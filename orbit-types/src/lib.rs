@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod entry;
 pub mod error;
 pub mod event;
 pub mod id;
@@ -11,6 +12,7 @@ pub mod tool;
 pub mod watch;
 
 pub use audit::Audit;
+pub use entry::{AuthorType, EntityType, Entry, EntryType};
 pub use error::OrbitError;
 pub use event::OrbitEvent;
 pub use id::OrbitId;
@@ -83,5 +85,28 @@ mod tests {
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["name"], "refactor-rust-module");
         assert_eq!(value["role"], "agent");
+    }
+
+    #[test]
+    fn entry_shape_is_stable() {
+        let value = serde_json::json!({
+            "id": "entry-1",
+            "entity_type": "task",
+            "entity_id": "task-1",
+            "session_id": null,
+            "sequence_number": 1,
+            "entry_type": "comment",
+            "author_type": "human",
+            "author_id": "daniel",
+            "author_model": null,
+            "body": "hello",
+            "created_at": "2026-02-22T00:00:00Z"
+        });
+
+        let decoded: crate::Entry = serde_json::from_value(value.clone()).expect("decode entry");
+        let reencoded = serde_json::to_value(decoded).expect("encode entry");
+        assert_eq!(reencoded["entity_type"], "task");
+        assert_eq!(reencoded["entry_type"], "comment");
+        assert_eq!(reencoded["author_type"], "human");
     }
 }

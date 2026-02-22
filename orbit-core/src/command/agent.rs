@@ -1,9 +1,17 @@
 use chrono::Utc;
-use orbit_types::{AgentSession, AgentSessionStatus, AgentToolCall, OrbitError, OrbitEvent, Role};
+use orbit_types::{
+    AgentSession, AgentSessionStatus, AgentToolCall, AuthorType, EntityType, EntryType, OrbitError,
+    OrbitEvent, Role,
+};
 use serde_json::json;
 
 use crate::OrbitRuntime;
 use crate::agent::context::{compose_agent_context, parse_planned_tool_calls};
+use crate::command::entry::EntryAddParams;
+
+const AGENT_ENTRY_AUTHOR_ID: &str = "orbit-agent";
+const AGENT_ENTRY_AUTHOR_MODEL: &str = "planner-v1";
+const SYSTEM_ENTRY_AUTHOR_ID: &str = "runtime";
 
 #[derive(Debug, Clone)]
 pub struct AgentRunResult {
@@ -91,16 +99,30 @@ impl OrbitRuntime {
                 },
             ))
         })?;
+        self.append_system_session_entry(
+            &session_id,
+            format!("agent session started for task {}", task.id),
+        )?;
+        self.append_agent_reasoning_entry(
+            &session_id,
+            format!("planner parsed {} tool call(s)", planned_calls.len()),
+        )?;
 
-        for mut planned in planned_calls {
+        for (call_index, mut planned) in planned_calls.into_iter().enumerate() {
             if !composed.effective_allowed_tools.contains(&planned.name) {
                 planned.success = false;
                 planned.output = Some(json!({
                     "error": format!("tool '{}' not permitted by effective allowlist", planned.name)
                 }));
+                let failure_message = format!(
+                    "tool call #{} denied by allowlist: {}",
+                    call_index + 1,
+                    planned.name
+                );
                 executed_calls.push(planned.clone());
                 let session_status = AgentSessionStatus::Failed;
                 session_outcome = "tool not permitted".to_string();
+                self.append_agent_reasoning_entry(&session_id, failure_message)?;
 
                 self.record_agent_tool_call(
                     &AgentSessionUpdate {
@@ -120,6 +142,13 @@ impl OrbitRuntime {
                     &session_outcome,
                     session_status.clone(),
                 )?;
+                self.append_system_session_entry(
+                    &session_id,
+                    format!(
+                        "agent session completed with status={}",
+                        status_to_text(&session_status)
+                    ),
+                )?;
 
                 return Err(OrbitError::PolicyDenied(format!(
                     "tool '{}' not permitted by effective allowlist",
@@ -131,6 +160,10 @@ impl OrbitRuntime {
                 Ok(output) => {
                     planned.success = true;
                     planned.output = Some(output);
+                    self.append_agent_reasoning_entry(
+                        &session_id,
+                        format!("tool call #{} succeeded: {}", call_index + 1, planned.name),
+                    )?;
                     executed_calls.push(planned.clone());
                     self.record_agent_tool_call(
                         &AgentSessionUpdate {
@@ -147,6 +180,15 @@ impl OrbitRuntime {
                 Err(err) => {
                     planned.success = false;
                     planned.output = Some(json!({ "error": err.to_string() }));
+                    self.append_agent_reasoning_entry(
+                        &session_id,
+                        format!(
+                            "tool call #{} failed: {} ({})",
+                            call_index + 1,
+                            planned.name,
+                            err
+                        ),
+                    )?;
                     executed_calls.push(planned.clone());
                     let session_status = AgentSessionStatus::Failed;
                     session_outcome = err.to_string();
@@ -168,6 +210,13 @@ impl OrbitRuntime {
                         &session_outcome,
                         session_status.clone(),
                     )?;
+                    self.append_system_session_entry(
+                        &session_id,
+                        format!(
+                            "agent session completed with status={}",
+                            status_to_text(&session_status)
+                        ),
+                    )?;
                     return Err(err);
                 }
             }
@@ -181,6 +230,13 @@ impl OrbitRuntime {
             &executed_calls,
             &session_outcome,
             session_status.clone(),
+        )?;
+        self.append_system_session_entry(
+            &session_id,
+            format!(
+                "agent session completed with status={}",
+                status_to_text(&session_status)
+            ),
         )?;
 
         Ok(AgentRunResult {
@@ -237,6 +293,42 @@ impl OrbitRuntime {
                 },
             ))
         })
+    }
+
+    fn append_agent_reasoning_entry(
+        &self,
+        session_id: &str,
+        body: String,
+    ) -> Result<(), OrbitError> {
+        let _entry = self.add_entry(EntryAddParams {
+            entity_type: EntityType::Session,
+            entity_id: session_id.to_string(),
+            session_id: Some(session_id.to_string()),
+            entry_type: EntryType::Reasoning,
+            author_type: AuthorType::Agent,
+            author_id: AGENT_ENTRY_AUTHOR_ID.to_string(),
+            author_model: Some(AGENT_ENTRY_AUTHOR_MODEL.to_string()),
+            body,
+        })?;
+        Ok(())
+    }
+
+    fn append_system_session_entry(
+        &self,
+        session_id: &str,
+        body: String,
+    ) -> Result<(), OrbitError> {
+        let _entry = self.add_entry(EntryAddParams {
+            entity_type: EntityType::Session,
+            entity_id: session_id.to_string(),
+            session_id: Some(session_id.to_string()),
+            entry_type: EntryType::System,
+            author_type: AuthorType::System,
+            author_id: SYSTEM_ENTRY_AUTHOR_ID.to_string(),
+            author_model: None,
+            body,
+        })?;
+        Ok(())
     }
 }
 

@@ -4,6 +4,23 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::{Store, StoreTx, new_id, now_string, parse_timestamp, status_to_str, str_to_status};
 
+fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
+    let next_run_raw: String = row.get(3)?;
+    let last_run_raw: Option<String> = row.get(4)?;
+    let status_raw: String = row.get(5)?;
+    Ok(Job {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        command: row.get(2)?,
+        next_run_at: parse_timestamp(&next_run_raw)?,
+        last_run_at: match last_run_raw {
+            Some(v) => Some(parse_timestamp(&v)?),
+            None => None,
+        },
+        status: str_to_status(&status_raw),
+    })
+}
+
 impl Store {
     pub fn due_jobs(&self, now: DateTime<Utc>) -> Result<Vec<Job>, OrbitError> {
         let conn = self
@@ -18,26 +35,26 @@ impl Store {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let rows = stmt
-            .query_map([now.to_rfc3339()], |row| {
-                let next_run_raw: String = row.get(3)?;
-                let last_run_raw: Option<String> = row.get(4)?;
-                let status_raw: String = row.get(5)?;
-                Ok(Job {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    command: row.get(2)?,
-                    next_run_at: parse_timestamp(&next_run_raw)?,
-                    last_run_at: match last_run_raw {
-                        Some(v) => Some(parse_timestamp(&v)?),
-                        None => None,
-                    },
-                    status: str_to_status(&status_raw),
-                })
-            })
+            .query_map([now.to_rfc3339()], row_to_job)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    pub fn get_job(&self, id: &str) -> Result<Option<Job>, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+
+        conn.query_row(
+            "SELECT id, name, command, next_run_at, last_run_at, status FROM jobs WHERE id = ?1",
+            [id],
+            row_to_job,
+        )
+        .optional()
+        .map_err(|e| OrbitError::Store(e.to_string()))
     }
 
     pub fn get_job_status(&self, id: &str) -> Result<Option<JobStatus>, OrbitError> {
@@ -69,22 +86,7 @@ impl<'a> StoreTx<'a> {
                 .map_err(|e| OrbitError::Store(e.to_string()))?;
 
             let rows = stmt
-                .query_map([now.to_rfc3339()], |row| {
-                    let next_run_raw: String = row.get(3)?;
-                    let last_run_raw: Option<String> = row.get(4)?;
-                    let status_raw: String = row.get(5)?;
-                    Ok(Job {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        command: row.get(2)?,
-                        next_run_at: parse_timestamp(&next_run_raw)?,
-                        last_run_at: match last_run_raw {
-                            Some(v) => Some(parse_timestamp(&v)?),
-                            None => None,
-                        },
-                        status: str_to_status(&status_raw),
-                    })
-                })
+                .query_map([now.to_rfc3339()], row_to_job)
                 .map_err(|e| OrbitError::Store(e.to_string()))?;
 
             rows.collect::<Result<Vec<_>, _>>()

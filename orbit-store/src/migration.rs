@@ -101,6 +101,32 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS entries (
+                id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                session_id TEXT,
+                sequence_number INTEGER NOT NULL,
+                entry_type TEXT NOT NULL,
+                author_type TEXT NOT NULL,
+                author_id TEXT NOT NULL,
+                author_model TEXT,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_entity_seq
+            ON entries(entity_type, entity_id, sequence_number);
+
+            CREATE INDEX IF NOT EXISTS idx_entries_entity
+            ON entries(entity_type, entity_id);
+
+            CREATE INDEX IF NOT EXISTS idx_entries_session
+            ON entries(session_id);
+
+            CREATE INDEX IF NOT EXISTS idx_entries_author
+            ON entries(author_type, author_id);
         "#,
     )
     .map_err(|e| OrbitError::Store(e.to_string()))?;

@@ -7,7 +7,10 @@ pub mod watch;
 
 pub use context::OrbitContext;
 pub use orbit_types::OrbitError;
-pub use orbit_types::{AgentSessionStatus, Role, Skill, Task, TaskPriority, TaskStatus, TaskType};
+pub use orbit_types::{
+    AgentSessionStatus, AuthorType, EntityType, Entry, EntryType, Role, Skill, Task, TaskPriority,
+    TaskStatus, TaskType,
+};
 pub use runtime::OrbitRuntime;
 
 #[cfg(test)]

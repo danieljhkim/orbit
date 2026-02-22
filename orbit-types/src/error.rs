@@ -12,12 +12,16 @@ pub enum OrbitError {
     SkillNotFound(String),
     #[error("agent session not found: {0}")]
     AgentSessionNotFound(String),
+    #[error("entry not found: {0}")]
+    EntryNotFound(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("skill validation failed: {0}")]
     SkillValidation(String),
     #[error("agent run failed: {0}")]
     AgentRun(String),
+    #[error("entry validation failed: {0}")]
+    EntryValidation(String),
     #[error("execution failed: {0}")]
     Execution(String),
     #[error("store error: {0}")]

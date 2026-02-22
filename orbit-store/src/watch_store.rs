@@ -1,8 +1,20 @@
 use chrono::Utc;
 use orbit_types::{OrbitError, Watch};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::{Store, StoreTx, new_id, parse_timestamp};
+
+fn row_to_watch(row: &rusqlite::Row<'_>) -> rusqlite::Result<Watch> {
+    let updated_at: String = row.get(4)?;
+    let debounce_ms: i64 = row.get(3)?;
+    Ok(Watch {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        command: row.get(2)?,
+        debounce_ms: debounce_ms as u64,
+        updated_at: parse_timestamp(&updated_at)?,
+    })
+}
 
 impl Store {
     pub fn list_watches(&self) -> Result<Vec<Watch>, OrbitError> {
@@ -18,21 +30,25 @@ impl Store {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let rows = stmt
-            .query_map([], |row| {
-                let updated_at: String = row.get(4)?;
-                let debounce_ms: i64 = row.get(3)?;
-                Ok(Watch {
-                    id: row.get(0)?,
-                    path: row.get(1)?,
-                    command: row.get(2)?,
-                    debounce_ms: debounce_ms as u64,
-                    updated_at: parse_timestamp(&updated_at)?,
-                })
-            })
+            .query_map([], row_to_watch)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    pub fn get_watch(&self, id: &str) -> Result<Option<Watch>, OrbitError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        conn.query_row(
+            "SELECT id, path, command, debounce_ms, updated_at FROM watches WHERE id = ?1",
+            [id],
+            row_to_watch,
+        )
+        .optional()
+        .map_err(|e| OrbitError::Store(e.to_string()))
     }
 }
 

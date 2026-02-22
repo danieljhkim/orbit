@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     task_type TEXT NOT NULL DEFAULT 'task',
     owner TEXT NOT NULL DEFAULT '',
     parent_id TEXT,
-    updated_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS memos (
@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS locks (
     acquired_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tools (
+    name TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    builtin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS skills (
     schema_version INTEGER NOT NULL,
     name TEXT PRIMARY KEY,
@@ -86,3 +96,29 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     updated_at TEXT NOT NULL,
     FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS entries (
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    session_id TEXT,
+    sequence_number INTEGER NOT NULL,
+    entry_type TEXT NOT NULL,
+    author_type TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    author_model TEXT,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entries_entity_seq
+ON entries(entity_type, entity_id, sequence_number);
+
+CREATE INDEX IF NOT EXISTS idx_entries_entity
+ON entries(entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_entries_session
+ON entries(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_entries_author
+ON entries(author_type, author_id);

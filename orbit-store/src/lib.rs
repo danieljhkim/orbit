@@ -1,5 +1,6 @@
 mod audit_store;
 mod connection;
+mod entry_store;
 mod job_store;
 mod lock;
 mod memo_store;

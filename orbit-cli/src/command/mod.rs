@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod audit;
 pub mod config;
+pub mod entry;
 pub mod job;
 pub mod skill;
 pub mod task;
@@ -28,6 +29,7 @@ pub enum Commands {
     Task(task::TaskCommand),
     Agent(agent::AgentCommand),
     Audit(audit::AuditCommand),
+    Entry(entry::EntryCommand),
     Skill(skill::SkillCommand),
     Job(job::JobCommand),
     Watch(watch::WatchCommand),
@@ -40,6 +42,7 @@ impl Execute for Commands {
             Commands::Task(cmd) => cmd.execute(runtime),
             Commands::Agent(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
+            Commands::Entry(cmd) => cmd.execute(runtime),
             Commands::Skill(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Watch(cmd) => cmd.execute(runtime),

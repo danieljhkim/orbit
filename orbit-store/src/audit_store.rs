@@ -84,6 +84,7 @@ fn event_type(event: &OrbitEvent) -> &'static str {
         OrbitEvent::AgentSessionStarted { .. } => "AgentSessionStarted",
         OrbitEvent::AgentToolCall { .. } => "AgentToolCall",
         OrbitEvent::AgentSessionCompleted { .. } => "AgentSessionCompleted",
+        OrbitEvent::EntryCreated { .. } => "EntryCreated",
     }
 }
 
@@ -134,5 +135,15 @@ fn event_message(event: &OrbitEvent) -> String {
             task_id,
             status,
         } => format!("agent session completed: {session_id} task={task_id} status={status}"),
+        OrbitEvent::EntryCreated {
+            id,
+            entity_type,
+            entity_id,
+            sequence_number,
+        } => {
+            format!(
+                "entry created: {id} entity={entity_type}:{entity_id} sequence={sequence_number}"
+            )
+        }
     }
 }

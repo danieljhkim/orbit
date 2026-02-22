@@ -85,4 +85,10 @@ pub enum OrbitEvent {
         task_id: String,
         status: String,
     },
+    EntryCreated {
+        id: String,
+        entity_type: String,
+        entity_id: String,
+        sequence_number: i64,
+    },
 }
