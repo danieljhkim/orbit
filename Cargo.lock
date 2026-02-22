@@ -409,7 +409,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "orbit-core",
- "orbit-types",
  "serde_json",
 ]
 

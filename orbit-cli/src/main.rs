@@ -1,6 +1,10 @@
 use clap::{Args, Parser, Subcommand};
-use orbit_core::OrbitRuntime;
+use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::{Map, Value};
+
+trait Execute {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError>;
+}
 
 #[derive(Parser)]
 #[command(name = "orbit")]
@@ -19,15 +23,41 @@ enum Commands {
     Watch(WatchCommand),
 }
 
+impl Execute for Commands {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            Commands::Tool(cmd) => cmd.execute(runtime),
+            Commands::Task(cmd) => cmd.execute(runtime),
+            Commands::Audit(cmd) => cmd.execute(runtime),
+            Commands::Job(cmd) => cmd.execute(runtime),
+            Commands::Watch(cmd) => cmd.execute(runtime),
+        }
+    }
+}
+
 #[derive(Args)]
 struct ToolCommand {
     #[command(subcommand)]
     command: ToolSubcommand,
 }
 
+impl Execute for ToolCommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
+    }
+}
+
 #[derive(Subcommand)]
 enum ToolSubcommand {
     Run(ToolRunArgs),
+}
+
+impl Execute for ToolSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            ToolSubcommand::Run(args) => args.execute(runtime),
+        }
+    }
 }
 
 #[derive(Args)]
@@ -45,10 +75,48 @@ struct ToolRunArgs {
     timeout_ms: Option<u64>,
 }
 
+impl Execute for ToolRunArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let mut input = Map::new();
+        if let Some(path) = self.path {
+            input.insert("path".to_string(), Value::String(path));
+        }
+        if let Some(content) = self.content {
+            input.insert("content".to_string(), Value::String(content));
+        }
+        if let Some(program) = self.program {
+            input.insert("program".to_string(), Value::String(program));
+        }
+        if !self.args.is_empty() {
+            input.insert(
+                "args".to_string(),
+                Value::Array(self.args.into_iter().map(Value::String).collect()),
+            );
+        }
+        if let Some(timeout_ms) = self.timeout_ms {
+            input.insert("timeout_ms".to_string(), Value::Number(timeout_ms.into()));
+        }
+
+        let output = runtime.run_tool(&self.name, Value::Object(input))?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output)
+                .map_err(|e| OrbitError::Execution(e.to_string()))?
+        );
+        Ok(())
+    }
+}
+
 #[derive(Args)]
 struct TaskCommand {
     #[command(subcommand)]
     command: TaskSubcommand,
+}
+
+impl Execute for TaskCommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
+    }
 }
 
 #[derive(Subcommand)]
@@ -57,9 +125,31 @@ enum TaskSubcommand {
     List,
 }
 
+impl Execute for TaskSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            TaskSubcommand::Add(args) => args.execute(runtime),
+            TaskSubcommand::List => {
+                for task in runtime.list_tasks()? {
+                    println!("{task}");
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Args)]
 struct TaskAddArgs {
     title: String,
+}
+
+impl Execute for TaskAddArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let task = runtime.add_task(&self.title)?;
+        println!("{task}");
+        Ok(())
+    }
 }
 
 #[derive(Args)]
@@ -68,9 +158,23 @@ struct AuditCommand {
     command: AuditSubcommand,
 }
 
+impl Execute for AuditCommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
+    }
+}
+
 #[derive(Subcommand)]
 enum AuditSubcommand {
     List(AuditListArgs),
+}
+
+impl Execute for AuditSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            AuditSubcommand::List(args) => args.execute(runtime),
+        }
+    }
 }
 
 #[derive(Args)]
@@ -79,15 +183,42 @@ struct AuditListArgs {
     limit: usize,
 }
 
+impl Execute for AuditListArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        for audit in runtime.list_audits(self.limit)? {
+            println!("{audit}");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Args)]
 struct JobCommand {
     #[command(subcommand)]
     command: JobSubcommand,
 }
 
+impl Execute for JobCommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
+    }
+}
+
 #[derive(Subcommand)]
 enum JobSubcommand {
     Run,
+}
+
+impl Execute for JobSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            JobSubcommand::Run => {
+                let count = runtime.run_jobs()?;
+                println!("ran_jobs={count}");
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Args)]
@@ -96,9 +227,23 @@ struct WatchCommand {
     command: WatchSubcommand,
 }
 
+impl Execute for WatchCommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
+    }
+}
+
 #[derive(Subcommand)]
 enum WatchSubcommand {
     Run(WatchRunArgs),
+}
+
+impl Execute for WatchSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            WatchSubcommand::Run(args) => args.execute(runtime),
+        }
+    }
 }
 
 #[derive(Args)]
@@ -107,10 +252,17 @@ struct WatchRunArgs {
     path: String,
 }
 
+impl Execute for WatchRunArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        runtime.trigger_watch_once(&self.path)?;
+        println!("watch trigger recorded for {}", self.path);
+        Ok(())
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-    let data_root = OrbitRuntime::default_data_root();
-    let runtime = match OrbitRuntime::from_data_root(&data_root) {
+    let runtime = match OrbitRuntime::initialize() {
         Ok(runtime) => runtime,
         Err(err) => {
             eprintln!("failed to initialize runtime: {err}");
@@ -118,108 +270,8 @@ fn main() {
         }
     };
 
-    let outcome = match cli.command {
-        Commands::Tool(cmd) => run_tool(&runtime, cmd),
-        Commands::Task(cmd) => run_task(&runtime, cmd),
-        Commands::Audit(cmd) => run_audit(&runtime, cmd),
-        Commands::Job(cmd) => run_job(&runtime, cmd),
-        Commands::Watch(cmd) => run_watch(&runtime, cmd),
-    };
-
-    if let Err(err) = outcome {
+    if let Err(err) = cli.command.execute(&runtime) {
         eprintln!("error: {err}");
         std::process::exit(1);
     }
-}
-
-fn run_tool(runtime: &OrbitRuntime, cmd: ToolCommand) -> Result<(), orbit_types::OrbitError> {
-    match cmd.command {
-        ToolSubcommand::Run(args) => {
-            let mut input = Map::new();
-            if let Some(path) = args.path {
-                input.insert("path".to_string(), Value::String(path));
-            }
-            if let Some(content) = args.content {
-                input.insert("content".to_string(), Value::String(content));
-            }
-            if let Some(program) = args.program {
-                input.insert("program".to_string(), Value::String(program));
-            }
-            if !args.args.is_empty() {
-                input.insert(
-                    "args".to_string(),
-                    Value::Array(args.args.into_iter().map(Value::String).collect()),
-                );
-            }
-            if let Some(timeout_ms) = args.timeout_ms {
-                input.insert("timeout_ms".to_string(), Value::Number(timeout_ms.into()));
-            }
-
-            let output = runtime.run_tool(&args.name, Value::Object(input))?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&output)
-                    .map_err(|e| orbit_types::OrbitError::Execution(e.to_string()))?
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn run_task(runtime: &OrbitRuntime, cmd: TaskCommand) -> Result<(), orbit_types::OrbitError> {
-    match cmd.command {
-        TaskSubcommand::Add(args) => {
-            let task = runtime.add_task(&args.title)?;
-            println!("{}\t{}", task.id, task.title);
-        }
-        TaskSubcommand::List => {
-            for task in runtime.list_tasks()? {
-                println!(
-                    "{}\t{}\t{}",
-                    task.id,
-                    task.created_at.to_rfc3339(),
-                    task.title
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-fn run_audit(runtime: &OrbitRuntime, cmd: AuditCommand) -> Result<(), orbit_types::OrbitError> {
-    match cmd.command {
-        AuditSubcommand::List(args) => {
-            for audit in runtime.list_audits(args.limit)? {
-                println!(
-                    "{}\t{}\t{}\t{}",
-                    audit.id,
-                    audit.created_at.to_rfc3339(),
-                    audit.event_type,
-                    audit.message
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-fn run_job(runtime: &OrbitRuntime, cmd: JobCommand) -> Result<(), orbit_types::OrbitError> {
-    match cmd.command {
-        JobSubcommand::Run => {
-            let count = runtime.run_jobs()?;
-            println!("ran_jobs={count}");
-        }
-    }
-    Ok(())
-}
-
-fn run_watch(runtime: &OrbitRuntime, cmd: WatchCommand) -> Result<(), orbit_types::OrbitError> {
-    match cmd.command {
-        WatchSubcommand::Run(args) => {
-            runtime.run_watch_once(&args.path)?;
-            println!("watch trigger recorded for {}", args.path);
-        }
-    }
-    Ok(())
 }

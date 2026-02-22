@@ -96,12 +96,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn with_mutation<T, F>(
-        &self,
-        event: &OrbitEvent,
-        message: &str,
-        op: F,
-    ) -> Result<T, OrbitError>
+    pub fn with_transaction<T, F>(&self, op: F) -> Result<T, OrbitError>
     where
         F: FnOnce(&mut StoreTx<'_>) -> Result<T, OrbitError>,
     {
@@ -116,7 +111,6 @@ impl Store {
 
         let mut store_tx = StoreTx { tx };
         let result = op(&mut store_tx)?;
-        store_tx.insert_audit(event, message)?;
         store_tx
             .tx
             .commit()
@@ -271,35 +265,6 @@ impl Store {
         Ok(changed == 1)
     }
 
-    pub fn insert_job(
-        &self,
-        name: &str,
-        command: &str,
-        next_run_at: DateTime<Utc>,
-    ) -> Result<Job, OrbitError> {
-        let id = new_id("job");
-        let job = Job {
-            id: id.clone(),
-            name: name.to_string(),
-            command: command.to_string(),
-            next_run_at,
-            last_run_at: None,
-            status: JobStatus::Scheduled,
-        };
-
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
-        conn.execute(
-            "INSERT INTO jobs(id, name, command, next_run_at, last_run_at, status) VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
-            params![job.id, job.name, job.command, job.next_run_at.to_rfc3339(), status_to_str(&job.status)],
-        )
-        .map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        Ok(job)
-    }
-
     pub fn due_jobs(&self, now: DateTime<Utc>) -> Result<Vec<Job>, OrbitError> {
         let conn = self
             .conn
@@ -419,9 +384,35 @@ impl<'a> StoreTx<'a> {
         Ok(changed == 1)
     }
 
-    fn insert_audit(&mut self, event: &OrbitEvent, message: &str) -> Result<(), OrbitError> {
+    pub fn insert_job(
+        &mut self,
+        name: &str,
+        command: &str,
+        next_run_at: DateTime<Utc>,
+    ) -> Result<Job, OrbitError> {
+        let job = Job {
+            id: new_id("job"),
+            name: name.to_string(),
+            command: command.to_string(),
+            next_run_at,
+            last_run_at: None,
+            status: JobStatus::Scheduled,
+        };
+
+        self.tx
+            .execute(
+                "INSERT INTO jobs(id, name, command, next_run_at, last_run_at, status) VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+                params![job.id, job.name, job.command, job.next_run_at.to_rfc3339(), status_to_str(&job.status)],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        Ok(job)
+    }
+
+    pub fn insert_audit_event(&mut self, event: &OrbitEvent) -> Result<(), OrbitError> {
         let payload = serde_json::to_string(event).map_err(|e| OrbitError::Store(e.to_string()))?;
         let event_type = event_type(event);
+        let message = event_message(event);
         self.tx
             .execute(
                 "INSERT INTO audits(event_type, payload, message, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -441,6 +432,19 @@ fn event_type(event: &OrbitEvent) -> &'static str {
         OrbitEvent::WatchTriggered { .. } => "WatchTriggered",
         OrbitEvent::PolicyDenied { .. } => "PolicyDenied",
         OrbitEvent::TaskAdded { .. } => "TaskAdded",
+    }
+}
+
+fn event_message(event: &OrbitEvent) -> String {
+    match event {
+        OrbitEvent::ToolExecuted { name } => format!("tool executed: {name}"),
+        OrbitEvent::JobStarted { id } => format!("job started: {id}"),
+        OrbitEvent::JobCompleted { id, success } => {
+            format!("job completed: {id} (success={success})")
+        }
+        OrbitEvent::WatchTriggered { path } => format!("watch triggered: {path}"),
+        OrbitEvent::PolicyDenied { tool } => format!("policy denied: {tool}"),
+        OrbitEvent::TaskAdded { id } => format!("task added: {id}"),
     }
 }
 
@@ -497,13 +501,13 @@ mod tests {
         let store = Store::open_in_memory().expect("store");
 
         let task = store
-            .with_mutation(
-                &OrbitEvent::TaskAdded {
-                    id: "pending".to_string(),
-                },
-                "task add",
-                |tx| tx.insert_task("buy milk"),
-            )
+            .with_transaction(|tx| {
+                let task = tx.insert_task("buy milk")?;
+                tx.insert_audit_event(&OrbitEvent::TaskAdded {
+                    id: task.id.clone(),
+                })?;
+                Ok(task)
+            })
             .expect("mutation succeeds");
 
         let tasks = store.list_tasks().expect("list tasks");

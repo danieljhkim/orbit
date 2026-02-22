@@ -4,18 +4,20 @@ pub mod watch;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use orbit_policy::{PolicyContext, PolicyEngine};
 use orbit_store::{Store, StoreTx};
 use orbit_tools::{ToolContext, ToolRegistry};
-use orbit_types::{Audit, OrbitError, OrbitEvent, PolicyDecision, Task};
+use orbit_types::{Audit, Job, JobStatus, OrbitEvent, PolicyDecision, Task};
 use serde_json::Value;
+
+pub use orbit_types::OrbitError;
 
 #[derive(Clone)]
 pub struct OrbitContext {
-    pub store: Store,
-    pub policy: PolicyEngine,
-    pub registry: Arc<ToolRegistry>,
+    store: Store,
+    policy: PolicyEngine,
+    registry: Arc<ToolRegistry>,
 }
 
 #[derive(Clone, Default)]
@@ -40,11 +42,16 @@ impl EventBus {
 
 #[derive(Clone)]
 pub struct OrbitRuntime {
-    pub context: OrbitContext,
+    context: OrbitContext,
     pub event_bus: EventBus,
 }
 
 impl OrbitRuntime {
+    pub fn initialize() -> Result<Self, OrbitError> {
+        let data_root = Self::default_data_root();
+        Self::from_data_root(&data_root)
+    }
+
     pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
         let db_path = data_root.join("orbit.db");
         let store = Store::open(&db_path)?;
@@ -90,13 +97,14 @@ impl OrbitRuntime {
 
         match decision {
             PolicyDecision::Deny { reason } => {
-                self.with_mutation(
-                    OrbitEvent::PolicyDenied {
-                        tool: name.to_string(),
-                    },
-                    "policy denied tool execution",
-                    |_| Ok(()),
-                )?;
+                self.with_mutation(|_| {
+                    Ok((
+                        (),
+                        OrbitEvent::PolicyDenied {
+                            tool: name.to_string(),
+                        },
+                    ))
+                })?;
                 Err(OrbitError::PolicyDenied(reason))
             }
             PolicyDecision::Allow => {
@@ -105,13 +113,14 @@ impl OrbitRuntime {
                     .registry
                     .execute(name, &ToolContext::default(), input)?;
 
-                self.with_mutation(
-                    OrbitEvent::ToolExecuted {
-                        name: name.to_string(),
-                    },
-                    "tool execution completed",
-                    |_| Ok(()),
-                )?;
+                self.with_mutation(|_| {
+                    Ok((
+                        (),
+                        OrbitEvent::ToolExecuted {
+                            name: name.to_string(),
+                        },
+                    ))
+                })?;
 
                 Ok(output)
             }
@@ -119,13 +128,15 @@ impl OrbitRuntime {
     }
 
     pub fn add_task(&self, title: &str) -> Result<Task, OrbitError> {
-        self.with_mutation(
-            OrbitEvent::TaskAdded {
-                id: "pending".to_string(),
-            },
-            "task created",
-            |tx| tx.insert_task(title),
-        )
+        self.with_mutation(|tx| {
+            let task = tx.insert_task(title)?;
+            Ok((
+                task.clone(),
+                OrbitEvent::TaskAdded {
+                    id: task.id.clone(),
+                },
+            ))
+        })
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
@@ -136,19 +147,40 @@ impl OrbitRuntime {
         self.context.store.list_audits(limit)
     }
 
+    pub fn schedule_job(
+        &self,
+        name: &str,
+        command: &str,
+        next_run_at: DateTime<Utc>,
+    ) -> Result<Job, OrbitError> {
+        self.with_mutation(|tx| {
+            let job = tx.insert_job(name, command, next_run_at)?;
+            Ok((job.clone(), OrbitEvent::JobStarted { id: job.id.clone() }))
+        })
+    }
+
+    pub fn job_status(&self, id: &str) -> Result<Option<JobStatus>, OrbitError> {
+        self.context.store.get_job_status(id)
+    }
+
     pub fn run_jobs(&self) -> Result<usize, OrbitError> {
         self.run_due_jobs(Utc::now())
     }
 
-    pub fn run_watch_once(&self, path: &str) -> Result<(), OrbitError> {
+    pub fn trigger_watch_once(&self, path: &str) -> Result<(), OrbitError> {
         self.trigger_watch_path(path)
     }
 
-    fn with_mutation<T, F>(&self, event: OrbitEvent, message: &str, op: F) -> Result<T, OrbitError>
+    pub fn with_mutation<F, T>(&self, f: F) -> Result<T, OrbitError>
     where
-        F: FnOnce(&mut StoreTx<'_>) -> Result<T, OrbitError>,
+        F: FnOnce(&mut StoreTx<'_>) -> Result<(T, OrbitEvent), OrbitError>,
     {
-        let result = self.context.store.with_mutation(&event, message, op)?;
+        let (result, event) = self.context.store.with_transaction(|tx| {
+            let (result, event) = f(tx)?;
+            tx.insert_audit_event(&event)?;
+            Ok((result, event))
+        })?;
+
         self.event_bus.publish(event);
         Ok(result)
     }
@@ -164,7 +196,7 @@ impl OrbitRuntime {
 mod tests {
     use super::*;
     use orbit_policy::PolicyEngine;
-    use orbit_types::{JobStatus, OrbitEvent};
+    use orbit_types::OrbitEvent;
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -224,10 +256,8 @@ mod tests {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
         let now = Utc::now();
         let job = runtime
-            .context
-            .store
-            .insert_job("demo", "noop", now)
-            .expect("insert job");
+            .schedule_job("demo", "noop", now)
+            .expect("schedule job");
 
         let first = runtime.run_due_jobs(now).expect("first run");
         let second = runtime.run_due_jobs(now).expect("second run");
@@ -236,9 +266,7 @@ mod tests {
         assert_eq!(second, 0);
 
         let status = runtime
-            .context
-            .store
-            .get_job_status(&job.id)
+            .job_status(&job.id)
             .expect("status")
             .expect("present");
         assert_eq!(status, JobStatus::Complete);

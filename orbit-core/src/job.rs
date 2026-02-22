@@ -14,27 +14,30 @@ impl OrbitRuntime {
         let result = (|| {
             let mut ran = 0usize;
             for job in self.context.store.due_jobs(now)? {
-                let started = self.with_mutation(
-                    OrbitEvent::JobStarted { id: job.id.clone() },
-                    "job started",
-                    |tx| {
-                        tx.transition_job_status(&job.id, JobStatus::Scheduled, JobStatus::Running)
-                    },
-                )?;
+                let started = self.with_mutation(|tx| {
+                    let started = tx.transition_job_status(
+                        &job.id,
+                        JobStatus::Scheduled,
+                        JobStatus::Running,
+                    )?;
+                    Ok((started, OrbitEvent::JobStarted { id: job.id.clone() }))
+                })?;
 
                 if !started {
                     continue;
                 }
 
                 let next_run_at = now + Duration::minutes(1);
-                let completed = self.with_mutation(
-                    OrbitEvent::JobCompleted {
-                        id: job.id.clone(),
-                        success: true,
-                    },
-                    "job completed",
-                    |tx| tx.complete_job(&job.id, next_run_at, true),
-                )?;
+                let completed = self.with_mutation(|tx| {
+                    let completed = tx.complete_job(&job.id, next_run_at, true)?;
+                    Ok((
+                        completed,
+                        OrbitEvent::JobCompleted {
+                            id: job.id.clone(),
+                            success: true,
+                        },
+                    ))
+                })?;
 
                 if completed {
                     ran += 1;
