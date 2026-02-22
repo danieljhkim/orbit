@@ -19,6 +19,36 @@ pub enum OrbitEvent {
     ToolDisabled {
         name: String,
     },
+    JobAdded {
+        job_id: String,
+    },
+    JobPaused {
+        job_id: String,
+    },
+    JobResumed {
+        job_id: String,
+    },
+    JobDeleted {
+        job_id: String,
+    },
+    JobSessionStarted {
+        job_id: String,
+        session_id: String,
+        trigger: String,
+    },
+    JobSessionCompleted {
+        job_id: String,
+        session_id: String,
+        status: String,
+    },
+    JobSessionCancelled {
+        job_id: String,
+        session_id: String,
+    },
+    JobSkipped {
+        job_id: String,
+        reason: String,
+    },
     JobStarted {
         id: String,
     },

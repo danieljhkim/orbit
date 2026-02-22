@@ -62,6 +62,14 @@ impl<'a> StoreTx<'a> {
 
 fn event_type(event: &OrbitEvent) -> &'static str {
     match event {
+        OrbitEvent::JobAdded { .. } => "JobAdded",
+        OrbitEvent::JobPaused { .. } => "JobPaused",
+        OrbitEvent::JobResumed { .. } => "JobResumed",
+        OrbitEvent::JobDeleted { .. } => "JobDeleted",
+        OrbitEvent::JobSessionStarted { .. } => "JobSessionStarted",
+        OrbitEvent::JobSessionCompleted { .. } => "JobSessionCompleted",
+        OrbitEvent::JobSessionCancelled { .. } => "JobSessionCancelled",
+        OrbitEvent::JobSkipped { .. } => "JobSkipped",
         OrbitEvent::ToolExecuted { .. } => "ToolExecuted",
         OrbitEvent::JobStarted { .. } => "JobStarted",
         OrbitEvent::JobCompleted { .. } => "JobCompleted",
@@ -90,6 +98,26 @@ fn event_type(event: &OrbitEvent) -> &'static str {
 
 fn event_message(event: &OrbitEvent) -> String {
     match event {
+        OrbitEvent::JobAdded { job_id } => format!("job added: {job_id}"),
+        OrbitEvent::JobPaused { job_id } => format!("job paused: {job_id}"),
+        OrbitEvent::JobResumed { job_id } => format!("job resumed: {job_id}"),
+        OrbitEvent::JobDeleted { job_id } => format!("job deleted: {job_id}"),
+        OrbitEvent::JobSessionStarted {
+            job_id,
+            session_id,
+            trigger,
+        } => format!("job session started: job={job_id} session={session_id} trigger={trigger}"),
+        OrbitEvent::JobSessionCompleted {
+            job_id,
+            session_id,
+            status,
+        } => format!("job session completed: job={job_id} session={session_id} status={status}"),
+        OrbitEvent::JobSessionCancelled { job_id, session_id } => {
+            format!("job session cancelled: job={job_id} session={session_id}")
+        }
+        OrbitEvent::JobSkipped { job_id, reason } => {
+            format!("job skipped: job={job_id} reason={reason}")
+        }
         OrbitEvent::ToolExecuted { name } => format!("tool executed: {name}"),
         OrbitEvent::JobStarted { id } => format!("job started: {id}"),
         OrbitEvent::JobCompleted { id, success } => {

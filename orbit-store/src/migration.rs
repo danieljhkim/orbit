@@ -26,13 +26,54 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
             );
 
             CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
+                job_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                command TEXT NOT NULL,
-                next_run_at TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                schedule_spec TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                paused_at TEXT,
+                deleted_at TEXT,
+                last_run_session_id TEXT,
                 last_run_at TEXT,
-                status TEXT NOT NULL
+                next_run_at TEXT,
+                last_error TEXT
             );
+
+            CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
+            CREATE INDEX IF NOT EXISTS idx_jobs_task ON jobs(task_id);
+            CREATE INDEX IF NOT EXISTS idx_jobs_next_run ON jobs(state, next_run_at);
+
+            CREATE TABLE IF NOT EXISTS job_sessions (
+                session_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                trigger_time TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                status TEXT NOT NULL,
+                exit_code INTEGER,
+                error TEXT,
+                composed_context_hash TEXT,
+                effective_allowlist_hash TEXT,
+                created_by_role TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                cancel_requested_at TEXT,
+                FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_job_sessions_job
+            ON job_sessions(job_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_job_sessions_status
+            ON job_sessions(status);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_job_sessions_single_running
+            ON job_sessions(job_id)
+            WHERE status = 'running';
 
             CREATE TABLE IF NOT EXISTS watches (
                 id TEXT PRIMARY KEY,
@@ -140,6 +181,7 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
         conn,
         "ALTER TABLE tasks ADD COLUMN context_files TEXT NOT NULL DEFAULT '[]'",
     )?;
+    migrate_legacy_jobs_table(conn)?;
 
     Ok(())
 }
@@ -150,4 +192,93 @@ fn add_column_if_missing(conn: &Connection, sql: &str) -> Result<(), OrbitError>
         Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
         Err(e) => Err(OrbitError::Store(e.to_string())),
     }
+}
+
+fn migrate_legacy_jobs_table(conn: &Connection) -> Result<(), OrbitError> {
+    let has_job_id = table_has_column(conn, "jobs", "job_id")?;
+    if has_job_id {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+            ALTER TABLE jobs RENAME TO jobs_legacy;
+
+            CREATE TABLE jobs (
+                job_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                schedule_spec TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                paused_at TEXT,
+                deleted_at TEXT,
+                last_run_session_id TEXT,
+                last_run_at TEXT,
+                next_run_at TEXT,
+                last_error TEXT
+            );
+
+            INSERT INTO jobs(
+                job_id,
+                name,
+                task_id,
+                schedule_spec,
+                timezone,
+                state,
+                created_at,
+                updated_at,
+                paused_at,
+                deleted_at,
+                last_run_session_id,
+                last_run_at,
+                next_run_at,
+                last_error
+            )
+            SELECT
+                id,
+                name,
+                '',
+                command,
+                'UTC',
+                'active',
+                COALESCE(last_run_at, next_run_at, datetime('now')),
+                COALESCE(last_run_at, next_run_at, datetime('now')),
+                NULL,
+                NULL,
+                NULL,
+                last_run_at,
+                next_run_at,
+                NULL
+            FROM jobs_legacy;
+
+            DROP TABLE jobs_legacy;
+            CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
+            CREATE INDEX IF NOT EXISTS idx_jobs_task ON jobs(task_id);
+            CREATE INDEX IF NOT EXISTS idx_jobs_next_run ON jobs(state, next_run_at);
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(format!("failed legacy jobs migration: {e}")))?;
+
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, OrbitError> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = conn
+        .prepare(&pragma)
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+    for name in rows {
+        let name = name.map_err(|e| OrbitError::Store(e.to_string()))?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

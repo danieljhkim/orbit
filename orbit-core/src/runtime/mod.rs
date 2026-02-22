@@ -7,11 +7,11 @@ pub mod pipeline;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use orbit_policy::PolicyEngine;
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
-use orbit_types::{Audit, Job, JobStatus, OrbitEvent};
+use orbit_types::{Audit, Job};
 
 use crate::{OrbitContext, OrbitError};
 
@@ -87,20 +87,8 @@ impl OrbitRuntime {
         self.context.store.list_audits(limit)
     }
 
-    pub fn schedule_job(
-        &self,
-        name: &str,
-        command: &str,
-        next_run_at: DateTime<Utc>,
-    ) -> Result<Job, OrbitError> {
-        self.with_mutation(|tx| {
-            let job = tx.insert_job(name, command, next_run_at)?;
-            Ok((job.clone(), OrbitEvent::JobStarted { id: job.id.clone() }))
-        })
-    }
-
-    pub fn job_status(&self, id: &str) -> Result<Option<JobStatus>, OrbitError> {
-        self.context.store.get_job_status(id)
+    pub fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
+        self.context.store.get_job(job_id)
     }
 
     pub fn run_jobs(&self) -> Result<usize, OrbitError> {

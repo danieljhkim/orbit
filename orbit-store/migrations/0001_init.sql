@@ -21,13 +21,59 @@ CREATE TABLE IF NOT EXISTS memos (
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
-    id TEXT PRIMARY KEY,
+    job_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    command TEXT NOT NULL,
-    next_run_at TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    schedule_spec TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    paused_at TEXT,
+    deleted_at TEXT,
+    last_run_session_id TEXT,
     last_run_at TEXT,
-    status TEXT NOT NULL
+    next_run_at TEXT,
+    last_error TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_jobs_state
+ON jobs(state);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_task
+ON jobs(task_id);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_next_run
+ON jobs(state, next_run_at);
+
+CREATE TABLE IF NOT EXISTS job_sessions (
+    session_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    trigger TEXT NOT NULL,
+    trigger_time TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    exit_code INTEGER,
+    error TEXT,
+    composed_context_hash TEXT,
+    effective_allowlist_hash TEXT,
+    created_by_role TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    cancel_requested_at TEXT,
+    FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_sessions_job
+ON job_sessions(job_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_job_sessions_status
+ON job_sessions(status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_job_sessions_single_running
+ON job_sessions(job_id)
+WHERE status = 'running';
 
 CREATE TABLE IF NOT EXISTS watches (
     id TEXT PRIMARY KEY,

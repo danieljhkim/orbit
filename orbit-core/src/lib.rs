@@ -8,20 +8,21 @@ pub mod watch;
 pub use context::OrbitContext;
 pub use orbit_types::OrbitError;
 pub use orbit_types::{
-    AgentSessionStatus, AuthorType, EntityType, Entry, EntryType, Role, Skill, Task, TaskPriority,
-    TaskStatus, TaskType,
+    AgentSessionStatus, AuthorType, EntityType, Entry, EntryType, Job, JobScheduleState,
+    JobSession, JobSessionStatus, JobTrigger, Role, Skill, Task, TaskPriority, TaskStatus,
+    TaskType,
 };
 pub use runtime::OrbitRuntime;
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
     use orbit_policy::PolicyEngine;
-    use orbit_types::{JobStatus, OrbitEvent, TaskPriority, TaskStatus, TaskType};
+    use orbit_types::{JobSessionStatus, OrbitEvent, TaskPriority, TaskStatus, TaskType};
     use serde_json::json;
     use tempfile::tempdir;
 
     use crate::OrbitRuntime;
+    use crate::command::job::JobAddParams;
     use crate::command::task::{TaskAddParams, TaskUpdateParams};
 
     #[test]
@@ -83,22 +84,39 @@ mod tests {
     #[test]
     fn job_run_does_not_double_execute_due_job() {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
-        let now = Utc::now();
-        let job = runtime
-            .schedule_job("demo", "true", now)
-            .expect("schedule job");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "job task".to_string(),
+                instructions: json!([
+                    {
+                        "name": "time.now",
+                        "input": {}
+                    }
+                ])
+                .to_string(),
+                ..Default::default()
+            })
+            .expect("add task");
 
-        let first = runtime.run_due_jobs(now).expect("first run");
-        let second = runtime.run_due_jobs(now).expect("second run");
+        let job = runtime
+            .add_job(JobAddParams {
+                name: "demo".to_string(),
+                task_id: task.id.clone(),
+                schedule_spec: "every 1m".to_string(),
+                timezone: Some("UTC".to_string()),
+            })
+            .expect("add job");
+
+        let due_at = job.next_run_at.expect("next run exists");
+        let first = runtime.run_due_jobs(due_at).expect("first run");
+        let second = runtime.run_due_jobs(due_at).expect("second run");
 
         assert_eq!(first, 1);
         assert_eq!(second, 0);
 
-        let status = runtime
-            .job_status(&job.id)
-            .expect("status")
-            .expect("present");
-        assert_eq!(status, JobStatus::Complete);
+        let sessions = runtime.job_history(&job.job_id).expect("history");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].status, JobSessionStatus::Succeeded);
     }
 
     #[test]

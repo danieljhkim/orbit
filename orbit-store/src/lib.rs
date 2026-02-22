@@ -11,9 +11,9 @@ mod tool_store;
 mod watch_store;
 
 use chrono::{DateTime, Utc};
-use orbit_types::JobStatus;
 
 pub use connection::{Store, StoreTx};
+pub use job_store::{ClaimedJobRun, DueJobsClaim};
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)
@@ -28,25 +28,6 @@ pub(crate) fn now_string() -> String {
 pub(crate) fn new_id(prefix: &str) -> String {
     let nanos = Utc::now().timestamp_nanos_opt().unwrap_or_default();
     format!("{prefix}-{nanos}")
-}
-
-pub(crate) fn status_to_str(status: &JobStatus) -> &'static str {
-    match status {
-        JobStatus::Scheduled => "scheduled",
-        JobStatus::Running => "running",
-        JobStatus::Complete => "complete",
-        JobStatus::Failed => "failed",
-    }
-}
-
-pub(crate) fn str_to_status(raw: &str) -> JobStatus {
-    match raw {
-        "scheduled" => JobStatus::Scheduled,
-        "running" => JobStatus::Running,
-        "complete" => JobStatus::Complete,
-        "failed" => JobStatus::Failed,
-        _ => JobStatus::Failed,
-    }
 }
 
 #[cfg(test)]

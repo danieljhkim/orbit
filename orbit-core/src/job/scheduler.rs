@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 
 use orbit_types::{OrbitError, OrbitEvent};
 
@@ -12,39 +12,39 @@ impl OrbitRuntime {
         }
 
         let result = (|| {
-            let claimed_jobs = self
+            let claim = self
                 .context
                 .store
                 .with_transaction(|tx| tx.claim_due_jobs(now))?;
 
-            for job in &claimed_jobs {
-                self.event_bus
-                    .publish(OrbitEvent::JobStarted { id: job.id.clone() });
-            }
-
-            let mut ran = 0usize;
-            for job in claimed_jobs {
-                let success = match self.execute_shell_command("job", &job.command) {
-                    Ok(result) => result.success,
-                    Err(_) => false,
-                };
-
-                let next_run_at = now + Duration::minutes(1);
-                let completed = self.with_mutation(|tx| {
-                    let _final_status = crate::job::state_machine::next_after_run(success);
-                    let completed = tx.complete_job(&job.id, next_run_at, success)?;
+            for skipped_job_id in &claim.skipped {
+                self.with_mutation(|_| {
                     Ok((
-                        completed,
-                        OrbitEvent::JobCompleted {
-                            id: job.id.clone(),
-                            success,
+                        (),
+                        OrbitEvent::JobSkipped {
+                            job_id: skipped_job_id.clone(),
+                            reason: "running session already exists".to_string(),
                         },
                     ))
                 })?;
+                let _ = self.append_job_system_entry(
+                    skipped_job_id,
+                    "scheduler skipped run: running session already exists".to_string(),
+                );
+            }
 
-                if completed {
-                    ran += 1;
-                }
+            for run in &claim.claimed {
+                self.event_bus.publish(OrbitEvent::JobSessionStarted {
+                    job_id: run.job.job_id.clone(),
+                    session_id: run.session.session_id.clone(),
+                    trigger: run.session.trigger.to_string(),
+                });
+            }
+
+            let mut ran = 0usize;
+            for run in claim.claimed {
+                self.execute_claimed_job(&run)?;
+                ran += 1;
             }
             Ok(ran)
         })();

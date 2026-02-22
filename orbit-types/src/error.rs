@@ -10,6 +10,10 @@ pub enum OrbitError {
     TaskNotFound(String),
     #[error("skill not found: {0}")]
     SkillNotFound(String),
+    #[error("job not found: {0}")]
+    JobNotFound(String),
+    #[error("job session not found: {0}")]
+    JobSessionNotFound(String),
     #[error("agent session not found: {0}")]
     AgentSessionNotFound(String),
     #[error("entry not found: {0}")]
@@ -18,6 +22,8 @@ pub enum OrbitError {
     InvalidInput(String),
     #[error("skill validation failed: {0}")]
     SkillValidation(String),
+    #[error("job validation failed: {0}")]
+    JobValidation(String),
     #[error("agent run failed: {0}")]
     AgentRun(String),
     #[error("entry validation failed: {0}")]
