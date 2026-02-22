@@ -1,6 +1,8 @@
+use chrono::Utc;
 use orbit_types::{OrbitError, Watch};
+use rusqlite::params;
 
-use crate::{Store, parse_timestamp};
+use crate::{Store, StoreTx, new_id, parse_timestamp};
 
 impl Store {
     pub fn list_watches(&self) -> Result<Vec<Watch>, OrbitError> {
@@ -31,5 +33,37 @@ impl Store {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
+    }
+}
+
+impl<'a> StoreTx<'a> {
+    pub fn insert_watch(
+        &mut self,
+        path: &str,
+        command: &str,
+        debounce_ms: u64,
+    ) -> Result<Watch, OrbitError> {
+        let watch = Watch {
+            id: new_id("watch"),
+            path: path.to_string(),
+            command: command.to_string(),
+            debounce_ms,
+            updated_at: Utc::now(),
+        };
+
+        self.tx
+            .execute(
+                "INSERT INTO watches(id, path, command, debounce_ms, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    watch.id,
+                    watch.path,
+                    watch.command,
+                    watch.debounce_ms as i64,
+                    watch.updated_at.to_rfc3339()
+                ],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        Ok(watch)
     }
 }

@@ -3,7 +3,7 @@ use rusqlite::params;
 
 use crate::{Store, now_string};
 
-const GLOBAL_JOB_LOCK: &str = "jobs/global";
+const GLOBAL_JOB_LOCK: &str = "job/run";
 
 impl Store {
     pub fn try_lock(&self, name: &str) -> Result<bool, OrbitError> {

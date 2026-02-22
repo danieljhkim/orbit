@@ -1,3 +1,5 @@
+pub const DEFAULT_WATCH_DEBOUNCE_MS: u64 = 500;
+
 #[derive(Debug, Clone)]
 pub struct DebounceQueueOne {
     window_ms: u64,
@@ -18,10 +20,12 @@ impl DebounceQueueOne {
         match self.last_emit_ms {
             None => {
                 self.last_emit_ms = Some(now_ms);
+                self.pending = None;
                 Some(path)
             }
             Some(last) if now_ms.saturating_sub(last) >= self.window_ms => {
                 self.last_emit_ms = Some(now_ms);
+                self.pending = None;
                 Some(path)
             }
             Some(_) => {

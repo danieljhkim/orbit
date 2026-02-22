@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod event_bus;
+pub mod execute;
 pub mod mutation;
 pub mod pipeline;
 

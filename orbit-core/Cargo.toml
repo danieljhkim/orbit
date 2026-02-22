@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 chrono.workspace = true
+notify.workspace = true
+orbit-exec = { path = "../orbit-exec" }
 orbit-policy = { path = "../orbit-policy" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }

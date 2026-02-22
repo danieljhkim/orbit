@@ -7,4 +7,5 @@ cd "$repo_root"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+"$repo_root/scripts/check-dependency-direction.sh"
 "$repo_root/scripts/check-cli-imports.sh"

@@ -74,7 +74,7 @@ mod tests {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
         let now = Utc::now();
         let job = runtime
-            .schedule_job("demo", "noop", now)
+            .schedule_job("demo", "true", now)
             .expect("schedule job");
 
         let first = runtime.run_due_jobs(now).expect("first run");

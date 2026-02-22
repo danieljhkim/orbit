@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 
-use orbit_types::{JobStatus, OrbitError, OrbitEvent};
+use orbit_types::{OrbitError, OrbitEvent};
 
 use crate::OrbitRuntime;
 
@@ -12,24 +12,25 @@ impl OrbitRuntime {
         }
 
         let result = (|| {
-            let mut ran = 0usize;
-            for job in self.context.store.due_jobs(now)? {
-                let started = self.with_mutation(|tx| {
-                    let started = tx.transition_job_status(
-                        &job.id,
-                        JobStatus::Scheduled,
-                        JobStatus::Running,
-                    )?;
-                    Ok((started, OrbitEvent::JobStarted { id: job.id.clone() }))
-                })?;
+            let claimed_jobs = self
+                .context
+                .store
+                .with_transaction(|tx| tx.claim_due_jobs(now))?;
 
-                if !started {
-                    continue;
-                }
+            for job in &claimed_jobs {
+                self.event_bus
+                    .publish(OrbitEvent::JobStarted { id: job.id.clone() });
+            }
+
+            let mut ran = 0usize;
+            for job in claimed_jobs {
+                let success = match self.execute_shell_command("job", &job.command) {
+                    Ok(result) => result.success,
+                    Err(_) => false,
+                };
 
                 let next_run_at = now + Duration::minutes(1);
                 let completed = self.with_mutation(|tx| {
-                    let success = true;
                     let _final_status = crate::job::state_machine::next_after_run(success);
                     let completed = tx.complete_job(&job.id, next_run_at, success)?;
                     Ok((

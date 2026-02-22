@@ -17,27 +17,16 @@ impl Execute for WatchCommand {
 
 #[derive(Subcommand)]
 pub enum WatchSubcommand {
-    Run(WatchRunArgs),
+    Run,
 }
 
 impl Execute for WatchSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
-            WatchSubcommand::Run(args) => args.execute(runtime),
+            WatchSubcommand::Run => {
+                runtime.execute_watch_run_command()?;
+                Ok(())
+            }
         }
-    }
-}
-
-#[derive(Args)]
-pub struct WatchRunArgs {
-    #[arg(long, default_value = ".")]
-    pub path: String,
-}
-
-impl Execute for WatchRunArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        runtime.execute_watch_run_command(&self.path)?;
-        crate::output::table::print_line(format!("watch trigger recorded for {}", self.path));
-        Ok(())
     }
 }
