@@ -1,67 +1,52 @@
 use orbit_core::OrbitRuntime;
-use orbit_core::command::skill::{SkillAddParams, SkillDoctorStatus, SkillUpdateParams};
 use orbit_core::command::task::TaskAddParams;
-use orbit_types::Role;
 use tempfile::tempdir;
 
 #[test]
-fn skill_crud_round_trip() {
+fn legacy_skill_mutation_commands_are_disabled() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
 
-    let created = runtime
-        .add_skill(SkillAddParams {
-            name: "rust-refactor".to_string(),
+    let add_err = runtime
+        .add_skill(orbit_core::command::skill::SkillAddParams {
+            name: "legacy".to_string(),
             description: Some("desc".to_string()),
-            instructions: "use crate boundaries".to_string(),
+            instructions: "instructions".to_string(),
             context_files: vec![],
-            allowed_tools: vec!["fs.read".to_string()],
-            role: Role::Agent,
+            allowed_tools: vec![],
+            role: orbit_types::Role::Agent,
         })
-        .expect("add skill");
-    assert_eq!(created.name, "rust-refactor");
+        .expect_err("add should be disabled");
+    assert!(
+        add_err
+            .to_string()
+            .contains("legacy skill mutation is disabled")
+    );
 
-    let listed = runtime.list_skills().expect("list");
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].name, "rust-refactor");
-
-    let shown = runtime.show_skill("rust-refactor").expect("show");
-    assert_eq!(shown.instructions, "use crate boundaries");
-
-    let updated = runtime
+    let update_err = runtime
         .update_skill(
-            "rust-refactor",
-            SkillUpdateParams {
-                instructions: Some("updated".to_string()),
-                ..Default::default()
-            },
+            "legacy",
+            orbit_core::command::skill::SkillUpdateParams::default(),
         )
-        .expect("update");
-    assert_eq!(updated.instructions, "updated");
+        .expect_err("update should be disabled");
+    assert!(
+        update_err
+            .to_string()
+            .contains("legacy skill mutation is disabled")
+    );
 
-    runtime.delete_skill("rust-refactor").expect("delete");
-    assert!(runtime.show_skill("rust-refactor").is_err());
+    let delete_err = runtime
+        .delete_skill("legacy")
+        .expect_err("delete should be disabled");
+    assert!(
+        delete_err
+            .to_string()
+            .contains("legacy skill mutation is disabled")
+    );
 }
 
 #[test]
-fn add_skill_rejects_unknown_allowed_tool() {
-    let dir = tempdir().expect("tempdir");
-    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-
-    let result = runtime.add_skill(SkillAddParams {
-        name: "bad".to_string(),
-        description: None,
-        instructions: "do".to_string(),
-        context_files: vec![],
-        allowed_tools: vec!["missing.tool".to_string()],
-        role: Role::Agent,
-    });
-
-    assert!(result.is_err());
-}
-
-#[test]
-fn attach_and_detach_skill_to_task() {
+fn legacy_task_skill_attachment_commands_are_disabled() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
 
@@ -70,72 +55,87 @@ fn attach_and_detach_skill_to_task() {
             title: "task".to_string(),
             ..Default::default()
         })
-        .expect("add task");
-    runtime
-        .add_skill(SkillAddParams {
-            name: "alpha".to_string(),
-            description: None,
-            instructions: "do".to_string(),
-            context_files: vec![],
-            allowed_tools: vec![],
-            role: Role::Agent,
-        })
-        .expect("add skill");
+        .expect("task");
 
-    runtime
-        .attach_skill_to_task(&task.id, "alpha")
-        .expect("attach");
-    let attached = runtime.list_task_skills(&task.id).expect("list attached");
-    assert_eq!(attached.len(), 1);
-    assert_eq!(attached[0].name, "alpha");
-
-    runtime
-        .detach_skill_from_task(&task.id, "alpha")
-        .expect("detach");
-    let attached = runtime.list_task_skills(&task.id).expect("list attached");
-    assert!(attached.is_empty());
-}
-
-#[test]
-fn skill_doctor_reports_missing_context_file() {
-    let dir = tempdir().expect("tempdir");
-    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-
-    runtime
-        .add_skill(SkillAddParams {
-            name: "with-missing-file".to_string(),
-            description: None,
-            instructions: "do".to_string(),
-            context_files: vec!["/tmp/definitely_missing_orbit_skill_file".to_string()],
-            allowed_tools: vec![],
-            role: Role::Agent,
-        })
-        .expect("add skill");
-
-    let report = runtime.doctor_skills().expect("doctor");
-    assert_eq!(report.len(), 1);
-    assert_eq!(report[0].status, SkillDoctorStatus::Warning);
-}
-
-#[test]
-fn legacy_sql_skill_rows_are_exported_to_file_catalog() {
-    let dir = tempdir().expect("tempdir");
-    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-    runtime
-        .add_skill(SkillAddParams {
-            name: "legacy-export".to_string(),
-            description: Some("legacy desc".to_string()),
-            instructions: "legacy instructions".to_string(),
-            context_files: vec![],
-            allowed_tools: vec![],
-            role: Role::Agent,
-        })
-        .expect("add skill");
-
-    let restarted = OrbitRuntime::from_data_root(dir.path()).expect("runtime restart");
-    let file_skills = restarted.list_file_skills().expect("file skills");
+    let attach_err = runtime
+        .attach_skill_to_task(&task.id, "legacy")
+        .expect_err("attach should be disabled");
     assert!(
-        file_skills.iter().any(|skill| skill.id == "legacy-export"),
-        "legacy sqlite row should be exported into file skill catalog"
+        attach_err
+            .to_string()
+            .contains("task-attached skill runtime is disabled")
+    );
+
+    let list_err = runtime
+        .list_task_skills(&task.id)
+        .expect_err("list should be disabled");
+    assert!(
+        list_err
+            .to_string()
+            .contains("task-attached skill runtime is disabled")
+    );
+
+    let detach_err = runtime
+        .detach_skill_from_task(&task.id, "legacy")
+        .expect_err("detach should be disabled");
+    assert!(
+        detach_err
+            .to_string()
+            .contains("task-attached skill runtime is disabled")
+    );
+}
+
+#[test]
+fn file_skill_catalog_commands_work() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let skill_dir = dir.path().join("skills").join("assess-codebase");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"# assess-codebase
+
+## Purpose
+Review codebase architecture.
+
+## Behavioral Constraints
+- Return deterministic output.
+
+## Output Requirements
+- JSON response.
+"#,
+    )
+    .expect("write skill");
+    std::fs::write(
+        skill_dir.join("meta.json"),
+        r#"{
+  "name": "Assess Codebase",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["summary"],
+  "properties": {
+    "summary": {"type": "string"}
+  }
+}"#,
+    )
+    .expect("write meta");
+
+    let listed = runtime.list_file_skills().expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "assess-codebase");
+    assert!(listed[0].output_schema.is_some());
+
+    let shown = runtime.show_file_skill("assess-codebase").expect("show");
+    assert_eq!(shown.sections.purpose, "Review codebase architecture.");
+    assert_eq!(
+        shown.meta.and_then(|meta| meta.name).as_deref(),
+        Some("Assess Codebase")
+    );
+
+    let doctor = runtime.doctor_file_skills().expect("doctor");
+    assert_eq!(doctor.len(), 1);
+    assert_eq!(
+        doctor[0].status,
+        orbit_core::command::skill::SkillDoctorStatus::Ok
     );
 }

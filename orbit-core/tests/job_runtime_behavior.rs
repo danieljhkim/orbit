@@ -323,3 +323,90 @@ Validate output shape.
         Some("AGENT_PROTOCOL_VIOLATION")
     );
 }
+
+#[test]
+fn skill_meta_complex_schema_keywords_are_enforced() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let skill_dir = dir.path().join("skills").join("strict-complex");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"# strict-complex
+
+## Purpose
+Validate advanced schema behavior.
+
+## Behavioral Constraints
+- Deterministic output only.
+
+## Output Requirements
+- kind
+"#,
+    )
+    .expect("write skill");
+    std::fs::write(
+        skill_dir.join("meta.json"),
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "oneOf": [
+    {
+      "required": ["kind", "a"],
+      "properties": {
+        "kind": { "const": "a" },
+        "a": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "required": ["kind", "b"],
+      "properties": {
+        "kind": { "const": "b" },
+        "b": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  ]
+}"#,
+    )
+    .expect("write meta");
+
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\ncat >/dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"kind\":\"a\",\"extra\":1},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    let _ = runtime
+        .add_work(WorkAddParams {
+            id: "spec-complex-schema".to_string(),
+            spec_type: "analysis".to_string(),
+            description: "schema validation".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            artifact_path_template: None,
+            skill_refs: vec!["strict-complex".to_string()],
+        })
+        .expect("add work");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-complex-schema",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let due_at = runtime.show_job(&job_id).expect("show job").next_run_at;
+    let ran = runtime.run_due_jobs(due_at).expect("run jobs");
+    assert_eq!(ran, 1);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].state, JobRunState::Failed);
+    assert_eq!(
+        history[0].error_code.as_deref(),
+        Some("AGENT_PROTOCOL_VIOLATION")
+    );
+}

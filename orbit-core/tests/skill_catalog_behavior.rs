@@ -174,3 +174,38 @@ Missing required sections.
     assert_eq!(report[0].status, SkillCatalogDoctorStatus::Error);
     assert!(report[0].message.contains("missing required section"));
 }
+
+#[test]
+fn load_rejects_invalid_meta_schema_document() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().join("skills");
+    let catalog = SkillCatalog::new(root.clone());
+    catalog.ensure_layout().expect("layout");
+
+    write_skill(
+        &root,
+        "bad-meta",
+        r#"# bad-meta
+
+## Purpose
+Analyze architecture.
+
+## Behavioral Constraints
+- Must be deterministic.
+
+## Output Requirements
+- JSON output.
+"#,
+    );
+    fs::write(
+        root.join("bad-meta").join("meta.json"),
+        r#"{
+  "name": "Bad Meta",
+  "type": 7
+}"#,
+    )
+    .expect("meta");
+
+    let err = catalog.load("bad-meta").expect_err("must fail");
+    assert!(err.to_string().contains("valid JSON Schema document"));
+}

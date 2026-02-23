@@ -4,7 +4,7 @@ use orbit_types::{
 };
 use rusqlite::{OptionalExtension, params};
 
-use crate::{Store, StoreTx, now_string};
+use crate::{Store, StoreTx};
 
 fn parse_skill(row: &rusqlite::Row<'_>) -> rusqlite::Result<Skill> {
     let context_files_raw: String = row.get(4)?;
@@ -206,114 +206,42 @@ impl Store {
 }
 
 impl<'a> StoreTx<'a> {
-    pub fn insert_skill(&mut self, skill: &Skill) -> Result<(), OrbitError> {
-        let context_files = serde_json::to_string(&skill.context_files)
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        let allowed_tools = serde_json::to_string(&skill.allowed_tools)
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        self.tx
-            .execute(
-                "INSERT INTO skills(schema_version, name, description, instructions, context_files, allowed_tools, role, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    i64::from(skill.schema_version),
-                    skill.name,
-                    skill.description,
-                    skill.instructions,
-                    context_files,
-                    allowed_tools,
-                    skill.role.to_string(),
-                    skill.created_at.to_rfc3339(),
-                    skill.updated_at.to_rfc3339(),
-                ],
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        Ok(())
+    pub fn insert_skill(&mut self, _skill: &Skill) -> Result<(), OrbitError> {
+        Err(OrbitError::Store(
+            "legacy sqlite skill mutation is disabled; use file-based skills".to_string(),
+        ))
     }
 
-    pub fn update_skill(&mut self, skill: &Skill) -> Result<bool, OrbitError> {
-        let context_files = serde_json::to_string(&skill.context_files)
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        let allowed_tools = serde_json::to_string(&skill.allowed_tools)
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        let changed = self
-            .tx
-            .execute(
-                "UPDATE skills
-                 SET schema_version = ?1,
-                     description = ?2,
-                     instructions = ?3,
-                     context_files = ?4,
-                     allowed_tools = ?5,
-                     role = ?6,
-                     updated_at = ?7
-                 WHERE name = ?8",
-                params![
-                    i64::from(skill.schema_version),
-                    skill.description,
-                    skill.instructions,
-                    context_files,
-                    allowed_tools,
-                    skill.role.to_string(),
-                    skill.updated_at.to_rfc3339(),
-                    skill.name,
-                ],
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        Ok(changed == 1)
+    pub fn update_skill(&mut self, _skill: &Skill) -> Result<bool, OrbitError> {
+        Err(OrbitError::Store(
+            "legacy sqlite skill mutation is disabled; use file-based skills".to_string(),
+        ))
     }
 
-    pub fn delete_skill(&mut self, name: &str) -> Result<bool, OrbitError> {
-        let changed = self
-            .tx
-            .execute("DELETE FROM skills WHERE name = ?1", [name])
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        Ok(changed == 1)
+    pub fn delete_skill(&mut self, _name: &str) -> Result<bool, OrbitError> {
+        Err(OrbitError::Store(
+            "legacy sqlite skill mutation is disabled; use file-based skills".to_string(),
+        ))
     }
 
     pub fn attach_skill_to_task(
         &mut self,
-        task_id: &str,
-        skill_name: &str,
+        _task_id: &str,
+        _skill_name: &str,
     ) -> Result<bool, OrbitError> {
-        let next_order = self
-            .tx
-            .query_row(
-                "SELECT COALESCE(MAX(attachment_order), 0) + 1 FROM task_skills WHERE task_id = ?1",
-                [task_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        let changed = self
-            .tx
-            .execute(
-                "INSERT INTO task_skills(task_id, skill_name, attachment_order, created_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(task_id, skill_name) DO NOTHING",
-                params![task_id, skill_name, next_order, now_string()],
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        Ok(changed == 1)
+        Err(OrbitError::Store(
+            "task-skill attachment is disabled; use work.skill_refs".to_string(),
+        ))
     }
 
     pub fn detach_skill_from_task(
         &mut self,
-        task_id: &str,
-        skill_name: &str,
+        _task_id: &str,
+        _skill_name: &str,
     ) -> Result<bool, OrbitError> {
-        let changed = self
-            .tx
-            .execute(
-                "DELETE FROM task_skills WHERE task_id = ?1 AND skill_name = ?2",
-                params![task_id, skill_name],
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        Ok(changed == 1)
+        Err(OrbitError::Store(
+            "task-skill attachment is disabled; use work.skill_refs".to_string(),
+        ))
     }
 
     pub fn insert_agent_session(&mut self, session: &AgentSession) -> Result<(), OrbitError> {
@@ -412,23 +340,22 @@ mod tests {
     }
 
     #[test]
-    fn insert_and_list_skills() {
+    fn legacy_skill_mutation_is_disabled() {
         let store = Store::open_in_memory().expect("store");
-        store
+        let err = store
             .with_transaction(|tx| {
                 tx.insert_skill(&sample_skill("alpha"))?;
                 Ok(())
             })
-            .expect("insert");
-
-        let skills = store.list_skills().expect("list");
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "alpha");
-        assert_eq!(skills[0].role, Role::Agent);
+            .expect_err("insert should fail");
+        assert!(
+            err.to_string()
+                .contains("legacy sqlite skill mutation is disabled")
+        );
     }
 
     #[test]
-    fn attach_and_order_task_skills() {
+    fn task_skill_attachment_is_disabled() {
         let store = Store::open_in_memory().expect("store");
         let task = store
             .with_transaction(|tx| {
@@ -439,22 +366,16 @@ mod tests {
             })
             .expect("task");
 
-        store
+        let err = store
             .with_transaction(|tx| {
-                tx.insert_skill(&sample_skill("b"))?;
-                tx.insert_skill(&sample_skill("a"))?;
                 tx.attach_skill_to_task(&task.id, "b")?;
-                tx.attach_skill_to_task(&task.id, "a")?;
                 Ok(())
             })
-            .expect("attach");
-
-        let attachments = store
-            .list_task_skill_attachments(&task.id)
-            .expect("attachments");
-        assert_eq!(attachments.len(), 2);
-        assert_eq!(attachments[0].skill_name, "b");
-        assert_eq!(attachments[1].skill_name, "a");
+            .expect_err("attach should fail");
+        assert!(
+            err.to_string()
+                .contains("task-skill attachment is disabled")
+        );
     }
 
     #[test]

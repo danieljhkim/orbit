@@ -7,6 +7,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::json_schema::validate_schema_document;
+
 const REQUIRED_SECTIONS: [&str; 3] = ["Purpose", "Behavioral Constraints", "Output Requirements"];
 const OPTIONAL_SECTIONS: [&str; 3] = ["Evaluation Focus", "Prohibitions", "Examples"];
 const META_NAME: &str = "name";
@@ -357,16 +359,14 @@ fn parse_meta_json(path: &Path) -> Result<ParsedMetaJson, OrbitError> {
         None
     };
 
-    let output_schema = if schema_obj.is_empty() {
-        None
-    } else {
-        Some(Value::Object(schema_obj))
-    };
+    let output_schema = Value::Object(schema_obj);
+    let schema_context = format!("meta.json at '{}'", path.display());
+    let _ = validate_schema_document(&output_schema, &schema_context)?;
 
     Ok(ParsedMetaJson {
         meta,
         meta_raw: Some(value),
-        output_schema,
+        output_schema: Some(output_schema),
     })
 }
 

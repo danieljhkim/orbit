@@ -2,6 +2,7 @@ pub mod agent;
 pub mod command;
 pub mod context;
 pub mod job;
+mod json_schema;
 pub mod runtime;
 pub mod skill_catalog;
 mod task_file_store;

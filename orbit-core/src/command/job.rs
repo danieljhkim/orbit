@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+use crate::json_schema::validate_instance_against_schema;
 const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";
 
@@ -547,11 +548,14 @@ impl OrbitRuntime {
             let Some(schema) = skill.output_schema.as_ref() else {
                 continue;
             };
-            if let Err(message) = validate_json_schema_subset(result, schema, "$") {
-                return Err(OrbitError::AgentProtocolViolation(format!(
-                    "result does not match skill '{}' output schema: {}",
-                    skill.id, message
-                )));
+            let context = format!("result does not match skill '{}' output schema", skill.id);
+            if let Err(err) = validate_instance_against_schema(schema, result, &context) {
+                return match err {
+                    OrbitError::SkillValidation(message) => {
+                        Err(OrbitError::AgentProtocolViolation(message))
+                    }
+                    other => Err(other),
+                };
             }
         }
 
@@ -578,74 +582,4 @@ impl OrbitRuntime {
         }
         Ok(())
     }
-}
-
-fn validate_json_schema_subset(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
-    let Some(schema_obj) = schema.as_object() else {
-        return Ok(());
-    };
-
-    if let Some(expected) = schema_obj.get("const")
-        && value != expected
-    {
-        return Err(format!("{} must equal const value", path));
-    }
-
-    if let Some(enum_values) = schema_obj.get("enum").and_then(Value::as_array)
-        && !enum_values.iter().any(|item| item == value)
-    {
-        return Err(format!("{} must match one of enum values", path));
-    }
-
-    if let Some(expected_type) = schema_obj.get("type").and_then(Value::as_str) {
-        let matches_type = match expected_type {
-            "object" => value.is_object(),
-            "array" => value.is_array(),
-            "string" => value.is_string(),
-            "number" => value.is_number(),
-            "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-            "boolean" => value.is_boolean(),
-            "null" => value.is_null(),
-            _ => true,
-        };
-        if !matches_type {
-            return Err(format!("{} must be {}", path, expected_type));
-        }
-    }
-
-    if let Some(required) = schema_obj.get("required").and_then(Value::as_array) {
-        let Some(value_obj) = value.as_object() else {
-            return Err(format!("{} must be object for required keys", path));
-        };
-        for key in required {
-            let Some(key) = key.as_str() else {
-                continue;
-            };
-            if !value_obj.contains_key(key) {
-                return Err(format!("{} missing required key '{}'", path, key));
-            }
-        }
-    }
-
-    if let Some(properties) = schema_obj.get("properties").and_then(Value::as_object)
-        && let Some(value_obj) = value.as_object()
-    {
-        for (key, prop_schema) in properties {
-            if let Some(prop_value) = value_obj.get(key) {
-                let child_path = format!("{}.{}", path, key);
-                validate_json_schema_subset(prop_value, prop_schema, &child_path)?;
-            }
-        }
-    }
-
-    if let Some(items_schema) = schema_obj.get("items")
-        && let Some(items) = value.as_array()
-    {
-        for (idx, item) in items.iter().enumerate() {
-            let child_path = format!("{}[{}]", path, idx);
-            validate_json_schema_subset(item, items_schema, &child_path)?;
-        }
-    }
-
-    Ok(())
 }

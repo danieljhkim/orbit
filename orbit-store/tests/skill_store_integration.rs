@@ -18,27 +18,22 @@ fn sample_skill(name: &str) -> Skill {
 }
 
 #[test]
-fn skill_name_is_unique() {
+fn legacy_skill_mutations_are_disabled() {
     let store = Store::open_in_memory().expect("store");
-    let skill = sample_skill("unique");
-    store
-        .with_transaction(|tx| {
-            tx.insert_skill(&skill)?;
-            Ok(())
-        })
-        .expect("first insert");
-
     let err = store
         .with_transaction(|tx| {
-            tx.insert_skill(&skill)?;
+            tx.insert_skill(&sample_skill("legacy"))?;
             Ok(())
         })
-        .expect_err("duplicate insert should fail");
-    assert!(err.to_string().contains("UNIQUE"));
+        .expect_err("insert should fail");
+    assert!(
+        err.to_string()
+            .contains("legacy sqlite skill mutation is disabled")
+    );
 }
 
 #[test]
-fn attach_detach_and_ordering_are_deterministic() {
+fn legacy_task_skill_attachment_is_disabled() {
     let store = Store::open_in_memory().expect("store");
     let task = store
         .with_transaction(|tx| {
@@ -49,32 +44,14 @@ fn attach_detach_and_ordering_are_deterministic() {
         })
         .expect("task");
 
-    store
+    let err = store
         .with_transaction(|tx| {
-            tx.insert_skill(&sample_skill("b"))?;
-            tx.insert_skill(&sample_skill("a"))?;
-            tx.attach_skill_to_task(&task.id, "b")?;
-            tx.attach_skill_to_task(&task.id, "a")?;
+            tx.attach_skill_to_task(&task.id, "legacy")?;
             Ok(())
         })
-        .expect("attach");
-
-    let attachments = store
-        .list_task_skill_attachments(&task.id)
-        .expect("attachments");
-    assert_eq!(attachments.len(), 2);
-    assert_eq!(attachments[0].skill_name, "b");
-    assert_eq!(attachments[1].skill_name, "a");
-
-    store
-        .with_transaction(|tx| {
-            tx.detach_skill_from_task(&task.id, "b")?;
-            Ok(())
-        })
-        .expect("detach");
-    let attachments = store
-        .list_task_skill_attachments(&task.id)
-        .expect("attachments");
-    assert_eq!(attachments.len(), 1);
-    assert_eq!(attachments[0].skill_name, "a");
+        .expect_err("attach should fail");
+    assert!(
+        err.to_string()
+            .contains("task-skill attachment is disabled")
+    );
 }
