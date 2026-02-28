@@ -58,7 +58,8 @@ pub struct WorkAddArgs {
 
 impl Execute for WorkAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let input_schema_json = parse_optional_json_object(self.input_schema.as_deref(), "input_schema")?;
+        let input_schema_json =
+            parse_optional_json_object(self.input_schema.as_deref(), "input_schema")?;
         let output_schema_json =
             parse_optional_json_object(self.output_schema.as_deref(), "output_schema")?;
         let skill_refs = parse_csv(&self.skill_refs);

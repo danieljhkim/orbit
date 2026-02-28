@@ -3,10 +3,17 @@ use std::path::Path;
 use orbit_types::{AgentResponseEnvelope, ExecutionResult, JobRunState, JobTargetType, OrbitError};
 use serde_json::{Deserializer, Value};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdinAdapter {
+    OrbitEnvelopeJson,
+    PromptWithEmbeddedEnvelope,
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentInvocation {
     pub program: String,
     pub args: Vec<String>,
+    pub stdin_adapter: StdinAdapter,
 }
 
 pub fn build_invocation(
@@ -16,11 +23,28 @@ pub fn build_invocation(
 ) -> Result<AgentInvocation, OrbitError> {
     let provider = provider_key(agent_cli);
 
-    let args = match provider.as_str() {
+    let (args, stdin_adapter) = match provider.as_str() {
         // Keep provider-specific mappers explicit to avoid hidden command drift.
-        "claude" => default_scheduled_args(target_type, target_id),
-        "codex" => default_scheduled_args(target_type, target_id),
-        "mock-agent" => default_scheduled_args(target_type, target_id),
+        // `mock-agent` implements Orbit's native scheduled flags and consumes JSON stdin directly.
+        "mock-agent" => (
+            default_scheduled_args(target_type, target_id),
+            StdinAdapter::OrbitEnvelopeJson,
+        ),
+        // Modern `codex` CLI uses `exec` for non-interactive mode and reads prompt from stdin
+        // when no prompt arg is supplied.
+        "codex" => (
+            vec!["exec".to_string()],
+            StdinAdapter::PromptWithEmbeddedEnvelope,
+        ),
+        // Modern `claude` CLI uses `-p` for non-interactive print mode.
+        "claude" => (
+            vec![
+                "-p".to_string(),
+                "--output-format".to_string(),
+                "text".to_string(),
+            ],
+            StdinAdapter::PromptWithEmbeddedEnvelope,
+        ),
         _ => {
             return Err(OrbitError::UnsupportedAgentProvider(provider));
         }
@@ -29,16 +53,47 @@ pub fn build_invocation(
     Ok(AgentInvocation {
         program: agent_cli.to_string(),
         args,
+        stdin_adapter,
     })
+}
+
+pub fn build_stdin_payload(invocation: &AgentInvocation, envelope_json: &[u8]) -> Vec<u8> {
+    match invocation.stdin_adapter {
+        StdinAdapter::OrbitEnvelopeJson => envelope_json.to_vec(),
+        StdinAdapter::PromptWithEmbeddedEnvelope => {
+            let envelope_text = String::from_utf8_lossy(envelope_json);
+            format!(
+                "You are Orbit's scheduled job agent.\n\
+Read the execution envelope JSON and perform the requested work.\n\
+Return exactly one JSON object and nothing else.\n\
+Required response schema:\n\
+{{\"schemaVersion\":1,\"status\":\"success|failed|timeout\",\"result\":{{}},\"error\":null,\"durationMs\":123}}\n\
+Rules:\n\
+- Output valid JSON only.\n\
+- No markdown fences.\n\
+- If execution cannot complete, return status=\"failed\" with non-empty error.code and error.message.\n\
+- Keep result as a JSON object.\n\
+Execution envelope:\n\
+{envelope_text}\n"
+            )
+            .into_bytes()
+        }
+    }
 }
 
 pub fn parse_and_validate_response(
     exec_result: &ExecutionResult,
 ) -> Result<(AgentResponseEnvelope, JobRunState), OrbitError> {
     if exec_result.stdout.trim().is_empty() {
-        return Err(OrbitError::AgentProtocolViolation(
-            "agent stdout is empty".to_string(),
-        ));
+        let stderr_hint = exec_result.stderr.trim();
+        let hint = if stderr_hint.is_empty() {
+            String::new()
+        } else {
+            format!("; stderr: {}", truncate(stderr_hint, 300))
+        };
+        return Err(OrbitError::AgentProtocolViolation(format!(
+            "agent stdout is empty{hint}"
+        )));
     }
 
     let value = parse_single_json_document(&exec_result.stdout)?;
@@ -158,4 +213,13 @@ fn provider_key(agent_cli: &str) -> String {
         .and_then(|v| v.to_str())
         .map(|v| v.to_ascii_lowercase())
         .unwrap_or_else(|| agent_cli.to_ascii_lowercase())
+}
+
+fn truncate(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        return value.to_string();
+    }
+    let mut output = value[..max_len].to_string();
+    output.push_str("...");
+    output
 }

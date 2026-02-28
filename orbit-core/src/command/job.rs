@@ -391,6 +391,8 @@ impl OrbitRuntime {
                 };
             }
         };
+        let stdin_payload =
+            crate::job::agent_protocol::build_stdin_payload(&invocation, &stdin_payload);
 
         let exec_result = match run_process(
             &ExecRequest {
