@@ -7,17 +7,13 @@ use serde_json::json;
 use crate::OrbitRuntime;
 use crate::command::work::WorkAddParams;
 
-const DEFAULT_IDENTITIES: [(&str, &str); 4] = [
-    (
-        "linus",
-        include_str!("../../../agents/identities/linus.yaml"),
-    ),
-    ("kent", include_str!("../../../agents/identities/kent.yaml")),
-    ("rob", include_str!("../../../agents/identities/rob.yaml")),
-    (
-        "grace",
-        include_str!("../../../agents/identities/grace.yaml"),
-    ),
+const DEFAULT_IDENTITIES: [(&str, &str); 6] = [
+    ("linus", include_str!("../../assets/identities/linus.yaml")),
+    ("john", include_str!("../../assets/identities/john.yaml")),
+    ("kent", include_str!("../../assets/identities/kent.yaml")),
+    ("rob", include_str!("../../assets/identities/rob.yaml")),
+    ("grace", include_str!("../../assets/identities/grace.yaml")),
+    ("steve", include_str!("../../assets/identities/steve.yaml")),
 ];
 const DEFAULT_APPROVAL_WORK_ID: &str = "approve-task-leader";
 

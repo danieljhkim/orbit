@@ -22,9 +22,11 @@ fn init_creates_default_identities_under_home_orbit() {
 
     let identity_root = home.path().join(".orbit").join("identities");
     assert!(identity_root.join("linus.yaml").exists());
+    assert!(identity_root.join("john.yaml").exists());
     assert!(identity_root.join("kent.yaml").exists());
     assert!(identity_root.join("rob.yaml").exists());
     assert!(identity_root.join("grace.yaml").exists());
+    assert!(identity_root.join("steve.yaml").exists());
 }
 
 #[test]
@@ -37,7 +39,7 @@ fn init_is_idempotent_for_existing_identity_files() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("created=4"));
+        .stdout(predicate::str::contains("created=6"));
 
     orbit_in(workspace.path())
         .env("HOME", home.path())
