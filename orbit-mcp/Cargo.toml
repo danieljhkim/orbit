@@ -1,17 +1,12 @@
 [package]
-name = "orbit"
+name = "orbit-mcp"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-clap.workspace = true
-csv = "1"
 orbit-core = { path = "../orbit-core" }
-orbit-mcp = { path = "../orbit-mcp" }
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-serde_json.workspace = true
 tempfile = "3"

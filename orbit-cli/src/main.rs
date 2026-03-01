@@ -19,6 +19,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Audit(cmd) => cmd.execute(&runtime),
+        Commands::Mcp(cmd) if cmd.should_bypass_audit() => cmd.execute(&runtime),
         other => {
             let meta = audit_middleware::extract_command_meta(&other);
             let mut guard = audit_middleware::AuditGuard::new(&runtime, meta);

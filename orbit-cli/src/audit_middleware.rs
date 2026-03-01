@@ -288,6 +288,26 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             role: "admin".to_string(),
             arguments_json: None,
         },
+        Commands::Mcp(cmd) => {
+            use crate::command::mcp::McpSubcommand;
+            let sub = match &cmd.command {
+                McpSubcommand::Start => "start",
+                McpSubcommand::Init(_) => "init",
+            };
+            let target_type = match &cmd.command {
+                McpSubcommand::Start => Some("mcp"),
+                McpSubcommand::Init(_) => Some("config"),
+            };
+            CommandMeta {
+                command: "mcp".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: target_type.map(String::from),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
     }
 }

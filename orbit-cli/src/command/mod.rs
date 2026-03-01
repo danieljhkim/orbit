@@ -3,6 +3,7 @@ pub mod audit;
 pub mod config;
 pub mod init;
 pub mod job;
+pub mod mcp;
 pub mod skill;
 pub mod task;
 pub mod tool;
@@ -36,6 +37,7 @@ pub enum Commands {
     Skill(skill::SkillCommand),
     Job(job::JobCommand),
     Watch(watch::WatchCommand),
+    Mcp(mcp::McpCommand),
 }
 
 impl Execute for Commands {
@@ -51,6 +53,7 @@ impl Execute for Commands {
             Commands::Skill(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Watch(cmd) => cmd.execute(runtime),
+            Commands::Mcp(cmd) => cmd.execute(runtime),
         }
     }
 }

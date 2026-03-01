@@ -3,6 +3,7 @@ pub mod audit_event;
 pub mod duration;
 pub mod init;
 pub mod job;
+pub mod mcp;
 pub mod skill;
 pub mod task;
 pub mod tool;

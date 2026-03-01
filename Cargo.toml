@@ -7,6 +7,7 @@ members = [
   "orbit-policy",
   "orbit-exec",
   "orbit-tools",
+  "orbit-mcp",
 ]
 resolver = "2"
 
