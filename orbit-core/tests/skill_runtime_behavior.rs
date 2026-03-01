@@ -89,12 +89,12 @@ fn legacy_task_skill_attachment_commands_are_disabled() {
 fn file_skill_catalog_commands_work() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-    let skill_dir = dir.path().join("skills").join("assess-codebase");
+    let skill_dir = dir.path().join("skills").join("orbit-assess-codebase");
     std::fs::create_dir_all(&skill_dir).expect("create skill dir");
     std::fs::write(
         skill_dir.join("SKILL.md"),
         r#"---
-name: assess-codebase
+name: orbit-assess-codebase
 description: Review codebase architecture.
 ---
 
@@ -127,10 +127,12 @@ Review codebase architecture.
 
     let listed = runtime.list_file_skills().expect("list");
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, "assess-codebase");
+    assert_eq!(listed[0].id, "orbit-assess-codebase");
     assert!(listed[0].output_schema.is_some());
 
-    let shown = runtime.show_file_skill("assess-codebase").expect("show");
+    let shown = runtime
+        .show_file_skill("orbit-assess-codebase")
+        .expect("show");
     assert_eq!(shown.sections.purpose, "Review codebase architecture.");
     assert_eq!(
         shown.meta.and_then(|meta| meta.name).as_deref(),

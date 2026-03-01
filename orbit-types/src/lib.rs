@@ -153,7 +153,7 @@ mod tests {
                 "properties": { "score": { "type": "number" } }
             }),
             artifact_path_template: Some("agentspace/reports/{{date}}/out.md".to_string()),
-            skill_refs: vec!["assess-codebase".to_string()],
+            skill_refs: vec!["orbit-assess-codebase".to_string()],
             identity_id: Some("linus-leader".to_string()),
             assigned_to: Some("Linus Torvalds (Maintainer)".to_string()),
             created_by: Some("human".to_string()),

@@ -23,9 +23,9 @@ fn skill_list_and_show_read_file_based_skills() {
     let dir = tempfile::tempdir().expect("tempdir");
     write_skill(
         dir.path(),
-        "assess-codebase",
+        "orbit-assess-codebase",
         r#"---
-name: assess-codebase
+name: orbit-assess-codebase
 description: Perform architectural boundary and invariant analysis.
 ---
 
@@ -59,15 +59,15 @@ Perform architectural boundary and invariant analysis.
         .args(["skill", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("assess-codebase"));
+        .stdout(predicate::str::contains("orbit-assess-codebase"));
 
     orbit_in(dir.path())
-        .args(["skill", "show", "assess-codebase"])
+        .args(["skill", "show", "orbit-assess-codebase"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Behavioral Contract"))
         .stdout(predicate::str::contains("Structured Metadata"))
-        .stdout(predicate::str::contains("assess-codebase"));
+        .stdout(predicate::str::contains("orbit-assess-codebase"));
 }
 
 #[test]

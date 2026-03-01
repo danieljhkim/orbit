@@ -24,7 +24,7 @@ fn write_skill(dir: &Path, id: &str) {
 #[test]
 fn work_add_show_list_delete_json_flow() {
     let dir = tempfile::tempdir().expect("tempdir");
-    write_skill(dir.path(), "assess-codebase");
+    write_skill(dir.path(), "orbit-assess-codebase");
     write_skill(dir.path(), "execution-audit");
 
     orbit_in(dir.path())
@@ -42,7 +42,7 @@ fn work_add_show_list_delete_json_flow() {
             "--output-schema",
             "{\"type\":\"object\"}",
             "--skill-refs",
-            "assess-codebase,execution-audit",
+            "orbit-assess-codebase,execution-audit",
             "--json",
         ])
         .assert()
