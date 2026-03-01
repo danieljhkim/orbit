@@ -84,19 +84,32 @@ Execution envelope:\n\
 pub fn parse_and_validate_response(
     exec_result: &ExecutionResult,
 ) -> Result<(AgentResponseEnvelope, JobRunState), OrbitError> {
+    let stderr_hint = exec_result.stderr.trim();
     if exec_result.stdout.trim().is_empty() {
-        let stderr_hint = exec_result.stderr.trim();
-        let hint = if stderr_hint.is_empty() {
-            String::new()
-        } else {
-            format!("; stderr: {}", truncate(stderr_hint, 300))
-        };
-        return Err(OrbitError::AgentProtocolViolation(format!(
-            "agent stdout is empty{hint}"
-        )));
+        if !stderr_hint.is_empty() {
+            return Err(OrbitError::Execution(format!(
+                "agent did not produce JSON stdout; stderr: {}",
+                truncate(stderr_hint, 300)
+            )));
+        }
+        return Err(OrbitError::AgentProtocolViolation(
+            "agent stdout is empty".to_string(),
+        ));
     }
 
-    let value = parse_single_json_document(&exec_result.stdout)?;
+    let value = match parse_single_json_document(&exec_result.stdout) {
+        Ok(value) => value,
+        Err(err) => {
+            if is_invocation_failure(exec_result) {
+                return Err(OrbitError::Execution(format!(
+                    "agent did not produce valid JSON stdout; stderr: {}; stdout: {}",
+                    truncate(stderr_hint, 300),
+                    truncate(exec_result.stdout.trim(), 300),
+                )));
+            }
+            return Err(err);
+        }
+    };
     let envelope: AgentResponseEnvelope = serde_json::from_value(value).map_err(|e| {
         OrbitError::AgentProtocolViolation(format!("invalid agent response envelope: {e}"))
     })?;
@@ -193,6 +206,10 @@ pub fn is_timeout(exec_result: &ExecutionResult) -> bool {
     !exec_result.success && exec_result.stderr.contains("process timed out")
 }
 
+fn is_invocation_failure(exec_result: &ExecutionResult) -> bool {
+    exec_result.exit_code.unwrap_or(1) != 0 && !exec_result.stderr.trim().is_empty()
+}
+
 fn default_scheduled_args(target_type: JobTargetType, target_id: &str) -> Vec<String> {
     vec![
         "run".to_string(),
@@ -207,7 +224,7 @@ fn default_scheduled_args(target_type: JobTargetType, target_id: &str) -> Vec<St
     ]
 }
 
-fn provider_key(agent_cli: &str) -> String {
+pub(crate) fn provider_key(agent_cli: &str) -> String {
     Path::new(agent_cli)
         .file_name()
         .and_then(|v| v.to_str())

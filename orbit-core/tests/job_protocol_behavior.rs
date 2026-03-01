@@ -121,7 +121,7 @@ fn stdin_payload_wraps_envelope_for_prompt_based_providers() {
 }
 
 #[test]
-fn protocol_parser_surfaces_stderr_when_stdout_empty() {
+fn protocol_parser_classifies_empty_stdout_with_stderr_as_execution_error() {
     let exec = ExecutionResult {
         success: false,
         stdout: String::new(),
@@ -132,7 +132,26 @@ fn protocol_parser_surfaces_stderr_when_stdout_empty() {
     };
 
     let err = parse_and_validate_response(&exec).expect_err("must fail");
+    assert!(matches!(err, OrbitError::Execution(_)));
     let msg = err.to_string();
-    assert!(msg.contains("agent stdout is empty"));
+    assert!(msg.contains("did not produce JSON stdout"));
     assert!(msg.contains("permission denied"));
+}
+
+#[test]
+fn protocol_parser_classifies_invalid_json_with_stderr_as_execution_error() {
+    let exec = ExecutionResult {
+        success: false,
+        stdout: "not-json".to_string(),
+        stderr: "network failure".to_string(),
+        exit_code: Some(1),
+        duration_ms: 1,
+        output: None,
+    };
+
+    let err = parse_and_validate_response(&exec).expect_err("must fail");
+    assert!(matches!(err, OrbitError::Execution(_)));
+    let msg = err.to_string();
+    assert!(msg.contains("did not produce valid JSON stdout"));
+    assert!(msg.contains("network failure"));
 }

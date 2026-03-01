@@ -1,10 +1,12 @@
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use chrono::{Duration as ChronoDuration, Utc};
 use orbit_core::OrbitRuntime;
 use orbit_core::command::job::JobAddParams;
 use orbit_core::command::work::WorkAddParams;
-use orbit_types::{JobRetryBackoffStrategy, JobRunState, JobTargetType};
+use orbit_store::Store;
+use orbit_types::{JobRetryBackoffStrategy, JobRunState, JobTargetType, OrbitError};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -70,6 +72,23 @@ fn write_agent_script(path: &std::path::Path, body: &str) -> String {
     #[cfg(unix)]
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
     path.to_string_lossy().to_string()
+}
+
+fn write_runtime_config(data_root: &std::path::Path, content: &str) {
+    std::fs::write(data_root.join("config.toml"), content).expect("write config");
+}
+
+fn insert_stale_running_run(data_root: &std::path::Path, job_id: &str) -> String {
+    let store = Store::open(&data_root.join("orbit.db")).expect("open store");
+    store
+        .with_transaction(|tx| {
+            let old_time = Utc::now() - ChronoDuration::hours(2);
+            let run = tx.insert_job_run(job_id, 1, old_time)?;
+            let changed = tx.mark_job_run_running(&run.run_id, old_time)?;
+            assert!(changed, "run must be marked running");
+            Ok(run.run_id)
+        })
+        .expect("insert stale running run")
 }
 
 #[test]
@@ -158,6 +177,167 @@ fn invalid_agent_json_marks_run_failed_with_protocol_violation() {
 }
 
 #[test]
+fn invocation_failure_with_stderr_marks_run_failed_with_invocation_error() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\necho 'network down' 1>&2\nexit 1\n",
+    );
+
+    add_work(&runtime, "spec-invocation");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-invocation",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let due_at = runtime.show_job(&job_id).expect("show job").next_run_at;
+    let ran = runtime.run_due_jobs(due_at).expect("run jobs");
+    assert_eq!(ran, 1);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].state, JobRunState::Failed);
+    assert_eq!(
+        history[0].error_code.as_deref(),
+        Some("AGENT_INVOCATION_FAILED")
+    );
+    assert!(
+        history[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("network down")
+    );
+}
+
+#[test]
+fn codex_job_fails_fast_when_required_env_var_is_not_allowlisted() {
+    let dir = tempdir().expect("tempdir");
+    write_runtime_config(
+        dir.path(),
+        r#"[execution.env]
+inherit = false
+pass = ["HOME","PATH"]
+"#,
+    );
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("codex");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_work(&runtime, "spec-codex-missing-env");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-codex-missing-env",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Failed);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(
+        history[0].error_code.as_deref(),
+        Some("AGENT_INVOCATION_FAILED")
+    );
+    let message = history[0].error_message.as_deref().unwrap_or_default();
+    assert!(message.contains("OPENAI_API_KEY"));
+    assert!(message.contains("config.toml"));
+}
+
+#[test]
+fn claude_job_fails_fast_when_required_env_var_is_not_allowlisted() {
+    let dir = tempdir().expect("tempdir");
+    write_runtime_config(
+        dir.path(),
+        r#"[execution.env]
+inherit = false
+pass = ["HOME","PATH"]
+"#,
+    );
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("claude");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_work(&runtime, "spec-claude-missing-env");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-claude-missing-env",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Failed);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(
+        history[0].error_code.as_deref(),
+        Some("AGENT_INVOCATION_FAILED")
+    );
+    let message = history[0].error_message.as_deref().unwrap_or_default();
+    assert!(message.contains("ANTHROPIC_API_KEY"));
+    assert!(message.contains("config.toml"));
+}
+
+#[test]
+fn provider_required_env_present_reaches_protocol_validation() {
+    let (provider, required_key) = if std::env::var("OPENAI_API_KEY").is_ok() {
+        ("codex", "OPENAI_API_KEY")
+    } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        ("claude", "ANTHROPIC_API_KEY")
+    } else {
+        return;
+    };
+
+    let dir = tempdir().expect("tempdir");
+    write_runtime_config(
+        dir.path(),
+        &format!(
+            "[execution.env]\ninherit = false\npass = [\"{required_key}\",\"HOME\",\"PATH\"]\n"
+        ),
+    );
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join(provider);
+    let agent_cli = write_agent_script(&script_path, "#!/bin/sh\nprintf 'not-json'\n");
+
+    add_work(&runtime, "spec-provider-env-present");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-provider-env-present",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Failed);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(
+        history[0].error_code.as_deref(),
+        Some("AGENT_PROTOCOL_VIOLATION")
+    );
+}
+
+#[test]
 fn run_job_now_applies_retry_policy_and_second_attempt_can_succeed() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
@@ -189,6 +369,164 @@ fn run_job_now_applies_retry_policy_and_second_attempt_can_succeed() {
     assert_eq!(history[0].state, JobRunState::Success);
     assert_eq!(history[1].attempt, 1);
     assert_eq!(history[1].state, JobRunState::Failed);
+}
+
+#[test]
+fn run_job_now_rejects_when_active_run_exists() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = Arc::new(OrbitRuntime::from_data_root(dir.path()).expect("runtime"));
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nsleep 0.5\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_work(&runtime, "spec-active-lock");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-active-lock",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let r1 = Arc::clone(&runtime);
+    let job_id_thread = job_id.clone();
+    let handle = thread::spawn(move || r1.run_job_now(&job_id_thread));
+    thread::sleep(std::time::Duration::from_millis(100));
+
+    let err = runtime
+        .run_job_now(&job_id)
+        .expect_err("second run should be rejected while first is active");
+    assert!(matches!(err, OrbitError::JobValidation(_)));
+    assert!(err.to_string().contains("already has an active run"));
+
+    let first = handle.join().expect("join");
+    assert!(first.is_ok(), "first run should complete successfully");
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(
+        history.len(),
+        1,
+        "second invocation must not insert a pending row"
+    );
+    assert_eq!(history[0].state, JobRunState::Success);
+}
+
+#[test]
+fn job_history_recovers_stale_running_run_to_failed() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_work(&runtime, "spec-history-stale");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-history-stale",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+    let stale_run_id = insert_stale_running_run(dir.path(), &job_id);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    let stale = history
+        .iter()
+        .find(|run| run.run_id == stale_run_id)
+        .expect("stale run should exist");
+    assert_eq!(stale.state, JobRunState::Failed);
+    assert_eq!(stale.error_code.as_deref(), Some("AGENT_INVOCATION_FAILED"));
+    assert!(
+        stale
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("stale active run recovered")
+    );
+}
+
+#[test]
+fn run_job_now_recovers_stale_running_run_and_executes_new_attempt() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_work(&runtime, "spec-run-now-stale");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-run-now-stale",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+    let stale_run_id = insert_stale_running_run(dir.path(), &job_id);
+
+    let result = runtime.run_job_now(&job_id).expect("run now");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert!(
+        history.iter().any(|run| run.run_id == stale_run_id),
+        "stale run should still be present in history"
+    );
+    let stale = history
+        .iter()
+        .find(|run| run.run_id == stale_run_id)
+        .expect("stale run should exist");
+    assert_eq!(stale.state, JobRunState::Failed);
+    assert_eq!(stale.error_code.as_deref(), Some("AGENT_INVOCATION_FAILED"));
+    assert!(
+        history.iter().any(|run| run.state == JobRunState::Success),
+        "new attempt should complete successfully"
+    );
+}
+
+#[test]
+fn run_due_jobs_recovers_stale_running_run_and_reclaims_job() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_work(&runtime, "spec-due-stale");
+    let job_id = add_scheduled_job(
+        &runtime,
+        "spec-due-stale",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+    let stale_run_id = insert_stale_running_run(dir.path(), &job_id);
+
+    let due_at = runtime.show_job(&job_id).expect("show job").next_run_at;
+    let ran = runtime.run_due_jobs(due_at).expect("run due jobs");
+    assert_eq!(ran, 1, "job should be reclaimed after stale run recovery");
+
+    let history = runtime.job_history(&job_id).expect("history");
+    let stale = history
+        .iter()
+        .find(|run| run.run_id == stale_run_id)
+        .expect("stale run should exist");
+    assert_eq!(stale.state, JobRunState::Failed);
+    assert!(
+        history.iter().any(|run| run.state == JobRunState::Success),
+        "reclaimed due job should complete successfully"
+    );
 }
 
 #[test]

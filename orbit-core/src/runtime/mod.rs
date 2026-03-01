@@ -13,6 +13,7 @@ use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 use orbit_types::{Audit, Job};
 
+use crate::config::RuntimeConfig;
 use crate::skill_catalog::SkillCatalog;
 use crate::task_file_store::TaskFileStore;
 use crate::{OrbitContext, OrbitError};
@@ -30,6 +31,7 @@ impl OrbitRuntime {
     }
 
     pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
+        let runtime_config = RuntimeConfig::load_from_data_root(data_root)?;
         let db_path = data_root.join("orbit.db");
         let store = orbit_store::Store::open(&db_path)?;
         let task_root = Self::task_root_path(data_root);
@@ -53,6 +55,7 @@ impl OrbitRuntime {
                 registry: Arc::new(registry),
                 task_store,
                 skill_catalog,
+                execution_env_policy: runtime_config.execution_env,
             },
             event_bus: event_bus::EventBus::default(),
         })
@@ -75,6 +78,7 @@ impl OrbitRuntime {
         let mut registry = ToolRegistry::new();
         registry.register_builtins();
         Self::load_external_tools(&store, &mut registry)?;
+        let runtime_config = RuntimeConfig::default();
 
         Ok(Self {
             context: OrbitContext {
@@ -83,6 +87,7 @@ impl OrbitRuntime {
                 registry: Arc::new(registry),
                 task_store,
                 skill_catalog,
+                execution_env_policy: runtime_config.execution_env,
             },
             event_bus: event_bus::EventBus::default(),
         })
@@ -116,6 +121,13 @@ impl OrbitRuntime {
 
     pub fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
         self.context.store.get_job(job_id)
+    }
+
+    pub fn execution_env_config(&self) -> (bool, Vec<String>) {
+        (
+            self.context.execution_env_policy.inherit(),
+            self.context.execution_env_policy.pass().to_vec(),
+        )
     }
 
     pub fn run_jobs(&self) -> Result<usize, OrbitError> {

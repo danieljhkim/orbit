@@ -1,4 +1,4 @@
-use orbit_exec::{ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
 
@@ -33,6 +33,7 @@ impl Tool for ProcWhichTool {
                 args: vec!["-c".to_string(), format!("command -v {command}")],
                 timeout_ms: Some(1_000),
                 stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::Inherit,
             },
             &NoSandbox,
         )?;

@@ -1,4 +1,4 @@
-use orbit_exec::{ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
@@ -61,6 +61,7 @@ impl Tool for ProcSpawnTool {
                 args,
                 timeout_ms,
                 stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::Inherit,
             },
             &NoSandbox,
         )?;

@@ -13,12 +13,20 @@ pub enum StdinMode {
     Bytes(Vec<u8>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum EnvironmentMode {
+    #[default]
+    Inherit,
+    ClearAndSet(Vec<(String, String)>),
+}
+
 #[derive(Debug, Clone)]
 pub struct ExecRequest {
     pub program: String,
     pub args: Vec<String>,
     pub timeout_ms: Option<u64>,
     pub stdin_mode: StdinMode,
+    pub environment_mode: EnvironmentMode,
 }
 
 pub fn run_process(
@@ -74,6 +82,7 @@ mod tests {
                 args: vec!["-c".to_string(), "printf hello".to_string()],
                 timeout_ms: Some(1000),
                 stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::Inherit,
             },
             &NoSandbox,
         )
@@ -91,6 +100,7 @@ mod tests {
                 args: vec!["-c".to_string(), "cat".to_string()],
                 timeout_ms: Some(1000),
                 stdin_mode: StdinMode::Bytes(b"hello-stdin".to_vec()),
+                environment_mode: EnvironmentMode::Inherit,
             },
             &NoSandbox,
         )
@@ -108,6 +118,7 @@ mod tests {
                 args: vec!["-c".to_string(), "sleep 1".to_string()],
                 timeout_ms: Some(100),
                 stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::Inherit,
             },
             &NoSandbox,
         )
@@ -115,5 +126,65 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.stderr.contains("timed out"));
+    }
+
+    #[test]
+    fn clear_and_set_environment_drops_unlisted_variables() {
+        let result = run_process(
+            &ExecRequest {
+                program: "env".to_string(),
+                args: Vec::new(),
+                timeout_ms: Some(1000),
+                stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::ClearAndSet(Vec::new()),
+            },
+            &NoSandbox,
+        )
+        .expect("process succeeds");
+
+        assert!(!result.stdout.lines().any(|line| line.starts_with("PATH=")));
+    }
+
+    #[test]
+    fn clear_and_set_environment_allows_allowlisted_variables() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        let result = run_process(
+            &ExecRequest {
+                program: "env".to_string(),
+                args: Vec::new(),
+                timeout_ms: Some(1000),
+                stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::ClearAndSet(vec![(
+                    "PATH".to_string(),
+                    path.clone(),
+                )]),
+            },
+            &NoSandbox,
+        )
+        .expect("process succeeds");
+
+        assert!(
+            result
+                .stdout
+                .lines()
+                .any(|line| line == format!("PATH={path}"))
+        );
+    }
+
+    #[test]
+    fn inherit_environment_keeps_existing_variables() {
+        let result = run_process(
+            &ExecRequest {
+                program: "env".to_string(),
+                args: Vec::new(),
+                timeout_ms: Some(1000),
+                stdin_mode: StdinMode::Inherit,
+                environment_mode: EnvironmentMode::Inherit,
+            },
+            &NoSandbox,
+        )
+        .expect("process succeeds");
+
+        assert!(result.stdout.lines().any(|line| line.starts_with("PATH=")));
     }
 }

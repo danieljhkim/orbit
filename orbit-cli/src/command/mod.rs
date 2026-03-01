@@ -26,6 +26,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    Config(config::ConfigCommand),
     Tool(tool::ToolCommand),
     Task(task::TaskCommand),
     Agent(agent::AgentCommand),
@@ -40,6 +41,7 @@ pub enum Commands {
 impl Execute for Commands {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
+            Commands::Config(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => cmd.execute(runtime),
             Commands::Agent(cmd) => cmd.execute(runtime),

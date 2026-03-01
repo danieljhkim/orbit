@@ -12,6 +12,11 @@ impl OrbitRuntime {
         }
 
         let result = (|| {
+            let due_jobs = self.context.store.due_jobs(now)?;
+            for job in &due_jobs {
+                let _ = self.recover_stale_active_run_for_job(job, now)?;
+            }
+
             let claim = self
                 .context
                 .store

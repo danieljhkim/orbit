@@ -5,5 +5,5 @@ pub mod sandbox;
 pub mod timeout;
 
 pub use result::ExecutionResult;
-pub use runner::{ExecRequest, StdinMode, run_process};
+pub use runner::{EnvironmentMode, ExecRequest, StdinMode, run_process};
 pub use sandbox::{NoSandbox, Sandbox};

@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod command;
+mod config;
 pub mod context;
 pub mod job;
 mod json_schema;

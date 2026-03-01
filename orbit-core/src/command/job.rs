@@ -2,7 +2,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use orbit_exec::{ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_store::ClaimedJobRun;
 use orbit_types::{
     AgentResponseEnvelope, Job, JobRetryBackoffStrategy, JobRun, JobRunState, JobScheduleState,
@@ -15,6 +15,7 @@ use crate::OrbitRuntime;
 use crate::json_schema::validate_instance_against_schema;
 const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";
+const STALE_RUN_GRACE_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone)]
 pub struct JobAddParams {
@@ -181,12 +182,20 @@ impl OrbitRuntime {
     }
 
     pub fn job_history(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        let _ = self.show_job(job_id)?;
+        let job = self.show_job(job_id)?;
+        let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
         self.context.store.list_job_runs(job_id)
     }
 
     pub fn run_job_now(&self, job_id: &str) -> Result<JobRunResult, OrbitError> {
         let job = self.show_job(job_id)?;
+        let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
+        if let Some(active_run) = self.context.store.get_pending_or_running_job_run(job_id)? {
+            return Err(OrbitError::JobValidation(format!(
+                "job '{}' already has an active run '{}' in state '{}'",
+                job_id, active_run.run_id, active_run.state
+            )));
+        }
         self.with_mutation(|_| {
             Ok((
                 (),
@@ -356,6 +365,69 @@ impl OrbitRuntime {
         last_result.ok_or(OrbitError::JobRunNotFound(job.job_id))
     }
 
+    pub(crate) fn recover_stale_active_run_for_job(
+        &self,
+        job: &Job,
+        now: DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        let Some(active_run) = self
+            .context
+            .store
+            .get_pending_or_running_job_run(&job.job_id)?
+        else {
+            return Ok(false);
+        };
+
+        if !is_stale_active_run(job, &active_run, now) {
+            return Ok(false);
+        }
+
+        let reference_time = active_run.started_at.unwrap_or(active_run.created_at);
+        let age_seconds = now
+            .signed_duration_since(reference_time)
+            .num_seconds()
+            .max(0) as u64;
+        let duration_ms = active_run
+            .started_at
+            .map(|started| now.signed_duration_since(started).num_milliseconds().max(0) as u64);
+        let message = format!(
+            "stale active run recovered: run '{}' remained '{}' for {}s \
+(timeout={}s, grace={}s)",
+            active_run.run_id,
+            active_run.state,
+            age_seconds,
+            job.timeout_seconds,
+            STALE_RUN_GRACE_SECONDS
+        );
+
+        self.with_mutation(|tx| {
+            let changed = tx.complete_job_run(
+                &active_run.run_id,
+                JobRunState::Failed,
+                now,
+                duration_ms,
+                Some(1),
+                None,
+                Some(AGENT_INVOCATION_FAILED),
+                Some(&message),
+            )?;
+            if !changed {
+                return Err(OrbitError::JobRunNotFound(active_run.run_id.clone()));
+            }
+
+            Ok((
+                (),
+                OrbitEvent::JobRunCompleted {
+                    job_id: job.job_id.clone(),
+                    run_id: active_run.run_id.clone(),
+                    state: JobRunState::Failed.to_string(),
+                },
+            ))
+        })?;
+
+        Ok(true)
+    }
+
     fn execute_single_attempt(&self, job: &Job) -> AttemptOutcome {
         let invocation = match crate::job::agent_protocol::build_invocation(
             &job.agent_cli,
@@ -375,6 +447,32 @@ impl OrbitRuntime {
                     protocol_violation: false,
                 };
             }
+        };
+        let provider = crate::job::agent_protocol::provider_key(&job.agent_cli);
+        let missing_env = self
+            .context
+            .execution_env_policy
+            .missing_required_for_provider(&provider);
+        if !missing_env.is_empty() {
+            let vars = missing_env.join(", ");
+            return AttemptOutcome {
+                state: JobRunState::Failed,
+                exit_code: Some(1),
+                duration_ms: None,
+                response_json: None,
+                error_code: Some(AGENT_INVOCATION_FAILED.to_string()),
+                error_message: Some(format!(
+                    "missing required environment variable(s) for provider '{provider}': {vars}. \
+configure .orbit/config.toml [execution.env].pass and set these variables in the parent shell."
+                )),
+                retryable: false,
+                protocol_violation: false,
+            };
+        }
+        let environment_mode = if self.context.execution_env_policy.inherit() {
+            EnvironmentMode::Inherit
+        } else {
+            EnvironmentMode::ClearAndSet(self.context.execution_env_policy.hydrated_allowlist_env())
         };
         let stdin_payload = match self.build_stdin_envelope_payload(job) {
             Ok(payload) => payload,
@@ -400,6 +498,7 @@ impl OrbitRuntime {
                 args: invocation.args,
                 timeout_ms: Some(job.timeout_seconds.saturating_mul(1000)),
                 stdin_mode: StdinMode::Bytes(stdin_payload),
+                environment_mode,
             },
             &NoSandbox,
         ) {
@@ -584,4 +683,11 @@ impl OrbitRuntime {
         }
         Ok(())
     }
+}
+
+fn is_stale_active_run(job: &Job, run: &JobRun, now: DateTime<Utc>) -> bool {
+    let reference_time = run.started_at.unwrap_or(run.created_at);
+    let elapsed_seconds = now.signed_duration_since(reference_time).num_seconds();
+    let stale_after_seconds = job.timeout_seconds.saturating_add(STALE_RUN_GRACE_SECONDS) as i64;
+    elapsed_seconds >= stale_after_seconds
 }

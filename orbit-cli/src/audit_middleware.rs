@@ -114,6 +114,21 @@ impl Drop for AuditGuard<'_> {
 
 pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
     match cmd {
+        Commands::Config(config_cmd) => {
+            use crate::command::config::ConfigSubcommand;
+            let sub = match &config_cmd.command {
+                ConfigSubcommand::Show(_) => "show",
+            };
+            CommandMeta {
+                command: "config".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("config".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
         Commands::Tool(tool_cmd) => {
             use crate::command::tool::ToolSubcommand;
             let (sub, tool_name, target_type, target_id) = match &tool_cmd.command {
