@@ -1,14 +1,14 @@
 use std::str::FromStr;
 
 use orbit_core::command::agent::AgentRunOptions;
+use orbit_core::command::job::JobAddParams;
 use orbit_core::command::scheduler::{SchedulerAddParams, SchedulerRunResult};
 use orbit_core::command::skill::{SkillDoctorResult, SkillDoctorStatus};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::command::tool::{DoctorResult, DoctorStatus};
-use orbit_core::command::job::JobAddParams;
 use orbit_core::{
-    Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerTargetType, OrbitError, OrbitRuntime, Task,
-    TaskPriority, TaskStatus, TaskType, Job,
+    Job, OrbitError, OrbitRuntime, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun,
+    SchedulerTargetType, Task, TaskPriority, TaskStatus, TaskType,
 };
 use serde_json::{Map, Value, json};
 
@@ -99,7 +99,9 @@ fn dispatch_tool_inner(
 }
 
 fn config_show(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
-    let config_path = OrbitRuntime::default_data_root().join("config.toml");
+    let orbit_root = runtime.data_root();
+    let orbit_home = runtime.orbit_home();
+    let config_path = runtime.config_path();
     let (inherit, pass) = runtime.execution_env_config();
     let persistence = runtime.persistence_config_json();
     let task_approval_required_for_agent = runtime.task_approval_required_for_agent();
@@ -108,6 +110,8 @@ fn config_show(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let identity_role_overrides = runtime.identity_role_overrides();
 
     Ok(json!({
+        "root": orbit_root.to_string_lossy(),
+        "home": orbit_home.to_string_lossy(),
         "path": config_path.to_string_lossy(),
         "exists": config_path.exists(),
         "execution": {
@@ -370,7 +374,9 @@ fn scheduler_add(runtime: &OrbitRuntime, obj: &Map<String, Value>) -> Result<Val
 fn scheduler_list(runtime: &OrbitRuntime, obj: &Map<String, Value>) -> Result<Value, OrbitError> {
     let include_disabled = optional_bool(obj, "include_disabled")?.unwrap_or(false);
     let schedulers = runtime.list_schedulers(include_disabled)?;
-    Ok(Value::Array(schedulers.iter().map(scheduler_to_json).collect()))
+    Ok(Value::Array(
+        schedulers.iter().map(scheduler_to_json).collect(),
+    ))
 }
 
 fn scheduler_show(runtime: &OrbitRuntime, obj: &Map<String, Value>) -> Result<Value, OrbitError> {
@@ -399,10 +405,15 @@ fn scheduler_resume(runtime: &OrbitRuntime, obj: &Map<String, Value>) -> Result<
     Ok(scheduler_to_json(&scheduler))
 }
 
-fn scheduler_history(runtime: &OrbitRuntime, obj: &Map<String, Value>) -> Result<Value, OrbitError> {
+fn scheduler_history(
+    runtime: &OrbitRuntime,
+    obj: &Map<String, Value>,
+) -> Result<Value, OrbitError> {
     let scheduler_id = required_string(obj, "scheduler_id")?;
     let runs = runtime.scheduler_history(&scheduler_id)?;
-    Ok(Value::Array(runs.iter().map(scheduler_run_to_json).collect()))
+    Ok(Value::Array(
+        runs.iter().map(scheduler_run_to_json).collect(),
+    ))
 }
 
 fn scheduler_delete(runtime: &OrbitRuntime, obj: &Map<String, Value>) -> Result<Value, OrbitError> {

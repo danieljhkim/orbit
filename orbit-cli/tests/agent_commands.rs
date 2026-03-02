@@ -32,6 +32,14 @@ fn add_task_with_instructions(dir: &Path, title: &str, instructions: &str) -> St
 #[test]
 fn agent_run_executes_task_instruction_payload() {
     let dir = tempfile::tempdir().expect("tempdir");
+    let orbit_dir = dir.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create orbit dir");
+    std::fs::write(
+        orbit_dir.join("config.toml"),
+        "[task.approval]\nrequired_for_agent = false\n",
+    )
+    .expect("write config");
+
     let task_id = add_task_with_instructions(
         dir.path(),
         "agent task",

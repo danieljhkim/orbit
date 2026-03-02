@@ -4,8 +4,8 @@ use std::sync::Arc;
 use orbit_types::OrbitError;
 
 use super::contracts::{
-    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, SchedulerStoreBackend,
-    LockStoreBackend, TaskStoreBackend, ToolStoreBackend, WatchStoreBackend, JobStoreBackend,
+    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, JobStoreBackend,
+    LockStoreBackend, SchedulerStoreBackend, TaskStoreBackend, ToolStoreBackend, WatchStoreBackend,
 };
 use super::sqlite_backends::{
     SqliteAgentSessionStoreBackend, SqliteAuditEventStoreBackend, SqliteAuditStoreBackend,
@@ -13,9 +13,9 @@ use super::sqlite_backends::{
     SqliteWatchStoreBackend, SqliteWorkStoreBackend,
 };
 use crate::Store;
+use crate::file::job_store::JobFileStore;
 use crate::file::scheduler_store::SchedulerFileStore;
 use crate::file::task_store::TaskFileStore;
-use crate::file::job_store::JobFileStore;
 
 pub fn task_store_file(root: PathBuf) -> Result<Arc<dyn TaskStoreBackend>, OrbitError> {
     let store = TaskFileStore::new(root);

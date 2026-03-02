@@ -42,8 +42,8 @@ fn mcp_init_creates_codex_and_claude_configs() {
         "codex config must use absolute path, not bare 'orbit'"
     );
     assert!(
-        codex_raw.contains("ORBIT_DATA_ROOT"),
-        "codex config must set ORBIT_DATA_ROOT env"
+        codex_raw.contains("ORBIT_ROOT"),
+        "codex config must set ORBIT_ROOT env"
     );
 
     let claude_raw = std::fs::read_to_string(claude_path).expect("read claude");
@@ -57,10 +57,10 @@ fn mcp_init_creates_codex_and_claude_configs() {
     );
     assert_eq!(claude_json["mcpServers"]["orbit"]["args"][0], "mcp");
     assert!(
-        claude_json["mcpServers"]["orbit"]["env"]["ORBIT_DATA_ROOT"]
+        claude_json["mcpServers"]["orbit"]["env"]["ORBIT_ROOT"]
             .as_str()
             .is_some(),
-        "claude config must include ORBIT_DATA_ROOT in env"
+        "claude config must include ORBIT_ROOT in env"
     );
 
     // Verify Claude Code config
@@ -74,10 +74,10 @@ fn mcp_init_creates_codex_and_claude_configs() {
         "claude-code config command must be absolute path, got: {cc_command}"
     );
     assert!(
-        cc_json["mcpServers"]["orbit"]["env"]["ORBIT_DATA_ROOT"]
+        cc_json["mcpServers"]["orbit"]["env"]["ORBIT_ROOT"]
             .as_str()
             .is_some(),
-        "claude-code config must include ORBIT_DATA_ROOT in env"
+        "claude-code config must include ORBIT_ROOT in env"
     );
 }
 

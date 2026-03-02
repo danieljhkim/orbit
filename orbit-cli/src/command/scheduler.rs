@@ -1,6 +1,9 @@
 use clap::{Args, Subcommand};
 use orbit_core::command::scheduler::SchedulerAddParams;
-use orbit_core::{Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerTargetType, OrbitError, OrbitRuntime};
+use orbit_core::{
+    OrbitError, OrbitRuntime, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun,
+    SchedulerTargetType,
+};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -144,9 +147,15 @@ impl Execute for SchedulerShowArgs {
             println!("Timeout (seconds):   {}", scheduler.timeout_seconds);
             println!("Retry Max Attempts:  {}", scheduler.retry_max_attempts);
             println!("Retry Backoff:       {}", scheduler.retry_backoff_strategy);
-            println!("Retry Initial Delay: {}", scheduler.retry_initial_delay_seconds);
+            println!(
+                "Retry Initial Delay: {}",
+                scheduler.retry_initial_delay_seconds
+            );
             println!("State:               {}", scheduler.state);
-            println!("Next Run:            {}", scheduler.next_run_at.to_rfc3339());
+            println!(
+                "Next Run:            {}",
+                scheduler.next_run_at.to_rfc3339()
+            );
             println!("Created:             {}", scheduler.created_at.to_rfc3339());
             println!("Updated:             {}", scheduler.updated_at.to_rfc3339());
             Ok(())

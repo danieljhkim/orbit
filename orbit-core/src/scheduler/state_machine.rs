@@ -1,5 +1,5 @@
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
-use orbit_types::{SchedulerRetryBackoffStrategy, OrbitError};
+use orbit_types::{OrbitError, SchedulerRetryBackoffStrategy};
 
 pub fn compute_next_run_at(
     schedule: &str,

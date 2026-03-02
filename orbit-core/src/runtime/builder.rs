@@ -5,8 +5,8 @@ use chrono::Utc;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     Store, agent_session_store_sqlite, audit_event_store_sqlite, audit_store_sqlite,
-    scheduler_store_file, scheduler_store_sqlite, lock_store_sqlite, task_store_file, tool_store_sqlite,
-    watch_store_sqlite, job_store_file, job_store_sqlite,
+    job_store_file, job_store_sqlite, lock_store_sqlite, scheduler_store_file,
+    scheduler_store_sqlite, task_store_file, tool_store_sqlite, watch_store_sqlite,
 };
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
@@ -17,8 +17,11 @@ use crate::config::{PersistenceType, RuntimeConfig};
 use crate::identity_catalog::IdentityCatalog;
 use crate::skill_catalog::SkillCatalog;
 
-pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitContext, OrbitError> {
-    let runtime_config = RuntimeConfig::load_from_data_root(data_root)?;
+pub(crate) fn build_context_from_data_root(
+    data_root: &Path,
+    orbit_home: &Path,
+) -> Result<OrbitContext, OrbitError> {
+    let runtime_config = RuntimeConfig::load_from_data_root(data_root, orbit_home)?;
     let db_path = if runtime_config.persistence.watch.path == runtime_config.persistence.audit.path
     {
         runtime_config.persistence.watch.path.clone()
@@ -29,7 +32,7 @@ pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitCont
     };
     let store = Store::open(&db_path)?;
 
-    let task_store = task_store_file(task_root_path(&runtime_config))?;
+    let task_store = task_store_file(runtime_config.persistence.task.path.clone())?;
     let job_store = match runtime_config.persistence.job.persistence_type {
         PersistenceType::File => job_store_file(runtime_config.persistence.job.path.clone())?,
         PersistenceType::Sqlite => job_store_sqlite(sqlite_store_for_entity(
@@ -39,7 +42,9 @@ pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitCont
         )?),
     };
     let scheduler_store = match runtime_config.persistence.scheduler.persistence_type {
-        PersistenceType::File => scheduler_store_file(runtime_config.persistence.scheduler.path.clone())?,
+        PersistenceType::File => {
+            scheduler_store_file(runtime_config.persistence.scheduler.path.clone())?
+        }
         PersistenceType::Sqlite => scheduler_store_sqlite(sqlite_store_for_entity(
             &store,
             &db_path,
@@ -50,6 +55,7 @@ pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitCont
     build_context_common(
         store,
         data_root.to_path_buf(),
+        orbit_home.to_path_buf(),
         runtime_config,
         task_store,
         job_store,
@@ -65,7 +71,8 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
     )))?;
     let job_store = job_store_sqlite(store.clone());
     let scheduler_store = scheduler_store_sqlite(store.clone());
-    let runtime_config = RuntimeConfig::default();
+    let orbit_home = orbit_home_root();
+    let runtime_config = RuntimeConfig::default_for_roots(&orbit_home, &orbit_home);
     let data_root = runtime_config
         .persistence
         .task
@@ -77,6 +84,7 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
     build_context_common(
         store,
         data_root,
+        orbit_home,
         runtime_config,
         task_store,
         job_store,
@@ -87,6 +95,7 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
 fn build_context_common(
     store: Store,
     data_root: PathBuf,
+    orbit_home: PathBuf,
     runtime_config: RuntimeConfig,
     task_store: Arc<dyn orbit_store::TaskStoreBackend>,
     job_store: Arc<dyn orbit_store::JobStoreBackend>,
@@ -99,7 +108,7 @@ fn build_context_common(
     let agent_session_store = agent_session_store_sqlite(store.clone());
     let lock_store = lock_store_sqlite(store.clone());
 
-    let skill_root = skill_root_path(&runtime_config);
+    let skill_root = runtime_config.persistence.skill.path.clone();
     let skill_catalog = SkillCatalog::new(skill_root);
     skill_catalog.ensure_layout()?;
 
@@ -119,6 +128,7 @@ fn build_context_common(
 
     Ok(OrbitContext {
         data_root,
+        orbit_home,
         task_store,
         job_store,
         scheduler_store,
@@ -164,20 +174,18 @@ fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(),
     Ok(())
 }
 
-fn task_root_path(runtime_config: &RuntimeConfig) -> PathBuf {
-    if let Ok(value) = std::env::var("ORBIT_TASK_ROOT")
-        && !value.trim().is_empty()
+fn orbit_home_root() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
     {
-        return PathBuf::from(value);
+        return PathBuf::from(home).join(".orbit");
     }
-    runtime_config.persistence.task.path.clone()
-}
-
-fn skill_root_path(runtime_config: &RuntimeConfig) -> PathBuf {
-    if let Ok(value) = std::env::var("ORBIT_SKILL_ROOT")
-        && !value.trim().is_empty()
+    if let Ok(profile) = std::env::var("USERPROFILE")
+        && !profile.trim().is_empty()
     {
-        return PathBuf::from(value);
+        return PathBuf::from(profile).join(".orbit");
     }
-    runtime_config.persistence.skill.path.clone()
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".orbit")
 }

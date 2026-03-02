@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, SchedulerStoreBackend,
-    LockStoreBackend, TaskStoreBackend, ToolStoreBackend, WatchStoreBackend, JobStoreBackend,
+    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, JobStoreBackend,
+    LockStoreBackend, SchedulerStoreBackend, TaskStoreBackend, ToolStoreBackend, WatchStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
@@ -15,6 +15,7 @@ use crate::skill_catalog::SkillCatalog;
 #[derive(Clone)]
 pub struct OrbitContext {
     pub(crate) data_root: PathBuf,
+    pub(crate) orbit_home: PathBuf,
     pub(crate) task_store: Arc<dyn TaskStoreBackend>,
     pub(crate) job_store: Arc<dyn JobStoreBackend>,
     pub(crate) scheduler_store: Arc<dyn SchedulerStoreBackend>,

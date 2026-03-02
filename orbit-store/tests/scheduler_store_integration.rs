@@ -1,6 +1,8 @@
 use chrono::Utc;
 use orbit_store::Store;
-use orbit_types::{SchedulerRetryBackoffStrategy, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType};
+use orbit_types::{
+    SchedulerRetryBackoffStrategy, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType,
+};
 
 #[test]
 fn scheduler_state_transitions_and_disabled_visibility() {
@@ -28,7 +30,9 @@ fn scheduler_state_transitions_and_disabled_visibility() {
     assert_eq!(due[0].scheduler_id, scheduler.scheduler_id);
 
     store
-        .with_transaction(|tx| tx.set_scheduler_state(&scheduler.scheduler_id, SchedulerScheduleState::Paused))
+        .with_transaction(|tx| {
+            tx.set_scheduler_state(&scheduler.scheduler_id, SchedulerScheduleState::Paused)
+        })
         .expect("pause scheduler");
     let paused = store
         .get_scheduler(&scheduler.scheduler_id)
@@ -37,14 +41,20 @@ fn scheduler_state_transitions_and_disabled_visibility() {
     assert_eq!(paused.state, SchedulerScheduleState::Paused);
 
     store
-        .with_transaction(|tx| tx.set_scheduler_state(&scheduler.scheduler_id, SchedulerScheduleState::Enabled))
+        .with_transaction(|tx| {
+            tx.set_scheduler_state(&scheduler.scheduler_id, SchedulerScheduleState::Enabled)
+        })
         .expect("resume scheduler");
     store
         .with_transaction(|tx| tx.mark_scheduler_disabled(&scheduler.scheduler_id))
         .expect("disable scheduler");
 
     let default_list = store.list_schedulers(false).expect("list enabled/paused");
-    assert!(default_list.iter().all(|item| item.scheduler_id != scheduler.scheduler_id));
+    assert!(
+        default_list
+            .iter()
+            .all(|item| item.scheduler_id != scheduler.scheduler_id)
+    );
 
     let all_list = store.list_schedulers(true).expect("list all");
     let disabled = all_list
@@ -80,7 +90,10 @@ fn claim_due_schedulers_skips_when_pending_or_running_run_exists() {
         .expect("first claim");
     assert_eq!(first.claimed.len(), 1);
     assert!(first.skipped.is_empty());
-    assert_eq!(first.claimed[0].scheduler.scheduler_id, scheduler.scheduler_id);
+    assert_eq!(
+        first.claimed[0].scheduler.scheduler_id,
+        scheduler.scheduler_id
+    );
     assert_eq!(first.claimed[0].run.state, SchedulerRunState::Pending);
 
     let second = store

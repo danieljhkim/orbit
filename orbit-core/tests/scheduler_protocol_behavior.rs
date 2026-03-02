@@ -1,7 +1,7 @@
 use orbit_core::scheduler::agent_protocol::{
     StdinAdapter, build_invocation, build_stdin_payload, parse_and_validate_response,
 };
-use orbit_types::{ExecutionResult, SchedulerRunState, SchedulerTargetType, OrbitError};
+use orbit_types::{ExecutionResult, OrbitError, SchedulerRunState, SchedulerTargetType};
 use serde_json::json;
 
 fn expected_native_args() -> Vec<String> {
@@ -51,8 +51,8 @@ fn provider_mapper_supports_codex() {
 
 #[test]
 fn provider_mapper_supports_mock_agent() {
-    let invocation =
-        build_invocation("mock-agent", SchedulerTargetType::Job, "spec-123").expect("mock-agent mapper");
+    let invocation = build_invocation("mock-agent", SchedulerTargetType::Job, "spec-123")
+        .expect("mock-agent mapper");
     assert_eq!(invocation.program, "mock-agent");
     assert_eq!(invocation.args, expected_native_args());
     assert_eq!(invocation.stdin_adapter, StdinAdapter::OrbitEnvelopeJson);
@@ -60,8 +60,12 @@ fn provider_mapper_supports_mock_agent() {
 
 #[test]
 fn provider_mapper_uses_binary_basename_for_paths() {
-    let invocation = build_invocation("/usr/local/bin/claude", SchedulerTargetType::Job, "spec-123")
-        .expect("path-based claude mapper");
+    let invocation = build_invocation(
+        "/usr/local/bin/claude",
+        SchedulerTargetType::Job,
+        "spec-123",
+    )
+    .expect("path-based claude mapper");
     assert_eq!(invocation.program, "/usr/local/bin/claude");
     assert_eq!(
         invocation.args,

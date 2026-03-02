@@ -4,14 +4,14 @@ pub mod error;
 pub mod event;
 pub mod id;
 pub mod identity;
-pub mod scheduler;
+pub mod job;
 pub mod memo;
 pub mod role;
+pub mod scheduler;
 pub mod skill;
 pub mod task;
 pub mod tool;
 pub mod watch;
-pub mod job;
 
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats};
@@ -19,25 +19,26 @@ pub use error::OrbitError;
 pub use event::OrbitEvent;
 pub use id::OrbitId;
 pub use identity::{IdentityRole, ResolvedIdentity};
-pub use scheduler::{
-    AgentResponseEnvelope, AgentRunError, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState,
-    SchedulerScheduleState, SchedulerTargetType,
-};
+pub use job::Job;
 pub use memo::Memo;
 pub use role::Role;
+pub use scheduler::{
+    AgentResponseEnvelope, AgentRunError, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun,
+    SchedulerRunState, SchedulerScheduleState, SchedulerTargetType,
+};
 pub use skill::{AgentSession, AgentSessionStatus, AgentToolCall, Skill, TaskSkillAttachment};
 pub use task::{Task, TaskPriority, TaskStatus, TaskType};
 pub use tool::{ExecutionResult, PolicyDecision, StoredTool, ToolParam, ToolSchema};
 pub use watch::Watch;
-pub use job::Job;
 
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
 
     use crate::{
-        AgentResponseEnvelope, ExecutionResult, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState,
-        SchedulerScheduleState, SchedulerTargetType, OrbitEvent, Role, Skill, Job,
+        AgentResponseEnvelope, ExecutionResult, Job, OrbitEvent, Role, Scheduler,
+        SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState, SchedulerScheduleState,
+        SchedulerTargetType, Skill,
     };
 
     #[test]

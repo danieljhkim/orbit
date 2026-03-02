@@ -3,8 +3,8 @@ use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process
 use orbit_store::ClaimedJobRun;
 use orbit_store::SchedulerCreateParams as StoreJobCreateParams;
 use orbit_types::{
-    AgentResponseEnvelope, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState, SchedulerScheduleState,
-    SchedulerTargetType, OrbitError, OrbitEvent,
+    AgentResponseEnvelope, OrbitError, OrbitEvent, Scheduler, SchedulerRetryBackoffStrategy,
+    SchedulerRun, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -98,17 +98,20 @@ impl OrbitRuntime {
         let next_run_at =
             crate::scheduler::state_machine::compute_next_run_at(&params.schedule, Utc::now())?;
 
-        let scheduler = self.context.scheduler_store.add_scheduler(StoreJobCreateParams {
-            target_type: params.target_type,
-            target_id: params.target_id,
-            schedule: params.schedule,
-            agent_cli: params.agent_cli,
-            timeout_seconds: params.timeout_seconds,
-            retry_max_attempts: params.retry_max_attempts,
-            retry_backoff_strategy: params.retry_backoff_strategy,
-            retry_initial_delay_seconds: params.retry_initial_delay_seconds,
-            next_run_at,
-        })?;
+        let scheduler = self
+            .context
+            .scheduler_store
+            .add_scheduler(StoreJobCreateParams {
+                target_type: params.target_type,
+                target_id: params.target_id,
+                schedule: params.schedule,
+                agent_cli: params.agent_cli,
+                timeout_seconds: params.timeout_seconds,
+                retry_max_attempts: params.retry_max_attempts,
+                retry_backoff_strategy: params.retry_backoff_strategy,
+                retry_initial_delay_seconds: params.retry_initial_delay_seconds,
+                next_run_at,
+            })?;
         self.record_event(OrbitEvent::SchedulerAdded {
             scheduler_id: scheduler.scheduler_id.clone(),
         })?;
@@ -160,7 +163,10 @@ impl OrbitRuntime {
     }
 
     pub fn delete_scheduler(&self, scheduler_id: &str) -> Result<(), OrbitError> {
-        let changed = self.context.scheduler_store.mark_scheduler_disabled(scheduler_id)?;
+        let changed = self
+            .context
+            .scheduler_store
+            .mark_scheduler_disabled(scheduler_id)?;
         if !changed {
             return Err(OrbitError::SchedulerNotFound(scheduler_id.to_string()));
         }
@@ -216,8 +222,11 @@ impl OrbitRuntime {
             let mut run = if let Some(existing) = pending_initial.take() {
                 existing
             } else {
-                let run =
-                    self.insert_job_run_backend(&scheduler.scheduler_id, current_attempt, scheduled_at)?;
+                let run = self.insert_job_run_backend(
+                    &scheduler.scheduler_id,
+                    current_attempt,
+                    scheduled_at,
+                )?;
                 self.record_event(OrbitEvent::SchedulerRunStarted {
                     scheduler_id: scheduler.scheduler_id.clone(),
                     run_id: String::new(),
@@ -313,8 +322,10 @@ impl OrbitRuntime {
         }
 
         if !retry_scheduled_for_future {
-            let next_run_at =
-                crate::scheduler::state_machine::compute_next_run_at(&scheduler.schedule, Utc::now())?;
+            let next_run_at = crate::scheduler::state_machine::compute_next_run_at(
+                &scheduler.schedule,
+                Utc::now(),
+            )?;
             let _ = self.update_job_next_run_backend(&scheduler.scheduler_id, next_run_at);
             let _ = self.record_event(OrbitEvent::SchedulerTriggered {
                 scheduler_id: scheduler.scheduler_id.clone(),
@@ -329,7 +340,9 @@ impl OrbitRuntime {
         scheduler: &Scheduler,
         now: DateTime<Utc>,
     ) -> Result<bool, OrbitError> {
-        let Some(active_run) = self.get_pending_or_running_job_run_backend(&scheduler.scheduler_id)? else {
+        let Some(active_run) =
+            self.get_pending_or_running_job_run_backend(&scheduler.scheduler_id)?
+        else {
             return Ok(false);
         };
 
@@ -489,7 +502,8 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
                     response_json: serde_json::to_value(envelope).ok(),
                     error_code: None,
                     error_message: None,
-                    retryable: state == SchedulerRunState::Failed || state == SchedulerRunState::Timeout,
+                    retryable: state == SchedulerRunState::Failed
+                        || state == SchedulerRunState::Timeout,
                     protocol_violation: false,
                 }
             }
@@ -612,7 +626,9 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
     }
 
     fn list_jobs_backend(&self, include_disabled: bool) -> Result<Vec<Scheduler>, OrbitError> {
-        self.context.scheduler_store.list_schedulers(include_disabled)
+        self.context
+            .scheduler_store
+            .list_schedulers(include_disabled)
     }
 
     fn get_job_backend(&self, scheduler_id: &str) -> Result<Option<Scheduler>, OrbitError> {
@@ -620,7 +636,9 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
     }
 
     fn list_job_runs_backend(&self, scheduler_id: &str) -> Result<Vec<SchedulerRun>, OrbitError> {
-        self.context.scheduler_store.list_scheduler_runs(scheduler_id)
+        self.context
+            .scheduler_store
+            .list_scheduler_runs(scheduler_id)
     }
 
     fn get_pending_or_running_job_run_backend(
@@ -691,6 +709,8 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
 fn is_stale_active_run(scheduler: &Scheduler, run: &SchedulerRun, now: DateTime<Utc>) -> bool {
     let reference_time = run.started_at.unwrap_or(run.created_at);
     let elapsed_seconds = now.signed_duration_since(reference_time).num_seconds();
-    let stale_after_seconds = scheduler.timeout_seconds.saturating_add(STALE_RUN_GRACE_SECONDS) as i64;
+    let stale_after_seconds = scheduler
+        .timeout_seconds
+        .saturating_add(STALE_RUN_GRACE_SECONDS) as i64;
     elapsed_seconds >= stale_after_seconds
 }

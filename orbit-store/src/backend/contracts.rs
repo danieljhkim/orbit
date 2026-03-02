@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    AgentSession, AgentSessionStatus, AgentToolCall, Audit, AuditEvent, Scheduler,
-    SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType, OrbitError,
-    OrbitEvent, StoredTool, Task, TaskPriority, TaskStatus, TaskType, Watch, Job,
+    AgentSession, AgentSessionStatus, AgentToolCall, Audit, AuditEvent, Job, OrbitError,
+    OrbitEvent, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState,
+    SchedulerScheduleState, SchedulerTargetType, StoredTool, Task, TaskPriority, TaskStatus,
+    TaskType, Watch,
 };
 use serde_json::Value;
 
@@ -102,8 +103,15 @@ pub trait SchedulerStoreBackend: Send + Sync {
     fn get_scheduler(&self, scheduler_id: &str) -> Result<Option<Scheduler>, OrbitError>;
     fn due_schedulers(&self, now: DateTime<Utc>) -> Result<Vec<Scheduler>, OrbitError>;
     fn list_scheduler_runs(&self, scheduler_id: &str) -> Result<Vec<SchedulerRun>, OrbitError>;
-    fn get_pending_or_running_scheduler_run(&self, scheduler_id: &str) -> Result<Option<SchedulerRun>, OrbitError>;
-    fn set_scheduler_state(&self, scheduler_id: &str, state: SchedulerScheduleState) -> Result<bool, OrbitError>;
+    fn get_pending_or_running_scheduler_run(
+        &self,
+        scheduler_id: &str,
+    ) -> Result<Option<SchedulerRun>, OrbitError>;
+    fn set_scheduler_state(
+        &self,
+        scheduler_id: &str,
+        state: SchedulerScheduleState,
+    ) -> Result<bool, OrbitError>;
     fn mark_scheduler_disabled(&self, scheduler_id: &str) -> Result<bool, OrbitError>;
     fn update_scheduler_next_run(
         &self,

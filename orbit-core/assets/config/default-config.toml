@@ -1,3 +1,5 @@
+root = "~/.orbit"
+
 [execution.env]
 inherit = false
 pass = ["HOME","PATH","CODEX_HOME"]
@@ -12,24 +14,24 @@ delegate_approval = true
 
 [scheduler]
 # yaml + sqlite are supported for now (default = file)
-persistence = { type = "file", path = "~/.orbit/schedulers/", format = "yaml"}
+persistence = { type = "file", path = "schedulers", format = "yaml"}
 
 [job]
 # yaml + sqlite are supported for now (default = file)
-persistence = { type = "file", path = "~/.orbit/jobs/", format = "yaml" }
+persistence = { type = "file", path = "jobs", format = "yaml" }
 
 [skill]
 # only markdown is supported for now (default = file)
-persistence = { type = "file", path = "~/.orbit/skills/", format = "md" }
+persistence = { type = "file", path = "skills", format = "md" }
 
 [task]
 # yaml + sqlite are supported for now (default = file)
-persistence = { type = "file", path = "~/.orbit/tasks/", format = "yaml" }
+persistence = { type = "file", path = "tasks", format = "yaml" }
 
 [watch]
 # only sqlite is supported for now (default = sqlite)
-persistence = { type = "sqlite", path = "~/.orbit/orbit.db"}
+persistence = { type = "sqlite", path = "orbit.db"}
 
 [audit]
 # only sqlite is supported for now (default = sqlite)
-persistence = { type = "sqlite", path = "~/.orbit/orbit.db" }
+persistence = { type = "sqlite", path = "orbit.db" }

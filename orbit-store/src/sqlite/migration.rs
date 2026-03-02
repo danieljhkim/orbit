@@ -914,7 +914,9 @@ mod tests {
 
         apply_schema(&conn).expect("apply schema");
 
-        let mut stmt = conn.prepare("PRAGMA table_info(schedulers)").expect("table info");
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(schedulers)")
+            .expect("table info");
         let mut rows = stmt.query([]).expect("query");
         let mut saw_target_type = false;
         while let Some(row) = rows.next().expect("row") {
@@ -1186,11 +1188,9 @@ mod tests {
         apply_schema(&conn).expect("apply schema");
 
         let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM jobs WHERE id = 'job-1'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM jobs WHERE id = 'job-1'", [], |row| {
+                row.get(0)
+            })
             .expect("query jobs");
         assert_eq!(count, 1);
     }

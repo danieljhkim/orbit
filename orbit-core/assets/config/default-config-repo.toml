@@ -1,3 +1,5 @@
+root = "."
+
 [execution.env]
 inherit = false
 pass = ["HOME","PATH","CODEX_HOME"]

@@ -12,7 +12,7 @@ fn orbit_in(dir: &Path) -> Command {
 }
 
 #[test]
-fn config_show_json_uses_defaults_when_config_file_missing() {
+fn config_show_json_bootstraps_orbit_home_when_missing() {
     let dir = tempfile::tempdir().expect("tempdir");
 
     let output = orbit_in(dir.path())
@@ -24,15 +24,15 @@ fn config_show_json_uses_defaults_when_config_file_missing() {
         .clone();
     let value: Value = serde_json::from_slice(&output).expect("json");
 
-    assert_eq!(value["exists"], false);
+    assert_eq!(value["exists"], true);
     assert_eq!(value["execution"]["env"]["inherit"], false);
     assert_eq!(
         value["execution"]["env"]["pass"],
-        serde_json::json!(["HOME", "PATH", "CODEX_HOME"])
+        serde_json::json!(["CODEX_HOME", "HOME", "PATH"])
     );
     assert_eq!(
         value["task"]["approval"]["required_for_agent"],
-        serde_json::json!(false)
+        serde_json::json!(true)
     );
     assert_eq!(
         value["persistence"]["scheduler"]["persistence"]["type"],
@@ -49,6 +49,23 @@ fn config_show_json_uses_defaults_when_config_file_missing() {
     assert_eq!(
         value["persistence"]["audit"]["persistence"]["type"],
         serde_json::json!("sqlite")
+    );
+
+    assert!(dir.path().join(".orbit").join("config.toml").exists());
+    assert!(
+        dir.path()
+            .join(".orbit")
+            .join("identities")
+            .join("linus.yaml")
+            .exists()
+    );
+    assert!(
+        dir.path()
+            .join(".orbit")
+            .join("skills")
+            .join("orbit-approve-task")
+            .join("SKILL.md")
+            .exists()
     );
 }
 
@@ -94,6 +111,7 @@ fn config_show_json_reports_workspace_config_path_when_local_config_is_used() {
     let workspace = dir.path().join("workspace");
     let home = dir.path().join("home");
     let local_orbit_dir = workspace.join(".orbit");
+    std::fs::create_dir_all(workspace.join(".git")).expect("create workspace git dir");
     std::fs::create_dir_all(&local_orbit_dir).expect("create workspace orbit dir");
     std::fs::create_dir_all(home.join(".orbit")).expect("create home orbit dir");
 
@@ -132,4 +150,33 @@ fn config_show_json_reports_workspace_config_path_when_local_config_is_used() {
         value["task"]["approval"]["required_for_agent"],
         serde_json::json!(true)
     );
+}
+
+#[test]
+fn non_init_commands_in_repo_bootstrap_only_home_scope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let workspace = dir.path().join("workspace");
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(workspace.join(".git")).expect("create workspace git dir");
+    std::fs::create_dir_all(&workspace).expect("create workspace dir");
+    std::fs::create_dir_all(&home).expect("create home dir");
+
+    #[allow(deprecated)]
+    let mut cmd = Command::cargo_bin("orbit").expect("binary exists");
+    cmd.current_dir(&workspace);
+    cmd.env("HOME", &home);
+    cmd.env("USERPROFILE", &home);
+
+    let output = cmd
+        .args(["config", "show", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: Value = serde_json::from_slice(&output).expect("json");
+
+    assert_eq!(value["exists"], serde_json::json!(true));
+    assert!(home.join(".orbit").join("config.toml").exists());
+    assert!(!workspace.join(".orbit").exists());
 }

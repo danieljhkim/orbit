@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use orbit_types::{AgentResponseEnvelope, ExecutionResult, SchedulerRunState, SchedulerTargetType, OrbitError};
+use orbit_types::{
+    AgentResponseEnvelope, ExecutionResult, OrbitError, SchedulerRunState, SchedulerTargetType,
+};
 use serde_json::{Deserializer, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

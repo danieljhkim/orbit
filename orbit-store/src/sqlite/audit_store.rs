@@ -102,30 +102,47 @@ fn event_message(event: &OrbitEvent) -> String {
     match event {
         OrbitEvent::SchedulerAdded { scheduler_id } => format!("scheduler added: {scheduler_id}"),
         OrbitEvent::SchedulerPaused { scheduler_id } => format!("scheduler paused: {scheduler_id}"),
-        OrbitEvent::SchedulerResumed { scheduler_id } => format!("scheduler resumed: {scheduler_id}"),
-        OrbitEvent::SchedulerDeleted { scheduler_id } => format!("scheduler deleted: {scheduler_id}"),
-        OrbitEvent::SchedulerTriggered { scheduler_id } => format!("scheduler triggered: {scheduler_id}"),
+        OrbitEvent::SchedulerResumed { scheduler_id } => {
+            format!("scheduler resumed: {scheduler_id}")
+        }
+        OrbitEvent::SchedulerDeleted { scheduler_id } => {
+            format!("scheduler deleted: {scheduler_id}")
+        }
+        OrbitEvent::SchedulerTriggered { scheduler_id } => {
+            format!("scheduler triggered: {scheduler_id}")
+        }
         OrbitEvent::SchedulerRunStarted {
             scheduler_id,
             run_id,
             attempt,
-        } => format!("scheduler run started: scheduler={scheduler_id} run={run_id} attempt={attempt}"),
+        } => format!(
+            "scheduler run started: scheduler={scheduler_id} run={run_id} attempt={attempt}"
+        ),
         OrbitEvent::SchedulerRunCompleted {
             scheduler_id,
             run_id,
             state,
-        } => format!("scheduler run completed: scheduler={scheduler_id} run={run_id} state={state}"),
+        } => {
+            format!("scheduler run completed: scheduler={scheduler_id} run={run_id} state={state}")
+        }
         OrbitEvent::SchedulerRetryScheduled {
             scheduler_id,
             run_id,
             next_run_at,
-        } => format!("scheduler retry scheduled: scheduler={scheduler_id} run={run_id} next_run_at={next_run_at}"),
+        } => format!(
+            "scheduler retry scheduled: scheduler={scheduler_id} run={run_id} next_run_at={next_run_at}"
+        ),
         OrbitEvent::SchedulerProtocolViolation {
             scheduler_id,
             run_id,
             message,
-        } => format!("scheduler protocol violation: scheduler={scheduler_id} run={run_id} message={message}"),
-        OrbitEvent::SchedulerSkipped { scheduler_id, reason } => {
+        } => format!(
+            "scheduler protocol violation: scheduler={scheduler_id} run={run_id} message={message}"
+        ),
+        OrbitEvent::SchedulerSkipped {
+            scheduler_id,
+            reason,
+        } => {
             format!("scheduler skipped: scheduler={scheduler_id} reason={reason}")
         }
         OrbitEvent::ToolExecuted { name } => format!("tool executed: {name}"),

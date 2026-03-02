@@ -11,7 +11,6 @@ const DEFAULT_ENV_INHERIT: bool = false;
 const DEFAULT_ENV_PASS: [&str; 3] = ["HOME", "PATH", "CODEX_HOME"];
 const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
 const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
-const DEFAULT_IDENTITY_ROOT: &str = "~/.orbit/identities";
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -23,27 +22,28 @@ pub(crate) struct RuntimeConfig {
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
-        let data_root = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".orbit");
-        Self::default_for_data_root(&data_root)
+        let orbit_home = orbit_home_root();
+        Self::default_for_roots(&orbit_home, &orbit_home)
     }
 }
 
 impl RuntimeConfig {
-    pub(crate) fn default_for_data_root(data_root: &Path) -> Self {
+    pub(crate) fn default_for_roots(data_root: &Path, orbit_home: &Path) -> Self {
         Self {
             execution_env: ExecutionEnvPolicy::default(),
             persistence: PersistenceConfig::default_for_data_root(data_root),
             task_approval: TaskApprovalConfig::default(),
-            identity: IdentityConfig::default(),
+            identity: IdentityConfig::default_for_orbit_home(orbit_home),
         }
     }
 
-    pub(crate) fn load_from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
+    pub(crate) fn load_from_data_root(
+        data_root: &Path,
+        orbit_home: &Path,
+    ) -> Result<Self, OrbitError> {
         let config_path = data_root.join("config.toml");
         if !config_path.exists() {
-            return Ok(Self::default_for_data_root(data_root));
+            return Ok(Self::default_for_roots(data_root, orbit_home));
         }
 
         let raw = fs::read_to_string(&config_path).map_err(|err| {
@@ -65,7 +65,7 @@ impl RuntimeConfig {
             )?,
             persistence: PersistenceConfig::from_raw(data_root, &parsed)?,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
-            identity: IdentityConfig::from_raw(parsed.identity.as_ref(), data_root)?,
+            identity: IdentityConfig::from_raw(parsed.identity.as_ref(), data_root, orbit_home)?,
         })
     }
 }
@@ -110,23 +110,24 @@ pub(crate) struct IdentityConfig {
 
 impl Default for IdentityConfig {
     fn default() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let root = resolve_path(
-            Some(DEFAULT_IDENTITY_ROOT),
-            Path::new(DEFAULT_IDENTITY_ROOT),
-            &cwd,
-        )
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_IDENTITY_ROOT));
-        Self {
-            root,
-            role_overrides: BTreeMap::new(),
-        }
+        Self::default_for_orbit_home(&orbit_home_root())
     }
 }
 
 impl IdentityConfig {
-    fn from_raw(raw: Option<&RawIdentitySection>, config_root: &Path) -> Result<Self, OrbitError> {
-        let default = Self::default();
+    fn default_for_orbit_home(orbit_home: &Path) -> Self {
+        Self {
+            root: orbit_home.join("identities"),
+            role_overrides: BTreeMap::new(),
+        }
+    }
+
+    fn from_raw(
+        raw: Option<&RawIdentitySection>,
+        config_root: &Path,
+        orbit_home: &Path,
+    ) -> Result<Self, OrbitError> {
+        let default = Self::default_for_orbit_home(orbit_home);
         let root = resolve_path(
             raw.and_then(|v| v.root.as_deref()),
             &default.root,
@@ -215,6 +216,16 @@ impl ExecutionEnvPolicy {
     }
 }
 
+fn orbit_home_root() -> PathBuf {
+    home_dir()
+        .map(|home| home.join(".orbit"))
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(".orbit")
+        })
+}
+
 fn default_pass_list() -> Vec<String> {
     DEFAULT_ENV_PASS.iter().map(ToString::to_string).collect()
 }
@@ -255,4 +266,18 @@ fn required_env_vars_for_provider(provider: &str) -> &'static [&'static str] {
         "claude" => &["HOME", "PATH"],
         _ => &[],
     }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return Some(PathBuf::from(home));
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE")
+        && !profile.trim().is_empty()
+    {
+        return Some(PathBuf::from(profile));
+    }
+    None
 }

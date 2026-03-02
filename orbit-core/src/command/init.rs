@@ -2,10 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_types::OrbitError;
-use serde_json::json;
 
 use crate::OrbitRuntime;
-use crate::command::job::JobAddParams;
+use crate::command::job::seed_default_jobs;
 
 const DEFAULT_IDENTITIES: [(&str, &str); 6] = [
     ("linus", include_str!("../../assets/identities/linus.yaml")),
@@ -15,7 +14,6 @@ const DEFAULT_IDENTITIES: [(&str, &str); 6] = [
     ("grace", include_str!("../../assets/identities/grace.yaml")),
     ("steve", include_str!("../../assets/identities/steve.yaml")),
 ];
-const DEFAULT_APPROVAL_WORK_ID: &str = "approve-task-leader";
 const DEFAULT_SKILLS: [(&str, &str); 6] = [
     (
         "orbit-approve-task",
@@ -72,104 +70,90 @@ impl OrbitRuntime {
         &self,
         options: InitOptions,
     ) -> Result<InitResult, OrbitError> {
-        let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-        let init_target = resolve_init_target(&cwd)?;
-        let orbit_root = init_target.orbit_root.clone();
-        let identity_root = orbit_root.join("identities");
+        let data_root = self.data_root();
+        let orbit_home = OrbitRuntime::orbit_home_root();
 
-        if options.force {
-            remove_path_if_exists(&orbit_root)?;
-        }
-        fs::create_dir_all(&orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-        fs::create_dir_all(&identity_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-        let skills_root = orbit_root.join("skills");
-        fs::create_dir_all(&skills_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-
-        let mut created = 0usize;
-        for (name, content) in DEFAULT_IDENTITIES {
-            let path = identity_root.join(format!("{name}.yaml"));
-            if path.exists() {
-                continue;
+        if data_root == orbit_home {
+            let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
+            if let Some(repo_root) = find_git_repo_root(&cwd) {
+                return init_workspace_at_root(&repo_root.join(".orbit"), options);
             }
-            write_identity_file(&path, content)?;
-            created += 1;
         }
 
-        let mut created_skill_files = 0usize;
-        for (id, content) in DEFAULT_SKILLS {
-            let path = skills_root.join(id).join("SKILL.md");
-            if path.exists() {
-                continue;
-            }
-            write_identity_file(&path, content)?;
-            created_skill_files += 1;
-        }
-
-        let config_path = orbit_root.join("config.toml");
-        let created_config = if config_path.exists() {
-            false
-        } else {
-            write_identity_file(&config_path, init_target.config_template)?;
-            true
-        };
-
-        let skill_ids = DEFAULT_SKILLS.map(|(id, _)| id);
-        let created_skills_symlink = ensure_skill_links(
-            &skills_root,
-            &skill_ids,
-            &init_target.skills_links_root,
-            options.force,
-        )?;
-
-        let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
-        let created_default_work = init_runtime.show_job(DEFAULT_APPROVAL_WORK_ID).is_err()
-            && init_runtime
-                .add_job(JobAddParams {
-                    id: DEFAULT_APPROVAL_WORK_ID.to_string(),
-                    spec_type: "task_approval".to_string(),
-                    description: "Leader review and delegated task approval workflow".to_string(),
-                    input_schema_json: json!({
-                        "type": "object",
-                        "required": ["task_id", "decision"],
-                        "properties": {
-                            "task_id": { "type": "string" },
-                            "decision": { "type": "string", "enum": ["approve", "reject"] },
-                            "note": { "type": "string" }
-                        },
-                        "additionalProperties": false
-                    }),
-                    output_schema_json: json!({
-                        "type": "object",
-                        "required": ["task_id", "decision", "approved"],
-                        "properties": {
-                            "task_id": { "type": "string" },
-                            "decision": { "type": "string" },
-                            "approved": { "type": "boolean" },
-                            "comment": { "type": "string" }
-                        }
-                    }),
-                    artifact_path_template: Some(
-                        "~/.orbit/agents/{{repo_name}}/executions/{{date}}-approve-task.md"
-                            .to_string(),
-                    ),
-                    skill_refs: Vec::new(),
-                    identity_id: Some("linus".to_string()),
-                    assigned_to: Some("Linus Torvalds (Maintainer)".to_string()),
-                    created_by: Some("system".to_string()),
-                })
-                .is_ok();
-
-        Ok(InitResult {
-            created_identity_files: created,
-            identity_root: identity_root.to_string_lossy().to_string(),
-            created_skill_files,
-            skills_root: skills_root.to_string_lossy().to_string(),
-            created_skills_symlink,
-            created_config,
-            config_path: config_path.to_string_lossy().to_string(),
-            created_default_work,
-        })
+        init_workspace_at_root(&data_root, options)
     }
+}
+
+pub(crate) fn ensure_orbit_root_initialized(orbit_root: &Path) -> Result<(), OrbitError> {
+    let _ = init_workspace_at_root(orbit_root, InitOptions::default())?;
+    Ok(())
+}
+
+fn init_workspace_at_root(
+    orbit_root: &Path,
+    options: InitOptions,
+) -> Result<InitResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(orbit_root)?;
+    let orbit_root = init_target.orbit_root.clone();
+    let identity_root = orbit_root.join("identities");
+
+    if options.force {
+        remove_path_if_exists(&orbit_root)?;
+    }
+    fs::create_dir_all(&orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+    fs::create_dir_all(&identity_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let skills_root = orbit_root.join("skills");
+    fs::create_dir_all(&skills_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+
+    let mut created = 0usize;
+    for (name, content) in DEFAULT_IDENTITIES {
+        let path = identity_root.join(format!("{name}.yaml"));
+        if path.exists() {
+            continue;
+        }
+        write_identity_file(&path, content)?;
+        created += 1;
+    }
+
+    let mut created_skill_files = 0usize;
+    for (id, content) in DEFAULT_SKILLS {
+        let path = skills_root.join(id).join("SKILL.md");
+        if path.exists() {
+            continue;
+        }
+        write_identity_file(&path, content)?;
+        created_skill_files += 1;
+    }
+
+    let config_path = orbit_root.join("config.toml");
+    let created_config = if config_path.exists() {
+        false
+    } else {
+        write_identity_file(&config_path, init_target.config_template)?;
+        true
+    };
+
+    let skill_ids = DEFAULT_SKILLS.map(|(id, _)| id);
+    let created_skills_symlink = ensure_skill_links(
+        &skills_root,
+        &skill_ids,
+        &init_target.skills_links_root,
+        options.force,
+    )?;
+
+    let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
+    let created_default_work = seed_default_jobs(&init_runtime)? > 0;
+
+    Ok(InitResult {
+        created_identity_files: created,
+        identity_root: identity_root.to_string_lossy().to_string(),
+        created_skill_files,
+        skills_root: skills_root.to_string_lossy().to_string(),
+        created_skills_symlink,
+        created_config,
+        config_path: config_path.to_string_lossy().to_string(),
+        created_default_work,
+    })
 }
 
 fn write_identity_file(path: &Path, content: &str) -> Result<(), OrbitError> {
@@ -190,18 +174,25 @@ struct InitTarget {
     config_template: &'static str,
 }
 
-fn resolve_init_target(cwd: &Path) -> Result<InitTarget, OrbitError> {
-    if let Some(repo_root) = find_git_repo_root(cwd) {
-        return Ok(InitTarget {
-            orbit_root: repo_root.join(".orbit"),
-            skills_links_root: repo_root.join(".agents").join("skills"),
-            config_template: DEFAULT_CONFIG_TEMPLATE_REPO,
-        });
-    }
+fn resolve_init_target_from_root(orbit_root: &Path) -> Result<InitTarget, OrbitError> {
+    let orbit_root = orbit_root.to_path_buf();
+    let home_root = home_orbit_root()?;
+    let config_template = if orbit_root == home_root {
+        DEFAULT_CONFIG_TEMPLATE
+    } else {
+        DEFAULT_CONFIG_TEMPLATE_REPO
+    };
+
+    let skills_links_root = if let Some(repo_root) = find_git_repo_root(&orbit_root) {
+        repo_root.join(".agents").join("skills")
+    } else {
+        home_dir()?.join(".agents").join("skills")
+    };
+
     Ok(InitTarget {
-        orbit_root: home_orbit_root()?,
-        skills_links_root: home_dir()?.join(".agents").join("skills"),
-        config_template: DEFAULT_CONFIG_TEMPLATE,
+        orbit_root,
+        skills_links_root,
+        config_template,
     })
 }
 

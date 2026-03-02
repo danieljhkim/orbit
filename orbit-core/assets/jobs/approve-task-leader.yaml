@@ -1,0 +1,39 @@
+id: approve-task-leader
+specType: task_approval
+description: Leader review and delegated task approval workflow
+inputSchemaJson:
+  type: object
+  required:
+    - task_id
+    - decision
+  properties:
+    task_id:
+      type: string
+    decision:
+      type: string
+      enum:
+        - approve
+        - reject
+    note:
+      type: string
+  additionalProperties: false
+outputSchemaJson:
+  type: object
+  required:
+    - task_id
+    - decision
+    - approved
+  properties:
+    task_id:
+      type: string
+    decision:
+      type: string
+    approved:
+      type: boolean
+    comment:
+      type: string
+artifactPathTemplate: "~/.orbit/agents/{{repo_name}}/executions/{{date}}-approve-task.md"
+skillRefs: []
+identityId: linus
+assignedTo: Linus Torvalds (Maintainer)
+createdBy: system

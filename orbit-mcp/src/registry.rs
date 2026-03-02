@@ -46,12 +46,18 @@ pub fn mcp_tools() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             name: "orbit.scheduler.delete".to_string(),
             description: "Disable an existing scheduler".to_string(),
-            input_schema: schema_with_identity(obj(&[("scheduler_id", str_schema())]), &["scheduler_id"]),
+            input_schema: schema_with_identity(
+                obj(&[("scheduler_id", str_schema())]),
+                &["scheduler_id"],
+            ),
         },
         ToolDescriptor {
             name: "orbit.scheduler.history".to_string(),
             description: "List run history for a scheduler".to_string(),
-            input_schema: schema_with_identity(obj(&[("scheduler_id", str_schema())]), &["scheduler_id"]),
+            input_schema: schema_with_identity(
+                obj(&[("scheduler_id", str_schema())]),
+                &["scheduler_id"],
+            ),
         },
         ToolDescriptor {
             name: "orbit.scheduler.list".to_string(),
@@ -61,22 +67,34 @@ pub fn mcp_tools() -> Vec<ToolDescriptor> {
         ToolDescriptor {
             name: "orbit.scheduler.pause".to_string(),
             description: "Pause a scheduler schedule".to_string(),
-            input_schema: schema_with_identity(obj(&[("scheduler_id", str_schema())]), &["scheduler_id"]),
+            input_schema: schema_with_identity(
+                obj(&[("scheduler_id", str_schema())]),
+                &["scheduler_id"],
+            ),
         },
         ToolDescriptor {
             name: "orbit.scheduler.resume".to_string(),
             description: "Resume a paused scheduler".to_string(),
-            input_schema: schema_with_identity(obj(&[("scheduler_id", str_schema())]), &["scheduler_id"]),
+            input_schema: schema_with_identity(
+                obj(&[("scheduler_id", str_schema())]),
+                &["scheduler_id"],
+            ),
         },
         ToolDescriptor {
             name: "orbit.scheduler.run".to_string(),
             description: "Run a scheduler immediately".to_string(),
-            input_schema: schema_with_identity(obj(&[("scheduler_id", str_schema())]), &["scheduler_id"]),
+            input_schema: schema_with_identity(
+                obj(&[("scheduler_id", str_schema())]),
+                &["scheduler_id"],
+            ),
         },
         ToolDescriptor {
             name: "orbit.scheduler.show".to_string(),
             description: "Show scheduler details".to_string(),
-            input_schema: schema_with_identity(obj(&[("scheduler_id", str_schema())]), &["scheduler_id"]),
+            input_schema: schema_with_identity(
+                obj(&[("scheduler_id", str_schema())]),
+                &["scheduler_id"],
+            ),
         },
         ToolDescriptor {
             name: "orbit.skill.doctor".to_string(),

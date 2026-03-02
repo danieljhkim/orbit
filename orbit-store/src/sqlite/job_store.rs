@@ -1,5 +1,5 @@
 use chrono::Utc;
-use orbit_types::{OrbitError, Job};
+use orbit_types::{Job, OrbitError};
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 

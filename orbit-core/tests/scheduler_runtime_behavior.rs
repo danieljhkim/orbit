@@ -3,10 +3,12 @@ use std::thread;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use orbit_core::OrbitRuntime;
-use orbit_core::command::scheduler::SchedulerAddParams;
 use orbit_core::command::job::JobAddParams;
+use orbit_core::command::scheduler::SchedulerAddParams;
 use orbit_store::Store;
-use orbit_types::{SchedulerRetryBackoffStrategy, SchedulerRunState, SchedulerTargetType, OrbitError};
+use orbit_types::{
+    OrbitError, SchedulerRetryBackoffStrategy, SchedulerRunState, SchedulerTargetType,
+};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -129,7 +131,10 @@ fn scheduled_run_executes_agent_and_records_success_run() {
         0,
     );
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
     let ran = runtime.run_due_schedulers(due_at).expect("run schedulers");
     assert_eq!(ran, 1);
 
@@ -169,7 +174,10 @@ fn invalid_agent_json_marks_run_failed_with_protocol_violation() {
         0,
     );
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
     let ran = runtime.run_due_schedulers(due_at).expect("run schedulers");
     assert_eq!(ran, 1);
 
@@ -210,7 +218,10 @@ fn invocation_failure_with_stderr_marks_run_failed_with_invocation_error() {
         0,
     );
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
     let ran = runtime.run_due_schedulers(due_at).expect("run schedulers");
     assert_eq!(ran, 1);
 
@@ -257,7 +268,9 @@ pass = ["PATH"]
         0,
     );
 
-    let run = runtime.run_scheduler_now(&scheduler_id).expect("run scheduler");
+    let run = runtime
+        .run_scheduler_now(&scheduler_id)
+        .expect("run scheduler");
     assert_eq!(run.state, SchedulerRunState::Failed);
 
     let history = runtime.scheduler_history(&scheduler_id).expect("history");
@@ -297,7 +310,9 @@ pass = ["PATH"]
         0,
     );
 
-    let run = runtime.run_scheduler_now(&scheduler_id).expect("run scheduler");
+    let run = runtime
+        .run_scheduler_now(&scheduler_id)
+        .expect("run scheduler");
     assert_eq!(run.state, SchedulerRunState::Failed);
 
     let history = runtime.scheduler_history(&scheduler_id).expect("history");
@@ -341,7 +356,9 @@ fn provider_required_env_present_reaches_protocol_validation() {
         0,
     );
 
-    let run = runtime.run_scheduler_now(&scheduler_id).expect("run scheduler");
+    let run = runtime
+        .run_scheduler_now(&scheduler_id)
+        .expect("run scheduler");
     assert_eq!(run.state, SchedulerRunState::Failed);
 
     let history = runtime.scheduler_history(&scheduler_id).expect("history");
@@ -503,7 +520,9 @@ fn run_scheduler_now_recovers_stale_running_run_and_executes_new_attempt() {
     assert_eq!(stale.state, SchedulerRunState::Failed);
     assert_eq!(stale.error_code.as_deref(), Some("AGENT_INVOCATION_FAILED"));
     assert!(
-        history.iter().any(|run| run.state == SchedulerRunState::Success),
+        history
+            .iter()
+            .any(|run| run.state == SchedulerRunState::Success),
         "new attempt should complete successfully"
     );
 }
@@ -530,9 +549,17 @@ fn run_due_schedulers_recovers_stale_running_run_and_reclaims_scheduler() {
     );
     let stale_run_id = insert_stale_running_run(dir.path(), &scheduler_id);
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
-    let ran = runtime.run_due_schedulers(due_at).expect("run due schedulers");
-    assert_eq!(ran, 1, "scheduler should be reclaimed after stale run recovery");
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
+    let ran = runtime
+        .run_due_schedulers(due_at)
+        .expect("run due schedulers");
+    assert_eq!(
+        ran, 1,
+        "scheduler should be reclaimed after stale run recovery"
+    );
 
     let history = runtime.scheduler_history(&scheduler_id).expect("history");
     let stale = history
@@ -541,7 +568,9 @@ fn run_due_schedulers_recovers_stale_running_run_and_reclaims_scheduler() {
         .expect("stale run should exist");
     assert_eq!(stale.state, SchedulerRunState::Failed);
     assert!(
-        history.iter().any(|run| run.state == SchedulerRunState::Success),
+        history
+            .iter()
+            .any(|run| run.state == SchedulerRunState::Success),
         "reclaimed due scheduler should complete successfully"
     );
 }
@@ -566,7 +595,10 @@ fn concurrent_scheduler_run_invocations_do_not_double_run_scheduler() {
         0,
     );
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
     let barrier = Arc::new(Barrier::new(3));
 
     let r1 = Arc::clone(&runtime);
@@ -674,7 +706,10 @@ Validate output shape.
         0,
     );
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
     let ran = runtime.run_due_schedulers(due_at).expect("run schedulers");
     assert_eq!(ran, 1);
 
@@ -769,7 +804,10 @@ Validate advanced schema behavior.
         0,
     );
 
-    let due_at = runtime.show_scheduler(&scheduler_id).expect("show scheduler").next_run_at;
+    let due_at = runtime
+        .show_scheduler(&scheduler_id)
+        .expect("show scheduler")
+        .next_run_at;
     let ran = runtime.run_due_schedulers(due_at).expect("run schedulers");
     assert_eq!(ran, 1);
 

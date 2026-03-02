@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType, OrbitError,
+    OrbitError, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState,
+    SchedulerScheduleState, SchedulerTargetType,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -72,7 +73,10 @@ impl SchedulerFileStore {
         Ok(scheduler)
     }
 
-    pub(crate) fn list_schedulers(&self, include_disabled: bool) -> Result<Vec<Scheduler>, OrbitError> {
+    pub(crate) fn list_schedulers(
+        &self,
+        include_disabled: bool,
+    ) -> Result<Vec<Scheduler>, OrbitError> {
         let mut schedulers = self.read_all_jobs()?;
         if !include_disabled {
             schedulers.retain(|scheduler| scheduler.state != SchedulerScheduleState::Disabled);
@@ -85,7 +89,10 @@ impl SchedulerFileStore {
         Ok(schedulers)
     }
 
-    pub(crate) fn get_scheduler(&self, scheduler_id: &str) -> Result<Option<Scheduler>, OrbitError> {
+    pub(crate) fn get_scheduler(
+        &self,
+        scheduler_id: &str,
+    ) -> Result<Option<Scheduler>, OrbitError> {
         let path = self.scheduler_path(scheduler_id);
         if !path.exists() {
             return Ok(None);
@@ -97,13 +104,18 @@ impl SchedulerFileStore {
         let mut schedulers = self
             .read_all_jobs()?
             .into_iter()
-            .filter(|scheduler| scheduler.state == SchedulerScheduleState::Enabled && scheduler.next_run_at <= now)
+            .filter(|scheduler| {
+                scheduler.state == SchedulerScheduleState::Enabled && scheduler.next_run_at <= now
+            })
             .collect::<Vec<_>>();
         schedulers.sort_by(|a, b| a.next_run_at.cmp(&b.next_run_at));
         Ok(schedulers)
     }
 
-    pub(crate) fn list_scheduler_runs(&self, scheduler_id: &str) -> Result<Vec<SchedulerRun>, OrbitError> {
+    pub(crate) fn list_scheduler_runs(
+        &self,
+        scheduler_id: &str,
+    ) -> Result<Vec<SchedulerRun>, OrbitError> {
         let mut runs = self.read_runs_for_job(scheduler_id)?;
         runs.sort_by(|a, b| {
             b.created_at
@@ -120,7 +132,9 @@ impl SchedulerFileStore {
         let mut runs = self
             .read_runs_for_job(scheduler_id)?
             .into_iter()
-            .filter(|run| run.state == SchedulerRunState::Pending || run.state == SchedulerRunState::Running)
+            .filter(|run| {
+                run.state == SchedulerRunState::Pending || run.state == SchedulerRunState::Running
+            })
             .collect::<Vec<_>>();
         runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(runs.into_iter().next())
@@ -225,12 +239,18 @@ impl SchedulerFileStore {
         Ok(true)
     }
 
-    pub(crate) fn claim_due_schedulers(&self, now: DateTime<Utc>) -> Result<DueJobsClaim, OrbitError> {
+    pub(crate) fn claim_due_schedulers(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<DueJobsClaim, OrbitError> {
         let due_schedulers = self.due_schedulers(now)?;
         let mut result = DueJobsClaim::default();
 
         for scheduler in due_schedulers {
-            if self.get_pending_or_running_scheduler_run(&scheduler.scheduler_id)?.is_some() {
+            if self
+                .get_pending_or_running_scheduler_run(&scheduler.scheduler_id)?
+                .is_some()
+            {
                 result.skipped.push(scheduler.scheduler_id.clone());
                 continue;
             }
@@ -308,7 +328,10 @@ impl SchedulerFileStore {
     fn read_run_at(&self, path: &Path) -> Result<SchedulerRun, OrbitError> {
         let raw = fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
         let doc = serde_yaml::from_str::<SchedulerRunFileDocument>(&raw).map_err(|e| {
-            OrbitError::Store(format!("invalid scheduler run file '{}': {e}", path.display()))
+            OrbitError::Store(format!(
+                "invalid scheduler run file '{}': {e}",
+                path.display()
+            ))
         })?;
         Ok(doc.run)
     }

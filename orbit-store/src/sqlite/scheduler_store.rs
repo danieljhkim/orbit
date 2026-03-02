@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType, OrbitError,
+    OrbitError, Scheduler, SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState,
+    SchedulerScheduleState, SchedulerTargetType,
 };
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
@@ -121,7 +122,10 @@ impl Store {
         .map_err(|e| OrbitError::Store(e.to_string()))
     }
 
-    pub fn get_running_job_run(&self, scheduler_id: &str) -> Result<Option<SchedulerRun>, OrbitError> {
+    pub fn get_running_job_run(
+        &self,
+        scheduler_id: &str,
+    ) -> Result<Option<SchedulerRun>, OrbitError> {
         let conn = self
             .conn
             .lock()

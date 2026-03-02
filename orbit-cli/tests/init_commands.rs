@@ -114,10 +114,10 @@ fn init_is_idempotent_for_existing_identity_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("identities: root="))
-        .stdout(predicate::str::contains("created=6"))
+        .stdout(predicate::str::contains("created=0"))
         .stdout(predicate::str::contains("skills: root="))
-        .stdout(predicate::str::contains("created=6"))
-        .stdout(predicate::str::contains("created=true"));
+        .stdout(predicate::str::contains("created=0"))
+        .stdout(predicate::str::contains("created=false"));
 
     orbit_in(workspace.path())
         .env("HOME", home.path())
@@ -252,6 +252,7 @@ fn init_uses_repo_local_layout_when_inside_git_repository() {
     std::fs::create_dir_all(repo.path().join(".git")).expect("create git marker");
     let nested = repo.path().join("nested").join("workdir");
     std::fs::create_dir_all(&nested).expect("create nested workdir");
+    let repo_orbit = repo.path().join(".orbit");
 
     orbit_in(&nested)
         .env("HOME", home.path())
@@ -267,7 +268,6 @@ fn init_uses_repo_local_layout_when_inside_git_repository() {
             repo_canonical.join(".orbit").join("skills").display()
         )));
 
-    let repo_orbit = repo.path().join(".orbit");
     assert!(repo_orbit.join("identities").join("linus.yaml").exists());
     assert!(
         repo_orbit
@@ -290,4 +290,15 @@ fn init_uses_repo_local_layout_when_inside_git_repository() {
         std::fs::read_to_string(repo_orbit.join("config.toml")).expect("read repo config");
     assert!(config_raw.contains("path = \"skills\""));
     assert!(config_raw.contains("path = \"orbit.db\""));
+
+    let home_orbit = home.path().join(".orbit");
+    assert!(home_orbit.join("identities").join("linus.yaml").exists());
+    assert!(
+        home_orbit
+            .join("skills")
+            .join("orbit-approve-task")
+            .join("SKILL.md")
+            .exists()
+    );
+    assert!(home_orbit.join("config.toml").exists());
 }

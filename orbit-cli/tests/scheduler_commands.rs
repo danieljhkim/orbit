@@ -90,7 +90,10 @@ fn scheduler_add_list_show_json_flow() {
     let spec_id = add_job(dir.path(), "spec-cli-list");
 
     let scheduler_id = add_scheduler(dir.path(), &spec_id, "every 1m", "mock-agent");
-    assert!(scheduler_id.starts_with("scheduler-"), "unexpected scheduler id: {scheduler_id}");
+    assert!(
+        scheduler_id.starts_with("scheduler-"),
+        "unexpected scheduler id: {scheduler_id}"
+    );
 
     let list_output = orbit_in(dir.path())
         .args(["scheduler", "list", "--json"])
@@ -101,7 +104,10 @@ fn scheduler_add_list_show_json_flow() {
         .clone();
     let list: Value = serde_json::from_slice(&list_output).expect("list json");
     let arr = list.as_array().expect("array");
-    assert!(arr.iter().any(|scheduler| scheduler["scheduler_id"] == scheduler_id));
+    assert!(
+        arr.iter()
+            .any(|scheduler| scheduler["scheduler_id"] == scheduler_id)
+    );
 
     let show_output = orbit_in(dir.path())
         .args(["scheduler", "show", &scheduler_id, "--json"])
@@ -205,7 +211,10 @@ fn scheduler_pause_resume_delete_flow() {
         .clone();
     let list: Value = serde_json::from_slice(&list_output).expect("list json");
     let arr = list.as_array().expect("array");
-    assert!(!arr.iter().any(|scheduler| scheduler["scheduler_id"] == scheduler_id));
+    assert!(
+        !arr.iter()
+            .any(|scheduler| scheduler["scheduler_id"] == scheduler_id)
+    );
 }
 
 #[test]

@@ -1,16 +1,17 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Scheduler, SchedulerRun, SchedulerRunState, SchedulerScheduleState, OrbitError, Task, TaskPriority, TaskStatus, Job,
+    Job, OrbitError, Scheduler, SchedulerRun, SchedulerRunState, SchedulerScheduleState, Task,
+    TaskPriority, TaskStatus,
 };
 use serde_json::Value;
 
 use super::contracts::{
-    SchedulerCreateParams, SchedulerStoreBackend, TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
-    JobCreateParams, JobStoreBackend,
+    JobCreateParams, JobStoreBackend, SchedulerCreateParams, SchedulerStoreBackend,
+    TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
 };
+use crate::file::job_store::{FileWorkInsert, JobFileStore};
 use crate::file::scheduler_store::SchedulerFileStore;
 use crate::file::task_store::{FileTaskInsert, FileTaskUpdate, TaskFileStore};
-use crate::file::job_store::{FileWorkInsert, JobFileStore};
 use crate::sqlite::scheduler_store::DueJobsClaim;
 
 impl TaskStoreBackend for TaskFileStore {
@@ -143,11 +144,18 @@ impl SchedulerStoreBackend for SchedulerFileStore {
         self.list_scheduler_runs(scheduler_id)
     }
 
-    fn get_pending_or_running_scheduler_run(&self, scheduler_id: &str) -> Result<Option<SchedulerRun>, OrbitError> {
+    fn get_pending_or_running_scheduler_run(
+        &self,
+        scheduler_id: &str,
+    ) -> Result<Option<SchedulerRun>, OrbitError> {
         self.get_pending_or_running_scheduler_run(scheduler_id)
     }
 
-    fn set_scheduler_state(&self, scheduler_id: &str, state: SchedulerScheduleState) -> Result<bool, OrbitError> {
+    fn set_scheduler_state(
+        &self,
+        scheduler_id: &str,
+        state: SchedulerScheduleState,
+    ) -> Result<bool, OrbitError> {
         self.set_scheduler_state(scheduler_id, state)
     }
 

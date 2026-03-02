@@ -2,9 +2,9 @@ pub mod agent;
 pub mod command;
 mod config;
 pub mod context;
-pub mod scheduler;
 mod json_schema;
 pub mod runtime;
+pub mod scheduler;
 pub mod watch;
 
 pub use orbit_store::identity_store as identity_catalog;
@@ -14,9 +14,9 @@ pub use context::OrbitContext;
 pub use orbit_store::AuditEventInsertParams;
 pub use orbit_types::OrbitError;
 pub use orbit_types::{
-    AgentSessionStatus, AuditEvent, AuditEventStatus, AuditStats, Scheduler, SchedulerRetryBackoffStrategy,
-    SchedulerRun, SchedulerRunState, SchedulerScheduleState, SchedulerTargetType, Role, Skill, Task, TaskPriority,
-    TaskStatus, TaskType, Job,
+    AgentSessionStatus, AuditEvent, AuditEventStatus, AuditStats, Job, Role, Scheduler,
+    SchedulerRetryBackoffStrategy, SchedulerRun, SchedulerRunState, SchedulerScheduleState,
+    SchedulerTargetType, Skill, Task, TaskPriority, TaskStatus, TaskType,
 };
 pub use runtime::OrbitRuntime;
 
@@ -27,16 +27,16 @@ mod tests {
 
     use orbit_policy::PolicyEngine;
     use orbit_types::{
-        SchedulerRetryBackoffStrategy, SchedulerRunState, SchedulerTargetType, OrbitEvent, TaskPriority, TaskStatus,
-        TaskType,
+        OrbitEvent, SchedulerRetryBackoffStrategy, SchedulerRunState, SchedulerTargetType,
+        TaskPriority, TaskStatus, TaskType,
     };
     use serde_json::json;
     use tempfile::tempdir;
 
     use crate::OrbitRuntime;
+    use crate::command::job::JobAddParams;
     use crate::command::scheduler::SchedulerAddParams;
     use crate::command::task::{TaskAddParams, TaskUpdateParams};
-    use crate::command::job::JobAddParams;
 
     #[test]
     fn policy_denied_records_audit_and_no_side_effects() {
@@ -143,7 +143,9 @@ mod tests {
         assert_eq!(first, 1);
         assert_eq!(second, 0);
 
-        let sessions = runtime.scheduler_history(&scheduler.scheduler_id).expect("history");
+        let sessions = runtime
+            .scheduler_history(&scheduler.scheduler_id)
+            .expect("history");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].state, SchedulerRunState::Success);
     }

@@ -1,20 +1,20 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    AgentSession, AgentSessionStatus, AgentToolCall, Audit, AuditEvent, Scheduler, SchedulerRun, SchedulerRunState,
-    SchedulerScheduleState, OrbitError, OrbitEvent, StoredTool, Task, TaskPriority, TaskStatus, Watch,
-    Job,
+    AgentSession, AgentSessionStatus, AgentToolCall, Audit, AuditEvent, Job, OrbitError,
+    OrbitEvent, Scheduler, SchedulerRun, SchedulerRunState, SchedulerScheduleState, StoredTool,
+    Task, TaskPriority, TaskStatus, Watch,
 };
 use serde_json::Value;
 
 use super::contracts::{
-    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, SchedulerCreateParams,
-    SchedulerStoreBackend, LockStoreBackend, TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
-    ToolStoreBackend, WatchStoreBackend, JobCreateParams, JobStoreBackend,
+    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, JobCreateParams,
+    JobStoreBackend, LockStoreBackend, SchedulerCreateParams, SchedulerStoreBackend,
+    TaskCreateParams, TaskStoreBackend, TaskUpdateParams, ToolStoreBackend, WatchStoreBackend,
 };
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 use crate::sqlite::scheduler_store::DueJobsClaim;
 use crate::sqlite::task_store::{TaskInsertParams, TaskUpdateFields};
-use crate::{Store, JobInsertParams};
+use crate::{JobInsertParams, Store};
 
 #[derive(Clone)]
 pub(crate) struct SqliteTaskStoreBackend {
@@ -194,11 +194,19 @@ impl SchedulerStoreBackend for SqliteJobStoreBackend {
         self.store.list_scheduler_runs(scheduler_id)
     }
 
-    fn get_pending_or_running_scheduler_run(&self, scheduler_id: &str) -> Result<Option<SchedulerRun>, OrbitError> {
-        self.store.get_pending_or_running_scheduler_run(scheduler_id)
+    fn get_pending_or_running_scheduler_run(
+        &self,
+        scheduler_id: &str,
+    ) -> Result<Option<SchedulerRun>, OrbitError> {
+        self.store
+            .get_pending_or_running_scheduler_run(scheduler_id)
     }
 
-    fn set_scheduler_state(&self, scheduler_id: &str, state: SchedulerScheduleState) -> Result<bool, OrbitError> {
+    fn set_scheduler_state(
+        &self,
+        scheduler_id: &str,
+        state: SchedulerScheduleState,
+    ) -> Result<bool, OrbitError> {
         self.store
             .with_transaction(|tx| tx.set_scheduler_state(scheduler_id, state))
     }
@@ -262,7 +270,8 @@ impl SchedulerStoreBackend for SqliteJobStoreBackend {
     }
 
     fn claim_due_schedulers(&self, now: DateTime<Utc>) -> Result<DueJobsClaim, OrbitError> {
-        self.store.with_transaction(|tx| tx.claim_due_schedulers(now))
+        self.store
+            .with_transaction(|tx| tx.claim_due_schedulers(now))
     }
 }
 

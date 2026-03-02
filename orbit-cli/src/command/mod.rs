@@ -2,13 +2,15 @@ pub mod agent;
 pub mod audit;
 pub mod config;
 pub mod init;
-pub mod scheduler;
+pub mod job;
 pub mod mcp;
+pub mod scheduler;
 pub mod skill;
 pub mod task;
 pub mod tool;
 pub mod watch;
-pub mod job;
+
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -21,6 +23,10 @@ pub trait Execute {
 #[command(name = "orbit")]
 #[command(about = "Orbit v2.1 CLI")]
 pub struct Cli {
+    /// Override the Orbit root directory (highest precedence)
+    #[arg(long, global = true)]
+    pub root: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

@@ -9,7 +9,7 @@ use crate::command::{Commands, Execute};
 
 fn main() {
     let cli = command::Cli::parse();
-    let runtime = match OrbitRuntime::initialize() {
+    let runtime = match OrbitRuntime::initialize_with_root_override(cli.root.as_deref()) {
         Ok(runtime) => runtime,
         Err(err) => {
             eprintln!("failed to initialize runtime: {err}");

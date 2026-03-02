@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_types::{OrbitError, Job};
+use orbit_types::{Job, OrbitError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]

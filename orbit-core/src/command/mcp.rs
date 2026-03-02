@@ -27,7 +27,7 @@ impl OrbitRuntime {
         let claude_path = claude_config_path()?;
         let claude_code_path = claude_code_config_path()?;
         let command = resolve_orbit_command()?;
-        let data_root = Self::default_data_root();
+        let data_root = self.data_root();
         upsert_mcp_configs(
             &codex_path,
             &claude_path,
@@ -109,11 +109,7 @@ fn upsert_codex_config(
     let mut changed = false;
     changed |= set_toml_string(orbit_table, "command", command);
     changed |= set_toml_string_array(orbit_table, "args", &["mcp", "start"]);
-    changed |= set_toml_inline_table(
-        orbit_table,
-        "env",
-        &[("ORBIT_DATA_ROOT", &data_root_str)],
-    );
+    changed |= set_toml_inline_table(orbit_table, "env", &[("ORBIT_ROOT", &data_root_str)]);
 
     if changed && !dry_run {
         write_text(
@@ -182,7 +178,7 @@ fn upsert_claude_config(
     changed |= set_json_object(
         orbit_obj,
         "env",
-        &[("ORBIT_DATA_ROOT", &data_root.to_string_lossy())],
+        &[("ORBIT_ROOT", &data_root.to_string_lossy())],
     );
 
     if changed && !dry_run {
@@ -245,7 +241,11 @@ fn set_json_string(obj: &mut JsonMap<String, JsonValue>, key: &str, value: &str)
     }
 }
 
-fn set_json_object(obj: &mut JsonMap<String, JsonValue>, key: &str, entries: &[(&str, &str)]) -> bool {
+fn set_json_object(
+    obj: &mut JsonMap<String, JsonValue>,
+    key: &str,
+    entries: &[(&str, &str)],
+) -> bool {
     let mut next = JsonMap::new();
     for (k, v) in entries {
         next.insert((*k).to_string(), JsonValue::String((*v).to_string()));
@@ -448,15 +448,15 @@ mod tests {
         assert!(result.claude.changed);
         assert!(result.claude_code.changed);
 
-        // Verify codex config has absolute command and ORBIT_DATA_ROOT env
+        // Verify codex config has absolute command and ORBIT_ROOT env
         let codex = fs::read_to_string(&codex_path).expect("read codex");
         assert!(
             codex.contains(TEST_COMMAND),
             "codex config must contain absolute command path"
         );
         assert!(
-            codex.contains("ORBIT_DATA_ROOT"),
-            "codex config must contain ORBIT_DATA_ROOT env"
+            codex.contains("ORBIT_ROOT"),
+            "codex config must contain ORBIT_ROOT env"
         );
 
         // Verify claude config has absolute command and env
@@ -464,7 +464,7 @@ mod tests {
         let claude: serde_json::Value = serde_json::from_str(&claude_raw).expect("parse claude");
         assert_eq!(claude["mcpServers"]["orbit"]["command"], TEST_COMMAND);
         assert_eq!(
-            claude["mcpServers"]["orbit"]["env"]["ORBIT_DATA_ROOT"],
+            claude["mcpServers"]["orbit"]["env"]["ORBIT_ROOT"],
             data_root.to_string_lossy().as_ref()
         );
 
@@ -473,7 +473,7 @@ mod tests {
         let cc: serde_json::Value = serde_json::from_str(&cc_raw).expect("parse claude-code");
         assert_eq!(cc["mcpServers"]["orbit"]["command"], TEST_COMMAND);
         assert_eq!(
-            cc["mcpServers"]["orbit"]["env"]["ORBIT_DATA_ROOT"],
+            cc["mcpServers"]["orbit"]["env"]["ORBIT_ROOT"],
             data_root.to_string_lossy().as_ref()
         );
     }
