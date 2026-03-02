@@ -15,6 +15,7 @@ pub enum TaskStatus {
     InProgress,
     Review,
     Done,
+    Blocked,
     Archived,
 }
 
@@ -26,6 +27,7 @@ impl Display for TaskStatus {
             TaskStatus::InProgress => "in_progress",
             TaskStatus::Review => "review",
             TaskStatus::Done => "done",
+            TaskStatus::Blocked => "blocked",
             TaskStatus::Archived => "archived",
         };
         write!(f, "{s}")
@@ -42,6 +44,7 @@ impl FromStr for TaskStatus {
             "in_progress" => Ok(TaskStatus::InProgress),
             "review" => Ok(TaskStatus::Review),
             "done" => Ok(TaskStatus::Done),
+            "blocked" => Ok(TaskStatus::Blocked),
             "archived" => Ok(TaskStatus::Archived),
             other => Err(format!("unknown task status: {other}")),
         }
@@ -53,6 +56,9 @@ impl TaskStatus {
         if target == TaskStatus::Archived {
             return Ok(());
         }
+        if target == TaskStatus::Blocked && *self != TaskStatus::Archived {
+            return Ok(());
+        }
 
         let allowed = match self {
             TaskStatus::Proposed => target == TaskStatus::Backlog,
@@ -60,6 +66,9 @@ impl TaskStatus {
             TaskStatus::InProgress => target == TaskStatus::Review,
             TaskStatus::Review => target == TaskStatus::Done,
             TaskStatus::Done => false,
+            TaskStatus::Blocked => {
+                target == TaskStatus::Backlog || target == TaskStatus::InProgress
+            }
             TaskStatus::Archived => target == TaskStatus::Backlog,
         };
 

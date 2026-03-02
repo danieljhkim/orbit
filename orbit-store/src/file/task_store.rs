@@ -57,6 +57,7 @@ enum TaskStateDir {
     InProgress,
     Review,
     Done,
+    Blocked,
     Archived,
 }
 
@@ -68,6 +69,7 @@ impl TaskStateDir {
             TaskStateDir::InProgress => "in_progress",
             TaskStateDir::Review => "review",
             TaskStateDir::Done => "done",
+            TaskStateDir::Blocked => "blocked",
             TaskStateDir::Archived => "archived",
         }
     }
@@ -79,6 +81,7 @@ impl TaskStateDir {
             TaskStateDir::InProgress => TaskStatus::InProgress,
             TaskStateDir::Review => TaskStatus::Review,
             TaskStateDir::Done => TaskStatus::Done,
+            TaskStateDir::Blocked => TaskStatus::Blocked,
             TaskStateDir::Archived => TaskStatus::Archived,
         }
     }
@@ -90,17 +93,19 @@ impl TaskStateDir {
             TaskStatus::InProgress => TaskStateDir::InProgress,
             TaskStatus::Review => TaskStateDir::Review,
             TaskStatus::Done => TaskStateDir::Done,
+            TaskStatus::Blocked => TaskStateDir::Blocked,
             TaskStatus::Archived => TaskStateDir::Archived,
         }
     }
 
-    fn all() -> [TaskStateDir; 6] {
+    fn all() -> [TaskStateDir; 7] {
         [
             TaskStateDir::Proposed,
             TaskStateDir::Backlog,
             TaskStateDir::InProgress,
             TaskStateDir::Review,
             TaskStateDir::Done,
+            TaskStateDir::Blocked,
             TaskStateDir::Archived,
         ]
     }
@@ -453,7 +458,7 @@ impl TaskFileStore {
             fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
         }
 
-        let yaml = serde_yaml::to_string(doc).map_err(|e| OrbitError::Store(e.to_string()))?;
+        let yaml = serialize_task_doc_yaml(doc)?;
         let nanos = Utc::now().timestamp_nanos_opt().unwrap_or_default();
         let tmp_path = path.with_extension(format!("yaml.tmp.{nanos}"));
         fs::write(&tmp_path, yaml).map_err(|e| OrbitError::Io(e.to_string()))?;
@@ -508,6 +513,58 @@ fn is_yaml(path: &Path) -> bool {
     )
 }
 
+fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError> {
+    let yaml = serde_yaml::to_string(doc).map_err(|e| OrbitError::Store(e.to_string()))?;
+    let yaml =
+        rewrite_top_level_string_field_as_literal_block(&yaml, "description", &doc.description);
+    let yaml =
+        rewrite_top_level_string_field_as_literal_block(&yaml, "instructions", &doc.instructions);
+    let yaml = rewrite_top_level_string_field_as_literal_block(
+        &yaml,
+        "execution_summary",
+        &doc.execution_summary,
+    );
+    Ok(yaml)
+}
+
+fn rewrite_top_level_string_field_as_literal_block(yaml: &str, key: &str, value: &str) -> String {
+    let lines: Vec<&str> = yaml.lines().collect();
+    let Some(start_idx) = lines
+        .iter()
+        .position(|line| line.starts_with(&format!("{key}:")))
+    else {
+        return yaml.to_string();
+    };
+
+    let mut end_idx = start_idx + 1;
+    while end_idx < lines.len() {
+        let line = lines[end_idx];
+        if !line.starts_with(' ') && line.contains(':') {
+            break;
+        }
+        end_idx += 1;
+    }
+
+    let mut output: Vec<String> = lines[..start_idx]
+        .iter()
+        .map(|line| (*line).to_string())
+        .collect();
+
+    if value.is_empty() {
+        output.push(format!("{key}: |-"));
+    } else {
+        output.push(format!("{key}: |"));
+        for part in value.split('\n') {
+            output.push(format!("  {part}"));
+        }
+    }
+
+    output.extend(lines[end_idx..].iter().map(|line| (*line).to_string()));
+    let mut rendered = output.join("\n");
+    rendered.push('\n');
+    rendered
+}
+
 fn doc_to_task(state: TaskStateDir, doc: TaskFileDocument) -> Task {
     Task {
         id: doc.id,
@@ -531,5 +588,60 @@ fn doc_to_task(state: TaskStateDir, doc: TaskFileDocument) -> Task {
         review_decision_note: doc.review_decision_note,
         created_at: doc.created_at,
         updated_at: doc.updated_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        TaskFileDocument, rewrite_top_level_string_field_as_literal_block, serialize_task_doc_yaml,
+    };
+    use orbit_types::TaskPriority;
+
+    #[test]
+    fn rewrite_emits_literal_block_for_multiline() {
+        let yaml = "id: T1\ndescription: one line\ninstructions: short\nexecution_summary: \"\"\npriority: medium\n";
+        let updated =
+            rewrite_top_level_string_field_as_literal_block(yaml, "description", "Line 1\nLine 2");
+        assert!(updated.contains("description: |\n  Line 1\n  Line 2\n"));
+    }
+
+    #[test]
+    fn serialize_task_doc_uses_literal_blocks_for_target_fields() {
+        let now = chrono::Utc::now();
+        let doc = TaskFileDocument {
+            schema_version: 1,
+            id: "T1".to_string(),
+            title: "Title".to_string(),
+            description: "Desc line 1\nDesc line 2".to_string(),
+            instructions: "Step 1\nStep 2".to_string(),
+            execution_summary: "Implemented and tested".to_string(),
+            context_files: vec![],
+            workspace_path: None,
+            assigned_to: None,
+            created_by: None,
+            priority: TaskPriority::Medium,
+            task_type: super::default_task_type(),
+            branch: None,
+            pr_number: None,
+            proposed_by: None,
+            proposal_approved_by: None,
+            proposal_decision_note: None,
+            review_approved_by: None,
+            review_decision_note: None,
+            created_at: now,
+            updated_at: now,
+            acceptance_criteria: vec![],
+            history: vec![],
+            comments: vec![],
+            job_id: None,
+            scheduler_id: None,
+            scheduler_run_id: None,
+        };
+
+        let yaml = serialize_task_doc_yaml(&doc).expect("yaml");
+        assert!(yaml.contains("description: |\n  Desc line 1\n  Desc line 2\n"));
+        assert!(yaml.contains("instructions: |\n  Step 1\n  Step 2\n"));
+        assert!(yaml.contains("execution_summary: |\n  Implemented and tested\n"));
     }
 }

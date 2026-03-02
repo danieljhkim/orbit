@@ -12,8 +12,26 @@ fn orbit_in(dir: &Path) -> Command {
 }
 
 fn add_task(dir: &Path, title: &str) -> String {
+    let workspace = dir
+        .canonicalize()
+        .expect("canonical workspace")
+        .to_string_lossy()
+        .to_string();
     let output = orbit_in(dir)
-        .args(["task", "add", "--title", title])
+        .args([
+            "task",
+            "add",
+            "--title",
+            title,
+            "--description",
+            "test description",
+            "--instructions",
+            "test instructions",
+            "--workspace",
+            &workspace,
+            "--proposed-by",
+            "test-user",
+        ])
         .assert()
         .success()
         .get_output()
@@ -79,7 +97,7 @@ fn task_show_displays_fields() {
         .success()
         .stdout(predicate::str::contains("ID:"))
         .stdout(predicate::str::contains("showable task"))
-        .stdout(predicate::str::contains("proposed"));
+        .stdout(predicate::str::contains("Status:"));
 }
 
 #[test]
@@ -92,20 +110,14 @@ fn task_show_nonexistent() {
 }
 
 #[test]
-fn task_update_changes_title() {
+fn task_update_rejects_non_updatable_fields() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let id = add_task(dir.path(), "before update");
+    let id = add_task(dir.path(), "non-updatable");
     orbit_in(dir.path())
-        .args(["task", "update", &id, "--title", "after update"])
+        .args(["task", "update", &id, "--title", "ignored"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Updated"));
-
-    orbit_in(dir.path())
-        .args(["task", "show", &id])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("after update"));
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument '--title'"));
 }
 
 #[test]
@@ -165,7 +177,7 @@ fn task_search_matches() {
 }
 
 #[test]
-fn task_workspace_add_update_and_clear() {
+fn task_workspace_is_normalized_on_add() {
     let dir = tempfile::tempdir().expect("tempdir");
     let workspace = dir.path().join("repo");
     std::fs::create_dir_all(&workspace).expect("workspace dir");
@@ -177,8 +189,14 @@ fn task_workspace_add_update_and_clear() {
             "add",
             "--title",
             "workspace task",
+            "--description",
+            "workspace description",
+            "--instructions",
+            "workspace instructions",
             "--workspace",
             workspace.to_string_lossy().as_ref(),
+            "--proposed-by",
+            "workspace-proposer",
         ])
         .assert()
         .success()
@@ -199,22 +217,6 @@ fn task_workspace_add_update_and_clear() {
         show["workspace_path"],
         workspace_canonical.to_string_lossy().to_string()
     );
-
-    orbit_in(dir.path())
-        .args(["task", "update", &id, "--workspace", ""])
-        .assert()
-        .success();
-
-    let show_after_clear = orbit_in(dir.path())
-        .args(["task", "show", &id, "--json"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    let show_after_clear: serde_json::Value =
-        serde_json::from_slice(&show_after_clear).expect("show json after clear");
-    assert!(show_after_clear["workspace_path"].is_null());
 }
 
 #[test]

@@ -12,14 +12,25 @@ fn orbit_in(dir: &Path) -> Command {
 }
 
 fn add_task_with_instructions(dir: &Path, title: &str, instructions: &str) -> String {
+    let workspace = dir
+        .canonicalize()
+        .expect("canonicalize workspace")
+        .to_string_lossy()
+        .to_string();
     let output = orbit_in(dir)
         .args([
             "task",
             "add",
             "--title",
             title,
+            "--description",
+            "agent test task",
             "--instructions",
             instructions,
+            "--workspace",
+            &workspace,
+            "--proposed-by",
+            "test-agent",
         ])
         .assert()
         .success()

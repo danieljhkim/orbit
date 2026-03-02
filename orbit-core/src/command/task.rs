@@ -10,15 +10,12 @@ pub struct TaskAddParams {
     pub title: String,
     pub description: String,
     pub instructions: String,
-    pub execution_summary: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
     pub assigned_to: Option<String>,
     pub created_by: Option<String>,
     pub priority: TaskPriority,
     pub task_type: TaskType,
-    pub branch: Option<String>,
-    pub pr_number: Option<String>,
     pub proposed_by: Option<String>,
 }
 
@@ -28,39 +25,23 @@ impl Default for TaskAddParams {
             title: String::new(),
             description: String::new(),
             instructions: String::new(),
-            execution_summary: String::new(),
             context_files: Vec::new(),
             workspace_path: None,
             assigned_to: None,
             created_by: None,
             priority: TaskPriority::Medium,
             task_type: TaskType::Task,
-            branch: None,
-            pr_number: None,
             proposed_by: None,
         }
     }
 }
 
 pub struct TaskUpdateParams {
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub instructions: Option<String>,
     pub execution_summary: Option<String>,
-    pub context_files: Option<Vec<String>>,
-    pub workspace_path: Option<Option<String>>,
     pub assigned_to: Option<Option<String>>,
-    pub created_by: Option<Option<String>>,
     pub status: Option<TaskStatus>,
-    pub priority: Option<TaskPriority>,
-    pub task_type: Option<TaskType>,
     pub branch: Option<Option<String>>,
     pub pr_number: Option<Option<String>>,
-    pub proposed_by: Option<Option<String>>,
-    pub proposal_approved_by: Option<Option<String>>,
-    pub proposal_decision_note: Option<Option<String>>,
-    pub review_approved_by: Option<Option<String>>,
-    pub review_decision_note: Option<Option<String>>,
 }
 
 impl OrbitRuntime {
@@ -81,7 +62,7 @@ impl OrbitRuntime {
                 title: params.title.clone(),
                 description: params.description.clone(),
                 instructions: params.instructions.clone(),
-                execution_summary: params.execution_summary.clone(),
+                execution_summary: String::new(),
                 context_files: params.context_files.clone(),
                 workspace_path: workspace_path.clone(),
                 assigned_to: params.assigned_to.clone(),
@@ -89,8 +70,8 @@ impl OrbitRuntime {
                 status: initial_status,
                 priority: params.priority,
                 task_type: params.task_type,
-                branch: params.branch.clone(),
-                pr_number: params.pr_number.clone(),
+                branch: None,
+                pr_number: None,
                 proposed_by: proposed_by.clone(),
             })?;
             Ok((
@@ -127,6 +108,12 @@ impl OrbitRuntime {
         let task = self.get_task(id)?;
 
         if let Some(target_status) = params.status {
+            if target_status == TaskStatus::Archived {
+                return Err(OrbitError::InvalidInput(
+                    "use `orbit task archive <id>` instead of setting status to archived"
+                        .to_string(),
+                ));
+            }
             task.status
                 .validate_transition(target_status)
                 .map_err(OrbitError::TaskStatusTransition)?;
@@ -144,33 +131,16 @@ impl OrbitRuntime {
             }
         }
 
-        let workspace_path = match params.workspace_path {
-            Some(value) => Some(normalize_path(value)?),
-            None => None,
-        };
-
         let task = self.with_mutation(|| {
             let task = self.context.task_store.update_task(
                 id,
                 StoreTaskUpdateParams {
-                    title: params.title,
-                    description: params.description,
-                    instructions: params.instructions,
                     execution_summary: params.execution_summary,
-                    context_files: params.context_files,
-                    workspace_path,
                     assigned_to: params.assigned_to,
-                    created_by: params.created_by,
                     status: params.status,
-                    priority: params.priority,
-                    task_type: params.task_type,
                     branch: params.branch,
                     pr_number: params.pr_number,
-                    proposed_by: params.proposed_by,
-                    proposal_approved_by: params.proposal_approved_by,
-                    proposal_decision_note: params.proposal_decision_note,
-                    review_approved_by: params.review_approved_by,
-                    review_decision_note: params.review_decision_note,
+                    ..Default::default()
                 },
             )?;
             Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))

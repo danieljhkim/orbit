@@ -1008,7 +1008,6 @@ dependencies = [
  "clap",
  "csv",
  "orbit-core",
- "orbit-mcp",
  "predicates",
  "serde_json",
  "tempfile",
@@ -1040,16 +1039,6 @@ version = "0.1.0"
 dependencies = [
  "orbit-types",
  "wait-timeout",
-]
-
-[[package]]
-name = "orbit-mcp"
-version = "0.1.0"
-dependencies = [
- "orbit-core",
- "serde",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]

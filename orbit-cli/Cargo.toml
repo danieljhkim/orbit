@@ -7,7 +7,6 @@ edition.workspace = true
 clap.workspace = true
 csv = "1"
 orbit-core = { path = "../orbit-core", features = ["clap"] }
-orbit-mcp = { path = "../orbit-mcp" }
 serde_json.workspace = true
 
 [dev-dependencies]

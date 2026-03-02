@@ -63,20 +63,17 @@ pub struct TaskAddArgs {
     #[arg(long)]
     pub title: String,
     /// Task description
-    #[arg(long, default_value = "")]
+    #[arg(long)]
     pub description: String,
     /// Task instructions payload (agent planning input)
-    #[arg(long, default_value = "")]
+    #[arg(long)]
     pub instructions: String,
-    /// Task execution summary (required before in_progress -> review)
-    #[arg(long, default_value = "")]
-    pub execution_summary: String,
     /// Comma-separated context file paths
     #[arg(long, default_value = "")]
     pub context: String,
     /// Repository workspace path
     #[arg(long)]
-    pub workspace: Option<String>,
+    pub workspace: String,
     /// Optional assignee display name
     #[arg(long)]
     pub assigned_to: Option<String>,
@@ -89,15 +86,9 @@ pub struct TaskAddArgs {
     /// Task type
     #[arg(long = "type", value_enum, default_value_t = TaskType::Task)]
     pub task_type: TaskType,
-    /// Git branch name
-    #[arg(long)]
-    pub branch: Option<String>,
-    /// Pull request number
-    #[arg(long)]
-    pub pr_number: Option<String>,
     /// Who proposed this task
     #[arg(long)]
-    pub proposed_by: Option<String>,
+    pub proposed_by: String,
 }
 
 impl Execute for TaskAddArgs {
@@ -106,16 +97,13 @@ impl Execute for TaskAddArgs {
             title: self.title,
             description: self.description,
             instructions: self.instructions,
-            execution_summary: self.execution_summary,
             context_files: parse_context_csv(&self.context),
-            workspace_path: self.workspace,
+            workspace_path: Some(self.workspace),
             assigned_to: self.assigned_to,
             created_by: self.created_by,
             priority: self.priority,
             task_type: self.task_type,
-            branch: self.branch,
-            pr_number: self.pr_number,
-            proposed_by: self.proposed_by,
+            proposed_by: Some(self.proposed_by),
         })?;
 
         println!("{}", task.id);
@@ -234,39 +222,15 @@ impl Execute for TaskShowArgs {
 pub struct TaskUpdateArgs {
     /// Task ID
     pub id: String,
-    /// New title
-    #[arg(long)]
-    pub title: Option<String>,
-    /// New description
-    #[arg(long)]
-    pub description: Option<String>,
-    /// New instructions payload
-    #[arg(long)]
-    pub instructions: Option<String>,
     /// New execution summary (empty string clears)
     #[arg(long)]
     pub execution_summary: Option<String>,
-    /// New comma-separated context files (empty string clears all)
-    #[arg(long)]
-    pub context: Option<String>,
-    /// New workspace path (use empty string to clear)
-    #[arg(long)]
-    pub workspace: Option<String>,
     /// New assignee (empty string clears)
     #[arg(long)]
     pub assigned_to: Option<String>,
-    /// New creator (empty string clears)
-    #[arg(long)]
-    pub created_by: Option<String>,
     /// New status
     #[arg(long, value_enum)]
-    pub status: Option<TaskStatus>,
-    /// New priority
-    #[arg(long, value_enum)]
-    pub priority: Option<TaskPriority>,
-    /// New type
-    #[arg(long = "type", value_enum)]
-    pub task_type: Option<TaskType>,
+    pub status: Option<TaskUpdateStatusArg>,
     /// Git branch name (empty string clears)
     #[arg(long)]
     pub branch: Option<String>,
@@ -277,21 +241,7 @@ pub struct TaskUpdateArgs {
 
 impl Execute for TaskUpdateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let workspace_path = self.workspace.map(|value| {
-            if value.trim().is_empty() {
-                None
-            } else {
-                Some(value)
-            }
-        });
         let assigned_to = self.assigned_to.map(|value| {
-            if value.trim().is_empty() {
-                None
-            } else {
-                Some(value)
-            }
-        });
-        let created_by = self.created_by.map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
@@ -316,29 +266,39 @@ impl Execute for TaskUpdateArgs {
         let task = runtime.update_task(
             &self.id,
             TaskUpdateParams {
-                title: self.title,
-                description: self.description,
-                instructions: self.instructions,
                 execution_summary: self.execution_summary,
-                context_files: self.context.map(|raw| parse_context_csv(&raw)),
-                workspace_path,
                 assigned_to,
-                created_by,
-                status: self.status,
-                priority: self.priority,
-                task_type: self.task_type,
+                status: self.status.map(Into::into),
                 branch,
                 pr_number,
-                proposed_by: None,
-                proposal_approved_by: None,
-                proposal_decision_note: None,
-                review_approved_by: None,
-                review_decision_note: None,
             },
         )?;
 
         println!("Updated task '{}'", task.id);
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum TaskUpdateStatusArg {
+    Proposed,
+    Backlog,
+    InProgress,
+    Review,
+    Done,
+    Blocked,
+}
+
+impl From<TaskUpdateStatusArg> for TaskStatus {
+    fn from(value: TaskUpdateStatusArg) -> Self {
+        match value {
+            TaskUpdateStatusArg::Proposed => TaskStatus::Proposed,
+            TaskUpdateStatusArg::Backlog => TaskStatus::Backlog,
+            TaskUpdateStatusArg::InProgress => TaskStatus::InProgress,
+            TaskUpdateStatusArg::Review => TaskStatus::Review,
+            TaskUpdateStatusArg::Done => TaskStatus::Done,
+            TaskUpdateStatusArg::Blocked => TaskStatus::Blocked,
+        }
     }
 }
 

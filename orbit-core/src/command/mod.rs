@@ -4,7 +4,6 @@ pub mod duration;
 pub mod identity;
 pub mod init;
 pub mod job;
-pub mod mcp;
 pub mod scheduler;
 pub mod skill;
 pub mod task;
