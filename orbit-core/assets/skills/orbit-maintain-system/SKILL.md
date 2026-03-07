@@ -1,6 +1,6 @@
 ---
 name: orbit-maintain-system
-description: Perform routine, low-risk maintenance to keep the system healthy, consistent, and up-to-date without changing intended behavior. Use this skill only when explicitly requested. 
+description: Perform routine, low-risk maintenance to keep the system healthy, consistent, and up-to-date without changing intended behavior. Use this skill only when explicitly requested.
 ---
 
 # Orbit Maintain System
@@ -10,7 +10,7 @@ Use this skill for routine maintenance that is safe, incremental, and non-disrup
 ---
 
 ## Inputs
-- Repository workspace (cwd)
+- Repository workspace
 - Maintenance policy or schedule
 - Optional scope constraints (paths, components)
 
@@ -19,7 +19,7 @@ Use this skill for routine maintenance that is safe, incremental, and non-disrup
 ## Responsibilities
 1. Assess system health and identify maintenance issues.
 2. Track every discovered issue via a new Orbit task.
-3. Apply low-risk maintenance (deps, formatting, dead code, minor upgrades).
+3. Auto approve and apply low-risk maintenance tasks (deps, formatting, dead code, minor upgrades).
 4. Verify integrity after changes (build/tests/lint as applicable).
 5. Persist a markdown maintenance summary report.
 
@@ -29,36 +29,14 @@ Use this skill for routine maintenance that is safe, incremental, and non-disrup
 
 When assessment finds any issue (bug, risk, drift, failing check, deprecated usage, security concern), create a tracking task immediately via `orbit task add`.
 
-Create one task per issue with:
-- `--title` concise issue statement
-- `--description` impact and observed evidence
-- `--instructions` recommended fix or mitigation
-- `--workspace` current repository absolute path
-- Attribution: `--assigned-to`, `--created-by`, and `--identity` when an identity id is available
-- `--type issue` (or `task` when clearly non-defect maintenance work)
-- `--priority` mapped from severity (`high -> high`, `medium -> medium`, `low -> low`)
+For canonical `orbit task` CLI workflows (create/update/verify, attribution rules, and backfills), refer to the `orbit-manage-tasks` skill.
 
-Attribution rule:
-- If identity is available, use identity id + display name for attribution.
-- If identity is not available, use model name fallback for `--assigned-to` and `--created-by`.
-- Set `--identity` only when an identity id exists (identity id or model-alias identity).
+This skill's issue-tracking requirements:
 
-Example:
-
-```bash
-orbit task add \
-  --title "Fix failing maintenance check: rustfmt drift in orbit-core" \
-  --description "Assessment detected formatting drift in orbit-core/src/...; CI risk: medium." \
-  --instructions "Run rustfmt on affected files and re-run cargo test." \
-  --workspace "/abs/path/to/repo" \
-  --identity "linus" \
-  --assigned-to "Linus Torvalds (Maintainer)" \
-  --created-by "Linus Torvalds (Maintainer)" \
-  --type issue \
-  --priority medium
-```
-
-Record created task IDs in the final report.
+- Create one Orbit task per issue discovered
+- Use `--type issue` for defects/risks; use `--type chore` only when clearly non-defect maintenance work.
+- Map severity to `--priority` (`high`, `medium`, `low`).
+- Record created task IDs in the final report.
 
 If no issues are found, explicitly state "No maintenance issues found" in the report.
 
@@ -76,28 +54,19 @@ If no issues are found, explicitly state "No maintenance issues found" in the re
 
 ## Output
 
-Persist a markdown report to:
+Persist a markdown report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md`
 
-`{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md`
+If a maintenance artifact belongs to exactly one Orbit task, store that task-owned artifact under the linked task bundle's `artifacts/` directory instead of `agents/reports/`.
 
-The report must include:
-- Maintenance request summary
-- Scope and assessment timestamp (ISO date)
-- Actions performed
-- Files modified
-- Validation results (`build/tests/lint`: pass|fail|skipped)
-- Issues found
-- Orbit tasks created for issues (task ID + title + priority + status)
-- Follow-ups and risks
-
-Return a concise markdown response that includes the report path and a short status summary.
-
----
+The report must use below template:
 
 ## Report Template
 
 ```markdown
 # Maintenance Summary - <Title>
+
+Agent Name: <agent name>
+Agent Model: <model name>
 
 ## Status
 success | failed
@@ -120,7 +89,7 @@ success | failed
 - <issue summary>
 
 ## Orbit Tasks Created
-- <TASK_ID> - <title> (priority: <low|medium|high>, status: <todo|in-progress|done>)
+- <TASK_ID> - <title> (priority: <low|medium|high>, status: <backlog|in_progress|done>)
 
 ## Notes
 <follow-ups, risks, blockers>
@@ -133,5 +102,5 @@ success | failed
 - Every discovered issue is tracked via newly created Orbit task(s)
 - Maintenance actions completed or safely skipped
 - Validation completed
-- Markdown report written to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md`
+- Markdown report written to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md` unless it is a single-task artifact, in which case it belongs under that task bundle's `artifacts/`
 - Response includes report location and outcome summary

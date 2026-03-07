@@ -40,11 +40,49 @@ fn add_task(dir: &Path, title: &str) -> String {
     String::from_utf8(output).expect("utf8").trim().to_string()
 }
 
+fn task_dir(dir: &Path, id: &str) -> std::path::PathBuf {
+    let tasks_root = dir.join(".orbit").join("tasks");
+    for status in [
+        "proposed",
+        "backlog",
+        "in_progress",
+        "review",
+        "done",
+        "blocked",
+        "archived",
+    ] {
+        let candidate = tasks_root.join(status).join(id);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    tasks_root.join("missing").join(id)
+}
+
 #[test]
 fn task_add_prints_id() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "test task");
     assert!(id.starts_with("T"), "id should start with T: {id}");
+}
+
+#[test]
+fn task_add_creates_bundle_layout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let id = add_task(dir.path(), "bundle task");
+    let task_dir = task_dir(dir.path(), &id);
+
+    assert!(task_dir.join("task.yaml").exists());
+    assert!(task_dir.join("description.md").exists());
+    assert!(task_dir.join("instructions.md").exists());
+    assert!(task_dir.join("execution-summary.md").exists());
+    assert!(task_dir.join("artifacts").is_dir());
+
+    let task_yaml = std::fs::read_to_string(task_dir.join("task.yaml")).expect("read task yaml");
+    assert!(task_yaml.contains("schema_version: 2"));
+    assert!(!task_yaml.contains("description:"));
+    assert!(!task_yaml.contains("instructions:"));
+    assert!(!task_yaml.contains("execution_summary:"));
 }
 
 #[test]
@@ -124,11 +162,30 @@ fn task_update_rejects_non_updatable_fields() {
 fn task_archive_and_unarchive() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "archivable");
+    let initial_dir = task_dir(dir.path(), &id);
+    std::fs::write(
+        initial_dir.join("artifacts").join("report.md"),
+        "# execution report\n",
+    )
+    .expect("write artifact");
     orbit_in(dir.path())
         .args(["task", "archive", &id])
         .assert()
         .success()
         .stdout(predicate::str::contains("Archived"));
+
+    let archived_dir = dir
+        .path()
+        .join(".orbit")
+        .join("tasks")
+        .join("archived")
+        .join(&id);
+    assert!(!initial_dir.exists());
+    assert_eq!(
+        std::fs::read_to_string(archived_dir.join("artifacts").join("report.md"))
+            .expect("artifact moved"),
+        "# execution report\n"
+    );
 
     orbit_in(dir.path())
         .args(["task", "show", &id])
@@ -142,6 +199,19 @@ fn task_archive_and_unarchive() {
         .success()
         .stdout(predicate::str::contains("Unarchived"));
 
+    let backlog_dir = dir
+        .path()
+        .join(".orbit")
+        .join("tasks")
+        .join("backlog")
+        .join(&id);
+    assert!(!archived_dir.exists());
+    assert_eq!(
+        std::fs::read_to_string(backlog_dir.join("artifacts").join("report.md"))
+            .expect("artifact moved back"),
+        "# execution report\n"
+    );
+
     orbit_in(dir.path())
         .args(["task", "show", &id])
         .assert()
@@ -153,11 +223,14 @@ fn task_archive_and_unarchive() {
 fn task_delete_removes() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "deletable");
+    let task_dir = task_dir(dir.path(), &id);
     orbit_in(dir.path())
         .args(["task", "delete", &id])
         .assert()
         .success()
         .stdout(predicate::str::contains("Deleted"));
+
+    assert!(!task_dir.exists());
 
     orbit_in(dir.path())
         .args(["task", "show", &id])

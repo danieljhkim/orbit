@@ -1,23 +1,21 @@
 ---
 name: orbit-track-issues
-description: Use this skill when issues are identified by agents or humans. All issues must be tracked. Use this to track issues properly. 
+description: Use this skill when issues are identified by agents or humans. All issues must be tracked. Use this to track issues properly.
 ---
 
 # Track Issues
-
-## Purpose
 
 Use this skill to evaluate and maintain issue lifecycle discipline while synchronizing each issue with an Orbit task.
 
 Ensure:
 
+- No pre-existing pending orbit issue already covers the same concern.
 - The issue is clearly defined
 - The implementation aligns with issue intent
 - Status fields reflect reality
 - Risks and assumptions are documented
 - Next actions are explicit
 - Lifecycle state is disciplined
-- No duplicate issue records or duplicate Orbit issue tasks are created
 
 This skill does not implement product changes; it performs governance and tracking updates.
 
@@ -29,197 +27,12 @@ Create and manage Orbit tasks directly with `orbit task` commands.
 
 Requirements:
 
-- Every tracked issue must have one Orbit task with `--type issue`.
-- Task title should match the issue title closely.
-- Task `--context` should include relevant files and issue markdown path when available.
-- Task `--workspace` should be set to the repository path when available.
-- Task attribution fields `assigned_to` and `created_by` must be populated.
-- Set `identity_id` whenever an identity id is available.
-- If identity is unavailable, use model name fallback for `assigned_to` and `created_by`, and set `identity_id` only when model-alias identity exists.
+- Every identified issue MUST have one Orbit task with `--type issue`.
+- Task description MUST include description of the problem and the impact.
+- Task instruction MUST include concrete steps to your recommended next actions
+- Assign task priority based on the risk level assessment - `low`, `medium`, `high`
 
----
-
-## Expected Issue Structure
-
-Issues are stored as single markdown files organized by lifecycle state:
-
-```
-{{ORBIT_ROOT}}/
-  agents/
-    issues/
-      pending/
-        2026-02-14-add-remote-persistence.md
-      resolved/
-        2026-02-10-fix-cluster-timeout.md
-```
-
-Each issue is a single `.md` file.
-
-Required sections inside each issue file:
-
-- Title
-- Problem Statement
-- Scope
-- Constraints (if any)
-- Acceptance Criteria
-- Lifecycle State (must match parent folder: `pending` or `resolved`)
-- Orbit Task ID (required once task is created)
-- Notes / Execution Summary (optional)
-- Audit (optional)
-
----
-
-## Tracking Rules
-
-- Ensure no pre-existing pending issue already covers the same concern.
-- Ensure no existing open Orbit task of type `issue` already covers the same concern.
-- Clearly separate facts from interpretations.
-- Flag missing artifacts.
-- Explicitly call out stale or ambiguous issues.
-- Enforce structured lifecycle discipline.
-- Keep issue markdown state and Orbit task state synchronized.
-
----
-
-## Lifecycle Mapping
-
-Issue lifecycle is determined strictly by folder location:
-
-- `pending/` -> issue is open
-- `resolved/` -> issue is resolved
-
-No additional lifecycle states are allowed.
-
-Orbit task status mapping:
-
-- `pending/` -> task status should be `todo`, `in-progress`, or `blocked`
-- `resolved/` -> task status should be `done` (closed)
-
-If the issue file contains a "Lifecycle State" field, it must match its parent folder.
-
----
-
-## Orbit Task Commands
-
-### Search for duplicates
-
-```bash
-orbit task search "<issue keywords>" --json
-```
-
-Use results to avoid creating duplicate issue tasks.
-
-### Create issue task
-
-```bash
-orbit task add \
-  --title "<issue title>" \
-  --description "<problem summary>" \
-  --instructions "<acceptance criteria and next actions>" \
-  --context "<file1,file2,{{ORBIT_ROOT}}/agents/issues/pending/<issue>.md>" \
-  --workspace "<repo path>" \
-  --identity "<identity_id_or_model_identity>" \
-  --assigned-to "<identity_display_name_or_model_name>" \
-  --created-by "<identity_display_name_or_model_name>" \
-  --type issue \
-  --priority <low|medium|high|critical>
-```
-
-Record the returned task ID in issue markdown (`Orbit Task ID`).
-
-### Update issue task
-
-```bash
-orbit task update <TASK_ID> \
-  --description "<updated summary>" \
-  --instructions "<updated criteria, notes, risks, next actions>" \
-  --identity "<identity_id_or_model_identity>" \
-  --assigned-to "<identity_display_name_or_model_name>" \
-  --created-by "<identity_display_name_or_model_name>" \
-  --status <todo|in-progress|blocked|done|cancelled> \
-  --priority <low|medium|high|critical> \
-  --context "<updated file list>"
-```
-
-### Close issue task
-
-```bash
-orbit task close <TASK_ID>
-orbit task show <TASK_ID>
-```
-
----
-
-## Standard Workflow
-
-### 1) Search for Existing Records
-
-1. Search pending issue markdown files for overlap.
-2. Run `orbit task search "<query>" --json` for overlap.
-3. If a duplicate exists, update existing records instead of creating new ones.
-
-### 2) Create Tracking Records
-
-When a new issue is confirmed:
-
-1. Create issue markdown under `pending/`.
-2. Run `orbit task add ... --type issue ... --identity ... --assigned-to ... --created-by ...`.
-3. Record returned task ID in issue markdown under `Orbit Task ID`.
-
-### 3) Update Tracking Records
-
-When issue details change:
-
-1. Update issue markdown sections.
-2. Run `orbit task update <TASK_ID> ...`.
-3. Confirm issue markdown and task state remain aligned.
-
-### 4) Resolve Issue
-
-When acceptance criteria are met:
-
-1. Move issue markdown from `pending/` to `resolved/`.
-2. Run `orbit task close <TASK_ID>`.
-3. Run `orbit task show <TASK_ID>` to verify `done`.
-4. Include final notes in issue markdown.
-
----
-
-## Tracking Report Template
-
-```markdown
-# Issue Tracking Report - <Issue Name>
-
-## 1. Issue Summary
-Concise description of the problem and intended outcome.
-
-## 2. Current Lifecycle State
-Issue State: <pending|resolved>
-Orbit Task ID: <task-id>
-Orbit Task Status: <todo|in-progress|blocked|done|cancelled>
-Justification:
-
-## 3. Alignment with Acceptance Criteria
-- Criterion:
-  - Status: Met / Partially Met / Not Met
-  - Notes:
-
-## 4. Gaps or Inconsistencies
-- Gap:
-  - Impact:
-
-## 5. Risks / Assumptions
-- Risk:
-  - Severity: Low / Medium / High
-  - Mitigation:
-
-## 6. Recommended Next Actions
-- Concrete step(s)
-
-## 7. Overall Health Assessment
-Healthy / At Risk / Off Track
-Rationale:
-```
+For canonical `orbit task add` instruction, refer to the `orbit-manage-tasks` skill.
 
 ---
 
@@ -227,18 +40,5 @@ Rationale:
 
 Tracking is complete when:
 
-- No duplicate issue markdown or Orbit issue task exists for the same concern.
-- Lifecycle state is explicit and correct.
-- Acceptance criteria are evaluated.
-- Gaps are documented.
-- Risks are surfaced.
-- Clear next actions are defined.
-- Tracking report is stored at:
-
-```
-{{ORBIT_ROOT}}/agents/issues/<pending|resolved>/YYYY-MM-DD-<title>.md
-```
-
-- Lifecycle transitions also move the file to the correct folder.
-- Linked Orbit task is synchronized and uses type `issue`.
-- Linked Orbit task has non-null `assigned_to` and `created_by`, and sets `identity_id` when identity is available.
+- No duplicate Orbit issue task exists for the same concern.
+- Orbit issue task is created aligned to the orbit task contract.

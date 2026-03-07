@@ -1,13 +1,13 @@
 ---
 name: orbit-manage-tasks
-description: Manage tasks through deterministic CLI workflows for create, update, search, and close operations. Use this skill when the user asks to create, modify, find, or close orbit tasks.
+description: Must use this skill when creating, modifying, searching, or archiving orbit tasks.
 ---
 
 # Orbit Manage Tasks
 
 ## Purpose
 
-Provide a deterministic, auditable workflow to create, update, search, approve, and close Orbit tasks via the `orbit task` CLI, with explicit ID resolution and post-mutation verification.
+Provide a deterministic, auditable workflow to create, update, search, and archive Orbit tasks via the `orbit task` CLI, with explicit ID resolution and post-mutation verification.
 
 ## Scope
 
@@ -15,8 +15,8 @@ In scope:
 - Create: `orbit task add`
 - Update: `orbit task update`
 - Search: `orbit task search`
+- Archive: `orbit task archive`
 - Approve: `orbit task approve`
-- Close: `orbit task close`
 
 Supporting commands:
 - `orbit task show <id>`
@@ -24,134 +24,103 @@ Supporting commands:
 
 Out of scope unless explicitly requested:
 - `orbit task delete`
-- `orbit task reopen`
+- `orbit task unarchive`
+
+## Task Lifecycle
+
+Tasks follow a linear lifecycle:
+
+```
+proposed → backlog → in_progress → review → done
+```
+
+Any status can transition to `blocked`. If you have a task at hand that is in `in_progress`, and blocked from execution, transition it to `blocked`. 
+
 
 ## Operating Rules
 
 - Use `orbit task` commands only. Do not edit backing files directly.
 - Never invent task IDs. Resolve IDs from command output or search/list results.
 - Use explicit flags for each requested change.
-- After create/update/approve/close, verify with `orbit task show <id>`.
+- After create/update/archive, verify with `orbit task show <id>`.
 - Prefer `--json` for machine-readable output in automation/debug flows.
 - Avoid destructive operations unless the user explicitly asks.
-- Always set task attribution fields on create: `--assigned-to`, `--created-by`, and `--identity` when available.
+- Task `--context` should include relevant files and task-local artifact paths when available.
+- Task `--workspace` should be set to the repository path when available.
+- Always set task attribution fields on create: `--assigned-to` and `--created-by` when available.
 - If any attribution field is missing on an existing task, backfill via `orbit task update`.
+- Task `description`, `instructions`, and `execution_summary` values must be authored as multi-line markdown content.
+- File-backed tasks persist as task bundles at `{{ORBIT_ROOT}}/tasks/<status>/<task_id>/`.
+- The canonical task bundle files are `task.yaml`, `description.md`, `instructions.md`, `execution-summary.md`, and `artifacts/`.
+- Use `execution-summary.md` for the canonical task execution summary. Store any additional task-owned markdown or reports under `artifacts/`.
+- `execution_summary`, `branch`, and `pr-number` are update-only fields; do not set them during `orbit task add`.
+- Required on create: `title`, `description`, `instructions`, `workspace`, and `proposed-by`.
+
+Multi-line content input (required):
+
+```text
+This is a multi-line paragraph.
+Orbit persists it into the task bundle markdown sidecars.
+```
 
 ## Command Reference
 
 ### Create
 
-Task attribution requirement:
-- If identity is available, use identity id and identity display name.
-- If identity is not available, use model name fallback for `--assigned-to` and `--created-by`.
-- Use `--identity` only when the identity id exists (identity id or model-alias identity).
-
 ```bash
 orbit task add \
   --title "<title>" \
-  --description "<description>" \
-  --instructions "<instructions>" \
+  --description "<multi-line markdown content>" \
+  --instructions "<multi-line markdown content>" \
   --context "<comma,separated,context>" \
   --workspace "<absolute_or_relative_repo_path>" \
-  --identity "<identity_id_or_model_identity>" \
   --assigned-to "<identity_display_name_or_model_name>" \
   --created-by "<identity_display_name_or_model_name>" \
   --priority <low|medium|high|critical> \
-  --type <task|feature|issue|other> \
-  --owner "<owner>" \
-  --parent "<parent_id>"
+  --type <task|feature|issue|chore|refactor> \
+  --proposed-by "<proposer_name>"
 ```
-
-Minimum required:
-- `--title`
 
 ### Update
 
 ```bash
 orbit task update <id> \
-  --title "<title>" \
-  --description "<description>" \
-  --instructions "<instructions>" \
-  --context "<comma,separated,context>" \
-  --workspace "<absolute_or_relative_repo_path>" \
-  --identity "<identity_id_or_model_identity>" \
+  --execution-summary "<multi-line markdown content>" \
   --assigned-to "<identity_display_name_or_model_name>" \
-  --created-by "<identity_display_name_or_model_name>" \
-  --status <todo|in-progress|done|blocked|cancelled> \
-  --priority <low|medium|high|critical> \
-  --type <task|feature|issue|other> \
-  --owner "<owner>" \
-  --parent "<parent_id>"
+  --status <proposed|backlog|in-progress|review|done|blocked> \
+  --branch "<branch_name>" \
+  --pr-number "<pr_number>"
 ```
-
-Field-clearing notes:
-- Clear parent: `--parent ""`
-- Clear context: `--context ""`
-- Clear workspace: `--workspace ""`
 
 ### Search
-
-```bash
-orbit task search "<query>"
-```
 
 ```bash
 orbit task search "<query>" --json
 ```
 
-### Close
+### Archive
 
 ```bash
-orbit task close <id>
-```
-
-Verify close:
-
-```bash
-orbit task show <id>
+orbit task archive <id>
 ```
 
 ### Approve
 
 ```bash
-orbit task approve <id> --by "<approver>" --note "<optional note>"
+orbit task approve <id> --by "<approver>" --note "<note>"
 ```
 
 ## Standard Workflows
 
-### 1) Create Task
-
-1. Collect required fields from user request plus attribution fields (`identity`, `assigned-to`, `created-by`).
-2. Run `orbit task add ...` including attribution fields.
-3. Capture returned task ID.
-4. Run `orbit task show <id>`.
-5. If attribution fields are missing, run `orbit task update <id> --identity ... --assigned-to ... --created-by ...`.
-6. Report ID and key fields (title, status, priority, owner, identity, assigned_to, created_by).
-
-### 2) Update Task
-
-1. If no ID is provided, run `orbit task search "<query>" --json`.
-2. Resolve the correct ID.
-3. Run `orbit task update <id> ...` with only requested changes.
-4. Run `orbit task show <id>` and report final state.
-
-### 3) Search Tasks
-
-1. Run `orbit task search "<query>"` (or `--json`).
-2. Return matches with ID, title, status, priority, owner.
-3. If no matches, state that and offer creation next.
-
-### 4) Close Task
-
-1. Resolve ID directly or via search.
-2. Run `orbit task close <id>`.
-3. Run `orbit task show <id>` to confirm.
-4. Report closed status.
+1. Create Task 
+2. Update Task
+3. Search Tasks
+4. Archive Task
 
 ## Response Contract
 
 After executing commands, respond with:
-- Action performed (`created`, `updated`, `found`, `closed`)
+- Action performed (`created`, `updated`, `completed`, `blocked`, `approved`)
 - Task ID(s)
 - Important fields changed or confirmed
 - Any failure with concrete next-step remediation

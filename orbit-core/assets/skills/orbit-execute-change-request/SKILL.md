@@ -1,6 +1,6 @@
 ---
 name: orbit-execute-change-request
-description: Use this when executing human-initiated code change in order to manage the full lifecycle in Orbit tasks (create, update, close). Use this before and after making any code changes.
+description: Use this when executing human-initiated code change in order to manage the full lifecycle in Orbit tasks (create, update, archive). Use this before and after making any code changes.
 ---
 
 # Orbit Execute Change Request
@@ -11,27 +11,13 @@ Handle human-initiated engineering changes (feature, refactor, improvement, issu
 
 ---
 
-## Required Task Lifecycle
-
-Manage a SINGLE Orbit task per change request:
-
-1. Create task at start, if task is not already created.
-2. If any doubt remains, ask clarifying questions and record them in the task.
-3. Ensure task is approved before implementation or agent execution.
-4. Update task during/after execution with implementation comments.
-5. Close task when job is complete and validated.
-
-Do not skip lifecycle updates.
-
----
-
 ## Inputs
 
 - Natural-language change request
 - Constraints (scope, files, deadlines), if any
 - Repository workspace
 - Priority/type hints, if any
-- Actor identity metadata (identity id + display name), if available
+- Actor identity metadata (display name), if available
 
 ---
 
@@ -39,136 +25,42 @@ Do not skip lifecycle updates.
 
 1. Clarify intent and success criteria.
 2. Create or link the tracking task in Orbit.
-3. Obtain/record approval before execution.
-4. Implement a minimal, safe diff.
-5. Run validation (build/tests/lint).
-6. Update and close the task with an auditable summary.
-7. Persist an execution summary markdown file.
+3. Obtain/record approval before execution (if task is in `proposed` status). If approval cannot be obtained right away, your job is done for now.
+4. Implement the requested change and validate.
+5. Once the task is completed,
+6. Persist the execution summary in the linked task bundle.
 
 ---
 
-## Task Management Contract (`orbit task`)
+## Required Task Lifecycle
 
-### 1) Create Task (required before edits)
+For the canonical `orbit task` CLI workflows (create/update/search/approve/archive), refer to the `orbit-manage-tasks` skill. It defines required attribution fields and post-mutation verification.
 
-Use `orbit task add` and include at least:
+Manage a SINGLE Orbit task per change request:
 
-- `--title` from the change request
-- `--description` summarizing the requested outcome
-- `--instructions` capturing initial plan/constraints
-- `--workspace` current repository path
-- `--type` appropriate to request (`task|feature|issue|other`)
-- Attribution: `--assigned-to`, `--created-by`, and `--identity` when an identity id is available
+1. Create task at start, if task is not already created.
+2. If any doubt remains, ask clarifying questions and record them in the task comments.
+3. Ensure task is approved before implementation (if `proposed`). If approval cannot be obtained right away, your job is done for now.
+4. Update task status (from `backlog`) to `in_progress` before execution.
+5. Once change is completed, update the status from `in_progress` to `review`
+6. 
 
-Example:
-
-```bash
-orbit task add \
-  --title "Refactor task lifecycle handling" \
-  --description "Apply requested refactor and preserve behavior" \
-  --instructions "Implement minimal diff; run tests" \
-  --workspace "/abs/path/to/repo" \
-  --identity "linus" \
-  --assigned-to "Linus Torvalds (Maintainer)" \
-  --created-by "Linus Torvalds (Maintainer)" \
-  --type feature \
-  --priority medium
-```
-
-Capture and retain the created task ID.
-
-Task attribution rule (required):
-- If identity is available, use identity id + display name for attribution.
-- If identity is not available, use model name fallback for `--assigned-to` and `--created-by`.
-- Set `--identity` only when an identity id exists (identity id or model-alias identity).
-- Never leave `assigned_to` or `created_by` null on newly created tasks.
-
-### 2) Approve Task (required before implementation)
-
-Preferred explicit approval:
-
-```bash
-orbit task approve <TASK_ID> --by "human" --note "approved verbally by user"
-```
-
-Flexible path when user gives explicit verbal approval in-session:
-
-```bash
-orbit agent run --task <TASK_ID> --approve-on-verbal --approved-by "agent" --approval-note "approved based on explicit user verbal confirmation"
-```
-
-If task approval is required by config (`[task.approval] required_for_agent = true`), execution must not proceed without one of the above.
-
-### 3) Update Task With Execution Comments (required)
-
-After implementation/validation, update the task with execution comments.
-
-Because `orbit task` has no dedicated comment command, write execution notes into `--instructions` and/or `--description`.
-
-Include:
-
-- What changed
-- Files touched
-- Validation results
-- Risks/follow-ups
-
-Example:
-
-```bash
-orbit task update <TASK_ID> \
-  --instructions "Execution comments: updated parser, added tests, build/tests pass." \
-  --status in-progress
-```
-
-Then apply final update reflecting completion summary.
-
-If `identity_id`, `assigned_to`, or `created_by` are missing on an existing task, backfill them:
-
-```bash
-orbit task update <TASK_ID> \
-  --assigned-to "<identity_display_name_or_model_name>" \
-  --created-by "<identity_display_name_or_model_name>"
-```
-
-If an identity id is available, include it in the same update:
-
-```bash
-orbit task update <TASK_ID> --identity "<identity_id_or_model_identity>"
-```
-
-### 4) Close Task (required when done)
-
-When acceptance criteria are met and validation is complete:
-
-```bash
-orbit task close <TASK_ID>
-```
-
-Verify final state:
-
-```bash
-orbit task show <TASK_ID>
-```
-
----
-
-## Execution Contract
-
-- Operate only within the specified workspace.
-- Prefer incremental, reviewable diffs.
-- Preserve existing behavior unless explicitly changed.
-- Fail fast on validation errors.
-- Keep task state synchronized with actual execution state.
-
+Do not skip lifecycle updates.
 
 ---
 
 ## Output
 
-Persist an execution summary markdown file at:
+Persist the execution summary markdown in the linked task bundle at:
 
 ```
-{{ORBIT_ROOT}}/agents/executions/YYYY-MM-DD-<title>.md
+{{ORBIT_ROOT}}/tasks/<current-status>/<task-id>/execution-summary.md
+```
+
+If you need additional task-owned notes beyond the canonical execution summary, place them under:
+
+```
+{{ORBIT_ROOT}}/tasks/<current-status>/<task-id>/artifacts/
 ```
 
 The execution summary file must include:
@@ -180,10 +72,13 @@ The execution summary file must include:
 - Validation results (build/tests/lint)
 - Risks, follow-ups, and notes
 
-Return output as markdown (not JSON), using this structure:
+Return output as markdown, using this structure:
 
 ```markdown
 # Execution Summary - <Change Request Title>
+
+Agent Name: <agent name>
+Agent Model: <model name>
 
 ## Status
 success | failed
@@ -212,7 +107,7 @@ Task ID: <orbit-task-id>
 
 - Requested change implemented
 - Validation completed
-- Task approved before execution
+- Task approved before execution (if required)
 - Task updated with execution comments
-- Task closed (`done`) when successful
-- Markdown summary written to `{{ORBIT_ROOT}}/agents/executions/YYYY-MM-DD-<title>.md`
+- Task archived when successful
+- Markdown summary written to the linked task bundle's `execution-summary.md`

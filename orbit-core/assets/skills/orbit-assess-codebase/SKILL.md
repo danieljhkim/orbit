@@ -42,6 +42,8 @@ All findings of issues must be emitted and audited in a structured form suitable
 8. Turn each issue finding into a tracked issue by invoking `orbit-track-issues` (do not create issue files directly).
 9. Write the assessment to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md`.
 
+Assessment reports are global outputs. If you create any artifact that belongs to exactly one Orbit task during follow-up work, store that artifact under the task bundle's `artifacts/` directory instead of `agents/reports/`.
+
 ---
 
 ## Evaluation Dimensions
