@@ -75,7 +75,7 @@ impl OrbitRuntime {
             }
         };
 
-        let planned_calls = match parse_planned_tool_calls(&task.instructions) {
+        let planned_calls = match parse_planned_tool_calls(&task.plan) {
             Ok(calls) => calls,
             Err(err) => {
                 let _ = self.with_mutation(|| {

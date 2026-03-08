@@ -317,7 +317,7 @@ mod tests {
             .add_task(TaskAddParams {
                 title: "full task".to_string(),
                 description: "detailed".to_string(),
-                instructions: "steps".to_string(),
+                plan: "steps".to_string(),
                 context_files: vec!["ARCHITECTURE.md".to_string()],
                 workspace_path: None,
                 assigned_to: None,
@@ -330,7 +330,7 @@ mod tests {
 
         assert_eq!(task.title, "full task");
         assert_eq!(task.description, "detailed");
-        assert_eq!(task.instructions, "steps");
+        assert_eq!(task.plan, "steps");
         assert_eq!(task.context_files, vec!["ARCHITECTURE.md".to_string()]);
         assert_eq!(task.priority, TaskPriority::High);
         assert_eq!(task.task_type, orbit_types::TaskType::Issue);

@@ -9,7 +9,7 @@ use crate::paths::normalize_path;
 pub struct TaskAddParams {
     pub title: String,
     pub description: String,
-    pub instructions: String,
+    pub plan: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
     pub assigned_to: Option<String>,
@@ -24,7 +24,7 @@ impl Default for TaskAddParams {
         Self {
             title: String::new(),
             description: String::new(),
-            instructions: String::new(),
+            plan: String::new(),
             context_files: Vec::new(),
             workspace_path: None,
             assigned_to: None,
@@ -61,7 +61,7 @@ impl OrbitRuntime {
             let task = self.context.task_store.create_task(StoreTaskCreateParams {
                 title: params.title.clone(),
                 description: params.description.clone(),
-                instructions: params.instructions.clone(),
+                plan: params.plan.clone(),
                 execution_summary: String::new(),
                 context_files: params.context_files.clone(),
                 workspace_path: workspace_path.clone(),

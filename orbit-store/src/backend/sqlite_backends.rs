@@ -27,7 +27,7 @@ impl TaskStoreBackend for SqliteTaskStoreBackend {
             tx.insert_task(&TaskInsertParams {
                 title: params.title.clone(),
                 description: params.description.clone(),
-                instructions: params.instructions.clone(),
+                plan: params.plan.clone(),
                 execution_summary: params.execution_summary.clone(),
                 context_files: params.context_files.clone(),
                 workspace_path: params.workspace_path.clone(),
@@ -73,7 +73,7 @@ impl TaskStoreBackend for SqliteTaskStoreBackend {
                 &TaskUpdateFields {
                     title: params.title.clone(),
                     description: params.description.clone(),
-                    instructions: params.instructions.clone(),
+                    plan: params.plan.clone(),
                     execution_summary: params.execution_summary.clone(),
                     context_files: params.context_files.clone(),
                     workspace_path: params.workspace_path,

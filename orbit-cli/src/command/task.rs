@@ -65,9 +65,9 @@ pub struct TaskAddArgs {
     /// Task description
     #[arg(long)]
     pub description: String,
-    /// Task instructions payload (agent planning input)
-    #[arg(long)]
-    pub instructions: String,
+    /// Task plan payload (agent planning input)
+    #[arg(long, alias = "instructions")]
+    pub plan: String,
     /// Comma-separated context file paths
     #[arg(long, default_value = "")]
     pub context: String,
@@ -96,7 +96,7 @@ impl Execute for TaskAddArgs {
         let task = runtime.add_task(TaskAddParams {
             title: self.title,
             description: self.description,
-            instructions: self.instructions,
+            plan: self.plan,
             context_files: parse_context_csv(&self.context),
             workspace_path: Some(self.workspace),
             assigned_to: self.assigned_to,
@@ -170,8 +170,8 @@ impl Execute for TaskShowArgs {
             if !task.description.is_empty() {
                 println!("Description: {}", task.description);
             }
-            if !task.instructions.is_empty() {
-                println!("Instructions: {}", task.instructions);
+            if !task.plan.is_empty() {
+                println!("Plan:        {}", task.plan);
             }
             if !task.execution_summary.is_empty() {
                 println!("Execution Summary: {}", task.execution_summary);
@@ -417,7 +417,8 @@ fn task_to_json(task: &orbit_core::Task) -> Value {
         "id": task.id,
         "title": task.title,
         "description": task.description,
-        "instructions": task.instructions,
+        "plan": task.plan,
+        "instructions": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,
         "workspace_path": task.workspace_path,

@@ -49,7 +49,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         id: row.get(0)?,
         title: row.get(1)?,
         description: row.get(2)?,
-        instructions: row.get(3)?,
+        plan: row.get(3)?,
         execution_summary,
         context_files: parse_context_files(&context_files_raw)?,
         workspace_path,
@@ -176,7 +176,7 @@ impl Store {
 pub struct TaskInsertParams {
     pub title: String,
     pub description: String,
-    pub instructions: String,
+    pub plan: String,
     pub execution_summary: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
@@ -195,7 +195,7 @@ impl Default for TaskInsertParams {
         Self {
             title: String::new(),
             description: String::new(),
-            instructions: String::new(),
+            plan: String::new(),
             execution_summary: String::new(),
             context_files: Vec::new(),
             workspace_path: None,
@@ -215,7 +215,7 @@ impl Default for TaskInsertParams {
 pub struct TaskUpdateFields {
     pub title: Option<String>,
     pub description: Option<String>,
-    pub instructions: Option<String>,
+    pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub context_files: Option<Vec<String>>,
     pub workspace_path: Option<Option<String>>,
@@ -242,7 +242,7 @@ impl<'a> StoreTx<'a> {
             id: new_id("task"),
             title: params.title.clone(),
             description: params.description.clone(),
-            instructions: params.instructions.clone(),
+            plan: params.plan.clone(),
             execution_summary: params.execution_summary.clone(),
             context_files: params.context_files.clone(),
             workspace_path: params.workspace_path.clone(),
@@ -269,7 +269,7 @@ impl<'a> StoreTx<'a> {
                     task.id,
                     task.title,
                     task.description,
-                    task.instructions,
+                    task.plan,
                     task.execution_summary,
                     context_files_json,
                     task.workspace_path,
@@ -306,7 +306,7 @@ impl<'a> StoreTx<'a> {
             sets.push("description = ?");
             param_values.push(Box::new(v.clone()));
         }
-        if let Some(ref v) = fields.instructions {
+        if let Some(ref v) = fields.plan {
             sets.push("instructions = ?");
             param_values.push(Box::new(v.clone()));
         }
@@ -439,7 +439,7 @@ mod tests {
                 tx.insert_task(&TaskInsertParams {
                     title: "test task".to_string(),
                     description: "a description".to_string(),
-                    instructions: "step one".to_string(),
+                    plan: "step one".to_string(),
                     execution_summary: "ran smoke checks".to_string(),
                     context_files: vec!["ARCHITECTURE.md".to_string()],
                     workspace_path: None,
@@ -453,7 +453,7 @@ mod tests {
         let found = store.get_task(&task.id).expect("get").expect("some");
         assert_eq!(found.title, "test task");
         assert_eq!(found.description, "a description");
-        assert_eq!(found.instructions, "step one");
+        assert_eq!(found.plan, "step one");
         assert_eq!(found.execution_summary, "ran smoke checks");
         assert_eq!(found.context_files, vec!["ARCHITECTURE.md".to_string()]);
         assert_eq!(found.priority, TaskPriority::High);

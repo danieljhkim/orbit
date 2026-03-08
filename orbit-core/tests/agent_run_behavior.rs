@@ -25,7 +25,7 @@ fn agent_run_executes_sequentially_and_stops_on_first_failure() {
     let task = runtime
         .add_task(TaskAddParams {
             title: "agent".to_string(),
-            instructions: format!(
+            plan: format!(
                 r#"{{
                   "tool_calls": [
                     {{"name":"fs.read","input":{{"path":"{}"}}}},
@@ -72,7 +72,7 @@ fn successful_agent_run_records_session_and_audits() {
     let task = runtime
         .add_task(TaskAddParams {
             title: "agent success".to_string(),
-            instructions: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
+            plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
             ..Default::default()
         })
         .expect("task");
@@ -119,7 +119,7 @@ fn agent_run_requires_approval_when_config_enabled() {
     let task = runtime
         .add_task(TaskAddParams {
             title: "agent gated".to_string(),
-            instructions: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
+            plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
             ..Default::default()
         })
         .expect("task");
@@ -144,7 +144,7 @@ fn agent_run_succeeds_after_explicit_approval() {
     let task = runtime
         .add_task(TaskAddParams {
             title: "agent after approval".to_string(),
-            instructions: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
+            plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
             ..Default::default()
         })
         .expect("task");

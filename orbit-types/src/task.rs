@@ -166,7 +166,8 @@ pub struct Task {
     pub id: OrbitId,
     pub title: String,
     pub description: String,
-    pub instructions: String,
+    #[serde(default, alias = "instructions")]
+    pub plan: String,
     #[serde(default)]
     pub execution_summary: String,
     pub context_files: Vec<String>,

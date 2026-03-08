@@ -27,9 +27,9 @@ Use this skill for routine maintenance that is safe, incremental, and non-disrup
 
 ## Assessment And Issue Tracking Contract
 
-When assessment finds any issue (bug, risk, drift, failing check, deprecated usage, security concern), create a tracking task immediately via `orbit task add`.
+When assessment finds any issue (bug, risk, drift, failing check, deprecated usage, security concern), create a tracking task immediately via `orbit task add` - refer to `orbit-create-task` skill on how to create a task.
 
-For canonical `orbit task` CLI workflows (create/update/verify, attribution rules, and backfills), refer to the `orbit-manage-tasks` skill.
+For canonical `orbit task` CLI workflows (update/show/search), refer to the `orbit-manage-tasks` skill.
 
 This skill's issue-tracking requirements:
 

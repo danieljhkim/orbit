@@ -14,7 +14,7 @@ use crate::sqlite::scheduler_store::DueJobsClaim;
 pub struct TaskCreateParams {
     pub title: String,
     pub description: String,
-    pub instructions: String,
+    pub plan: String,
     pub execution_summary: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
@@ -32,7 +32,7 @@ pub struct TaskCreateParams {
 pub struct TaskUpdateParams {
     pub title: Option<String>,
     pub description: Option<String>,
-    pub instructions: Option<String>,
+    pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub context_files: Option<Vec<String>>,
     pub workspace_path: Option<Option<String>>,

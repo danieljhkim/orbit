@@ -56,17 +56,15 @@ pub fn compose_agent_context(
     Ok(context)
 }
 
-pub fn parse_planned_tool_calls(
-    instructions_payload: &str,
-) -> Result<Vec<AgentToolCall>, OrbitError> {
-    if instructions_payload.trim().is_empty() {
+pub fn parse_planned_tool_calls(plan_payload: &str) -> Result<Vec<AgentToolCall>, OrbitError> {
+    if plan_payload.trim().is_empty() {
         return Err(OrbitError::AgentRun(
-            "task instructions are empty; expected JSON payload".to_string(),
+            "task plan is empty; expected JSON payload".to_string(),
         ));
     }
 
-    let payload: Value = serde_json::from_str(instructions_payload)
-        .map_err(|e| OrbitError::AgentRun(format!("invalid task instructions JSON: {e}")))?;
+    let payload: Value = serde_json::from_str(plan_payload)
+        .map_err(|e| OrbitError::AgentRun(format!("invalid task plan JSON: {e}")))?;
 
     let call_items = match payload {
         Value::Array(items) => items,
@@ -76,20 +74,19 @@ pub fn parse_planned_tool_calls(
             .cloned()
             .ok_or_else(|| {
                 OrbitError::AgentRun(
-                    "instructions payload must be an array or object with `tool_calls` array"
-                        .to_string(),
+                    "plan payload must be an array or object with `tool_calls` array".to_string(),
                 )
             })?,
         _ => {
             return Err(OrbitError::AgentRun(
-                "instructions payload must be an array or object".to_string(),
+                "plan payload must be an array or object".to_string(),
             ));
         }
     };
 
     if call_items.is_empty() {
         return Err(OrbitError::AgentRun(
-            "instructions payload contains no tool calls".to_string(),
+            "plan payload contains no tool calls".to_string(),
         ));
     }
 
@@ -123,8 +120,8 @@ fn compose_instructions(task: &Task, skills: &[Skill], identity_block: Option<&s
     if !task.description.trim().is_empty() {
         parts.push(task.description.trim().to_string());
     }
-    if !task.instructions.trim().is_empty() {
-        parts.push(task.instructions.trim().to_string());
+    if !task.plan.trim().is_empty() {
+        parts.push(task.plan.trim().to_string());
     }
     for skill in skills {
         if !skill.instructions.trim().is_empty() {

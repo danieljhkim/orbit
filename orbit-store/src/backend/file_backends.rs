@@ -18,7 +18,7 @@ impl TaskStoreBackend for TaskFileStore {
         self.create_task(FileTaskInsert {
             title: params.title,
             description: params.description,
-            instructions: params.instructions,
+            plan: params.plan,
             execution_summary: params.execution_summary,
             context_files: params.context_files,
             workspace_path: params.workspace_path,
@@ -59,7 +59,7 @@ impl TaskStoreBackend for TaskFileStore {
             &FileTaskUpdate {
                 title: params.title,
                 description: params.description,
-                instructions: params.instructions,
+                plan: params.plan,
                 execution_summary: params.execution_summary,
                 context_files: params.context_files,
                 workspace_path: params.workspace_path,

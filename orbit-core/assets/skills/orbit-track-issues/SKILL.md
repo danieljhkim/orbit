@@ -32,7 +32,7 @@ Requirements:
 - Task instruction MUST include concrete steps to your recommended next actions
 - Assign task priority based on the risk level assessment - `low`, `medium`, `high`
 
-For canonical `orbit task add` instruction, refer to the `orbit-manage-tasks` skill.
+For canonical `orbit task add` instruction, refer to the `orbit-create-task` skill.
 
 ---
 

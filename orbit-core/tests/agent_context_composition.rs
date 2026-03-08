@@ -34,8 +34,7 @@ fn composition_merges_in_deterministic_order_and_hash_is_stable() {
         .add_task(TaskAddParams {
             title: "compose".to_string(),
             description: "task description".to_string(),
-            instructions: r#"{"tool_calls":[{"name":"fs.read","input":{"path":"README.md"}}]}"#
-                .to_string(),
+            plan: r#"{"tool_calls":[{"name":"fs.read","input":{"path":"README.md"}}]}"#.to_string(),
             context_files: vec!["A.md".to_string(), "B.md".to_string()],
             ..Default::default()
         })
@@ -85,7 +84,7 @@ fn composition_merges_in_deterministic_order_and_hash_is_stable() {
 }
 
 #[test]
-fn parse_planned_tool_calls_from_task_instructions_payload() {
+fn parse_planned_tool_calls_from_task_plan_payload() {
     let payload = r#"{
       "tool_calls": [
         {"name":"fs.read","input":{"path":"README.md"}},
@@ -106,8 +105,7 @@ fn empty_effective_allowlist_is_rejected() {
     let task = runtime
         .add_task(TaskAddParams {
             title: "compose".to_string(),
-            instructions: r#"{"tool_calls":[{"name":"fs.read","input":{"path":"README.md"}}]}"#
-                .to_string(),
+            plan: r#"{"tool_calls":[{"name":"fs.read","input":{"path":"README.md"}}]}"#.to_string(),
             ..Default::default()
         })
         .expect("task");

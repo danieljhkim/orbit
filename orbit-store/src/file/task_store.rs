@@ -6,12 +6,10 @@ use orbit_types::{OrbitError, Task, TaskPriority, TaskStatus, TaskType};
 use serde::{Deserialize, Serialize};
 
 const TASK_DOC_FILE_NAME: &str = "task.yaml";
-const LEGACY_DESCRIPTION_FILE_NAME: &str = "description.md";
-const INSTRUCTIONS_FILE_NAME: &str = "instructions.md";
+const PLAN_FILE_NAME: &str = "plan.md";
 const EXECUTION_SUMMARY_FILE_NAME: &str = "execution-summary.md";
 const ARTIFACTS_DIR_NAME: &str = "artifacts";
-const TASK_SCHEMA_VERSION: u8 = 3;
-const LEGACY_TASK_SCHEMA_VERSION: u8 = 2;
+const TASK_SCHEMA_VERSION: u8 = 4;
 
 #[derive(Clone)]
 pub(crate) struct TaskFileStore {
@@ -22,7 +20,7 @@ pub(crate) struct TaskFileStore {
 pub(crate) struct FileTaskInsert {
     pub title: String,
     pub description: String,
-    pub instructions: String,
+    pub plan: String,
     pub execution_summary: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
@@ -40,7 +38,7 @@ pub(crate) struct FileTaskInsert {
 pub(crate) struct FileTaskUpdate {
     pub title: Option<String>,
     pub description: Option<String>,
-    pub instructions: Option<String>,
+    pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub context_files: Option<Vec<String>>,
     pub workspace_path: Option<Option<String>>,
@@ -172,7 +170,7 @@ struct TaskFileDocument {
 #[derive(Debug, Clone)]
 struct TaskBundle {
     doc: TaskFileDocument,
-    instructions: String,
+    plan: String,
     execution_summary: String,
 }
 
@@ -254,7 +252,7 @@ impl TaskFileStore {
                 scheduler_id: None,
                 scheduler_run_id: None,
             },
-            instructions: params.instructions,
+            plan: params.plan,
             execution_summary: params.execution_summary,
         };
 
@@ -340,8 +338,8 @@ impl TaskFileStore {
         if let Some(value) = &fields.description {
             bundle.doc.description = value.clone();
         }
-        if let Some(value) = &fields.instructions {
-            bundle.instructions = value.clone();
+        if let Some(value) = &fields.plan {
+            bundle.plan = value.clone();
         }
         if let Some(value) = &fields.execution_summary {
             bundle.execution_summary = value.clone();
@@ -476,12 +474,11 @@ impl TaskFileStore {
             &self.task_doc_path(task_dir),
             &serialize_task_doc_yaml(&bundle.doc)?,
         )?;
-        atomic_write_string(&self.instructions_path(task_dir), &bundle.instructions)?;
+        atomic_write_string(&self.plan_path(task_dir), &bundle.plan)?;
         atomic_write_string(
             &self.execution_summary_path(task_dir),
             &bundle.execution_summary,
         )?;
-        remove_if_exists(&self.legacy_description_path(task_dir))?;
         Ok(())
     }
 
@@ -489,26 +486,12 @@ impl TaskFileStore {
         let doc_path = self.task_doc_path(task_dir);
         let raw = fs::read_to_string(&doc_path)
             .map_err(|e| bundle_read_error(&doc_path, "task metadata", e))?;
-        let mut doc = serde_yaml::from_str::<TaskFileDocument>(&raw).map_err(|e| {
+        let doc = serde_yaml::from_str::<TaskFileDocument>(&raw).map_err(|e| {
             OrbitError::Store(format!("invalid task file {}: {e}", doc_path.display()))
         })?;
-        doc.description = match doc.schema_version {
-            LEGACY_TASK_SCHEMA_VERSION => {
-                read_required_text(&self.legacy_description_path(task_dir), "task description")?
-            }
-            TASK_SCHEMA_VERSION => doc.description.clone(),
-            other => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "unsupported task schema version: {other}"
-                )));
-            }
-        };
         let bundle = TaskBundle {
             doc,
-            instructions: read_required_text(
-                &self.instructions_path(task_dir),
-                "task instructions",
-            )?,
+            plan: read_required_text(&self.plan_path(task_dir), "task plan")?,
             execution_summary: read_required_text(
                 &self.execution_summary_path(task_dir),
                 "task execution summary",
@@ -530,7 +513,7 @@ impl TaskFileStore {
         bundle: &TaskBundle,
         task_dir: Option<&Path>,
     ) -> Result<(), OrbitError> {
-        if !is_supported_task_schema_version(bundle.doc.schema_version) {
+        if bundle.doc.schema_version != TASK_SCHEMA_VERSION {
             return Err(OrbitError::InvalidInput(format!(
                 "unsupported task schema version: {}",
                 bundle.doc.schema_version
@@ -576,12 +559,8 @@ impl TaskFileStore {
         task_dir.join(TASK_DOC_FILE_NAME)
     }
 
-    fn legacy_description_path(&self, task_dir: &Path) -> PathBuf {
-        task_dir.join(LEGACY_DESCRIPTION_FILE_NAME)
-    }
-
-    fn instructions_path(&self, task_dir: &Path) -> PathBuf {
-        task_dir.join(INSTRUCTIONS_FILE_NAME)
+    fn plan_path(&self, task_dir: &Path) -> PathBuf {
+        task_dir.join(PLAN_FILE_NAME)
     }
 
     fn execution_summary_path(&self, task_dir: &Path) -> PathBuf {
@@ -595,10 +574,6 @@ impl TaskFileStore {
 
 fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError> {
     serde_yaml::to_string(doc).map_err(|e| OrbitError::Store(e.to_string()))
-}
-
-fn is_supported_task_schema_version(version: u8) -> bool {
-    version == LEGACY_TASK_SCHEMA_VERSION || version == TASK_SCHEMA_VERSION
 }
 
 fn atomic_write_string(path: &Path, contents: &str) -> Result<(), OrbitError> {
@@ -621,14 +596,6 @@ fn atomic_write_string(path: &Path, contents: &str) -> Result<(), OrbitError> {
     Ok(())
 }
 
-fn remove_if_exists(path: &Path) -> Result<(), OrbitError> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(OrbitError::Io(err.to_string())),
-    }
-}
-
 fn read_required_text(path: &Path, label: &str) -> Result<String, OrbitError> {
     fs::read_to_string(path).map_err(|e| bundle_read_error(path, label, e))
 }
@@ -646,7 +613,7 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         id: bundle.doc.id,
         title: bundle.doc.title,
         description: bundle.doc.description,
-        instructions: bundle.instructions,
+        plan: bundle.plan,
         execution_summary: bundle.execution_summary,
         context_files: bundle.doc.context_files,
         workspace_path: bundle.doc.workspace_path,
@@ -672,9 +639,7 @@ mod tests {
     use std::fs;
 
     use super::{ARTIFACTS_DIR_NAME, EXECUTION_SUMMARY_FILE_NAME, FileTaskInsert, FileTaskUpdate};
-    use super::{
-        INSTRUCTIONS_FILE_NAME, LEGACY_DESCRIPTION_FILE_NAME, TASK_DOC_FILE_NAME, TaskFileStore,
-    };
+    use super::{PLAN_FILE_NAME, TASK_DOC_FILE_NAME, TaskFileStore};
     use orbit_types::{TaskPriority, TaskStatus, TaskType};
     use tempfile::tempdir;
 
@@ -682,7 +647,7 @@ mod tests {
         FileTaskInsert {
             title: "Bundle task".to_string(),
             description: "Task description".to_string(),
-            instructions: "Task instructions".to_string(),
+            plan: "Task plan".to_string(),
             execution_summary: String::new(),
             context_files: vec!["orbit-store/src/file/task_store.rs".to_string()],
             workspace_path: Some("/tmp/workspace".to_string()),
@@ -708,24 +673,23 @@ mod tests {
         let task_dir = dir.path().join("backlog").join(&task.id);
 
         assert!(task_dir.join(TASK_DOC_FILE_NAME).exists());
-        assert!(!task_dir.join(LEGACY_DESCRIPTION_FILE_NAME).exists());
-        assert!(task_dir.join(INSTRUCTIONS_FILE_NAME).exists());
+        assert!(task_dir.join(PLAN_FILE_NAME).exists());
         assert!(task_dir.join(EXECUTION_SUMMARY_FILE_NAME).exists());
         assert!(task_dir.join(ARTIFACTS_DIR_NAME).is_dir());
 
         let yaml = fs::read_to_string(task_dir.join(TASK_DOC_FILE_NAME)).expect("read yaml");
-        assert!(yaml.contains("schema_version: 3"));
+        assert!(yaml.contains("schema_version: 4"));
         assert!(yaml.contains("description: Task description"));
-        assert!(!yaml.contains("instructions:"));
+        assert!(!yaml.contains("plan:"));
         assert!(!yaml.contains("execution_summary:"));
         assert_eq!(
-            fs::read_to_string(task_dir.join(INSTRUCTIONS_FILE_NAME)).expect("instructions"),
-            "Task instructions"
+            fs::read_to_string(task_dir.join(PLAN_FILE_NAME)).expect("plan"),
+            "Task plan"
         );
     }
 
     #[test]
-    fn update_task_rewrites_task_yaml_and_markdown_sidecars() {
+    fn update_task_rewrites_task_yaml_and_plan_sidecar() {
         let dir = tempdir().expect("tempdir");
         let store = TaskFileStore::new(dir.path().to_path_buf());
 
@@ -739,7 +703,7 @@ mod tests {
                 &task.id,
                 &FileTaskUpdate {
                     description: Some("Updated description".to_string()),
-                    instructions: Some("Updated instructions".to_string()),
+                    plan: Some("Updated plan".to_string()),
                     execution_summary: Some("Validated bundle layout".to_string()),
                     ..Default::default()
                 },
@@ -747,15 +711,14 @@ mod tests {
             .expect("update task");
 
         assert_eq!(updated.description, "Updated description");
-        assert_eq!(updated.instructions, "Updated instructions");
+        assert_eq!(updated.plan, "Updated plan");
         assert_eq!(updated.execution_summary, "Validated bundle layout");
         let yaml = fs::read_to_string(task_dir.join(TASK_DOC_FILE_NAME)).expect("read yaml");
-        assert!(yaml.contains("schema_version: 3"));
+        assert!(yaml.contains("schema_version: 4"));
         assert!(yaml.contains("description: Updated description"));
-        assert!(!task_dir.join(LEGACY_DESCRIPTION_FILE_NAME).exists());
         assert_eq!(
-            fs::read_to_string(task_dir.join(INSTRUCTIONS_FILE_NAME)).expect("instructions"),
-            "Updated instructions"
+            fs::read_to_string(task_dir.join(PLAN_FILE_NAME)).expect("plan"),
+            "Updated plan"
         );
         assert_eq!(
             fs::read_to_string(task_dir.join(EXECUTION_SUMMARY_FILE_NAME)).expect("summary"),
@@ -827,7 +790,7 @@ mod tests {
             .create_task(FileTaskInsert {
                 title: "Another task".to_string(),
                 description: "Searchable phrase".to_string(),
-                instructions: "Other instructions".to_string(),
+                plan: "Other plan".to_string(),
                 execution_summary: String::new(),
                 context_files: vec![],
                 workspace_path: None,
@@ -859,9 +822,7 @@ mod tests {
         let store = TaskFileStore::new(dir.path().to_path_buf());
         let task_dir = dir.path().join("backlog").join("T-missing-doc");
         fs::create_dir_all(task_dir.join(ARTIFACTS_DIR_NAME)).expect("create task dir");
-        fs::write(task_dir.join(LEGACY_DESCRIPTION_FILE_NAME), "desc").expect("write description");
-        fs::write(task_dir.join(INSTRUCTIONS_FILE_NAME), "instructions")
-            .expect("write instructions");
+        fs::write(task_dir.join(PLAN_FILE_NAME), "plan").expect("write plan");
         fs::write(task_dir.join(EXECUTION_SUMMARY_FILE_NAME), "").expect("write summary");
 
         let err = store
@@ -871,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn get_task_reads_legacy_description_sidecar() {
+    fn get_task_errors_when_plan_file_is_missing() {
         let dir = tempdir().expect("tempdir");
         let store = TaskFileStore::new(dir.path().to_path_buf());
 
@@ -879,91 +840,12 @@ mod tests {
             .create_task(sample_insert(TaskStatus::Backlog))
             .expect("create task");
         let task_dir = dir.path().join("backlog").join(&task.id);
-
-        let yaml_path = task_dir.join(TASK_DOC_FILE_NAME);
-        let yaml = fs::read_to_string(&yaml_path).expect("read yaml");
-        fs::write(
-            &yaml_path,
-            yaml.replace("schema_version: 3", "schema_version: 2")
-                .replace("description: Task description\n", ""),
-        )
-        .expect("write legacy yaml");
-        fs::write(
-            task_dir.join(LEGACY_DESCRIPTION_FILE_NAME),
-            "Legacy task description",
-        )
-        .expect("write legacy description");
-
-        let loaded = store
-            .get_task(&task.id)
-            .expect("read task")
-            .expect("task exists");
-        assert_eq!(loaded.description, "Legacy task description");
-    }
-
-    #[test]
-    fn update_task_migrates_legacy_description_sidecar_into_task_yaml() {
-        let dir = tempdir().expect("tempdir");
-        let store = TaskFileStore::new(dir.path().to_path_buf());
-
-        let task = store
-            .create_task(sample_insert(TaskStatus::Backlog))
-            .expect("create task");
-        let task_dir = dir.path().join("backlog").join(&task.id);
-
-        let yaml_path = task_dir.join(TASK_DOC_FILE_NAME);
-        let yaml = fs::read_to_string(&yaml_path).expect("read yaml");
-        fs::write(
-            &yaml_path,
-            yaml.replace("schema_version: 3", "schema_version: 2")
-                .replace("description: Task description\n", ""),
-        )
-        .expect("write legacy yaml");
-        fs::write(
-            task_dir.join(LEGACY_DESCRIPTION_FILE_NAME),
-            "Legacy task description",
-        )
-        .expect("write legacy description");
-
-        let updated = store
-            .update_task(
-                &task.id,
-                &FileTaskUpdate {
-                    instructions: Some("Updated instructions".to_string()),
-                    ..Default::default()
-                },
-            )
-            .expect("update task");
-
-        assert_eq!(updated.description, "Legacy task description");
-        assert!(!task_dir.join(LEGACY_DESCRIPTION_FILE_NAME).exists());
-        let migrated_yaml = fs::read_to_string(task_dir.join(TASK_DOC_FILE_NAME)).expect("yaml");
-        assert!(migrated_yaml.contains("schema_version: 3"));
-        assert!(migrated_yaml.contains("description: Legacy task description"));
-    }
-
-    #[test]
-    fn get_task_errors_when_legacy_description_file_is_missing() {
-        let dir = tempdir().expect("tempdir");
-        let store = TaskFileStore::new(dir.path().to_path_buf());
-
-        let task = store
-            .create_task(sample_insert(TaskStatus::Backlog))
-            .expect("create task");
-        let task_dir = dir.path().join("backlog").join(&task.id);
-        let yaml_path = task_dir.join(TASK_DOC_FILE_NAME);
-        let yaml = fs::read_to_string(&yaml_path).expect("read yaml");
-        fs::write(
-            &yaml_path,
-            yaml.replace("schema_version: 3", "schema_version: 2")
-                .replace("description: Task description\n", ""),
-        )
-        .expect("write legacy yaml");
+        fs::remove_file(task_dir.join(PLAN_FILE_NAME)).expect("remove plan");
 
         let err = store
             .get_task(&task.id)
-            .expect_err("missing description should error");
-        assert!(err.to_string().contains("missing task description"));
+            .expect_err("missing plan should error");
+        assert!(err.to_string().contains("missing task plan"));
     }
 
     #[test]
@@ -979,7 +861,7 @@ mod tests {
         let yaml = fs::read_to_string(&yaml_path).expect("read yaml");
         fs::write(
             &yaml_path,
-            yaml.replace("schema_version: 3", "schema_version: 9"),
+            yaml.replace("schema_version: 4", "schema_version: 9"),
         )
         .expect("write yaml");
 

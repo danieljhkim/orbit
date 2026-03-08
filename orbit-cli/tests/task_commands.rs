@@ -25,8 +25,8 @@ fn add_task(dir: &Path, title: &str) -> String {
             title,
             "--description",
             "test description",
-            "--instructions",
-            "test instructions",
+            "--plan",
+            "test plan",
             "--workspace",
             &workspace,
             "--proposed-by",
@@ -73,16 +73,19 @@ fn task_add_creates_bundle_layout() {
     let task_dir = task_dir(dir.path(), &id);
 
     assert!(task_dir.join("task.yaml").exists());
-    assert!(!task_dir.join("description.md").exists());
-    assert!(task_dir.join("instructions.md").exists());
+    assert!(task_dir.join("plan.md").exists());
     assert!(task_dir.join("execution-summary.md").exists());
     assert!(task_dir.join("artifacts").is_dir());
 
     let task_yaml = std::fs::read_to_string(task_dir.join("task.yaml")).expect("read task yaml");
-    assert!(task_yaml.contains("schema_version: 3"));
+    assert!(task_yaml.contains("schema_version: 4"));
     assert!(task_yaml.contains("description: test description"));
-    assert!(!task_yaml.contains("instructions:"));
+    assert!(!task_yaml.contains("plan:"));
     assert!(!task_yaml.contains("execution_summary:"));
+    assert_eq!(
+        std::fs::read_to_string(task_dir.join("plan.md")).expect("read plan"),
+        "test plan"
+    );
 }
 
 #[test]
@@ -123,6 +126,7 @@ fn task_list_json() {
     assert!(parsed.is_array());
     let arr = parsed.as_array().expect("array");
     assert!(arr.iter().any(|t| t["title"] == "json task"));
+    assert!(arr.iter().any(|t| t["plan"] == "test plan"));
 }
 
 #[test]
@@ -135,6 +139,7 @@ fn task_show_displays_fields() {
         .success()
         .stdout(predicate::str::contains("ID:"))
         .stdout(predicate::str::contains("showable task"))
+        .stdout(predicate::str::contains("Plan:"))
         .stdout(predicate::str::contains("Status:"));
 }
 
@@ -265,7 +270,7 @@ fn task_workspace_is_normalized_on_add() {
             "--description",
             "workspace description",
             "--instructions",
-            "workspace instructions",
+            "workspace plan",
             "--workspace",
             workspace.to_string_lossy().as_ref(),
             "--proposed-by",
@@ -290,6 +295,7 @@ fn task_workspace_is_normalized_on_add() {
         show["workspace_path"],
         workspace_canonical.to_string_lossy().to_string()
     );
+    assert_eq!(show["plan"], "workspace plan");
 }
 
 #[test]
