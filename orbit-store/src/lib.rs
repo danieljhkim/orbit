@@ -18,13 +18,12 @@ pub use backend::{
     TaskCreateParams, TaskStoreBackend, TaskUpdateParams, ToolStoreBackend, activity_store_file,
     activity_store_sqlite, agent_session_store_sqlite, audit_event_store_sqlite,
     audit_store_sqlite, job_store_file, job_store_sqlite, lock_store_sqlite, task_store_file,
-    task_store_sqlite, tool_store_sqlite,
+    tool_store_sqlite,
 };
 pub use sqlite::activity_store::ActivityInsertParams;
 pub use sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 pub use sqlite::connection::{Store, StoreTx};
 pub use sqlite::job_store::{ClaimedJobRun, DueJobsClaim};
-pub use sqlite::task_store;
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)
@@ -46,7 +45,6 @@ mod tests {
     use orbit_types::OrbitEvent;
 
     use crate::Store;
-    use crate::task_store::TaskInsertParams;
 
     #[test]
     fn lock_is_advisory_and_exclusive() {
@@ -59,28 +57,19 @@ mod tests {
     }
 
     #[test]
-    fn mutation_persists_task_and_audit() {
+    fn mutation_persists_audit() {
         let store = Store::open_in_memory().expect("store");
 
-        let task = store
+        store
             .with_transaction(|tx| {
-                let task = tx.insert_task(&TaskInsertParams {
-                    title: "buy milk".to_string(),
-                    ..Default::default()
-                })?;
                 tx.insert_audit_event(&OrbitEvent::TaskAdded {
-                    id: task.id.clone(),
+                    id: "task-test-1".to_string(),
                 })?;
-                Ok(task)
+                Ok(())
             })
             .expect("mutation succeeds");
 
-        let tasks = store.list_tasks().expect("list tasks");
         let audits = store.list_audits(10).expect("list audits");
-
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].title, "buy milk");
-        assert_eq!(task.title, "buy milk");
 
         assert_eq!(audits.len(), 1);
         assert_eq!(audits[0].event_type, "TaskAdded");

@@ -1,110 +1,17 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
     Activity, AgentSession, AgentSessionStatus, AgentToolCall, Audit, AuditEvent, Job, JobRun,
-    JobScheduleState, OrbitError, OrbitEvent, StoredTool, Task, TaskPriority, TaskStatus,
+    JobScheduleState, OrbitError, OrbitEvent, StoredTool,
 };
 
 use super::contracts::{
     ActivityCreateParams, ActivityStoreBackend, AgentSessionStoreBackend, AuditEventStoreBackend,
     AuditStoreBackend, JobCreateParams, JobRunCompletionParams, JobStoreBackend, LockStoreBackend,
-    TaskCreateParams, TaskStoreBackend, TaskUpdateParams, ToolStoreBackend,
+    ToolStoreBackend,
 };
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 use crate::sqlite::job_store::DueJobsClaim;
-use crate::sqlite::task_store::{TaskInsertParams, TaskUpdateFields};
 use crate::{ActivityInsertParams, Store};
-
-#[derive(Clone)]
-pub(crate) struct SqliteTaskStoreBackend {
-    pub(crate) store: Store,
-}
-
-impl TaskStoreBackend for SqliteTaskStoreBackend {
-    fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError> {
-        let task = self.store.with_transaction(|tx| {
-            tx.insert_task(&TaskInsertParams {
-                title: params.title.clone(),
-                description: params.description.clone(),
-                plan: params.plan.clone(),
-                execution_summary: params.execution_summary.clone(),
-                context_files: params.context_files.clone(),
-                workspace_path: params.workspace_path.clone(),
-                assigned_to: params.assigned_to.clone(),
-                created_by: params.created_by.clone(),
-                status: params.status,
-                priority: params.priority,
-                task_type: params.task_type,
-                branch: params.branch.clone(),
-                pr_number: params.pr_number.clone(),
-                proposed_by: params.proposed_by.clone(),
-            })
-        })?;
-
-        self.get_task(&task.id)?
-            .ok_or(OrbitError::TaskNotFound(task.id))
-    }
-
-    fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
-        self.store.list_tasks()
-    }
-
-    fn list_tasks_filtered(
-        &self,
-        status: Option<TaskStatus>,
-        priority: Option<TaskPriority>,
-    ) -> Result<Vec<Task>, OrbitError> {
-        self.store.list_tasks_filtered(status, priority)
-    }
-
-    fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
-        self.store.get_task(id)
-    }
-
-    fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
-        self.store.search_tasks(query)
-    }
-
-    fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
-        let changed = self.store.with_transaction(|tx| {
-            tx.update_task(
-                id,
-                &TaskUpdateFields {
-                    title: params.title.clone(),
-                    description: params.description.clone(),
-                    plan: params.plan.clone(),
-                    execution_summary: params.execution_summary.clone(),
-                    context_files: params.context_files.clone(),
-                    workspace_path: params.workspace_path,
-                    assigned_to: params.assigned_to.clone(),
-                    created_by: params.created_by.clone(),
-                    status: params.status,
-                    priority: params.priority,
-                    task_type: params.task_type,
-                    branch: params.branch.clone(),
-                    pr_number: params.pr_number.clone(),
-                    proposed_by: params.proposed_by.clone(),
-                    proposal_approved_by: params.proposal_approved_by.clone(),
-                    proposal_rejected_by: params.proposal_rejected_by.clone(),
-                    proposal_decision_note: params.proposal_decision_note.clone(),
-                    review_approved_by: params.review_approved_by.clone(),
-                    review_rejected_by: params.review_rejected_by.clone(),
-                    review_decision_note: params.review_decision_note.clone(),
-                },
-            )
-        })?;
-
-        if !changed {
-            return Err(OrbitError::TaskNotFound(id.to_string()));
-        }
-
-        self.get_task(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
-    }
-
-    fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
-        self.store.with_transaction(|tx| tx.delete_task(id))
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct SqliteActivityStoreBackend {

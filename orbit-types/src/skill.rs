@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{OrbitId, Role};
+use crate::Role;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
@@ -14,11 +14,4 @@ pub struct Skill {
     pub role: Role,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TaskSkillAttachment {
-    pub task_id: OrbitId,
-    pub skill_name: String,
-    pub attachment_order: i64,
 }

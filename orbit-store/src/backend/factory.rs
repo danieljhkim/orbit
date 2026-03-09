@@ -9,8 +9,7 @@ use super::contracts::{
 };
 use super::sqlite_backends::{
     SqliteActivityStoreBackend, SqliteAgentSessionStoreBackend, SqliteAuditEventStoreBackend,
-    SqliteAuditStoreBackend, SqliteJobStoreBackend, SqliteLockStoreBackend, SqliteTaskStoreBackend,
-    SqliteToolStoreBackend,
+    SqliteAuditStoreBackend, SqliteJobStoreBackend, SqliteLockStoreBackend, SqliteToolStoreBackend,
 };
 use crate::Store;
 use crate::file::activity_store::ActivityFileStore;
@@ -21,10 +20,6 @@ pub fn task_store_file(root: PathBuf) -> Result<Arc<dyn TaskStoreBackend>, Orbit
     let store = TaskFileStore::new(root);
     store.ensure_layout()?;
     Ok(Arc::new(store))
-}
-
-pub fn task_store_sqlite(store: Store) -> Arc<dyn TaskStoreBackend> {
-    Arc::new(SqliteTaskStoreBackend { store })
 }
 
 pub fn activity_store_file(root: PathBuf) -> Result<Arc<dyn ActivityStoreBackend>, OrbitError> {

@@ -27,7 +27,7 @@ pub use job::{
 };
 pub use memo::Memo;
 pub use role::Role;
-pub use skill::{Skill, TaskSkillAttachment};
+pub use skill::Skill;
 pub use task::{Task, TaskPriority, TaskStatus, TaskType};
 pub use tool::{ExecutionResult, PolicyDecision, StoredTool, ToolParam, ToolSchema};
 

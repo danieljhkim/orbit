@@ -41,6 +41,8 @@ mod tests {
         );
         assert_eq!(config.job.format.as_deref(), Some("yaml"));
         assert_eq!(config.activity.format.as_deref(), Some("yaml"));
+        assert_eq!(config.task, std::path::PathBuf::from("/tmp/orbit/tasks"));
+        assert_eq!(config.skill, std::path::PathBuf::from("/tmp/orbit/skills"));
         assert_eq!(
             config.audit.path,
             std::path::PathBuf::from("/tmp/orbit/orbit.db")

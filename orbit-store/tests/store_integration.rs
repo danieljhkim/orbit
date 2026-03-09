@@ -1,6 +1,5 @@
 use chrono::Utc;
 use orbit_store::Store;
-use orbit_store::task_store::TaskInsertParams;
 use orbit_types::{JobRetryBackoffStrategy, JobTargetType};
 
 #[test]
@@ -10,13 +9,9 @@ fn due_jobs_query_returns_scheduled_entries() {
 
     store
         .with_transaction(|tx| {
-            let task = tx.insert_task(&TaskInsertParams {
-                title: "job task".to_string(),
-                ..Default::default()
-            })?;
             let _activity = tx.insert_activity_v2(
                 JobTargetType::Activity,
-                &task.id,
+                "task-test-1",
                 "every 1h",
                 "mock-agent",
                 300,

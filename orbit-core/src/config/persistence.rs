@@ -37,8 +37,8 @@ impl EntityPersistenceConfig {
 pub(crate) struct PersistenceConfig {
     pub(crate) job: EntityPersistenceConfig,
     pub(crate) activity: EntityPersistenceConfig,
-    pub(crate) skill: EntityPersistenceConfig,
-    pub(crate) task: EntityPersistenceConfig,
+    pub(crate) skill: PathBuf,
+    pub(crate) task: PathBuf,
     pub(crate) audit: EntityPersistenceConfig,
 }
 
@@ -56,16 +56,8 @@ impl PersistenceConfig {
                 path: data_root.join("activities"),
                 format: Some("yaml".to_string()),
             },
-            skill: EntityPersistenceConfig {
-                persistence_type: PersistenceType::File,
-                path: data_root.join("skills"),
-                format: Some("md".to_string()),
-            },
-            task: EntityPersistenceConfig {
-                persistence_type: PersistenceType::File,
-                path: data_root.join("tasks"),
-                format: Some("yaml".to_string()),
-            },
+            skill: data_root.join("skills"),
+            task: data_root.join("tasks"),
             audit: EntityPersistenceConfig {
                 persistence_type: PersistenceType::Sqlite,
                 path: sqlite_default,
@@ -82,6 +74,18 @@ impl PersistenceConfig {
                     .to_string(),
             ));
         }
+
+        let skill = resolve_path_only_entity(
+            raw.skill.as_ref().and_then(|v| v.persistence.as_ref()),
+            &defaults.skill,
+            data_root,
+        )?;
+
+        let task = resolve_path_only_entity(
+            raw.task.as_ref().and_then(|v| v.persistence.as_ref()),
+            &defaults.task,
+            data_root,
+        )?;
 
         Ok(Self {
             job: parse_configurable_entity(
@@ -100,20 +104,8 @@ impl PersistenceConfig {
                 "yaml",
                 data_root,
             )?,
-            skill: parse_file_only_entity(
-                "skill",
-                raw.skill.as_ref().and_then(|v| v.persistence.as_ref()),
-                &defaults.skill,
-                "md",
-                data_root,
-            )?,
-            task: parse_file_only_entity(
-                "task",
-                raw.task.as_ref().and_then(|v| v.persistence.as_ref()),
-                &defaults.task,
-                "yaml",
-                data_root,
-            )?,
+            skill,
+            task,
             audit: parse_sqlite_only_entity(
                 "audit",
                 raw.audit.as_ref().and_then(|v| v.persistence.as_ref()),
@@ -127,11 +119,27 @@ impl PersistenceConfig {
         json!({
             "job": { "persistence": self.job.to_json_value() },
             "activity": { "persistence": self.activity.to_json_value() },
-            "skill": { "persistence": self.skill.to_json_value() },
-            "task": { "persistence": self.task.to_json_value() },
+            "skill": { "path": self.skill.to_string_lossy() },
+            "task": { "path": self.task.to_string_lossy() },
             "audit": { "persistence": self.audit.to_json_value() },
         })
     }
+}
+
+fn resolve_path_only_entity(
+    raw: Option<&RawPersistenceConfig>,
+    default_path: &Path,
+    base_dir: &Path,
+) -> Result<PathBuf, OrbitError> {
+    let Some(raw) = raw else {
+        return Ok(default_path.to_path_buf());
+    };
+    paths::resolve_config_path(
+        raw.path.as_deref(),
+        default_path,
+        base_dir,
+        "persistence.path",
+    )
 }
 
 fn parse_configurable_entity(
@@ -193,16 +201,6 @@ fn parse_configurable_entity(
             })
         }
     }
-}
-
-fn parse_file_only_entity(
-    entity: &str,
-    raw: Option<&RawPersistenceConfig>,
-    defaults: &EntityPersistenceConfig,
-    required_file_format: &str,
-    base_dir: &Path,
-) -> Result<EntityPersistenceConfig, OrbitError> {
-    parse_configurable_entity(entity, raw, defaults, false, required_file_format, base_dir)
 }
 
 fn parse_sqlite_only_entity(

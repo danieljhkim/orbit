@@ -8,6 +8,7 @@ use orbit_store::{
     audit_event_store_sqlite, audit_store_sqlite, job_store_file, job_store_sqlite,
     lock_store_sqlite, task_store_file, tool_store_sqlite,
 };
+
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 use orbit_types::OrbitError;
@@ -26,7 +27,7 @@ pub(crate) fn build_context_from_data_root(
     let db_path = runtime_config.persistence.audit.path.clone();
     let store = Store::open(&db_path)?;
 
-    let task_store = task_store_file(runtime_config.persistence.task.path.clone())?;
+    let task_store = task_store_file(runtime_config.persistence.task.clone())?;
     let activity_store = match runtime_config.persistence.activity.persistence_type {
         PersistenceType::File => {
             activity_store_file(runtime_config.persistence.activity.path.clone())?
@@ -70,7 +71,6 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
     let data_root = runtime_config
         .persistence
         .task
-        .path
         .parent()
         .unwrap_or(Path::new("."))
         .to_path_buf();
@@ -101,7 +101,7 @@ fn build_context_common(
     let agent_session_store = agent_session_store_sqlite(store.clone());
     let lock_store = lock_store_sqlite(store.clone());
 
-    let skill_root = runtime_config.persistence.skill.path.clone();
+    let skill_root = runtime_config.persistence.skill.clone();
     let skill_catalog = SkillCatalog::new(skill_root);
     skill_catalog.ensure_layout()?;
 
