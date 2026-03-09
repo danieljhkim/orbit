@@ -40,7 +40,7 @@ Use this structure:
 
 ```markdown
 # Execution Summary - <Change Request Title>
-Agent Name: <agent name>
+Agent Name: <identity_display_name>
 Agent Model: <model name>
 
 ## Status

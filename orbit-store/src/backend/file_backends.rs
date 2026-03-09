@@ -205,4 +205,8 @@ impl JobStoreBackend for JobFileStore {
     fn claim_due_jobs(&self, now: DateTime<Utc>) -> Result<DueJobsClaim, OrbitError> {
         self.claim_due_jobs(now)
     }
+
+    fn archive_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
+        self.archive_run(run_id)
+    }
 }

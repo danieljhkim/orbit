@@ -130,6 +130,7 @@ pub trait JobStoreBackend: Send + Sync {
     ) -> Result<bool, OrbitError>;
     fn complete_job_run(&self, params: &JobRunCompletionParams) -> Result<bool, OrbitError>;
     fn claim_due_jobs(&self, now: DateTime<Utc>) -> Result<DueJobsClaim, OrbitError>;
+    fn archive_job_run(&self, run_id: &str) -> Result<String, OrbitError>;
 }
 
 #[derive(Debug, Clone)]

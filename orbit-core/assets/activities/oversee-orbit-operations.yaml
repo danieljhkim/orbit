@@ -1,7 +1,7 @@
 id: oversee-orbit-operations
 specType: operation_management
-description: Manager reviews all recently ran orbit job runs, review them carefully
-instruction: Use `orbit-approve-task` to check for any orbit tasks with "proposed" or "review" status, review them carefully, and update the status accordingly. Output the task_id's that have been approved and rejected and leave a brief summary in the comment.
+description: As the CEO of orbit-workflow operations, reviews all the recent orbit operations - such as job-runs & tasks - and make sure everything is up to the standard. Flag any issues and create orbit tasks of type issue to address them.
+instruction: First view list of orbit jobs, via `orbit job list`. For each of the job_id, view the job-runs, via `orbit job history <job_id>`
 inputSchemaJson:
   type: object
   properties: {}
@@ -11,7 +11,7 @@ outputSchemaJson:
   properties:
     comment:
       type: string
-skillRefs: ["orbit-approve-task", "orbit-manage-tasks"]
-identityId: linus
-assignedTo: linus
+skillRefs: ["orbit-skills", "orbit-manage-tasks", "orbit-create-task"]
+identityId: steve
+assignedTo: steve
 createdBy: system

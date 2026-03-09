@@ -11,7 +11,7 @@ outputSchemaJson:
   properties:
     comment:
       type: string
-skillRefs: ["orbit-approve-task", "orbit-manage-tasks"]
+skillRefs: ["orbit-skills", "orbit-approve-task", "orbit-manage-tasks"]
 identityId: linus
 assignedTo: linus
 createdBy: system

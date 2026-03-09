@@ -366,6 +366,31 @@ impl JobFileStore {
     fn run_path(&self, job_id: &str, run_id: &str) -> PathBuf {
         self.run_dir(job_id).join(format!("{run_id}.yaml"))
     }
+
+    fn archived_runs_dir(&self) -> PathBuf {
+        self.runs_dir().join("archived")
+    }
+
+    fn archived_run_dir(&self, job_id: &str) -> PathBuf {
+        self.archived_runs_dir().join(job_id)
+    }
+
+    fn archived_run_path(&self, job_id: &str, run_id: &str) -> PathBuf {
+        self.archived_run_dir(job_id).join(format!("{run_id}.yaml"))
+    }
+
+    pub(crate) fn archive_run(&self, run_id: &str) -> Result<String, OrbitError> {
+        let Some((job_id, src)) = self.find_run_path(run_id)? else {
+            return Err(OrbitError::JobRunNotFound(run_id.to_string()));
+        };
+        let dst = self.archived_run_path(&job_id, run_id);
+        let parent = dst.parent().ok_or_else(|| {
+            OrbitError::Io(format!("cannot determine parent for '{}'", dst.display()))
+        })?;
+        fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+        fs::rename(&src, &dst).map_err(|e| OrbitError::Io(e.to_string()))?;
+        Ok(job_id)
+    }
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), OrbitError> {
@@ -391,3 +416,58 @@ fn is_yaml(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
 }
 use crate::{ClaimedJobRun, DueJobsClaim};
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use orbit_types::{JobRetryBackoffStrategy, JobTargetType, OrbitError};
+
+    use super::JobFileStore;
+
+    fn make_store() -> (tempfile::TempDir, JobFileStore) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = JobFileStore::new(dir.path().to_path_buf());
+        (dir, store)
+    }
+
+    #[test]
+    fn archive_run_moves_file_to_archived_dir() {
+        let (_dir, store) = make_store();
+        let now = Utc::now();
+        let job = store
+            .insert_activity_v2(
+                JobTargetType::Activity,
+                "target-1",
+                "every 1h",
+                "mock-agent",
+                300,
+                0,
+                JobRetryBackoffStrategy::None,
+                0,
+                now,
+            )
+            .expect("insert job");
+        let run = store
+            .insert_job_run(&job.job_id, 1, now)
+            .expect("insert run");
+
+        let src = store.run_path(&job.job_id, &run.run_id);
+        assert!(src.exists(), "run file must exist before archive");
+
+        store.archive_run(&run.run_id).expect("archive run");
+
+        assert!(!src.exists(), "run file must be gone after archive");
+        let dst = store.archived_run_path(&job.job_id, &run.run_id);
+        assert!(dst.exists(), "archived run file must exist");
+    }
+
+    #[test]
+    fn archive_run_returns_error_for_unknown_run() {
+        let (_dir, store) = make_store();
+        let err = store.archive_run("jrun-does-not-exist").unwrap_err();
+        assert!(
+            matches!(err, OrbitError::JobRunNotFound(_)),
+            "expected JobRunNotFound, got {err:?}"
+        );
+    }
+}

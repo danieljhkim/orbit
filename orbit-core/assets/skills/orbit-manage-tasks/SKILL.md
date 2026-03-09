@@ -43,7 +43,7 @@ Any status may move to `blocked` when execution cannot safely continue.
 ```bash
 orbit task update <id> \
   --execution-summary "<multi-line markdown content>" \
-  --assigned-to "<identity_display_name_or_model_name>" \
+  --assigned-to "<identity_display_name>" \
   --status <proposed|backlog|in-progress|review|done|blocked> \
   --branch "<branch_name>" \
   --pr-number "<pr_number>"

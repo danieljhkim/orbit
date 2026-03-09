@@ -11,7 +11,7 @@ outputSchemaJson:
   properties:
     comment:
       type: string
-skillRefs: ["orbit-maintain-system"]
+skillRefs: ["orbit-skills", "orbit-maintain-system"]
 identityId: linus
 assignedTo: linus
 createdBy: system

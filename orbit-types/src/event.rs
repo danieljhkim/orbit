@@ -58,6 +58,10 @@ pub enum OrbitEvent {
         job_id: String,
         reason: String,
     },
+    JobRunArchived {
+        job_id: String,
+        run_id: String,
+    },
     PolicyDenied {
         tool: String,
     },

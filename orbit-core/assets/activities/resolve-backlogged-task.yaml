@@ -16,7 +16,8 @@ outputSchemaJson:
     comment:
       type: string
   additionalProperties: false
-skillRefs: ["orbit-manage-tasks", "orbit-execute-change-request"]
+skillRefs:
+  ["orbit-skills", "orbit-manage-tasks", "orbit-execute-change-request"]
 identityId: kent
 assignedTo: kent-beck
 createdBy: system

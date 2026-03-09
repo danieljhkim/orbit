@@ -48,7 +48,7 @@ Use this structure:
 
 ```markdown
 # Maintenance Summary - <Title>
-Agent Name: <agent name>
+Agent Name: <identity_display_name>
 Agent Model: <model name>
 
 ## Status

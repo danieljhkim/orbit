@@ -38,11 +38,11 @@ orbit task add \
   --plan "<multi-line markdown>" \
   --context "<comma,separated,context>" \
   --workspace "<absolute_or_relative_repo_path>" \
-  --assigned-to "<identity_display_name_or_model_name>" \
-  --created-by "<identity_display_name_or_model_name>" \
+  --assigned-to "<identity_display_name>" \
+  --created-by "<identity_display_name>" \
   --priority <low|medium|high|critical> \
   --type <task|feature|issue|chore|refactor> \
-  --proposed-by "<identity_display_name_or_model_name>"
+  --proposed-by "<identity_display_name>"
 ```
 
 ## Plan Template

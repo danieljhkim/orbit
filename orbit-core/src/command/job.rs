@@ -192,6 +192,14 @@ impl OrbitRuntime {
         })
     }
 
+    pub fn archive_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
+        let job_id = self.context.job_store.archive_job_run(run_id)?;
+        self.record_event(OrbitEvent::JobRunArchived {
+            job_id,
+            run_id: run_id.to_string(),
+        })
+    }
+
     pub fn job_history(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         let job = self.show_job(job_id)?;
         let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;

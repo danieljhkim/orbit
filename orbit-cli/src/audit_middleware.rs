@@ -229,6 +229,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 JobSubcommand::Resume(args) => ("resume", Some(args.job_id.as_str())),
                 JobSubcommand::History(args) => ("history", Some(args.job_id.as_str())),
                 JobSubcommand::Delete(args) => ("delete", Some(args.job_id.as_str())),
+                JobSubcommand::Archive(args) => ("archive", Some(args.job_run_id.as_str())),
             };
             CommandMeta {
                 command: "job".to_string(),

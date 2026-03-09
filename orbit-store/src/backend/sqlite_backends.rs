@@ -152,6 +152,12 @@ impl JobStoreBackend for SqliteJobStoreBackend {
     fn claim_due_jobs(&self, now: DateTime<Utc>) -> Result<DueJobsClaim, OrbitError> {
         self.store.with_transaction(|tx| tx.claim_due_jobs(now))
     }
+
+    fn archive_job_run(&self, _run_id: &str) -> Result<String, OrbitError> {
+        Err(OrbitError::Store(
+            "job run archive is not supported for the sqlite backend".to_string(),
+        ))
+    }
 }
 
 #[derive(Clone)]
