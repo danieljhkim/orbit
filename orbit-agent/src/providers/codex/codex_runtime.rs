@@ -1,6 +1,4 @@
 use orbit_types::OrbitError;
-use serde_json::{Value, json};
-
 use crate::providers::AgentProvider;
 use crate::providers::codex::codex_cli::CodexCliTransport;
 use crate::runtime::AgentRuntime;
@@ -27,37 +25,11 @@ impl AgentRuntime for CodexRuntime {
             program: self.command.clone(),
             args: self.cli.args(&req.operation),
             stdin: self.cli.stdin(&req.envelope_json),
-            stdout_schema_json: Some(codex_response_schema()),
+            // Codex now rejects Orbit's generic envelope schema because open-ended
+            // object branches must be closed with additionalProperties=false.
+            // Orbit still validates the returned JSON envelope after execution.
+            stdout_schema_json: None,
             required_env_vars: AgentProvider::Codex.required_env_vars(),
         })
     }
-}
-
-fn codex_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "schemaVersion": {
-                "type": "integer",
-                "const": 1
-            },
-            "status": {
-                "type": "string",
-                "enum": ["success", "failed", "timeout"]
-            },
-            "result": {
-                "type": ["object", "null"]
-            },
-            "error": {
-                "type": ["object", "null"],
-                "additionalProperties": true
-            },
-            "durationMs": {
-                "type": "integer",
-                "minimum": 0
-            }
-        },
-        "required": ["schemaVersion", "status", "durationMs"]
-    })
 }

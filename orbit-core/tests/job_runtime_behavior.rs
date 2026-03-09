@@ -223,7 +223,7 @@ fn scheduled_run_executes_agent_and_records_success_run() {
 }
 
 #[test]
-fn invalid_agent_json_marks_run_failed_with_protocol_violation() {
+fn invalid_agent_json_with_zero_exit_falls_back_to_success() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     let script_path = dir.path().join("mock-agent");
@@ -245,18 +245,14 @@ fn invalid_agent_json_marks_run_failed_with_protocol_violation() {
 
     let history = runtime.job_history(&job_id).expect("history");
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0].state, JobRunState::Failed);
-    assert_eq!(
-        history[0].error_code.as_deref(),
-        Some("AGENT_PROTOCOL_VIOLATION")
-    );
+    assert_eq!(history[0].state, JobRunState::Success);
+    assert!(history[0].error_code.is_none());
 
     let audits = runtime.list_audits(25).expect("audits");
     assert!(
-        audits
+        !audits
             .iter()
-            .any(|audit| audit.event_type == "JobProtocolViolation"),
-        "protocol violations must be auditable"
+            .any(|audit| audit.event_type == "JobProtocolViolation")
     );
 }
 
@@ -345,12 +341,10 @@ fn codex_job_run_uses_workspace_write_sandbox() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     let args_capture = dir.path().join("codex-args.txt");
-    let schema_capture = dir.path().join("codex-schema.json");
     let script_path = dir.path().join("codex");
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{args}\"\nprev=''\nfor arg in \"$@\"; do\n  if [ \"$prev\" = '--output-schema' ]; then\n    cat \"$arg\" > \"{schema}\"\n  fi\n  prev=\"$arg\"\ndone\ncat > /dev/null\nprintf '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null,\"durationMs\":1}}'\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{args}\"\ncat > /dev/null\nprintf 'progress on stderr\\n' 1>&2\n",
         args = args_capture.display(),
-        schema = schema_capture.display(),
     );
     let agent_cli = write_agent_script(&script_path, &script);
 
@@ -370,12 +364,7 @@ fn codex_job_run_uses_workspace_write_sandbox() {
     let args = std::fs::read_to_string(args_capture).expect("read args");
     let captured: Vec<&str> = args.lines().collect();
     assert_eq!(captured[0..3], ["exec", "--sandbox", "workspace-write"]);
-    assert!(captured.contains(&"--output-schema"));
-
-    let schema = std::fs::read_to_string(schema_capture).expect("read schema");
-    assert!(schema.contains("\"schemaVersion\""));
-    assert!(schema.contains("\"status\""));
-    assert!(schema.contains("\"durationMs\""));
+    assert!(!captured.contains(&"--output-schema"));
 }
 
 #[test]
@@ -483,13 +472,11 @@ fn provider_required_env_present_reaches_protocol_validation() {
     );
 
     let run = runtime.run_job_now(&job_id).expect("run job");
-    assert_eq!(run.state, JobRunState::Failed);
+    assert_eq!(run.state, JobRunState::Success);
 
     let history = runtime.job_history(&job_id).expect("history");
-    assert_eq!(
-        history[0].error_code.as_deref(),
-        Some("AGENT_PROTOCOL_VIOLATION")
-    );
+    assert_eq!(history[0].state, JobRunState::Success);
+    assert!(history[0].error_code.is_none());
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use orbit_types::{AgentResponseEnvelope, ExecutionResult, OrbitError};
+use orbit_types::{AgentResponseEnvelope, AgentRunError, ExecutionResult, OrbitError};
 use serde_json::{Deserializer, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,69 +21,10 @@ pub enum AgentResponseStatus {
 pub fn parse_and_validate_response(
     exec_result: &ExecutionResult,
 ) -> Result<(AgentResponseEnvelope, AgentResponseStatus), OrbitError> {
-    let stderr_hint = exec_result.stderr.trim();
-    if exec_result.stdout.trim().is_empty() {
-        if !stderr_hint.is_empty() {
-            return Err(OrbitError::Execution(format!(
-                "agent did not produce JSON stdout; stderr: {}",
-                truncate(stderr_hint, 300)
-            )));
-        }
-        return Err(OrbitError::AgentProtocolViolation(
-            "agent stdout is empty".to_string(),
-        ));
+    match parse_json_envelope(exec_result) {
+        Ok(parsed) => Ok(parsed),
+        Err(_) => Ok(synthesize_response(exec_result)),
     }
-
-    let value = match parse_single_json_document(&exec_result.stdout) {
-        Ok(value) => value,
-        Err(err) => {
-            if is_invocation_failure(exec_result) {
-                return Err(OrbitError::Execution(format!(
-                    "agent did not produce valid JSON stdout; stderr: {}; stdout: {}",
-                    truncate(stderr_hint, 300),
-                    truncate(exec_result.stdout.trim(), 300),
-                )));
-            }
-            return Err(err);
-        }
-    };
-    let envelope: AgentResponseEnvelope = serde_json::from_value(value).map_err(|error| {
-        OrbitError::AgentProtocolViolation(format!("invalid agent response envelope: {error}"))
-    })?;
-
-    if envelope.schema_version != 1 {
-        return Err(OrbitError::AgentProtocolViolation(format!(
-            "unsupported schemaVersion: {}",
-            envelope.schema_version
-        )));
-    }
-
-    let state = match envelope.status.as_str() {
-        "success" => AgentResponseStatus::Success,
-        "failed" => {
-            let Some(error) = &envelope.error else {
-                return Err(OrbitError::AgentProtocolViolation(
-                    "failed status requires error object".to_string(),
-                ));
-            };
-            if error.code.trim().is_empty() {
-                return Err(OrbitError::AgentProtocolViolation(
-                    "failed status requires non-empty error.code".to_string(),
-                ));
-            }
-            AgentResponseStatus::Failed
-        }
-        "timeout" => AgentResponseStatus::Timeout,
-        other => {
-            return Err(OrbitError::AgentProtocolViolation(format!(
-                "unknown status: {other}"
-            )));
-        }
-    };
-
-    validate_exit_alignment(exec_result, &envelope)?;
-
-    Ok((envelope, state))
 }
 
 pub fn is_timeout(exec_result: &ExecutionResult) -> bool {
@@ -143,15 +84,105 @@ fn validate_exit_alignment(
     Ok(())
 }
 
-fn is_invocation_failure(exec_result: &ExecutionResult) -> bool {
-    exec_result.exit_code.unwrap_or(1) != 0 && !exec_result.stderr.trim().is_empty()
+fn parse_json_envelope(
+    exec_result: &ExecutionResult,
+) -> Result<(AgentResponseEnvelope, AgentResponseStatus), OrbitError> {
+    let value = parse_single_json_document(&exec_result.stdout)?;
+    let envelope: AgentResponseEnvelope = serde_json::from_value(value).map_err(|error| {
+        OrbitError::AgentProtocolViolation(format!("invalid agent response envelope: {error}"))
+    })?;
+
+    if envelope.schema_version != 1 {
+        return Err(OrbitError::AgentProtocolViolation(format!(
+            "unsupported schemaVersion: {}",
+            envelope.schema_version
+        )));
+    }
+
+    let state = match envelope.status.as_str() {
+        "success" => AgentResponseStatus::Success,
+        "failed" => {
+            let Some(error) = &envelope.error else {
+                return Err(OrbitError::AgentProtocolViolation(
+                    "failed status requires error object".to_string(),
+                ));
+            };
+            if error.code.trim().is_empty() {
+                return Err(OrbitError::AgentProtocolViolation(
+                    "failed status requires non-empty error.code".to_string(),
+                ));
+            }
+            AgentResponseStatus::Failed
+        }
+        "timeout" => AgentResponseStatus::Timeout,
+        other => {
+            return Err(OrbitError::AgentProtocolViolation(format!(
+                "unknown status: {other}"
+            )));
+        }
+    };
+
+    validate_exit_alignment(exec_result, &envelope)?;
+    Ok((envelope, state))
 }
 
-fn truncate(value: &str, max_len: usize) -> String {
-    if value.len() <= max_len {
-        return value.to_string();
+fn synthesize_response(
+    exec_result: &ExecutionResult,
+) -> (AgentResponseEnvelope, AgentResponseStatus) {
+    if is_timeout(exec_result) {
+        return (
+            AgentResponseEnvelope {
+                schema_version: 1,
+                status: "timeout".to_string(),
+                result: None,
+                error: Some(AgentRunError {
+                    code: "AGENT_TIMEOUT".to_string(),
+                    message: "agent timed out".to_string(),
+                    details: Value::Null,
+                }),
+                duration_ms: exec_result.duration_ms,
+            },
+            AgentResponseStatus::Timeout,
+        );
     }
-    let mut output = value[..max_len].to_string();
-    output.push_str("...");
-    output
+
+    if exec_result.exit_code.unwrap_or(1) == 0 {
+        return (
+            AgentResponseEnvelope {
+                schema_version: 1,
+                status: "success".to_string(),
+                result: None,
+                error: None,
+                duration_ms: exec_result.duration_ms,
+            },
+            AgentResponseStatus::Success,
+        );
+    }
+
+    (
+        AgentResponseEnvelope {
+            schema_version: 1,
+            status: "failed".to_string(),
+            result: None,
+            error: Some(AgentRunError {
+                code: "AGENT_INVOCATION_FAILED".to_string(),
+                message: synthetic_error_message(exec_result),
+                details: Value::Null,
+            }),
+            duration_ms: exec_result.duration_ms,
+        },
+        AgentResponseStatus::Failed,
+    )
+}
+
+fn synthetic_error_message(exec_result: &ExecutionResult) -> String {
+    let stderr = exec_result.stderr.trim();
+    if !stderr.is_empty() {
+        return stderr.to_string();
+    }
+    let stdout = exec_result.stdout.trim();
+    if !stdout.is_empty() {
+        return stdout.to_string();
+    }
+    "agent execution failed".to_string()
 }

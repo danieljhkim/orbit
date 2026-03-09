@@ -74,7 +74,7 @@ fn provider_mapper_supports_codex() {
         ]
     );
     assert_eq!(invocation.runtime_key, "codex");
-    assert!(invocation.stdout_schema_json.is_some());
+    assert!(invocation.stdout_schema_json.is_none());
     let text = String::from_utf8(invocation.stdin).expect("utf8");
     assert!(text.contains("Execution envelope"));
 }
@@ -168,7 +168,7 @@ fn claude_runtime_declares_required_env_vars() {
 }
 
 #[test]
-fn protocol_parser_classifies_empty_stdout_with_stderr_as_execution_error() {
+fn protocol_parser_falls_back_to_failed_status_for_empty_stdout_with_stderr() {
     let exec = ExecutionResult {
         success: false,
         stdout: String::new(),
@@ -178,27 +178,32 @@ fn protocol_parser_classifies_empty_stdout_with_stderr_as_execution_error() {
         output: None,
     };
 
-    let err = parse_and_validate_response(&exec).expect_err("must fail");
-    assert!(matches!(err, OrbitError::Execution(_)));
-    let msg = err.to_string();
-    assert!(msg.contains("did not produce JSON stdout"));
-    assert!(msg.contains("permission denied"));
+    let (envelope, state) = parse_and_validate_response(&exec).expect("fallback response");
+    assert_eq!(state, AgentResponseStatus::Failed);
+    assert_eq!(envelope.status, "failed");
+    assert!(
+        envelope
+            .error
+            .as_ref()
+            .expect("error")
+            .message
+            .contains("permission denied")
+    );
 }
 
 #[test]
-fn protocol_parser_classifies_invalid_json_with_stderr_as_execution_error() {
+fn protocol_parser_falls_back_to_success_for_invalid_json_stdout_on_zero_exit() {
     let exec = ExecutionResult {
-        success: false,
+        success: true,
         stdout: "not-json".to_string(),
-        stderr: "network failure".to_string(),
-        exit_code: Some(1),
+        stderr: "Reading prompt from stdin...".to_string(),
+        exit_code: Some(0),
         duration_ms: 1,
         output: None,
     };
 
-    let err = parse_and_validate_response(&exec).expect_err("must fail");
-    assert!(matches!(err, OrbitError::Execution(_)));
-    let msg = err.to_string();
-    assert!(msg.contains("did not produce valid JSON stdout"));
-    assert!(msg.contains("network failure"));
+    let (envelope, state) = parse_and_validate_response(&exec).expect("fallback response");
+    assert_eq!(state, AgentResponseStatus::Success);
+    assert_eq!(envelope.status, "success");
+    assert!(envelope.result.is_none());
 }

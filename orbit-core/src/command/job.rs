@@ -576,7 +576,10 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
                     AgentResponseStatus::Failed => JobRunState::Failed,
                     AgentResponseStatus::Timeout => JobRunState::Timeout,
                 };
+                let error_code = envelope.error.as_ref().map(|error| error.code.clone());
+                let error_message = envelope.error.as_ref().map(|error| error.message.clone());
                 if run_state == JobRunState::Success
+                    && envelope.result.is_some()
                     && let Err(err) =
                         self.validate_skill_output_schema(&execution.activity, &envelope)
                 {
@@ -596,8 +599,8 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
                     exit_code: exec_result.exit_code,
                     duration_ms: Some(exec_result.duration_ms),
                     response_json: serde_json::to_value(envelope).ok(),
-                    error_code: None,
-                    error_message: None,
+                    error_code,
+                    error_message,
                     retryable: run_state == JobRunState::Failed
                         || run_state == JobRunState::Timeout,
                     protocol_violation: false,
