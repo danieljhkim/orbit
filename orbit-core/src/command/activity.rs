@@ -8,10 +8,14 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 
-const DEFAULT_JOB_FILES: [(&str, &str); 3] = [
+const DEFAULT_JOB_FILES: [(&str, &str); 4] = [
     (
         "approve-task-leader",
         include_str!("../../assets/activities/approve-task-leader.yaml"),
+    ),
+    (
+        "oversee-orbit-operations",
+        include_str!("../../assets/activities/oversee-orbit-operations.yaml"),
     ),
     (
         "perform-maintenance",
