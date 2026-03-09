@@ -32,6 +32,31 @@ impl IdentityCatalog {
         &self.role_overrides
     }
 
+    pub fn list(&self) -> Result<Vec<String>, OrbitError> {
+        if !self.root.exists() {
+            return Ok(Vec::new());
+        }
+        let entries = fs::read_dir(&self.root).map_err(|e| {
+            OrbitError::Io(format!(
+                "failed to read identity root '{}': {e}",
+                self.root.display()
+            ))
+        })?;
+        let mut ids: Vec<String> = entries
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+                if path.extension()?.to_str()? == "yaml" {
+                    path.file_stem()?.to_str().map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        ids.sort();
+        Ok(ids)
+    }
+
     pub fn resolve(&self, identity_id: &str) -> Result<ResolvedIdentity, OrbitError> {
         let identity_id = identity_id.trim();
         if identity_id.is_empty() {

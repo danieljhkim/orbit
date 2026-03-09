@@ -2,6 +2,7 @@ pub mod activity;
 pub mod agent;
 pub mod audit;
 pub mod config;
+pub mod identity;
 pub mod init;
 pub mod job;
 pub mod skill;
@@ -32,6 +33,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Config(config::ConfigCommand),
+    Identity(identity::IdentityCommand),
     Init(init::InitCommand),
     Tool(tool::ToolCommand),
     Task(task::TaskCommand),
@@ -46,6 +48,7 @@ impl Execute for Commands {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
             Commands::Config(cmd) => cmd.execute(runtime),
+            Commands::Identity(cmd) => cmd.execute(runtime),
             Commands::Init(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => cmd.execute(runtime),

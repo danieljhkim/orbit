@@ -1,0 +1,17 @@
+id: oversee-orbit-operations
+specType: operation_management
+description: Manager reviews all recently ran orbit job runs, review them carefully
+instruction: Use `orbit-approve-task` to check for any orbit tasks with "proposed" or "review" status, review them carefully, and update the status accordingly. Output the task_id's that have been approved and rejected and leave a brief summary in the comment.
+inputSchemaJson:
+  type: object
+  properties: {}
+  additionalProperties: false
+outputSchemaJson:
+  type: object
+  properties:
+    comment:
+      type: string
+skillRefs: ["orbit-approve-task", "orbit-manage-tasks"]
+identityId: linus
+assignedTo: linus
+createdBy: system
