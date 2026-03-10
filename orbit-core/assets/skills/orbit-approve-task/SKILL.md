@@ -30,11 +30,12 @@ orbit task approve <id> --by "<identity_display_name>" --note "<note>" # approve
 1. Find all tasks with status `proposed` or `review`.
 2. Confirm all the tasks are in `proposed` or `review`.
 3. For `proposed` tasks, review the task carefully and determine whether the task is valid.
-   - If the proposed task is valid, approve with explicit identity and a meaningful note.
+   - If the proposed task is valid, approve with explicit identity and a meaningful note - and ASSIGN the task to the person (from `orbit identity list`) you think is best suited to complete it. 
    - If not valid, reject with `orbit task reject <id> --by <identity_display_name> --note <reason>`.
 4. For `review` tasks, confirm all requirements were fulfilled as outlined in the task.
    - If the task is completed successfully, approve with `orbit task approve <id> --by <identity_display_name> --note <reason>`.
    - If the task is incomplete, reject with `orbit task reject <id> --by <identity_display_name> --note <reason>` and explain what still needs to be resolved.
+5. If there was a code change, and the task was approved, create a commit in to agent-main branch.
 
 ## Verification Rules
 

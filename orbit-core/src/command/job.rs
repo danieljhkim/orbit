@@ -84,6 +84,7 @@ struct ExecutionContext {
     job: Option<Job>,
     agent_cli: String,
     timeout_seconds: u64,
+    input: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +194,14 @@ impl OrbitRuntime {
     }
 
     pub fn run_job_now(&self, job_id: &str) -> Result<JobRunResult, OrbitError> {
+        self.run_job_now_with_input(job_id, json!({}))
+    }
+
+    pub fn run_job_now_with_input(
+        &self,
+        job_id: &str,
+        input: Value,
+    ) -> Result<JobRunResult, OrbitError> {
         let job = self.show_job(job_id)?;
         let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
         if let Some(active_run) = self.get_pending_or_running_job_run_backend(job_id)? {
@@ -205,7 +214,7 @@ impl OrbitRuntime {
             job_id: job.job_id.clone(),
         })?;
 
-        self.execute_activity_with_retries(job, Utc::now(), None)
+        self.execute_activity_with_retries(job, Utc::now(), None, input)
     }
 
     pub(crate) fn execute_claimed_job(&self, claimed: &ClaimedJobRun) -> Result<(), OrbitError> {
@@ -213,6 +222,7 @@ impl OrbitRuntime {
             claimed.job.clone(),
             claimed.run.scheduled_at,
             Some(claimed.run.clone()),
+            json!({}),
         )?;
         Ok(())
     }
@@ -222,8 +232,9 @@ impl OrbitRuntime {
         job: Job,
         scheduled_at: DateTime<Utc>,
         initial_run: Option<JobRun>,
+        input: Value,
     ) -> Result<JobRunResult, OrbitError> {
-        let execution = self.build_execution_context_for_job(&job)?;
+        let execution = self.build_execution_context_for_job(&job, input)?;
         let max_attempts = job.retry_max_attempts.saturating_add(1);
         let mut current_attempt = initial_run.as_ref().map(|r| r.attempt).unwrap_or(1);
         let mut pending_initial = initial_run;
@@ -406,6 +417,7 @@ impl OrbitRuntime {
             job: None,
             agent_cli: agent_cli.to_string(),
             timeout_seconds,
+            input: json!({}),
         };
         let outcome = self.execute_single_attempt(&execution);
         Ok(DirectActivityRunOutcome {
@@ -417,12 +429,19 @@ impl OrbitRuntime {
         })
     }
 
-    fn build_execution_context_for_job(&self, job: &Job) -> Result<ExecutionContext, OrbitError> {
+    fn build_execution_context_for_job(
+        &self,
+        job: &Job,
+        input: Value,
+    ) -> Result<ExecutionContext, OrbitError> {
+        let activity = self.show_activity(&job.target_id)?;
+        self.validate_activity_input_schema(&activity, &input)?;
         Ok(ExecutionContext {
-            activity: self.show_activity(&job.target_id)?,
+            activity,
             job: Some(job.clone()),
             agent_cli: job.agent_cli.clone(),
             timeout_seconds: job.timeout_seconds,
+            input,
         })
     }
 
@@ -682,7 +701,7 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
                 })
                 .collect(),
             identity,
-            input: json!({}),
+            input: execution.input.clone(),
             memory: json!({}),
         };
 
@@ -718,6 +737,24 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
         }
 
         Ok(())
+    }
+
+    fn validate_activity_input_schema(
+        &self,
+        activity: &Activity,
+        input: &Value,
+    ) -> Result<(), OrbitError> {
+        let context = format!(
+            "job run input does not match activity '{}' input schema",
+            activity.id
+        );
+        match validate_instance_against_schema(&activity.input_schema_json, input, &context) {
+            Ok(()) => Ok(()),
+            Err(OrbitError::AgentProtocolViolation(message)) => {
+                Err(OrbitError::InvalidInput(message))
+            }
+            Err(other) => Err(other),
+        }
     }
 
     fn validate_activity_target_exists(

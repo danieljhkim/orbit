@@ -15,7 +15,7 @@ pub use context::OrbitContext;
 pub use orbit_store::AuditEventInsertParams;
 pub use orbit_types::OrbitError;
 pub use orbit_types::{
-    Activity, AgentSessionStatus, AuditEvent, AuditEventStatus, AuditStats, Job,
+    Activity, AgentSessionStatus, AuditEvent, AuditEventStatus, AuditStats, IdentityRole, Job,
     JobRetryBackoffStrategy, JobRun, JobRunState, JobScheduleState, JobTargetType, Role, Skill,
     Task, TaskComment, TaskPriority, TaskStatus, TaskType,
 };

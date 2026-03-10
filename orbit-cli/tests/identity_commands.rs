@@ -170,6 +170,82 @@ fn identity_list_json_fails_for_malformed_identity_files() {
 }
 
 #[test]
+fn identity_list_role_filter_returns_only_matching_identities() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_identity(dir.path(), "alice", "Alice", "engineer");
+    write_identity(dir.path(), "bob", "Bob", "member");
+    write_identity(dir.path(), "carol", "Carol", "engineer");
+
+    let output = orbit_in(dir.path())
+        .args(["identity", "list", "--role", "engineer"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let text = String::from_utf8(output).expect("utf8");
+    assert!(text.contains("alice"), "alice (engineer) must appear");
+    assert!(text.contains("carol"), "carol (engineer) must appear");
+    assert!(!text.contains("bob"), "bob (member) must not appear");
+}
+
+#[test]
+fn identity_list_role_filter_json_returns_only_matching_identities() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_identity(dir.path(), "alice", "Alice", "engineer");
+    write_identity(dir.path(), "bob", "Bob", "member");
+
+    let output = orbit_in(dir.path())
+        .args(["identity", "list", "--role", "engineer", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let text = String::from_utf8(output).expect("utf8");
+    let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+    let ids: Vec<&str> = parsed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"alice"));
+    assert!(!ids.contains(&"bob"));
+}
+
+#[test]
+fn identity_list_role_filter_empty_match_returns_empty() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_identity(dir.path(), "alice", "Alice", "engineer");
+
+    let output = orbit_in(dir.path())
+        .args(["identity", "list", "--role", "leader"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let text = String::from_utf8(output).expect("utf8");
+    // Header line only, no data rows
+    assert!(!text.contains("alice"));
+}
+
+#[test]
+fn identity_list_role_filter_invalid_role_returns_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    orbit_in(dir.path())
+        .args(["identity", "list", "--role", "not-a-real-role"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown identity role"));
+}
+
+#[test]
 fn identity_help_shows_list_and_show_subcommands() {
     let dir = tempfile::tempdir().expect("tempdir");
 

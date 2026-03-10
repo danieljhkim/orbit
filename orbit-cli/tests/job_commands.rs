@@ -17,6 +17,10 @@ fn orbit_in(dir: &Path) -> Command {
 }
 
 fn add_activity(dir: &Path, id: &str) -> String {
+    add_activity_with_input_schema(dir, id, "{}")
+}
+
+fn add_activity_with_input_schema(dir: &Path, id: &str, input_schema: &str) -> String {
     let output = orbit_in(dir)
         .args([
             "activity",
@@ -28,7 +32,7 @@ fn add_activity(dir: &Path, id: &str) -> String {
             "--description",
             "test spec",
             "--input-schema",
-            "{}",
+            input_schema,
             "--output-schema",
             "{}",
         ])
@@ -107,6 +111,19 @@ fn write_failing_agent(dir: &Path) -> String {
     #[cfg(unix)]
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
         .expect("chmod failing agent");
+    path.to_string_lossy().to_string()
+}
+
+fn write_stdin_capturing_agent(dir: &Path, stdin_capture: &Path) -> String {
+    let path = dir.join("mock-agent");
+    let script = format!(
+        "#!/bin/sh\ncat > \"{stdin}\"\nprintf '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null,\"durationMs\":1}}'\n",
+        stdin = stdin_capture.to_string_lossy(),
+    );
+    std::fs::write(&path, script).expect("write capturing agent");
+    #[cfg(unix)]
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod capturing agent");
     path.to_string_lossy().to_string()
 }
 
@@ -194,6 +211,59 @@ fn job_run_creates_run_and_history_json() {
     assert_eq!(runs[0]["state"], "success");
     assert_eq!(runs[0]["attempt"], 1);
     assert!(runs[0]["agent_response_json"].is_object());
+}
+
+#[test]
+fn job_run_with_task_id_passes_input_to_agent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let stdin_capture = dir.path().join("job-run-stdin.json");
+    let spec_id = add_activity_with_input_schema(
+        dir.path(),
+        "spec-cli-run-task-id",
+        r#"{"type":"object","properties":{"task_id":{"type":"string"}},"additionalProperties":false}"#,
+    );
+    let agent_cli = write_stdin_capturing_agent(dir.path(), &stdin_capture);
+    let job_id = add_job(dir.path(), &spec_id, "every 1m", &agent_cli);
+
+    orbit_in(dir.path())
+        .args([
+            "job",
+            "run",
+            &job_id,
+            "--task-id",
+            "T20260310-045900-1773118740023227000",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdin_raw = std::fs::read_to_string(stdin_capture).expect("stdin capture");
+    let payload: Value = serde_json::from_str(&stdin_raw).expect("valid stdin payload");
+    assert_eq!(
+        payload["input"]["task_id"],
+        "T20260310-045900-1773118740023227000"
+    );
+}
+
+#[test]
+fn job_run_with_task_id_rejects_incompatible_activity_input_schema() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec_id = add_activity_with_input_schema(
+        dir.path(),
+        "spec-cli-run-task-id-invalid",
+        r#"{"type":"object","properties":{},"additionalProperties":false}"#,
+    );
+    let agent_cli = write_mock_agent(dir.path());
+    let job_id = add_job(dir.path(), &spec_id, "every 1m", &agent_cli);
+
+    orbit_in(dir.path())
+        .args(["job", "run", &job_id, "--task-id", "T123"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "job run input does not match activity",
+        ))
+        .stderr(predicate::str::contains("task_id"));
 }
 
 #[test]

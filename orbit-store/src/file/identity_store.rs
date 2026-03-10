@@ -33,10 +33,24 @@ impl IdentityCatalog {
     }
 
     pub fn list(&self) -> Result<Vec<ResolvedIdentity>, OrbitError> {
-        self.list_ids()?
+        self.list_filtered(None)
+    }
+
+    /// List identities, optionally filtering by role.
+    /// Ordering is deterministic (sorted by ID) both before and after filtering.
+    pub fn list_filtered(
+        &self,
+        role: Option<IdentityRole>,
+    ) -> Result<Vec<ResolvedIdentity>, OrbitError> {
+        let all: Vec<ResolvedIdentity> = self
+            .list_ids()?
             .into_iter()
             .map(|identity_id| self.resolve(&identity_id))
-            .collect()
+            .collect::<Result<_, _>>()?;
+        match role {
+            None => Ok(all),
+            Some(r) => Ok(all.into_iter().filter(|i| i.role == r).collect()),
+        }
     }
 
     fn list_ids(&self) -> Result<Vec<String>, OrbitError> {
@@ -215,6 +229,80 @@ mod tests {
     use orbit_types::{IdentityRole, OrbitError};
 
     use super::IdentityCatalog;
+
+    #[test]
+    fn list_filtered_by_role_returns_only_matching_identities() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("alice.yaml"),
+            "identity:\n  name: Alice\n  role: engineer\n",
+        )
+        .expect("write alice");
+        std::fs::write(
+            dir.path().join("bob.yaml"),
+            "identity:\n  name: Bob\n  role: member\n",
+        )
+        .expect("write bob");
+        std::fs::write(
+            dir.path().join("carol.yaml"),
+            "identity:\n  name: Carol\n  role: engineer\n",
+        )
+        .expect("write carol");
+
+        let catalog = IdentityCatalog::new(dir.path().to_path_buf(), BTreeMap::new());
+
+        let engineers = catalog
+            .list_filtered(Some(IdentityRole::Engineer))
+            .expect("list engineers");
+        assert_eq!(engineers.len(), 2);
+        assert!(engineers.iter().all(|i| i.role == IdentityRole::Engineer));
+        // deterministic ordering preserved
+        assert_eq!(engineers[0].id, "alice");
+        assert_eq!(engineers[1].id, "carol");
+
+        let members = catalog
+            .list_filtered(Some(IdentityRole::Member))
+            .expect("list members");
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].id, "bob");
+    }
+
+    #[test]
+    fn list_filtered_with_none_returns_all_identities() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("alice.yaml"),
+            "identity:\n  name: Alice\n  role: engineer\n",
+        )
+        .expect("write alice");
+        std::fs::write(
+            dir.path().join("bob.yaml"),
+            "identity:\n  name: Bob\n  role: member\n",
+        )
+        .expect("write bob");
+
+        let catalog = IdentityCatalog::new(dir.path().to_path_buf(), BTreeMap::new());
+
+        let all = catalog.list_filtered(None).expect("list all");
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn list_filtered_empty_match_returns_empty_vec() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("alice.yaml"),
+            "identity:\n  name: Alice\n  role: engineer\n",
+        )
+        .expect("write alice");
+
+        let catalog = IdentityCatalog::new(dir.path().to_path_buf(), BTreeMap::new());
+
+        let leaders = catalog
+            .list_filtered(Some(IdentityRole::Leader))
+            .expect("list leaders");
+        assert!(leaders.is_empty());
+    }
 
     #[test]
     fn list_returns_sorted_resolved_identities() {

@@ -16,13 +16,21 @@ use tempfile::tempdir;
 use std::os::unix::fs::PermissionsExt;
 
 fn add_activity(runtime: &OrbitRuntime, id: &str) {
+    add_activity_with_input_schema(runtime, id, json!({}));
+}
+
+fn add_activity_with_input_schema(
+    runtime: &OrbitRuntime,
+    id: &str,
+    input_schema_json: serde_json::Value,
+) {
     let _ = runtime
         .add_activity(ActivityAddParams {
             id: id.to_string(),
             spec_type: "analysis".to_string(),
             description: "runtime test spec".to_string(),
             instruction: "Run the scheduled runtime behavior test.".to_string(),
-            input_schema_json: json!({}),
+            input_schema_json,
             output_schema_json: json!({}),
             artifact_path_template: None,
             skill_refs: Vec::new(),
@@ -142,6 +150,58 @@ fn activity_run_executes_without_persisted_job() {
     );
 }
 
+#[test]
+fn agent_with_orphan_stdout_holder_does_not_hang() {
+    // Reproduces: job-run stuck in `running` when agent exits successfully but leaves
+    // orphan child processes that inherited the stdout pipe write end.
+    // Without the fix, `wait_with_output()` hangs indefinitely because the orphan
+    // keeps the pipe open. With the fix, the process group is killed after the agent
+    // exits, closing all write ends and letting the run complete.
+    let dir = tempdir().expect("tempdir");
+    let runtime = Arc::new(OrbitRuntime::from_data_root(dir.path()).expect("runtime"));
+    let script_path = dir.path().join("mock-agent");
+    // The script: consumes stdin, spawns an orphan that holds stdout open for 60s,
+    // prints a valid success envelope, then exits cleanly.
+    let script = concat!(
+        "#!/bin/sh\n",
+        "cat > /dev/null\n", // consume stdin
+        "sleep 60 &\n",      // orphan process inherits stdout pipe write end
+        "printf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+        "exit 0\n",
+    );
+    let agent_cli = write_agent_script(&script_path, script);
+
+    add_activity(&runtime, "spec-orphan-stdout");
+    let job_id = add_scheduled_activity_with_timeout(
+        &runtime,
+        "spec-orphan-stdout",
+        &agent_cli,
+        10, // generous agent timeout; the hang occurs before timeout fires
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    // Run the job in a thread so we can detect a hang via channel timeout.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let r = Arc::clone(&runtime);
+    let j = job_id.clone();
+    thread::spawn(move || {
+        let _ = tx.send(r.run_job_now(&j));
+    });
+
+    // The agent exits almost immediately; the run must complete well within 5 seconds.
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("run_job_now must not hang when agent has orphan stdout-holding children")
+        .expect("run must succeed");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].state, JobRunState::Success);
+}
+
 fn write_agent_script(path: &std::path::Path, body: &str) -> String {
     std::fs::write(path, body).expect("write script");
     #[cfg(unix)]
@@ -220,6 +280,82 @@ fn scheduled_run_executes_agent_and_records_success_run() {
     assert!(stdin_raw.contains("\"input\""));
     assert!(stdin_raw.contains("\"memory\""));
     assert!(stdin_raw.contains("\"instruction\":\"Run the scheduled runtime behavior test.\""));
+}
+
+#[test]
+fn run_job_now_with_input_passes_manual_input_to_agent() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let stdin_capture = dir.path().join("job-stdin.json");
+    let script_path = dir.path().join("mock-agent");
+    let script = format!(
+        "#!/bin/sh\ncat > \"{stdin}\"\nprintf '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null,\"durationMs\":1}}'\n",
+        stdin = stdin_capture.to_string_lossy(),
+    );
+    let agent_cli = write_agent_script(&script_path, &script);
+
+    add_activity_with_input_schema(
+        &runtime,
+        "spec-success-with-input",
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string" }
+            },
+            "additionalProperties": false
+        }),
+    );
+    let job_id = add_scheduled_activity(
+        &runtime,
+        "spec-success-with-input",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime
+        .run_job_now_with_input(&job_id, json!({ "task_id": "T123" }))
+        .expect("run job");
+
+    assert_eq!(run.state, JobRunState::Success);
+    let stdin_raw = std::fs::read_to_string(stdin_capture).expect("stdin capture");
+    let payload: serde_json::Value = serde_json::from_str(&stdin_raw).expect("valid stdin payload");
+    assert_eq!(payload["input"]["task_id"], "T123");
+}
+
+#[test]
+fn run_job_now_with_input_rejects_schema_mismatch() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    add_activity_with_input_schema(
+        &runtime,
+        "spec-invalid-input",
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    );
+    let job_id = add_scheduled_activity(
+        &runtime,
+        "spec-invalid-input",
+        "mock-agent",
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let err = runtime
+        .run_job_now_with_input(&job_id, json!({ "task_id": "T123" }))
+        .expect_err("schema mismatch should fail");
+
+    assert!(matches!(err, OrbitError::InvalidInput(_)));
+    assert!(
+        err.to_string()
+            .contains("job run input does not match activity")
+    );
 }
 
 #[test]

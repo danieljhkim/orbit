@@ -48,21 +48,13 @@ pub fn run_process(
             ));
         }
     }
-    let (timed_out, output) = crate::timeout::wait_with_optional_timeout(child, req.timeout_ms)?;
-
-    let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if timed_out {
-        if !stderr.is_empty() {
-            stderr.push('\n');
-        }
-        stderr.push_str("process timed out");
-    }
+    let result = crate::timeout::wait_with_optional_timeout(child, req.timeout_ms)?;
 
     Ok(ExecutionResult {
-        success: output.status.success() && !timed_out,
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr,
-        exit_code: output.status.code(),
+        success: result.exit_success,
+        stdout: String::from_utf8_lossy(&result.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&result.stderr).to_string(),
+        exit_code: result.exit_code,
         duration_ms: started.elapsed().as_millis() as u64,
         output: None,
     })

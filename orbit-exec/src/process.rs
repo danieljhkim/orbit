@@ -11,6 +11,17 @@ pub(crate) fn spawn(req: &ExecRequest) -> Result<Child, OrbitError> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    // Make the child a process group leader (pgid = pid).  This lets us send
+    // SIGKILL to the entire group after the child exits, ensuring that any
+    // orphan subprocesses the agent spawned (which may have inherited the
+    // stdout/stderr pipe write ends) are also killed.  Without this, those
+    // orphans keep the pipes open and `wait_with_output` hangs indefinitely.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     if let EnvironmentMode::ClearAndSet(pairs) = &req.environment_mode {
         command.env_clear();
         command.envs(pairs.iter().cloned());

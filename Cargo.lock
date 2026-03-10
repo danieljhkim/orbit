@@ -923,6 +923,7 @@ dependencies = [
 name = "orbit-exec"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "orbit-types",
  "wait-timeout",
 ]

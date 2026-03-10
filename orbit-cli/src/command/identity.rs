@@ -1,4 +1,5 @@
 use clap::{Args, Subcommand};
+use orbit_core::IdentityRole;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
 
@@ -35,11 +36,22 @@ impl Execute for IdentitySubcommand {
 pub struct IdentityListArgs {
     #[arg(long)]
     pub json: bool,
+    /// Filter by identity role (e.g. engineer, member, leader, product-designer, ceo).
+    #[arg(long, value_name = "ROLE")]
+    pub role: Option<String>,
 }
 
 impl Execute for IdentityListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let identities = runtime.list_identities()?;
+        let role = self
+            .role
+            .as_deref()
+            .map(|r| {
+                r.parse::<IdentityRole>()
+                    .map_err(|e| OrbitError::IdentityValidation(e))
+            })
+            .transpose()?;
+        let identities = runtime.list_identities_filtered(role)?;
         if self.json {
             let values: Vec<_> = identities
                 .iter()

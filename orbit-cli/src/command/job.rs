@@ -169,12 +169,15 @@ impl Execute for JobShowArgs {
 pub struct JobRunArgs {
     pub job_id: String,
     #[arg(long)]
+    pub task_id: Option<String>,
+    #[arg(long)]
     pub json: bool,
 }
 
 impl Execute for JobRunArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let run = runtime.run_job_now(&self.job_id)?;
+        let run = runtime
+            .run_job_now_with_input(&self.job_id, build_job_run_input(self.task_id.as_deref())?)?;
         let run_details = runtime
             .job_history(&self.job_id)?
             .into_iter()
@@ -423,6 +426,21 @@ pub(crate) fn summarize_error_message(raw: Option<&str>) -> String {
     }
     let truncated = value.chars().take(120).collect::<String>();
     format!("{truncated}...")
+}
+
+fn build_job_run_input(task_id: Option<&str>) -> Result<Value, OrbitError> {
+    match task_id {
+        None => Ok(json!({})),
+        Some(task_id) => {
+            let task_id = task_id.trim();
+            if task_id.is_empty() {
+                return Err(OrbitError::InvalidInput(
+                    "task_id must not be empty".to_string(),
+                ));
+            }
+            Ok(json!({ "task_id": task_id }))
+        }
+    }
 }
 
 struct CliShutdownSignal;

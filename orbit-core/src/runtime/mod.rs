@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_policy::PolicyEngine;
-use orbit_types::{Audit, Job, OrbitError, ResolvedIdentity};
+use orbit_types::{Audit, IdentityRole, Job, OrbitError, ResolvedIdentity};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -112,7 +112,14 @@ impl OrbitRuntime {
     }
 
     pub fn list_identities(&self) -> Result<Vec<ResolvedIdentity>, OrbitError> {
-        self.context.identity_catalog.list()
+        self.context.identity_catalog.list_filtered(None)
+    }
+
+    pub fn list_identities_filtered(
+        &self,
+        role: Option<IdentityRole>,
+    ) -> Result<Vec<ResolvedIdentity>, OrbitError> {
+        self.context.identity_catalog.list_filtered(role)
     }
 
     pub fn show_identity(&self, identity_id: &str) -> Result<ResolvedIdentity, OrbitError> {

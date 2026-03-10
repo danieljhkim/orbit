@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 orbit-types = { path = "../orbit-types" }
 wait-timeout.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
