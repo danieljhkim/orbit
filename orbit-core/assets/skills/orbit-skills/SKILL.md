@@ -22,8 +22,10 @@ You are to assume this identity, and act and think like this identity. That is y
 Default task lifecycle:
 
 ```text
-proposed -> backlog -> in_progress -> review -> done
+proposed -> backlog -> in-progress -> review -> done
 ```
+
+Use the CLI-facing spelling `in-progress` in commands and examples. Orbit may still store task bundles under an internal `in_progress` directory on disk.
 
 Use `blocked` when execution cannot safely continue. Use `orbit task` commands for lifecycle mutations; do not edit task backing files directly.
 

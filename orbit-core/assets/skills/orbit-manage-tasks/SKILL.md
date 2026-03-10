@@ -21,7 +21,7 @@ In scope:
 ## Task Lifecycle
 
 ```text
-proposed -> backlog -> in_progress -> review -> done
+proposed -> backlog -> in-progress -> review -> done
 ```
 
 Any status may move to `blocked` when execution cannot safely continue.
@@ -36,6 +36,7 @@ Any status may move to `blocked` when execution cannot safely continue.
 - Avoid destructive operations unless explicitly requested.
 - Backfill missing attribution fields when needed.
 - Task bundles live at `{{ORBIT_ROOT}}/tasks/<status>/<task_id>/`.
+- CLI-facing status spelling is `in-progress`; the on-disk task bundle directory remains `in_progress`.
 - Use `execution-summary.md` for canonical execution summaries; store other task-owned artifacts under `artifacts/`.
 
 ## Command Reference

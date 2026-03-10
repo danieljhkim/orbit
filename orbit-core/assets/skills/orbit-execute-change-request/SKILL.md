@@ -14,9 +14,9 @@ Handle a human-requested engineering change or existing Orbit task from intent t
 1. Clarify intent and success criteria.
 2. Create or link the tracking task in Orbit. If creating, use `orbit-create-task`.
 3. Ensure `proposed` work is explicitly approved before execution.
-4. Move `backlog -> in_progress` before making changes.
+4. Move `backlog -> in-progress` before making changes.
 5. Implement and validate the change according to the task plan.
-6. Move `in_progress -> review` after validation.
+6. Move `in-progress -> review` after validation.
 7. Persist the execution summary in the linked task bundle.
 
 Use `orbit-manage-tasks` for canonical CLI mutation and verification details.

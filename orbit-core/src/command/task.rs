@@ -141,7 +141,7 @@ impl OrbitRuntime {
                 .unwrap_or(task.execution_summary.as_str());
             if effective_execution_summary.trim().is_empty() {
                 return Err(OrbitError::InvalidInput(format!(
-                    "task '{id}' requires non-empty execution_summary before transitioning in_progress -> review"
+                    "task '{id}' requires non-empty execution_summary before transitioning in-progress -> review"
                 )));
             }
         }

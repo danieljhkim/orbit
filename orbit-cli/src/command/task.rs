@@ -319,6 +319,7 @@ impl Execute for TaskUpdateArgs {
 pub enum TaskUpdateStatusArg {
     Proposed,
     Backlog,
+    #[value(name = "in-progress", alias = "in_progress")]
     InProgress,
     Review,
     Done,

@@ -245,6 +245,63 @@ fn task_update_updates_description_and_plan() {
 }
 
 #[test]
+fn task_update_accepts_in_progress_status_alias() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = false\n",
+    )
+    .expect("write config");
+    let id = add_task(dir.path(), "status alias");
+
+    orbit_in(dir.path())
+        .args(["task", "update", &id, "--status", "in_progress"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated task"));
+
+    let show_output = orbit_in(dir.path())
+        .args(["task", "show", &id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_eq!(show["status"], "in-progress");
+}
+
+#[test]
+fn task_show_and_list_use_cli_status_spelling() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = false\n",
+    )
+    .expect("write config");
+    let id = add_task(dir.path(), "status display");
+
+    orbit_in(dir.path())
+        .args(["task", "update", &id, "--status", "in-progress"])
+        .assert()
+        .success();
+
+    orbit_in(dir.path())
+        .args(["task", "show", &id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Status:      in-progress"));
+
+    orbit_in(dir.path())
+        .args(["task", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("in-progress"));
+}
+
+#[test]
 fn task_update_accepts_instructions_alias_for_plan() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "instructions-update");

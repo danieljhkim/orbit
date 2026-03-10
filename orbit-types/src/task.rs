@@ -12,6 +12,7 @@ use crate::OrbitId;
 pub enum TaskStatus {
     Proposed,
     Backlog,
+    #[cfg_attr(feature = "clap", value(name = "in-progress", alias = "in_progress"))]
     InProgress,
     Review,
     Done,
@@ -21,16 +22,7 @@ pub enum TaskStatus {
 
 impl Display for TaskStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            TaskStatus::Proposed => "proposed",
-            TaskStatus::Backlog => "backlog",
-            TaskStatus::InProgress => "in_progress",
-            TaskStatus::Review => "review",
-            TaskStatus::Done => "done",
-            TaskStatus::Blocked => "blocked",
-            TaskStatus::Archived => "archived",
-        };
-        write!(f, "{s}")
+        write!(f, "{}", self.cli_name())
     }
 }
 
@@ -41,6 +33,7 @@ impl FromStr for TaskStatus {
         match s {
             "proposed" => Ok(TaskStatus::Proposed),
             "backlog" => Ok(TaskStatus::Backlog),
+            "in-progress" => Ok(TaskStatus::InProgress),
             "in_progress" => Ok(TaskStatus::InProgress),
             "review" => Ok(TaskStatus::Review),
             "done" => Ok(TaskStatus::Done),
@@ -52,6 +45,18 @@ impl FromStr for TaskStatus {
 }
 
 impl TaskStatus {
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            TaskStatus::Proposed => "proposed",
+            TaskStatus::Backlog => "backlog",
+            TaskStatus::InProgress => "in-progress",
+            TaskStatus::Review => "review",
+            TaskStatus::Done => "done",
+            TaskStatus::Blocked => "blocked",
+            TaskStatus::Archived => "archived",
+        }
+    }
+
     pub fn validate_transition(&self, target: TaskStatus) -> Result<(), String> {
         if target == TaskStatus::Archived {
             return Ok(());

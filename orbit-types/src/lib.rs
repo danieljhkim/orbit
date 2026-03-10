@@ -34,10 +34,11 @@ pub use tool::{ExecutionResult, PolicyDecision, StoredTool, ToolParam, ToolSchem
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
+    use std::str::FromStr;
 
     use crate::{
         Activity, AgentResponseEnvelope, ExecutionResult, Job, JobRetryBackoffStrategy, JobRun,
-        JobRunState, JobScheduleState, JobTargetType, OrbitEvent, Role, Skill,
+        JobRunState, JobScheduleState, JobTargetType, OrbitEvent, Role, Skill, TaskStatus,
     };
 
     #[test]
@@ -181,5 +182,18 @@ mod tests {
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["status"], "success");
         assert_eq!(value["durationMs"], 1234);
+    }
+
+    #[test]
+    fn task_status_accepts_snake_case_alias_and_formats_for_cli() {
+        assert_eq!(
+            TaskStatus::from_str("in_progress").expect("snake_case alias"),
+            TaskStatus::InProgress
+        );
+        assert_eq!(
+            TaskStatus::from_str("in-progress").expect("canonical cli spelling"),
+            TaskStatus::InProgress
+        );
+        assert_eq!(TaskStatus::InProgress.to_string(), "in-progress");
     }
 }
