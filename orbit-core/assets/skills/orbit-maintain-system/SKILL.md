@@ -40,7 +40,7 @@ Use `orbit-create-task` for task creation details and `orbit-manage-tasks` for u
 
 ## Output
 
-Write the report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md`.
+Write the report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD/maintenance_<title>.md`.
 
 If an artifact belongs to exactly one Orbit task, store it under that task bundle's `artifacts/` directory instead.
 

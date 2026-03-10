@@ -19,7 +19,7 @@ Perform a structured, point-in-time evaluation of the codebase across architectu
 6. Identify UX/DX friction, technical debt, and architectural weaknesses.
 7. Produce a prioritized improvement roadmap and feature opportunities.
 8. Route each issue finding through `orbit-track-issues`.
-9. Write the report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD-<title>.md`.
+9. Write the report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD/assessment_<title>.md`.
 
 ## Evaluation Dimensions
 

@@ -34,6 +34,7 @@ fn assert_default_skill_links(base_root: &std::path::Path) {
             "orbit-assess-codebase",
             "orbit-execute-change-request",
             "orbit-maintain-system",
+            "orbit-operations-management",
             "orbit-manage-tasks",
             "orbit-skills",
             "orbit-track-issues",
@@ -95,6 +96,12 @@ fn init_creates_default_identities_under_home_orbit() {
     assert!(
         skills_root
             .join("orbit-maintain-system")
+            .join("SKILL.md")
+            .exists()
+    );
+    assert!(
+        skills_root
+            .join("orbit-operations-management")
             .join("SKILL.md")
             .exists()
     );
