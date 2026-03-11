@@ -22,8 +22,8 @@ pub use event::OrbitEvent;
 pub use id::OrbitId;
 pub use identity::{IdentityRole, ResolvedIdentity};
 pub use job::{
-    AgentResponseEnvelope, AgentRunError, Job, JobRetryBackoffStrategy, JobRun, JobRunState,
-    JobScheduleState, JobTargetType,
+    AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRetryBackoffStrategy, JobRun,
+    JobRunState, JobScheduleState, JobTargetType,
 };
 pub use memo::Memo;
 pub use role::Role;
@@ -37,8 +37,9 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        Activity, AgentResponseEnvelope, ExecutionResult, Job, JobRetryBackoffStrategy, JobRun,
-        JobRunState, JobScheduleState, JobTargetType, OrbitEvent, Role, Skill, TaskStatus,
+        Activity, AgentCommitRequest, AgentResponseEnvelope, ExecutionResult, Job,
+        JobRetryBackoffStrategy, JobRun, JobRunState, JobScheduleState, JobTargetType, OrbitEvent,
+        Role, Skill, TaskStatus,
     };
 
     #[test]
@@ -182,6 +183,20 @@ mod tests {
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["status"], "success");
         assert_eq!(value["durationMs"], 1234);
+    }
+
+    #[test]
+    fn agent_commit_request_round_trips() {
+        let request = AgentCommitRequest {
+            message: "feat: orbit-owned commit".to_string(),
+            files: vec!["orbit-core/src/command/job.rs".to_string()],
+        };
+        let value = serde_json::to_value(&request).expect("serialize commit request");
+        assert_eq!(value["message"], "feat: orbit-owned commit");
+        assert_eq!(value["files"][0], "orbit-core/src/command/job.rs");
+        let decoded: AgentCommitRequest =
+            serde_json::from_value(value).expect("deserialize commit request");
+        assert_eq!(decoded, request);
     }
 
     #[test]

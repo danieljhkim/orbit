@@ -9,8 +9,8 @@ use orbit_store::ClaimedJobRun;
 use orbit_store::JobCreateParams as StoreActivityCreateParams;
 use orbit_store::JobRunCompletionParams;
 use orbit_types::{
-    Activity, AgentResponseEnvelope, Job, JobRetryBackoffStrategy, JobRun, JobRunState,
-    JobScheduleState, JobTargetType, OrbitError, OrbitEvent,
+    Activity, AgentCommitRequest, AgentResponseEnvelope, Job, JobRetryBackoffStrategy, JobRun,
+    JobRunState, JobScheduleState, JobTargetType, OrbitError, OrbitEvent,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -18,8 +18,10 @@ use tempfile::NamedTempFile;
 
 use crate::OrbitRuntime;
 use crate::json_schema::validate_instance_against_schema;
+use crate::paths;
 const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";
+const AGENT_COMMIT_FAILED: &str = "AGENT_COMMIT_FAILED";
 const AGENT_TIMEOUT: &str = "AGENT_TIMEOUT";
 const STALE_RUN_GRACE_SECONDS: u64 = 30;
 
@@ -640,6 +642,27 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
                         protocol_violation: true,
                     };
                 }
+                if run_state == JobRunState::Success
+                    && let Some(result) = envelope.result.as_ref()
+                    && let Err(err) = self.execute_commit_request_if_present(result)
+                {
+                    let (error_code, protocol_violation) = match err {
+                        OrbitError::AgentProtocolViolation(_) => {
+                            (AGENT_PROTOCOL_VIOLATION.to_string(), true)
+                        }
+                        _ => (AGENT_COMMIT_FAILED.to_string(), false),
+                    };
+                    return AttemptOutcome {
+                        state: JobRunState::Failed,
+                        exit_code: exec_result.exit_code,
+                        duration_ms: Some(exec_result.duration_ms),
+                        response_json: serde_json::to_value(envelope).ok(),
+                        error_code: Some(error_code),
+                        error_message: Some(err.to_string()),
+                        retryable: false,
+                        protocol_violation,
+                    };
+                }
                 AttemptOutcome {
                     state: run_state,
                     exit_code: exec_result.exit_code,
@@ -769,6 +792,57 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
             }
         }
 
+        Ok(())
+    }
+
+    fn execute_commit_request_if_present(&self, result: &Value) -> Result<(), OrbitError> {
+        let Some(commit_value) = result.get("commit") else {
+            return Ok(());
+        };
+
+        let commit: AgentCommitRequest =
+            serde_json::from_value(commit_value.clone()).map_err(|error| {
+                OrbitError::AgentProtocolViolation(format!(
+                    "result.commit must be an object with string `message` and string-array `files`: {error}"
+                ))
+            })?;
+
+        if commit.message.trim().is_empty() {
+            return Err(OrbitError::AgentProtocolViolation(
+                "result.commit.message must not be empty".to_string(),
+            ));
+        }
+        if commit.files.is_empty() {
+            return Err(OrbitError::AgentProtocolViolation(
+                "result.commit.files must contain at least one path".to_string(),
+            ));
+        }
+        let files = commit.files.clone();
+        let message = commit.message.clone();
+
+        let repo_root = paths::find_git_repo_root(&self.context.data_root).ok_or_else(|| {
+            OrbitError::Execution(format!(
+                "cannot locate git repository root from Orbit data root '{}'",
+                self.context.data_root.display()
+            ))
+        })?;
+        let repo_root_str = repo_root.to_string_lossy().to_string();
+
+        self.run_tool(
+            "git.stage_paths",
+            json!({
+                "repo_root": repo_root_str,
+                "files": files.clone(),
+            }),
+        )?;
+        self.run_tool(
+            "git.commit",
+            json!({
+                "repo_root": repo_root.to_string_lossy(),
+                "message": message,
+                "files": files,
+            }),
+        )?;
         Ok(())
     }
 

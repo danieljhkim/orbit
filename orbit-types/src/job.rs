@@ -158,6 +158,12 @@ pub struct AgentResponseEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentCommitRequest {
+    pub message: String,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Job {
     pub job_id: OrbitId,
     pub target_type: JobTargetType,

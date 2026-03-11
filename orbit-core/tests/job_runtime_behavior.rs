@@ -1,3 +1,4 @@
+use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -213,6 +214,29 @@ fn write_agent_script(path: &std::path::Path, body: &str) -> String {
 
 fn write_runtime_config(data_root: &std::path::Path, content: &str) {
     std::fs::write(data_root.join("config.toml"), content).expect("write config");
+}
+
+fn init_git_repo(path: &std::path::Path) {
+    let status = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(path)
+        .status()
+        .expect("git init");
+    assert!(status.success(), "git init must succeed");
+
+    let status = Command::new("git")
+        .args(["config", "user.email", "orbit@example.com"])
+        .current_dir(path)
+        .status()
+        .expect("git config email");
+    assert!(status.success(), "git config email must succeed");
+
+    let status = Command::new("git")
+        .args(["config", "user.name", "Orbit Test"])
+        .current_dir(path)
+        .status()
+        .expect("git config name");
+    assert!(status.success(), "git config name must succeed");
 }
 
 fn write_sqlite_job_config(data_root: &std::path::Path) {
@@ -547,6 +571,154 @@ approval_policy = "on-request"
             "--sandbox",
             "workspace-write",
         ]
+    );
+}
+
+#[test]
+fn successful_commit_request_is_executed_via_git_tools() {
+    let dir = tempdir().expect("tempdir");
+    init_git_repo(dir.path());
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let committed = dir.path().join("committed.txt");
+    let ignored = dir.path().join("ignored.txt");
+    std::fs::write(&committed, "commit me").expect("write committed file");
+    std::fs::write(&ignored, "leave me out").expect("write ignored file");
+
+    let script_path = dir.path().join("mock-agent");
+    let script = concat!(
+        "#!/bin/sh\n",
+        "cat >/dev/null\n",
+        "printf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"commit\":{\"message\":\"feat: commit selected file\",\"files\":[\"committed.txt\"]}},\"error\":null,\"durationMs\":1}'\n",
+    );
+    let agent_cli = write_agent_script(&script_path, script);
+
+    add_activity(&runtime, "spec-commit-request");
+    let job_id = add_scheduled_activity(
+        &runtime,
+        "spec-commit-request",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let log = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git log");
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).trim(),
+        "feat: commit selected file"
+    );
+
+    let files = Command::new("git")
+        .args(["show", "--name-only", "--pretty=", "HEAD"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git show");
+    let changed = String::from_utf8_lossy(&files.stdout);
+    assert!(changed.contains("committed.txt"));
+    assert!(!changed.contains("ignored.txt"));
+}
+
+#[test]
+fn commit_request_excludes_preexisting_staged_changes() {
+    let dir = tempdir().expect("tempdir");
+    init_git_repo(dir.path());
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let committed = dir.path().join("committed.txt");
+    let unrelated = dir.path().join("unrelated.txt");
+    std::fs::write(&committed, "commit me").expect("write committed file");
+    std::fs::write(&unrelated, "leave staged").expect("write unrelated file");
+
+    let stage_unrelated = Command::new("git")
+        .args(["add", "--", "unrelated.txt"])
+        .current_dir(dir.path())
+        .status()
+        .expect("git add unrelated");
+    assert!(stage_unrelated.success(), "git add unrelated must succeed");
+
+    let script_path = dir.path().join("mock-agent");
+    let script = concat!(
+        "#!/bin/sh\n",
+        "cat >/dev/null\n",
+        "printf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"commit\":{\"message\":\"feat: commit selected file only\",\"files\":[\"committed.txt\"]}},\"error\":null,\"durationMs\":1}'\n",
+    );
+    let agent_cli = write_agent_script(&script_path, script);
+
+    add_activity(&runtime, "spec-commit-request-isolated");
+    let job_id = add_scheduled_activity(
+        &runtime,
+        "spec-commit-request-isolated",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let files = Command::new("git")
+        .args(["show", "--name-only", "--pretty=", "HEAD"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git show");
+    let changed = String::from_utf8_lossy(&files.stdout);
+    assert!(changed.contains("committed.txt"));
+    assert!(!changed.contains("unrelated.txt"));
+
+    let staged = Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git diff --cached");
+    let staged_files = String::from_utf8_lossy(&staged.stdout);
+    assert!(staged_files.contains("unrelated.txt"));
+    assert!(!staged_files.contains("committed.txt"));
+}
+
+#[test]
+fn malformed_commit_request_fails_as_protocol_violation() {
+    let dir = tempdir().expect("tempdir");
+    init_git_repo(dir.path());
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("mock-agent");
+    let script = concat!(
+        "#!/bin/sh\n",
+        "cat >/dev/null\n",
+        "printf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"commit\":{\"message\":\"feat: empty files\",\"files\":[]}},\"error\":null,\"durationMs\":1}'\n",
+    );
+    let agent_cli = write_agent_script(&script_path, script);
+
+    add_activity(&runtime, "spec-commit-protocol");
+    let job_id = add_scheduled_activity(
+        &runtime,
+        "spec-commit-protocol",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Failed);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    assert_eq!(
+        history[0].error_code.as_deref(),
+        Some("AGENT_PROTOCOL_VIOLATION")
+    );
+    assert!(
+        history[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("result.commit.files must contain at least one path")
     );
 }
 

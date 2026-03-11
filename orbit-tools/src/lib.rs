@@ -47,6 +47,8 @@ mod tests {
 
         assert!(names.contains(&"fs.read".to_string()));
         assert!(names.contains(&"fs.write".to_string()));
+        assert!(names.contains(&"git.stage_paths".to_string()));
+        assert!(names.contains(&"git.commit".to_string()));
         assert!(names.contains(&"proc.spawn".to_string()));
         assert!(names.contains(&"time.now".to_string()));
     }

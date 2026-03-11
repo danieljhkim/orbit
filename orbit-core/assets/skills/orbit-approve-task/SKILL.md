@@ -35,7 +35,11 @@ orbit task approve <id> --by "<identity_display_name>" --note "<note>" # approve
 4. For `review` tasks, confirm all requirements were fulfilled as outlined in the task.
    - If the task is completed successfully, approve with `orbit task approve <id> --by <identity_display_name> --note <reason>`.
    - If the task is incomplete, reject with `orbit task reject <id> --by <identity_display_name> --note <reason>` and explain what still needs to be resolved.
-5. If there was a code change, and the task was approved, create a commit in to agent-main branch.
+5. If there was a code change and the workflow expects a commit, return commit intent for Orbit to execute instead of running `git commit` directly.
+   - Put the request under `result.commit`
+   - Required fields:
+     - `message`: commit message string
+     - `files`: array of explicit file paths to stage
 
 ## Verification Rules
 
@@ -54,6 +58,10 @@ Report:
 - decision identity used
 - decision note
 - verification result
+- If there are code changes, put the request under `result.commit`
+   - Required fields:
+      - `message`: commit message string
+      - `files`: array of explicit file paths to stage
 
 Keep output concise, operational, and auditable.
 
