@@ -209,3 +209,39 @@ fn legacy_workflow_command_is_not_supported() {
         .assert()
         .failure();
 }
+
+#[test]
+fn activity_list_ops_returns_signal_tier_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    orbit_in(dir.path())
+        .args(["init"])
+        .assert()
+        .success();
+
+    let output = orbit_in(dir.path())
+        .args(["activity", "list", "--ops"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let activities: Value = serde_json::from_slice(&output).expect("valid json");
+    let activities = activities.as_array().expect("array");
+    assert!(!activities.is_empty());
+
+    let activity = &activities[0];
+
+    // Required signal fields present.
+    assert!(activity.get("id").is_some());
+    assert!(activity.get("type").is_some());
+    assert!(activity.get("description").is_some());
+    assert!(activity.get("is_active").is_some());
+
+    // Verbose fields must be absent.
+    assert!(activity.get("instruction").is_none());
+    assert!(activity.get("input_schema_json").is_none());
+    assert!(activity.get("output_schema_json").is_none());
+    assert!(activity.get("skill_refs").is_none());
+}

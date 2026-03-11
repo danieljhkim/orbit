@@ -103,12 +103,18 @@ pub struct ActivityListArgs {
     pub all: bool,
     #[arg(long)]
     pub json: bool,
+    /// Output signal-tier JSON (id, type, description, is_active only)
+    #[arg(long)]
+    pub ops: bool,
 }
 
 impl Execute for ActivityListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let specs = runtime.list_activities(self.all)?;
-        if self.json {
+        if self.ops {
+            let values = specs.iter().map(activity_to_signal_json).collect::<Vec<_>>();
+            crate::output::json::print_pretty(&Value::Array(values))
+        } else if self.json {
             let values = specs.iter().map(activity_to_json).collect::<Vec<_>>();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
@@ -278,6 +284,15 @@ fn parse_duration_seconds(raw: &str) -> Result<u64, OrbitError> {
     };
 
     Ok(seconds)
+}
+
+fn activity_to_signal_json(spec: &Activity) -> Value {
+    json!({
+        "id": spec.id,
+        "type": spec.spec_type,
+        "description": spec.description,
+        "is_active": spec.is_active,
+    })
 }
 
 fn activity_to_json(spec: &Activity) -> Value {

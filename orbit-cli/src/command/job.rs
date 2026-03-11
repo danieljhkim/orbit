@@ -110,12 +110,18 @@ pub struct JobListArgs {
     pub all: bool,
     #[arg(long)]
     pub json: bool,
+    /// Output signal-tier JSON (job_id, target_id, state, next_run_at only)
+    #[arg(long)]
+    pub ops: bool,
 }
 
 impl Execute for JobListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let jobs = runtime.list_jobs(self.all)?;
-        if self.json {
+        if self.ops {
+            let values = jobs.iter().map(job_to_signal_json).collect::<Vec<_>>();
+            crate::output::json::print_pretty(&Value::Array(values))
+        } else if self.json {
             let values = jobs.iter().map(job_to_json).collect::<Vec<_>>();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
@@ -352,6 +358,15 @@ impl Execute for JobArchiveRunArgs {
         println!("Archived job run '{}'", self.job_run_id);
         Ok(())
     }
+}
+
+fn job_to_signal_json(job: &Job) -> Value {
+    json!({
+        "job_id": job.job_id,
+        "target_id": job.target_id,
+        "state": job.state.to_string(),
+        "next_run_at": job.next_run_at.to_rfc3339(),
+    })
 }
 
 fn job_to_json(job: &Job) -> Value {

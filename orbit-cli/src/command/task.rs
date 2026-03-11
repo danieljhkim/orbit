@@ -131,6 +131,9 @@ pub struct TaskListArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+    /// Output signal-tier JSON (id, title, type, status, priority only)
+    #[arg(long)]
+    pub ops: bool,
 }
 
 impl Execute for TaskListArgs {
@@ -141,7 +144,10 @@ impl Execute for TaskListArgs {
             runtime.list_tasks()?
         };
 
-        if self.json {
+        if self.ops {
+            let json_tasks: Vec<Value> = tasks.iter().map(task_to_signal_json).collect();
+            crate::output::json::print_pretty(&Value::Array(json_tasks))
+        } else if self.json {
             let json_tasks: Vec<Value> = tasks.iter().map(task_to_json).collect();
             crate::output::json::print_pretty(&Value::Array(json_tasks))
         } else {
@@ -475,6 +481,16 @@ fn print_task_table(tasks: &[orbit_core::Task]) {
             task.id, task.status, task.priority, task.task_type, task.title
         );
     }
+}
+
+fn task_to_signal_json(task: &orbit_core::Task) -> Value {
+    json!({
+        "id": task.id,
+        "title": task.title,
+        "type": task.task_type.to_string(),
+        "status": task.status.to_string(),
+        "priority": task.priority.to_string(),
+    })
 }
 
 fn task_to_json(task: &orbit_core::Task) -> Value {

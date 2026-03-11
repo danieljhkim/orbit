@@ -752,3 +752,37 @@ fn task_reject_requires_note() {
             "required arguments were not provided",
         ));
 }
+
+#[test]
+fn task_list_ops_returns_signal_tier_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let id = add_task(dir.path(), "ops test task");
+
+    let output = orbit_in(dir.path())
+        .args(["task", "list", "--ops"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let tasks: serde_json::Value = serde_json::from_slice(&output).expect("valid json");
+    let tasks = tasks.as_array().expect("array");
+    assert!(!tasks.is_empty());
+
+    let task = tasks.iter().find(|t| t["id"] == id).expect("task in list");
+
+    // Required signal fields present.
+    assert!(task.get("id").is_some());
+    assert!(task.get("title").is_some());
+    assert!(task.get("type").is_some());
+    assert!(task.get("status").is_some());
+    assert!(task.get("priority").is_some());
+
+    // Verbose fields must be absent.
+    assert!(task.get("description").is_none());
+    assert!(task.get("plan").is_none());
+    assert!(task.get("execution_summary").is_none());
+    assert!(task.get("context_files").is_none());
+    assert!(task.get("comments").is_none());
+}

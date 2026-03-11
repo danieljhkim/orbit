@@ -767,3 +767,39 @@ fn job_tick_skips_manual_schedule_job() {
         runs.len()
     );
 }
+
+#[test]
+fn job_list_ops_returns_signal_tier_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    orbit_in(dir.path())
+        .args(["init"])
+        .assert()
+        .success();
+
+    let output = orbit_in(dir.path())
+        .args(["job", "list", "--ops"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let jobs: Value = serde_json::from_slice(&output).expect("valid json");
+    let jobs = jobs.as_array().expect("array");
+    assert!(!jobs.is_empty());
+
+    let job = &jobs[0];
+
+    // Required signal fields present.
+    assert!(job.get("job_id").is_some());
+    assert!(job.get("target_id").is_some());
+    assert!(job.get("state").is_some());
+    assert!(job.get("next_run_at").is_some());
+
+    // Verbose fields must be absent.
+    assert!(job.get("agent_cli").is_none());
+    assert!(job.get("timeout_seconds").is_none());
+    assert!(job.get("retry_max_attempts").is_none());
+    assert!(job.get("schedule").is_none());
+}
