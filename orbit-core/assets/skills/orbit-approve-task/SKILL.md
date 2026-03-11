@@ -38,7 +38,7 @@ orbit task approve <id> --by "<identity_display_name>" --note "<note>" # approve
 5. If there was a code change and the workflow expects a commit, return commit intent for Orbit to execute instead of running `git commit` directly.
    - Put the request under `result.commit`
    - Required fields:
-     - `message`: commit message string
+     - `message`: commit message string — must include the task ID (e.g. `"Fix foo bar [T20260310-062435-1773123875457583000]"`)
      - `files`: array of explicit file paths to stage
 
 ## Verification Rules
@@ -60,7 +60,7 @@ Report:
 - verification result
 - If there are code changes, put the request under `result.commit`
    - Required fields:
-      - `message`: commit message string
+      - `message`: commit message string — must include the task ID 
       - `files`: array of explicit file paths to stage
 
 Keep output concise, operational, and auditable.
