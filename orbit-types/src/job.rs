@@ -178,6 +178,9 @@ pub struct Job {
     pub next_run_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Additional env var names to pass through in hermetic mode, on top of the global allowlist.
+    #[serde(default)]
+    pub env_extra: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

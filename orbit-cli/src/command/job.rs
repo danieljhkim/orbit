@@ -71,6 +71,9 @@ pub struct JobAddArgs {
     pub retry_backoff: JobRetryBackoffStrategy,
     #[arg(long, default_value = "0s")]
     pub retry_initial_delay: String,
+    /// Comma-separated list of extra env var names to pass through in hermetic mode for this job.
+    #[arg(long, default_value = "")]
+    pub env_extra: String,
     #[arg(long)]
     pub json: bool,
 }
@@ -92,6 +95,7 @@ impl Execute for JobAddArgs {
             retry_backoff_strategy: self.retry_backoff,
             retry_initial_delay_seconds,
             initial_state_override: None,
+            env_extra: crate::parse::csv_to_vec(&self.env_extra),
         })?;
 
         if self.json {
@@ -374,6 +378,7 @@ fn job_to_json(job: &Job) -> Value {
         "next_run_at": job.next_run_at.to_rfc3339(),
         "created_at": job.created_at.to_rfc3339(),
         "updated_at": job.updated_at.to_rfc3339(),
+        "env_extra": job.env_extra,
     })
 }
 

@@ -94,6 +94,7 @@ pub struct JobCreateParams {
     pub retry_initial_delay_seconds: u64,
     pub next_run_at: DateTime<Utc>,
     pub initial_state: JobScheduleState,
+    pub env_extra: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]

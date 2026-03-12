@@ -54,6 +54,7 @@ impl JobFileStore {
         retry_initial_delay_seconds: u64,
         next_run_at: DateTime<Utc>,
         initial_state: JobScheduleState,
+        env_extra: Vec<String>,
     ) -> Result<Job, OrbitError> {
         self.ensure_layout()?;
         let resolved_id = match job_id {
@@ -82,6 +83,7 @@ impl JobFileStore {
             next_run_at,
             created_at: now,
             updated_at: now,
+            env_extra,
         };
         self.write_activity(&job)?;
         Ok(job)
@@ -610,6 +612,7 @@ mod tests {
                 0,
                 Utc::now(),
                 JobScheduleState::Enabled,
+                vec![],
             )
             .expect("insert job")
     }

@@ -21,7 +21,7 @@ pub struct DueJobsClaim {
     pub skipped: Vec<String>,
 }
 
-const JOB_COLS: &str = "id, target_type, target_id, schedule, agent_cli, timeout_seconds, retry_max_attempts, retry_backoff_strategy, retry_initial_delay_seconds, state, next_run_at, created_at, updated_at";
+const JOB_COLS: &str = "id, target_type, target_id, schedule, agent_cli, timeout_seconds, retry_max_attempts, retry_backoff_strategy, retry_initial_delay_seconds, state, next_run_at, created_at, updated_at, COALESCE(env_extra, '[]') as env_extra";
 const JOB_RUN_COLS: &str = "id, job_id, attempt, state, scheduled_at, started_at, finished_at, duration_ms, exit_code, agent_response_json, error_code, error_message, created_at";
 const ARCHIVED_JOB_RUN_COLS: &str = "id, job_id, attempt, state, scheduled_at, started_at, finished_at, duration_ms, exit_code, agent_response_json, error_code, error_message, created_at";
 
@@ -251,9 +251,12 @@ impl<'a> StoreTx<'a> {
         retry_initial_delay_seconds: u64,
         next_run_at: DateTime<Utc>,
         initial_state: JobScheduleState,
+        env_extra: Vec<String>,
     ) -> Result<Job, OrbitError> {
         let now = Utc::now();
         let resolved_id = job_id.unwrap_or_else(|| new_id("job"));
+        let env_extra_json = serde_json::to_string(&env_extra)
+            .map_err(|e| OrbitError::Store(format!("failed to serialize env_extra: {e}")))?;
         let job = Job {
             job_id: resolved_id,
             target_type,
@@ -268,6 +271,7 @@ impl<'a> StoreTx<'a> {
             next_run_at,
             created_at: now,
             updated_at: now,
+            env_extra,
         };
 
         self.tx
@@ -275,8 +279,9 @@ impl<'a> StoreTx<'a> {
                 "INSERT INTO jobs(
                     id, target_type, target_id, schedule, agent_cli,
                     timeout_seconds, retry_max_attempts, retry_backoff_strategy,
-                    retry_initial_delay_seconds, state, next_run_at, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    retry_initial_delay_seconds, state, next_run_at, created_at, updated_at,
+                    env_extra
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     job.job_id,
                     job.target_type.to_string(),
@@ -291,6 +296,7 @@ impl<'a> StoreTx<'a> {
                     job.next_run_at.to_rfc3339(),
                     job.created_at.to_rfc3339(),
                     job.updated_at.to_rfc3339(),
+                    env_extra_json,
                 ],
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -603,6 +609,8 @@ fn row_to_activity(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     let retry_max_attempts: i64 = row.get(6)?;
     let retry_initial_delay_seconds: i64 = row.get(8)?;
     let backoff_raw: String = row.get(7)?;
+    let env_extra_raw: String = row.get(13)?;
+    let env_extra: Vec<String> = serde_json::from_str(&env_extra_raw).unwrap_or_default();
 
     Ok(Job {
         job_id: row.get(0)?,
@@ -618,6 +626,7 @@ fn row_to_activity(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         next_run_at: parse_timestamp(&next_run_at_raw)?,
         created_at: parse_timestamp(&created_at_raw)?,
         updated_at: parse_timestamp(&updated_at_raw)?,
+        env_extra,
     })
 }
 

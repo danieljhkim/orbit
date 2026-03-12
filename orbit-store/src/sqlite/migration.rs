@@ -112,8 +112,16 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     migrate_legacy_work_rows(conn)?;
     ensure_audit_events_schema(conn)?;
     ensure_no_legacy_watch_state(conn)?;
+    ensure_job_env_extra_column(conn)?;
 
     Ok(())
+}
+
+fn ensure_job_env_extra_column(conn: &Connection) -> Result<(), OrbitError> {
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE jobs ADD COLUMN env_extra TEXT NOT NULL DEFAULT '[]'",
+    )
 }
 
 fn ensure_task_metadata_schema(conn: &Connection) -> Result<(), OrbitError> {

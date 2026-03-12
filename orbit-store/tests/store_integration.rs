@@ -21,6 +21,7 @@ fn due_jobs_query_returns_scheduled_entries() {
                 0,
                 next_run,
                 JobScheduleState::Enabled,
+                vec![],
             )?;
             Ok(())
         })

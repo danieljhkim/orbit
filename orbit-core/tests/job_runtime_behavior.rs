@@ -103,6 +103,7 @@ fn add_scheduled_activity_with_timeout(
             retry_backoff_strategy,
             retry_initial_delay_seconds,
             initial_state_override: None,
+            env_extra: vec![],
         })
         .expect("add job")
         .job_id
@@ -1349,6 +1350,7 @@ fn run_job_now_manual_schedule_does_not_error_on_cron_validation() {
             retry_backoff_strategy: JobRetryBackoffStrategy::None,
             retry_initial_delay_seconds: 0,
             initial_state_override: None,
+            env_extra: vec![],
         })
         .expect("add job")
         .job_id;

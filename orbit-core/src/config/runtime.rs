@@ -13,17 +13,6 @@ use super::raw::{
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
-const DEFAULT_ENV_PASS: [&str; 6] = [
-    "HOME",
-    "PATH",
-    "CODEX_HOME",
-    // macOS system vars required by SCDynamicStore / CoreFoundation.
-    // Without these, agent CLIs that depend on system-configuration panic
-    // with "Attempted to create a NULL object" in hermetic mode.
-    "TMPDIR",
-    "__CF_USER_TEXT_ENCODING",
-    "USER",
-];
 const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
 const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
 
@@ -316,9 +305,23 @@ impl ExecutionEnvPolicy {
     }
 
     pub(crate) fn hydrated_allowlist_env(&self) -> Vec<(String, String)> {
-        self.pass
+        self.hydrated_allowlist_env_with_extras(&[])
+    }
+
+    pub(crate) fn hydrated_allowlist_env_with_extras(
+        &self,
+        extras: &[String],
+    ) -> Vec<(String, String)> {
+        let mut names: std::collections::BTreeSet<&str> =
+            self.pass.iter().map(String::as_str).collect();
+        names.extend(extras.iter().map(String::as_str));
+        names
             .iter()
-            .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
+            .filter_map(|name| {
+                std::env::var(*name)
+                    .ok()
+                    .map(|value| (name.to_string(), value))
+            })
             .collect()
     }
 
@@ -340,10 +343,19 @@ impl ExecutionEnvPolicy {
 }
 
 fn default_pass_list() -> Vec<String> {
-    DEFAULT_ENV_PASS.iter().map(ToString::to_string).collect()
+    // Cross-platform POSIX base: required by virtually all CLI tools.
+    let mut vars: Vec<&str> = vec!["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"];
+
+    // macOS: SCDynamicStore / CoreFoundation requires this encoding var.
+    // Without it, agent CLIs that link system-configuration panic with
+    // "Attempted to create a NULL object".
+    #[cfg(target_os = "macos")]
+    vars.push("__CF_USER_TEXT_ENCODING");
+
+    vars.iter().map(ToString::to_string).collect()
 }
 
-pub(super) fn normalize_pass_list(pass: Vec<String>) -> Result<Vec<String>, OrbitError> {
+pub(crate) fn normalize_pass_list(pass: Vec<String>) -> Result<Vec<String>, OrbitError> {
     let mut normalized = BTreeSet::new();
     for entry in pass {
         let value = entry.trim();

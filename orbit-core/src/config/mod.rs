@@ -5,7 +5,9 @@ mod runtime;
 
 pub(crate) use bootstrap::{default_config_template_for_root, seed_default_config};
 pub(crate) use persistence::{PersistenceConfig, PersistenceType};
-pub(crate) use runtime::{CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig};
+pub(crate) use runtime::{
+    CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig, normalize_pass_list,
+};
 
 #[cfg(test)]
 mod tests {
@@ -32,24 +34,41 @@ mod tests {
     }
 
     #[test]
-    fn default_pass_list_includes_macos_system_vars() {
+    fn default_pass_list_includes_cross_platform_system_vars() {
         let policy = ExecutionEnvPolicy::default();
         let pass = policy.pass();
-        // Core vars
+        // Core cross-platform vars
         assert!(pass.contains(&"HOME".to_string()));
         assert!(pass.contains(&"PATH".to_string()));
-        // macOS system vars required by SCDynamicStore / CoreFoundation
         assert!(
             pass.contains(&"TMPDIR".to_string()),
-            "TMPDIR must be in default pass list for macOS compatibility"
-        );
-        assert!(
-            pass.contains(&"__CF_USER_TEXT_ENCODING".to_string()),
-            "__CF_USER_TEXT_ENCODING must be in default pass list for macOS compatibility"
+            "TMPDIR must be in default pass list"
         );
         assert!(
             pass.contains(&"USER".to_string()),
-            "USER must be in default pass list for macOS compatibility"
+            "USER must be in default pass list"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn default_pass_list_includes_macos_cf_encoding_var() {
+        let policy = ExecutionEnvPolicy::default();
+        let pass = policy.pass();
+        assert!(
+            pass.contains(&"__CF_USER_TEXT_ENCODING".to_string()),
+            "__CF_USER_TEXT_ENCODING must be in default pass list on macOS"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn default_pass_list_excludes_macos_cf_encoding_var_on_non_macos() {
+        let policy = ExecutionEnvPolicy::default();
+        let pass = policy.pass();
+        assert!(
+            !pass.contains(&"__CF_USER_TEXT_ENCODING".to_string()),
+            "__CF_USER_TEXT_ENCODING should not be in default pass list on non-macOS"
         );
     }
 

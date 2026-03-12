@@ -19,6 +19,7 @@ fn insert_job<'a>(
         0,
         next_run_at,
         JobScheduleState::Enabled,
+        vec![],
     )
 }
 
@@ -41,6 +42,7 @@ fn job_state_transitions_and_disabled_visibility() {
                 0,
                 now,
                 JobScheduleState::Enabled,
+                vec![],
             )
         })
         .expect("insert job");
@@ -291,6 +293,7 @@ fn next_due_job_time_returns_earliest_enabled_job() {
                 0,
                 now + chrono::Duration::minutes(1),
                 JobScheduleState::Enabled,
+                vec![],
             )?;
             let _ = tx.set_job_state(&paused.job_id, JobScheduleState::Paused)?;
             let _enabled = tx.insert_activity_v2(
@@ -305,6 +308,7 @@ fn next_due_job_time_returns_earliest_enabled_job() {
                 0,
                 earliest,
                 JobScheduleState::Enabled,
+                vec![],
             )?;
             let _ = tx.insert_activity_v2(
                 None,
@@ -318,6 +322,7 @@ fn next_due_job_time_returns_earliest_enabled_job() {
                 0,
                 latest,
                 JobScheduleState::Enabled,
+                vec![],
             )?;
             Ok(paused.job_id)
         })

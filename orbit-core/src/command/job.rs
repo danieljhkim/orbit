@@ -37,6 +37,8 @@ pub struct JobAddParams {
     pub retry_backoff_strategy: JobRetryBackoffStrategy,
     pub retry_initial_delay_seconds: u64,
     pub initial_state_override: Option<JobScheduleState>,
+    /// Extra env var names to pass through in hermetic mode for this job specifically.
+    pub env_extra: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +146,8 @@ impl OrbitRuntime {
             )
         };
 
+        let env_extra = crate::config::normalize_pass_list(params.env_extra)
+            .map_err(|e| OrbitError::JobValidation(e.to_string()))?;
         let job = self.context.job_store.add_job(StoreActivityCreateParams {
             job_id: params.job_id,
             target_type: params.target_type,
@@ -156,6 +160,7 @@ impl OrbitRuntime {
             retry_initial_delay_seconds: params.retry_initial_delay_seconds,
             next_run_at,
             initial_state,
+            env_extra,
         })?;
         self.record_event(OrbitEvent::JobAdded {
             job_id: job.job_id.clone(),
@@ -558,10 +563,19 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
                 protocol_violation: false,
             };
         };
+        let job_env_extra: &[String] = execution
+            .job
+            .as_ref()
+            .map(|j| j.env_extra.as_slice())
+            .unwrap_or(&[]);
         let environment_mode = if self.context.execution_env_policy.inherit() {
             EnvironmentMode::Inherit
         } else {
-            EnvironmentMode::ClearAndSet(self.context.execution_env_policy.hydrated_allowlist_env())
+            EnvironmentMode::ClearAndSet(
+                self.context
+                    .execution_env_policy
+                    .hydrated_allowlist_env_with_extras(job_env_extra),
+            )
         };
         let (args, _stdout_schema_file) = match prepare_exec_args(&invocation) {
             Ok(prepared) => prepared,
@@ -1006,6 +1020,7 @@ pub(crate) fn seed_default_jobs(runtime: &OrbitRuntime) -> Result<usize, OrbitEr
             retry_backoff_strategy: JobRetryBackoffStrategy::None,
             retry_initial_delay_seconds: 0,
             initial_state_override: Some(JobScheduleState::Enabled),
+            env_extra: vec![],
         })?;
         created += 1;
     }

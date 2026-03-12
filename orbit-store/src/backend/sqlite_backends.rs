@@ -89,6 +89,7 @@ impl JobStoreBackend for SqliteJobStoreBackend {
                 params.retry_initial_delay_seconds,
                 params.next_run_at,
                 params.initial_state,
+                params.env_extra,
             )
         })
     }
