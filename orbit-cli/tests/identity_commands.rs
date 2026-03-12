@@ -11,6 +11,15 @@ fn orbit_in(dir: &Path) -> Command {
     cmd
 }
 
+fn orbit_in_with_home(dir: &Path, home: &Path) -> Command {
+    #[allow(deprecated)]
+    let mut cmd = Command::cargo_bin("orbit").expect("binary exists");
+    cmd.current_dir(dir);
+    cmd.env("HOME", home);
+    cmd.env("USERPROFILE", home);
+    cmd
+}
+
 fn write_identity(dir: &Path, id: &str, name: &str, role: &str) {
     let identity_root = dir.join(".orbit").join("identities");
     std::fs::create_dir_all(&identity_root).expect("create identity dir");
@@ -21,6 +30,13 @@ fn write_identity(dir: &Path, id: &str, name: &str, role: &str) {
 fn write_raw_identity(dir: &Path, id: &str, content: &str) {
     let identity_root = dir.join(".orbit").join("identities");
     std::fs::create_dir_all(&identity_root).expect("create identity dir");
+    std::fs::write(identity_root.join(format!("{id}.yaml")), content).expect("write identity");
+}
+
+fn write_identity_under(root: &Path, id: &str, name: &str, role: &str) {
+    let identity_root = root.join(".orbit").join("identities");
+    std::fs::create_dir_all(&identity_root).expect("create identity dir");
+    let content = format!("identity:\n  name: {name}\n  role: {role}\n");
     std::fs::write(identity_root.join(format!("{id}.yaml")), content).expect("write identity");
 }
 
@@ -132,6 +148,30 @@ fn identity_show_unknown_returns_error() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("nonexistent"));
+}
+
+#[test]
+fn identity_list_uses_workspace_identity_root_when_local_config_is_selected() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let workspace = dir.path().join("workspace");
+    let home = dir.path().join("home");
+    let workspace_orbit = workspace.join(".orbit");
+    std::fs::create_dir_all(workspace.join(".git")).expect("create workspace git dir");
+    std::fs::create_dir_all(&workspace_orbit).expect("create workspace orbit dir");
+    std::fs::create_dir_all(home.join(".orbit")).expect("create home orbit dir");
+    std::fs::write(
+        workspace_orbit.join("config.toml"),
+        "[task.approval]\nrequired_for_agent = true\n",
+    )
+    .expect("write workspace config");
+
+    write_identity_under(&workspace, "prii", "Prii", "leader");
+
+    orbit_in_with_home(&workspace, &home)
+        .args(["identity", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("prii"));
 }
 
 #[test]

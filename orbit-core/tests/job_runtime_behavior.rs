@@ -1,6 +1,6 @@
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex, OnceLock};
 use std::thread;
 
 use chrono::{Duration as ChronoDuration, Utc};
@@ -15,6 +15,11 @@ use tempfile::tempdir;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn add_activity(runtime: &OrbitRuntime, id: &str) {
     add_activity_with_input_schema(runtime, id, json!({}));
@@ -217,6 +222,15 @@ fn write_runtime_config(data_root: &std::path::Path, content: &str) {
     std::fs::write(data_root.join("config.toml"), content).expect("write config");
 }
 
+fn write_identity_file(data_root: &std::path::Path, id: &str, display_name: &str, role: &str) {
+    let identity_root = data_root.join("identities");
+    std::fs::create_dir_all(&identity_root).expect("create identity root");
+    let content = format!(
+        "identity:\n  name: {id}\n  display_name: {display_name}\n  role: {role}\n"
+    );
+    std::fs::write(identity_root.join(format!("{id}.yaml")), content).expect("write identity");
+}
+
 fn init_git_repo(path: &std::path::Path) {
     let status = Command::new("git")
         .args(["init", "-q"])
@@ -383,6 +397,70 @@ fn run_job_now_with_input_rejects_schema_mismatch() {
         err.to_string()
             .contains("job run input does not match activity")
     );
+}
+
+#[test]
+fn job_run_resolves_activity_identity_from_data_root_when_home_differs() {
+    let _guard = env_lock().lock().expect("env lock");
+    let repo_orbit = tempdir().expect("repo orbit");
+    let home = tempdir().expect("home");
+    let previous_home = std::env::var("HOME").ok();
+    let previous_userprofile = std::env::var("USERPROFILE").ok();
+    unsafe {
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("USERPROFILE", home.path());
+    }
+
+    write_identity_file(repo_orbit.path(), "prii", "Prii", "leader");
+    let runtime = OrbitRuntime::from_data_root(repo_orbit.path()).expect("runtime");
+    let stdin_capture = repo_orbit.path().join("job-stdin.json");
+    let script_path = repo_orbit.path().join("mock-agent");
+    let script = format!(
+        "#!/bin/sh\ncat > \"{stdin}\"\nprintf '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null,\"durationMs\":1}}'\n",
+        stdin = stdin_capture.to_string_lossy(),
+    );
+    let agent_cli = write_agent_script(&script_path, &script);
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-identity".to_string(),
+            spec_type: "analysis".to_string(),
+            description: "identity runtime test".to_string(),
+            instruction: "Run with an explicit identity.".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            artifact_path_template: None,
+            skill_refs: Vec::new(),
+            identity_id: Some("prii".to_string()),
+            assigned_to: None,
+            created_by: None,
+        })
+        .expect("add activity");
+    let job_id = add_scheduled_activity(
+        &runtime,
+        "spec-identity",
+        &agent_cli,
+        0,
+        JobRetryBackoffStrategy::None,
+        0,
+    );
+
+    let run_result = runtime.run_job_now(&job_id);
+    match previous_home {
+        Some(value) => unsafe { std::env::set_var("HOME", value) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+    match previous_userprofile {
+        Some(value) => unsafe { std::env::set_var("USERPROFILE", value) },
+        None => unsafe { std::env::remove_var("USERPROFILE") },
+    }
+
+    let run = run_result.expect("run job");
+    assert_eq!(run.state, JobRunState::Success);
+    let stdin_raw = std::fs::read_to_string(stdin_capture).expect("stdin capture");
+    let payload: serde_json::Value = serde_json::from_str(&stdin_raw).expect("valid stdin");
+    assert_eq!(payload["identity"]["id"], "prii");
+    assert_eq!(payload["identity"]["name"], "Prii");
 }
 
 #[test]

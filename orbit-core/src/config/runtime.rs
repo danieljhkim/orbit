@@ -33,13 +33,13 @@ impl Default for RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    pub(crate) fn default_for_roots(data_root: &Path, orbit_home: &Path) -> Self {
+    pub(crate) fn default_for_roots(data_root: &Path, _orbit_home: &Path) -> Self {
         Self {
             execution_env: ExecutionEnvPolicy::default(),
             codex_execution: CodexExecutionPolicy::default(),
             persistence: PersistenceConfig::default_for_data_root(data_root),
             task_approval: TaskApprovalConfig::default(),
-            identity: IdentityConfig::default_for_orbit_home(orbit_home),
+            identity: IdentityConfig::default_for_data_root(data_root),
         }
     }
 
@@ -74,7 +74,7 @@ impl RuntimeConfig {
             )?,
             persistence: PersistenceConfig::from_raw(data_root, &parsed)?,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
-            identity: IdentityConfig::from_raw(parsed.identity.as_ref(), data_root, orbit_home)?,
+            identity: IdentityConfig::from_raw(parsed.identity.as_ref(), data_root, data_root)?,
         })
     }
 }
@@ -221,14 +221,14 @@ pub(crate) struct IdentityConfig {
 
 impl Default for IdentityConfig {
     fn default() -> Self {
-        Self::default_for_orbit_home(&paths::orbit_home_root())
+        Self::default_for_data_root(&paths::orbit_home_root())
     }
 }
 
 impl IdentityConfig {
-    fn default_for_orbit_home(orbit_home: &Path) -> Self {
+    fn default_for_data_root(data_root: &Path) -> Self {
         Self {
-            root: orbit_home.join("identities"),
+            root: data_root.join("identities"),
             role_overrides: BTreeMap::new(),
         }
     }
@@ -236,9 +236,9 @@ impl IdentityConfig {
     fn from_raw(
         raw: Option<&RawIdentitySection>,
         config_root: &Path,
-        orbit_home: &Path,
+        data_root: &Path,
     ) -> Result<Self, OrbitError> {
-        let default = Self::default_for_orbit_home(orbit_home);
+        let default = Self::default_for_data_root(data_root);
         let root = paths::resolve_config_path(
             raw.and_then(|v| v.root.as_deref()),
             &default.root,
