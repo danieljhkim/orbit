@@ -5,7 +5,7 @@ use orbit_core::{JobRun, JobRunState, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
 use crate::command::Execute;
-use crate::command::job::{job_run_to_json, parse_duration_seconds, summarize_error_message};
+use crate::command::job::{job_run_to_json, summarize_error_message};
 
 #[derive(Args)]
 pub struct JobRunCommand {
@@ -57,7 +57,7 @@ impl Execute for JobRunListArgs {
         let since = self
             .since
             .as_deref()
-            .map(parse_duration_seconds)
+            .map(crate::parse::parse_duration_seconds)
             .transpose()?
             .map(|seconds| Utc::now() - Duration::seconds(seconds as i64));
 

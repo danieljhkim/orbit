@@ -77,8 +77,9 @@ pub struct JobAddArgs {
 
 impl Execute for JobAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let timeout_seconds = parse_duration_seconds(&self.timeout)?;
-        let retry_initial_delay_seconds = parse_duration_seconds(&self.retry_initial_delay)?;
+        let timeout_seconds = crate::parse::parse_duration_seconds(&self.timeout)?;
+        let retry_initial_delay_seconds =
+            crate::parse::parse_duration_seconds(&self.retry_initial_delay)?;
 
         let job = runtime.add_job(JobAddParams {
             job_id: self.job_id,
@@ -259,8 +260,12 @@ impl Execute for JobServeArgs {
         let job_runtime = JobRuntime::new(
             runtime,
             JobRuntimeConfig {
-                idle_sleep: Duration::from_secs(parse_duration_seconds(&self.idle_sleep)?),
-                max_sleep: Duration::from_secs(parse_duration_seconds(&self.max_sleep)?),
+                idle_sleep: Duration::from_secs(crate::parse::parse_duration_seconds(
+                    &self.idle_sleep,
+                )?),
+                max_sleep: Duration::from_secs(crate::parse::parse_duration_seconds(
+                    &self.max_sleep,
+                )?),
             },
         );
         job_runtime.run_forever(&shutdown)
@@ -388,39 +393,6 @@ pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
         "error_message": run.error_message,
         "created_at": run.created_at.to_rfc3339(),
     })
-}
-
-pub(crate) fn parse_duration_seconds(raw: &str) -> Result<u64, OrbitError> {
-    let value = raw.trim();
-    if value.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "duration must not be empty".to_string(),
-        ));
-    }
-
-    let split_at = value
-        .find(|c: char| c.is_alphabetic())
-        .ok_or_else(|| OrbitError::InvalidInput(format!("invalid duration: {raw}")))?;
-    let (num_raw, unit_raw) = value.split_at(split_at);
-
-    let num: u64 = num_raw
-        .parse()
-        .map_err(|_| OrbitError::InvalidInput(format!("invalid duration number: {raw}")))?;
-
-    let seconds = match unit_raw {
-        "s" => num,
-        "m" => num.saturating_mul(60),
-        "h" => num.saturating_mul(3600),
-        "d" => num.saturating_mul(86400),
-        "w" => num.saturating_mul(604800),
-        _ => {
-            return Err(OrbitError::InvalidInput(format!(
-                "invalid duration unit: {unit_raw} (expected s/m/h/d/w)"
-            )));
-        }
-    };
-
-    Ok(seconds)
 }
 
 pub(crate) fn summarize_error_message(raw: Option<&str>) -> String {

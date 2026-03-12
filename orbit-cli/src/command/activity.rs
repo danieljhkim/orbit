@@ -285,7 +285,7 @@ impl Execute for ActivityRunArgs {
         let result = runtime.run_activity_now(ActivityRunParams {
             activity_id: self.id,
             agent_cli: self.agent_cli,
-            timeout_seconds: parse_duration_seconds(&self.timeout)?,
+            timeout_seconds: crate::parse::parse_duration_seconds(&self.timeout)?,
         })?;
 
         if self.json {
@@ -349,39 +349,6 @@ fn parse_optional_json_object(raw: Option<&str>, field: &str) -> Result<Value, O
 
 fn parse_csv(raw: &str) -> Vec<String> {
     crate::parse::csv_to_vec(raw)
-}
-
-fn parse_duration_seconds(raw: &str) -> Result<u64, OrbitError> {
-    let value = raw.trim();
-    if value.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "duration must not be empty".to_string(),
-        ));
-    }
-
-    let split_at = value
-        .find(|c: char| c.is_alphabetic())
-        .ok_or_else(|| OrbitError::InvalidInput(format!("invalid duration: {raw}")))?;
-    let (num_raw, unit_raw) = value.split_at(split_at);
-
-    let num: u64 = num_raw
-        .parse()
-        .map_err(|_| OrbitError::InvalidInput(format!("invalid duration number: {raw}")))?;
-
-    let seconds = match unit_raw {
-        "s" => num,
-        "m" => num.saturating_mul(60),
-        "h" => num.saturating_mul(3600),
-        "d" => num.saturating_mul(86400),
-        "w" => num.saturating_mul(604800),
-        _ => {
-            return Err(OrbitError::InvalidInput(format!(
-                "invalid duration unit: {unit_raw} (expected s/m/h/d/w)"
-            )));
-        }
-    };
-
-    Ok(seconds)
 }
 
 fn activity_to_signal_json(spec: &Activity) -> Value {
