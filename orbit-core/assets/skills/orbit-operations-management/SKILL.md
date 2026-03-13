@@ -91,6 +91,17 @@ Include relevant details from the job-run output in the task description.
 
 Provide a summary overview of the job-runs in a markdown format, and write the report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD/operation_<title>.md`.
 
+After writing the report file, return the following JSON result:
+
+```json
+{
+  "comment": "<one-line summary of operations reviewed>",
+  "created_file": "<repo-relative or absolute path to the report file>"
+}
+```
+
+Orbit will auto-commit the report file together with the run artifact. Do **not** include a `commit` field — Orbit handles the commit.
+
 ---
 
 # Operational Guidelines

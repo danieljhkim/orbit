@@ -20,6 +20,7 @@ Perform a structured, point-in-time evaluation of the codebase across architectu
 7. Produce a prioritized improvement roadmap and feature opportunities.
 8. Route each issue finding through `orbit-track-issues`.
 9. Write the report to `{{ORBIT_ROOT}}/agents/reports/YYYY-MM-DD/assessment_<title>.md`.
+10. Commit the assessment along with related job-run artifacts under `.orbit/jobs/jobs/runs/<job_run_id>/`
 
 ## Evaluation Dimensions
 

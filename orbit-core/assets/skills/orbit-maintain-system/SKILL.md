@@ -71,6 +71,19 @@ success | failed
 <follow-ups, risks, blockers>
 ```
 
+## Result Contract
+
+After writing the report, return the following JSON result:
+
+```json
+{
+  "comment": "<one-line summary of what was done>",
+  "created_file": "<repo-relative or absolute path to the report file>"
+}
+```
+
+Orbit will auto-commit the report file together with the run artifact. Do **not** include a `commit` field — Orbit handles the commit.
+
 ## Exit Criteria
 
 - Assessment completed
@@ -78,3 +91,4 @@ success | failed
 - Maintenance actions completed or safely skipped
 - Validation completed
 - Report written to the correct location
+- Result returned with `comment` and `created_file`

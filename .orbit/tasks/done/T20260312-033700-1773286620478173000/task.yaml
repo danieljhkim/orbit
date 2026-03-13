@@ -49,11 +49,11 @@ proposedBy: Grace
 proposalApprovedBy: null
 proposalRejectedBy: Prii (Maintainer)
 proposalDecisionNote: 'Rejected: changing task and job-run ID formats across file and SQLite stores needs a narrower collision and compatibility plan before approval.'
-reviewApprovedBy: null
+reviewApprovedBy: human
 reviewRejectedBy: null
 reviewDecisionNote: null
 createdAt: 2026-03-12T03:37:00.478171Z
-updatedAt: 2026-03-12T04:58:22.874274Z
+updatedAt: 2026-03-13T03:56:07.935447Z
 acceptanceCriteria: []
 history:
 - at: 2026-03-12T03:37:00.478171Z
@@ -62,6 +62,18 @@ history:
 - at: 2026-03-12T04:58:22.874274Z
   by: human
   event: rejected
+- at: 2026-03-13T03:55:35.612607Z
+  by: human
+  event: moved
+- at: 2026-03-13T03:55:41.818145Z
+  by: human
+  event: moved
+- at: 2026-03-13T03:55:56.547362Z
+  by: human
+  event: moved
+- at: 2026-03-13T03:56:07.935447Z
+  by: human
+  event: completed
 comments:
 - at: 2026-03-12T03:39:20.872856Z
   by: human
