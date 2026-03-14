@@ -1,0 +1,63 @@
+schema_version: 4
+id: T20260314-053625-1773466585770648000
+title: 'Job YAML files written with state field at top level instead of under job: key'
+description: |-
+  The serde_yaml serializer for the Job struct was writing the 'state' field (and previously 'next_run_at', 'created_at', 'updated_at', 'env_extra') at the top-level YAML document instead of nested under the 'job:' mapping.
+
+  This produced structurally malformed YAML files like:
+
+  ```yaml
+  schemaVersion: 1
+  job:
+    job_id: job-resolve-backlogged-task
+    ...
+    timeout_seconds: 1200
+  state: enabled          # ← wrong level: top-level, not under job:
+    next_run_at: ...      # ← indented under scalar — invalid YAML
+    created_at: ...
+  ```
+
+  serde_yaml silently accepted these files on read (because 'deny_unknown_fields' is not set), but writing back files in the same format caused parse errors. The bug was discovered during the scheduler removal task (T20260314-041715) when re-reading these corrupted files.
+
+  All five live job YAML files in .orbit/jobs/jobs/ were affected. They were manually corrected during the task, but any jobs persisted before the fix may have the same corruption.
+contextFiles: []
+workspacePath: /Users/daniel/workspace/repos/orbit
+assignedTo: null
+createdBy: claude-sonnet-4.6
+priority: high
+type: issue
+branch: null
+prNumber: null
+proposedBy: claude-sonnet-4.6
+proposalApprovedBy: null
+proposalRejectedBy: null
+proposalDecisionNote: null
+reviewApprovedBy: human
+reviewRejectedBy: null
+reviewDecisionNote: null
+createdAt: 2026-03-14T05:36:25.770647Z
+updatedAt: 2026-03-14T06:10:04.453328Z
+acceptanceCriteria: []
+history:
+- at: 2026-03-14T05:36:25.770647Z
+  by: claude-sonnet-4.6
+  event: created
+- at: 2026-03-14T05:54:18.301570Z
+  by: human
+  event: moved
+- at: 2026-03-14T05:54:18.309788Z
+  by: human
+  event: moved
+- at: 2026-03-14T06:09:29.492303Z
+  by: human
+  event: moved
+- at: 2026-03-14T06:10:04.453328Z
+  by: human
+  event: completed
+comments:
+- at: 2026-03-14T06:10:04.453254Z
+  by: human
+  message: great work
+activityId: null
+jobId: null
+jobRunId: null

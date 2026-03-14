@@ -613,4 +613,61 @@ mod tests {
             "archived run file removed"
         );
     }
+
+    #[test]
+    fn job_write_read_roundtrip_preserves_all_fields() {
+        // Regression test: previously, fields like 'state', 'created_at',
+        // 'updated_at', and 'env_extra' were serialized at the top level of
+        // the YAML document instead of nested under the 'job:' key, causing
+        // silent data loss on read (state defaulted, timestamps missing).
+        let (_dir, store) = make_store();
+        let written = store
+            .insert_activity_v2(
+                Some("job-roundtrip-test".to_string()),
+                JobTargetType::Activity,
+                "target-roundtrip",
+                "my-agent-cli",
+                600,
+                JobScheduleState::Disabled,
+                vec!["MY_VAR".to_string(), "OTHER_VAR".to_string()],
+            )
+            .expect("insert job");
+
+        // Read the raw YAML to assert correct nesting.
+        let yaml_path = store.job_path("job-roundtrip-test");
+        let raw = std::fs::read_to_string(&yaml_path).expect("read yaml");
+        // All Job fields must be under the 'job:' key (2-space indent).
+        // None should appear at the top level (0-space indent).
+        for field in &["state:", "created_at:", "updated_at:", "env_extra:"] {
+            assert!(
+                raw.contains(&format!("  {field}")),
+                "field '{field}' must be nested under job: but raw yaml was:\n{raw}"
+            );
+            assert!(
+                !raw.starts_with(field) && !raw.contains(&format!("\n{field}")),
+                "field '{field}' must NOT appear at top level but raw yaml was:\n{raw}"
+            );
+        }
+
+        // Read back via the store and assert round-trip fidelity.
+        let read_back = store
+            .get_job("job-roundtrip-test")
+            .expect("get_job ok")
+            .expect("job exists");
+
+        assert_eq!(read_back.job_id, written.job_id);
+        assert_eq!(read_back.target_id, written.target_id);
+        assert_eq!(read_back.agent_cli, written.agent_cli);
+        assert_eq!(read_back.timeout_seconds, written.timeout_seconds);
+        assert_eq!(read_back.state, JobScheduleState::Disabled);
+        assert_eq!(read_back.env_extra, vec!["MY_VAR", "OTHER_VAR"]);
+        assert_eq!(
+            read_back.created_at.timestamp(),
+            written.created_at.timestamp()
+        );
+        assert_eq!(
+            read_back.updated_at.timestamp(),
+            written.updated_at.timestamp()
+        );
+    }
 }
