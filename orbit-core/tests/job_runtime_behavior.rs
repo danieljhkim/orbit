@@ -8,7 +8,6 @@ use orbit_core::OrbitRuntime;
 use orbit_core::command::activity::{ActivityAddParams, ActivityRunParams};
 use orbit_core::command::job::JobAddParams;
 use orbit_core::job::runtime::{JobRuntime, JobRuntimeConfig, ShutdownSignal};
-use orbit_store::Store;
 use orbit_types::{JobRetryBackoffStrategy, JobRunState, JobTargetType, OrbitError};
 use serde_json::json;
 use tempfile::tempdir;
@@ -253,25 +252,39 @@ fn init_git_repo(path: &std::path::Path) {
     assert!(status.success(), "git config name must succeed");
 }
 
-fn write_sqlite_job_config(data_root: &std::path::Path) {
-    let db_path = data_root.join("orbit.db").to_string_lossy().to_string();
-    write_runtime_config(
-        data_root,
-        &format!("[job]\npersistence = {{ type = \"sqlite\", path = \"{db_path}\" }}\n"),
-    );
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JobRunFileDocument {
+    schema_version: u8,
+    run: orbit_types::JobRun,
 }
 
-fn insert_stale_running_run(data_root: &std::path::Path, job_id: &str) -> String {
-    let store = Store::open(&data_root.join("orbit.db")).expect("open store");
-    store
-        .with_transaction(|tx| {
-            let old_time = Utc::now() - ChronoDuration::hours(2);
-            let run = tx.insert_job_run(job_id, 1, old_time)?;
-            let changed = tx.mark_job_run_running(&run.run_id, old_time)?;
-            assert!(changed, "run must be marked running");
-            Ok(run.run_id)
-        })
-        .expect("insert stale running run")
+fn insert_stale_running_run(
+    runtime: &OrbitRuntime,
+    data_root: &std::path::Path,
+    job_id: &str,
+) -> String {
+    let run = runtime.run_job_now(job_id).expect("seed run");
+    let run_path = data_root
+        .join("jobs")
+        .join("runs")
+        .join(job_id)
+        .join(format!("{}.yaml", run.run_id));
+    let raw = std::fs::read_to_string(&run_path).expect("read run file");
+    let mut doc: JobRunFileDocument = serde_yaml::from_str(&raw).expect("parse run doc");
+    let old_time = Utc::now() - ChronoDuration::hours(2);
+    doc.run.state = JobRunState::Running;
+    doc.run.started_at = Some(old_time);
+    doc.run.finished_at = None;
+    doc.run.duration_ms = None;
+    doc.run.exit_code = None;
+    doc.run.agent_response_json = None;
+    doc.run.error_code = None;
+    doc.run.error_message = None;
+    doc.run.created_at = old_time;
+    let updated = serde_yaml::to_string(&doc).expect("serialize run doc");
+    std::fs::write(&run_path, updated).expect("write run file");
+    run.run_id
 }
 
 #[test]
@@ -992,7 +1005,6 @@ fn run_job_now_rejects_when_active_run_exists() {
 #[test]
 fn job_history_recovers_stale_running_run_to_failed() {
     let dir = tempdir().expect("tempdir");
-    write_sqlite_job_config(dir.path());
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     let script_path = dir.path().join("mock-agent");
     let agent_cli = write_agent_script(
@@ -1009,7 +1021,7 @@ fn job_history_recovers_stale_running_run_to_failed() {
         JobRetryBackoffStrategy::None,
         0,
     );
-    let stale_run_id = insert_stale_running_run(dir.path(), &job_id);
+    let stale_run_id = insert_stale_running_run(&runtime, dir.path(), &job_id);
 
     let history = runtime.job_history(&job_id).expect("history");
     let stale = history
@@ -1030,7 +1042,6 @@ fn job_history_recovers_stale_running_run_to_failed() {
 #[test]
 fn run_job_now_recovers_stale_running_run_and_executes_new_attempt() {
     let dir = tempdir().expect("tempdir");
-    write_sqlite_job_config(dir.path());
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     let script_path = dir.path().join("mock-agent");
     let agent_cli = write_agent_script(
@@ -1047,7 +1058,7 @@ fn run_job_now_recovers_stale_running_run_and_executes_new_attempt() {
         JobRetryBackoffStrategy::None,
         0,
     );
-    let stale_run_id = insert_stale_running_run(dir.path(), &job_id);
+    let stale_run_id = insert_stale_running_run(&runtime, dir.path(), &job_id);
 
     let result = runtime.run_job_now(&job_id).expect("run now");
     assert_eq!(result.state, JobRunState::Success);
@@ -1072,7 +1083,6 @@ fn run_job_now_recovers_stale_running_run_and_executes_new_attempt() {
 #[test]
 fn run_due_jobs_recovers_stale_running_run_and_reclaims_job() {
     let dir = tempdir().expect("tempdir");
-    write_sqlite_job_config(dir.path());
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     let script_path = dir.path().join("mock-agent");
     let agent_cli = write_agent_script(
@@ -1089,7 +1099,7 @@ fn run_due_jobs_recovers_stale_running_run_and_reclaims_job() {
         JobRetryBackoffStrategy::None,
         0,
     );
-    let stale_run_id = insert_stale_running_run(dir.path(), &job_id);
+    let stale_run_id = insert_stale_running_run(&runtime, dir.path(), &job_id);
 
     let due_at = runtime.show_job(&job_id).expect("show job").next_run_at;
     let ran = runtime.run_due_jobs(due_at).expect("run due jobs");

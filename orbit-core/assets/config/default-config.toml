@@ -17,11 +17,11 @@ delegate_approval = true
 # ----------------------------------
 
 [job]
-# yaml + sqlite are supported for now (default = file)
+# only yaml file persistence is supported (default = file)
 persistence = { type = "file", path = "jobs", format = "yaml"}
 
 [activity]
-# yaml + sqlite are supported for now (default = file)
+# only yaml file persistence is supported (default = file)
 persistence = { type = "file", path = "activities", format = "yaml" }
 
 [skill]
@@ -29,7 +29,7 @@ persistence = { type = "file", path = "activities", format = "yaml" }
 persistence = { type = "file", path = "skills", format = "md" }
 
 [task]
-# yaml + sqlite are supported for now (default = file)
+# only yaml file persistence is supported (default = file)
 persistence = { type = "file", path = "tasks", format = "yaml" }
 
 [audit]

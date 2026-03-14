@@ -4,7 +4,7 @@ mod raw;
 mod runtime;
 
 pub(crate) use bootstrap::{default_config_template_for_root, seed_default_config};
-pub(crate) use persistence::{PersistenceConfig, PersistenceType};
+pub(crate) use persistence::PersistenceConfig;
 pub(crate) use runtime::{
     CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig, normalize_pass_list,
 };
@@ -97,7 +97,7 @@ mod tests {
         );
         assert_eq!(
             config.audit.persistence_type,
-            super::PersistenceType::Sqlite
+            super::persistence::PersistenceType::Sqlite
         );
     }
 }

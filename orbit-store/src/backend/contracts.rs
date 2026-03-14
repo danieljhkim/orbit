@@ -7,7 +7,6 @@ use orbit_types::{
 use serde_json::Value;
 
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
-use crate::sqlite::job_store::DueJobsClaim;
 
 #[derive(Debug, Clone)]
 pub struct TaskCreateParams {
@@ -95,6 +94,18 @@ pub struct JobCreateParams {
     pub next_run_at: DateTime<Utc>,
     pub initial_state: JobScheduleState,
     pub env_extra: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimedJobRun {
+    pub job: Job,
+    pub run: JobRun,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DueJobsClaim {
+    pub claimed: Vec<ClaimedJobRun>,
+    pub skipped: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]

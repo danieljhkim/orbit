@@ -94,7 +94,7 @@ fn config_show_json_reads_and_normalizes_runtime_file() {
     std::fs::create_dir_all(&orbit_dir).expect("create orbit dir");
     std::fs::write(
         orbit_dir.join("config.toml"),
-        "[execution.env]\ninherit = true\npass = [\"PATH\",\"HOME\",\"PATH\"]\n\n[execution.codex]\nsandbox = \"danger-full-access\"\napproval_policy = \"on-request\"\n\n[task.approval]\nrequired_for_agent = true\n\n[job]\npersistence = { type = \"sqlite\", path = \"./.orbit/orbit.db\" }\n",
+        "[execution.env]\ninherit = true\npass = [\"PATH\",\"HOME\",\"PATH\"]\n\n[execution.codex]\nsandbox = \"danger-full-access\"\napproval_policy = \"on-request\"\n\n[task.approval]\nrequired_for_agent = true\n\n[job]\npersistence = { type = \"file\", path = \"./custom-jobs\", format = \"yaml\" }\n",
     )
     .expect("write config");
 
@@ -127,8 +127,52 @@ fn config_show_json_reads_and_normalizes_runtime_file() {
     );
     assert_eq!(
         value["persistence"]["job"]["persistence"]["type"],
-        serde_json::json!("sqlite")
+        serde_json::json!("file")
     );
+    assert_eq!(
+        value["persistence"]["job"]["persistence"]["path"],
+        serde_json::json!(orbit_dir.join("custom-jobs").to_string_lossy())
+    );
+}
+
+#[test]
+fn config_show_rejects_sqlite_jobs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let orbit_dir = dir.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create orbit dir");
+    std::fs::write(
+        orbit_dir.join("config.toml"),
+        "[job]\npersistence = { type = \"sqlite\", path = \"./.orbit/orbit.db\" }\n",
+    )
+    .expect("write config");
+
+    orbit_in(dir.path())
+        .args(["config", "show", "--json"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "job.persistence.type only supports 'file'",
+        ));
+}
+
+#[test]
+fn config_show_rejects_sqlite_activities() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let orbit_dir = dir.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("create orbit dir");
+    std::fs::write(
+        orbit_dir.join("config.toml"),
+        "[activity]\npersistence = { type = \"sqlite\", path = \"./.orbit/orbit.db\" }\n",
+    )
+    .expect("write config");
+
+    orbit_in(dir.path())
+        .args(["config", "show", "--json"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "activity.persistence.type only supports 'file'",
+        ));
 }
 
 #[test]

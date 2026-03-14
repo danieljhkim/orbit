@@ -4,9 +4,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    Store, activity_store_file, activity_store_sqlite, agent_session_store_sqlite,
-    audit_event_store_sqlite, audit_store_sqlite, job_store_file, job_store_sqlite,
-    lock_store_sqlite, task_store_file, tool_store_sqlite,
+    Store, activity_store_file, agent_session_store_sqlite, audit_event_store_sqlite,
+    audit_store_sqlite, job_store_file, lock_store_sqlite, task_store_file, tool_store_sqlite,
 };
 
 use orbit_tools::ToolRegistry;
@@ -14,7 +13,7 @@ use orbit_tools::external::ExternalTool;
 use orbit_types::OrbitError;
 
 use crate::OrbitContext;
-use crate::config::{PersistenceType, RuntimeConfig};
+use crate::config::RuntimeConfig;
 use crate::identity_catalog::IdentityCatalog;
 use crate::paths;
 use crate::skill_catalog::SkillCatalog;
@@ -28,24 +27,8 @@ pub(crate) fn build_context_from_data_root(
     let store = Store::open(&db_path)?;
 
     let task_store = task_store_file(runtime_config.persistence.task.clone())?;
-    let activity_store = match runtime_config.persistence.activity.persistence_type {
-        PersistenceType::File => {
-            activity_store_file(runtime_config.persistence.activity.path.clone())?
-        }
-        PersistenceType::Sqlite => activity_store_sqlite(sqlite_store_for_entity(
-            &store,
-            &db_path,
-            &runtime_config.persistence.activity.path,
-        )?),
-    };
-    let job_store = match runtime_config.persistence.job.persistence_type {
-        PersistenceType::File => job_store_file(runtime_config.persistence.job.path.clone())?,
-        PersistenceType::Sqlite => job_store_sqlite(sqlite_store_for_entity(
-            &store,
-            &db_path,
-            &runtime_config.persistence.job.path,
-        )?),
-    };
+    let activity_store = activity_store_file(runtime_config.persistence.activity.path.clone())?;
+    let job_store = job_store_file(runtime_config.persistence.job.path.clone())?;
 
     build_context_common(
         store,
@@ -60,12 +43,13 @@ pub(crate) fn build_context_from_data_root(
 
 pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
     let store = Store::open_in_memory()?;
-    let task_store = task_store_file(std::env::temp_dir().join(format!(
-        "orbit-task-store-{}",
+    let temp_root = std::env::temp_dir().join(format!(
+        "orbit-runtime-{}",
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    )))?;
-    let activity_store = activity_store_sqlite(store.clone());
-    let job_store = job_store_sqlite(store.clone());
+    ));
+    let task_store = task_store_file(temp_root.join("tasks"))?;
+    let activity_store = activity_store_file(temp_root.join("activities"))?;
+    let job_store = job_store_file(temp_root.join("jobs"))?;
     let orbit_home = paths::orbit_home_root();
     let runtime_config = RuntimeConfig::default_for_roots(&orbit_home, &orbit_home);
     let data_root = runtime_config
@@ -142,18 +126,6 @@ fn build_context_common(
         task_delegate_approval,
     })
 }
-
-fn sqlite_store_for_entity(
-    default_store: &Store,
-    default_path: &Path,
-    entity_path: &Path,
-) -> Result<Store, OrbitError> {
-    if entity_path == default_path {
-        return Ok(default_store.clone());
-    }
-    Store::open(entity_path)
-}
-
 fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(), OrbitError> {
     let stored_tools = store.list_tools()?;
     for tool in stored_tools {

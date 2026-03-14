@@ -4,14 +4,13 @@ use orbit_types::{
 };
 
 use super::contracts::{
-    ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, JobCreateParams,
-    JobRunCompletionParams, JobRunQuery, JobStoreBackend, TaskCreateParams, TaskStoreBackend,
-    TaskUpdateParams,
+    ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, DueJobsClaim,
+    JobCreateParams, JobRunCompletionParams, JobRunQuery, JobStoreBackend, TaskCreateParams,
+    TaskStoreBackend, TaskUpdateParams,
 };
 use crate::file::activity_store::{ActivityFileStore, FileWorkInsert};
 use crate::file::job_store::JobFileStore;
 use crate::file::task_store::{FileTaskInsert, FileTaskUpdate, TaskFileStore};
-use crate::sqlite::job_store::DueJobsClaim;
 
 impl TaskStoreBackend for TaskFileStore {
     fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError> {
