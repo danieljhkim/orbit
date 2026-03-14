@@ -2,8 +2,6 @@
 
 ## Core Working Note
 
-Treat friction, ambiguity, and DX rough edges as first-class feedback while working in this repository, and turn the important ones into concrete, non-duplicate Orbit tasks when they surface.
-
 Orbit is primarily a tool for agents. So your voice matters.
 
 ## Ownership Expectations
