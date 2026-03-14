@@ -1,12 +1,10 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    AgentSession, AgentSessionStatus, AgentToolCall, Audit, AuditEvent, OrbitError, OrbitEvent,
-    StoredTool,
+    AgentSession, AgentSessionStatus, AgentToolCall, AuditEvent, OrbitError, StoredTool,
 };
 
 use super::contracts::{
-    AgentSessionStoreBackend, AuditEventStoreBackend, AuditStoreBackend, LockStoreBackend,
-    ToolStoreBackend,
+    AgentSessionStoreBackend, AuditEventStoreBackend, ToolStoreBackend,
 };
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 use crate::Store;
@@ -36,22 +34,6 @@ impl ToolStoreBackend for SqliteToolStoreBackend {
     fn set_tool_enabled(&self, name: &str, enabled: bool) -> Result<bool, OrbitError> {
         self.store
             .with_transaction(|tx| tx.set_tool_enabled(name, enabled))
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct SqliteAuditStoreBackend {
-    pub(crate) store: Store,
-}
-
-impl AuditStoreBackend for SqliteAuditStoreBackend {
-    fn list_audits(&self, limit: usize) -> Result<Vec<Audit>, OrbitError> {
-        self.store.list_audits(limit)
-    }
-
-    fn insert_audit_event(&self, event: &OrbitEvent) -> Result<(), OrbitError> {
-        self.store
-            .with_transaction(|tx| tx.insert_audit_event(event))
     }
 }
 
@@ -118,24 +100,5 @@ impl AgentSessionStoreBackend for SqliteAgentSessionStoreBackend {
     ) -> Result<bool, OrbitError> {
         self.store
             .with_transaction(|tx| tx.update_agent_session(session_id, tool_calls, outcome, status))
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct SqliteLockStoreBackend {
-    pub(crate) store: Store,
-}
-
-impl LockStoreBackend for SqliteLockStoreBackend {
-    fn try_lock(&self, name: &str) -> Result<bool, OrbitError> {
-        self.store.try_lock(name)
-    }
-
-    fn unlock(&self, name: &str) -> Result<bool, OrbitError> {
-        self.store.unlock(name)
-    }
-
-    fn global_job_lock_name(&self) -> &'static str {
-        Store::global_job_lock_name()
     }
 }

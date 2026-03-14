@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_policy::PolicyEngine;
-use orbit_types::{Audit, IdentityRole, Job, OrbitError, ResolvedIdentity};
+use orbit_types::{Audit, IdentityRole, Job, OrbitError, OrbitEvent, ResolvedIdentity};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -60,7 +60,15 @@ impl OrbitRuntime {
     }
 
     pub fn list_audits(&self, limit: usize) -> Result<Vec<Audit>, OrbitError> {
-        self.context.audit_store.list_audits(limit)
+        let events = self.event_log.snapshot();
+        let audits = events
+            .into_iter()
+            .enumerate()
+            .map(|(idx, event)| orbit_event_to_audit((idx + 1) as i64, event))
+            .rev()
+            .take(limit)
+            .collect();
+        Ok(audits)
     }
 
     pub fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
@@ -154,6 +162,23 @@ impl OrbitRuntime {
 
     pub fn orbit_home_root() -> PathBuf {
         paths::orbit_home_root()
+    }
+}
+
+fn orbit_event_to_audit(id: i64, event: OrbitEvent) -> Audit {
+    let payload = serde_json::to_value(&event).unwrap_or(Value::Null);
+    let event_type = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("Unknown")
+        .to_string();
+
+    Audit {
+        id,
+        event_type: event_type.clone(),
+        payload,
+        message: event_type,
+        created_at: Utc::now(),
     }
 }
 

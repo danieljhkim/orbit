@@ -5,7 +5,7 @@ use chrono::Utc;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     Store, activity_store_file, agent_session_store_sqlite, audit_event_store_sqlite,
-    audit_store_sqlite, job_store_file, lock_store_sqlite, task_store_file, tool_store_sqlite,
+    job_store_file, lock_store_memory, task_store_file, tool_store_sqlite,
 };
 
 use orbit_tools::ToolRegistry;
@@ -80,10 +80,9 @@ fn build_context_common(
     job_store: Arc<dyn orbit_store::JobStoreBackend>,
 ) -> Result<OrbitContext, OrbitError> {
     let tool_store = tool_store_sqlite(store.clone());
-    let audit_store = audit_store_sqlite(store.clone());
     let audit_event_store = audit_event_store_sqlite(store.clone());
     let agent_session_store = agent_session_store_sqlite(store.clone());
-    let lock_store = lock_store_sqlite(store.clone());
+    let lock_store = lock_store_memory();
 
     let skill_root = runtime_config.persistence.skill.clone();
     let skill_catalog = SkillCatalog::new(skill_root);
@@ -111,7 +110,6 @@ fn build_context_common(
         activity_store,
         job_store,
         tool_store,
-        audit_store,
         audit_event_store,
         agent_session_store,
         lock_store,

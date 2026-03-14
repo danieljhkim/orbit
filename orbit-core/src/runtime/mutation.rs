@@ -4,7 +4,6 @@ use crate::{OrbitError, OrbitRuntime};
 
 impl OrbitRuntime {
     pub(crate) fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError> {
-        self.context.audit_store.insert_audit_event(&event)?;
         self.event_log.append(event);
         Ok(())
     }
@@ -14,7 +13,6 @@ impl OrbitRuntime {
         F: FnOnce() -> Result<(T, OrbitEvent), OrbitError>,
     {
         let (result, event) = f()?;
-        self.context.audit_store.insert_audit_event(&event)?;
         self.event_log.append(event);
         Ok(result)
     }
