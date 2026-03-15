@@ -9,7 +9,10 @@ activity:
   description: CEO reviews the backlog and dispatches the single highest-priority task for execution.
   input_schema_json:
     additional_properties: false
-    properties: {}
+    properties:
+      base:
+        description: Shared pipeline base branch input, accepted but unused by dispatch_task.
+        type: string
     type: object
   output_schema_json:
     additional_properties: false

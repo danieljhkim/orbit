@@ -33,7 +33,10 @@ activity:
   # ---- interface ----
   input_schema_json:
     type: object
-    properties: {}
+    properties:
+      base:
+        type: string
+        description: Shared pipeline base branch input, accepted but unused by dispatch_task.
     additional_properties: false
   output_schema_json:
     type: object

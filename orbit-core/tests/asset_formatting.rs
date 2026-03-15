@@ -74,6 +74,15 @@ fn activity_assets_use_grouped_sections_and_literal_instruction_blocks() {
 }
 
 #[test]
+fn dispatch_task_asset_accepts_shared_pipeline_base_input() {
+    let raw = include_str!("../assets/activities/dispatch_task.yaml");
+    assert!(
+        raw.contains("base:\n        type: string"),
+        "dispatch_task should accept the shared pipeline base input"
+    );
+}
+
+#[test]
 fn identity_assets_use_grouped_sections_and_literal_description_blocks() {
     let assets = [
         ("lamport", include_str!("../assets/identities/lamport.yaml")),
