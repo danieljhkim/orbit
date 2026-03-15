@@ -1,10 +1,15 @@
 schemaVersion: 1
+
+# ---- job ----
 job:
-  job_id: job_approve_task_leader
+  # ---- identity ----
+  job_id: job_review_tasks
   state: enabled
+
+  # ---- execution ----
   steps:
     - target_type: activity
-      target_id: approve_task_leader
+      target_id: review_tasks
       agent_cli: codex
       timeout_seconds: 1200
       env_extra: []

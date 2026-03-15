@@ -1,31 +1,16 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: implement_change
   spec_type: agent_invoke
+
+  # ---- content ----
   description: Implement an Orbit task from plan to committed code, then move it to review
-  input_schema_json:
-    type: object
-    required: [task_id]
-    properties:
-      task_id:
-        type: string
-        description: The Orbit task ID to implement
-  output_schema_json:
-    type: object
-    required: [status, summary]
-    properties:
-      status:
-        type: string
-        description: "Outcome: success or failed"
-      summary:
-        type: string
-        description: One-paragraph summary of what was implemented
-      files_changed:
-        type: array
-        items:
-          type: string
-        description: List of files created or modified
   instruction: |
     You are implementing an Orbit task from plan to committed, tested code.
 
@@ -98,6 +83,34 @@ activity:
     files are missing), set status to "failed" in the execution summary, call
     orbit.task.update to add a comment explaining the blocker, and return status: "failed".
 
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: The Orbit task ID to implement
+  output_schema_json:
+    type: object
+    required:
+      - status
+      - summary
+    properties:
+      status:
+        type: string
+        description: "Outcome: success or failed"
+      summary:
+        type: string
+        description: One-paragraph summary of what was implemented
+      files_changed:
+        type: array
+        items:
+          type: string
+        description: List of files created or modified
+
+  # ---- execution ----
   tools:
     - orbit.task.show
     - orbit.task.update

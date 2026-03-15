@@ -1,26 +1,16 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: open_pr
   spec_type: agent_invoke
+
+  # ---- content ----
   description: Open a pull request for a completed Orbit task
-  input_schema_json:
-    type: object
-    required: [task_id]
-    properties:
-      task_id:
-        type: string
-        description: The Orbit task ID whose branch should be opened as a PR
-      base:
-        type: string
-        description: Base branch to merge into (defaults to main)
-  output_schema_json:
-    type: object
-    required: [pr_url]
-    properties:
-      pr_url:
-        type: string
-        description: URL of the created pull request
   instruction: |
     You are opening a pull request for an Orbit task.
 
@@ -37,6 +27,29 @@ activity:
     5. Return the PR URL in the output as `pr_url`.
 
     If the task is not found or the branch does not exist, return a clear error.
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: The Orbit task ID whose branch should be opened as a PR
+      base:
+        type: string
+        description: Base branch to merge into (defaults to main)
+  output_schema_json:
+    type: object
+    required:
+      - pr_url
+    properties:
+      pr_url:
+        type: string
+        description: URL of the created pull request
+
+  # ---- execution ----
   tools:
     - orbit.task.show
     - github.pr.create

@@ -1,11 +1,26 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
 identity_id: steve
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: oversee_orbit_operations
   spec_type: agent_invoke
-  description: As the CEO of orbit-workflow operations, reviews all the recent orbit operations - such as job-runs & tasks - and make sure everything is up to the standard.
-  instruction: First refer to `orbit-operations-management` skill. The agent acts as the "CEO of orbit-workflow operations" and audits recent job executions. Any detected failures or operational issues must be investigated and converted into actionable Orbit tasks.
+
+  # ---- content ----
+  description: |
+    As the CEO of orbit-workflow operations, reviews all the recent
+    orbit operations such as job-runs and tasks and makes sure
+    everything is up to the standard.
+  instruction: |
+    First refer to `orbit-operations-management` skill.
+    The agent acts as the "CEO of orbit-workflow operations" and audits recent job executions.
+    Any detected failures or operational issues must be investigated and converted into actionable Orbit tasks.
+
+  # ---- interface ----
   input_schema_json:
     type: object
     properties: {}
@@ -18,5 +33,10 @@ activity:
       created_file:
         type: string
         description: Repo-relative or absolute path to the markdown report written during this run. Orbit auto-commits this file together with the run artifact.
-  skill_refs: ["orbit-skills", "orbit-create-task", "orbit-operations-management"]
+
+  # ---- execution ----
+  skill_refs:
+    - orbit-skills
+    - orbit-create-task
+    - orbit-operations-management
   tools: []

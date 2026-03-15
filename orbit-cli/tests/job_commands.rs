@@ -568,7 +568,7 @@ fn seeded_default_jobs_are_listed_as_enabled_after_init() {
 
     let seeded_job = jobs
         .iter()
-        .find(|job| job["job_id"] == "job_resolve_backlogged_task")
+        .find(|job| job["job_id"] == "job_review_tasks")
         .expect("seeded default job visible");
     assert_eq!(seeded_job["state"], "enabled");
 }

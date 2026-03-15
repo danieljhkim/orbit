@@ -1,7 +1,12 @@
 schemaVersion: 1
+
+# ---- job ----
 job:
-  job_id: job_execute_task
+  # ---- identity ----
+  job_id: job_task_pipeline
   state: enabled
+
+  # ---- execution ----
   #
   # Step flow:
   #   dispatch_task

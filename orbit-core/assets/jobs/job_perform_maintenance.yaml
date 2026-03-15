@@ -1,7 +1,12 @@
 schemaVersion: 1
+
+# ---- job ----
 job:
+  # ---- identity ----
   job_id: job_perform_maintenance
   state: enabled
+
+  # ---- execution ----
   steps:
     - target_type: activity
       target_id: perform_maintenance

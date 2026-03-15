@@ -59,11 +59,9 @@ fn assert_default_named_jobs_visible_and_enabled(base_root: &std::path::Path) {
     let jobs = list.as_array().expect("jobs array");
 
     for job_id in [
-        "job_resolve_backlogged_task",
         "job_perform_maintenance",
         "job_oversee_orbit_operations",
-        "job_approve_task_leader",
-        "job_dispatch_task",
+        "job_review_tasks",
     ] {
         let job = jobs
             .iter()
@@ -457,9 +455,9 @@ fn init_migrates_legacy_builtin_kebab_case_names_to_snake_case() {
 
     rename_seeded_file_to_legacy_name(
         &activities_dir,
-        "approve_task_leader",
-        "approve-task-leader",
-        &[("approve_task_leader", "approve-task-leader")],
+        "review_tasks",
+        "review-tasks",
+        &[("review_tasks", "review-tasks")],
     );
     rename_seeded_file_to_legacy_name(
         &activities_dir,
@@ -469,27 +467,18 @@ fn init_migrates_legacy_builtin_kebab_case_names_to_snake_case() {
     );
     rename_seeded_file_to_legacy_name(
         &jobs_dir,
-        "job_approve_task_leader",
-        "job-approve-task-leader",
+        "job_review_tasks",
+        "job-review-tasks",
         &[
-            ("job_approve_task_leader", "job-approve-task-leader"),
-            ("approve_task_leader", "approve-task-leader"),
-        ],
-    );
-    rename_seeded_file_to_legacy_name(
-        &jobs_dir,
-        "job_dispatch_task",
-        "job-triage-and-dispatch-task",
-        &[
-            ("job_dispatch_task", "job-triage-and-dispatch-task"),
-            ("dispatch_task", "triage-and-dispatch-task"),
+            ("job_review_tasks", "job-review-tasks"),
+            ("review_tasks", "review-tasks"),
         ],
     );
 
     let legacy_run_dir = orbit_root
         .join("jobs")
         .join("runs")
-        .join("job-approve-task-leader")
+        .join("job-review-tasks")
         .join("jrun-20260315-010101");
     std::fs::create_dir_all(legacy_run_dir.join("steps")).expect("create legacy run bundle");
     std::fs::write(
@@ -497,7 +486,7 @@ fn init_migrates_legacy_builtin_kebab_case_names_to_snake_case() {
         r#"schemaVersion: 1
 run:
   run_id: jrun-20260315-010101
-  job_id: job-approve-task-leader
+  job_id: job-review-tasks
   attempt: 1
   state: success
   scheduled_at: 2026-03-15T01:01:01Z
@@ -509,14 +498,12 @@ run:
     )
     .expect("write legacy jrun");
     std::fs::write(
-        legacy_run_dir
-            .join("steps")
-            .join("01-approve-task-leader.yaml"),
+        legacy_run_dir.join("steps").join("01-review-tasks.yaml"),
         r#"schemaVersion: 1
 step:
   step_index: 0
   target_type: activity
-  target_id: approve-task-leader
+  target_id: review-tasks
   started_at: 2026-03-15T01:01:02Z
   finished_at: 2026-03-15T01:01:03Z
   duration_ms: 1000
@@ -540,8 +527,8 @@ step:
         .assert()
         .success();
 
-    assert!(activities_dir.join("approve_task_leader.yaml").exists());
-    assert!(!activities_dir.join("approve-task-leader.yaml").exists());
+    assert!(activities_dir.join("review_tasks.yaml").exists());
+    assert!(!activities_dir.join("review-tasks.yaml").exists());
     assert!(activities_dir.join("dispatch_task.yaml").exists());
     assert!(
         !activities_dir
@@ -549,48 +536,43 @@ step:
             .exists()
     );
 
-    assert!(jobs_dir.join("job_approve_task_leader.yaml").exists());
-    assert!(!jobs_dir.join("job-approve-task-leader.yaml").exists());
-    assert!(jobs_dir.join("job_dispatch_task.yaml").exists());
-    assert!(!jobs_dir.join("job-triage-and-dispatch-task.yaml").exists());
+    assert!(jobs_dir.join("job_review_tasks.yaml").exists());
+    assert!(!jobs_dir.join("job-review-tasks.yaml").exists());
 
     let migrated_run_dir = orbit_root
         .join("jobs")
         .join("runs")
-        .join("job_approve_task_leader")
+        .join("job_review_tasks")
         .join("jrun-20260315-010101");
     assert!(migrated_run_dir.exists());
     assert!(
         !orbit_root
             .join("jobs")
             .join("runs")
-            .join("job-approve-task-leader")
+            .join("job-review-tasks")
             .exists()
     );
     assert!(
         migrated_run_dir
             .join("steps")
-            .join("01-approve_task_leader.yaml")
+            .join("01-review_tasks.yaml")
             .exists()
     );
 
     let migrated_jrun =
         std::fs::read_to_string(migrated_run_dir.join("jrun.yaml")).expect("read migrated jrun");
-    assert!(migrated_jrun.contains("job_approve_task_leader"));
-    assert!(!migrated_jrun.contains("job-approve-task-leader"));
+    assert!(migrated_jrun.contains("job_review_tasks"));
+    assert!(!migrated_jrun.contains("job-review-tasks"));
 
-    let migrated_step = std::fs::read_to_string(
-        migrated_run_dir
-            .join("steps")
-            .join("01-approve_task_leader.yaml"),
-    )
-    .expect("read migrated step");
-    assert!(migrated_step.contains("approve_task_leader"));
-    assert!(!migrated_step.contains("approve-task-leader"));
+    let migrated_step =
+        std::fs::read_to_string(migrated_run_dir.join("steps").join("01-review_tasks.yaml"))
+            .expect("read migrated step");
+    assert!(migrated_step.contains("review_tasks"));
+    assert!(!migrated_step.contains("review-tasks"));
 
     orbit_in(workspace.path())
         .env("HOME", home.path())
-        .args(["activity", "show", "approve_task_leader", "--json"])
+        .args(["activity", "show", "review_tasks", "--json"])
         .assert()
         .success();
     orbit_in(workspace.path())
@@ -601,7 +583,7 @@ step:
 
     let history_output = orbit_in(workspace.path())
         .env("HOME", home.path())
-        .args(["job", "history", "job_approve_task_leader", "--json"])
+        .args(["job", "history", "job_review_tasks", "--json"])
         .assert()
         .success()
         .get_output()
@@ -609,8 +591,5 @@ step:
         .clone();
     let history: Value = serde_json::from_slice(&history_output).expect("history json");
     let runs = history.as_array().expect("history array");
-    assert!(
-        runs.iter()
-            .any(|run| run["job_id"] == "job_approve_task_leader")
-    );
+    assert!(runs.iter().any(|run| run["job_id"] == "job_review_tasks"));
 }

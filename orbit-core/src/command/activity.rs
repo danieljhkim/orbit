@@ -10,10 +10,10 @@ use serde_json::{Map, Value};
 use crate::OrbitRuntime;
 use crate::paths::ORBIT_ROOT_TOKEN;
 
-const DEFAULT_JOB_FILES: [(&str, &str); 5] = [
+const DEFAULT_JOB_FILES: [(&str, &str); 4] = [
     (
-        "approve_task_leader",
-        include_str!("../../assets/activities/approve_task_leader.yaml"),
+        "review_tasks",
+        include_str!("../../assets/activities/review_tasks.yaml"),
     ),
     (
         "oversee_orbit_operations",
@@ -22,10 +22,6 @@ const DEFAULT_JOB_FILES: [(&str, &str); 5] = [
     (
         "perform_maintenance",
         include_str!("../../assets/activities/perform_maintenance.yaml"),
-    ),
-    (
-        "resolve_backlogged_task",
-        include_str!("../../assets/activities/resolve_backlogged_task.yaml"),
     ),
     (
         "dispatch_task",

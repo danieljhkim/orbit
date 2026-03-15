@@ -1366,10 +1366,7 @@ fn claude_job_run_succeeds_with_mock_binary() {
     let agent_cli = write_agent_script(&script_path, &script);
 
     // Runtime config: hermetic env — HOME and PATH are sufficient for Claude Code auth.
-    write_runtime_config(
-        dir.path(),
-        "[execution.env]\npass = [\"HOME\", \"PATH\"]\n",
-    );
+    write_runtime_config(dir.path(), "[execution.env]\npass = [\"HOME\", \"PATH\"]\n");
 
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     add_activity(&runtime, "spec-claude-run");

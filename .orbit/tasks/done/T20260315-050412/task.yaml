@@ -1,0 +1,77 @@
+schema_version: 4
+
+# ---- identity ----
+id: T20260315-050412
+type: issue
+priority: medium
+
+# ---- content ----
+title: Resolve drift between bundled activity assets and tracked .orbit active copies
+description: |-
+  ## Summary
+
+  While executing `T20260315-045727`, I confirmed that tracked `.orbit/activities/active/*.yaml` files are not just materialized copies of `orbit-core/assets/activities/*.yaml`; some of them have drifted into meaningfully different specs.
+
+  Examples observed:
+  - `resolve-backlogged-task` is `agent_invoke` in the bundled asset but `task` in the tracked active copy
+  - `approve-task-leader` is `agent_invoke` in the bundled asset but `task_approval` in the tracked active copy
+  - the tracked active copies also carry extra timestamps and formatting differences
+
+  This leaves Orbit with two checked-in sources of truth for built-in activities, and small maintenance edits can silently update only one side.
+acceptanceCriteria: []
+
+# ---- context ----
+contextFiles:
+- orbit-core/assets/activities
+- .orbit/activities/active
+- orbit-core/src/command/init.rs
+- orbit-core/src/command/activity.rs
+- orbit-cli/tests/init_commands.rs
+workspacePath: /Users/daniel/workspace/repos/orbit
+
+# ---- ownership ----
+createdBy: Codex
+assignedTo: Codex
+
+# ---- proposal workflow ----
+proposedBy: Codex
+proposalApprovedBy: human
+proposalRejectedBy: null
+proposalDecisionNote: Approved after confirming the tracked active activity copies now match bundled built-in assets semantically; only generated timestamps/formatting differ.
+
+# ---- implementation ----
+branch: null
+prNumber: null
+
+# ---- review workflow ----
+reviewApprovedBy: human
+reviewRejectedBy: null
+reviewDecisionNote: 'Confirmed resolved: tracked active built-in activities now align with bundled assets semantically, and targeted init/core verification passed.'
+
+# ---- execution references ----
+activityId: null
+jobId: null
+jobRunId: null
+
+# ---- timestamps ----
+createdAt: 2026-03-15T05:04:12.824712Z
+updatedAt: 2026-03-15T05:13:10.071328Z
+
+# ---- audit trail ----
+history:
+- at: 2026-03-15T05:04:12.824712Z
+  by: Codex
+  event: created
+- at: 2026-03-15T05:11:38.926794Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:11:44.661453Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:12:58.684139Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:13:10.071328Z
+  by: human
+  event: completed
+comments: []

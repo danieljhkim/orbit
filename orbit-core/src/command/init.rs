@@ -12,24 +12,23 @@ use crate::config::seed_default_config;
 use crate::fs_utils::{create_dir_symlink, remove_path_if_exists};
 
 const BUILTIN_ACTIVITY_RENAMES: &[(&str, &str)] = &[
-    ("approve-task-leader", "approve_task_leader"),
+    ("approve-task-leader", "review_tasks"),
+    ("approve_task_leader", "review_tasks"),
     ("oversee-orbit-operations", "oversee_orbit_operations"),
     ("perform-maintenance", "perform_maintenance"),
-    ("resolve-backlogged-task", "resolve_backlogged_task"),
     ("triage-and-dispatch-task", "dispatch_task"),
 ];
 
 const BUILTIN_JOB_RENAMES: &[(&str, &str)] = &[
-    ("job-approve-task-leader", "job_approve_task_leader"),
+    ("job-approve-task-leader", "job_review_tasks"),
+    ("job_approve_task_leader", "job_review_tasks"),
     (
         "job-oversee-orbit-operations",
         "job_oversee_orbit_operations",
     ),
     ("job-perform-maintenance", "job_perform_maintenance"),
-    ("job-resolve-backlogged-task", "job_resolve_backlogged_task"),
-    ("job-triage-and-dispatch-task", "job_dispatch_task"),
-    ("job-dispatch-task", "job_dispatch_task"),
-    ("job-execute-task", "job_execute_task"),
+    ("job-execute-task", "job_task_pipeline"),
+    ("job_execute_task", "job_task_pipeline"),
 ];
 
 #[derive(Debug, Clone)]

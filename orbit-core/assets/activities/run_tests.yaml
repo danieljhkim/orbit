@@ -1,9 +1,18 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: run_tests
   spec_type: cli_command
+
+  # ---- content ----
   description: Run tests, formatting checks, and linting for the workspace project
+
+  # ---- interface ----
   input_schema_json:
     type: object
     required: []
@@ -13,6 +22,8 @@ activity:
     properties:
       exit_code:
         type: integer
+
+  # ---- execution ----
   # Convention: the workspace project must expose a `make check` target that runs
   # tests, formatting, and linting in one step. This keeps the activity simple and
   # lets each project own what "check" means.
@@ -35,7 +46,9 @@ activity:
   #         echo "No recognized project type in $(pwd)" >&2; exit 1
   #       fi
   command: make
-  args: [check]
+  args:
+    - check
   working_dir: "{{workspace_path}}"
   timeout_seconds: 300
-  expected_exit_codes: [0]
+  expected_exit_codes:
+    - 0

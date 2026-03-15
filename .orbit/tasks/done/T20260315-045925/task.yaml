@@ -1,0 +1,65 @@
+schema_version: 4
+
+# ---- identity ----
+id: T20260315-045925
+type: chore
+priority: high
+
+# ---- content ----
+title: Remove ANTHROPIC_API_KEY from Claude agent required env vars
+description: Claude authenticates via browser OAuth credentials stored in `~/.claude/` (home-relative). Requiring `ANTHROPIC_API_KEY` in the hermetic env passthrough is wrong — it forces API-key auth and blocks subscription-based users. `HOME` is already passed through, which is sufficient for Claude Code to find its stored credentials.
+acceptanceCriteria: []
+
+# ---- context ----
+contextFiles:
+- orbit-agent/src/providers/mod.rs
+- orbit-agent/tests/protocol_behavior.rs
+- orbit-core/tests/job_runtime_behavior.rs
+workspacePath: /Users/daniel/workspace/repos/orbit
+
+# ---- ownership ----
+createdBy: null
+assignedTo: null
+
+# ---- proposal workflow ----
+proposedBy: Prii (Reviewer)
+proposalApprovedBy: human
+proposalRejectedBy: null
+proposalDecisionNote: lgtm
+
+# ---- implementation ----
+branch: null
+prNumber: null
+
+# ---- review workflow ----
+reviewApprovedBy: human
+reviewRejectedBy: null
+reviewDecisionNote: lgtm
+
+# ---- execution references ----
+activityId: null
+jobId: null
+jobRunId: null
+
+# ---- timestamps ----
+createdAt: 2026-03-15T04:59:25.704553Z
+updatedAt: 2026-03-15T05:22:43.216735Z
+
+# ---- audit trail ----
+history:
+- at: 2026-03-15T04:59:25.704553Z
+  by: human
+  event: created
+- at: 2026-03-15T05:01:15.468211Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:11:34.733342Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:13:37.404783Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:22:43.216735Z
+  by: human
+  event: completed
+comments: []

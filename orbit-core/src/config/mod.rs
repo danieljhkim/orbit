@@ -15,7 +15,9 @@ mod tests {
     use std::path::Path;
 
     use super::PersistenceConfig;
-    use super::runtime::{CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig, normalize_pass_list};
+    use super::runtime::{
+        CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig, normalize_pass_list,
+    };
     use tempfile::tempdir;
 
     #[test]
@@ -90,8 +92,11 @@ mod tests {
     #[test]
     fn runtime_config_loads_user_name_from_config() {
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join("config.toml"), "[user]\nname = \"daniel\"\n")
-            .expect("write config");
+        fs::write(
+            dir.path().join("config.toml"),
+            "[user]\nname = \"daniel\"\n",
+        )
+        .expect("write config");
 
         let config = RuntimeConfig::load_from_data_root(dir.path()).expect("load config");
         assert_eq!(config.user_name, "daniel");

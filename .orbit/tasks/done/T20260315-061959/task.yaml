@@ -1,0 +1,80 @@
+schema_version: 4
+
+# ---- identity ----
+id: T20260315-061959
+type: refactor
+priority: medium
+
+# ---- content ----
+title: Standardize bundled asset YAML formatting and field grouping
+description: |-
+  ## Summary
+
+  Orbit's bundled YAML assets under `orbit-core/assets` currently mix formatting styles across activities, identities, and jobs. Long prose fields sometimes use folded scalars or single-line strings, field ordering varies by asset type, and the files do not consistently present a clear logical grouping.
+
+  Standardize these bundled asset files so they read as one intentional format. In particular, long paragraph-style fields such as activity instructions or identity descriptions should use literal multi-line block style (`|`) when they span multiple lines, for example:
+
+  ```yaml
+  instruction: |
+    You are reviewing a pull request for an Orbit task.
+  ```
+
+  The task should also define and apply a consistent logical field order for each asset family (`activities`, `identities`, `jobs`) so the bundled files are easy to scan and maintain.
+acceptanceCriteria: []
+
+# ---- context ----
+contextFiles:
+- orbit-core/assets/activities
+- orbit-core/assets/identities
+- orbit-core/assets/jobs
+- orbit-core/src/command/activity.rs
+- orbit-core/src/command/job.rs
+- orbit-core/src/command/identity.rs
+workspacePath: /Users/daniel/workspace/repos/orbit
+
+# ---- ownership ----
+createdBy: Codex
+assignedTo: Codex
+
+# ---- proposal workflow ----
+proposedBy: daniel
+proposalApprovedBy: human
+proposalRejectedBy: null
+proposalDecisionNote: Approved. Standardize bundled asset YAML formatting, use literal multi-line blocks for long prose fields, and group fields logically across activities, identities, and jobs.
+
+# ---- implementation ----
+branch: null
+prNumber: null
+
+# ---- review workflow ----
+reviewApprovedBy: human
+reviewRejectedBy: null
+reviewDecisionNote: null
+
+# ---- execution references ----
+activityId: null
+jobId: null
+jobRunId: null
+
+# ---- timestamps ----
+createdAt: 2026-03-15T06:19:59.673625Z
+updatedAt: 2026-03-15T06:37:55.690519Z
+
+# ---- audit trail ----
+history:
+- at: 2026-03-15T06:19:59.673625Z
+  by: human
+  event: created
+- at: 2026-03-15T06:21:50.555184Z
+  by: human
+  event: moved
+- at: 2026-03-15T06:22:10.213813Z
+  by: human
+  event: moved
+- at: 2026-03-15T06:32:57.615704Z
+  by: human
+  event: moved
+- at: 2026-03-15T06:37:55.690519Z
+  by: human
+  event: completed
+comments: []

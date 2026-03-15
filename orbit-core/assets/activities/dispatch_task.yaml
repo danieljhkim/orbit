@@ -1,24 +1,17 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
 identity_id: steve
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: dispatch_task
   spec_type: agent_invoke
+
+  # ---- content ----
   description: CEO reviews the backlog and dispatches the single highest-priority task for execution.
-  input_schema_json:
-    type: object
-    properties: {}
-    additional_properties: false
-  output_schema_json:
-    type: object
-    required:
-      - task_id
-    properties:
-      task_id:
-        type: string
-      comment:
-        type: string
-    additional_properties: false
   instruction: |
     You are Steve (CEO). Pick the single best task from the backlog and dispatch it.
 
@@ -35,6 +28,24 @@ activity:
        to record the dispatch rationale.
 
     Output the selected task_id and the rationale comment.
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    properties: {}
+    additional_properties: false
+  output_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+      comment:
+        type: string
+    additional_properties: false
+
+  # ---- execution ----
   tools:
     - orbit.task.list
     - orbit.task.show

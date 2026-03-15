@@ -1312,8 +1312,8 @@ fn activity_envelope_json(activity: &Activity) -> Value {
 
 const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
-        "job_approve_task_leader",
-        include_str!("../../assets/jobs/job_approve_task_leader.yaml"),
+        "job_review_tasks",
+        include_str!("../../assets/jobs/job_review_tasks.yaml"),
     ),
     (
         "job_oversee_orbit_operations",
@@ -1322,14 +1322,6 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "job_perform_maintenance",
         include_str!("../../assets/jobs/job_perform_maintenance.yaml"),
-    ),
-    (
-        "job_resolve_backlogged_task",
-        include_str!("../../assets/jobs/job_resolve_backlogged_task.yaml"),
-    ),
-    (
-        "job_dispatch_task",
-        include_str!("../../assets/jobs/job_dispatch_task.yaml"),
     ),
 ];
 

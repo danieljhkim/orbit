@@ -1,12 +1,22 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: checkout_branch
   spec_type: cli_command
+
+  # ---- content ----
   description: Check out a git branch, typically used to return to the base branch after task work is complete
+
+  # ---- interface ----
   input_schema_json:
     type: object
-    required: [base]
+    required:
+      - base
     properties:
       base:
         type: string
@@ -16,10 +26,13 @@ activity:
     properties:
       exit_code:
         type: integer
+
+  # ---- execution ----
   command: bash
   args:
     - -c
     - "git checkout '{{input.base}}' && git pull --rebase origin '{{input.base}}'"
   working_dir: "{{workspace_path}}"
   timeout_seconds: 60
-  expected_exit_codes: [0]
+  expected_exit_codes:
+    - 0

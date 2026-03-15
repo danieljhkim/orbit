@@ -464,8 +464,11 @@ mod tests {
     #[test]
     fn configured_user_name_is_used_for_created_by_and_update_comments() {
         let dir = tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("config.toml"), "[user]\nname = \"daniel\"\n")
-            .expect("write config");
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[user]\nname = \"daniel\"\n",
+        )
+        .expect("write config");
         let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
 
         let task = runtime

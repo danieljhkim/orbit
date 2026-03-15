@@ -1,32 +1,16 @@
 schema_version: 1
+
+# ---- metadata ----
 created_by: system
+
+# ---- activity ----
 activity:
+  # ---- identity ----
   id: review_pr
   spec_type: agent_invoke
+
+  # ---- content ----
   description: Review a pull request for a completed Orbit task against its acceptance criteria
-  input_schema_json:
-    type: object
-    required: [task_id]
-    properties:
-      task_id:
-        type: string
-        description: The Orbit task ID whose PR should be reviewed
-      pr:
-        type: string
-        description: PR number, URL, or branch name. If omitted, derived from the task's prNumber or branch field.
-      repo:
-        type: string
-        description: Repository in owner/name format (optional, defaults to current repo)
-  output_schema_json:
-    type: object
-    required: [action, body]
-    properties:
-      action:
-        type: string
-        description: "Review decision: approve, request-changes, or comment"
-      body:
-        type: string
-        description: Review body summarising findings
   instruction: |
     You are reviewing a pull request for an Orbit task.
 
@@ -54,6 +38,36 @@ activity:
     7. Return the action and body in the output.
 
     If the task is not found or the PR cannot be located, return a clear error.
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: The Orbit task ID whose PR should be reviewed
+      pr:
+        type: string
+        description: PR number, URL, or branch name. If omitted, derived from the task's prNumber or branch field.
+      repo:
+        type: string
+        description: Repository in owner/name format (optional, defaults to current repo)
+  output_schema_json:
+    type: object
+    required:
+      - action
+      - body
+    properties:
+      action:
+        type: string
+        description: "Review decision: approve, request-changes, or comment"
+      body:
+        type: string
+        description: Review body summarising findings
+
+  # ---- execution ----
   tools:
     - orbit.task.show
     - github.pr.view
