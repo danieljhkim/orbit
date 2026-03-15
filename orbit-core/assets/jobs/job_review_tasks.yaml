@@ -10,6 +10,6 @@ job:
   steps:
     - target_type: activity
       target_id: review_tasks
-      agent_cli: codex
+      agent_cli: claude
       timeout_seconds: 1200
       env_extra: []

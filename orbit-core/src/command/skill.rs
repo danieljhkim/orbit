@@ -9,10 +9,7 @@ use crate::fs_utils::write_text_with_parent;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
 const DEFAULT_SKILL_FILES: [(&str, &str); 6] = [
-    (
-        "orbit",
-        include_str!("../../assets/skills/orbit/SKILL.md"),
-    ),
+    ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
     (
         "orbit-create-task",
         include_str!("../../assets/skills/orbit-create-task/SKILL.md"),

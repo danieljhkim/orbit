@@ -621,7 +621,10 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
     yaml.push_str(&yaml_section("content"));
     yaml.push_str(&yaml_field("title", &doc.title)?);
     yaml.push_str(&yaml_field("description", &doc.description)?);
-    yaml.push_str(&yaml_field("acceptance_criteria", &doc.acceptance_criteria)?);
+    yaml.push_str(&yaml_field(
+        "acceptance_criteria",
+        &doc.acceptance_criteria,
+    )?);
 
     yaml.push_str(&yaml_section("context"));
     yaml.push_str(&yaml_field("context_files", &doc.context_files)?);
