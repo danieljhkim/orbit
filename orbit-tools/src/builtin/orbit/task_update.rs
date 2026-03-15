@@ -10,7 +10,7 @@ pub(super) fn build_exec_requests(
     ctx: &ToolContext,
     input: &Value,
 ) -> Result<(ExecRequest, ExecRequest), OrbitError> {
-    let id = super::required_string(input, &["id", "task_id"], "id")?;
+    let id = super::required_string(input, &["id"], "id")?;
     let mut args = vec!["task".to_string(), "update".to_string(), id.clone()];
     let mut changed = false;
 

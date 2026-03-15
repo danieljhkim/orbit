@@ -96,20 +96,12 @@ pub(super) fn optional_string(input: &Value, key: &str) -> Result<Option<String>
 }
 
 pub(super) fn orbit_id_params(kind: &str) -> Vec<ToolParam> {
-    vec![
-        ToolParam {
-            name: "id".to_string(),
-            description: format!("{kind} ID"),
-            param_type: "string".to_string(),
-            required: true,
-        },
-        ToolParam {
-            name: format!("{kind}_id"),
-            description: format!("Alias for `id`; accepted to match activity input naming"),
-            param_type: "string".to_string(),
-            required: false,
-        },
-    ]
+    vec![ToolParam {
+        name: "id".to_string(),
+        description: format!("{kind} ID"),
+        param_type: "string".to_string(),
+        required: true,
+    }]
 }
 
 #[cfg(test)]
@@ -150,12 +142,12 @@ mod tests {
     }
 
     #[test]
-    fn task_show_accepts_task_id_alias() {
+    fn task_show_builds_request_from_id() {
         let req = super::task_show::build_exec_request(
             &ToolContext::default(),
-            &json!({"task_id": "T20260315-025432"}),
+            &json!({"id": "T20260315-025432"}),
         )
-        .expect("task_id alias should be accepted");
+        .expect("id should be accepted");
 
         assert_eq!(
             req.args,
@@ -200,7 +192,7 @@ mod tests {
         let (update, show) = super::task_update::build_exec_requests(
             &ToolContext::default(),
             &json!({
-                "task_id": "T20260315-025432",
+                "id": "T20260315-025432",
                 "status": "review",
                 "comment": "ready for review",
             }),
@@ -241,12 +233,12 @@ mod tests {
     }
 
     #[test]
-    fn activity_show_accepts_activity_id_alias() {
+    fn activity_show_builds_request_from_id() {
         let req = super::activity_show::build_exec_request(
             &ToolContext::default(),
-            &json!({"activity_id": "open_pr"}),
+            &json!({"id": "open_pr"}),
         )
-        .expect("activity_id alias should be accepted");
+        .expect("id should be accepted");
 
         assert_eq!(
             req.args,

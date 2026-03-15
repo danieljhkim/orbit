@@ -10,7 +10,7 @@ pub(super) fn build_exec_request(
     ctx: &ToolContext,
     input: &Value,
 ) -> Result<ExecRequest, OrbitError> {
-    let id = super::required_string(input, &["id", "activity_id"], "id")?;
+    let id = super::required_string(input, &["id"], "id")?;
     Ok(super::orbit_exec_request(
         ctx,
         vec![

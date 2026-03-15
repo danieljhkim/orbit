@@ -33,11 +33,11 @@ proposedBy: daniel
 proposalApprovedBy: human
 proposalRejectedBy: null
 proposalDecisionNote: 'LGTM. Clarification: this does touch orbit-core asset YAML instruction text, but the narrower design is sound and matches the earlier rejection of schema-level alias support.'
-reviewApprovedBy: null
+reviewApprovedBy: daniel
 reviewRejectedBy: null
-reviewDecisionNote: null
+reviewDecisionNote: All aliases removed from tool layer. orbit_id_params returns single id param. All three tools accept only ["id"]. Activity instructions correctly map input.task_id to id at the call site. 37/37 tests pass.
 createdAt: 2026-03-15T03:45:14.444959Z
-updatedAt: 2026-03-15T03:49:34.493110Z
+updatedAt: 2026-03-15T04:07:49.926058Z
 acceptanceCriteria: []
 history:
 - at: 2026-03-15T03:45:14.444959Z
@@ -52,6 +52,9 @@ history:
 - at: 2026-03-15T03:49:34.493110Z
   by: human
   event: moved
+- at: 2026-03-15T04:07:49.926058Z
+  by: human
+  event: completed
 comments: []
 activityId: null
 jobId: null
