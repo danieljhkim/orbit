@@ -16,3 +16,4 @@ orbit.db-shm
 orbit.db-wal
 .orbit/jobs/runs/
 .orbit/tasks/archived
+docs
