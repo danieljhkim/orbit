@@ -284,109 +284,141 @@ impl OrbitRuntime {
         run.state = JobRunState::Running;
         run.started_at = Some(started_at);
 
-        let mut final_state = JobRunState::Success;
-        let mut total_duration_ms: u64 = 0;
-        let mut last_protocol_violation = false;
-        let mut last_created_file: Option<String> = None;
-        let mut current_input = merge_job_input(job.default_input.as_ref(), input)?;
+        let default_failure_step = job.steps.first().cloned().ok_or_else(|| {
+            OrbitError::JobValidation("job must have at least one step".to_string())
+        })?;
+        let mut failure_step = (0usize, default_failure_step);
 
-        for (step_index, step) in job.steps.iter().enumerate() {
-            let execution =
-                self.build_execution_context_for_step(&job, step, current_input.clone())?;
-            let step_started = Utc::now();
-            let outcome = self.execute_single_attempt(&execution);
-            let step_finished = Utc::now();
+        let execution_result: Result<JobRunResult, OrbitError> = (|| {
+            let mut final_state = JobRunState::Success;
+            let mut total_duration_ms: u64 = 0;
+            let mut last_protocol_violation = false;
+            let mut last_created_file: Option<String> = None;
+            let mut current_input = merge_job_input(job.default_input.as_ref(), input)?;
 
-            if let Some(d) = outcome.duration_ms {
-                total_duration_ms += d;
-            }
-            let step_state = outcome.state;
+            for (step_index, step) in job.steps.iter().enumerate() {
+                failure_step = (step_index, step.clone());
+                let execution =
+                    self.build_execution_context_for_step(&job, step, current_input.clone())?;
+                let step_started = Utc::now();
+                let outcome = self.execute_single_attempt(&execution);
+                let step_finished = Utc::now();
 
-            // Merge step output into current_input so subsequent steps receive
-            // both the original inputs and any values produced by prior steps.
-            if step_state == JobRunState::Success {
-                if let Some(output_map) =
-                    step_output_for_following_input(&execution.activity, outcome.response_json.as_ref())
-                {
-                    if let Value::Object(ref mut input_map) = current_input {
-                        for (k, v) in output_map {
-                            input_map.insert(k.clone(), v.clone());
+                if let Some(d) = outcome.duration_ms {
+                    total_duration_ms += d;
+                }
+                let step_state = outcome.state;
+
+                // Merge step output into current_input so subsequent steps receive
+                // both the original inputs and any values produced by prior steps.
+                if step_state == JobRunState::Success {
+                    if let Some(output_map) = step_output_for_following_input(
+                        &execution.activity,
+                        outcome.response_json.as_ref(),
+                    ) {
+                        if let Value::Object(ref mut input_map) = current_input {
+                            for (k, v) in output_map {
+                                input_map.insert(k.clone(), v.clone());
+                            }
                         }
                     }
                 }
+
+                let changed = self.complete_job_run_step_backend(
+                    &run.run_id,
+                    &JobRunStepParams {
+                        step_index,
+                        target_type: step.target_type,
+                        target_id: step.target_id.clone(),
+                        started_at: step_started,
+                        finished_at: step_finished,
+                        duration_ms: outcome.duration_ms,
+                        exit_code: outcome.exit_code,
+                        agent_response_json: outcome.response_json.clone(),
+                        state: step_state,
+                        error_code: outcome.error_code.clone(),
+                        error_message: outcome.error_message.clone(),
+                    },
+                )?;
+                if !changed {
+                    return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
+                }
+
+                if outcome.protocol_violation {
+                    last_protocol_violation = true;
+                }
+                if let Some(f) = outcome.created_file {
+                    last_created_file = Some(f);
+                }
+
+                if step_state != JobRunState::Success {
+                    final_state = step_state;
+                    break;
+                }
             }
 
-            let changed = self.complete_job_run_step_backend(
-                &run.run_id,
-                &JobRunStepParams {
-                    step_index,
-                    target_type: step.target_type,
-                    target_id: step.target_id.clone(),
-                    started_at: step_started,
-                    finished_at: step_finished,
-                    duration_ms: outcome.duration_ms,
-                    exit_code: outcome.exit_code,
-                    agent_response_json: outcome.response_json.clone(),
-                    state: step_state,
-                    error_code: outcome.error_code.clone(),
-                    error_message: outcome.error_message.clone(),
-                },
-            )?;
+            let finished_at = Utc::now();
+            let duration_ms = if total_duration_ms > 0 {
+                Some(total_duration_ms)
+            } else {
+                None
+            };
+
+            let changed =
+                self.finalize_job_run_backend(&run.run_id, final_state, finished_at, duration_ms)?;
             if !changed {
                 return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
             }
-
-            if outcome.protocol_violation {
-                last_protocol_violation = true;
-            }
-            if let Some(f) = outcome.created_file {
-                last_created_file = Some(f);
-            }
-
-            if step_state != JobRunState::Success {
-                final_state = step_state;
-                break;
-            }
-        }
-
-        let finished_at = Utc::now();
-        let duration_ms = if total_duration_ms > 0 {
-            Some(total_duration_ms)
-        } else {
-            None
-        };
-
-        let changed =
-            self.finalize_job_run_backend(&run.run_id, final_state, finished_at, duration_ms)?;
-        if !changed {
-            return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
-        }
-        self.record_event(OrbitEvent::JobRunCompleted {
-            job_id: job.job_id.clone(),
-            run_id: run.run_id.clone(),
-            state: final_state.to_string(),
-        })?;
-
-        if last_protocol_violation {
-            self.record_event(OrbitEvent::JobProtocolViolation {
+            self.record_event(OrbitEvent::JobRunCompleted {
                 job_id: job.job_id.clone(),
                 run_id: run.run_id.clone(),
-                message: "agent protocol violation".to_string(),
+                state: final_state.to_string(),
             })?;
-        }
 
-        if final_state == JobRunState::Success {
-            if let Some(ref created_file_path) = last_created_file {
+            if last_protocol_violation {
+                self.record_event(OrbitEvent::JobProtocolViolation {
+                    job_id: job.job_id.clone(),
+                    run_id: run.run_id.clone(),
+                    message: "agent protocol violation".to_string(),
+                })?;
+            }
+
+            if final_state == JobRunState::Success
+                && let Some(ref created_file_path) = last_created_file
+            {
                 self.execute_created_file_auto_commit(created_file_path, &job.job_id, &run.run_id)?;
             }
-        }
 
-        Ok(JobRunResult {
-            job_id: job.job_id.clone(),
-            run_id: run.run_id.clone(),
-            state: final_state,
-            attempt: run.attempt,
-        })
+            Ok(JobRunResult {
+                job_id: job.job_id.clone(),
+                run_id: run.run_id.clone(),
+                state: final_state,
+                attempt: run.attempt,
+            })
+        })();
+
+        match execution_result {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                if let Some(active_run) = self.context.job_store.get_job_run(&run.run_id)?
+                    && matches!(
+                        active_run.state,
+                        JobRunState::Pending | JobRunState::Running
+                    )
+                {
+                    let (step_index, step) = &failure_step;
+                    self.finalize_failed_started_run(
+                        &job,
+                        &run,
+                        *step_index,
+                        step,
+                        started_at,
+                        &err,
+                    )?;
+                }
+                Err(err)
+            }
+        }
     }
 
     pub(crate) fn recover_stale_active_run_for_job(
@@ -457,6 +489,61 @@ impl OrbitRuntime {
         })?;
 
         Ok(true)
+    }
+
+    fn finalize_failed_started_run(
+        &self,
+        job: &Job,
+        run: &JobRun,
+        step_index: usize,
+        step: &JobStep,
+        started_at: DateTime<Utc>,
+        err: &OrbitError,
+    ) -> Result<(), OrbitError> {
+        let finished_at = Utc::now();
+        let duration_ms = Some(
+            finished_at
+                .signed_duration_since(started_at)
+                .num_milliseconds()
+                .max(0) as u64,
+        );
+        let message = err.to_string();
+
+        let changed = self.complete_job_run_step_backend(
+            &run.run_id,
+            &JobRunStepParams {
+                step_index,
+                target_type: step.target_type,
+                target_id: step.target_id.clone(),
+                started_at,
+                finished_at,
+                duration_ms,
+                exit_code: Some(1),
+                agent_response_json: None,
+                state: JobRunState::Failed,
+                error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
+                error_message: Some(message.clone()),
+            },
+        )?;
+        if !changed {
+            return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
+        }
+
+        let changed = self.finalize_job_run_backend(
+            &run.run_id,
+            JobRunState::Failed,
+            finished_at,
+            duration_ms,
+        )?;
+        if !changed {
+            return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
+        }
+        self.record_event(OrbitEvent::JobRunCompleted {
+            job_id: job.job_id.clone(),
+            run_id: run.run_id.clone(),
+            state: JobRunState::Failed.to_string(),
+        })?;
+        Ok(())
     }
 
     pub(crate) fn run_activity_direct(

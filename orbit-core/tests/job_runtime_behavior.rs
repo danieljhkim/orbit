@@ -6,6 +6,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use orbit_core::OrbitRuntime;
 use orbit_core::command::activity::{ActivityAddParams, ActivityRunParams};
 use orbit_core::command::job::JobAddParams;
+use orbit_core::command::job_run::JobRunListParams;
 use orbit_types::{JobRunState, JobStep, JobTargetType, OrbitError};
 use serde_json::json;
 use tempfile::tempdir;
@@ -531,6 +532,77 @@ fn run_job_now_with_input_rejects_schema_mismatch() {
         err.to_string()
             .contains("job run input does not match activity")
     );
+}
+
+#[test]
+fn run_job_now_finalizes_failed_when_pre_step_setup_errors_after_running() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    add_activity_with_input_schema(
+        &runtime,
+        "spec-invalid-default-input",
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    );
+
+    let job = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({ "base": "main" })),
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-invalid-default-input".to_string(),
+                agent_cli: "mock-agent".to_string(),
+                timeout_seconds: 10,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job");
+
+    let err = runtime
+        .run_job_now(&job.job_id)
+        .expect_err("schema mismatch should fail after run starts");
+
+    assert!(matches!(err, OrbitError::InvalidInput(_)));
+    assert!(
+        err.to_string()
+            .contains("job run input does not match activity"),
+        "{err}"
+    );
+
+    let history = runtime.job_history(&job.job_id).expect("history");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].state, JobRunState::Failed);
+    assert!(history[0].started_at.is_some());
+    assert!(history[0].finished_at.is_some());
+    assert_eq!(history[0].steps.len(), 1);
+    assert_eq!(history[0].steps[0].state, JobRunState::Failed);
+    assert_eq!(
+        history[0].steps[0].error_code.as_deref(),
+        Some("ACTIVITY_EXECUTION_FAILED")
+    );
+    assert!(
+        history[0].steps[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("job run input does not match activity"),
+    );
+
+    let running = runtime
+        .list_job_runs(JobRunListParams {
+            job_id: Some(job.job_id.clone()),
+            state: Some(JobRunState::Running),
+            since: None,
+            limit: None,
+        })
+        .expect("running list");
+    assert!(running.is_empty(), "run should no longer appear as running");
 }
 
 #[test]
