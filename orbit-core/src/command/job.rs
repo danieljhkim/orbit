@@ -936,7 +936,7 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
         TemplateContext {
             input: execution.input.clone(),
             env: std::env::vars().collect(),
-            workspace_path: Some(self.context.data_root.to_string_lossy().into_owned()),
+            workspace_path: execution.activity.workspace_path.clone(),
         }
     }
 

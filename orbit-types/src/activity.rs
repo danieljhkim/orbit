@@ -15,6 +15,8 @@ pub struct Activity {
     #[serde(default)]
     pub spec_config: Value,
     #[serde(default)]
+    pub workspace_path: Option<String>,
+    #[serde(default)]
     pub identity_id: Option<String>,
     #[serde(default)]
     pub created_by: Option<String>,

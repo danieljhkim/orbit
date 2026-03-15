@@ -43,6 +43,7 @@ pub struct ActivityAddParams {
     pub input_schema_json: Value,
     pub output_schema_json: Value,
     pub spec_config: Value,
+    pub workspace_path: Option<String>,
     pub identity_id: Option<String>,
     pub created_by: Option<String>,
 }
@@ -53,6 +54,7 @@ pub struct ActivityUpdateParams {
     pub input_schema_json: Option<Value>,
     pub output_schema_json: Option<Value>,
     pub spec_config: Option<Value>,
+    pub workspace_path: Option<Option<String>>,
     pub identity_id: Option<Option<String>>,
     pub is_active: Option<bool>,
 }
@@ -76,6 +78,8 @@ struct ActivityFileSpec {
     input_schema_json: Value,
     #[serde(default)]
     output_schema_json: Value,
+    #[serde(default)]
+    workspace_path: Option<String>,
     #[serde(flatten)]
     spec_config: Map<String, Value>,
 }
@@ -120,6 +124,7 @@ impl OrbitRuntime {
                 input_schema_json: params.input_schema_json,
                 output_schema_json: params.output_schema_json,
                 spec_config: params.spec_config,
+                workspace_path: params.workspace_path,
                 identity_id,
                 created_by,
             })?;
@@ -160,6 +165,7 @@ impl OrbitRuntime {
                 input_schema_json: params.input_schema_json,
                 output_schema_json: params.output_schema_json,
                 spec_config: params.spec_config,
+                workspace_path: params.workspace_path,
                 identity_id: params.identity_id,
                 is_active: params.is_active,
             },
@@ -277,6 +283,7 @@ fn load_default_activity_specs(
             input_schema_json: spec.activity.input_schema_json,
             output_schema_json: spec.activity.output_schema_json,
             spec_config: Value::Object(spec.activity.spec_config),
+            workspace_path: spec.activity.workspace_path,
             identity_id: spec.identity_id,
             created_by: spec.created_by,
         });

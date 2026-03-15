@@ -55,6 +55,8 @@ pub struct ActivityAddArgs {
     #[arg(long)]
     pub spec_config: Option<String>,
     #[arg(long)]
+    pub workspace_path: Option<String>,
+    #[arg(long)]
     pub identity: Option<String>,
     #[arg(long)]
     pub created_by: Option<String>,
@@ -77,6 +79,7 @@ impl Execute for ActivityAddArgs {
             input_schema_json,
             output_schema_json,
             spec_config,
+            workspace_path: self.workspace_path,
             identity_id: self.identity,
             created_by: self.created_by,
         })?;
@@ -173,6 +176,10 @@ pub struct ActivityUpdateArgs {
     #[arg(long)]
     pub spec_config: Option<String>,
     #[arg(long)]
+    pub workspace_path: Option<String>,
+    #[arg(long)]
+    pub clear_workspace_path: bool,
+    #[arg(long)]
     pub identity: Option<String>,
     #[arg(long, conflicts_with = "identity")]
     pub clear_identity: bool,
@@ -201,6 +208,11 @@ impl Execute for ActivityUpdateArgs {
             .as_deref()
             .map(|raw| parse_json_object(raw, "spec_config"))
             .transpose()?;
+        let workspace_path = if self.clear_workspace_path {
+            Some(None)
+        } else {
+            self.workspace_path.map(Some)
+        };
         let identity_id = if self.clear_identity {
             Some(None)
         } else {
@@ -221,6 +233,7 @@ impl Execute for ActivityUpdateArgs {
                 input_schema_json,
                 output_schema_json,
                 spec_config,
+                workspace_path,
                 identity_id,
                 is_active,
             },
@@ -330,6 +343,7 @@ fn activity_to_json(spec: &Activity) -> Value {
         "input_schema_json": spec.input_schema_json,
         "output_schema_json": spec.output_schema_json,
         "spec_config": spec.spec_config,
+        "workspace_path": spec.workspace_path,
         "identity_id": spec.identity_id,
         "created_by": spec.created_by,
         "is_active": spec.is_active,

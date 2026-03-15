@@ -572,3 +572,59 @@ fn activity_update_clear_identity_removes_field() {
     let show: Value = serde_json::from_slice(&show_output).expect("show json");
     assert!(show["identity_id"].is_null());
 }
+
+#[test]
+fn activity_workspace_path_is_stored_and_clearable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    // Add activity with workspace_path
+    orbit_in(dir.path())
+        .args([
+            "activity",
+            "add",
+            "--id",
+            "spec-ws-path",
+            "--type",
+            "cli_command",
+            "--description",
+            "workspace path test",
+            "--spec-config",
+            "{\"command\":\"cargo\",\"args\":[\"test\"]}",
+            "--workspace-path",
+            "/tmp/myrepo",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let show_output = orbit_in(dir.path())
+        .args(["activity", "show", "spec-ws-path", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_eq!(show["workspace_path"], "/tmp/myrepo");
+
+    // Update to clear workspace_path
+    orbit_in(dir.path())
+        .args([
+            "activity",
+            "update",
+            "spec-ws-path",
+            "--clear-workspace-path",
+        ])
+        .assert()
+        .success();
+
+    let show_output = orbit_in(dir.path())
+        .args(["activity", "show", "spec-ws-path", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert!(show["workspace_path"].is_null());
+}

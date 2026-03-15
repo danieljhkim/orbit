@@ -37,6 +37,7 @@ fn add_activity_with_input_schema(
             spec_config: json!({
                 "instruction": "Run the scheduled runtime behavior test."
             }),
+                workspace_path: None,
             identity_id: None,
             created_by: None,
         })
@@ -57,6 +58,7 @@ fn add_activity_rejects_missing_skill_ref() {
         spec_config: json!({
             "skill_refs": ["does-not-exist"]
         }),
+                workspace_path: None,
         identity_id: None,
         created_by: None,
     });
@@ -163,6 +165,7 @@ fn cli_command_activity_executes_without_agent_cli_and_captures_output_file() {
                 "working_dir": "{{workspace_path}}",
                 "expected_exit_codes": [0]
             }),
+            workspace_path: Some(dir.path().to_string_lossy().into_owned()),
             identity_id: None,
             created_by: None,
         })
@@ -460,6 +463,7 @@ fn job_run_resolves_activity_identity_from_data_root_when_home_differs() {
             spec_config: json!({
                 "instruction": "Run with an explicit identity."
             }),
+                workspace_path: None,
             identity_id: Some("prii".to_string()),
             created_by: None,
         })
@@ -1058,6 +1062,7 @@ Validate output shape.
             spec_config: json!({
                 "skill_refs": ["strict-schema"]
             }),
+                workspace_path: None,
             identity_id: None,
             created_by: None,
         })
@@ -1148,6 +1153,7 @@ Validate advanced schema behavior.
             spec_config: json!({
                 "skill_refs": ["strict-complex"]
             }),
+                workspace_path: None,
             identity_id: None,
             created_by: None,
         })

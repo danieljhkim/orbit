@@ -115,6 +115,7 @@ mod tests {
                 input_schema_json: json!({}),
                 output_schema_json: json!({}),
                 spec_config: json!({}),
+                workspace_path: None,
                 identity_id: None,
                 created_by: None,
             })

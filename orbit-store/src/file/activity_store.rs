@@ -19,6 +19,7 @@ pub(crate) struct FileWorkInsert {
     pub input_schema_json: Value,
     pub output_schema_json: Value,
     pub spec_config: Value,
+    pub workspace_path: Option<String>,
     pub identity_id: Option<String>,
     pub created_by: Option<String>,
 }
@@ -30,6 +31,8 @@ struct ActivitySpecDocument {
     description: String,
     input_schema_json: Value,
     output_schema_json: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace_path: Option<String>,
     #[serde(flatten)]
     spec_config: Map<String, Value>,
 }
@@ -83,6 +86,7 @@ impl ActivityFileStore {
                 output_schema_json: normalize_json_schema_for_storage(
                     params.output_schema_json.clone(),
                 ),
+                workspace_path: params.workspace_path.clone(),
                 spec_config: params
                     .spec_config
                     .as_object()
@@ -132,6 +136,7 @@ impl ActivityFileStore {
         input_schema_json: Option<Value>,
         output_schema_json: Option<Value>,
         spec_config: Option<Value>,
+        workspace_path: Option<Option<String>>,
         identity_id: Option<Option<String>>,
         is_active: Option<bool>,
     ) -> Result<Activity, OrbitError> {
@@ -157,6 +162,9 @@ impl ActivityFileStore {
         }
         if let Some(v) = spec_config {
             doc.activity.spec_config = v.as_object().cloned().unwrap_or_default();
+        }
+        if let Some(v) = workspace_path {
+            doc.activity.workspace_path = v;
         }
         if let Some(v) = identity_id {
             doc.identity_id = v;
@@ -259,6 +267,7 @@ fn doc_to_work(doc: ActivityFileDocument, is_active: bool) -> Activity {
         input_schema_json: normalize_json_schema_for_runtime(doc.activity.input_schema_json),
         output_schema_json: normalize_json_schema_for_runtime(doc.activity.output_schema_json),
         spec_config: Value::Object(doc.activity.spec_config),
+        workspace_path: doc.activity.workspace_path,
         identity_id: doc.identity_id,
         created_by: doc.created_by,
         is_active,
