@@ -36,7 +36,7 @@ impl Execute for IdentitySubcommand {
 pub struct IdentityListArgs {
     #[arg(long)]
     pub json: bool,
-    /// Filter by identity role (e.g. engineer, member, leader, product-designer, ceo).
+    /// Filter by identity role (e.g. engineer, architect, reviewer, member, leader, product-designer, ceo).
     #[arg(long, value_name = "ROLE")]
     pub role: Option<String>,
 }

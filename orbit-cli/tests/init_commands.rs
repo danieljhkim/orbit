@@ -88,12 +88,14 @@ fn init_creates_default_identities_under_cwd_orbit() {
         .stdout(predicate::str::contains("config: path="));
 
     let identity_root = workspace.path().join(".orbit").join("identities");
+    assert!(identity_root.join("linus.yaml").exists());
+    assert!(identity_root.join("lamport.yaml").exists());
     assert!(identity_root.join("prii.yaml").exists());
-    assert!(identity_root.join("john.yaml").exists());
-    assert!(identity_root.join("kent.yaml").exists());
-    assert!(identity_root.join("rob.yaml").exists());
-    assert!(identity_root.join("grace.yaml").exists());
     assert!(identity_root.join("steve.yaml").exists());
+    assert!(!identity_root.join("grace.yaml").exists());
+    assert!(!identity_root.join("john.yaml").exists());
+    assert!(!identity_root.join("kent.yaml").exists());
+    assert!(!identity_root.join("rob.yaml").exists());
 
     let skills_root = workspace.path().join(".orbit").join("skills");
     assert!(
@@ -169,7 +171,7 @@ fn init_is_idempotent_for_existing_identity_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("identities: root="))
-        .stdout(predicate::str::contains("refreshed=6"))
+        .stdout(predicate::str::contains("refreshed=4"))
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("refreshed=9"));
 
@@ -180,7 +182,7 @@ fn init_is_idempotent_for_existing_identity_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("identities: root="))
-        .stdout(predicate::str::contains("refreshed=6"))
+        .stdout(predicate::str::contains("refreshed=4"))
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("refreshed=9"));
 }

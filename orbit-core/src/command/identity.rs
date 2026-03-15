@@ -4,12 +4,13 @@ use orbit_types::OrbitError;
 
 use crate::fs_utils::write_text_with_parent;
 
-const DEFAULT_IDENTITY_FILES: [(&str, &str); 6] = [
+const DEFAULT_IDENTITY_FILES: [(&str, &str); 4] = [
+    ("linus", include_str!("../../assets/identities/linus.yaml")),
+    (
+        "lamport",
+        include_str!("../../assets/identities/lamport.yaml"),
+    ),
     ("prii", include_str!("../../assets/identities/prii.yaml")),
-    ("john", include_str!("../../assets/identities/john.yaml")),
-    ("kent", include_str!("../../assets/identities/kent.yaml")),
-    ("rob", include_str!("../../assets/identities/rob.yaml")),
-    ("grace", include_str!("../../assets/identities/grace.yaml")),
     ("steve", include_str!("../../assets/identities/steve.yaml")),
 ];
 

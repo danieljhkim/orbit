@@ -1,6 +1,6 @@
 schema_version: 1
 created_by: system
-identity_id: kent
+identity_id: linus
 activity:
   id: resolve-backlogged-task
   spec_type: agent_invoke

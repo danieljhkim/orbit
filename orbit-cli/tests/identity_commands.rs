@@ -257,6 +257,48 @@ fn identity_list_role_filter_json_returns_only_matching_identities() {
 }
 
 #[test]
+fn identity_show_supports_architect_and_reviewer_roles() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_identity(dir.path(), "linus", "Linus", "engineer");
+    write_identity(dir.path(), "lamport", "Lamport", "architect");
+    write_identity(dir.path(), "prii", "Prii", "reviewer");
+
+    orbit_in(dir.path())
+        .args(["identity", "show", "lamport", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"role\": \"architect\""));
+
+    orbit_in(dir.path())
+        .args(["identity", "show", "prii", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"role\": \"reviewer\""));
+}
+
+#[test]
+fn identity_list_role_filter_accepts_architect_and_reviewer() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_identity(dir.path(), "linus", "Linus", "engineer");
+    write_identity(dir.path(), "lamport", "Lamport", "architect");
+    write_identity(dir.path(), "prii", "Prii", "reviewer");
+
+    orbit_in(dir.path())
+        .args(["identity", "list", "--role", "architect"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("lamport"))
+        .stdout(predicate::str::contains("Lamport"));
+
+    orbit_in(dir.path())
+        .args(["identity", "list", "--role", "reviewer"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("prii"))
+        .stdout(predicate::str::contains("Prii"));
+}
+
+#[test]
 fn identity_list_role_filter_empty_match_returns_empty() {
     let dir = tempfile::tempdir().expect("tempdir");
     write_identity(dir.path(), "alice", "Alice", "engineer");

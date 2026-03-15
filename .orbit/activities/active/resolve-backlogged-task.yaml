@@ -1,13 +1,12 @@
 schema_version: 1
 created_by: system
-identity_id: kent
-created_at: 2026-03-15T00:39:46.848272Z
-updated_at: 2026-03-15T00:39:46.848272Z
+identity_id: linus
+created_at: 2026-03-15T05:05:11.627289Z
+updated_at: 2026-03-15T05:05:11.627289Z
 activity:
   id: resolve-backlogged-task
-  spec_type: task
+  spec_type: agent_invoke
   description: Work on a single orbit task that is in "rejected" or "backlog" status.
-  instruction: If input.task_id is provided, work on that specific orbit task and do not select a different backlog item. Otherwise, first check if there exists any orbit tasks with "rejected" status (else, check for "backlog" status), and pick a single task to work on. Once done, update the orbit task to "review" status. Output a brief summary in the comment.
   input_schema_json:
     additional_properties: false
     properties:
@@ -24,6 +23,7 @@ activity:
     required:
     - task_id
     type: object
+  instruction: If input.task_id is provided, work on that specific orbit task and do not select a different backlog item. Otherwise, first check if there exists any orbit tasks with "rejected" status (else, check for "backlog" status), and pick a single task to work on. Once done, update the orbit task to "review" status. Output a brief summary in the comment.
   skill_refs:
   - orbit-skills
   - orbit-manage-tasks

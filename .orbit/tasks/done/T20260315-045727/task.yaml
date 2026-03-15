@@ -1,0 +1,99 @@
+schema_version: 4
+
+# ---- identity ----
+id: T20260315-045727
+type: refactor
+priority: medium
+
+# ---- content ----
+title: Consolidate default identities to four canonical personas end-to-end
+description: |-
+  ## Summary
+
+  Replacement for rejected task `T20260315-044737`. The original consolidation goal is still valid, but the work must cover all runtime surfaces that currently assume the six-default identity set.
+
+  Target default identity set:
+  - `linus` with role `engineer`
+  - `lamport` with role `architect`
+  - `prii` with role `reviewer`
+  - `steve` with role `ceo` (unchanged)
+
+  This task must update the full identity pipeline, not just the asset YAMLs:
+  - `IdentityRole` must support any new roles introduced by the replacement identities
+  - seeded defaults in `seed_default_identities` must switch from the current six names to the new four
+  - tracked repo-local `.orbit/identities/*.yaml` copies must stay in sync with `orbit-core/assets/identities/*.yaml`
+  - active built-in activities that still reference retired identities (currently `kent`) must be repointed
+  - init / identity tests that assert the old default file set must be updated
+
+  ## Explicit Non-Goals
+
+  - Do not rewrite historical task bundles just because they mention retired identity names
+  - Do not rename activity IDs like `approve-task-leader` unless there is a separate task for that
+  - Do not keep the contradictory `planner` role from the rejected task; `steve` remains `ceo`
+
+  ## Why this task exists
+
+  Review of `T20260315-044737` found three blockers that must be designed in from the start:
+  1. `architect` and `reviewer` are not valid `IdentityRole` values today
+  2. `resolve-backlogged-task` still references `kent`
+  3. `seed_default_identities` would recreate the retired identities on `orbit init` unless updated
+acceptanceCriteria: []
+
+# ---- context ----
+contextFiles:
+- orbit-types/src/identity.rs
+- orbit-core/src/command/identity.rs
+- orbit-core/assets/identities
+- orbit-core/assets/activities/resolve-backlogged-task.yaml
+- .orbit/identities
+- .orbit/activities/active/resolve-backlogged-task.yaml
+- orbit-cli/tests/init_commands.rs
+- orbit-cli/tests/identity_commands.rs
+workspacePath: /Users/daniel/workspace/repos/orbit
+
+# ---- ownership ----
+createdBy: Codex
+assignedTo: Linus (Engineer)
+
+# ---- proposal workflow ----
+proposedBy: Codex
+proposalApprovedBy: human
+proposalRejectedBy: null
+proposalDecisionNote: LGTM
+
+# ---- implementation ----
+branch: agent-main
+prNumber: null
+
+# ---- review workflow ----
+reviewApprovedBy: human
+reviewRejectedBy: null
+reviewDecisionNote: LGTM
+
+# ---- execution references ----
+activityId: null
+jobId: null
+jobRunId: null
+
+# ---- timestamps ----
+createdAt: 2026-03-15T04:57:27.987217Z
+updatedAt: 2026-03-15T05:07:02.110092Z
+
+# ---- audit trail ----
+history:
+- at: 2026-03-15T04:57:27.987217Z
+  by: Codex
+  event: created
+- at: 2026-03-15T04:59:37.920015Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:00:20.416125Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:04:38.735296Z
+  by: human
+  event: moved
+- at: 2026-03-15T05:07:02.110092Z
+  by: human
+  event: completed
+comments: []
