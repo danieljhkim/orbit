@@ -234,6 +234,7 @@ impl Execute for ActivityUpdateArgs {
                 spec_config,
                 workspace_path,
                 identity_id,
+                created_by: None,
                 is_active,
             },
         )?;

@@ -554,7 +554,7 @@ fn seeded_default_jobs_are_listed_as_enabled_after_init() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("default_jobs_created="));
+        .stdout(predicate::str::contains("default_jobs_refreshed="));
 
     let list_output = orbit_in(dir.path())
         .args(["job", "list", "--json"])

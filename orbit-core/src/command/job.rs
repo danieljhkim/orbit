@@ -8,6 +8,7 @@ use orbit_agent::{
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_store::JobCreateParams as StoreActivityCreateParams;
 use orbit_store::JobRunStepParams;
+use orbit_store::JobUpdateParams as StoreJobUpdateParams;
 use orbit_types::{
     Activity, AgentCommitRequest, AgentResponseEnvelope, Job, JobRun, JobRunState,
     JobScheduleState, JobStep, JobTargetType, OrbitError, OrbitEvent,
@@ -148,6 +149,25 @@ impl OrbitRuntime {
             initial_state,
         })?;
         self.record_event(OrbitEvent::JobAdded {
+            job_id: job.job_id.clone(),
+        })?;
+        Ok(job)
+    }
+
+    pub(crate) fn update_job_definition(
+        &self,
+        job_id: &str,
+        steps: Vec<JobStep>,
+        state: JobScheduleState,
+    ) -> Result<Job, OrbitError> {
+        let job = self.context.job_store.update_job(
+            job_id,
+            StoreJobUpdateParams {
+                steps: Some(steps),
+                state: Some(state),
+            },
+        )?;
+        self.record_event(OrbitEvent::JobUpdated {
             job_id: job.job_id.clone(),
         })?;
         Ok(job)
@@ -1323,6 +1343,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         "job_perform_maintenance",
         include_str!("../../assets/jobs/job_perform_maintenance.yaml"),
     ),
+    (
+        "job_task_pipeline",
+        include_str!("../../assets/jobs/job_task_pipeline.yaml"),
+    ),
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1341,6 +1365,7 @@ struct DefaultJobEntry {
 struct DefaultJobStep {
     target_type: String,
     target_id: String,
+    #[serde(default)]
     agent_cli: String,
     timeout_seconds: u64,
     #[serde(default)]
@@ -1366,45 +1391,25 @@ fn load_default_job_specs(raw_specs: &[(&str, &str)]) -> Result<Vec<DefaultJobEn
     Ok(specs)
 }
 
-pub(crate) fn seed_default_jobs(runtime: &OrbitRuntime) -> Result<usize, OrbitError> {
+pub(crate) fn seed_default_jobs(
+    runtime: &OrbitRuntime,
+    overwrite: bool,
+) -> Result<usize, OrbitError> {
     let specs = load_default_job_specs(DEFAULT_JOB_FILES)?;
     let mut created = 0usize;
     for entry in specs {
         if runtime.show_job(&entry.job_id).is_ok() {
+            if !overwrite {
+                continue;
+            }
+            let initial_state = parse_default_job_state(&entry.state, &entry.job_id)?;
+            let steps = default_job_steps(&entry)?;
+            runtime.update_job_definition(&entry.job_id, steps, initial_state)?;
+            created += 1;
             continue;
         }
-        let initial_state = match entry.state.as_str() {
-            "enabled" => JobScheduleState::Enabled,
-            "disabled" => JobScheduleState::Disabled,
-            other => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "unsupported state '{}' in default job '{}'",
-                    other, entry.job_id
-                )));
-            }
-        };
-        let steps = entry
-            .steps
-            .into_iter()
-            .map(|s| {
-                let target_type = match s.target_type.as_str() {
-                    "activity" => JobTargetType::Activity,
-                    other => {
-                        return Err(OrbitError::InvalidInput(format!(
-                            "unsupported target_type '{}' in default job '{}'",
-                            other, entry.job_id
-                        )));
-                    }
-                };
-                Ok(JobStep {
-                    target_type,
-                    target_id: s.target_id,
-                    agent_cli: s.agent_cli,
-                    timeout_seconds: s.timeout_seconds,
-                    env_extra: s.env_extra,
-                })
-            })
-            .collect::<Result<Vec<_>, OrbitError>>()?;
+        let initial_state = parse_default_job_state(&entry.state, &entry.job_id)?;
+        let steps = default_job_steps(&entry)?;
         runtime.add_job(JobAddParams {
             job_id: Some(entry.job_id),
             steps,
@@ -1413,6 +1418,42 @@ pub(crate) fn seed_default_jobs(runtime: &OrbitRuntime) -> Result<usize, OrbitEr
         created += 1;
     }
     Ok(created)
+}
+
+fn parse_default_job_state(state: &str, job_id: &str) -> Result<JobScheduleState, OrbitError> {
+    match state {
+        "enabled" => Ok(JobScheduleState::Enabled),
+        "disabled" => Ok(JobScheduleState::Disabled),
+        other => Err(OrbitError::InvalidInput(format!(
+            "unsupported state '{}' in default job '{}'",
+            other, job_id
+        ))),
+    }
+}
+
+fn default_job_steps(entry: &DefaultJobEntry) -> Result<Vec<JobStep>, OrbitError> {
+    entry
+        .steps
+        .iter()
+        .map(|s| {
+            let target_type = match s.target_type.as_str() {
+                "activity" => JobTargetType::Activity,
+                other => {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "unsupported target_type '{}' in default job '{}'",
+                        other, entry.job_id
+                    )));
+                }
+            };
+            Ok(JobStep {
+                target_type,
+                target_id: s.target_id.clone(),
+                agent_cli: s.agent_cli.clone(),
+                timeout_seconds: s.timeout_seconds,
+                env_extra: s.env_extra.clone(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1424,12 +1465,24 @@ mod tests {
         let specs =
             load_default_job_specs(DEFAULT_JOB_FILES).expect("bundled default jobs must parse");
         assert_eq!(specs.len(), DEFAULT_JOB_FILES.len());
+        let ids = specs
+            .iter()
+            .map(|spec| spec.job_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "job_review_tasks",
+                "job_oversee_orbit_operations",
+                "job_perform_maintenance",
+                "job_task_pipeline",
+            ]
+        );
         for spec in &specs {
             assert!(!spec.job_id.is_empty(), "job_id must not be empty");
             assert!(!spec.steps.is_empty(), "steps must not be empty");
             for step in &spec.steps {
                 assert!(!step.target_id.is_empty(), "target_id must not be empty");
-                assert!(!step.agent_cli.is_empty(), "agent_cli must not be empty");
                 assert!(step.timeout_seconds > 0, "timeout_seconds must be positive");
             }
         }

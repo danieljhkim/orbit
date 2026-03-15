@@ -134,6 +134,7 @@ impl ActivityFileStore {
         spec_config: Option<Value>,
         workspace_path: Option<Option<String>>,
         identity_id: Option<Option<String>>,
+        created_by: Option<Option<String>>,
         is_active: Option<bool>,
     ) -> Result<Activity, OrbitError> {
         self.ensure_layout()?;
@@ -164,6 +165,9 @@ impl ActivityFileStore {
         }
         if let Some(v) = identity_id {
             doc.identity_id = v;
+        }
+        if let Some(v) = created_by {
+            doc.created_by = v;
         }
         doc.updated_at = Utc::now();
 

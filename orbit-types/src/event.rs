@@ -22,6 +22,9 @@ pub enum OrbitEvent {
     JobAdded {
         job_id: String,
     },
+    JobUpdated {
+        job_id: String,
+    },
     JobPaused {
         job_id: String,
     },

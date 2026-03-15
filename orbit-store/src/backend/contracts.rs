@@ -75,6 +75,7 @@ pub struct ActivityUpdateParams {
     pub spec_config: Option<Value>,
     pub workspace_path: Option<Option<String>>,
     pub identity_id: Option<Option<String>>,
+    pub created_by: Option<Option<String>>,
     pub is_active: Option<bool>,
 }
 
@@ -83,6 +84,12 @@ pub struct JobCreateParams {
     pub job_id: Option<String>,
     pub steps: Vec<JobStep>,
     pub initial_state: JobScheduleState,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct JobUpdateParams {
+    pub steps: Option<Vec<JobStep>>,
+    pub state: Option<JobScheduleState>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -121,6 +128,7 @@ pub trait ActivityStoreBackend: Send + Sync {
 
 pub trait JobStoreBackend: Send + Sync {
     fn add_job(&self, params: JobCreateParams) -> Result<Job, OrbitError>;
+    fn update_job(&self, job_id: &str, params: JobUpdateParams) -> Result<Job, OrbitError>;
     fn list_jobs(&self, include_disabled: bool) -> Result<Vec<Job>, OrbitError>;
     fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError>;
     fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;

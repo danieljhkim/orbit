@@ -62,12 +62,43 @@ fn assert_default_named_jobs_visible_and_enabled(base_root: &std::path::Path) {
         "job_perform_maintenance",
         "job_oversee_orbit_operations",
         "job_review_tasks",
+        "job_task_pipeline",
     ] {
         let job = jobs
             .iter()
             .find(|job| job["job_id"] == job_id)
             .unwrap_or_else(|| panic!("missing default job in list: {job_id}"));
         assert_eq!(job["state"], "enabled");
+    }
+}
+
+fn assert_default_named_activities_visible(base_root: &std::path::Path) {
+    let list_output = orbit_in(base_root)
+        .args(["activity", "list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list: serde_json::Value = serde_json::from_slice(&list_output).expect("activity list json");
+    let activities = list.as_array().expect("activities array");
+
+    for activity_id in [
+        "checkout_branch",
+        "create_branch",
+        "dispatch_task",
+        "implement_change",
+        "open_pr",
+        "oversee_orbit_operations",
+        "perform_maintenance",
+        "review_pr",
+        "review_tasks",
+        "run_tests",
+    ] {
+        activities
+            .iter()
+            .find(|activity| activity["id"] == activity_id)
+            .unwrap_or_else(|| panic!("missing default activity in list: {activity_id}"));
     }
 }
 
@@ -176,6 +207,60 @@ fn init_creates_default_identities_under_cwd_orbit() {
     assert!(!config_raw.contains("[watch]"));
 
     assert_default_skill_links(workspace.path());
+    assert_default_named_activities_visible(workspace.path());
+    assert_default_named_jobs_visible_and_enabled(workspace.path());
+}
+
+#[test]
+fn init_refreshes_full_bundled_activity_and_job_set() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let home = tempfile::tempdir().expect("home");
+
+    orbit_in(workspace.path())
+        .env("HOME", home.path())
+        .args(["init"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("default_activities_refreshed=10"))
+        .stdout(predicate::str::contains("default_jobs_refreshed=4"));
+
+    let activities_dir = workspace
+        .path()
+        .join(".orbit")
+        .join("activities")
+        .join("active");
+    for activity_id in [
+        "checkout_branch",
+        "create_branch",
+        "dispatch_task",
+        "implement_change",
+        "open_pr",
+        "oversee_orbit_operations",
+        "perform_maintenance",
+        "review_pr",
+        "review_tasks",
+        "run_tests",
+    ] {
+        assert!(
+            activities_dir.join(format!("{activity_id}.yaml")).exists(),
+            "missing activity file: {activity_id}"
+        );
+    }
+
+    let jobs_dir = workspace.path().join(".orbit").join("jobs").join("jobs");
+    for job_id in [
+        "job_oversee_orbit_operations",
+        "job_perform_maintenance",
+        "job_review_tasks",
+        "job_task_pipeline",
+    ] {
+        assert!(
+            jobs_dir.join(format!("{job_id}.yaml")).exists(),
+            "missing job file: {job_id}"
+        );
+    }
+
+    assert_default_named_activities_visible(workspace.path());
     assert_default_named_jobs_visible_and_enabled(workspace.path());
 }
 
@@ -204,6 +289,64 @@ fn init_is_idempotent_for_existing_identity_files() {
         .stdout(predicate::str::contains("refreshed=4"))
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("refreshed=9"));
+}
+
+#[test]
+fn explicit_init_refreshes_builtin_activities_and_jobs_but_implicit_bootstrap_does_not() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let home = tempfile::tempdir().expect("home");
+
+    orbit_in(workspace.path())
+        .env("HOME", home.path())
+        .args(["init"])
+        .assert()
+        .success();
+
+    let activity_path = workspace
+        .path()
+        .join(".orbit")
+        .join("activities")
+        .join("active")
+        .join("dispatch_task.yaml");
+    let job_path = workspace
+        .path()
+        .join(".orbit")
+        .join("jobs")
+        .join("jobs")
+        .join("job_task_pipeline.yaml");
+
+    rewrite_file(
+        &activity_path,
+        &[("Pick the single best task", "TAMPERED ACTIVITY")],
+    );
+    rewrite_file(&job_path, &[("dispatch_task", "tampered_dispatch_task")]);
+
+    orbit_in(workspace.path())
+        .env("HOME", home.path())
+        .args(["task", "list", "--json"])
+        .assert()
+        .success();
+
+    let activity_raw = std::fs::read_to_string(&activity_path).expect("read activity");
+    assert!(activity_raw.contains("TAMPERED ACTIVITY"));
+    let job_raw = std::fs::read_to_string(&job_path).expect("read job");
+    assert!(job_raw.contains("tampered_dispatch_task"));
+
+    orbit_in(workspace.path())
+        .env("HOME", home.path())
+        .args(["init"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("default_activities_refreshed=10"))
+        .stdout(predicate::str::contains("default_jobs_refreshed=4"));
+
+    let refreshed_activity_raw = std::fs::read_to_string(&activity_path).expect("read activity");
+    assert!(!refreshed_activity_raw.contains("TAMPERED ACTIVITY"));
+    assert!(refreshed_activity_raw.contains("Pick the single best task"));
+
+    let refreshed_job_raw = std::fs::read_to_string(&job_path).expect("read job");
+    assert!(!refreshed_job_raw.contains("tampered_dispatch_task"));
+    assert!(refreshed_job_raw.contains("dispatch_task"));
 }
 
 #[test]
@@ -456,8 +599,8 @@ fn init_migrates_legacy_builtin_kebab_case_names_to_snake_case() {
     rename_seeded_file_to_legacy_name(
         &activities_dir,
         "review_tasks",
-        "review-tasks",
-        &[("review_tasks", "review-tasks")],
+        "approve-task-leader",
+        &[("review_tasks", "approve-task-leader")],
     );
     rename_seeded_file_to_legacy_name(
         &activities_dir,
@@ -468,17 +611,17 @@ fn init_migrates_legacy_builtin_kebab_case_names_to_snake_case() {
     rename_seeded_file_to_legacy_name(
         &jobs_dir,
         "job_review_tasks",
-        "job-review-tasks",
+        "job-approve-task-leader",
         &[
-            ("job_review_tasks", "job-review-tasks"),
-            ("review_tasks", "review-tasks"),
+            ("job_review_tasks", "job-approve-task-leader"),
+            ("review_tasks", "approve-task-leader"),
         ],
     );
 
     let legacy_run_dir = orbit_root
         .join("jobs")
         .join("runs")
-        .join("job-review-tasks")
+        .join("job-approve-task-leader")
         .join("jrun-20260315-010101");
     std::fs::create_dir_all(legacy_run_dir.join("steps")).expect("create legacy run bundle");
     std::fs::write(
@@ -486,7 +629,7 @@ fn init_migrates_legacy_builtin_kebab_case_names_to_snake_case() {
         r#"schemaVersion: 1
 run:
   run_id: jrun-20260315-010101
-  job_id: job-review-tasks
+  job_id: job-approve-task-leader
   attempt: 1
   state: success
   scheduled_at: 2026-03-15T01:01:01Z
@@ -498,12 +641,14 @@ run:
     )
     .expect("write legacy jrun");
     std::fs::write(
-        legacy_run_dir.join("steps").join("01-review-tasks.yaml"),
+        legacy_run_dir
+            .join("steps")
+            .join("01-approve-task-leader.yaml"),
         r#"schemaVersion: 1
 step:
   step_index: 0
   target_type: activity
-  target_id: review-tasks
+  target_id: approve-task-leader
   started_at: 2026-03-15T01:01:02Z
   finished_at: 2026-03-15T01:01:03Z
   duration_ms: 1000
@@ -528,7 +673,7 @@ step:
         .success();
 
     assert!(activities_dir.join("review_tasks.yaml").exists());
-    assert!(!activities_dir.join("review-tasks.yaml").exists());
+    assert!(!activities_dir.join("approve-task-leader.yaml").exists());
     assert!(activities_dir.join("dispatch_task.yaml").exists());
     assert!(
         !activities_dir
@@ -537,7 +682,7 @@ step:
     );
 
     assert!(jobs_dir.join("job_review_tasks.yaml").exists());
-    assert!(!jobs_dir.join("job-review-tasks.yaml").exists());
+    assert!(!jobs_dir.join("job-approve-task-leader.yaml").exists());
 
     let migrated_run_dir = orbit_root
         .join("jobs")
@@ -549,7 +694,7 @@ step:
         !orbit_root
             .join("jobs")
             .join("runs")
-            .join("job-review-tasks")
+            .join("job-approve-task-leader")
             .exists()
     );
     assert!(
@@ -562,13 +707,13 @@ step:
     let migrated_jrun =
         std::fs::read_to_string(migrated_run_dir.join("jrun.yaml")).expect("read migrated jrun");
     assert!(migrated_jrun.contains("job_review_tasks"));
-    assert!(!migrated_jrun.contains("job-review-tasks"));
+    assert!(!migrated_jrun.contains("job-approve-task-leader"));
 
     let migrated_step =
         std::fs::read_to_string(migrated_run_dir.join("steps").join("01-review_tasks.yaml"))
             .expect("read migrated step");
     assert!(migrated_step.contains("review_tasks"));
-    assert!(!migrated_step.contains("review-tasks"));
+    assert!(!migrated_step.contains("approve-task-leader"));
 
     orbit_in(workspace.path())
         .env("HOME", home.path())

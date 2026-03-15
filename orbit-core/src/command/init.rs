@@ -40,8 +40,8 @@ pub struct InitResult {
     pub created_skills_symlink: bool,
     pub created_config: bool,
     pub config_path: String,
-    pub created_default_work: bool,
-    pub created_default_jobs: usize,
+    pub refreshed_default_activities: usize,
+    pub refreshed_default_jobs: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -111,8 +111,8 @@ fn init_workspace_at_root(
     }
 
     let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
-    let created_default_work = seed_default_activities(&init_runtime)? > 0;
-    let created_default_jobs = seed_default_jobs(&init_runtime)?;
+    let refreshed_default_activities = seed_default_activities(&init_runtime, overwrite)?;
+    let refreshed_default_jobs = seed_default_jobs(&init_runtime, overwrite)?;
 
     Ok(InitResult {
         refreshed_identity_files,
@@ -122,8 +122,8 @@ fn init_workspace_at_root(
         created_skills_symlink,
         created_config,
         config_path: config_path.to_string_lossy().to_string(),
-        created_default_work,
-        created_default_jobs,
+        refreshed_default_activities,
+        refreshed_default_jobs,
     })
 }
 

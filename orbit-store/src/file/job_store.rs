@@ -102,6 +102,44 @@ impl JobFileStore {
         Ok(None)
     }
 
+    pub(crate) fn update_job(
+        &self,
+        job_id: &str,
+        steps: Option<Vec<JobStep>>,
+        state: Option<JobScheduleState>,
+    ) -> Result<Job, OrbitError> {
+        self.ensure_layout()?;
+        let Some(mut job) = self.get_job(job_id)? else {
+            return Err(OrbitError::JobNotFound(job_id.to_string()));
+        };
+
+        if let Some(steps) = steps {
+            job.steps = steps;
+        }
+        if let Some(state) = state {
+            job.state = state;
+        }
+        job.updated_at = Utc::now();
+
+        self.write_activity(&job)?;
+        let disabled_path = self.disabled_job_path(job_id);
+        let active_path = self.job_path(job_id);
+        match job.state {
+            JobScheduleState::Enabled => {
+                if disabled_path.exists() {
+                    fs::remove_file(&disabled_path).map_err(|e| OrbitError::Io(e.to_string()))?;
+                }
+            }
+            JobScheduleState::Disabled => {
+                if active_path.exists() {
+                    fs::remove_file(&active_path).map_err(|e| OrbitError::Io(e.to_string()))?;
+                }
+            }
+        }
+
+        Ok(job)
+    }
+
     pub(crate) fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         let mut runs = self.read_runs_for_activity(job_id)?;
         runs.sort_by(|a, b| {

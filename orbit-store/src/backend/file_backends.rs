@@ -5,7 +5,8 @@ use orbit_types::{
 
 use super::contracts::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, JobCreateParams, JobRunQuery,
-    JobRunStepParams, JobStoreBackend, TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
+    JobRunStepParams, JobStoreBackend, JobUpdateParams, TaskCreateParams, TaskStoreBackend,
+    TaskUpdateParams,
 };
 use crate::file::activity_store::{ActivityFileStore, FileWorkInsert};
 use crate::file::job_store::JobFileStore;
@@ -124,6 +125,7 @@ impl ActivityStoreBackend for ActivityFileStore {
             params.spec_config,
             params.workspace_path,
             params.identity_id,
+            params.created_by,
             params.is_active,
         )
     }
@@ -136,6 +138,10 @@ impl ActivityStoreBackend for ActivityFileStore {
 impl JobStoreBackend for JobFileStore {
     fn add_job(&self, params: JobCreateParams) -> Result<Job, OrbitError> {
         self.insert_activity_v2(params.job_id, params.steps, params.initial_state)
+    }
+
+    fn update_job(&self, job_id: &str, params: JobUpdateParams) -> Result<Job, OrbitError> {
+        self.update_job(job_id, params.steps, params.state)
     }
 
     fn list_jobs(&self, include_disabled: bool) -> Result<Vec<Job>, OrbitError> {

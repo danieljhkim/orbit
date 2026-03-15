@@ -10,7 +10,27 @@ use serde_json::{Map, Value};
 use crate::OrbitRuntime;
 use crate::paths::ORBIT_ROOT_TOKEN;
 
-const DEFAULT_JOB_FILES: [(&str, &str); 4] = [
+pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
+    (
+        "checkout_branch",
+        include_str!("../../assets/activities/checkout_branch.yaml"),
+    ),
+    (
+        "create_branch",
+        include_str!("../../assets/activities/create_branch.yaml"),
+    ),
+    (
+        "dispatch_task",
+        include_str!("../../assets/activities/dispatch_task.yaml"),
+    ),
+    (
+        "implement_change",
+        include_str!("../../assets/activities/implement_change.yaml"),
+    ),
+    (
+        "open_pr",
+        include_str!("../../assets/activities/open_pr.yaml"),
+    ),
     (
         "review_tasks",
         include_str!("../../assets/activities/review_tasks.yaml"),
@@ -24,8 +44,12 @@ const DEFAULT_JOB_FILES: [(&str, &str); 4] = [
         include_str!("../../assets/activities/perform_maintenance.yaml"),
     ),
     (
-        "dispatch_task",
-        include_str!("../../assets/activities/dispatch_task.yaml"),
+        "review_pr",
+        include_str!("../../assets/activities/review_pr.yaml"),
+    ),
+    (
+        "run_tests",
+        include_str!("../../assets/activities/run_tests.yaml"),
     ),
 ];
 
@@ -52,6 +76,7 @@ pub struct ActivityUpdateParams {
     pub spec_config: Option<Value>,
     pub workspace_path: Option<Option<String>>,
     pub identity_id: Option<Option<String>>,
+    pub created_by: Option<Option<String>>,
     pub is_active: Option<bool>,
 }
 
@@ -163,6 +188,7 @@ impl OrbitRuntime {
                 spec_config: params.spec_config,
                 workspace_path: params.workspace_path,
                 identity_id: params.identity_id,
+                created_by: params.created_by,
                 is_active: params.is_active,
             },
         )?;
@@ -225,10 +251,13 @@ impl OrbitRuntime {
     }
 }
 
-pub(crate) fn seed_default_activities(runtime: &OrbitRuntime) -> Result<usize, OrbitError> {
+pub(crate) fn seed_default_activities(
+    runtime: &OrbitRuntime,
+    overwrite: bool,
+) -> Result<usize, OrbitError> {
     let orbit_root = runtime.data_root();
-    let specs = load_default_activity_specs(&DEFAULT_JOB_FILES, Some(&orbit_root))?;
-    seed_default_activities_from_specs(runtime, &specs)
+    let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, Some(&orbit_root))?;
+    seed_default_activities_from_specs(runtime, &specs, overwrite)
 }
 
 fn load_default_activity_specs(
@@ -295,10 +324,28 @@ fn inject_activity_template_tokens(raw: &str, orbit_root: &Path) -> String {
 fn seed_default_activities_from_specs(
     runtime: &OrbitRuntime,
     specs: &[ActivityAddParams],
+    overwrite: bool,
 ) -> Result<usize, OrbitError> {
     let mut created = 0usize;
     for spec in specs {
         if runtime.show_activity(&spec.id).is_ok() {
+            if !overwrite {
+                continue;
+            }
+            runtime.update_activity(
+                &spec.id,
+                ActivityUpdateParams {
+                    description: Some(spec.description.clone()),
+                    input_schema_json: Some(spec.input_schema_json.clone()),
+                    output_schema_json: Some(spec.output_schema_json.clone()),
+                    spec_config: Some(spec.spec_config.clone()),
+                    workspace_path: Some(spec.workspace_path.clone()),
+                    identity_id: Some(spec.identity_id.clone()),
+                    created_by: Some(spec.created_by.clone()),
+                    is_active: Some(true),
+                },
+            )?;
+            created += 1;
             continue;
         }
         runtime.add_activity(spec.clone())?;
@@ -385,7 +432,7 @@ pub(crate) fn activity_skill_refs_from_spec_config(
 mod tests {
     use std::path::Path;
 
-    use super::{DEFAULT_JOB_FILES, load_default_activity_specs};
+    use super::{DEFAULT_ACTIVITY_FILES, load_default_activity_specs};
 
     #[test]
     fn parse_rejects_duplicate_ids() {
@@ -479,9 +526,29 @@ activity:
 
     #[test]
     fn bundled_default_activity_specs_parse_successfully() {
-        let parsed = load_default_activity_specs(&DEFAULT_JOB_FILES, Some(Path::new("/tmp/orbit")))
-            .expect("bundled default activities must parse");
+        let parsed =
+            load_default_activity_specs(DEFAULT_ACTIVITY_FILES, Some(Path::new("/tmp/orbit")))
+                .expect("bundled default activities must parse");
 
-        assert_eq!(parsed.len(), DEFAULT_JOB_FILES.len());
+        assert_eq!(parsed.len(), DEFAULT_ACTIVITY_FILES.len());
+        let ids = parsed
+            .iter()
+            .map(|spec| spec.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "checkout_branch",
+                "create_branch",
+                "dispatch_task",
+                "implement_change",
+                "open_pr",
+                "review_tasks",
+                "oversee_orbit_operations",
+                "perform_maintenance",
+                "review_pr",
+                "run_tests",
+            ]
+        );
     }
 }
