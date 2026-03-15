@@ -1328,8 +1328,8 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/jobs/job-resolve-backlogged-task.yaml"),
     ),
     (
-        "job-triage-and-dispatch-task",
-        include_str!("../../assets/jobs/job-triage-and-dispatch-task.yaml"),
+        "job-dispatch-task",
+        include_str!("../../assets/jobs/job-dispatch-task.yaml"),
     ),
 ];
 

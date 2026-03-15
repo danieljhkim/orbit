@@ -1,0 +1,9 @@
+schemaVersion: 1
+job:
+  job_id: job-dispatch-task
+  state: enabled
+  steps:
+    - target_type: activity
+      target_id: dispatch-task
+      agent_cli: claude
+      timeout_seconds: 600

@@ -1,0 +1,42 @@
+schema_version: 1
+created_by: system
+identity_id: steve
+activity:
+  id: dispatch-task
+  spec_type: agent_invoke
+  description: CEO reviews the backlog and dispatches the single highest-priority task for execution.
+  instruction: |-
+    You are Steve (CEO). Pick the single best task from the backlog and dispatch it.
+
+    Step 1: Run `orbit task list --status backlog --json` to get all backlog tasks.
+            If the backlog is empty, output "Backlog is empty. Nothing to dispatch." and exit.
+
+    Step 2: For the top candidates, run `orbit task show <id>` to read description, plan, and priority.
+
+    Step 3: Select the single task most valuable to execute next.
+            Prioritise: critical/high priority first; tasks that unblock others or reduce systemic risk;
+            tasks with a clear, executable plan; smaller contained changes over large sweeping ones.
+
+    Step 4: Dispatch it: `orbit job run job-resolve-backlogged-task --input task_id=<selected_task_id>`
+
+    Step 5: Record rationale: `orbit task update <selected_task_id> --comment "Dispatched by Steve (CEO): <one sentence rationale>"`
+
+    Output: { "task_id": "<selected_task_id>", "comment": "<rationale>" }
+  input_schema_json:
+    type: object
+    properties: {}
+    additional_properties: false
+  output_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+      comment:
+        type: string
+    additional_properties: false
+  skill_refs:
+    - orbit-skills
+    - orbit-manage-tasks
+  tools: []

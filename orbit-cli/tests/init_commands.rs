@@ -62,7 +62,7 @@ fn assert_default_named_jobs_visible_and_enabled(base_root: &std::path::Path) {
         "job-perform-maintenance",
         "job-oversee-orbit-operations",
         "job-approve-task-leader",
-        "job-triage-and-dispatch-task",
+        "job-dispatch-task",
     ] {
         let job = jobs
             .iter()
