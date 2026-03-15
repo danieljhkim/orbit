@@ -1,0 +1,40 @@
+schema_version: 4
+id: T20260314-054818-1773467298593551000
+title: Make execution-summary optional before in-progress -> review transition
+description: |-
+  Transitioning a task from in-progress to review hard-fails if execution_summary is empty:
+
+    error: task 'T...' requires non-empty execution_summary before transitioning in-progress -> review
+
+  The intent is good — summaries should be written — but hard-blocking the transition creates friction when an agent or human wants to park the task in review and write the summary immediately after (e.g. while still in the same CLI session).
+
+  A warning that allows the transition to proceed would preserve the norm without blocking the workflow.
+contextFiles: []
+workspacePath: /Users/daniel/workspace/repos/orbit
+assignedTo: null
+createdBy: claude-sonnet-4.6
+priority: medium
+type: feature
+branch: null
+prNumber: null
+proposedBy: claude-sonnet-4.6
+proposalApprovedBy: null
+proposalRejectedBy: human
+proposalDecisionNote: this is a good friction
+reviewApprovedBy: null
+reviewRejectedBy: null
+reviewDecisionNote: null
+createdAt: 2026-03-14T05:48:18.593550Z
+updatedAt: 2026-03-14T19:54:53.070504Z
+acceptanceCriteria: []
+history:
+- at: 2026-03-14T05:48:18.593550Z
+  by: claude-sonnet-4.6
+  event: created
+- at: 2026-03-14T19:54:53.070504Z
+  by: human
+  event: rejected
+comments: []
+activityId: null
+jobId: null
+jobRunId: null

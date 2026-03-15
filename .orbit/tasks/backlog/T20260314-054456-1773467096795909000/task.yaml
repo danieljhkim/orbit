@@ -1,0 +1,69 @@
+schema_version: 4
+id: T20260314-054456-1773467096795909000
+title: Align task attribution with the identity catalog
+description: |-
+  # Align task attribution with the identity catalog
+
+  **Goal:** Remove the current mismatch where some task lifecycle fields expect a real Orbit identity while other task actor/assignee fields accept arbitrary free-form strings.
+
+  **Problem:**
+  - `orbit task approve --by ...` and `orbit task reject --by ...` are treated as identity-bearing actions in workflow guidance.
+  - `orbit task add --assigned-to`, `--created-by`, and `--proposed-by`, plus `orbit task update --assigned-to`, accept arbitrary display strings today.
+  - This makes it easy to end up with tasks whose assignment and approval metadata do not line up with the actual identity catalog, which creates confusion for humans and agents.
+
+  **Requested improvement:**
+  - Define one clear contract for task attribution fields.
+  - Either validate all identity-bearing task fields against the identity catalog, or store both canonical identity IDs and display names explicitly so Orbit can remain consistent without losing readability.
+  - Update CLI/help/skill guidance and tests so agents no longer have to guess which fields require a real identity versus a free-form string.
+
+  **Scope:**
+  - Task CLI flags and runtime validation for assignment/creator/proposer/approver/rejector fields
+  - Task data model/storage if identity IDs need to be stored separately from display names
+  - Task-related workflow docs/skills that currently assume identities without the CLI enforcing them
+  - Tests for task add/update/approve/reject flows
+
+  **Out of scope:**
+  - Redesigning the full identity system beyond the task attribution boundary
+  - Activity/job identity semantics unless they must change to keep task attribution coherent
+
+  **Risks:**
+  - Existing persisted tasks may already contain free-form values, so the implementation needs a compatibility story.
+  - Tightening validation without a smooth CLI contract could make task operations more cumbersome before the UX is improved.
+contextFiles:
+- orbit-types/src/task.rs
+- orbit-core/src/command/task.rs
+- orbit-cli/src/command/task.rs
+- orbit-store/src/file/task_store.rs
+- orbit-cli/tests/task_commands.rs
+- orbit-core/assets/skills/orbit-create-task/SKILL.md
+- orbit-core/assets/skills/orbit-approve-task/SKILL.md
+- .orbit/skills/orbit-create-task/SKILL.md
+- .orbit/skills/orbit-approve-task/SKILL.md
+workspacePath: /Users/daniel/workspace/repos/orbit
+assignedTo: Kent
+createdBy: codex-gpt-5.4-high
+priority: high
+type: refactor
+branch: null
+prNumber: null
+proposedBy: daniel
+proposalApprovedBy: Prii (Maintainer)
+proposalRejectedBy: null
+proposalDecisionNote: 'Approved: task attribution should follow one identity contract instead of mixing identity-backed approvals with free-form creator and assignee fields.'
+reviewApprovedBy: null
+reviewRejectedBy: null
+reviewDecisionNote: null
+createdAt: 2026-03-14T05:44:56.795908Z
+updatedAt: 2026-03-14T23:04:15.501668Z
+acceptanceCriteria: []
+history:
+- at: 2026-03-14T05:44:56.795908Z
+  by: codex-gpt-5.4-high
+  event: created
+- at: 2026-03-14T23:04:15.495236Z
+  by: human
+  event: moved
+comments: []
+activityId: null
+jobId: null
+jobRunId: null

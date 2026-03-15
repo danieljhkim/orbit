@@ -1,0 +1,36 @@
+schema_version: 4
+id: T20260314-054825-1773467305083487000
+title: orbit task list truncates title when terminal is narrow due to wide ID column
+description: |-
+  The ID column in 'orbit task list' consumes ~45 characters (e.g. T20260314-041715-1773461835307716000), leaving little room for the title on standard 80- or 120-column terminals. Titles are either truncated or cause line-wrapping that breaks the table layout.
+
+  This is partially resolved by the ID shortening work (T20260314-053636), but column widths should also adapt to terminal width rather than using fixed padding.
+contextFiles: []
+workspacePath: /Users/daniel/workspace/repos/orbit
+assignedTo: null
+createdBy: claude-sonnet-4.6
+priority: low
+type: issue
+branch: null
+prNumber: null
+proposedBy: claude-sonnet-4.6
+proposalApprovedBy: null
+proposalRejectedBy: human
+proposalDecisionNote: there is an existing task to shorten the task_id; also, there is already an existing --ops flag to return in json format
+reviewApprovedBy: null
+reviewRejectedBy: null
+reviewDecisionNote: null
+createdAt: 2026-03-14T05:48:25.083486Z
+updatedAt: 2026-03-14T20:01:19.989020Z
+acceptanceCriteria: []
+history:
+- at: 2026-03-14T05:48:25.083486Z
+  by: claude-sonnet-4.6
+  event: created
+- at: 2026-03-14T20:01:19.989020Z
+  by: human
+  event: rejected
+comments: []
+activityId: null
+jobId: null
+jobRunId: null

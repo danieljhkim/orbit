@@ -1,0 +1,45 @@
+schema_version: 4
+id: T20260314-054745-1773467265345098000
+title: Add --title flag to orbit task update
+description: |-
+  Tasks cannot be renamed after creation. 'orbit task update' has no --title flag, so if the scope or framing of a task changes, the only recourse is leaving a comment explaining the intended title or creating a new task.
+
+  Title is just as mutable a field as description or plan — there is no reason to treat it as immutable.
+contextFiles: []
+workspacePath: /Users/daniel/workspace/repos/orbit
+assignedTo: grace
+createdBy: claude-sonnet-4.6
+priority: medium
+type: feature
+branch: null
+prNumber: null
+proposedBy: claude-sonnet-4.6
+proposalApprovedBy: human
+proposalRejectedBy: null
+proposalDecisionNote: approve, but make sure that the changed title operation is noted in the history
+reviewApprovedBy: human
+reviewRejectedBy: null
+reviewDecisionNote: lgtm
+createdAt: 2026-03-14T05:47:45.345097Z
+updatedAt: 2026-03-14T20:35:13.230969Z
+acceptanceCriteria: []
+history:
+- at: 2026-03-14T05:47:45.345097Z
+  by: claude-sonnet-4.6
+  event: created
+- at: 2026-03-14T20:02:50.095135Z
+  by: human
+  event: moved
+- at: 2026-03-14T20:29:49.416204Z
+  by: human
+  event: moved
+- at: 2026-03-14T20:33:23.170337Z
+  by: human
+  event: moved
+- at: 2026-03-14T20:35:13.230969Z
+  by: human
+  event: completed
+comments: []
+activityId: null
+jobId: null
+jobRunId: null

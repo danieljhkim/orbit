@@ -14,5 +14,5 @@ config.toml
 orbit.db
 orbit.db-shm
 orbit.db-wal
-.orbit/jobs/runs/archived
+.orbit/jobs/runs/
 .orbit/tasks/archived

@@ -1,0 +1,67 @@
+schema_version: 4
+id: T20260314-044220-1773463340968400000
+title: Remove redundant orbit-maintain-system skill
+description: |-
+  # Remove redundant orbit-maintain-system skill
+
+  **Goal:** Remove the `orbit-maintain-system` skill from Orbit because it is redundant with the remaining workflow and creates unnecessary maintenance surface.
+
+  **Requested cleanup:**
+  - Delete the built-in `orbit-maintain-system` skill asset and any mirrored repo-local copy.
+  - Remove the skill from skill registries, seeded assets, init/install surfaces, and tests.
+  - Rework built-in activities or docs that currently point at `orbit-maintain-system` so they use the simpler remaining Orbit workflow instead of a dedicated maintenance skill.
+
+  **Scope:**
+  - Skill asset files and embedded-skill registration code
+  - Activity specs and docs that reference `orbit-maintain-system`
+  - CLI/init tests and any seeded-skill assertions that expect the skill to exist
+  - Catalog/reference docs that list the skill as available
+
+  **Out of scope:**
+  - Removing the maintenance activity itself, unless it becomes unnecessary as a direct consequence of removing the skill
+  - Broader workflow redesign beyond eliminating this one redundant skill
+
+  **Assumptions:**
+  - Maintenance work can be handled by the general Orbit task/issue workflow and does not require its own dedicated skill wrapper.
+  - `perform-maintenance` can either be rewritten to use remaining skills or simplified without introducing a replacement maintenance skill.
+
+  **Risks:**
+  - `perform-maintenance` currently depends on this skill by name, so removing the skill without updating the activity and docs will break built-in job execution.
+  - The skill is surfaced both in seeded runtime assets and repo-local `.orbit` copies, so partial cleanup could leave inconsistent behavior between fresh init and existing workspaces.
+contextFiles:
+- orbit-core/src/command/skill.rs
+- orbit-core/assets/skills/orbit-maintain-system/SKILL.md
+- .orbit/skills/orbit-maintain-system/SKILL.md
+- orbit-core/assets/skills/orbit-skills/SKILL.md
+- .orbit/skills/orbit-skills/SKILL.md
+- orbit-core/assets/activities/perform-maintenance.yaml
+- .orbit/activities/active/perform-maintenance.yaml
+- orbit-cli/tests/init_commands.rs
+workspacePath: /Users/daniel/workspace/repos/orbit
+assignedTo: Grace
+createdBy: Grace
+priority: high
+type: refactor
+branch: null
+prNumber: null
+proposedBy: daniel
+proposalApprovedBy: Prii (Maintainer)
+proposalRejectedBy: null
+proposalDecisionNote: 'Approved: removing the dedicated maintenance skill is a sensible surface-area reduction as long as perform-maintenance remains coherent after the rewire.'
+reviewApprovedBy: null
+reviewRejectedBy: null
+reviewDecisionNote: null
+createdAt: 2026-03-14T04:42:20.968399Z
+updatedAt: 2026-03-14T23:04:15.514521Z
+acceptanceCriteria: []
+history:
+- at: 2026-03-14T04:42:20.968399Z
+  by: Grace
+  event: created
+- at: 2026-03-14T23:04:15.507521Z
+  by: human
+  event: moved
+comments: []
+activityId: null
+jobId: null
+jobRunId: null
