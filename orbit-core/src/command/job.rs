@@ -300,7 +300,9 @@ impl OrbitRuntime {
             // Merge step output into current_input so subsequent steps receive
             // both the original inputs and any values produced by prior steps.
             if step_state == JobRunState::Success {
-                if let Some(Value::Object(output_map)) = outcome.response_json.as_ref() {
+                if let Some(output_map) =
+                    step_output_for_following_input(&execution.activity, outcome.response_json.as_ref())
+                {
                     if let Value::Object(ref mut input_map) = current_input {
                         for (k, v) in output_map {
                             input_map.insert(k.clone(), v.clone());
@@ -1306,6 +1308,18 @@ fn format_timeout_error_message(exec_result: &orbit_types::ExecutionResult) -> S
         return "agent timed out before producing JSON stdout".to_string();
     }
     format!("agent timed out before producing JSON stdout; stderr: {stderr}")
+}
+
+fn step_output_for_following_input<'a>(
+    activity: &Activity,
+    response_json: Option<&'a Value>,
+) -> Option<&'a serde_json::Map<String, Value>> {
+    match activity.spec_type.as_str() {
+        "agent_invoke" => response_json
+            .and_then(|value| value.get("result"))
+            .and_then(Value::as_object),
+        _ => response_json.and_then(Value::as_object),
+    }
 }
 
 fn activity_envelope_json(activity: &Activity) -> Value {

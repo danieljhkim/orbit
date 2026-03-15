@@ -1440,6 +1440,111 @@ fn run_job_now_executes_job_successfully() {
 }
 
 #[test]
+fn agent_step_result_fields_flow_into_next_step_input() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\ncat >/dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"task_id\":\"T123\"},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-agent-output".to_string(),
+            spec_type: "agent_invoke".to_string(),
+            description: "agent step output propagation".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({
+                "instruction": "Return a task_id."
+            }),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add agent activity");
+
+    let cli_script_path = dir.path().join("capture-input.sh");
+    std::fs::write(
+        &cli_script_path,
+        "#!/bin/sh\nprintf '{\"seen_task_id\":\"%s\"}' \"$SEEN_TASK_ID\" > \"$ORBIT_OUTPUT_FILE\"\n",
+    )
+    .expect("write cli script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&cli_script_path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod cli script");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-cli-consumer".to_string(),
+            spec_type: "cli_command".to_string(),
+            description: "consume task_id from prior step".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" }
+                },
+                "required": ["task_id"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "seen_task_id": { "type": "string" }
+                },
+                "required": ["seen_task_id"]
+            }),
+            spec_config: json!({
+                "command": cli_script_path.to_string_lossy().to_string(),
+                "expected_exit_codes": [0],
+                "env": {
+                    "SEEN_TASK_ID": "{{input.task_id}}"
+                }
+            }),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add cli activity");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            steps: vec![
+                JobStep {
+                    target_type: JobTargetType::Activity,
+                    target_id: "spec-agent-output".to_string(),
+                    agent_cli,
+                    timeout_seconds: 10,
+                    env_extra: vec![],
+                },
+                JobStep {
+                    target_type: JobTargetType::Activity,
+                    target_id: "spec-cli-consumer".to_string(),
+                    agent_cli: String::new(),
+                    timeout_seconds: 10,
+                    env_extra: vec![],
+                },
+            ],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let result = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("job history");
+    let cli_output = history[0]
+        .steps
+        .get(1)
+        .and_then(|step| step.agent_response_json.as_ref())
+        .expect("cli step output");
+    assert_eq!(cli_output["seen_task_id"], json!("T123"));
+}
+
+#[test]
 fn multi_step_same_agent_cli_each_step_gets_its_own_env_extra() {
     // Regression: env_extra was looked up by matching agent_cli (first match), so step 2
     // sharing the same agent_cli as step 1 would receive step 1's allowlist.

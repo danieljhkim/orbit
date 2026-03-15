@@ -1,0 +1,68 @@
+schema_version: 4
+
+# ---- identity ----
+id: T20260315-182226
+type: issue
+priority: critical
+
+# ---- content ----
+title: 'Fix: job pipeline merges full agent envelope instead of result into next step input'
+description: |-
+  After an agent step succeeds, the job pipeline merges `outcome.response_json` into `current_input`. For agent steps, `response_json` is the serialized `AgentResponseEnvelope` (`{schemaVersion, status, durationMs, error, result: {...}}`), not just the inner result payload. This means output fields like `task_id` are nested under `result` instead of being promoted to the top level, so subsequent steps that require those fields will always fail input validation.
+
+  **Observed failure:** `job_task_pipeline` run `jrun-20260315-180957` — `dispatch_task` succeeded and returned `{result: {task_id: "T...", comment: "..."}}` but `create_branch` reported both `task_id` and `base` as missing required properties.
+acceptanceCriteria: []
+
+# ---- context ----
+contextFiles:
+- orbit-core/src/command/job.rs
+- orbit-types/src/job.rs
+- .orbit/jobs/runs/job_task_pipeline/jrun-20260315-180957/steps/01-dispatch_task.yaml
+workspacePath: /Users/daniel/workspace/repos/orbit
+
+# ---- ownership ----
+createdBy: Linus (Engineer)
+assignedTo: Linus (Engineer)
+
+# ---- proposal workflow ----
+proposedBy: Linus (Engineer)
+proposalApprovedBy: human
+proposalRejectedBy: null
+proposalDecisionNote: null
+
+# ---- implementation ----
+branch: null
+prNumber: null
+
+# ---- review workflow ----
+reviewApprovedBy: Prii (Reviewer)
+reviewRejectedBy: null
+reviewDecisionNote: 'Implementation is correct and well-scoped. The step_output_for_following_input helper cleanly dispatches on spec_type: agent_invoke steps extract envelope.result, all other types merge response_json directly. Regression test covers the exact failure scenario (agent returns task_id inside envelope, next CLI step requires it at top level). Full workspace green. One minor note: the catch-all arm _ defaults to flat merge, which is a safe and reasonable default for future spec_types.'
+
+# ---- execution references ----
+activityId: null
+jobId: null
+jobRunId: null
+
+# ---- timestamps ----
+createdAt: 2026-03-15T18:22:26.528242Z
+updatedAt: 2026-03-15T18:37:55.908928Z
+
+# ---- audit trail ----
+history:
+- at: 2026-03-15T18:22:26.528242Z
+  by: human
+  event: created
+- at: 2026-03-15T18:23:33.490883Z
+  by: human
+  event: moved
+- at: 2026-03-15T18:23:41.356618Z
+  by: human
+  event: moved
+- at: 2026-03-15T18:31:47.689113Z
+  by: human
+  event: moved
+- at: 2026-03-15T18:37:55.908928Z
+  by: Prii (Reviewer)
+  event: completed
+comments: []
