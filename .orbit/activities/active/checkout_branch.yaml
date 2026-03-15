@@ -2,7 +2,7 @@ schema_version: 1
 created_by: system
 identity_id: null
 created_at: 2026-03-15T21:22:59.072872Z
-updated_at: 2026-03-15T21:22:59.072872Z
+updated_at: 2026-03-15T22:46:27.210753Z
 activity:
   id: checkout_branch
   spec_type: cli_command
@@ -11,6 +11,9 @@ activity:
     properties:
       base:
         description: Branch name to check out (e.g. main)
+        type: string
+      workspace_path:
+        description: Task workspace path propagated from dispatch_task for CLI execution.
         type: string
     required:
     - base

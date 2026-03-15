@@ -2,13 +2,16 @@ schema_version: 1
 created_by: system
 identity_id: null
 created_at: 2026-03-15T21:22:59.076399Z
-updated_at: 2026-03-15T21:22:59.076399Z
+updated_at: 2026-03-15T22:46:27.215959Z
 activity:
   id: run_tests
   spec_type: cli_command
   description: Run tests, formatting checks, and linting for the workspace project
   input_schema_json:
-    properties: {}
+    properties:
+      workspace_path:
+        description: Task workspace path propagated from dispatch_task for CLI execution.
+        type: string
     required: []
     type: object
   output_schema_json:

@@ -2,7 +2,7 @@ schema_version: 1
 created_by: system
 identity_id: steve
 created_at: 2026-03-15T21:22:59.073695Z
-updated_at: 2026-03-15T21:22:59.073695Z
+updated_at: 2026-03-15T22:46:27.211913Z
 activity:
   id: dispatch_task
   spec_type: agent_invoke
@@ -20,6 +20,9 @@ activity:
       comment:
         type: string
       task_id:
+        type: string
+      workspace_path:
+        description: Workspace path of the selected task for downstream CLI steps.
         type: string
     required:
     - task_id
@@ -40,7 +43,7 @@ activity:
     4. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Steve (CEO): <one sentence rationale>"
        to record the dispatch rationale.
 
-    Output the selected task_id and the rationale comment.
+    Output the selected task_id, workspace_path, and the rationale comment.
   skill_refs:
   - orbit
   tools:

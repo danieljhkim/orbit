@@ -1,0 +1,60 @@
+schema_version: 4
+
+# ---- identity ----
+id: T20260315-222854
+type: task
+priority: medium
+
+# ---- content ----
+title: Reduce Orbit-managed environment variable surface
+description: |-
+  Orbit should not manage sensitive environment variables. We want the runtime and tool execution model to avoid treating secrets as Orbit-managed configuration, and we also want to prepare for a stricter future where Orbit no longer manages even broad ambient variables like HOME and PATH.
+
+  This task should audit the current execution environment policy, provider/runtime expectations, CLI-command activity behavior, and any skill/docs/config surfaces that imply Orbit owns or curates sensitive env state.
+
+  The immediate product direction is:
+  - Orbit must not manage sensitive env vars
+  - Orbit should avoid growing its built-in env allowlist around secret-bearing variables
+  - the later removal of HOME and PATH should be designed deliberately because it may break current agent/tool execution paths
+
+  The task should produce a coherent design and implementation that reduces Orbit-managed env responsibilities without introducing hidden breakage.
+acceptance_criteria: []
+
+# ---- context ----
+context_files: []
+workspace_path: /Users/daniel/workspace/repos/orbit
+
+# ---- ownership ----
+created_by: human
+assigned_to: null
+
+# ---- proposal workflow ----
+proposed_by: daniel
+proposal_approved_by: null
+proposal_rejected_by: null
+proposal_decision_note: null
+
+# ---- implementation ----
+branch: null
+pr_number: null
+
+# ---- review workflow ----
+review_approved_by: null
+review_rejected_by: null
+review_decision_note: null
+
+# ---- execution references ----
+activity_id: null
+job_id: null
+job_run_id: null
+
+# ---- timestamps ----
+created_at: 2026-03-15T22:28:54.987727Z
+updated_at: 2026-03-15T22:28:54.987727Z
+
+# ---- audit trail ----
+history:
+- at: 2026-03-15T22:28:54.987727Z
+  by: human
+  event: created
+comments: []
