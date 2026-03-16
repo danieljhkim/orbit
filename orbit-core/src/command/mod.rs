@@ -1,7 +1,6 @@
 pub mod activity;
 pub mod agent;
 pub mod audit_event;
-pub mod duration;
 pub mod identity;
 pub mod init;
 pub mod job;

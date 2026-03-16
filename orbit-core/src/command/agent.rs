@@ -19,7 +19,6 @@ pub struct AgentRunResult {
 pub struct AgentRunOptions {
     pub identity_id: Option<String>,
 }
-
 impl OrbitRuntime {
     pub fn get_agent_session(&self, session_id: &str) -> Result<Option<AgentSession>, OrbitError> {
         self.context

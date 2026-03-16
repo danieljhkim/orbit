@@ -75,12 +75,11 @@ After writing the report, return the following JSON result:
 
 ```json
 {
-  "comment": "<one-line summary of what was done>",
-  "created_file": "<repo-relative or absolute path to the report file>"
+  "comment": "<one-line summary of what was done>"
 }
 ```
 
-Orbit will auto-commit the report file together with the run artifact. Do **not** include a `commit` field — Orbit handles the commit.
+Do not include a `commit` field. Orbit does not auto-commit reports or other agent-created files.
 
 ## Operational Audit (Job Runs)
 
@@ -126,4 +125,4 @@ Record created task IDs in the report.
 - Maintenance actions completed or safely skipped
 - Validation completed
 - Report written to the correct location
-- Result returned with `comment` and `created_file`
+- Result returned with `comment`

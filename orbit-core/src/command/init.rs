@@ -11,26 +11,6 @@ use crate::command::skill::{default_skill_ids, seed_default_skills};
 use crate::config::seed_default_config;
 use crate::fs_utils::{create_dir_symlink, remove_path_if_exists};
 
-const BUILTIN_ACTIVITY_RENAMES: &[(&str, &str)] = &[
-    ("approve-task-leader", "review_tasks"),
-    ("approve_task_leader", "review_tasks"),
-    ("oversee-orbit-operations", "oversee_orbit_operations"),
-    ("perform-maintenance", "perform_maintenance"),
-    ("triage-and-dispatch-task", "dispatch_task"),
-];
-
-const BUILTIN_JOB_RENAMES: &[(&str, &str)] = &[
-    ("job-approve-task-leader", "job_review_tasks"),
-    ("job_approve_task_leader", "job_review_tasks"),
-    (
-        "job-oversee-orbit-operations",
-        "job_oversee_orbit_operations",
-    ),
-    ("job-perform-maintenance", "job_perform_maintenance"),
-    ("job-execute-task", "job_task_pipeline"),
-    ("job_execute_task", "job_task_pipeline"),
-];
-
 #[derive(Debug, Clone)]
 pub struct InitResult {
     pub refreshed_identity_files: usize,
@@ -95,7 +75,6 @@ fn init_workspace_at_root(
     fs::create_dir_all(&identity_root).map_err(|e| OrbitError::Io(e.to_string()))?;
     let skills_root = orbit_root.join("skills");
     fs::create_dir_all(&skills_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-    migrate_builtin_names_to_snake_case(&orbit_root)?;
 
     let overwrite = options.force || options.refresh_defaults;
     let refreshed_identity_files = seed_default_identities(&identity_root, overwrite)?;
@@ -125,190 +104,6 @@ fn init_workspace_at_root(
         refreshed_default_activities,
         refreshed_default_jobs,
     })
-}
-
-fn migrate_builtin_names_to_snake_case(orbit_root: &Path) -> Result<(), OrbitError> {
-    for activity_dir in [
-        orbit_root.join("activities").join("active"),
-        orbit_root.join("activities").join("inactive"),
-    ] {
-        migrate_named_yaml_files(&activity_dir, BUILTIN_ACTIVITY_RENAMES)?;
-    }
-
-    let jobs_root = orbit_root.join("jobs");
-    for job_dir in [
-        jobs_root.join("jobs"),
-        jobs_root.join("jobs").join("disabled"),
-    ] {
-        migrate_named_yaml_files(&job_dir, BUILTIN_JOB_RENAMES)?;
-    }
-
-    for runs_root in [
-        jobs_root.join("runs"),
-        jobs_root.join("runs").join("archived"),
-    ] {
-        migrate_job_run_dirs(&runs_root)?;
-    }
-
-    Ok(())
-}
-
-fn migrate_named_yaml_files(dir: &Path, renames: &[(&str, &str)]) -> Result<(), OrbitError> {
-    if !dir.exists() {
-        return Ok(());
-    }
-
-    for (old_id, new_id) in renames {
-        let old_path = dir.join(format!("{old_id}.yaml"));
-        if !old_path.exists() {
-            continue;
-        }
-
-        let new_path = dir.join(format!("{new_id}.yaml"));
-        migrate_text_file(&old_path, &new_path)?;
-    }
-
-    Ok(())
-}
-
-fn migrate_text_file(old_path: &Path, new_path: &Path) -> Result<(), OrbitError> {
-    let raw = fs::read_to_string(old_path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    let migrated = apply_builtin_name_replacements(&raw);
-    if new_path.exists() {
-        let current = fs::read_to_string(new_path).map_err(|e| OrbitError::Io(e.to_string()))?;
-        if current != migrated {
-            return Err(OrbitError::InvalidInput(format!(
-                "conflicting built-in migration targets '{}' and '{}'",
-                old_path.display(),
-                new_path.display()
-            )));
-        }
-        fs::remove_file(old_path).map_err(|e| OrbitError::Io(e.to_string()))?;
-        return Ok(());
-    }
-
-    write_atomic(new_path, &migrated)?;
-    fs::remove_file(old_path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    Ok(())
-}
-
-fn migrate_job_run_dirs(runs_root: &Path) -> Result<(), OrbitError> {
-    if !runs_root.exists() {
-        return Ok(());
-    }
-
-    for (old_job_id, new_job_id) in BUILTIN_JOB_RENAMES {
-        let old_dir = runs_root.join(old_job_id);
-        if !old_dir.exists() {
-            continue;
-        }
-
-        let new_dir = runs_root.join(new_job_id);
-        fs::create_dir_all(&new_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-
-        let entries = fs::read_dir(&old_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-        for entry in entries {
-            let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
-            let run_dir = entry.path();
-            if !run_dir.is_dir() {
-                continue;
-            }
-
-            migrate_job_run_bundle(&run_dir)?;
-
-            let run_name = run_dir.file_name().ok_or_else(|| {
-                OrbitError::Io(format!("invalid run bundle path '{}'", run_dir.display()))
-            })?;
-            let destination = new_dir.join(run_name);
-            if destination.exists() {
-                return Err(OrbitError::InvalidInput(format!(
-                    "conflicting migrated run bundle '{}'",
-                    destination.display()
-                )));
-            }
-            fs::rename(&run_dir, &destination).map_err(|e| OrbitError::Io(e.to_string()))?;
-        }
-
-        fs::remove_dir(&old_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-    }
-
-    Ok(())
-}
-
-fn migrate_job_run_bundle(run_dir: &Path) -> Result<(), OrbitError> {
-    let jrun_path = run_dir.join("jrun.yaml");
-    if jrun_path.exists() {
-        rewrite_file_in_place(&jrun_path)?;
-    }
-
-    let steps_dir = run_dir.join("steps");
-    if !steps_dir.exists() {
-        return Ok(());
-    }
-
-    let entries = fs::read_dir(&steps_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
-        let step_path = entry.path();
-        if !step_path.is_file() {
-            continue;
-        }
-        rewrite_file_in_place(&step_path)?;
-
-        let Some(file_name) = step_path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let migrated_name = apply_builtin_name_replacements(file_name);
-        if migrated_name == file_name {
-            continue;
-        }
-
-        let destination = step_path.with_file_name(migrated_name);
-        if destination.exists() {
-            return Err(OrbitError::InvalidInput(format!(
-                "conflicting migrated step file '{}'",
-                destination.display()
-            )));
-        }
-        fs::rename(&step_path, &destination).map_err(|e| OrbitError::Io(e.to_string()))?;
-    }
-
-    Ok(())
-}
-
-fn rewrite_file_in_place(path: &Path) -> Result<(), OrbitError> {
-    let raw = fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    let migrated = apply_builtin_name_replacements(&raw);
-    if migrated != raw {
-        write_atomic(path, &migrated)?;
-    }
-    Ok(())
-}
-
-fn apply_builtin_name_replacements(raw: &str) -> String {
-    let mut migrated = raw.to_string();
-    for (old, new) in BUILTIN_JOB_RENAMES {
-        migrated = migrated.replace(old, new);
-    }
-    for (old, new) in BUILTIN_ACTIVITY_RENAMES {
-        migrated = migrated.replace(old, new);
-    }
-    migrated
-}
-
-fn write_atomic(path: &Path, content: &str) -> Result<(), OrbitError> {
-    let parent = path.parent().ok_or_else(|| {
-        OrbitError::Io(format!("cannot determine parent for '{}'", path.display()))
-    })?;
-    fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
-
-    let tmp_path = path.with_extension("yaml.tmp");
-    fs::write(&tmp_path, content).map_err(|e| OrbitError::Io(e.to_string()))?;
-    if let Err(err) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(OrbitError::Io(err.to_string()));
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -357,10 +152,7 @@ fn ensure_skill_links(
     }
 
     if let Ok(metadata) = fs::symlink_metadata(skills_links_dir) {
-        if metadata.file_type().is_symlink() {
-            // Migrate legacy root-level skill symlinks to per-skill entries.
-            fs::remove_file(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-        } else if !metadata.file_type().is_dir() {
+        if !metadata.file_type().is_dir() {
             if force {
                 remove_path_if_exists(skills_links_dir)?;
             } else {

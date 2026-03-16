@@ -13,9 +13,6 @@ activity:
     properties:
       comment:
         type: string
-      created_file:
-        description: Repo-relative or absolute path to the markdown report written during this run. Orbit auto-commits this file together with the run artifact.
-        type: string
     type: object
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.

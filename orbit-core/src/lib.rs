@@ -2,6 +2,7 @@ pub mod agent;
 pub mod command;
 mod config;
 pub mod context;
+mod engine;
 pub mod executor;
 mod fs_utils;
 mod json_schema;

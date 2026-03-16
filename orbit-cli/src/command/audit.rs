@@ -1,11 +1,11 @@
 use std::io::Write;
 
 use clap::{Args, Subcommand, ValueEnum};
-use orbit_core::command::duration::parse_since;
 use orbit_core::{AuditEvent, AuditEventStatus, AuditStats, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
+use crate::parse::parse_since;
 
 #[derive(Args)]
 pub struct AuditCommand {
