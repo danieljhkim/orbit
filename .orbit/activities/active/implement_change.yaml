@@ -54,7 +54,7 @@ activity:
        - status: "in-progress"
 
     3. Explore the workspace:
-       - Use fs.list and fs.read to read the files listed in contextFiles and any
+       - Read the files listed in contextFiles and any
          other files the plan references. Understand the existing code before writing.
        - All relative file and process work should happen inside input.workspace_path when provided.
 
@@ -115,8 +115,6 @@ activity:
   - orbit.task.show
   - orbit.task.update
   - orbit.task.list
-  - fs.read
-  - fs.list
   - fs.write
   - fs.delete
   - proc.spawn

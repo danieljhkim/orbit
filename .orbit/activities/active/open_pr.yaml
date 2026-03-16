@@ -13,20 +13,20 @@ activity:
       branch:
         description: Task branch to open as a PR. If omitted, Orbit falls back to the task's stored branch.
         type: string
+      changed_files:
+        description: List of changed file paths from the preceding commit_task_changes step.
+        items:
+          type: string
+        type: array
+      commit_message:
+        description: Commit message from the preceding commit_task_changes step, used as PR body header.
+        type: string
       repo_root:
         description: Canonical repository root or task worktree used to resolve the current repository context.
         type: string
       task_id:
         description: The Orbit task ID whose branch should be opened as a PR
         type: string
-      commit_message:
-        description: Commit message from the preceding commit_task_changes step, used as PR body header.
-        type: string
-      changed_files:
-        description: List of changed file paths from the preceding commit_task_changes step.
-        items:
-          type: string
-        type: array
     required:
     - task_id
     - repo_root
