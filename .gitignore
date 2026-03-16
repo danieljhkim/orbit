@@ -15,5 +15,7 @@ orbit.db
 orbit.db-shm
 orbit.db-wal
 .orbit/jobs/runs/
-.orbit/tasks/archived
+.orbit/tasks/
+.orbit/agents/
 docs
+.monodev
