@@ -30,8 +30,6 @@ pub enum OrbitError {
     IdentityValidation(String),
     #[error("job validation failed: {0}")]
     JobValidation(String),
-    #[error("agent run failed: {0}")]
-    AgentRun(String),
     #[error("agent protocol violation: {0}")]
     AgentProtocolViolation(String),
     #[error("unsupported agent provider: {0}")]

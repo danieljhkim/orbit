@@ -6,8 +6,7 @@ use orbit_types::{Activity, OrbitError, Role, TaskStatus, TaskType};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::OrbitRuntime;
-use crate::command::task::TaskUpdateParams;
+use crate::context::{EngineHost, TaskAutomationUpdate};
 
 const AUTOMATION_CREATE_TASK_WORKTREE: &str = "create_task_worktree";
 const AUTOMATION_COMMIT_TASK_CHANGES: &str = "commit_task_changes";
@@ -19,8 +18,8 @@ struct AutomationSpec {
     action: String,
 }
 
-pub fn execute(
-    runtime: &OrbitRuntime,
+pub fn execute<H: EngineHost>(
+    host: &H,
     activity: &Activity,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -30,235 +29,222 @@ pub fn execute(
         })?;
 
     match spec.action.as_str() {
-        AUTOMATION_CREATE_TASK_WORKTREE => runtime.create_task_worktree(input),
-        AUTOMATION_COMMIT_TASK_CHANGES => runtime.commit_task_changes(input),
-        AUTOMATION_OPEN_PR_FROM_TASK => runtime.open_pr_from_task(input),
-        AUTOMATION_FINALIZE_TASK_WORKTREE => runtime.finalize_task_worktree(input),
+        AUTOMATION_CREATE_TASK_WORKTREE => create_task_worktree(host, input),
+        AUTOMATION_COMMIT_TASK_CHANGES => commit_task_changes(host, input),
+        AUTOMATION_OPEN_PR_FROM_TASK => open_pr_from_task(host, input),
+        AUTOMATION_FINALIZE_TASK_WORKTREE => finalize_task_worktree(input),
         other => Err(OrbitError::InvalidInput(format!(
             "unsupported automation action '{other}'"
         ))),
     }
 }
 
-impl OrbitRuntime {
-    fn create_task_worktree(&self, input: &Value) -> Result<Value, OrbitError> {
-        let task_id = required_input_string(input, "task_id")?;
-        let repo_root = input_repo_root(input)?;
-        let repo_root = canonicalize_existing_dir(&repo_root, "repo_root")?;
-        let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
-        let branch = format!("orbit/{task_id}");
-        let worktree_path = resolve_task_worktree_path(&repo_root, task_id)?;
+fn create_task_worktree<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+    let task_id = required_input_string(input, "task_id")?;
+    let repo_root = input_repo_root(input)?;
+    let repo_root = canonicalize_existing_dir(&repo_root, "repo_root")?;
+    let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
+    let branch = format!("orbit/{task_id}");
+    let worktree_path = resolve_task_worktree_path(&repo_root, task_id)?;
 
-        if worktree_path.exists() {
-            ensure_existing_task_worktree(&worktree_path, &branch)?;
-        } else {
-            let start_point = resolve_worktree_start_point(&repo_root, &base)?;
-            create_or_attach_task_worktree(&repo_root, &worktree_path, &branch, &start_point)?;
-        }
-
-        let canonical_worktree = worktree_path.canonicalize().map_err(|error| {
-            OrbitError::Execution(format!(
-                "failed to canonicalize task worktree '{}': {error}",
-                worktree_path.display()
-            ))
-        })?;
-        let canonical_repo_root = repo_root.canonicalize().map_err(|error| {
-            OrbitError::Execution(format!(
-                "failed to canonicalize repo_root '{}': {error}",
-                repo_root.display()
-            ))
-        })?;
-
-        let _ = self.update_task(
-            task_id,
-            TaskUpdateParams {
-                title: None,
-                description: None,
-                plan: None,
-                execution_summary: None,
-                comment: None,
-                status: None,
-                branch: Some(Some(branch.clone())),
-                pr_number: None,
-            },
-        )?;
-
-        Ok(json!({
-            "workspace_path": canonical_worktree.to_string_lossy().to_string(),
-            "repo_root": canonical_repo_root.to_string_lossy().to_string(),
-            "branch": branch,
-        }))
+    if worktree_path.exists() {
+        ensure_existing_task_worktree(&worktree_path, &branch)?;
+    } else {
+        let start_point = resolve_worktree_start_point(&repo_root, &base)?;
+        create_or_attach_task_worktree(&repo_root, &worktree_path, &branch, &start_point)?;
     }
 
-    fn commit_task_changes(&self, input: &Value) -> Result<Value, OrbitError> {
-        let task_id = required_input_string(input, "task_id")?;
-        let workspace_path = canonicalize_existing_dir(
-            &input_workspace_path(input).ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "commit_task_changes requires input.workspace_path".to_string(),
-                )
-            })?,
-            "workspace_path",
-        )?;
-        let repo_root = canonicalize_existing_dir(&input_repo_root(input)?, "repo_root")?;
-        let expected_branch = input_string_field(input, "branch");
-        let task = self.get_task(task_id)?;
+    let canonical_worktree = worktree_path.canonicalize().map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to canonicalize task worktree '{}': {error}",
+            worktree_path.display()
+        ))
+    })?;
+    let canonical_repo_root = repo_root.canonicalize().map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to canonicalize repo_root '{}': {error}",
+            repo_root.display()
+        ))
+    })?;
 
-        if task.execution_summary.trim().is_empty() {
-            return Err(OrbitError::Execution(format!(
-                "task '{}' must have a non-empty execution_summary before commit_task_changes",
-                task.id
-            )));
-        }
+    host.apply_task_automation_update(
+        task_id,
+        TaskAutomationUpdate {
+            branch: Some(branch.clone()),
+            ..TaskAutomationUpdate::default()
+        },
+    )?;
 
-        let actual_branch = git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-        if let Some(expected_branch) = expected_branch.as_deref()
-            && actual_branch.trim() != expected_branch
-        {
-            return Err(OrbitError::Execution(format!(
-                "workspace '{}' is on branch '{}' but '{}' was expected",
-                workspace_path.display(),
-                actual_branch.trim(),
-                expected_branch
-            )));
-        }
+    Ok(json!({
+        "workspace_path": canonical_worktree.to_string_lossy().to_string(),
+        "repo_root": canonical_repo_root.to_string_lossy().to_string(),
+        "branch": branch,
+    }))
+}
 
-        ensure_no_unmerged_changes(&workspace_path)?;
-        git_success(&workspace_path, &["add", "--all", "--", "."])?;
-        let changed_files = git_output_paths(
-            &workspace_path,
-            &["diff", "--cached", "--name-only", "-z", "--relative"],
-        )?;
-        if changed_files.is_empty() {
-            return Err(OrbitError::Execution(format!(
-                "task worktree '{}' has no changes to commit",
-                workspace_path.display()
-            )));
-        }
+fn commit_task_changes<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+    let task_id = required_input_string(input, "task_id")?;
+    let workspace_path = canonicalize_existing_dir(
+        &input_workspace_path(input).ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "commit_task_changes requires input.workspace_path".to_string(),
+            )
+        })?,
+        "workspace_path",
+    )?;
+    let repo_root = canonicalize_existing_dir(&input_repo_root(input)?, "repo_root")?;
+    let expected_branch = input_string_field(input, "branch");
+    let task = host.get_task(task_id)?;
 
-        let message = task_commit_message(&task.task_type, &task.title, &task.id);
-        git_success(&workspace_path, &["commit", "-m", &message])?;
-        let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
-
-        Ok(json!({
-            "repo_root": repo_root.to_string_lossy().to_string(),
-            "workspace_path": workspace_path.to_string_lossy().to_string(),
-            "branch": actual_branch.trim(),
-            "commit_message": message,
-            "commit_sha": commit_sha,
-            "changed_files": changed_files,
-        }))
+    if task.execution_summary.trim().is_empty() {
+        return Err(OrbitError::Execution(format!(
+            "task '{}' must have a non-empty execution_summary before commit_task_changes",
+            task.id
+        )));
     }
 
-    fn open_pr_from_task(&self, input: &Value) -> Result<Value, OrbitError> {
-        let task_id = required_input_string(input, "task_id")?;
-        let repo_root = canonicalize_existing_dir(&input_repo_root(input)?, "repo_root")?;
-        let branch = input_string_field(input, "branch");
-        let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
-        let task = self.get_task(task_id)?;
+    let actual_branch = git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if let Some(expected_branch) = expected_branch.as_deref()
+        && actual_branch.trim() != expected_branch
+    {
+        return Err(OrbitError::Execution(format!(
+            "workspace '{}' is on branch '{}' but '{}' was expected",
+            workspace_path.display(),
+            actual_branch.trim(),
+            expected_branch
+        )));
+    }
 
-        if task.execution_summary.trim().is_empty() {
-            return Err(OrbitError::Execution(format!(
-                "task '{}' must have a non-empty execution_summary before open_pr_from_task",
-                task.id
-            )));
-        }
+    ensure_no_unmerged_changes(&workspace_path)?;
+    git_success(&workspace_path, &["add", "--all", "--", "."])?;
+    let changed_files = git_output_paths(
+        &workspace_path,
+        &["diff", "--cached", "--name-only", "-z", "--relative"],
+    )?;
+    if changed_files.is_empty() {
+        return Err(OrbitError::Execution(format!(
+            "task worktree '{}' has no changes to commit",
+            workspace_path.display()
+        )));
+    }
 
-        let head = branch.or_else(|| task.branch.clone()).ok_or_else(|| {
-            OrbitError::Execution(format!(
-                "task '{}' does not have a branch for PR creation",
-                task.id
-            ))
-        })?;
-        let title = task.title.trim().to_string();
-        let body = task.execution_summary.clone();
-        let tool_context = ToolContext {
-            cwd: Some(repo_root.to_string_lossy().to_string()),
-        };
-        let pr_create = self.run_tool_with_context_and_role(
-            "github.pr.create",
-            json!({
-                "title": title,
-                "body": body,
-                "base": base,
-                "head": head,
-                "label": "orbit",
-            }),
-            Role::Admin,
-            tool_context.clone(),
-        )?;
-        let pr_url = pr_create
-            .get("url")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                OrbitError::Execution("github.pr.create did not return a PR url".to_string())
-            })?
-            .to_string();
-        let pr_view = self.run_tool_with_context_and_role(
-            "github.pr.view",
-            json!({ "pr": pr_url }),
-            Role::Admin,
-            tool_context,
-        )?;
-        let pr_number = pr_view
-            .get("pull_request")
-            .and_then(|value| value.get("number"))
-            .and_then(json_number_to_string)
-            .ok_or_else(|| {
-                OrbitError::Execution("github.pr.view did not return a PR number".to_string())
-            })?;
+    let message = task_commit_message(&task.task_type, &task.title, &task.id);
+    git_success(&workspace_path, &["commit", "-m", &message])?;
+    let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
 
-        let target_status = if task.status == TaskStatus::InProgress {
-            Some(TaskStatus::Review)
-        } else {
-            None
-        };
-        let _ = self.update_task(
-            task_id,
-            TaskUpdateParams {
-                title: None,
-                description: None,
-                plan: None,
-                execution_summary: None,
-                comment: None,
-                status: target_status,
-                branch: Some(Some(head.clone())),
-                pr_number: Some(Some(pr_number.clone())),
-            },
-        )?;
+    Ok(json!({
+        "repo_root": repo_root.to_string_lossy().to_string(),
+        "workspace_path": workspace_path.to_string_lossy().to_string(),
+        "branch": actual_branch.trim(),
+        "commit_message": message,
+        "commit_sha": commit_sha,
+        "changed_files": changed_files,
+    }))
+}
 
-        Ok(json!({
-            "pr_url": pr_create["url"].clone(),
-            "pr_number": pr_number,
+fn open_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+    let task_id = required_input_string(input, "task_id")?;
+    let repo_root = canonicalize_existing_dir(&input_repo_root(input)?, "repo_root")?;
+    let branch = input_string_field(input, "branch");
+    let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
+    let task = host.get_task(task_id)?;
+
+    if task.execution_summary.trim().is_empty() {
+        return Err(OrbitError::Execution(format!(
+            "task '{}' must have a non-empty execution_summary before open_pr_from_task",
+            task.id
+        )));
+    }
+
+    let head = branch.or_else(|| task.branch.clone()).ok_or_else(|| {
+        OrbitError::Execution(format!(
+            "task '{}' does not have a branch for PR creation",
+            task.id
+        ))
+    })?;
+    let title = task.title.trim().to_string();
+    let body = task.execution_summary.clone();
+    let tool_context = ToolContext {
+        cwd: Some(repo_root.to_string_lossy().to_string()),
+    };
+    let pr_create = host.run_tool_with_context_and_role(
+        "github.pr.create",
+        json!({
             "title": title,
             "body": body,
             "base": base,
             "head": head,
-        }))
-    }
+            "label": "orbit",
+        }),
+        Role::Admin,
+        tool_context.clone(),
+    )?;
+    let pr_url = pr_create
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            OrbitError::Execution("github.pr.create did not return a PR url".to_string())
+        })?
+        .to_string();
+    let pr_view = host.run_tool_with_context_and_role(
+        "github.pr.view",
+        json!({ "pr": pr_url }),
+        Role::Admin,
+        tool_context,
+    )?;
+    let pr_number = pr_view
+        .get("pull_request")
+        .and_then(|value| value.get("number"))
+        .and_then(json_number_to_string)
+        .ok_or_else(|| {
+            OrbitError::Execution("github.pr.view did not return a PR number".to_string())
+        })?;
 
-    fn finalize_task_worktree(&self, input: &Value) -> Result<Value, OrbitError> {
-        let workspace_path = canonicalize_existing_dir(
-            &input_workspace_path(input).ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "finalize_task_worktree requires input.workspace_path".to_string(),
-                )
-            })?,
-            "workspace_path",
-        )?;
-        let repo_root = canonicalize_existing_dir(&input_repo_root(input)?, "repo_root")?;
-        let cleanup_strategy = if workspace_path == repo_root {
-            "main_checkout_unchanged"
-        } else {
-            "retained"
-        };
-        Ok(json!({
-            "workspace_path": workspace_path.to_string_lossy().to_string(),
-            "repo_root": repo_root.to_string_lossy().to_string(),
-            "cleanup_strategy": cleanup_strategy,
-        }))
-    }
+    let target_status = if task.status == TaskStatus::InProgress {
+        Some(TaskStatus::Review)
+    } else {
+        None
+    };
+    host.apply_task_automation_update(
+        task_id,
+        TaskAutomationUpdate {
+            status: target_status,
+            branch: Some(head.clone()),
+            pr_number: Some(pr_number.clone()),
+        },
+    )?;
+
+    Ok(json!({
+        "pr_url": pr_create["url"].clone(),
+        "pr_number": pr_number,
+        "title": title,
+        "body": body,
+        "base": base,
+        "head": head,
+    }))
+}
+
+fn finalize_task_worktree(input: &Value) -> Result<Value, OrbitError> {
+    let workspace_path = canonicalize_existing_dir(
+        &input_workspace_path(input).ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "finalize_task_worktree requires input.workspace_path".to_string(),
+            )
+        })?,
+        "workspace_path",
+    )?;
+    let repo_root = canonicalize_existing_dir(&input_repo_root(input)?, "repo_root")?;
+    let cleanup_strategy = if workspace_path == repo_root {
+        "main_checkout_unchanged"
+    } else {
+        "retained"
+    };
+    Ok(json!({
+        "workspace_path": workspace_path.to_string_lossy().to_string(),
+        "repo_root": repo_root.to_string_lossy().to_string(),
+        "cleanup_strategy": cleanup_strategy,
+    }))
 }
 
 fn required_input_string<'a>(input: &'a Value, key: &str) -> Result<&'a str, OrbitError> {

@@ -1,27 +1,17 @@
 [package]
-name = "orbit-core"
+name = "orbit-engine"
 version.workspace = true
 edition.workspace = true
-
-[features]
-clap = ["orbit-types/clap"]
 
 [dependencies]
 chrono.workspace = true
 jsonschema.workspace = true
 orbit-agent = { path = "../orbit-agent" }
-orbit-engine = { path = "../orbit-engine" }
 orbit-exec = { path = "../orbit-exec" }
-orbit-policy = { path = "../orbit-policy" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }
 orbit-types = { path = "../orbit-types" }
 reqwest.workspace = true
-serde_json.workspace = true
 serde.workspace = true
-serde_yaml.workspace = true
-sha2.workspace = true
+serde_json.workspace = true
 tempfile = "3"
-toml.workspace = true
-
-[dev-dependencies]

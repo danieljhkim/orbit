@@ -1248,6 +1248,7 @@ dependencies = [
  "chrono",
  "jsonschema",
  "orbit-agent",
+ "orbit-engine",
  "orbit-exec",
  "orbit-policy",
  "orbit-store",
@@ -1260,6 +1261,23 @@ dependencies = [
  "sha2",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "orbit-engine"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jsonschema",
+ "orbit-agent",
+ "orbit-exec",
+ "orbit-store",
+ "orbit-tools",
+ "orbit-types",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

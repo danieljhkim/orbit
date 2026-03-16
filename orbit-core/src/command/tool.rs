@@ -7,6 +7,29 @@ use crate::OrbitRuntime;
 
 pub use crate::runtime::pipeline::DryRunResult;
 
+#[derive(Debug, Clone)]
+pub struct ToolInfo {
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+    pub builtin: bool,
+    pub parameters: Vec<orbit_types::ToolParam>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoctorStatus {
+    Ok,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct DoctorResult {
+    pub tool_name: String,
+    pub status: DoctorStatus,
+    pub message: String,
+}
+
 impl OrbitRuntime {
     pub fn execute_tool_command(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
         self.run_tool(name, input)
@@ -229,27 +252,4 @@ impl OrbitRuntime {
             Ok(((), event))
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ToolInfo {
-    pub name: String,
-    pub description: String,
-    pub enabled: bool,
-    pub builtin: bool,
-    pub parameters: Vec<orbit_types::ToolParam>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DoctorStatus {
-    Ok,
-    Warning,
-    Error,
-}
-
-#[derive(Debug, Clone)]
-pub struct DoctorResult {
-    pub tool_name: String,
-    pub status: DoctorStatus,
-    pub message: String,
 }

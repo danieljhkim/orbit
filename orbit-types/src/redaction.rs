@@ -78,7 +78,6 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::JobValidation(message) => {
             OrbitError::JobValidation(redact_sensitive_env_text(&message))
         }
-        OrbitError::AgentRun(message) => OrbitError::AgentRun(redact_sensitive_env_text(&message)),
         OrbitError::AgentProtocolViolation(message) => {
             OrbitError::AgentProtocolViolation(redact_sensitive_env_text(&message))
         }

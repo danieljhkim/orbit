@@ -126,6 +126,18 @@ pub struct ActivityRunResult {
 }
 
 impl OrbitRuntime {
+    pub(crate) fn validate_activity_target_exists(
+        &self,
+        target_type: orbit_types::JobTargetType,
+        target_id: &str,
+    ) -> Result<Activity, OrbitError> {
+        let _ = target_type;
+        let activity = self.show_activity(target_id)?;
+        let skill_refs = activity_skill_refs_from_spec_config(&activity.spec_config)?;
+        let _ = self.resolve_activity_skill_refs(&skill_refs)?;
+        Ok(activity)
+    }
+
     pub fn add_activity(&self, params: ActivityAddParams) -> Result<Activity, OrbitError> {
         validate_activity_params(&params)?;
         let skill_refs = activity_skill_refs_from_spec_config(&params.spec_config)?;
@@ -229,8 +241,12 @@ impl OrbitRuntime {
         self.record_event(OrbitEvent::ActivityRunStarted {
             id: activity.id.clone(),
         })?;
-        let outcome =
-            self.run_activity_direct(&activity, &params.agent_cli, params.timeout_seconds)?;
+        let outcome = orbit_engine::run_activity_direct(
+            self,
+            &activity,
+            &params.agent_cli,
+            params.timeout_seconds,
+        )?;
         if outcome.protocol_violation {
             self.record_event(OrbitEvent::ActivityProtocolViolation {
                 id: activity.id.clone(),

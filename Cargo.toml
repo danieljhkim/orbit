@@ -3,6 +3,7 @@ members = [
   "orbit-agent",
   "orbit-cli",
   "orbit-core",
+  "orbit-engine",
   "orbit-types",
   "orbit-store",
   "orbit-policy",

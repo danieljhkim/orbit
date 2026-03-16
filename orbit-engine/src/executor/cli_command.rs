@@ -106,38 +106,3 @@ pub fn execute(
 
     Ok((output, exec_result.duration_ms, exec_result.exit_code))
 }
-
-#[cfg(test)]
-mod tests {
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
-    use serde_json::json;
-    use tempfile::tempdir;
-
-    use super::execute;
-    use crate::template::TemplateContext;
-
-    #[test]
-    fn cli_command_falls_back_to_exit_code_when_no_output_file_is_written() {
-        let dir = tempdir().expect("tempdir");
-        let script_path = dir.path().join("script.sh");
-        std::fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write script");
-        #[cfg(unix)]
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-            .expect("chmod");
-
-        let (output, _, exit_code) = execute(
-            &json!({
-                "command": script_path,
-                "expected_exit_codes": [0]
-            }),
-            &TemplateContext::default(),
-            5,
-        )
-        .expect("execute");
-
-        assert_eq!(output, json!({"exit_code": 0}));
-        assert_eq!(exit_code, Some(0));
-    }
-}

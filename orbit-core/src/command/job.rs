@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use orbit_agent::{Agent, AgentConfig};
 use orbit_store::JobCreateParams as StoreActivityCreateParams;
 use orbit_store::JobUpdateParams as StoreJobUpdateParams;
@@ -61,15 +61,28 @@ pub struct JobAddParams {
     pub initial_state_override: Option<JobScheduleState>,
 }
 
-#[derive(Debug, Clone)]
-pub struct JobRunResult {
-    pub job_id: String,
-    pub run_id: String,
-    pub state: orbit_types::JobRunState,
-    pub attempt: u32,
-}
-
 impl OrbitRuntime {
+    pub fn run_job_now(&self, job_id: &str) -> Result<orbit_engine::JobRunResult, OrbitError> {
+        self.run_job_now_with_input(job_id, serde_json::json!({}))
+    }
+
+    pub fn run_job_now_with_input(
+        &self,
+        job_id: &str,
+        input: Value,
+    ) -> Result<orbit_engine::JobRunResult, OrbitError> {
+        let job = self.show_job(job_id)?;
+        orbit_engine::run_job_with_input(self, job, input)
+    }
+
+    pub(crate) fn recover_stale_active_run_for_job(
+        &self,
+        job: &Job,
+        now: DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        orbit_engine::recover_stale_active_run_for_job(self, job, now)
+    }
+
     pub fn add_job(&self, params: JobAddParams) -> Result<Job, OrbitError> {
         if params.steps.is_empty() {
             return Err(OrbitError::JobValidation(

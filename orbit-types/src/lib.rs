@@ -1,5 +1,4 @@
 pub mod activity;
-pub mod agent_session;
 pub mod audit;
 pub mod audit_event;
 pub mod error;
@@ -15,7 +14,6 @@ pub mod task;
 pub mod tool;
 
 pub use activity::Activity;
-pub use agent_session::AgentToolCall;
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats};
 pub use error::OrbitError;
