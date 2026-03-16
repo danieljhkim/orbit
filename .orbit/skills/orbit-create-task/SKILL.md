@@ -23,7 +23,8 @@ Create an Orbit task another engineer or agent can execute without guessing. Pla
 - Never edit task files directly.
 - Never invent task IDs.
 - `description` and `plan` must be multi-line markdown.
-- Required fields: `title`, `description`, `plan`, `workspace`, and `proposed_by`.
+- Required fields: `title`, `description`, `plan`, and `workspace`.
+- Orbit fills `created_by`, `assigned_to`, and `proposed_by` automatically from execution context.
 
 ## Command
 
@@ -34,11 +35,8 @@ orbit tool run orbit.task.add --input '{
   "plan": "<multi-line markdown>",
   "context": "<comma,separated,paths>",
   "workspace": "<absolute_or_relative_repo_path>",
-  "assigned_to": "<identity_display_name>",
-  "created_by": "<identity_display_name>",
   "priority": "<low|medium|high|critical>",
-  "type": "<task|feature|issue|chore|refactor>",
-  "proposed_by": "<identity_display_name>"
+  "type": "<task|feature|issue|chore|refactor>"
 }'
 ```
 

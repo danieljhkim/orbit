@@ -14,7 +14,6 @@ pub(super) fn build_exec_request(
     let description = super::required_string(input, &["description"], "description")?;
     let plan = super::required_string(input, &["plan"], "plan")?;
     let workspace = super::required_string(input, &["workspace"], "workspace")?;
-    let proposed_by = super::required_string(input, &["proposed_by", "proposedBy"], "proposed_by")?;
 
     let mut args = vec![
         "task".to_string(),
@@ -27,8 +26,6 @@ pub(super) fn build_exec_request(
         plan,
         "--workspace".to_string(),
         workspace,
-        "--proposed-by".to_string(),
-        proposed_by,
     ];
 
     if let Some(comment) = super::optional_string(input, "comment")? {
@@ -38,15 +35,6 @@ pub(super) fn build_exec_request(
     if let Some(context) = super::optional_string(input, "context")? {
         args.push("--context".to_string());
         args.push(context);
-    }
-    if let Some(assigned_to) = super::optional_string_alias(input, &["assigned_to", "assignedTo"])?
-    {
-        args.push("--assigned-to".to_string());
-        args.push(assigned_to);
-    }
-    if let Some(created_by) = super::optional_string_alias(input, &["created_by", "createdBy"])? {
-        args.push("--created-by".to_string());
-        args.push(created_by);
     }
     if let Some(priority) = super::optional_string(input, "priority")? {
         args.push("--priority".to_string());
@@ -94,12 +82,6 @@ impl Tool for OrbitTaskAddTool {
                     required: true,
                 },
                 ToolParam {
-                    name: "proposed_by".to_string(),
-                    description: "Who proposed the task".to_string(),
-                    param_type: "string".to_string(),
-                    required: true,
-                },
-                ToolParam {
                     name: "comment".to_string(),
                     description: "Optional initial task comment".to_string(),
                     param_type: "string".to_string(),
@@ -108,18 +90,6 @@ impl Tool for OrbitTaskAddTool {
                 ToolParam {
                     name: "context".to_string(),
                     description: "Optional comma-separated context file paths".to_string(),
-                    param_type: "string".to_string(),
-                    required: false,
-                },
-                ToolParam {
-                    name: "assigned_to".to_string(),
-                    description: "Optional assignee display name".to_string(),
-                    param_type: "string".to_string(),
-                    required: false,
-                },
-                ToolParam {
-                    name: "created_by".to_string(),
-                    description: "Optional creator display name".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },

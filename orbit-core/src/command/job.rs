@@ -1063,9 +1063,18 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
     }
 
     fn execution_template_context(&self, execution: &ExecutionContext) -> TemplateContext {
+        let mut env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
+        env.insert("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string());
+        if let Some(identity_id) = execution.activity.identity_id.as_ref() {
+            env.insert(
+                "ORBIT_TASK_ACTOR_IDENTITY_ID".to_string(),
+                identity_id.clone(),
+            );
+        }
+
         TemplateContext {
             input: execution.input.clone(),
-            env: std::env::vars().collect(),
+            env,
             workspace_path: execution
                 .activity
                 .workspace_path

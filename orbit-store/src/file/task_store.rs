@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_types::{OrbitError, Task, TaskComment, TaskPriority, TaskStatus, TaskType};
+use orbit_types::{
+    OrbitError, Task, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value as YamlValue};
 
@@ -26,8 +28,8 @@ pub(crate) struct FileTaskInsert {
     pub execution_summary: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
-    pub assigned_to: Option<String>,
     pub created_by: Option<String>,
+    pub assigned_to: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub task_type: TaskType,
@@ -54,12 +56,9 @@ pub(crate) struct FileTaskUpdate {
     pub branch: Option<Option<String>>,
     pub pr_number: Option<Option<String>>,
     pub proposed_by: Option<Option<String>>,
-    pub proposal_approved_by: Option<Option<String>>,
-    pub proposal_rejected_by: Option<Option<String>>,
-    pub proposal_decision_note: Option<Option<String>>,
-    pub review_approved_by: Option<Option<String>>,
-    pub review_rejected_by: Option<Option<String>>,
-    pub review_decision_note: Option<Option<String>>,
+    pub status_event: Option<String>,
+    pub status_note: Option<String>,
+    pub append_history: Vec<TaskHistoryEntry>,
     pub append_comments: Vec<TaskComment>,
 }
 
@@ -130,6 +129,7 @@ impl TaskStateDir {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TaskFileDocument {
     #[serde(rename = "schema_version")]
     schema_version: u8,
@@ -153,21 +153,9 @@ struct TaskFileDocument {
     #[serde(default)]
     proposed_by: Option<String>,
     #[serde(default)]
-    proposal_approved_by: Option<String>,
-    #[serde(default)]
-    proposal_rejected_by: Option<String>,
-    #[serde(default)]
-    proposal_decision_note: Option<String>,
-    #[serde(default)]
     branch: Option<String>,
     #[serde(default)]
     pr_number: Option<String>,
-    #[serde(default)]
-    review_approved_by: Option<String>,
-    #[serde(default)]
-    review_rejected_by: Option<String>,
-    #[serde(default)]
-    review_decision_note: Option<String>,
     #[serde(default)]
     activity_id: Option<String>,
     #[serde(default)]
@@ -187,13 +175,6 @@ struct TaskBundle {
     doc: TaskFileDocument,
     plan: String,
     execution_summary: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TaskHistoryEntry {
-    at: DateTime<Utc>,
-    by: String,
-    event: String,
 }
 
 fn default_task_type() -> TaskType {
@@ -244,12 +225,6 @@ impl TaskFileStore {
                 branch: params.branch,
                 pr_number: params.pr_number,
                 proposed_by: params.proposed_by,
-                proposal_approved_by: None,
-                proposal_rejected_by: None,
-                proposal_decision_note: None,
-                review_approved_by: None,
-                review_rejected_by: None,
-                review_decision_note: None,
                 created_at: now,
                 updated_at: now,
                 acceptance_criteria: Vec::new(),
@@ -257,6 +232,7 @@ impl TaskFileStore {
                     at: now,
                     by: params.actor,
                     event: "created".to_string(),
+                    note: None,
                 }],
                 comments: params.comments,
                 activity_id: None,
@@ -391,23 +367,8 @@ impl TaskFileStore {
         if let Some(value) = &fields.proposed_by {
             bundle.doc.proposed_by = value.clone();
         }
-        if let Some(value) = &fields.proposal_approved_by {
-            bundle.doc.proposal_approved_by = value.clone();
-        }
-        if let Some(value) = &fields.proposal_rejected_by {
-            bundle.doc.proposal_rejected_by = value.clone();
-        }
-        if let Some(value) = &fields.proposal_decision_note {
-            bundle.doc.proposal_decision_note = value.clone();
-        }
-        if let Some(value) = &fields.review_approved_by {
-            bundle.doc.review_approved_by = value.clone();
-        }
-        if let Some(value) = &fields.review_rejected_by {
-            bundle.doc.review_rejected_by = value.clone();
-        }
-        if let Some(value) = &fields.review_decision_note {
-            bundle.doc.review_decision_note = value.clone();
+        if !fields.append_history.is_empty() {
+            bundle.doc.history.extend(fields.append_history.clone());
         }
         if !fields.append_comments.is_empty() {
             bundle.doc.comments.extend(fields.append_comments.clone());
@@ -418,7 +379,9 @@ impl TaskFileStore {
             .map(TaskStateDir::from_status)
             .unwrap_or(current_state);
 
-        let event = if target_state == current_state {
+        let event = if let Some(event) = fields.status_event.clone() {
+            Some(event)
+        } else if target_state == current_state {
             None
         } else if target_state == TaskStateDir::Done {
             Some("completed".to_string())
@@ -436,6 +399,7 @@ impl TaskFileStore {
                 at: bundle.doc.updated_at,
                 by: fields.actor.clone(),
                 event,
+                note: fields.status_note.clone(),
             });
         }
         if title_changed {
@@ -443,6 +407,7 @@ impl TaskFileStore {
                 at: bundle.doc.updated_at,
                 by: fields.actor.clone(),
                 event: "renamed".to_string(),
+                note: None,
             });
         }
 
@@ -636,30 +601,10 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
 
     yaml.push_str(&yaml_section("proposal workflow"));
     yaml.push_str(&yaml_field("proposed_by", &doc.proposed_by)?);
-    yaml.push_str(&yaml_field(
-        "proposal_approved_by",
-        &doc.proposal_approved_by,
-    )?);
-    yaml.push_str(&yaml_field(
-        "proposal_rejected_by",
-        &doc.proposal_rejected_by,
-    )?);
-    yaml.push_str(&yaml_field(
-        "proposal_decision_note",
-        &doc.proposal_decision_note,
-    )?);
 
     yaml.push_str(&yaml_section("implementation"));
     yaml.push_str(&yaml_field("branch", &doc.branch)?);
     yaml.push_str(&yaml_field("pr_number", &doc.pr_number)?);
-
-    yaml.push_str(&yaml_section("review workflow"));
-    yaml.push_str(&yaml_field("review_approved_by", &doc.review_approved_by)?);
-    yaml.push_str(&yaml_field("review_rejected_by", &doc.review_rejected_by)?);
-    yaml.push_str(&yaml_field(
-        "review_decision_note",
-        &doc.review_decision_note,
-    )?);
 
     yaml.push_str(&yaml_section("execution references"));
     yaml.push_str(&yaml_field("activity_id", &doc.activity_id)?);
@@ -739,13 +684,8 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         branch: bundle.doc.branch,
         pr_number: bundle.doc.pr_number,
         proposed_by: bundle.doc.proposed_by,
-        proposal_approved_by: bundle.doc.proposal_approved_by,
-        proposal_rejected_by: bundle.doc.proposal_rejected_by,
-        proposal_decision_note: bundle.doc.proposal_decision_note,
-        review_approved_by: bundle.doc.review_approved_by,
-        review_rejected_by: bundle.doc.review_rejected_by,
-        review_decision_note: bundle.doc.review_decision_note,
         comments: bundle.doc.comments,
+        history: bundle.doc.history,
         created_at: bundle.doc.created_at,
         updated_at: bundle.doc.updated_at,
     }
@@ -861,6 +801,32 @@ mod tests {
             fs::read_to_string(task_dir.join(EXECUTION_SUMMARY_FILE_NAME)).expect("summary"),
             "Validated bundle layout"
         );
+    }
+
+    #[test]
+    fn get_task_errors_when_legacy_decision_fields_are_present() {
+        let dir = tempdir().expect("tempdir");
+        let store = TaskFileStore::new(dir.path().to_path_buf());
+
+        let task = store
+            .create_task(sample_insert(TaskStatus::Backlog))
+            .expect("create task");
+        let task_yaml_path = dir
+            .path()
+            .join("backlog")
+            .join(&task.id)
+            .join(TASK_DOC_FILE_NAME);
+        let task_yaml = fs::read_to_string(&task_yaml_path).expect("read yaml");
+        let task_yaml = task_yaml.replace(
+            "proposed_by: daniel\n",
+            "proposed_by: daniel\nproposal_approved_by: reviewer\nproposal_decision_note: ship it\n",
+        );
+        fs::write(&task_yaml_path, task_yaml).expect("write yaml");
+
+        let err = store
+            .get_task(&task.id)
+            .expect_err("legacy fields should be rejected");
+        assert!(err.to_string().contains("proposal_approved_by"));
     }
 
     #[test]

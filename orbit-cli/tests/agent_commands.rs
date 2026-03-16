@@ -29,8 +29,34 @@ fn add_task_with_instructions(dir: &Path, title: &str, instructions: &str) -> St
             instructions,
             "--workspace",
             &workspace,
-            "--proposed-by",
-            "test-agent",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    String::from_utf8(output).expect("utf8").trim().to_string()
+}
+
+fn add_agent_task_with_instructions(dir: &Path, title: &str, instructions: &str) -> String {
+    let workspace = dir
+        .canonicalize()
+        .expect("canonicalize workspace")
+        .to_string_lossy()
+        .to_string();
+    let output = orbit_in(dir)
+        .env("ORBIT_TASK_ACTOR_KIND", "agent")
+        .args([
+            "task",
+            "add",
+            "--title",
+            title,
+            "--description",
+            "agent test task",
+            "--instructions",
+            instructions,
+            "--workspace",
+            &workspace,
         ])
         .assert()
         .success()
@@ -88,7 +114,7 @@ fn agent_run_requires_approval_when_enabled() {
     )
     .expect("write config");
 
-    let task_id = add_task_with_instructions(
+    let task_id = add_agent_task_with_instructions(
         dir.path(),
         "needs approval",
         r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#,

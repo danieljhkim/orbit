@@ -302,8 +302,6 @@ mod tests {
                 plan: "steps".to_string(),
                 context_files: vec!["ARCHITECTURE.md".to_string()],
                 workspace_path: None,
-                assigned_to: None,
-                created_by: None,
                 priority: TaskPriority::High,
                 task_type: orbit_types::TaskType::Issue,
                 ..Default::default()
@@ -421,7 +419,6 @@ mod tests {
                     plan: Some("updated plan".to_string()),
                     execution_summary: Some("validated with unit tests".to_string()),
                     comment: None,
-                    assigned_to: Some(Some("Eng Owner".to_string())),
                     status: None,
                     branch: None,
                     pr_number: None,
@@ -432,26 +429,25 @@ mod tests {
         assert_eq!(updated.description, "updated description");
         assert_eq!(updated.plan, "updated plan");
         assert_eq!(updated.execution_summary, "validated with unit tests");
-        assert_eq!(updated.assigned_to.as_deref(), Some("Eng Owner"));
+        assert_eq!(updated.assigned_to.as_deref(), Some("human"));
 
         let audits = runtime.list_audits(10).expect("audits");
         assert!(audits.iter().any(|a| a.event_type == "TaskUpdated"));
     }
 
     #[test]
-    fn add_task_comment_uses_created_by_or_proposed_by() {
+    fn add_task_comment_uses_effective_actor() {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
         let task = runtime
             .add_task(TaskAddParams {
                 title: "commented".to_string(),
                 comment: Some("initial context".to_string()),
-                proposed_by: Some("proposer".to_string()),
                 ..Default::default()
             })
             .expect("add");
 
         assert_eq!(task.comments.len(), 1);
-        assert_eq!(task.comments[0].by, "proposer");
+        assert_eq!(task.comments[0].by, "human");
         assert_eq!(task.comments[0].message, "initial context");
     }
 
@@ -474,7 +470,6 @@ mod tests {
                     plan: None,
                     execution_summary: None,
                     comment: Some("follow-up note".to_string()),
-                    assigned_to: None,
                     status: None,
                     branch: None,
                     pr_number: None,
@@ -488,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn configured_user_name_is_used_for_created_by_and_update_comments() {
+    fn direct_runtime_task_attribution_uses_human_labels() {
         let dir = tempdir().expect("tempdir");
         std::fs::write(
             dir.path().join("config.toml"),
@@ -503,7 +498,7 @@ mod tests {
                 ..Default::default()
             })
             .expect("add");
-        assert_eq!(task.created_by.as_deref(), Some("daniel"));
+        assert_eq!(task.created_by.as_deref(), Some("human"));
 
         let updated = runtime
             .update_task(
@@ -514,7 +509,6 @@ mod tests {
                     plan: None,
                     execution_summary: None,
                     comment: Some("configured follow-up".to_string()),
-                    assigned_to: None,
                     status: None,
                     branch: None,
                     pr_number: None,
@@ -523,7 +517,7 @@ mod tests {
             .expect("update");
 
         assert_eq!(runtime.user_name(), "daniel");
-        assert_eq!(updated.comments[0].by, "daniel");
+        assert_eq!(updated.comments[0].by, "human");
         assert_eq!(updated.comments[0].message, "configured follow-up");
     }
 
@@ -546,7 +540,6 @@ mod tests {
                     plan: None,
                     execution_summary: None,
                     comment: None,
-                    assigned_to: None,
                     status: Some(TaskStatus::InProgress),
                     branch: None,
                     pr_number: None,
@@ -562,7 +555,6 @@ mod tests {
                     plan: None,
                     execution_summary: Some("ready".to_string()),
                     comment: None,
-                    assigned_to: None,
                     status: Some(TaskStatus::Review),
                     branch: None,
                     pr_number: None,
@@ -573,14 +565,13 @@ mod tests {
         let approved = runtime
             .approve_task(
                 &task.id,
-                "reviewer",
                 Some("looks good".to_string()),
                 Some("approved with note".to_string()),
             )
             .expect("approve");
 
         assert_eq!(approved.comments.len(), 1);
-        assert_eq!(approved.comments[0].by, "reviewer");
+        assert_eq!(approved.comments[0].by, "human");
         assert_eq!(approved.comments[0].message, "approved with note");
     }
 
@@ -633,7 +624,6 @@ mod tests {
                     plan: None,
                     execution_summary: None,
                     comment: None,
-                    assigned_to: None,
                     status: Some(TaskStatus::InProgress),
                     branch: None,
                     pr_number: None,
@@ -649,7 +639,6 @@ mod tests {
                     plan: None,
                     execution_summary: Some("Implemented initial pass.".to_string()),
                     comment: None,
-                    assigned_to: None,
                     status: Some(TaskStatus::Review),
                     branch: None,
                     pr_number: None,
@@ -658,20 +647,14 @@ mod tests {
             .expect("review");
 
         let rejected = runtime
-            .reject_task(
-                &task.id,
-                "reviewer",
-                "Missing regression coverage".to_string(),
-                None,
-            )
+            .reject_task(&task.id, "Missing regression coverage".to_string(), None)
             .expect("reject");
 
         assert_eq!(rejected.status, TaskStatus::Rejected);
-        assert_eq!(rejected.review_rejected_by.as_deref(), Some("reviewer"));
-        assert_eq!(
-            rejected.review_decision_note.as_deref(),
-            Some("Missing regression coverage")
-        );
+        let history = rejected.history.last().expect("history entry");
+        assert_eq!(history.by, "human");
+        assert_eq!(history.event, "review_rejected");
+        assert_eq!(history.note.as_deref(), Some("Missing regression coverage"));
 
         let audits = runtime.list_audits(10).expect("audits");
         assert!(audits.iter().any(|a| a.event_type == "TaskReviewRejected"));
@@ -687,13 +670,13 @@ mod tests {
             })
             .expect("add");
 
-        let wrong_status = runtime.reject_task(&task.id, "reviewer", "not ready".to_string(), None);
+        let wrong_status = runtime.reject_task(&task.id, "not ready".to_string(), None);
         assert!(matches!(
             wrong_status,
             Err(crate::OrbitError::InvalidInput(_))
         ));
 
-        let empty_note = runtime.reject_task(&task.id, "reviewer", "   ".to_string(), None);
+        let empty_note = runtime.reject_task(&task.id, "   ".to_string(), None);
         assert!(matches!(
             empty_note,
             Err(crate::OrbitError::InvalidInput(_))
@@ -719,7 +702,6 @@ mod tests {
                     plan: None,
                     execution_summary: None,
                     comment: None,
-                    assigned_to: None,
                     status: Some(TaskStatus::InProgress),
                     branch: None,
                     pr_number: None,
@@ -735,7 +717,6 @@ mod tests {
                 plan: None,
                 execution_summary: None,
                 comment: None,
-                assigned_to: None,
                 status: Some(TaskStatus::Review),
                 branch: None,
                 pr_number: None,
@@ -755,7 +736,6 @@ mod tests {
                     plan: None,
                     execution_summary: Some("Implemented change and validated tests.".to_string()),
                     comment: None,
-                    assigned_to: None,
                     status: Some(TaskStatus::Review),
                     branch: None,
                     pr_number: None,

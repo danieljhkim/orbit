@@ -15,9 +15,9 @@ Invoke Orbit through `orbit tool run`:
 
 ```bash
 orbit tool run orbit.task.list --input '{"status": "backlog"}'
-orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "plan": "...", "workspace": ".", "proposed_by": "Name"}'
-orbit tool run orbit.task.approve --input '{"id": "<id>", "by": "<identity_display_name>", "note": "<note>"}'
-orbit tool run orbit.task.reject --input '{"id": "<id>", "by": "<identity_display_name>", "note": "<note>"}'
+orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "plan": "...", "workspace": "."}'
+orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>"}'
+orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<note>"}'
 orbit tool run orbit.task.show --input '{"id": "T20260315-123456"}'
 orbit tool run orbit.task.update --input '{"id": "T20260315-123456", "status": "review"}'
 orbit tool run orbit.task.update --input '{"id": "T20260315-123456", "comment": "notes here"}'
@@ -49,6 +49,11 @@ Use `blocked` when execution cannot safely continue.
 ## Identity
 
 Run `orbit tool run orbit.identity.list --input '{"role": "engineer"}'` (or another role), then `orbit tool run orbit.identity.show --input '{"id": "<id>"}'`. Assume this identity for the session.
+
+Task commands infer actor provenance automatically:
+- `orbit tool run ...` is treated as agent-driven
+- direct `orbit task ...` CLI usage is treated as human-driven
+- activity-driven executions use the activity `identity_id` when available
 
 ## Skill Selection
 

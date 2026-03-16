@@ -181,6 +181,15 @@ pub struct TaskComment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskHistoryEntry {
+    pub at: DateTime<Utc>,
+    pub by: String,
+    pub event: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Task {
     pub id: OrbitId,
     pub title: String,
@@ -206,19 +215,9 @@ pub struct Task {
     #[serde(default)]
     pub proposed_by: Option<String>,
     #[serde(default)]
-    pub proposal_approved_by: Option<String>,
-    #[serde(default)]
-    pub proposal_rejected_by: Option<String>,
-    #[serde(default)]
-    pub proposal_decision_note: Option<String>,
-    #[serde(default)]
-    pub review_approved_by: Option<String>,
-    #[serde(default)]
-    pub review_rejected_by: Option<String>,
-    #[serde(default)]
-    pub review_decision_note: Option<String>,
-    #[serde(default)]
     pub comments: Vec<TaskComment>,
+    #[serde(default)]
+    pub history: Vec<TaskHistoryEntry>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

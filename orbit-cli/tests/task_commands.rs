@@ -29,8 +29,6 @@ fn add_task(dir: &Path, title: &str) -> String {
             "test plan",
             "--workspace",
             &workspace,
-            "--proposed-by",
-            "test-user",
         ])
         .assert()
         .success()
@@ -60,8 +58,34 @@ fn add_task_with_comment(dir: &Path, title: &str, comment: &str) -> String {
             comment,
             "--workspace",
             &workspace,
-            "--proposed-by",
-            "test-user",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    String::from_utf8(output).expect("utf8").trim().to_string()
+}
+
+fn add_agent_task(dir: &Path, title: &str) -> String {
+    let workspace = dir
+        .canonicalize()
+        .expect("canonical workspace")
+        .to_string_lossy()
+        .to_string();
+    let output = orbit_in(dir)
+        .env("ORBIT_TASK_ACTOR_KIND", "agent")
+        .args([
+            "task",
+            "add",
+            "--title",
+            title,
+            "--description",
+            "test description",
+            "--plan",
+            "test plan",
+            "--workspace",
+            &workspace,
         ])
         .assert()
         .success()
@@ -119,8 +143,6 @@ fn task_add_json_returns_task_object() {
             "json plan",
             "--workspace",
             &workspace,
-            "--proposed-by",
-            "test-user",
             "--json",
         ])
         .assert()
@@ -171,7 +193,7 @@ fn task_add_comment_is_persisted_in_show_json() {
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
     assert_eq!(show["comments"].as_array().expect("comments").len(), 1);
-    assert_eq!(show["comments"][0]["by"], "test-user");
+    assert_eq!(show["comments"][0]["by"], "human");
     assert_eq!(show["comments"][0]["message"], "initial context");
 }
 
@@ -450,7 +472,7 @@ fn task_update_comment_appends_without_replacing_existing_comments() {
 }
 
 #[test]
-fn task_uses_configured_user_name_for_created_by_and_comment_author() {
+fn task_direct_cli_uses_human_for_created_by_and_comment_author() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
     std::fs::write(
@@ -468,7 +490,7 @@ fn task_uses_configured_user_name_for_created_by_and_comment_author() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["created_by"], "daniel");
+    assert_eq!(show["created_by"], "human");
 
     orbit_in(dir.path())
         .args(["task", "update", &id, "--comment", "follow-up"])
@@ -484,7 +506,7 @@ fn task_uses_configured_user_name_for_created_by_and_comment_author() {
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
     let comments = show["comments"].as_array().expect("comments");
-    assert_eq!(comments[0]["by"], "daniel");
+    assert_eq!(comments[0]["by"], "human");
     assert_eq!(comments[0]["message"], "follow-up");
 }
 
@@ -565,11 +587,6 @@ fn task_archive_and_unarchive() {
 fn task_archive_unarchive_and_delete_support_json() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "json lifecycle");
-
-    orbit_in(dir.path())
-        .args(["task", "update", &id, "--status", "backlog"])
-        .assert()
-        .success();
 
     let archive_output = orbit_in(dir.path())
         .args(["task", "archive", &id, "--json"])
@@ -656,8 +673,6 @@ fn task_workspace_is_normalized_on_add() {
             "workspace plan",
             "--workspace",
             workspace.to_string_lossy().as_ref(),
-            "--proposed-by",
-            "workspace-proposer",
         ])
         .assert()
         .success()
@@ -690,7 +705,7 @@ fn task_approve_proposed_to_backlog() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "approvable");
+    let id = add_agent_task(dir.path(), "approvable");
 
     // Task should start as proposed since approval is required
     orbit_in(dir.path())
@@ -704,8 +719,6 @@ fn task_approve_proposed_to_backlog() {
             "task",
             "approve",
             &id,
-            "--by",
-            "daniel",
             "--note",
             "approved verbally in sync",
         ])
@@ -721,9 +734,17 @@ fn task_approve_proposed_to_backlog() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["proposal_approved_by"], "daniel");
-    assert_eq!(show["proposal_decision_note"], "approved verbally in sync");
     assert_eq!(show["status"], "backlog");
+    let history = show["history"].as_array().expect("history");
+    assert_eq!(history.last().expect("latest")["by"], "human");
+    assert_eq!(
+        history.last().expect("latest")["event"],
+        "proposal_approved"
+    );
+    assert_eq!(
+        history.last().expect("latest")["note"],
+        "approved verbally in sync"
+    );
 }
 
 #[test]
@@ -735,19 +756,10 @@ fn task_approve_json_returns_updated_task() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "approve json");
+    let id = add_agent_task(dir.path(), "approve json");
 
     let output = orbit_in(dir.path())
-        .args([
-            "task",
-            "approve",
-            &id,
-            "--by",
-            "daniel",
-            "--note",
-            "json approved",
-            "--json",
-        ])
+        .args(["task", "approve", &id, "--note", "json approved", "--json"])
         .assert()
         .success()
         .get_output()
@@ -755,8 +767,15 @@ fn task_approve_json_returns_updated_task() {
         .clone();
     let task: serde_json::Value = serde_json::from_slice(&output).expect("task json");
     assert_eq!(task["id"], id);
-    assert_eq!(task["proposal_approved_by"], "daniel");
     assert_eq!(task["status"], "backlog");
+    assert_eq!(
+        task["history"]
+            .as_array()
+            .expect("history")
+            .last()
+            .expect("latest")["event"],
+        "proposal_approved"
+    );
 }
 
 #[test]
@@ -768,7 +787,7 @@ fn task_approve_defaults_to_configured_user_name() {
         "[task.approval]\nrequired_for_agent = true\n[user]\nname = \"daniel\"\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "approve defaults");
+    let id = add_agent_task(dir.path(), "approve defaults");
 
     orbit_in(dir.path())
         .args(["task", "approve", &id, "--note", "config default approver"])
@@ -784,7 +803,14 @@ fn task_approve_defaults_to_configured_user_name() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["proposal_approved_by"], "daniel");
+    assert_eq!(
+        show["history"]
+            .as_array()
+            .expect("history")
+            .last()
+            .expect("latest")["by"],
+        "human"
+    );
 }
 
 #[test]
@@ -796,15 +822,13 @@ fn task_approve_comment_appends_with_approver_identity() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "approvable comment");
+    let id = add_agent_task(dir.path(), "approvable comment");
 
     orbit_in(dir.path())
         .args([
             "task",
             "approve",
             &id,
-            "--by",
-            "daniel",
             "--note",
             "approved verbally in sync",
             "--comment",
@@ -822,7 +846,7 @@ fn task_approve_comment_appends_with_approver_identity() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["comments"][0]["by"], "daniel");
+    assert_eq!(show["comments"][0]["by"], "human");
     assert_eq!(show["comments"][0]["message"], "ready to schedule");
 }
 
@@ -835,15 +859,13 @@ fn task_reject_proposed_to_rejected() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "rejectable");
+    let id = add_agent_task(dir.path(), "rejectable");
 
     orbit_in(dir.path())
         .args([
             "task",
             "reject",
             &id,
-            "--by",
-            "daniel",
             "--note",
             "Duplicate of an existing task",
         ])
@@ -859,12 +881,17 @@ fn task_reject_proposed_to_rejected() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["proposal_rejected_by"], "daniel");
+    assert_eq!(show["status"], "rejected");
+    let history = show["history"].as_array().expect("history");
+    assert_eq!(history.last().expect("latest")["by"], "human");
     assert_eq!(
-        show["proposal_decision_note"],
+        history.last().expect("latest")["event"],
+        "proposal_rejected"
+    );
+    assert_eq!(
+        history.last().expect("latest")["note"],
         "Duplicate of an existing task"
     );
-    assert_eq!(show["status"], "rejected");
 }
 
 #[test]
@@ -876,19 +903,10 @@ fn task_reject_json_returns_updated_task() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "reject json");
+    let id = add_agent_task(dir.path(), "reject json");
 
     let output = orbit_in(dir.path())
-        .args([
-            "task",
-            "reject",
-            &id,
-            "--by",
-            "daniel",
-            "--note",
-            "json rejected",
-            "--json",
-        ])
+        .args(["task", "reject", &id, "--note", "json rejected", "--json"])
         .assert()
         .success()
         .get_output()
@@ -896,8 +914,15 @@ fn task_reject_json_returns_updated_task() {
         .clone();
     let task: serde_json::Value = serde_json::from_slice(&output).expect("task json");
     assert_eq!(task["id"], id);
-    assert_eq!(task["proposal_rejected_by"], "daniel");
     assert_eq!(task["status"], "rejected");
+    assert_eq!(
+        task["history"]
+            .as_array()
+            .expect("history")
+            .last()
+            .expect("latest")["event"],
+        "proposal_rejected"
+    );
 }
 
 #[test]
@@ -933,8 +958,6 @@ fn task_reject_review_to_rejected() {
             "task",
             "reject",
             &id,
-            "--by",
-            "review-bot",
             "--note",
             "Needs stronger coverage before merge",
         ])
@@ -950,12 +973,14 @@ fn task_reject_review_to_rejected() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["review_rejected_by"], "review-bot");
+    assert_eq!(show["status"], "rejected");
+    let history = show["history"].as_array().expect("history");
+    assert_eq!(history.last().expect("latest")["by"], "human");
+    assert_eq!(history.last().expect("latest")["event"], "review_rejected");
     assert_eq!(
-        show["review_decision_note"],
+        history.last().expect("latest")["note"],
         "Needs stronger coverage before merge"
     );
-    assert_eq!(show["status"], "rejected");
 }
 
 #[test]
@@ -991,8 +1016,6 @@ fn task_reject_comment_appends_with_reviewer_identity() {
             "task",
             "reject",
             &id,
-            "--by",
-            "review-bot",
             "--note",
             "Needs stronger coverage before merge",
             "--comment",
@@ -1010,7 +1033,7 @@ fn task_reject_comment_appends_with_reviewer_identity() {
         .stdout
         .clone();
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
-    assert_eq!(show["comments"][0]["by"], "review-bot");
+    assert_eq!(show["comments"][0]["by"], "human");
     assert_eq!(
         show["comments"][0]["message"],
         "add a regression test for comment ordering"
@@ -1023,7 +1046,7 @@ fn task_reject_requires_note() {
     let id = add_task(dir.path(), "missing note");
 
     orbit_in(dir.path())
-        .args(["task", "reject", &id, "--by", "daniel"])
+        .args(["task", "reject", &id])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -1074,18 +1097,10 @@ fn task_reject_proposed_moves_to_rejected_dir() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "rejected-dir-test");
+    let id = add_agent_task(dir.path(), "rejected-dir-test");
 
     orbit_in(dir.path())
-        .args([
-            "task",
-            "reject",
-            &id,
-            "--by",
-            "grace",
-            "--note",
-            "invalid scope",
-        ])
+        .args(["task", "reject", &id, "--note", "invalid scope"])
         .assert()
         .success();
 
@@ -1130,15 +1145,7 @@ fn task_reject_review_moves_to_rejected_dir() {
         .success();
 
     orbit_in(dir.path())
-        .args([
-            "task",
-            "reject",
-            &id,
-            "--by",
-            "grace",
-            "--note",
-            "missing coverage",
-        ])
+        .args(["task", "reject", &id, "--note", "missing coverage"])
         .assert()
         .success();
 
@@ -1158,18 +1165,10 @@ fn task_list_filtered_by_rejected_shows_rejected_tasks() {
         "[task.approval]\nrequired_for_agent = true\n",
     )
     .expect("write config");
-    let id = add_task(dir.path(), "filterable-rejected");
+    let id = add_agent_task(dir.path(), "filterable-rejected");
 
     orbit_in(dir.path())
-        .args([
-            "task",
-            "reject",
-            &id,
-            "--by",
-            "grace",
-            "--note",
-            "out of scope",
-        ])
+        .args(["task", "reject", &id, "--note", "out of scope"])
         .assert()
         .success();
 

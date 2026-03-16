@@ -14,11 +14,8 @@ pub struct TaskAddParams {
     pub comment: Option<String>,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
-    pub assigned_to: Option<String>,
-    pub created_by: Option<String>,
     pub priority: TaskPriority,
     pub task_type: TaskType,
-    pub proposed_by: Option<String>,
 }
 
 impl Default for TaskAddParams {
@@ -30,11 +27,8 @@ impl Default for TaskAddParams {
             comment: None,
             context_files: Vec::new(),
             workspace_path: None,
-            assigned_to: None,
-            created_by: None,
             priority: TaskPriority::Medium,
             task_type: TaskType::Task,
-            proposed_by: None,
         }
     }
 }
@@ -45,52 +39,76 @@ pub struct TaskUpdateParams {
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
-    pub assigned_to: Option<Option<String>>,
     pub status: Option<TaskStatus>,
     pub branch: Option<Option<String>>,
     pub pr_number: Option<Option<String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskActorKind {
+    Human,
+    Agent,
+}
+
+#[derive(Debug, Clone)]
+struct EffectiveTaskActor {
+    kind: TaskActorKind,
+    label: String,
+}
+
+const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
+const ORBIT_TASK_ACTOR_IDENTITY_ID: &str = "ORBIT_TASK_ACTOR_IDENTITY_ID";
+
+fn effective_task_actor() -> EffectiveTaskActor {
+    let kind_raw = std::env::var(ORBIT_TASK_ACTOR_KIND).ok();
+    let identity_id = std::env::var(ORBIT_TASK_ACTOR_IDENTITY_ID)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let kind = match kind_raw.as_deref() {
+        Some("agent") => TaskActorKind::Agent,
+        _ if identity_id.is_some() => TaskActorKind::Agent,
+        _ => TaskActorKind::Human,
+    };
+    let label = identity_id.unwrap_or_else(|| match kind {
+        TaskActorKind::Human => "human".to_string(),
+        TaskActorKind::Agent => "agent".to_string(),
+    });
+
+    EffectiveTaskActor { kind, label }
+}
+
 impl OrbitRuntime {
     pub fn add_task(&self, params: TaskAddParams) -> Result<Task, OrbitError> {
         let workspace_path = normalize_path(params.workspace_path)?;
-        let initial_status = if self.context.task_approval_required_for_agent {
+        let actor = effective_task_actor();
+        let initial_status = if actor.kind == TaskActorKind::Agent
+            && self.context.task_approval_required_for_agent
+        {
             TaskStatus::Proposed
         } else {
             TaskStatus::Backlog
         };
-        let actor = self.user_name().to_string();
-        let created_by = params.created_by.clone().or_else(|| Some(actor.clone()));
-        let proposed_by = params
-            .proposed_by
-            .clone()
-            .or_else(|| params.created_by.clone());
-        let comments = build_task_comments(
-            params.comment.clone(),
-            params
-                .created_by
-                .as_deref()
-                .or(params.proposed_by.as_deref())
-                .unwrap_or(actor.as_str()),
-        )?;
+        let comments = build_task_comments(params.comment.clone(), actor.label.as_str())?;
 
         self.with_mutation(|| {
             let task = self.context.task_store.create_task(StoreTaskCreateParams {
-                actor: actor.clone(),
+                actor: actor.label.clone(),
                 title: params.title.clone(),
                 description: params.description.clone(),
                 plan: params.plan.clone(),
                 execution_summary: String::new(),
                 context_files: params.context_files.clone(),
                 workspace_path: workspace_path.clone(),
-                assigned_to: params.assigned_to.clone(),
-                created_by: created_by.clone(),
+                created_by: Some(actor.label.clone()),
+                assigned_to: Some(actor.label.clone()),
                 status: initial_status,
                 priority: params.priority,
                 task_type: params.task_type,
                 branch: None,
                 pr_number: None,
-                proposed_by: proposed_by.clone(),
+                proposed_by: Some(actor.label.clone()),
                 comments: comments.clone(),
             })?;
             Ok((
@@ -156,19 +174,26 @@ impl OrbitRuntime {
             }
         }
 
-        let actor = self.user_name().to_string();
-        let append_comments = build_task_comments(params.comment.clone(), actor.as_str())?;
+        let actor = effective_task_actor();
+        let append_comments = build_task_comments(params.comment.clone(), actor.label.as_str())?;
+        let assigned_to = params.status.and_then(|status| {
+            if status == TaskStatus::InProgress {
+                Some(Some(actor.label.clone()))
+            } else {
+                None
+            }
+        });
 
         let task = self.with_mutation(|| {
             let task = self.context.task_store.update_task(
                 id,
                 StoreTaskUpdateParams {
-                    actor: actor.clone(),
+                    actor: actor.label.clone(),
                     title: params.title,
                     description: params.description,
                     plan: params.plan,
                     execution_summary: params.execution_summary,
-                    assigned_to: params.assigned_to,
+                    assigned_to,
                     status: params.status,
                     branch: params.branch,
                     pr_number: params.pr_number,
@@ -185,18 +210,12 @@ impl OrbitRuntime {
     pub fn approve_task(
         &self,
         id: &str,
-        approved_by: &str,
         note: Option<String>,
         comment: Option<String>,
     ) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
-        let approver = approved_by.trim();
-        if approver.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "approved_by must not be empty".to_string(),
-            ));
-        }
-        let append_comments = build_task_comments(comment, approver)?;
+        let actor = effective_task_actor();
+        let append_comments = build_task_comments(comment, actor.label.as_str())?;
 
         match task.status {
             TaskStatus::Proposed => {
@@ -204,10 +223,11 @@ impl OrbitRuntime {
                     let task = self.context.task_store.update_task(
                         id,
                         StoreTaskUpdateParams {
-                            actor: approver.to_string(),
+                            actor: actor.label.clone(),
                             status: Some(TaskStatus::Backlog),
-                            proposal_approved_by: Some(Some(approver.to_string())),
-                            proposal_decision_note: Some(note.clone()),
+                            status_event: Some("proposal_approved".to_string()),
+                            status_note: note.clone(),
+                            assigned_to: Some(Some(actor.label.clone())),
                             append_comments: append_comments.clone(),
                             ..Default::default()
                         },
@@ -216,7 +236,7 @@ impl OrbitRuntime {
                         task.clone(),
                         OrbitEvent::TaskProposalApproved {
                             id: id.to_string(),
-                            approved_by: approver.to_string(),
+                            approved_by: actor.label.clone(),
                         },
                     ))
                 })?;
@@ -227,10 +247,10 @@ impl OrbitRuntime {
                     let task = self.context.task_store.update_task(
                         id,
                         StoreTaskUpdateParams {
-                            actor: approver.to_string(),
+                            actor: actor.label.clone(),
                             status: Some(TaskStatus::Done),
-                            review_approved_by: Some(Some(approver.to_string())),
-                            review_decision_note: Some(note.clone()),
+                            status_event: Some("review_approved".to_string()),
+                            status_note: note.clone(),
                             append_comments: append_comments.clone(),
                             ..Default::default()
                         },
@@ -239,7 +259,7 @@ impl OrbitRuntime {
                         task.clone(),
                         OrbitEvent::TaskReviewApproved {
                             id: id.to_string(),
-                            approved_by: approver.to_string(),
+                            approved_by: actor.label.clone(),
                         },
                     ))
                 })?;
@@ -254,17 +274,11 @@ impl OrbitRuntime {
     pub fn reject_task(
         &self,
         id: &str,
-        rejected_by: &str,
         note: String,
         comment: Option<String>,
     ) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
-        let rejector = rejected_by.trim();
-        if rejector.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "rejected_by must not be empty".to_string(),
-            ));
-        }
+        let actor = effective_task_actor();
         let reason = note.trim();
         if reason.is_empty() {
             return Err(OrbitError::InvalidInput(
@@ -272,7 +286,7 @@ impl OrbitRuntime {
             ));
         }
         let reason = reason.to_string();
-        let append_comments = build_task_comments(comment, rejector)?;
+        let append_comments = build_task_comments(comment, actor.label.as_str())?;
 
         match task.status {
             TaskStatus::Proposed => {
@@ -280,10 +294,10 @@ impl OrbitRuntime {
                     let task = self.context.task_store.update_task(
                         id,
                         StoreTaskUpdateParams {
-                            actor: rejector.to_string(),
+                            actor: actor.label.clone(),
                             status: Some(TaskStatus::Rejected),
-                            proposal_rejected_by: Some(Some(rejector.to_string())),
-                            proposal_decision_note: Some(Some(reason.clone())),
+                            status_event: Some("proposal_rejected".to_string()),
+                            status_note: Some(reason.clone()),
                             append_comments: append_comments.clone(),
                             ..Default::default()
                         },
@@ -292,7 +306,7 @@ impl OrbitRuntime {
                         task.clone(),
                         OrbitEvent::TaskProposalRejected {
                             id: id.to_string(),
-                            rejected_by: rejector.to_string(),
+                            rejected_by: actor.label.clone(),
                         },
                     ))
                 })?;
@@ -303,10 +317,10 @@ impl OrbitRuntime {
                     let task = self.context.task_store.update_task(
                         id,
                         StoreTaskUpdateParams {
-                            actor: rejector.to_string(),
+                            actor: actor.label.clone(),
                             status: Some(TaskStatus::Rejected),
-                            review_rejected_by: Some(Some(rejector.to_string())),
-                            review_decision_note: Some(Some(reason.clone())),
+                            status_event: Some("review_rejected".to_string()),
+                            status_note: Some(reason.clone()),
                             append_comments: append_comments.clone(),
                             ..Default::default()
                         },
@@ -315,7 +329,7 @@ impl OrbitRuntime {
                         task.clone(),
                         OrbitEvent::TaskReviewRejected {
                             id: id.to_string(),
-                            rejected_by: rejector.to_string(),
+                            rejected_by: actor.label.clone(),
                         },
                     ))
                 })?;
@@ -340,7 +354,7 @@ impl OrbitRuntime {
             let _ = self.context.task_store.update_task(
                 id,
                 StoreTaskUpdateParams {
-                    actor: self.user_name().to_string(),
+                    actor: effective_task_actor().label,
                     status: Some(TaskStatus::Archived),
                     ..Default::default()
                 },
@@ -363,7 +377,7 @@ impl OrbitRuntime {
             let _ = self.context.task_store.update_task(
                 id,
                 StoreTaskUpdateParams {
-                    actor: self.user_name().to_string(),
+                    actor: effective_task_actor().label,
                     status: Some(TaskStatus::Backlog),
                     ..Default::default()
                 },

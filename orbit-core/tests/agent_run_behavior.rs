@@ -1,7 +1,70 @@
+use std::sync::{Mutex, OnceLock};
+
 use orbit_core::OrbitRuntime;
 use orbit_core::command::task::TaskAddParams;
 use orbit_types::AgentSessionStatus;
 use tempfile::tempdir;
+
+const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
+const ORBIT_TASK_ACTOR_IDENTITY_ID: &str = "ORBIT_TASK_ACTOR_IDENTITY_ID";
+
+fn with_task_actor_env<T>(
+    actor_kind: Option<&str>,
+    identity_id: Option<&str>,
+    f: impl FnOnce() -> T,
+) -> T {
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct EnvReset {
+        previous_kind: Option<String>,
+        previous_identity_id: Option<String>,
+    }
+
+    impl Drop for EnvReset {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.previous_kind {
+                    Some(value) => std::env::set_var(ORBIT_TASK_ACTOR_KIND, value),
+                    None => std::env::remove_var(ORBIT_TASK_ACTOR_KIND),
+                }
+                match &self.previous_identity_id {
+                    Some(value) => std::env::set_var(ORBIT_TASK_ACTOR_IDENTITY_ID, value),
+                    None => std::env::remove_var(ORBIT_TASK_ACTOR_IDENTITY_ID),
+                }
+            }
+        }
+    }
+
+    let _guard = ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let previous_kind = std::env::var(ORBIT_TASK_ACTOR_KIND).ok();
+    let previous_identity_id = std::env::var(ORBIT_TASK_ACTOR_IDENTITY_ID).ok();
+    unsafe {
+        match actor_kind {
+            Some(value) => std::env::set_var(ORBIT_TASK_ACTOR_KIND, value),
+            None => std::env::remove_var(ORBIT_TASK_ACTOR_KIND),
+        }
+        match identity_id {
+            Some(value) => std::env::set_var(ORBIT_TASK_ACTOR_IDENTITY_ID, value),
+            None => std::env::remove_var(ORBIT_TASK_ACTOR_IDENTITY_ID),
+        }
+    }
+    let _reset = EnvReset {
+        previous_kind,
+        previous_identity_id,
+    };
+    f()
+}
+
+fn with_agent_task_actor<T>(f: impl FnOnce() -> T) -> T {
+    with_task_actor_env(Some("agent"), None, f)
+}
+
+fn with_human_task_actor<T>(f: impl FnOnce() -> T) -> T {
+    with_task_actor_env(None, None, f)
+}
 
 fn session_id_from_audits(audits: &[orbit_types::Audit]) -> Option<String> {
     audits.iter().find_map(|audit| {
@@ -116,13 +179,15 @@ fn agent_run_requires_approval_when_config_enabled() {
     .expect("write config");
 
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-    let task = runtime
-        .add_task(TaskAddParams {
-            title: "agent gated".to_string(),
-            plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
-            ..Default::default()
-        })
-        .expect("task");
+    let task = with_agent_task_actor(|| {
+        runtime
+            .add_task(TaskAddParams {
+                title: "agent gated".to_string(),
+                plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
+                ..Default::default()
+            })
+            .expect("task")
+    });
 
     let result = runtime.run_agent_task(&task.id);
     assert!(matches!(
@@ -141,13 +206,15 @@ fn agent_run_succeeds_after_explicit_approval() {
     .expect("write config");
 
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-    let task = runtime
-        .add_task(TaskAddParams {
-            title: "agent after approval".to_string(),
-            plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
-            ..Default::default()
-        })
-        .expect("task");
+    let task = with_agent_task_actor(|| {
+        runtime
+            .add_task(TaskAddParams {
+                title: "agent after approval".to_string(),
+                plan: r#"{"tool_calls":[{"name":"time.now","input":{}}]}"#.to_string(),
+                ..Default::default()
+            })
+            .expect("task")
+    });
 
     // Task starts as proposed, so agent should fail
     let result = runtime.run_agent_task(&task.id);
@@ -157,26 +224,19 @@ fn agent_run_succeeds_after_explicit_approval() {
     ));
 
     // Approve the task (proposed → backlog)
-    runtime
-        .approve_task(
-            &task.id,
-            "human-reviewer",
-            Some("looks good".to_string()),
-            None,
-        )
-        .expect("approve");
+    with_human_task_actor(|| {
+        runtime
+            .approve_task(&task.id, Some("looks good".to_string()), None)
+            .expect("approve");
+    });
 
     // Now agent should succeed
     let result = runtime.run_agent_task(&task.id).expect("run");
     assert_eq!(result.status, AgentSessionStatus::Completed);
 
     let approved_task = runtime.get_task(&task.id).expect("task");
-    assert_eq!(
-        approved_task.proposal_approved_by.as_deref(),
-        Some("human-reviewer")
-    );
-    assert_eq!(
-        approved_task.proposal_decision_note.as_deref(),
-        Some("looks good")
-    );
+    let history = approved_task.history.last().expect("history entry");
+    assert_eq!(history.by, "human");
+    assert_eq!(history.event, "proposal_approved");
+    assert_eq!(history.note.as_deref(), Some("looks good"));
 }

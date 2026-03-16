@@ -113,8 +113,7 @@ orbit tool run orbit.task.add --input '{
   "title": "...",
   "description": "...",
   "plan": "...",
-  "workspace": ".",
-  "proposed_by": "<identity>"
+  "workspace": "."
 }'
 ```
 

@@ -51,7 +51,7 @@ pub fn execute(
     })?;
     let output_path = temp_dir.path().join("orbit-output.json");
 
-    let mut env = std::env::vars().collect::<HashMap<_, _>>();
+    let mut env = template_context.env.clone();
     for (key, value) in &spec.env {
         env.insert(key.clone(), render(value, template_context)?);
     }

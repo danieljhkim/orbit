@@ -80,21 +80,12 @@ pub struct TaskAddArgs {
     /// Repository workspace path
     #[arg(long)]
     pub workspace: String,
-    /// Optional assignee display name
-    #[arg(long)]
-    pub assigned_to: Option<String>,
-    /// Optional creator display name
-    #[arg(long)]
-    pub created_by: Option<String>,
     /// Priority level
     #[arg(long, value_enum, default_value_t = TaskPriority::Medium)]
     pub priority: TaskPriority,
     /// Task type
     #[arg(long = "type", value_enum, default_value_t = TaskType::Task)]
     pub task_type: TaskType,
-    /// Who proposed this task
-    #[arg(long)]
-    pub proposed_by: String,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -109,11 +100,8 @@ impl Execute for TaskAddArgs {
             comment: self.comment,
             context_files: parse_context_csv(&self.context),
             workspace_path: Some(self.workspace),
-            assigned_to: self.assigned_to,
-            created_by: self.created_by,
             priority: self.priority,
             task_type: self.task_type,
-            proposed_by: Some(self.proposed_by),
         })?;
 
         if self.json {
@@ -219,6 +207,27 @@ impl Execute for TaskShowArgs {
             if let Some(ref created_by) = task.created_by {
                 println!("Created By:  {}", created_by);
             }
+            if !task.history.is_empty() {
+                println!("History:");
+                for entry in &task.history {
+                    if let Some(note) = &entry.note {
+                        println!(
+                            "  [{}] {}: {} ({})",
+                            entry.at.to_rfc3339(),
+                            entry.by,
+                            entry.event,
+                            note
+                        );
+                    } else {
+                        println!(
+                            "  [{}] {}: {}",
+                            entry.at.to_rfc3339(),
+                            entry.by,
+                            entry.event
+                        );
+                    }
+                }
+            }
             if let Some(ref branch) = task.branch {
                 println!("Branch:      {}", branch);
             }
@@ -227,24 +236,6 @@ impl Execute for TaskShowArgs {
             }
             if let Some(ref proposed_by) = task.proposed_by {
                 println!("Proposed By: {}", proposed_by);
-            }
-            if let Some(ref approved_by) = task.proposal_approved_by {
-                println!("Proposal Approved By: {}", approved_by);
-            }
-            if let Some(ref rejected_by) = task.proposal_rejected_by {
-                println!("Proposal Rejected By: {}", rejected_by);
-            }
-            if let Some(ref note) = task.proposal_decision_note {
-                println!("Proposal Note: {}", note);
-            }
-            if let Some(ref approved_by) = task.review_approved_by {
-                println!("Review Approved By: {}", approved_by);
-            }
-            if let Some(ref rejected_by) = task.review_rejected_by {
-                println!("Review Rejected By: {}", rejected_by);
-            }
-            if let Some(ref note) = task.review_decision_note {
-                println!("Review Note: {}", note);
             }
             println!("Created:     {}", task.created_at.to_rfc3339());
             println!("Updated:     {}", task.updated_at.to_rfc3339());
@@ -274,9 +265,6 @@ pub struct TaskUpdateArgs {
     /// Append a task comment
     #[arg(long)]
     pub comment: Option<String>,
-    /// New assignee (empty string clears)
-    #[arg(long)]
-    pub assigned_to: Option<String>,
     /// New status
     #[arg(long, value_enum)]
     pub status: Option<TaskUpdateStatusArg>,
@@ -293,13 +281,6 @@ pub struct TaskUpdateArgs {
 
 impl Execute for TaskUpdateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let assigned_to = self.assigned_to.map(|value| {
-            if value.trim().is_empty() {
-                None
-            } else {
-                Some(value)
-            }
-        });
         let branch = self.branch.map(|value| {
             if value.trim().is_empty() {
                 None
@@ -323,7 +304,6 @@ impl Execute for TaskUpdateArgs {
                 plan: self.plan,
                 execution_summary: self.execution_summary,
                 comment: self.comment,
-                assigned_to,
                 status: self.status.map(Into::into),
                 branch,
                 pr_number,
@@ -371,9 +351,6 @@ impl From<TaskUpdateStatusArg> for TaskStatus {
 pub struct TaskApproveArgs {
     /// Task ID
     pub id: String,
-    /// Approver identity, defaults to the configured user.name
-    #[arg(long)]
-    pub by: Option<String>,
     /// Optional approval note
     #[arg(long)]
     pub note: Option<String>,
@@ -387,8 +364,7 @@ pub struct TaskApproveArgs {
 
 impl Execute for TaskApproveArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let by = self.by.unwrap_or_else(|| runtime.user_name().to_string());
-        let task = runtime.approve_task(&self.id, &by, self.note, self.comment)?;
+        let task = runtime.approve_task(&self.id, self.note, self.comment)?;
         if self.json {
             crate::output::json::print_pretty(&task_to_json(&task))
         } else {
@@ -404,9 +380,6 @@ impl Execute for TaskApproveArgs {
 pub struct TaskRejectArgs {
     /// Task ID
     pub id: String,
-    /// Rejector identity, defaults to the configured user.name
-    #[arg(long)]
-    pub by: Option<String>,
     /// Rejection note
     #[arg(long)]
     pub note: String,
@@ -420,8 +393,7 @@ pub struct TaskRejectArgs {
 
 impl Execute for TaskRejectArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let by = self.by.unwrap_or_else(|| runtime.user_name().to_string());
-        let task = runtime.reject_task(&self.id, &by, self.note, self.comment)?;
+        let task = runtime.reject_task(&self.id, self.note, self.comment)?;
         if self.json {
             crate::output::json::print_pretty(&task_to_json(&task))
         } else {
@@ -573,13 +545,8 @@ fn task_to_json(task: &orbit_core::Task) -> Value {
         "branch": task.branch,
         "pr_number": task.pr_number,
         "proposed_by": task.proposed_by,
-        "proposal_approved_by": task.proposal_approved_by,
-        "proposal_rejected_by": task.proposal_rejected_by,
-        "proposal_decision_note": task.proposal_decision_note,
-        "review_approved_by": task.review_approved_by,
-        "review_rejected_by": task.review_rejected_by,
-        "review_decision_note": task.review_decision_note,
         "comments": task.comments,
+        "history": task.history,
         "created_at": task.created_at.to_rfc3339(),
         "updated_at": task.updated_at.to_rfc3339(),
     })

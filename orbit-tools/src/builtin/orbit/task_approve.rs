@@ -11,15 +11,12 @@ pub(super) fn build_exec_request(
     input: &Value,
 ) -> Result<ExecRequest, OrbitError> {
     let id = super::required_string(input, &["id"], "id")?;
-    let by = super::required_string(input, &["by"], "by")?;
     let note = super::required_string(input, &["note"], "note")?;
 
     let mut args = vec![
         "task".to_string(),
         "approve".to_string(),
         id,
-        "--by".to_string(),
-        by,
         "--note".to_string(),
         note,
     ];
@@ -37,12 +34,6 @@ impl Tool for OrbitTaskApproveTool {
     fn schema(&self) -> ToolSchema {
         let mut parameters = super::orbit_id_params("task");
         parameters.extend([
-            ToolParam {
-                name: "by".to_string(),
-                description: "Approver identity".to_string(),
-                param_type: "string".to_string(),
-                required: true,
-            },
             ToolParam {
                 name: "note".to_string(),
                 description: "Approval note".to_string(),

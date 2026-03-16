@@ -11,6 +11,8 @@ pub mod task_reject;
 pub mod task_show;
 pub mod task_update;
 
+use std::collections::HashMap;
+
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{OrbitError, ToolParam};
 use serde_json::Value;
@@ -18,6 +20,7 @@ use serde_json::Value;
 use crate::{ToolContext, ToolRegistry};
 
 const ORBIT_TIMEOUT_MS: u64 = 15_000;
+const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
 
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_add::OrbitTaskAddTool);
@@ -35,13 +38,16 @@ pub fn register(registry: &mut ToolRegistry) {
 }
 
 pub(super) fn orbit_exec_request(ctx: &ToolContext, args: Vec<String>) -> ExecRequest {
+    let mut env = std::env::vars().collect::<HashMap<_, _>>();
+    env.insert(ORBIT_TASK_ACTOR_KIND.to_string(), "agent".to_string());
+
     ExecRequest {
         program: "orbit".to_string(),
         args,
         current_dir: ctx.cwd.clone(),
         timeout_ms: Some(ORBIT_TIMEOUT_MS),
         stdin_mode: StdinMode::Null,
-        environment_mode: EnvironmentMode::Inherit,
+        environment_mode: EnvironmentMode::ClearAndSet(env.into_iter().collect()),
     }
 }
 
@@ -222,11 +228,8 @@ mod tests {
                 "description": "Details",
                 "plan": "Plan",
                 "workspace": "/tmp/orbit",
-                "proposed_by": "daniel",
                 "comment": "seed comment",
                 "context": "a.rs,b.rs",
-                "assigned_to": "Linus (Engineer)",
-                "created_by": "Linus (Engineer)",
                 "priority": "high",
                 "type": "feature",
             }),
@@ -246,16 +249,10 @@ mod tests {
                 "Plan".to_string(),
                 "--workspace".to_string(),
                 "/tmp/orbit".to_string(),
-                "--proposed-by".to_string(),
-                "daniel".to_string(),
                 "--comment".to_string(),
                 "seed comment".to_string(),
                 "--context".to_string(),
                 "a.rs,b.rs".to_string(),
-                "--assigned-to".to_string(),
-                "Linus (Engineer)".to_string(),
-                "--created-by".to_string(),
-                "Linus (Engineer)".to_string(),
                 "--priority".to_string(),
                 "high".to_string(),
                 "--type".to_string(),
@@ -271,7 +268,6 @@ mod tests {
             &ToolContext::default(),
             &json!({
                 "id": "T20260315-205817",
-                "by": "human",
                 "note": "lgtm",
                 "comment": "ship it",
             }),
@@ -284,8 +280,6 @@ mod tests {
                 "task".to_string(),
                 "approve".to_string(),
                 "T20260315-205817".to_string(),
-                "--by".to_string(),
-                "human".to_string(),
                 "--note".to_string(),
                 "lgtm".to_string(),
                 "--comment".to_string(),
@@ -301,7 +295,6 @@ mod tests {
             &ToolContext::default(),
             &json!({
                 "id": "T20260315-205817",
-                "by": "human",
                 "note": "needs work",
                 "comment": "please revise",
             }),
@@ -314,8 +307,6 @@ mod tests {
                 "task".to_string(),
                 "reject".to_string(),
                 "T20260315-205817".to_string(),
-                "--by".to_string(),
-                "human".to_string(),
                 "--note".to_string(),
                 "needs work".to_string(),
                 "--comment".to_string(),
