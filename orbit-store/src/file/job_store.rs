@@ -12,11 +12,28 @@ pub(crate) struct JobFileStore {
     root: PathBuf,
 }
 
+/// Persisted YAML shape for a Job — excludes timestamp fields to reduce diff noise.
+/// Old files that include `created_at` / `updated_at` are tolerated on read via
+/// `skip_serializing` + `Option` so existing artifacts remain loadable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedJob {
+    job_id: String,
+    state: JobScheduleState,
+    #[serde(default)]
+    default_input: Option<serde_json::Value>,
+    steps: Vec<JobStep>,
+    // Legacy fields: tolerated when reading old artifacts, never written to new ones.
+    #[serde(default, skip_serializing)]
+    created_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing)]
+    updated_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JobFileDocument {
     schema_version: u8,
-    job: Job,
+    job: PersistedJob,
 }
 
 /// Serialized to jrun.yaml — contains run-level fields only.
@@ -242,7 +259,14 @@ impl JobFileStore {
         // Write updated state to disabled/ then remove the active file.
         let content = serde_yaml::to_string(&JobFileDocument {
             schema_version: 1,
-            job: job.clone(),
+            job: PersistedJob {
+                job_id: job.job_id.clone(),
+                state: job.state,
+                default_input: job.default_input.clone(),
+                steps: job.steps.clone(),
+                created_at: None,
+                updated_at: None,
+            },
         })
         .map_err(|e| OrbitError::Store(e.to_string()))?;
         write_atomic(&disabled_path, &content)?;
@@ -461,7 +485,19 @@ impl JobFileStore {
         let doc = serde_yaml::from_str::<JobFileDocument>(&raw).map_err(|e| {
             OrbitError::Store(format!("invalid job file '{}': {e}", path.display()))
         })?;
-        Ok(doc.job)
+        let p = doc.job;
+        let created_at = p
+            .created_at
+            .unwrap_or_else(|| parse_timestamp_from_job_id(&p.job_id));
+        let updated_at = p.updated_at.unwrap_or(created_at);
+        Ok(Job {
+            job_id: p.job_id,
+            state: p.state,
+            default_input: p.default_input,
+            steps: p.steps,
+            created_at,
+            updated_at,
+        })
     }
 
     /// Read a run bundle directory: parses `jrun.yaml` then populates the
@@ -506,7 +542,14 @@ impl JobFileStore {
         self.ensure_layout()?;
         let doc = JobFileDocument {
             schema_version: 1,
-            job: job.clone(),
+            job: PersistedJob {
+                job_id: job.job_id.clone(),
+                state: job.state,
+                default_input: job.default_input.clone(),
+                steps: job.steps.clone(),
+                created_at: None,
+                updated_at: None,
+            },
         };
         let content = serde_yaml::to_string(&doc).map_err(|e| OrbitError::Store(e.to_string()))?;
         write_atomic(&self.job_path(&job.job_id), &content)
@@ -649,6 +692,22 @@ impl JobFileStore {
         }
         Err(OrbitError::JobRunNotFound(run_id.to_string()))
     }
+}
+
+/// Derive a UTC timestamp from a job ID of the form `job-YYYYMMDD-HHMMSS[-N]`.
+/// Falls back to `Utc::now()` for IDs that don't embed a parseable timestamp.
+fn parse_timestamp_from_job_id(job_id: &str) -> DateTime<Utc> {
+    let rest = job_id.strip_prefix("job-").unwrap_or(job_id);
+    let mut parts = rest.splitn(3, '-');
+    let date = parts.next().unwrap_or("");
+    let time = parts.next().unwrap_or("");
+    if date.len() == 8 && time.len() == 6 {
+        let s = format!("{date}{time}");
+        if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(&s, "%Y%m%d%H%M%S") {
+            return ndt.and_utc();
+        }
+    }
+    Utc::now()
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), OrbitError> {
@@ -870,18 +929,24 @@ mod tests {
         // Read the raw YAML to assert correct nesting.
         let yaml_path = store.job_path("job-roundtrip-test");
         let raw = std::fs::read_to_string(&yaml_path).expect("read yaml");
-        // steps must be nested under job: (2-space indent)
+        // steps and state must be nested under job: (2-space indent)
         assert!(
             raw.contains("  steps:"),
             "steps must be nested under job: but raw yaml was:\n{raw}"
         );
-        // state, created_at, updated_at must also be nested
-        for field in &["state:", "created_at:", "updated_at:"] {
-            assert!(
-                raw.contains(&format!("  {field}")),
-                "field '{field}' must be nested under job: but raw yaml was:\n{raw}"
-            );
-        }
+        assert!(
+            raw.contains("  state:"),
+            "state must be nested under job: but raw yaml was:\n{raw}"
+        );
+        // timestamps must NOT appear in the persisted YAML artifact
+        assert!(
+            !raw.contains("created_at:"),
+            "created_at must not appear in persisted job YAML but raw yaml was:\n{raw}"
+        );
+        assert!(
+            !raw.contains("updated_at:"),
+            "updated_at must not appear in persisted job YAML but raw yaml was:\n{raw}"
+        );
 
         // Read back via the store and assert round-trip fidelity.
         let read_back = store
@@ -897,14 +962,8 @@ mod tests {
         assert_eq!(read_back.steps[0].agent_cli, "my-agent-cli");
         assert_eq!(read_back.steps[0].timeout_seconds, 600);
         assert_eq!(read_back.steps[0].env_extra, vec!["MY_VAR", "OTHER_VAR"]);
-        assert_eq!(
-            read_back.created_at.timestamp(),
-            written.created_at.timestamp()
-        );
-        assert_eq!(
-            read_back.updated_at.timestamp(),
-            written.updated_at.timestamp()
-        );
+        // Timestamps are no longer stored in YAML; they are derived at read time
+        // (from the job_id for standard IDs, or Utc::now() as fallback).
     }
 
     #[test]
