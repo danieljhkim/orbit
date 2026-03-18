@@ -22,7 +22,7 @@ pub use id::OrbitId;
 pub use identity::{IdentityRole, ResolvedIdentity};
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
-    JobScheduleState, JobStep, JobTargetType,
+    JobScheduleState, JobStep, JobStepPrecondition, JobTargetType,
 };
 pub use memo::Memo;
 pub use redaction::{
@@ -113,6 +113,7 @@ mod tests {
                 agent_cli: "claude".to_string(),
                 timeout_seconds: 300,
                 env_extra: vec![],
+                precondition: None,
             }],
             created_at: Utc::now(),
             updated_at: Utc::now(),

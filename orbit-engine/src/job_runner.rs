@@ -1,6 +1,8 @@
+use std::process::Command;
+
 use chrono::{DateTime, Utc};
 use orbit_store::JobRunStepParams;
-use orbit_types::{Job, JobRun, JobRunState, JobStep, OrbitError, OrbitEvent};
+use orbit_types::{Job, JobRun, JobRunState, JobStep, JobStepPrecondition, OrbitError, OrbitEvent};
 use serde_json::Value;
 
 use crate::activity_runner::{build_execution_context_for_step, execute_single_attempt};
@@ -76,6 +78,54 @@ fn execute_activity_with_retries<H: EngineHost>(
 
         for (step_index, step) in job.steps.iter().enumerate() {
             failure_step = (step_index, step.clone());
+
+            // Evaluate precondition before paying the step execution cost.
+            if let Some(precondition) = &step.precondition {
+                match evaluate_precondition(precondition) {
+                    Ok(true) => {} // precondition passed, continue normally
+                    Ok(false) if precondition.skip_job_on_failure => {
+                        // Clean stop — not a failure.
+                        let reason = format!(
+                            "Precondition not met for step '{}': skipped cleanly.",
+                            step.target_id
+                        );
+                        let finished_at = Utc::now();
+                        let changed = host.finalize_job_run(
+                            &run.run_id,
+                            JobRunState::Success,
+                            finished_at,
+                            None,
+                        )?;
+                        if !changed {
+                            return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
+                        }
+                        host.record_event(OrbitEvent::JobSkipped {
+                            job_id: job.job_id.clone(),
+                            reason: reason.clone(),
+                        })?;
+                        host.record_event(OrbitEvent::JobRunCompleted {
+                            job_id: job.job_id.clone(),
+                            run_id: run.run_id.clone(),
+                            state: JobRunState::Success.to_string(),
+                        })?;
+                        return Ok(JobRunResult {
+                            job_id: job.job_id.clone(),
+                            run_id: run.run_id.clone(),
+                            state: JobRunState::Success,
+                            attempt: run.attempt,
+                        });
+                    }
+                    Ok(false) => {
+                        // skip_job_on_failure is false — treat as step failure.
+                        return Err(OrbitError::Execution(format!(
+                            "Precondition failed for step '{}'",
+                            step.target_id
+                        )));
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+
             let execution =
                 build_execution_context_for_step(host, &job, step, current_input.clone())?;
             let step_started = Utc::now();
@@ -292,6 +342,20 @@ fn is_stale_active_run(job: &Job, run: &JobRun, now: DateTime<Utc>) -> bool {
     let elapsed_seconds = now.signed_duration_since(reference_time).num_seconds();
     let stale_after_seconds = total_timeout.saturating_add(STALE_RUN_GRACE_SECONDS) as i64;
     elapsed_seconds >= stale_after_seconds
+}
+
+/// Runs the precondition command and returns `Ok(true)` if it exits 0, `Ok(false)` if non-zero.
+fn evaluate_precondition(precondition: &JobStepPrecondition) -> Result<bool, OrbitError> {
+    let status = Command::new(&precondition.command)
+        .args(&precondition.args)
+        .status()
+        .map_err(|err| {
+            OrbitError::Execution(format!(
+                "failed to spawn precondition command '{}': {err}",
+                precondition.command
+            ))
+        })?;
+    Ok(status.success())
 }
 
 fn merge_job_input(default_input: Option<&Value>, input: Value) -> Result<Value, OrbitError> {

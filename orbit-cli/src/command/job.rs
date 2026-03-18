@@ -70,6 +70,7 @@ impl Execute for JobAddArgs {
                 agent_cli: self.agent_cli,
                 timeout_seconds,
                 env_extra: crate::parse::csv_to_vec(&self.env_extra),
+                precondition: None,
             }],
             initial_state_override: None,
         })?;

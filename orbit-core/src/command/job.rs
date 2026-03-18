@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use orbit_agent::{Agent, AgentConfig};
 use orbit_store::JobCreateParams as StoreActivityCreateParams;
 use orbit_store::JobUpdateParams as StoreJobUpdateParams;
-use orbit_types::{Job, JobRun, JobScheduleState, JobStep, JobTargetType, OrbitError, OrbitEvent};
+use orbit_types::{
+    Job, JobRun, JobScheduleState, JobStep, JobStepPrecondition, JobTargetType, OrbitError,
+    OrbitEvent,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -43,6 +46,14 @@ struct DefaultJobEntry {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct DefaultJobStepPrecondition {
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    skip_job_on_failure: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct DefaultJobStep {
     target_type: String,
     target_id: String,
@@ -51,6 +62,8 @@ struct DefaultJobStep {
     timeout_seconds: u64,
     #[serde(default)]
     env_extra: Vec<String>,
+    #[serde(default)]
+    precondition: Option<DefaultJobStepPrecondition>,
 }
 
 #[derive(Debug, Clone)]
@@ -313,12 +326,18 @@ fn default_job_steps(entry: &DefaultJobEntry) -> Result<Vec<JobStep>, OrbitError
                     )));
                 }
             };
+            let precondition = s.precondition.as_ref().map(|p| JobStepPrecondition {
+                command: p.command.clone(),
+                args: p.args.clone(),
+                skip_job_on_failure: p.skip_job_on_failure,
+            });
             Ok(JobStep {
                 target_type,
                 target_id: s.target_id.clone(),
                 agent_cli: s.agent_cli.clone(),
                 timeout_seconds: s.timeout_seconds,
                 env_extra: s.env_extra.clone(),
+                precondition,
             })
         })
         .collect()

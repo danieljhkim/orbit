@@ -16,6 +16,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/checkout_branch.yaml"),
     ),
     (
+        "check_dispatch_needed",
+        include_str!("../../assets/activities/check_dispatch_needed.yaml"),
+    ),
+    (
         "commit_changes",
         include_str!("../../assets/activities/commit_changes.yaml"),
     ),
@@ -559,6 +563,7 @@ activity:
             ids,
             vec![
                 "checkout_branch",
+                "check_dispatch_needed",
                 "commit_changes",
                 "create_branch",
                 "dispatch_task",

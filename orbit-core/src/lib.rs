@@ -157,6 +157,7 @@ mod tests {
                     agent_cli: agent_path.to_string_lossy().to_string(),
                     timeout_seconds: 30,
                     env_extra: vec![],
+                    precondition: None,
                 }],
                 initial_state_override: None,
             })

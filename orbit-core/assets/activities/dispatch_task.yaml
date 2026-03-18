@@ -11,13 +11,14 @@ activity:
   spec_type: agent_invoke
 
   # ---- content ----
-  description: CEO reviews the backlog and dispatches the single highest-priority task for execution.
+  description: CEO reviews the backlog and rejected queues and dispatches the single highest-priority task for execution.
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.
-    You are Steve (CEO). Pick the single best task from the backlog and dispatch it.
+    You are Steve (CEO). Pick the single best task and dispatch it.
 
-    1. Call orbit.task.list with status: "backlog" to retrieve all backlog tasks.
-       If the list is empty, return a comment "Backlog is empty. Nothing to dispatch." and task_id "None" and exit.
+    1. Call orbit.task.list with status: "rejected" to retrieve all rejected tasks.
+       Call orbit.task.list with status: "backlog" to retrieve all backlog tasks.
+       If both lists are empty, return a comment "No tasks available. Nothing to dispatch." and task_id "None" and exit.
 
     2. Call github.pr.list with state: "open" to retrieve all currently open pull requests.
        Note the head branch and title of each open PR.
@@ -25,13 +26,20 @@ activity:
     3. Call orbit.task.list with status: "in_progress" to retrieve tasks currently being worked on.
        For each in-progress task, call orbit.task.show to read its description and plan.
 
-    4. For the top backlog candidates, call orbit.task.show with the task id to read description, plan, and priority.
+    4. For the top candidates, call orbit.task.show with the task id to read description, plan, and priority.
 
-    5. Select the single task most valuable to execute next.
-       Prioritise: critical/high priority first; tasks that unblock others or reduce systemic risk;
-       tasks with a clear, executable plan; smaller contained changes over large sweeping ones.
-       Skip any task whose scope or target files clearly overlap with an open PR or an in-progress task —
-       prefer work that can land independently without causing merge conflicts or duplicating effort.
+    5. Select the single task most valuable to execute next using this priority order:
+
+       a. Rejected tasks take precedence over backlog tasks. A rejected task represents work
+          already reviewed and found incomplete — it is a regression or incomplete change that
+          needs remediation, not net-new work.
+
+       b. Within each group (rejected first, then backlog), apply priority rules:
+          critical > high > medium > low.
+
+       c. Skip any task whose scope or target files clearly overlap with an open PR or an
+          in-progress task — prefer work that can land independently without causing merge
+          conflicts or duplicating effort.
 
     6. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Steve (CEO): <one sentence rationale>"
        to record the dispatch rationale.

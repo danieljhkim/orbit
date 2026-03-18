@@ -1,0 +1,21 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- identity ----
+  id: check_dispatch_needed
+  spec_type: cli_command
+
+  # ---- content ----
+  description: Exits 0 if backlog or rejected tasks exist; exits 1 if both queues are empty.
+  command: bash
+  args:
+    - -c
+    - |
+      COUNT=$(orbit task list --status backlog --json 2>/dev/null | jq 'length')
+      REJECTED=$(orbit task list --status rejected --json 2>/dev/null | jq 'length')
+      if [ "$COUNT" -eq 0 ] && [ "$REJECTED" -eq 0 ]; then exit 1; fi
+  expected_exit_codes: [0]
