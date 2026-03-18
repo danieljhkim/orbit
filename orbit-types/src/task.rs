@@ -81,7 +81,9 @@ impl TaskStatus {
                 target == TaskStatus::Backlog || target == TaskStatus::InProgress
             }
             TaskStatus::Archived => target == TaskStatus::Backlog,
-            TaskStatus::Rejected => target == TaskStatus::Backlog,
+            TaskStatus::Rejected => {
+                target == TaskStatus::Backlog || target == TaskStatus::InProgress
+            }
         };
 
         if allowed {
@@ -220,6 +222,25 @@ pub struct Task {
     pub history: Vec<TaskHistoryEntry>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejected_can_transition_to_in_progress() {
+        assert!(TaskStatus::Rejected
+            .validate_transition(TaskStatus::InProgress)
+            .is_ok());
+    }
+
+    #[test]
+    fn rejected_can_still_transition_to_backlog() {
+        assert!(TaskStatus::Rejected
+            .validate_transition(TaskStatus::Backlog)
+            .is_ok());
+    }
 }
 
 impl Display for Task {
