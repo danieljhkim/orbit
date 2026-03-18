@@ -2395,6 +2395,22 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
     std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
     git_commit_all(&repo_root, "chore: seed repo");
 
+    // Set up a local bare repo as "origin" so git.push succeeds without a real remote.
+    let bare_dir = dir.path().join("origin.git");
+    std::fs::create_dir_all(&bare_dir).expect("create bare dir");
+    let status = Command::new("git")
+        .args(["init", "--bare", "-q"])
+        .current_dir(&bare_dir)
+        .status()
+        .expect("git init --bare");
+    assert!(status.success(), "git init --bare must succeed");
+    let status = Command::new("git")
+        .args(["remote", "add", "origin", &bare_dir.to_string_lossy()])
+        .current_dir(&repo_root)
+        .status()
+        .expect("git remote add origin");
+    assert!(status.success(), "git remote add must succeed");
+
     let gh_dir = dir.path().join("bin");
     std::fs::create_dir_all(&gh_dir).expect("create gh dir");
     let title_capture = dir.path().join("gh-title.txt");
@@ -2453,6 +2469,21 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
         })
         .expect("add task")
         .id;
+
+    // Create the task branch locally so git.push has something to push.
+    let status = Command::new("git")
+        .args(["checkout", "-b", &format!("orbit/{task_id}")])
+        .current_dir(&repo_root)
+        .status()
+        .expect("git checkout -b task branch");
+    assert!(status.success(), "checkout task branch must succeed");
+    let status = Command::new("git")
+        .args(["checkout", "-"])
+        .current_dir(&repo_root)
+        .status()
+        .expect("git checkout - back");
+    assert!(status.success(), "checkout back must succeed");
+
     runtime
         .update_task(
             &task_id,

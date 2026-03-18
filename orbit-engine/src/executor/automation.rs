@@ -176,6 +176,18 @@ fn open_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, Or
     let tool_context = ToolContext {
         cwd: Some(repo_root.to_string_lossy().to_string()),
     };
+
+    // Push the branch so GitHub can see it before creating the PR.
+    host.run_tool_with_context_and_role(
+        "git.push",
+        json!({
+            "repo_root": repo_root.to_string_lossy().to_string(),
+            "branch": head,
+        }),
+        Role::Admin,
+        tool_context.clone(),
+    )?;
+
     let pr_create = host.run_tool_with_context_and_role(
         "github.pr.create",
         json!({

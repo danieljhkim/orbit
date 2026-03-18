@@ -1,4 +1,5 @@
 pub mod commit;
+pub mod push;
 pub mod stage_paths;
 
 use std::collections::HashSet;
@@ -12,6 +13,7 @@ use crate::ToolRegistry;
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(stage_paths::GitStagePathsTool);
     registry.register(commit::GitCommitTool);
+    registry.register(push::GitPushTool);
 }
 
 fn require_repo_root(input: &Value) -> Result<PathBuf, OrbitError> {
