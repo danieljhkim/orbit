@@ -35,7 +35,9 @@ Orbit is currently in an active development (WIP) phase. While the core executio
 
 ### Implementation Note
 
-To maintain repository hygiene, it is recommended to add the `.orbit/` directory to your `.gitignore`. For users who wish to persist these artifacts across machines without polluting the main Git history, consider using a Git overlay tool such as **monodev**.
+To maintain repository hygiene, it is recommended to add the `.orbit/` directory to your `.gitignore`. For users who wish to persist these artifacts across machines without polluting the main Git history, consider using a Git overlay tool such as **monodev**. For Orbit, .orbit overlays are tracked here:
+
+- https://github.com/danieljhkim/orbit/tree/monodev/persist/persist/stores/orbit-states/overlay/.orbit
 
 ## Contributing
 
