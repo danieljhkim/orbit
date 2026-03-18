@@ -4,41 +4,104 @@ Orbit is a lightweight, local-first execution engine designed for agent-driven s
 
 Unlike centralized AI orchestration platforms, Orbit is built to be a decoupled execution layer. It focuses on the "how" of agentic task completion, leaving scheduling and higher-level management to external tools or manual triggers.
 
-## Core Architectural Principles
+---
 
-* **Decoupled Execution:** Orbit functions as a pure execution engine. It manages task state, tool-calling, and artifact generation without enforcing a specific scheduling or hosting model.
-* **Local-First Persistence:** All engine state, including job definitions, run audits, and task tracking, is stored within a local `.orbit` directory. This ensures high-speed execution and repository-resident context.
-* **Multi-Model Orchestration:** Orbit optimizes for both reasoning quality and execution throughput by assigning specialized roles to different Large Language Models (LLMs).
+## Quick Start
 
-## System Components
+**1. Initialize Orbit in your repository:**
 
-The engine operates through a structured filesystem hierarchy within the `.orbit` directory:
+```bash
 
-* **Activities (`.orbit/activities`):** Definitions of atomic units of work that can be performed by an agent/automation/API/script.
-* **Jobs (`.orbit/jobs/jobs`):** Executable chains of activities that link multiple activities into a cohesive delivery pipeline.
-* **Runs (`.orbit/jobs/runs`):** Immutable execution audits and artifacts. This serves as the "source of truth" for debugging and state rehydration.
-* **Skills (`.orbit/skills`):** A library of orbit-realted capabilities that extend the agent's ability to utilize orbit workflow.
-* **Tasks (`.orbit/tasks`):** Local task artifacts that manage the lifecycle of a feature or bug fix, similar to Jira board.
+# Initialize `.orbit/` directory with default configuration.
+orbit init
 
-## Model Dynamics and Strategy
+# Prompt an agent to create a task:
+"Create this orbit task ...."
 
-Orbit utilizes a dual-model strategy to balance computational cost against reasoning depth:
+# once task is created (proposed status), approve the task
+orbit task approve <task_id>
 
-| Model | Primary Role | Justification |
+# run job_task_pipeline job
+orbit job run job_task_pipeline 
+```
+
+---
+
+## Overview
+
+### Task Lifecycle
+
+Tasks move through a linear lifecycle with defined gates at each transition:
+
+```
+proposed → backlog → in-progress → review → done
+```
+
+Rejection and recovery paths:
+
+```
+proposed  → rejected
+review    → rejected
+rejected  → backlog   (reconsider)
+```
+
+### Orbit Artifacts
+
+Orbit operates through a structured filesystem hierarchy under `.orbit/`:
+
+```
+.orbit/
+├── activities/       # Atomic units of work (YAML)
+├── jobs/
+│   ├── jobs/         # Job definitions — ordered chains of activities
+│   └── runs/         # Immutable execution audit logs per job run
+├── identities/       # Agent personas with roles and behavioral profiles
+├── skills/           # Markdown-based skill instructions loaded by agents
+├── tasks/            # Task artifacts organized by lifecycle state
+└── orbit.db          # SQLite audit store
+```
+
+
+### Architecture
+
+Orbit is structured as a layered set of Rust crates. Lower layers have no knowledge of higher layers.
+
+```
+orbit-cli          ← binary; CLI parsing and command dispatch
+    └── orbit-core         ← runtime facade; wires all subsystems together
+            ├── orbit-engine       ← job and activity execution loop
+            │       ├── orbit-agent    ← agent invocation (Claude, Codex)
+            │       ├── orbit-exec     ← subprocess execution and sandboxing
+            │       ├── orbit-tools    ← built-in tool registry
+            │       └── orbit-store    ← persistence backends
+            ├── orbit-policy       ← tool access control and role enforcement
+            └── orbit-types        ← shared domain types and error definitions
+```
+
+
+### Model Strategy
+
+Orbit uses a dual-model strategy to balance reasoning depth against throughput:
+
+| Model | Role | Rationale |
 | :--- | :--- | :--- |
-| **Claude** | Planning and Review | High-order reasoning and adherence to complex architectural patterns. |
-| **Codex** | Code Generation and Execution | High throughput and generous rate limits for iterative implementation tasks. |
+| **Claude** | Planning, dispatch, review | High-order reasoning; architectural and code review quality |
+| **Codex** | Implementation, code generation | High throughput and rate limits for iterative coding tasks |
+
+---
 
 ## Current Status
 
-Orbit is currently in an active development (WIP) phase. While the core execution primitives are stable enough for local productivity enhancements, it is not yet recommended for production environments.
+Orbit is in active development (WIP). Core execution primitives are stable for local use; production deployments are not yet recommended.
 
-### Implementation Note
+### Persistence Note
 
-To maintain repository hygiene, it is recommended to add the `.orbit/` directory to your `.gitignore`. For users who wish to persist these artifacts across machines without polluting the main Git history, consider using a Git overlay tool such as **monodev**. For Orbit, .orbit overlays are tracked here:
+All Orbit state lives in `.orbit/` and is local by default. For persistence across machines without polluting git history, consider a Git overlay tool such as **monodev**. Orbit state overlays are tracked here:
 
 - https://github.com/danieljhkim/orbit/tree/monodev/persist/persist/stores/orbit-states/overlay/.orbit
 
+---
+
 ## Contributing
 
-Contributions focusing on refining the core execution primitives, improving state serialization, or hardening tool-calling interfaces are welcome. Please open an issue or submit a pull request for review.
+Contributions focused on core execution primitives, state serialization, or tool-calling interfaces are welcome. Open an issue or submit a pull request for review.
