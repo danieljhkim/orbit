@@ -255,13 +255,24 @@ impl EngineHost for OrbitRuntime {
 
     fn execution_environment_mode(&self, env_extra: &[String]) -> EnvironmentMode {
         if self.context.execution_env_policy.inherit() {
+            // Full inheritance: ORBIT_ROOT resolution relies on find_git_repo_root
+            // handling git worktrees correctly (which it does after the worktree fix).
             EnvironmentMode::Inherit
         } else {
-            EnvironmentMode::ClearAndSet(
-                self.context
-                    .execution_env_policy
-                    .hydrated_allowlist_env_with_extras(env_extra),
-            )
+            let mut env = self
+                .context
+                .execution_env_policy
+                .hydrated_allowlist_env_with_extras(env_extra);
+            // Explicitly inject ORBIT_ROOT so that any orbit CLI invocation made
+            // by the agent subprocess (e.g., `orbit tool run orbit.task.*`) resolves
+            // to the same data root regardless of its working directory. Without this,
+            // a Codex or Claude agent running inside a git worktree would either create
+            // a spurious .orbit/ in the worktree or resolve to the wrong database.
+            let orbit_root = self.context.data_root.to_string_lossy().into_owned();
+            if !env.iter().any(|(k, _)| k == "ORBIT_ROOT") {
+                env.push(("ORBIT_ROOT".to_string(), orbit_root));
+            }
+            EnvironmentMode::ClearAndSet(env)
         }
     }
 
