@@ -7,16 +7,14 @@ mod paths;
 pub mod runtime;
 
 pub use orbit_engine::JobRunResult;
-pub use orbit_store::identity_store as identity_catalog;
 pub use orbit_store::skill_store as skill_catalog;
 
 pub use context::OrbitContext;
 pub use orbit_store::AuditEventInsertParams;
 pub use orbit_types::OrbitError;
 pub use orbit_types::{
-    Activity, AuditEvent, AuditEventStatus, AuditStats, IdentityRole, Job, JobRun, JobRunState,
-    JobScheduleState, JobStep, JobTargetType, Role, Skill, Task, TaskComment, TaskPriority,
-    TaskStatus, TaskType,
+    Activity, AuditEvent, AuditEventStatus, AuditStats, Job, JobRun, JobRunState, JobScheduleState,
+    JobStep, JobTargetType, Role, Skill, Task, TaskComment, TaskPriority, TaskStatus, TaskType,
 };
 pub use orbit_types::{
     redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,
@@ -214,7 +212,6 @@ mod tests {
                 output_schema_json: json!({}),
                 spec_config: json!({}),
                 workspace_path: None,
-                identity_id: None,
                 created_by: None,
             })
             .expect("insert activity");

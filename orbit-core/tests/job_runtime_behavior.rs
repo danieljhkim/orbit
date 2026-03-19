@@ -42,7 +42,6 @@ fn add_activity_with_input_schema(
                 "instruction": "Run the scheduled runtime behavior test."
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add activity");
@@ -63,7 +62,6 @@ fn add_activity_rejects_missing_skill_ref() {
             "skill_refs": ["does-not-exist"]
         }),
         workspace_path: None,
-        identity_id: None,
         created_by: None,
     });
     assert!(result.is_err());
@@ -171,7 +169,6 @@ fn cli_command_activity_executes_without_agent_cli_and_captures_output_file() {
                 "expected_exit_codes": [0]
             }),
             workspace_path: Some(dir.path().to_string_lossy().into_owned()),
-            identity_id: None,
             created_by: None,
         })
         .expect("add activity");
@@ -226,7 +223,6 @@ fn cli_command_failures_redact_sensitive_environment_values_from_error_messages(
                 "expected_exit_codes": [0]
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add activity");
@@ -323,14 +319,6 @@ fn write_agent_script(path: &std::path::Path, body: &str) -> String {
 
 fn write_runtime_config(data_root: &std::path::Path, content: &str) {
     std::fs::write(data_root.join("config.toml"), content).expect("write config");
-}
-
-fn write_identity_file(data_root: &std::path::Path, id: &str, display_name: &str, role: &str) {
-    let identity_root = data_root.join("identities");
-    std::fs::create_dir_all(&identity_root).expect("create identity root");
-    let content =
-        format!("identity:\n  name: {id}\n  display_name: {display_name}\n  role: {role}\n");
-    std::fs::write(identity_root.join(format!("{id}.yaml")), content).expect("write identity");
 }
 
 fn init_git_repo(path: &std::path::Path) {
@@ -701,7 +689,7 @@ fn run_job_now_finalizes_failed_when_pre_step_setup_errors_after_running() {
 }
 
 #[test]
-fn job_run_resolves_activity_identity_from_data_root_when_home_differs() {
+fn job_run_omits_identity_block_from_agent_envelope() {
     let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
     let repo_orbit = tempdir().expect("repo orbit");
     let home = tempdir().expect("home");
@@ -712,7 +700,6 @@ fn job_run_resolves_activity_identity_from_data_root_when_home_differs() {
         std::env::set_var("USERPROFILE", home.path());
     }
 
-    write_identity_file(repo_orbit.path(), "prii", "Prii", "leader");
     let runtime = OrbitRuntime::from_data_root(repo_orbit.path()).expect("runtime");
     let stdin_capture = repo_orbit.path().join("job-stdin.json");
     let script_path = repo_orbit.path().join("mock-agent");
@@ -724,20 +711,19 @@ fn job_run_resolves_activity_identity_from_data_root_when_home_differs() {
 
     runtime
         .add_activity(ActivityAddParams {
-            id: "spec-identity".to_string(),
+            id: "spec-envelope".to_string(),
             spec_type: "agent_invoke".to_string(),
-            description: "identity runtime test".to_string(),
+            description: "envelope runtime test".to_string(),
             input_schema_json: json!({}),
             output_schema_json: json!({}),
             spec_config: json!({
-                "instruction": "Run with an explicit identity."
+                "instruction": "Run without an identity block."
             }),
             workspace_path: None,
-            identity_id: Some("prii".to_string()),
             created_by: None,
         })
         .expect("add activity");
-    let job_id = add_scheduled_activity(&runtime, "spec-identity", &agent_cli);
+    let job_id = add_scheduled_activity(&runtime, "spec-envelope", &agent_cli);
 
     let run_result = runtime.run_job_now(&job_id);
     match previous_home {
@@ -753,8 +739,7 @@ fn job_run_resolves_activity_identity_from_data_root_when_home_differs() {
     assert_eq!(run.state, JobRunState::Success);
     let stdin_raw = std::fs::read_to_string(stdin_capture).expect("stdin capture");
     let payload: serde_json::Value = serde_json::from_str(&stdin_raw).expect("valid stdin");
-    assert_eq!(payload["identity"]["id"], "prii");
-    assert_eq!(payload["identity"]["name"], "Prii");
+    assert!(payload.get("identity").is_none());
 }
 
 #[test]
@@ -1332,7 +1317,6 @@ Validate output shape.
                 "skill_refs": ["strict-schema"]
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add activity");
@@ -1423,7 +1407,6 @@ Validate advanced schema behavior.
                 "skill_refs": ["strict-complex"]
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add activity");
@@ -1570,7 +1553,6 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                 "instruction": "Return a task_id."
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add agent activity");
@@ -1612,7 +1594,6 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                 }
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add cli activity");
@@ -1688,7 +1669,6 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                 "instruction": "Return a task_id and workspace_path."
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add agent activity");
@@ -1729,7 +1709,6 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                 "expected_exit_codes": [0]
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add cli activity");
@@ -1810,7 +1789,6 @@ fn agent_step_uses_workspace_path_as_process_current_dir() {
                 "instruction": "Return the current working directory."
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add activity");
@@ -1925,7 +1903,6 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                 "action": "create_task_worktree"
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add create activity");
@@ -1958,7 +1935,6 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                 "expected_exit_codes": [0]
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add capture activity");
@@ -2085,7 +2061,6 @@ fn start_task_automation_moves_task_into_progress() {
             }),
             spec_config: json!({"action":"start_task"}),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add start activity");
@@ -2178,7 +2153,6 @@ fn update_task_automation_moves_task_to_review_with_summary_comment_and_note() {
             }),
             spec_config: json!({"action":"update_task"}),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add update activity");
@@ -2433,7 +2407,6 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 "action": "create_task_worktree"
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add create activity");
@@ -2509,7 +2482,6 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 "action": "commit_task_changes"
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add commit activity");
@@ -2626,7 +2598,6 @@ fn commit_task_changes_uses_summary_from_input() {
             output_schema_json: json!({"type":"object","properties":{"workspace_path":{"type":"string"},"branch":{"type":"string"}},"required":["workspace_path","branch"]}),
             spec_config: json!({"action":"create_task_worktree"}),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add create activity");
@@ -2670,7 +2641,6 @@ fn commit_task_changes_uses_summary_from_input() {
             output_schema_json: json!({"type":"object","properties":{"commit_message":{"type":"string"}},"required":["commit_message"]}),
             spec_config: json!({"action":"commit_task_changes"}),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add commit activity");
@@ -2884,7 +2854,6 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
                 "action": "open_pr_from_task"
             }),
             workspace_path: None,
-            identity_id: None,
             created_by: None,
         })
         .expect("add pr activity");

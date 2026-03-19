@@ -197,11 +197,8 @@ fn execute_automation_attempt<H: EngineHost>(
 pub fn execution_template_context(execution: &ExecutionContext) -> TemplateContext {
     let mut env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
     env.insert("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string());
-    if let Some(identity_id) = execution.activity.identity_id.as_ref() {
-        env.insert(
-            "ORBIT_TASK_ACTOR_IDENTITY_ID".to_string(),
-            identity_id.clone(),
-        );
+    if let Some(actor_label) = execution.activity.created_by.as_ref() {
+        env.insert("ORBIT_TASK_ACTOR_LABEL".to_string(), actor_label.clone());
     }
 
     TemplateContext {

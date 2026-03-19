@@ -111,7 +111,7 @@ fn rewrite_file(path: &std::path::Path, replacements: &[(&str, &str)]) {
 }
 
 #[test]
-fn init_creates_default_identities_under_cwd_orbit() {
+fn init_creates_default_runtime_assets_under_cwd_orbit() {
     let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
@@ -120,20 +120,8 @@ fn init_creates_default_identities_under_cwd_orbit() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("identities: root="))
-        .stdout(predicate::str::contains("refreshed="))
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("config: path="));
-
-    let identity_root = workspace.path().join(".orbit").join("identities");
-    assert!(identity_root.join("linus.yaml").exists());
-    assert!(identity_root.join("lamport.yaml").exists());
-    assert!(identity_root.join("prii.yaml").exists());
-    assert!(identity_root.join("steve.yaml").exists());
-    assert!(!identity_root.join("grace.yaml").exists());
-    assert!(!identity_root.join("john.yaml").exists());
-    assert!(!identity_root.join("kent.yaml").exists());
-    assert!(!identity_root.join("rob.yaml").exists());
 
     let skills_root = workspace.path().join(".orbit").join("skills");
     assert!(skills_root.join("orbit").join("SKILL.md").exists());
@@ -236,7 +224,7 @@ fn init_refreshes_full_bundled_activity_and_job_set() {
 }
 
 #[test]
-fn init_is_idempotent_for_existing_identity_files() {
+fn init_is_idempotent_for_existing_defaults() {
     let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
@@ -245,8 +233,6 @@ fn init_is_idempotent_for_existing_identity_files() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("identities: root="))
-        .stdout(predicate::str::contains("refreshed=4"))
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("refreshed=6"));
 
@@ -256,8 +242,6 @@ fn init_is_idempotent_for_existing_identity_files() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("identities: root="))
-        .stdout(predicate::str::contains("refreshed=4"))
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("refreshed=6"));
 }
@@ -424,15 +408,13 @@ fn init_force_resets_cwd_orbit_to_defaults() {
 }
 
 #[test]
-fn init_uses_repo_local_layout_when_inside_git_repository() {
+fn init_uses_explicit_orbit_root_when_invoked_inside_git_repository() {
     let repo = tempfile::tempdir().expect("repo");
     let home = tempfile::tempdir().expect("home");
-    let repo_canonical = repo.path().canonicalize().expect("canonical repo path");
-
     std::fs::create_dir_all(repo.path().join(".git")).expect("create git marker");
     let nested = repo.path().join("nested").join("workdir");
     std::fs::create_dir_all(&nested).expect("create nested workdir");
-    let repo_orbit = repo.path().join(".orbit");
+    let repo_orbit = nested.join(".orbit");
 
     orbit_in(&nested)
         .env("HOME", home.path())
@@ -440,17 +422,13 @@ fn init_uses_repo_local_layout_when_inside_git_repository() {
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
-            "identities: root={}",
-            repo_canonical.join(".orbit").join("identities").display()
-        )))
-        .stdout(predicate::str::contains(format!(
             "skills: root={}",
-            repo_canonical.join(".orbit").join("skills").display()
+            nested.join(".orbit").join("skills").display()
         )));
 
-    assert!(repo_orbit.join("identities").join("prii.yaml").exists());
     assert!(
-        repo_orbit
+        nested
+            .join(".orbit")
             .join("skills")
             .join("orbit-approve-task")
             .join("SKILL.md")
@@ -481,10 +459,6 @@ fn init_refreshes_modified_defaults_without_destroying_tasks() {
 
     let orbit_root = workspace.path().join(".orbit");
 
-    // Tamper with a default identity file.
-    let identity_path = orbit_root.join("identities").join("prii.yaml");
-    std::fs::write(&identity_path, "TAMPERED IDENTITY").expect("tamper identity");
-
     // Tamper with a default skill file.
     let skill_path = orbit_root
         .join("skills")
@@ -504,11 +478,6 @@ fn init_refreshes_modified_defaults_without_destroying_tasks() {
         .assert()
         .success()
         .stdout(predicate::str::contains("refreshed="));
-
-    // Identity should be restored to default.
-    let identity_raw = std::fs::read_to_string(&identity_path).expect("read identity");
-    assert!(!identity_raw.contains("TAMPERED"));
-    assert!(identity_raw.contains("display_name:"));
 
     // Skill should be restored to default.
     let skill_raw = std::fs::read_to_string(&skill_path).expect("read skill");

@@ -294,22 +294,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 arguments_json: None,
             }
         }
-        Commands::Identity(cmd) => {
-            use crate::command::identity::IdentitySubcommand;
-            let (sub, target_id) = match &cmd.command {
-                IdentitySubcommand::List(_) => ("list", None),
-                IdentitySubcommand::Show(args) => ("show", Some(args.identity_id.as_str())),
-            };
-            CommandMeta {
-                command: "identity".to_string(),
-                subcommand: Some(sub.to_string()),
-                tool_name: None,
-                target_type: Some("identity".to_string()),
-                target_id: target_id.map(String::from),
-                role: "admin".to_string(),
-                arguments_json: None,
-            }
-        }
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
     }
 }

@@ -63,17 +63,11 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::AgentSessionNotFound(message) => {
             OrbitError::AgentSessionNotFound(redact_sensitive_env_text(&message))
         }
-        OrbitError::IdentityNotFound(message) => {
-            OrbitError::IdentityNotFound(redact_sensitive_env_text(&message))
-        }
         OrbitError::InvalidInput(message) => {
             OrbitError::InvalidInput(redact_sensitive_env_text(&message))
         }
         OrbitError::SkillValidation(message) => {
             OrbitError::SkillValidation(redact_sensitive_env_text(&message))
-        }
-        OrbitError::IdentityValidation(message) => {
-            OrbitError::IdentityValidation(redact_sensitive_env_text(&message))
         }
         OrbitError::JobValidation(message) => {
             OrbitError::JobValidation(redact_sensitive_env_text(&message))

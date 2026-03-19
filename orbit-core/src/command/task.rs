@@ -59,21 +59,23 @@ struct EffectiveTaskActor {
 }
 
 const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
-const ORBIT_TASK_ACTOR_IDENTITY_ID: &str = "ORBIT_TASK_ACTOR_IDENTITY_ID";
+const ORBIT_TASK_ACTOR_LABEL: &str = "ORBIT_TASK_ACTOR_LABEL";
+const LEGACY_ORBIT_TASK_ACTOR_IDENTITY_ID: &str = "ORBIT_TASK_ACTOR_IDENTITY_ID";
 
 fn effective_task_actor() -> EffectiveTaskActor {
     let kind_raw = std::env::var(ORBIT_TASK_ACTOR_KIND).ok();
-    let identity_id = std::env::var(ORBIT_TASK_ACTOR_IDENTITY_ID)
+    let actor_label = std::env::var(ORBIT_TASK_ACTOR_LABEL)
         .ok()
+        .or_else(|| std::env::var(LEGACY_ORBIT_TASK_ACTOR_IDENTITY_ID).ok())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
 
     let kind = match kind_raw.as_deref() {
         Some("agent") => TaskActorKind::Agent,
-        _ if identity_id.is_some() => TaskActorKind::Agent,
+        _ if actor_label.is_some() => TaskActorKind::Agent,
         _ => TaskActorKind::Human,
     };
-    let label = identity_id.unwrap_or_else(|| match kind {
+    let label = actor_label.unwrap_or_else(|| match kind {
         TaskActorKind::Human => "human".to_string(),
         TaskActorKind::Agent => "agent".to_string(),
     });

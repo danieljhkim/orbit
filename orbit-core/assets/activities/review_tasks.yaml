@@ -2,16 +2,14 @@ schema_version: 1
 
 # ---- metadata ----
 created_by: system
-identity_id: prii
-
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: review_tasks
   spec_type: agent_invoke
 
   # ---- content ----
-  description: reviewer reviews all Orbit tasks in "proposed" or "review" and records explicit approvals or rejections.
+  description: Review all Orbit tasks in "proposed" or "review" and record explicit approvals or rejections.
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.
     Use `orbit-approve-task` to check for any orbit tasks with "proposed" or "review" status,

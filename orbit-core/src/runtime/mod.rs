@@ -10,13 +10,12 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_policy::PolicyEngine;
-use orbit_types::{Audit, IdentityRole, Job, OrbitError, OrbitEvent, ResolvedIdentity};
+use orbit_types::{Audit, Job, OrbitError, OrbitEvent};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::OrbitContext;
 use crate::command::init::ensure_orbit_root_initialized;
-use crate::identity_catalog::compile_identity_block;
 use crate::paths;
 
 #[derive(Clone)]
@@ -113,42 +112,6 @@ impl OrbitRuntime {
 
     pub fn user_name(&self) -> &str {
         &self.context.user_name
-    }
-
-    pub fn identity_root(&self) -> PathBuf {
-        self.context.identity_catalog.root().to_path_buf()
-    }
-
-    pub fn identity_role_overrides(&self) -> std::collections::BTreeMap<String, String> {
-        self.context
-            .identity_catalog
-            .role_overrides()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.to_string()))
-            .collect()
-    }
-
-    pub fn list_identities(&self) -> Result<Vec<ResolvedIdentity>, OrbitError> {
-        self.context.identity_catalog.list_filtered(None)
-    }
-
-    pub fn list_identities_filtered(
-        &self,
-        role: Option<IdentityRole>,
-    ) -> Result<Vec<ResolvedIdentity>, OrbitError> {
-        self.context.identity_catalog.list_filtered(role)
-    }
-
-    pub fn show_identity(&self, identity_id: &str) -> Result<ResolvedIdentity, OrbitError> {
-        self.context.identity_catalog.resolve(identity_id)
-    }
-
-    pub fn resolve_identity(&self, identity_id: &str) -> Result<ResolvedIdentity, OrbitError> {
-        self.context.identity_catalog.resolve(identity_id)
-    }
-
-    pub fn compile_identity_block(&self, identity: &ResolvedIdentity) -> String {
-        compile_identity_block(identity)
     }
 }
 

@@ -26,8 +26,6 @@ struct ExecutionEnvelope {
     #[serde(skip_serializing_if = "Option::is_none")]
     job: Option<Value>,
     skills: Vec<ExecutionSkillEnvelope>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    identity: Option<Value>,
     input: Value,
     memory: Value,
 }
@@ -47,20 +45,6 @@ fn build_agent_stdin_envelope_payload(
 ) -> Result<Vec<u8>, OrbitError> {
     let skill_refs = activity_skill_refs_from_spec_config(&execution.activity.spec_config)?;
     let skills = runtime.resolve_activity_skill_refs(&skill_refs)?;
-    let identity = execution
-        .activity
-        .identity_id
-        .as_deref()
-        .map(|identity_id| runtime.resolve_identity(identity_id))
-        .transpose()?
-        .map(|resolved| {
-            json!({
-                "id": resolved.id,
-                "name": resolved.name,
-                "role": resolved.role.to_string(),
-                "block": runtime.compile_identity_block(&resolved),
-            })
-        });
     let envelope = ExecutionEnvelope {
         schema_version: 1,
         activity: activity_envelope_json(&execution.activity),
@@ -86,7 +70,6 @@ fn build_agent_stdin_envelope_payload(
                 meta: skill.meta_raw,
             })
             .collect(),
-        identity,
         input: execution.input.clone(),
         memory: json!({}),
     };
@@ -381,7 +364,6 @@ fn activity_envelope_json(activity: &Activity) -> Value {
         "description": activity.description,
         "input_schema_json": activity.input_schema_json,
         "output_schema_json": activity.output_schema_json,
-        "identity_id": activity.identity_id,
         "created_by": activity.created_by,
     });
 

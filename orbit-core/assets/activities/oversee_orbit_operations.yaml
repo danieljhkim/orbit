@@ -2,19 +2,16 @@ schema_version: 1
 
 # ---- metadata ----
 created_by: system
-identity_id: steve
-
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: oversee_orbit_operations
   spec_type: agent_invoke
 
   # ---- content ----
   description: |
-    As the CEO of orbit-workflow operations, reviews all the recent
-    orbit operations such as job-runs and tasks and makes sure
-    everything is up to the standard.
+    Review recent Orbit operations such as job runs and tasks and make
+    sure everything is up to the standard.
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.
     Use `orbit-maintain-system` skill to perform an operational audit of recent job runs.

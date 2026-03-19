@@ -1,15 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use orbit_types::{IdentityRole, OrbitError};
+use orbit_types::OrbitError;
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
-    RawCodexExecutionConfig, RawExecutionEnvConfig, RawIdentitySection, RawRuntimeConfig,
-    RawTaskSection, RawUserSection,
+    RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig, RawTaskSection,
+    RawUserSection,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -23,7 +23,6 @@ pub(crate) struct RuntimeConfig {
     pub(crate) codex_execution: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,
     pub(crate) task_approval: TaskApprovalConfig,
-    pub(crate) identity: IdentityConfig,
     pub(crate) user_name: String,
 }
 
@@ -40,7 +39,6 @@ impl RuntimeConfig {
             codex_execution: CodexExecutionPolicy::default(),
             persistence: PersistenceConfig::default_for_data_root(data_root),
             task_approval: TaskApprovalConfig::default(),
-            identity: IdentityConfig::default_for_data_root(data_root),
             user_name: DEFAULT_USER_NAME.to_string(),
         }
     }
@@ -73,7 +71,6 @@ impl RuntimeConfig {
             )?,
             persistence: PersistenceConfig::from_raw(data_root, &parsed)?,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
-            identity: IdentityConfig::from_raw(parsed.identity.as_ref(), data_root, data_root)?,
             user_name: parse_user_name(parsed.user.as_ref())?,
         })
     }
@@ -225,62 +222,6 @@ impl TaskApprovalConfig {
         Ok(Self {
             required_for_agent,
             delegate_approval,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct IdentityConfig {
-    pub(crate) root: PathBuf,
-    pub(crate) role_overrides: BTreeMap<String, IdentityRole>,
-}
-
-impl Default for IdentityConfig {
-    fn default() -> Self {
-        Self::default_for_data_root(&paths::current_dir_orbit_root())
-    }
-}
-
-impl IdentityConfig {
-    fn default_for_data_root(data_root: &Path) -> Self {
-        Self {
-            root: data_root.join("identities"),
-            role_overrides: BTreeMap::new(),
-        }
-    }
-
-    fn from_raw(
-        raw: Option<&RawIdentitySection>,
-        config_root: &Path,
-        data_root: &Path,
-    ) -> Result<Self, OrbitError> {
-        let default = Self::default_for_data_root(data_root);
-        let root = paths::resolve_config_path(
-            raw.and_then(|v| v.root.as_deref()),
-            &default.root,
-            config_root,
-            "identity.root",
-        )?;
-        let mut role_overrides = BTreeMap::new();
-        if let Some(roles) = raw.and_then(|v| v.roles.as_ref()) {
-            for (identity, role_raw) in roles {
-                let key = identity.trim();
-                if key.is_empty() {
-                    return Err(OrbitError::InvalidInput(
-                        "identity.roles keys must not be empty".to_string(),
-                    ));
-                }
-                let role = role_raw.parse::<IdentityRole>().map_err(|e| {
-                    OrbitError::InvalidInput(format!(
-                        "identity.roles.{key} has invalid role '{role_raw}': {e}"
-                    ))
-                })?;
-                role_overrides.insert(key.to_string(), role);
-            }
-        }
-        Ok(Self {
-            root,
-            role_overrides,
         })
     }
 }

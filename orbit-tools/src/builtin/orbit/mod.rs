@@ -1,6 +1,4 @@
 pub mod activity_show;
-pub mod identity_list;
-pub mod identity_show;
 pub mod job_run_archive;
 pub mod job_run_list;
 pub mod job_run_show;
@@ -31,8 +29,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_show::OrbitTaskShowTool);
     registry.register(task_list::OrbitTaskListTool);
     registry.register(task_update::OrbitTaskUpdateTool);
-    registry.register(identity_list::OrbitIdentityListTool);
-    registry.register(identity_show::OrbitIdentityShowTool);
     registry.register(job_run_list::OrbitJobRunListTool);
     registry.register(job_run_show::OrbitJobRunShowTool);
     registry.register(job_run_archive::OrbitJobRunArchiveTool);
@@ -169,8 +165,6 @@ mod tests {
             "orbit.task.show",
             "orbit.task.list",
             "orbit.task.update",
-            "orbit.identity.list",
-            "orbit.identity.show",
             "orbit.job_run.list",
             "orbit.job_run.show",
             "orbit.job_run.archive",
@@ -410,45 +404,6 @@ mod tests {
         )
         .expect_err("missing fields must fail");
         assert!(err.to_string().contains("at least one"), "{err}");
-    }
-
-    #[test]
-    fn identity_list_builds_role_filter_when_present() {
-        let req = super::identity_list::build_exec_request(
-            &ToolContext::default(),
-            &json!({"role": "engineer"}),
-        )
-        .expect("valid list input");
-
-        assert_eq!(
-            req.args,
-            vec![
-                "identity".to_string(),
-                "list".to_string(),
-                "--json".to_string(),
-                "--role".to_string(),
-                "engineer".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn identity_show_builds_request_from_id() {
-        let req = super::identity_show::build_exec_request(
-            &ToolContext::default(),
-            &json!({"id": "linus"}),
-        )
-        .expect("id should be accepted");
-
-        assert_eq!(
-            req.args,
-            vec![
-                "identity".to_string(),
-                "show".to_string(),
-                "linus".to_string(),
-                "--json".to_string(),
-            ]
-        );
     }
 
     #[test]

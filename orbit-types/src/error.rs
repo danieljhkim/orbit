@@ -20,14 +20,10 @@ pub enum OrbitError {
     ActivityNotFound(String),
     #[error("agent session not found: {0}")]
     AgentSessionNotFound(String),
-    #[error("identity not found: {0}")]
-    IdentityNotFound(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("skill validation failed: {0}")]
     SkillValidation(String),
-    #[error("identity validation failed: {0}")]
-    IdentityValidation(String),
     #[error("job validation failed: {0}")]
     JobValidation(String),
     #[error("agent protocol violation: {0}")]

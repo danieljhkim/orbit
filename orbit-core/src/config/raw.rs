@@ -1,12 +1,11 @@
-use std::collections::BTreeMap;
-
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawRuntimeConfig {
     pub(super) execution: Option<RawExecutionConfig>,
     pub(super) user: Option<RawUserSection>,
-    pub(super) identity: Option<RawIdentitySection>,
+    #[allow(dead_code)]
+    pub(super) identity: Option<toml::Value>,
     pub(super) job: Option<RawEntitySection>,
     pub(super) activity: Option<RawEntitySection>,
     pub(super) skill: Option<RawEntitySection>,
@@ -53,12 +52,6 @@ pub(super) struct RawTaskSection {
 pub(super) struct RawTaskApprovalConfig {
     pub(super) required_for_agent: Option<bool>,
     pub(super) delegate_approval: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct RawIdentitySection {
-    pub(super) root: Option<String>,
-    pub(super) roles: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

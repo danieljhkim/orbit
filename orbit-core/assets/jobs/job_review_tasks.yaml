@@ -2,7 +2,7 @@ schemaVersion: 1
 
 # ---- job ----
 job:
-  # ---- identity ----
+  # ---- registration ----
   job_id: job_review_tasks
   state: enabled
 

@@ -2,7 +2,7 @@ schemaVersion: 1
 
 # ---- job ----
 job:
-  # ---- identity ----
+  # ---- registration ----
   job_id: job_oversee_orbit_operations
   state: enabled
 

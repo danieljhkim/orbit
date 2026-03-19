@@ -59,7 +59,6 @@ pub struct ActivityCreateParams {
     pub output_schema_json: Value,
     pub spec_config: Value,
     pub workspace_path: Option<String>,
-    pub identity_id: Option<String>,
     pub created_by: Option<String>,
 }
 
@@ -70,7 +69,6 @@ pub struct ActivityUpdateParams {
     pub output_schema_json: Option<Value>,
     pub spec_config: Option<Value>,
     pub workspace_path: Option<Option<String>>,
-    pub identity_id: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
     pub is_active: Option<bool>,
 }

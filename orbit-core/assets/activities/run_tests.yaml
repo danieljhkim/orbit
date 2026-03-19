@@ -5,7 +5,7 @@ created_by: system
 
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: run_tests
   spec_type: cli_command
 

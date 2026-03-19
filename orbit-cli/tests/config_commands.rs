@@ -85,13 +85,6 @@ fn config_show_json_bootstraps_cwd_orbit_when_missing() {
     assert!(
         dir.path()
             .join(".orbit")
-            .join("identities")
-            .join("prii.yaml")
-            .exists()
-    );
-    assert!(
-        dir.path()
-            .join(".orbit")
             .join("skills")
             .join("orbit-approve-task")
             .join("SKILL.md")
@@ -225,6 +218,7 @@ fn config_show_json_reports_workspace_config_path_when_local_config_is_used() {
     cmd.current_dir(&workspace);
     cmd.env("HOME", &home);
     cmd.env("USERPROFILE", &home);
+    cmd.env("ORBIT_ROOT", &local_orbit_dir);
 
     let output = cmd
         .args(["config", "show", "--json"])
@@ -257,21 +251,6 @@ fn config_show_json_reports_workspace_config_path_when_local_config_is_used() {
         value["task"]["approval"]["required_for_agent"],
         serde_json::json!(true)
     );
-    let expected_identity_root = std::fs::canonicalize(&local_orbit_dir)
-        .expect("canonical workspace orbit dir")
-        .join("identities");
-    let reported_identity_root = std::fs::canonicalize(
-        Path::new(
-            value["identity"]["root"]
-                .as_str()
-                .expect("identity.root should be a string in config show json"),
-        )
-        .parent()
-        .expect("identity.root should have a parent"),
-    )
-    .expect("canonical reported identity parent")
-    .join("identities");
-    assert_eq!(reported_identity_root, expected_identity_root);
 }
 
 #[test]
@@ -288,6 +267,7 @@ fn non_init_commands_in_repo_bootstrap_repo_local_scope() {
     cmd.current_dir(&workspace);
     cmd.env("HOME", &home);
     cmd.env("USERPROFILE", &home);
+    cmd.env("ORBIT_ROOT", workspace.join(".orbit"));
 
     let output = cmd
         .args(["config", "show", "--json"])

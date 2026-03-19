@@ -4,7 +4,6 @@ pub mod audit_event;
 pub mod error;
 pub mod event;
 pub mod id;
-pub mod identity;
 pub mod job;
 pub mod memo;
 pub mod redaction;
@@ -19,7 +18,6 @@ pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats};
 pub use error::OrbitError;
 pub use event::OrbitEvent;
 pub use id::OrbitId;
-pub use identity::{IdentityRole, ResolvedIdentity};
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
     JobScheduleState, JobStep, JobTargetType,
@@ -160,7 +158,6 @@ mod tests {
             }),
             tools: vec!["fs.read".to_string(), "fs.write".to_string()],
             workspace_path: None,
-            identity_id: Some("prii".to_string()),
             created_by: Some("human".to_string()),
             is_active: true,
             created_at: Utc::now(),

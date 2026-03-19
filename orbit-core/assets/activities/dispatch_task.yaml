@@ -2,19 +2,17 @@ schema_version: 1
 
 # ---- metadata ----
 created_by: system
-identity_id: steve
-
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: dispatch_task
   spec_type: agent_invoke
 
   # ---- content ----
-  description: CEO reviews the backlog and rejected queues and dispatches the single highest-priority task for execution.
+  description: Review the backlog and rejected queues and dispatch the single highest-priority task for execution.
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.
-    You are Steve (CEO). Pick the single best task and dispatch it.
+    Pick the single best task and dispatch it.
 
     1. Call orbit.task.list with status: "rejected" to retrieve all rejected tasks.
        Call orbit.task.list with status: "backlog" to retrieve all backlog tasks.
@@ -39,7 +37,7 @@ activity:
           in-progress task — prefer work that can land independently without causing merge
           conflicts or duplicating effort.
 
-    5. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Steve (CEO): <one sentence rationale>"
+    5. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Orbit: <one sentence rationale>"
        to record the dispatch rationale.
 
     6. Return a JSON result with EXACTLY these fields (no prose, no explanation):

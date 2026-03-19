@@ -2,10 +2,6 @@ pub mod backend;
 mod file;
 pub mod sqlite;
 
-pub mod identity_store {
-    pub use crate::file::identity_store::*;
-}
-
 pub mod skill_store {
     pub use crate::file::skill_store::*;
 }

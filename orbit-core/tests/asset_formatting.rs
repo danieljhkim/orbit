@@ -69,7 +69,7 @@ fn activity_assets_use_grouped_sections_and_literal_instruction_blocks() {
                 "schema_version: 1",
                 "# ---- metadata ----",
                 "# ---- activity ----",
-                "  # ---- identity ----",
+                "  # ---- registration ----",
                 "  # ---- content ----",
                 "  # ---- interface ----",
                 "  # ---- execution ----",
@@ -147,38 +147,6 @@ fn worktree_pipeline_assets_document_isolated_worktree_contract() {
 }
 
 #[test]
-fn identity_assets_use_grouped_sections_and_literal_description_blocks() {
-    let assets = [
-        ("lamport", include_str!("../assets/identities/lamport.yaml")),
-        ("linus", include_str!("../assets/identities/linus.yaml")),
-        ("prii", include_str!("../assets/identities/prii.yaml")),
-        ("steve", include_str!("../assets/identities/steve.yaml")),
-    ];
-
-    for (name, raw) in assets {
-        assert_in_order(
-            raw,
-            &[
-                "# ---- identity ----",
-                "identity:",
-                "# ---- personality ----",
-                "personality:",
-            ],
-        );
-        assert!(
-            raw.contains("\n  description: |\n"),
-            "identity asset '{name}' should use a literal block for description"
-        );
-        if raw.contains("\nbehavior:\n") {
-            assert!(
-                raw.contains("\n# ---- behavior ----\nbehavior:\n"),
-                "identity asset '{name}' should group behavior under a section header"
-            );
-        }
-    }
-}
-
-#[test]
 fn job_assets_use_grouped_sections() {
     let assets = [
         (
@@ -206,14 +174,14 @@ fn job_assets_use_grouped_sections() {
                 "schemaVersion: 1",
                 "# ---- job ----",
                 "job:",
-                "  # ---- identity ----",
+                "  # ---- registration ----",
                 "  # ---- execution ----",
                 "  steps:",
             ],
         );
         assert!(
             raw.contains("\n  job_id: "),
-            "job asset '{name}' should declare job_id inside the identity group"
+            "job asset '{name}' should declare job_id inside the registration group"
         );
     }
 }

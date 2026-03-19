@@ -2,11 +2,9 @@ schema_version: 1
 
 # ---- metadata ----
 created_by: system
-identity_id: prii
-
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: perform_maintenance
   spec_type: agent_invoke
 

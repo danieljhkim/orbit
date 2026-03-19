@@ -20,8 +20,6 @@ pub struct Activity {
     #[serde(default)]
     pub workspace_path: Option<String>,
     #[serde(default)]
-    pub identity_id: Option<String>,
-    #[serde(default)]
     pub created_by: Option<String>,
     pub is_active: bool,
     pub created_at: DateTime<Utc>,

@@ -9,7 +9,6 @@ use orbit_store::{
 use orbit_tools::ToolRegistry;
 
 use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
-use crate::identity_catalog::IdentityCatalog;
 use crate::skill_catalog::SkillCatalog;
 
 #[derive(Clone)]
@@ -23,7 +22,6 @@ pub struct OrbitContext {
     pub(crate) policy: PolicyEngine,
     pub(crate) registry: Arc<ToolRegistry>,
     pub(crate) skill_catalog: SkillCatalog,
-    pub(crate) identity_catalog: IdentityCatalog,
     pub(crate) execution_env_policy: ExecutionEnvPolicy,
     pub(crate) codex_execution_policy: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,

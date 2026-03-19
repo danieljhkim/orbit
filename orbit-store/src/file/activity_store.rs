@@ -20,7 +20,6 @@ pub(crate) struct FileWorkInsert {
     pub output_schema_json: Value,
     pub spec_config: Value,
     pub workspace_path: Option<String>,
-    pub identity_id: Option<String>,
     pub created_by: Option<String>,
 }
 
@@ -42,8 +41,9 @@ struct ActivityFileDocument {
     schema_version: u8,
     #[serde(default)]
     created_by: Option<String>,
-    #[serde(default)]
-    identity_id: Option<String>,
+    #[allow(dead_code)]
+    #[serde(default, rename = "identity_id", skip_serializing)]
+    legacy_identity_id: Option<String>,
     activity: ActivitySpecDocument,
 }
 
@@ -70,7 +70,7 @@ impl ActivityFileStore {
         let doc = ActivityFileDocument {
             schema_version: 1,
             created_by: params.created_by.clone(),
-            identity_id: params.identity_id.clone(),
+            legacy_identity_id: None,
             activity: ActivitySpecDocument {
                 id: params.id.clone(),
                 spec_type: params.spec_type.clone(),
@@ -127,7 +127,6 @@ impl ActivityFileStore {
         output_schema_json: Option<Value>,
         spec_config: Option<Value>,
         workspace_path: Option<Option<String>>,
-        identity_id: Option<Option<String>>,
         created_by: Option<Option<String>>,
         is_active: Option<bool>,
     ) -> Result<Activity, OrbitError> {
@@ -156,9 +155,6 @@ impl ActivityFileStore {
         }
         if let Some(v) = workspace_path {
             doc.activity.workspace_path = v;
-        }
-        if let Some(v) = identity_id {
-            doc.identity_id = v;
         }
         if let Some(v) = created_by {
             doc.created_by = v;
@@ -281,7 +277,6 @@ fn doc_to_work(
         spec_config: Value::Object(doc.activity.spec_config),
         tools,
         workspace_path: doc.activity.workspace_path,
-        identity_id: doc.identity_id,
         created_by: doc.created_by,
         is_active,
         created_at,
@@ -378,7 +373,6 @@ mod tests {
                 "model": "gpt-5"
             }),
             workspace_path: Some("/tmp/workspace".to_string()),
-            identity_id: Some("linus".to_string()),
             created_by: Some("human".to_string()),
         }
     }
@@ -399,7 +393,6 @@ mod tests {
 
         assert!(yaml.contains("schema_version: 1"));
         assert!(yaml.contains("created_by: human"));
-        assert!(yaml.contains("identity_id: linus"));
         assert!(!yaml.contains("created_at:"));
         assert!(!yaml.contains("updated_at:"));
     }
@@ -419,7 +412,6 @@ mod tests {
 
         assert_eq!(fetched.id, inserted.id);
         assert_eq!(fetched.created_by.as_deref(), Some("human"));
-        assert_eq!(fetched.identity_id.as_deref(), Some("linus"));
         assert!(fetched.updated_at >= fetched.created_at);
     }
 }

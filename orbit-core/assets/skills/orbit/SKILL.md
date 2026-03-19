@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: Entry point for Orbit workflow. Covers lifecycle, invocation patterns, identity, and skill routing. Load this for any Orbit-related work.
+description: Entry point for Orbit workflow. Covers lifecycle, invocation patterns, and skill routing. Load this for any Orbit-related work.
 ---
 
 # Orbit
@@ -22,8 +22,6 @@ orbit tool run orbit.task.show --input '{"id": "T20260315-123456"}'
 orbit tool run orbit.task.start --input '{"id": "T20260315-123456", "note": "ready to execute"}'
 orbit tool run orbit.task.update --input '{"id": "T20260315-123456", "status": "review"}'
 orbit tool run orbit.task.update --input '{"id": "T20260315-123456", "comment": "notes here"}'
-orbit tool run orbit.identity.list --input '{"role": "engineer"}'
-orbit tool run orbit.identity.show --input '{"id": "<identity_id>"}'
 orbit tool run orbit.job_run.list --input '{"status": "failed"}'
 orbit tool run orbit.job_run.show --input '{"id": "<job_run_id>"}'
 orbit tool run orbit.job_run.archive --input '{"id": "<job_run_id>"}'
@@ -47,21 +45,9 @@ rejected  → backlog  (reconsider)
 
 Use `blocked` when execution cannot safely continue.
 
-## Identity
-
-If the execution envelope includes an `identity` block, use it directly — no tool calls needed. The identity has already been resolved server-side.
-
-Only call the identity tools when no identity is pre-loaded in the envelope:
-
-```bash
-orbit tool run orbit.identity.list --input '{"role": "engineer"}'
-orbit tool run orbit.identity.show --input '{"id": "<id>"}'
-```
-
 Task commands infer actor provenance automatically:
 - `orbit tool run ...` is treated as agent-driven
 - direct `orbit task ...` CLI usage is treated as human-driven
-- activity-driven executions use the activity `identity_id` when available
 
 ## Skill Selection
 

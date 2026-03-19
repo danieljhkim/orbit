@@ -43,6 +43,9 @@ impl OrbitRuntime {
 }
 
 fn read_activity_tools_from_env() -> Vec<String> {
+    if std::env::var("ORBIT_TASK_ACTOR_KIND").ok().as_deref() != Some("agent") {
+        return Vec::new();
+    }
     std::env::var("ORBIT_ACTIVITY_TOOLS")
         .ok()
         .map(|raw| {

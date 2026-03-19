@@ -57,8 +57,6 @@ pub struct ActivityAddArgs {
     #[arg(long)]
     pub workspace_path: Option<String>,
     #[arg(long)]
-    pub identity: Option<String>,
-    #[arg(long)]
     pub created_by: Option<String>,
     #[arg(long)]
     pub json: bool,
@@ -80,7 +78,6 @@ impl Execute for ActivityAddArgs {
             output_schema_json,
             spec_config,
             workspace_path: self.workspace_path,
-            identity_id: self.identity,
             created_by: self.created_by,
         })?;
 
@@ -149,9 +146,6 @@ impl Execute for ActivityShowArgs {
                 "Spec Config:         {}",
                 serde_json::to_string(&spec.spec_config).unwrap_or_else(|_| "{}".to_string())
             );
-            if let Some(ref identity_id) = spec.identity_id {
-                println!("Identity:            {}", identity_id);
-            }
             if let Some(ref created_by) = spec.created_by {
                 println!("Created By:          {}", created_by);
             }
@@ -178,10 +172,6 @@ pub struct ActivityUpdateArgs {
     pub workspace_path: Option<String>,
     #[arg(long)]
     pub clear_workspace_path: bool,
-    #[arg(long)]
-    pub identity: Option<String>,
-    #[arg(long, conflicts_with = "identity")]
-    pub clear_identity: bool,
     #[arg(long, conflicts_with = "inactive")]
     pub active: bool,
     #[arg(long, conflicts_with = "active")]
@@ -212,11 +202,6 @@ impl Execute for ActivityUpdateArgs {
         } else {
             self.workspace_path.map(Some)
         };
-        let identity_id = if self.clear_identity {
-            Some(None)
-        } else {
-            self.identity.map(Some)
-        };
         let is_active = if self.active {
             Some(true)
         } else if self.inactive {
@@ -233,7 +218,6 @@ impl Execute for ActivityUpdateArgs {
                 output_schema_json,
                 spec_config,
                 workspace_path,
-                identity_id,
                 created_by: None,
                 is_active,
             },
@@ -353,7 +337,6 @@ fn activity_to_json(spec: &Activity) -> Value {
         "output_schema_json": spec.output_schema_json,
         "spec_config": spec.spec_config,
         "workspace_path": spec.workspace_path,
-        "identity_id": spec.identity_id,
         "created_by": spec.created_by,
         "is_active": spec.is_active,
         "created_at": spec.created_at.to_rfc3339(),

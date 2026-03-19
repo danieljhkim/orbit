@@ -14,7 +14,6 @@ use orbit_types::OrbitError;
 
 use crate::OrbitContext;
 use crate::config::RuntimeConfig;
-use crate::identity_catalog::IdentityCatalog;
 use crate::skill_catalog::SkillCatalog;
 
 pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitContext, OrbitError> {
@@ -79,11 +78,6 @@ fn build_context_common(
     let skill_catalog = SkillCatalog::new(skill_root);
     skill_catalog.ensure_layout()?;
 
-    let identity_catalog = IdentityCatalog::new(
-        runtime_config.identity.root.clone(),
-        runtime_config.identity.role_overrides.clone(),
-    );
-
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
     load_external_tools(&store, &mut registry)?;
@@ -105,7 +99,6 @@ fn build_context_common(
         policy: PolicyEngine::new_local_default_allow(),
         registry: Arc::new(registry),
         skill_catalog,
-        identity_catalog,
         execution_env_policy,
         codex_execution_policy,
         persistence,

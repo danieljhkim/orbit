@@ -76,7 +76,6 @@ pub struct ActivityAddParams {
     pub output_schema_json: Value,
     pub spec_config: Value,
     pub workspace_path: Option<String>,
-    pub identity_id: Option<String>,
     pub created_by: Option<String>,
 }
 
@@ -87,7 +86,6 @@ pub struct ActivityUpdateParams {
     pub output_schema_json: Option<Value>,
     pub spec_config: Option<Value>,
     pub workspace_path: Option<Option<String>>,
-    pub identity_id: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
     pub is_active: Option<bool>,
 }
@@ -97,8 +95,9 @@ struct ActivityFileEnvelope {
     schema_version: u8,
     #[serde(default)]
     created_by: Option<String>,
-    #[serde(default)]
-    identity_id: Option<String>,
+    #[allow(dead_code)]
+    #[serde(default, rename = "identity_id")]
+    legacy_identity_id: Option<String>,
     activity: ActivityFileSpec,
 }
 
@@ -150,15 +149,6 @@ impl OrbitRuntime {
         validate_activity_params(&params)?;
         let skill_refs = activity_skill_refs_from_spec_config(&params.spec_config)?;
         let _ = self.resolve_activity_skill_refs(&skill_refs)?;
-        let identity_id = params.identity_id.clone();
-        let mut created_by = params.created_by.clone();
-        if let Some(id) = identity_id.as_ref() {
-            let resolved = self.resolve_identity(id)?;
-            if created_by.is_none() {
-                created_by = Some(resolved.name);
-            }
-        }
-
         let activity = self
             .context
             .activity_store
@@ -170,8 +160,7 @@ impl OrbitRuntime {
                 output_schema_json: params.output_schema_json,
                 spec_config: params.spec_config,
                 workspace_path: params.workspace_path,
-                identity_id,
-                created_by,
+                created_by: params.created_by,
             })?;
         self.record_event(OrbitEvent::ActivityAdded {
             id: activity.id.clone(),
@@ -211,7 +200,6 @@ impl OrbitRuntime {
                 output_schema_json: params.output_schema_json,
                 spec_config: params.spec_config,
                 workspace_path: params.workspace_path,
-                identity_id: params.identity_id,
                 created_by: params.created_by,
                 is_active: params.is_active,
             },
@@ -337,7 +325,6 @@ fn load_default_activity_specs(
             output_schema_json: spec.activity.output_schema_json,
             spec_config: Value::Object(spec.activity.spec_config),
             workspace_path: spec.activity.workspace_path,
-            identity_id: spec.identity_id,
             created_by: spec.created_by,
         });
     }
@@ -368,7 +355,6 @@ fn seed_default_activities_from_specs(
                     output_schema_json: Some(spec.output_schema_json.clone()),
                     spec_config: Some(spec.spec_config.clone()),
                     workspace_path: Some(spec.workspace_path.clone()),
-                    identity_id: Some(spec.identity_id.clone()),
                     created_by: Some(spec.created_by.clone()),
                     is_active: Some(true),
                 },

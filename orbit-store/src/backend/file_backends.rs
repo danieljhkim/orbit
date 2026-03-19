@@ -96,7 +96,6 @@ impl ActivityStoreBackend for ActivityFileStore {
             output_schema_json: params.output_schema_json,
             spec_config: params.spec_config,
             workspace_path: params.workspace_path,
-            identity_id: params.identity_id,
             created_by: params.created_by,
         })
     }
@@ -121,7 +120,6 @@ impl ActivityStoreBackend for ActivityFileStore {
             params.output_schema_json,
             params.spec_config,
             params.workspace_path,
-            params.identity_id,
             params.created_by,
             params.is_active,
         )

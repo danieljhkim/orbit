@@ -29,7 +29,7 @@ orbit tool run orbit.task.start --input '{"id": "<id>", "note": "<note>"}'
 1. Run `orbit tool run orbit.task.list --input '{"status": "proposed"}'` and `'{"status": "review"}'`. If both are empty, your job is done.
 2. For `proposed` tasks, review the task carefully.
    - If valid and execution should begin immediately: run `orbit tool run orbit.task.start --input '{"id": "<id>", "note": "<note>"}'`.
-   - If valid but execution should remain queued: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>"}'`. Also identify the best-suited engineer via `orbit tool run orbit.identity.list --input '{"role": "engineer"}'`.
+   - If valid but execution should remain queued: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>"}'`.
    - If not valid: run `orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<reason>"}'`.
 3. For `review` tasks, confirm all requirements were fulfilled as outlined in the task.
    - If complete and code changes are acceptable: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>"}'` and include `result.commit` in the approval response so Orbit creates the commit.

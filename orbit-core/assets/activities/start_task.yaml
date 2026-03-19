@@ -5,7 +5,7 @@ created_by: system
 
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: start_task
   spec_type: automation
 

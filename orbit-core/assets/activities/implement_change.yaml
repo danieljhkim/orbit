@@ -5,7 +5,7 @@ created_by: system
 
 # ---- activity ----
 activity:
-  # ---- identity ----
+  # ---- registration ----
   id: implement_change
   spec_type: agent_invoke
 

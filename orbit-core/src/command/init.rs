@@ -5,7 +5,6 @@ use orbit_types::OrbitError;
 
 use crate::OrbitRuntime;
 use crate::command::activity::seed_default_activities;
-use crate::command::identity::seed_default_identities;
 use crate::command::job::seed_default_jobs;
 use crate::command::skill::{default_skill_ids, seed_default_skills};
 use crate::config::seed_default_config;
@@ -13,8 +12,6 @@ use crate::fs_utils::{create_dir_symlink, remove_path_if_exists};
 
 #[derive(Debug, Clone)]
 pub struct InitResult {
-    pub refreshed_identity_files: usize,
-    pub identity_root: String,
     pub refreshed_skill_files: usize,
     pub skills_root: String,
     pub created_skills_symlink: bool,
@@ -27,7 +24,7 @@ pub struct InitResult {
 #[derive(Debug, Clone, Default)]
 pub struct InitOptions {
     pub force: bool,
-    /// When true, always overwrite default identity and skill files even if
+    /// When true, always overwrite default skill files even if
     /// they already exist.  Explicit `orbit init` sets this; implicit
     /// bootstrap from other commands does not.
     pub refresh_defaults: bool,
@@ -66,18 +63,15 @@ fn init_workspace_at_root(
 ) -> Result<InitResult, OrbitError> {
     let init_target = resolve_init_target_from_root(orbit_root);
     let orbit_root = init_target.orbit_root.clone();
-    let identity_root = orbit_root.join("identities");
 
     if options.force {
         remove_path_if_exists(&orbit_root)?;
     }
     fs::create_dir_all(&orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-    fs::create_dir_all(&identity_root).map_err(|e| OrbitError::Io(e.to_string()))?;
     let skills_root = orbit_root.join("skills");
     fs::create_dir_all(&skills_root).map_err(|e| OrbitError::Io(e.to_string()))?;
 
     let overwrite = options.force || options.refresh_defaults;
-    let refreshed_identity_files = seed_default_identities(&identity_root, overwrite)?;
     let refreshed_skill_files = seed_default_skills(&skills_root, &orbit_root, overwrite)?;
     let config_path = orbit_root.join("config.toml");
     let created_config = seed_default_config(&config_path)?;
@@ -94,8 +88,6 @@ fn init_workspace_at_root(
     let refreshed_default_jobs = seed_default_jobs(&init_runtime, overwrite)?;
 
     Ok(InitResult {
-        refreshed_identity_files,
-        identity_root: identity_root.to_string_lossy().to_string(),
         refreshed_skill_files,
         skills_root: skills_root.to_string_lossy().to_string(),
         created_skills_symlink,
