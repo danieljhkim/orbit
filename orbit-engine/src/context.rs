@@ -100,6 +100,7 @@ pub trait EngineHost {
 
     fn agent_config_for(&self, agent_cli: &str) -> Result<AgentConfig, OrbitError>;
     fn execution_environment_mode(&self, env_extra: &[String]) -> EnvironmentMode;
+    fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)>;
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String>;
     fn build_agent_stdin_envelope_payload(
         &self,

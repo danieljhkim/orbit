@@ -25,7 +25,10 @@ pub fn register(registry: &mut ToolRegistry) {
 ///
 /// Returns `Ok` when no workspace root is set, or when the canonical path is
 /// inside the root. Returns `Err(PolicyDenied)` otherwise.
-pub(super) fn check_workspace_boundary(ctx: &ToolContext, path: &Path) -> Result<PathBuf, OrbitError> {
+pub(super) fn check_workspace_boundary(
+    ctx: &ToolContext,
+    path: &Path,
+) -> Result<PathBuf, OrbitError> {
     let workspace_root = match &ctx.workspace_root {
         Some(root) => root,
         None => return Ok(path.to_path_buf()),
@@ -37,15 +40,15 @@ pub(super) fn check_workspace_boundary(ctx: &ToolContext, path: &Path) -> Result
     } else {
         // Path does not exist yet (e.g. write target). Canonicalize the parent
         // so we can still enforce the boundary.
-        let parent = path.parent().ok_or_else(|| {
-            OrbitError::InvalidInput("path has no parent directory".to_string())
-        })?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| OrbitError::InvalidInput("path has no parent directory".to_string()))?;
         let canonical_parent = parent
             .canonicalize()
             .map_err(|e| OrbitError::Io(format!("failed to canonicalize parent directory: {e}")))?;
-        let file_name = path.file_name().ok_or_else(|| {
-            OrbitError::InvalidInput("path has no file name".to_string())
-        })?;
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| OrbitError::InvalidInput("path has no file name".to_string()))?;
         canonical_parent.join(file_name)
     };
 

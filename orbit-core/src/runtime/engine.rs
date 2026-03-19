@@ -279,6 +279,12 @@ impl EngineHost for OrbitRuntime {
         }
     }
 
+    fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.context
+            .execution_env_policy
+            .hydrated_cli_command_env_with_extras(env_extra)
+    }
+
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
         self.context
             .execution_env_policy

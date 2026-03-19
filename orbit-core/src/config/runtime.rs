@@ -337,6 +337,27 @@ impl ExecutionEnvPolicy {
             .collect()
     }
 
+    pub(crate) fn hydrated_cli_command_env_with_extras(
+        &self,
+        extras: &[String],
+    ) -> Vec<(String, String)> {
+        let mut env = std::collections::BTreeMap::new();
+        for name in cli_command_baseline_pass_list() {
+            if let Ok(value) = std::env::var(&name) {
+                env.insert(name.to_string(), value);
+            }
+        }
+        for (name, value) in self.hydrated_allowlist_env_with_extras(extras) {
+            env.insert(name, value);
+        }
+        for (name, value) in std::env::vars() {
+            if name.starts_with("ORBIT_") {
+                env.insert(name, value);
+            }
+        }
+        env.into_iter().collect()
+    }
+
     pub(crate) fn missing_required(&self, required_env_vars: &[&str]) -> Vec<String> {
         required_env_vars
             .iter()
@@ -365,6 +386,15 @@ fn default_pass_list() -> Vec<String> {
     vars.push("__CF_USER_TEXT_ENCODING");
 
     vars.iter().map(ToString::to_string).collect()
+}
+
+fn cli_command_baseline_pass_list() -> Vec<String> {
+    let mut vars = default_pass_list();
+    vars.push("LANG".to_string());
+    vars.push("TZ".to_string());
+    vars.sort();
+    vars.dedup();
+    vars
 }
 
 pub(crate) fn normalize_pass_list(pass: Vec<String>) -> Result<Vec<String>, OrbitError> {

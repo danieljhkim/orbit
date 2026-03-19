@@ -57,7 +57,7 @@ pub fn execute_single_attempt<H: EngineHost>(
 ) -> AttemptOutcome {
     let outcome = match execution.activity.spec_type.as_str() {
         "agent_invoke" => agent::execute(host, execution),
-        "cli_command" => execute_cli_command_attempt(execution),
+        "cli_command" => execute_cli_command_attempt(host, execution),
         "api" => execute_api_attempt(execution),
         "automation" => execute_automation_attempt(host, execution),
         other => AttemptOutcome {
@@ -73,8 +73,14 @@ pub fn execute_single_attempt<H: EngineHost>(
     redact_attempt_outcome(outcome)
 }
 
-fn execute_cli_command_attempt(execution: &ExecutionContext) -> AttemptOutcome {
-    let template_context = execution_template_context(execution);
+fn execute_cli_command_attempt<H: EngineHost>(
+    host: &H,
+    execution: &ExecutionContext,
+) -> AttemptOutcome {
+    let template_context = execution_template_context_with_env(
+        execution,
+        host.cli_command_environment(&execution.env_extra),
+    );
     match cli_command::execute(
         &execution.activity.spec_config,
         &template_context,
@@ -195,7 +201,16 @@ fn execute_automation_attempt<H: EngineHost>(
 }
 
 pub fn execution_template_context(execution: &ExecutionContext) -> TemplateContext {
-    let mut env = std::env::vars().collect::<std::collections::HashMap<_, _>>();
+    execution_template_context_with_env(execution, std::env::vars().collect())
+}
+
+fn execution_template_context_with_env(
+    execution: &ExecutionContext,
+    env_pairs: Vec<(String, String)>,
+) -> TemplateContext {
+    let mut env = env_pairs
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
     env.insert("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string());
     if let Some(identity_id) = execution.activity.identity_id.as_ref() {
         env.insert(

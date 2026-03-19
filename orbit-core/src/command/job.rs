@@ -2,10 +2,7 @@ use chrono::{DateTime, Utc};
 use orbit_agent::{Agent, AgentConfig};
 use orbit_store::JobCreateParams as StoreActivityCreateParams;
 use orbit_store::JobUpdateParams as StoreJobUpdateParams;
-use orbit_types::{
-    Job, JobRun, JobScheduleState, JobStep, JobTargetType, OrbitError,
-    OrbitEvent,
-};
+use orbit_types::{Job, JobRun, JobScheduleState, JobStep, JobTargetType, OrbitError, OrbitEvent};
 use serde::Deserialize;
 use serde_json::Value;
 

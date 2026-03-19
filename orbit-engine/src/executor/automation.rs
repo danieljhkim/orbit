@@ -111,9 +111,10 @@ fn commit_task_changes<H: EngineHost>(host: &H, input: &Value) -> Result<Value, 
             })?,
         "repo_root",
     )?;
-    let expected_branch = input_string_field(input, "branch")
-        .unwrap_or_else(|| format!("orbit/{task_id}"));
-    let summary = input_string_field(input, "summary").unwrap_or_else(|| task.execution_summary.clone());
+    let expected_branch =
+        input_string_field(input, "branch").unwrap_or_else(|| format!("orbit/{task_id}"));
+    let summary =
+        input_string_field(input, "summary").unwrap_or_else(|| task.execution_summary.clone());
     if summary.trim().is_empty() {
         return Err(OrbitError::Execution(format!(
             "task '{}' commit_task_changes requires a non-empty summary from input.summary or task.execution_summary",
@@ -339,10 +340,12 @@ fn input_repo_root(input: &Value) -> Result<String, OrbitError> {
 }
 
 fn input_string_array_field(input: &Value, key: &str) -> Option<Vec<String>> {
-    input
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+    input.get(key).and_then(Value::as_array).map(|arr| {
+        arr.iter()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect()
+    })
 }
 
 fn canonicalize_existing_dir(raw: &str, field_name: &str) -> Result<PathBuf, OrbitError> {
@@ -421,11 +424,7 @@ fn fetch_remote_base(repo_root: &Path, base: &str) {
     let _ = run_process(
         &ExecRequest {
             program: "git".to_string(),
-            args: vec![
-                "fetch".to_string(),
-                "origin".to_string(),
-                base.to_string(),
-            ],
+            args: vec!["fetch".to_string(), "origin".to_string(), base.to_string()],
             current_dir: Some(repo_root.to_string_lossy().to_string()),
             timeout_ms: Some(60_000),
             stdin_mode: StdinMode::Null,

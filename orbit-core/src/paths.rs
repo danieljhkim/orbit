@@ -164,7 +164,11 @@ mod tests {
         std::fs::create_dir_all(&cwd).expect("create cwd");
 
         let root = find_git_repo_root(&cwd);
-        assert_eq!(root, Some(main_repo), "should resolve to main repo, not worktree");
+        assert_eq!(
+            root,
+            Some(main_repo),
+            "should resolve to main repo, not worktree"
+        );
     }
 
     #[test]

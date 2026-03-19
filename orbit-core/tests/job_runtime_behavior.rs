@@ -9,8 +9,7 @@ use orbit_core::command::job::JobAddParams;
 use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_types::{
-    JobRunState, JobStep, JobTargetType, OrbitError, TaskPriority, TaskStatus,
-    TaskType,
+    JobRunState, JobStep, JobTargetType, OrbitError, TaskPriority, TaskStatus, TaskType,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -21,6 +20,32 @@ use std::os::unix::fs::PermissionsExt;
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct EnvSnapshot(Vec<(String, Option<String>)>);
+
+impl EnvSnapshot {
+    fn capture(names: &[&str]) -> Self {
+        Self(
+            names
+                .iter()
+                .map(|name| (name.to_string(), std::env::var(name).ok()))
+                .collect(),
+        )
+    }
+}
+
+impl Drop for EnvSnapshot {
+    fn drop(&mut self) {
+        for (name, value) in self.0.drain(..) {
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(&name, value),
+                    None => std::env::remove_var(&name),
+                }
+            }
+        }
+    }
 }
 
 fn add_activity(runtime: &OrbitRuntime, id: &str) {
@@ -207,7 +232,13 @@ fn cli_command_activity_executes_without_agent_cli_and_captures_output_file() {
 
 #[test]
 fn cli_command_failures_redact_sensitive_environment_values_from_error_messages() {
+    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _snapshot = EnvSnapshot::capture(&["TEST_SECRET_TOKEN"]);
     let dir = tempdir().expect("tempdir");
+    write_runtime_config(
+        dir.path(),
+        "[execution.env]\ninherit = false\npass = [\"TEST_SECRET_TOKEN\"]\n",
+    );
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
 
     unsafe {
@@ -263,6 +294,235 @@ fn cli_command_failures_redact_sensitive_environment_values_from_error_messages(
     assert!(
         error_message.contains("[REDACTED_ENV]"),
         "error message should indicate redaction: {error_message}"
+    );
+}
+
+#[test]
+fn cli_command_receives_only_baseline_allowlisted_and_orbit_env_vars() {
+    let _lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _snapshot = EnvSnapshot::capture(&[
+        "TEST_ALLOWED_VALUE",
+        "TEST_SECRET_TOKEN",
+        "LANG",
+        "TZ",
+        "ORBIT_TEST_CONTEXT",
+    ]);
+
+    unsafe {
+        std::env::set_var("TEST_ALLOWED_VALUE", "safe-to-pass");
+        std::env::set_var("TEST_SECRET_TOKEN", "do-not-pass");
+        std::env::set_var("LANG", "en_US.UTF-8");
+        std::env::set_var("TZ", "UTC");
+        std::env::set_var("ORBIT_TEST_CONTEXT", "orbit-context");
+    }
+
+    let dir = tempdir().expect("tempdir");
+    write_runtime_config(
+        dir.path(),
+        "[execution.env]\ninherit = false\npass = [\"TEST_ALLOWED_VALUE\"]\n",
+    );
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    let script_path = dir.path().join("capture-cli-env.sh");
+    let script = concat!(
+        "#!/bin/sh\n",
+        "printf '{\"allowed\":\"%s\",\"secret_present\":\"%s\",\"lang\":\"%s\",\"tz\":\"%s\",\"orbit\":\"%s\",\"home_present\":\"%s\",\"path_present\":\"%s\"}' \\\n",
+        "  \"${TEST_ALLOWED_VALUE:-}\" \\\n",
+        "  \"${TEST_SECRET_TOKEN+present}\" \\\n",
+        "  \"${LANG:-}\" \\\n",
+        "  \"${TZ:-}\" \\\n",
+        "  \"${ORBIT_TEST_CONTEXT:-}\" \\\n",
+        "  \"${HOME+present}\" \\\n",
+        "  \"${PATH+present}\" > \"$ORBIT_OUTPUT_FILE\"\n",
+    );
+    std::fs::write(&script_path, script).expect("write script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod script");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-cli-allowlisted-env".to_string(),
+            spec_type: "cli_command".to_string(),
+            description: "capture filtered cli env".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "allowed": { "type": "string" },
+                    "secret_present": { "type": "string" },
+                    "lang": { "type": "string" },
+                    "tz": { "type": "string" },
+                    "orbit": { "type": "string" },
+                    "home_present": { "type": "string" },
+                    "path_present": { "type": "string" }
+                },
+                "required": [
+                    "allowed",
+                    "secret_present",
+                    "lang",
+                    "tz",
+                    "orbit",
+                    "home_present",
+                    "path_present"
+                ]
+            }),
+            spec_config: json!({
+                "command": script_path.to_string_lossy().to_string(),
+                "expected_exit_codes": [0]
+            }),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add activity");
+
+    let job = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: None,
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-cli-allowlisted-env".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job");
+
+    let run = runtime.run_job_now(&job.job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job.job_id).expect("history");
+    let response = history[0]
+        .steps
+        .last()
+        .and_then(|step| step.agent_response_json.as_ref())
+        .expect("stored step response");
+
+    assert_eq!(response["allowed"], json!("safe-to-pass"));
+    assert_eq!(response["secret_present"], json!(""));
+    assert_eq!(response["lang"], json!("en_US.UTF-8"));
+    assert_eq!(response["tz"], json!("UTC"));
+    assert_eq!(response["orbit"], json!("orbit-context"));
+    assert_eq!(response["home_present"], json!("present"));
+    assert_eq!(response["path_present"], json!("present"));
+}
+
+#[test]
+fn cli_command_step_env_extra_is_scoped_per_step() {
+    let _lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _snapshot = EnvSnapshot::capture(&["STEP1_SECRET", "STEP2_SECRET"]);
+
+    unsafe {
+        std::env::set_var("STEP1_SECRET", "alpha");
+        std::env::set_var("STEP2_SECRET", "beta");
+    }
+
+    let dir = tempdir().expect("tempdir");
+    write_runtime_config(
+        dir.path(),
+        "[execution.env]\ninherit = false\npass = [\"HOME\", \"PATH\"]\n",
+    );
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    let capture_dir = dir.path().join("cli-env");
+    std::fs::create_dir_all(&capture_dir).expect("create capture dir");
+    let step1_script = dir.path().join("step1-cli-env.sh");
+    let step2_script = dir.path().join("step2-cli-env.sh");
+
+    let step1_body = format!(
+        "#!/bin/sh\nprintf '{{\"step\":\"1\",\"step1\":\"%s\",\"step2\":\"%s\"}}' \"${{STEP1_SECRET:-}}\" \"${{STEP2_SECRET:-}}\" > \"{}\"\nprintf '{{\"step\":\"1\"}}' > \"$ORBIT_OUTPUT_FILE\"\n",
+        capture_dir.join("step1.json").display(),
+    );
+    let step2_body = format!(
+        "#!/bin/sh\nprintf '{{\"step\":\"2\",\"step1\":\"%s\",\"step2\":\"%s\"}}' \"${{STEP1_SECRET:-}}\" \"${{STEP2_SECRET:-}}\" > \"{}\"\nprintf '{{\"step\":\"2\"}}' > \"$ORBIT_OUTPUT_FILE\"\n",
+        capture_dir.join("step2.json").display(),
+    );
+
+    for (path, body) in [(&step1_script, step1_body), (&step2_script, step2_body)] {
+        std::fs::write(path, body).expect("write script");
+        #[cfg(unix)]
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod script");
+    }
+
+    for (id, script) in [
+        ("spec-cli-env-step1", &step1_script),
+        ("spec-cli-env-step2", &step2_script),
+    ] {
+        runtime
+            .add_activity(ActivityAddParams {
+                id: id.to_string(),
+                spec_type: "cli_command".to_string(),
+                description: "capture cli env extra".to_string(),
+                input_schema_json: json!({}),
+                output_schema_json: json!({
+                    "type": "object",
+                    "properties": {
+                        "step": { "type": "string" }
+                    },
+                    "required": ["step"]
+                }),
+                spec_config: json!({
+                    "command": script.to_string_lossy().to_string(),
+                    "expected_exit_codes": [0]
+                }),
+                workspace_path: None,
+                identity_id: None,
+                created_by: None,
+            })
+            .expect("add activity");
+    }
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: None,
+            steps: vec![
+                JobStep {
+                    target_type: JobTargetType::Activity,
+                    target_id: "spec-cli-env-step1".to_string(),
+                    agent_cli: String::new(),
+                    timeout_seconds: 10,
+                    env_extra: vec!["STEP1_SECRET".to_string()],
+                },
+                JobStep {
+                    target_type: JobTargetType::Activity,
+                    target_id: "spec-cli-env-step2".to_string(),
+                    agent_cli: String::new(),
+                    timeout_seconds: 10,
+                    env_extra: vec!["STEP2_SECRET".to_string()],
+                },
+            ],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let result = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let step1 = std::fs::read_to_string(capture_dir.join("step1.json")).expect("step1 capture");
+    let step2 = std::fs::read_to_string(capture_dir.join("step2.json")).expect("step2 capture");
+
+    assert!(
+        step1.contains("\"step1\":\"alpha\""),
+        "step 1 should get STEP1_SECRET"
+    );
+    assert!(
+        step1.contains("\"step2\":\"\""),
+        "step 1 must not get STEP2_SECRET"
+    );
+    assert!(
+        step2.contains("\"step1\":\"\""),
+        "step 2 must not get STEP1_SECRET"
+    );
+    assert!(
+        step2.contains("\"step2\":\"beta\""),
+        "step 2 should get STEP2_SECRET"
     );
 }
 
@@ -2241,7 +2501,9 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
         .expect("git log");
     assert_eq!(
         String::from_utf8_lossy(&log.stdout).trim(),
-        format!("refactor: Refactor automation flow [{task_id}]\n\nImplemented the automation refactor.")
+        format!(
+            "refactor: Refactor automation flow [{task_id}]\n\nImplemented the automation refactor."
+        )
     );
     assert_eq!(git_current_branch(&repo_root), "agent-main");
 }
@@ -2314,11 +2576,24 @@ fn commit_task_changes_uses_summary_from_input() {
     let create_run = runtime.run_job_now(&create_job_id).expect("run create");
     assert_eq!(create_run.state, JobRunState::Success);
     let create_history = runtime.job_history(&create_job_id).expect("create history");
-    let create_output = create_history[0].steps[0].agent_response_json.as_ref().expect("output");
-    let workspace_path = create_output["workspace_path"].as_str().expect("workspace_path").to_string();
-    let branch = create_output["branch"].as_str().expect("branch").to_string();
+    let create_output = create_history[0].steps[0]
+        .agent_response_json
+        .as_ref()
+        .expect("output");
+    let workspace_path = create_output["workspace_path"]
+        .as_str()
+        .expect("workspace_path")
+        .to_string();
+    let branch = create_output["branch"]
+        .as_str()
+        .expect("branch")
+        .to_string();
 
-    std::fs::write(std::path::Path::new(&workspace_path).join("fix.rs"), "fixed\n").expect("write");
+    std::fs::write(
+        std::path::Path::new(&workspace_path).join("fix.rs"),
+        "fixed\n",
+    )
+    .expect("write");
 
     runtime
         .add_activity(ActivityAddParams {
@@ -2344,12 +2619,18 @@ fn commit_task_changes_uses_summary_from_input() {
         })
         .expect("add success job")
         .job_id;
-    let success_run = runtime.run_job_now(&success_job_id).expect("run success job");
+    let success_run = runtime
+        .run_job_now(&success_job_id)
+        .expect("run success job");
     match previous_worktree_root.as_ref() {
         Some(value) => unsafe { std::env::set_var("ORBIT_WORKTREE_ROOT", value) },
         None => unsafe { std::env::remove_var("ORBIT_WORKTREE_ROOT") },
     }
-    assert_eq!(success_run.state, JobRunState::Success, "must succeed when summary is in input");
+    assert_eq!(
+        success_run.state,
+        JobRunState::Success,
+        "must succeed when summary is in input"
+    );
 
     // Case 2: summary absent from input → must fail with clear error.
     let task2_id = runtime
@@ -2375,9 +2656,16 @@ fn commit_task_changes_uses_summary_from_input() {
         .expect("add fail job")
         .job_id;
     let fail_run = runtime.run_job_now(&fail_job_id).expect("run fail job");
-    assert_eq!(fail_run.state, JobRunState::Failed, "must fail when summary is absent");
+    assert_eq!(
+        fail_run.state,
+        JobRunState::Failed,
+        "must fail when summary is absent"
+    );
     let fail_history = runtime.job_history(&fail_job_id).expect("fail history");
-    let error_msg = fail_history[0].steps[0].error_message.as_deref().unwrap_or("");
+    let error_msg = fail_history[0].steps[0]
+        .error_message
+        .as_deref()
+        .unwrap_or("");
     assert!(
         error_msg.contains("requires a non-empty summary"),
         "error should mention missing summary, got: {error_msg}"
@@ -2485,7 +2773,11 @@ fn commit_task_changes_supports_task_id_only_inputs() {
         Some(canonical_repo_root.to_string_lossy().as_ref())
     );
 
-    std::fs::write(std::path::Path::new(&workspace_path).join("fix.rs"), "fixed\n").expect("write fix");
+    std::fs::write(
+        std::path::Path::new(&workspace_path).join("fix.rs"),
+        "fixed\n",
+    )
+    .expect("write fix");
     runtime
         .update_task(
             &task_id,
@@ -2776,9 +3068,18 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
         "Wire Orbit PR automation"
     );
     let body_content = std::fs::read_to_string(body_capture).expect("body");
-    assert!(body_content.contains("Orbit owns PR creation now."), "body: {body_content}");
-    assert!(body_content.contains("## Files Changed"), "body: {body_content}");
-    assert!(body_content.contains("automation.rs"), "body: {body_content}");
+    assert!(
+        body_content.contains("Orbit owns PR creation now."),
+        "body: {body_content}"
+    );
+    assert!(
+        body_content.contains("## Files Changed"),
+        "body: {body_content}"
+    );
+    assert!(
+        body_content.contains("automation.rs"),
+        "body: {body_content}"
+    );
     assert_eq!(
         std::fs::read_to_string(base_capture).expect("base"),
         "agent-main"
@@ -2947,8 +3248,11 @@ fn open_pr_automation_supports_task_id_only_inputs() {
         .clone()
         .expect("task workspace_path");
 
-    std::fs::write(std::path::Path::new(&workspace_path).join("feature.rs"), "feature\n")
-        .expect("write feature file");
+    std::fs::write(
+        std::path::Path::new(&workspace_path).join("feature.rs"),
+        "feature\n",
+    )
+    .expect("write feature file");
     runtime
         .update_task(
             &task_id,
@@ -3069,7 +3373,10 @@ fn open_pr_automation_supports_task_id_only_inputs() {
     assert_eq!(run.state, JobRunState::Success);
 
     let body_content = std::fs::read_to_string(body_capture).expect("body");
-    assert!(body_content.contains("task_id only"), "body: {body_content}");
+    assert!(
+        body_content.contains("task_id only"),
+        "body: {body_content}"
+    );
     assert!(body_content.contains("feature.rs"), "body: {body_content}");
     assert_eq!(
         std::fs::read_to_string(title_capture).expect("title"),
@@ -3087,7 +3394,10 @@ fn open_pr_automation_supports_task_id_only_inputs() {
     let updated_task = runtime.get_task(&task_id).expect("updated task");
     assert_eq!(updated_task.pr_number.as_deref(), Some("42"));
     assert_eq!(updated_task.status, TaskStatus::Review);
-    assert_eq!(updated_task.changed_files, Some(vec!["feature.rs".to_string()]));
+    assert_eq!(
+        updated_task.changed_files,
+        Some(vec!["feature.rs".to_string()])
+    );
 }
 
 #[test]
