@@ -4,7 +4,7 @@ use orbit_engine::{
     EngineHost, ExecutionContext, TaskAutomationUpdate, activity_skill_refs_from_spec_config,
 };
 use orbit_exec::EnvironmentMode;
-use orbit_store::JobRunStepParams;
+use orbit_store::{JobRunStepParams, TaskUpdateParams as StoreTaskUpdateParams};
 use orbit_tools::ToolContext;
 use orbit_types::{
     Activity, AgentCommitRequest, AgentResponseEnvelope, JobRun, JobRunState, JobTargetType,
@@ -14,7 +14,6 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::TaskUpdateParams;
 use crate::json_schema::validate_instance_against_schema;
 use crate::paths;
 
@@ -314,19 +313,29 @@ impl EngineHost for OrbitRuntime {
         task_id: &str,
         update: TaskAutomationUpdate,
     ) -> Result<(), OrbitError> {
-        let _ = self.update_task(
-            task_id,
-            TaskUpdateParams {
-                title: None,
-                description: None,
-                plan: None,
-                execution_summary: update.execution_summary,
-                comment: None,
-                status: update.status,
-                branch: update.branch.map(Some),
-                pr_number: update.pr_number.map(Some),
-            },
-        )?;
+        let _ = self.with_mutation(|| {
+            let task = self.context.task_store.update_task(
+                task_id,
+                StoreTaskUpdateParams {
+                    actor: "agent".to_string(),
+                    execution_summary: update.execution_summary.clone(),
+                    status: update.status,
+                    workspace_path: update.workspace_path.clone().map(Some),
+                    repo_root: update.repo_root.clone().map(Some),
+                    branch: update.branch.clone().map(Some),
+                    commit_message: update.commit_message.clone().map(Some),
+                    changed_files: update.changed_files.clone().map(Some),
+                    pr_number: update.pr_number.clone().map(Some),
+                    ..Default::default()
+                },
+            )?;
+            Ok((
+                task.clone(),
+                OrbitEvent::TaskUpdated {
+                    id: task_id.to_string(),
+                },
+            ))
+        })?;
         Ok(())
     }
 

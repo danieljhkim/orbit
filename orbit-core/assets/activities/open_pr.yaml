@@ -17,30 +17,27 @@ activity:
     type: object
     required:
       - task_id
-      - repo_root
-      - commit_message
-      - changed_files
     properties:
       task_id:
         type: string
         description: The Orbit task ID whose branch should be opened as a PR
       repo_root:
         type: string
-        description: Canonical repository root or task worktree used to resolve the current repository context.
+        description: Canonical repository root or task worktree used to resolve the current repository context. Optional when task_id is provided; falls back to input.workspace_path and then the task repo_root.
       branch:
         type: string
-        description: Task branch to open as a PR. If omitted, Orbit falls back to the task's stored branch.
+        description: Task branch to open as a PR. Optional when task_id is provided; falls back to the task branch.
       base:
         type: string
         description: Base branch to merge into (defaults to agent-main)
       commit_message:
         type: string
-        description: Commit message from the preceding commit_task_changes step, used as PR body header.
+        description: Commit message from the preceding commit_task_changes step, used as PR body header. Optional when task_id is provided; falls back to the task commit_message.
       changed_files:
         type: array
         items:
           type: string
-        description: List of changed file paths from the preceding commit_task_changes step.
+        description: List of changed file paths from the preceding commit_task_changes step. Optional when task_id is provided; falls back to the task changed_files.
   output_schema_json:
     type: object
     required:
@@ -60,7 +57,7 @@ activity:
         description: Pull request title derived from the Orbit task title.
       body:
         type: string
-        description: Pull request body built from commit_message and changed_files pipeline inputs.
+        description: Pull request body built from commit_message and changed_files, whether passed explicitly or loaded from the task.
 
   # ---- execution ----
   action: open_pr_from_task

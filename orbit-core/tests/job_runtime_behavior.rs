@@ -2385,6 +2385,201 @@ fn commit_task_changes_uses_summary_from_input() {
 }
 
 #[test]
+fn commit_task_changes_supports_task_id_only_inputs() {
+    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let dir = tempdir().expect("tempdir");
+    let data_root = dir.path().join("orbit");
+    std::fs::create_dir_all(&data_root).expect("create data root");
+    let repo_root = dir.path().join("repo");
+    std::fs::create_dir_all(&repo_root).expect("create repo root");
+    init_git_repo(&repo_root);
+    std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
+    git_commit_all(&repo_root, "chore: seed repo");
+    Command::new("git")
+        .args(["branch", "-M", "agent-main"])
+        .current_dir(&repo_root)
+        .status()
+        .expect("rename branch");
+
+    let worktree_root = dir.path().join("worktrees");
+    let previous_worktree_root = std::env::var("ORBIT_WORKTREE_ROOT").ok();
+    unsafe {
+        std::env::set_var("ORBIT_WORKTREE_ROOT", &worktree_root);
+    }
+
+    let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
+    let task_id = runtime
+        .add_task(TaskAddParams {
+            title: "Persist pipeline artifacts".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: Some(repo_root.to_string_lossy().to_string()),
+            priority: TaskPriority::High,
+            task_type: TaskType::Issue,
+        })
+        .expect("add task")
+        .id;
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-create-wt-task-only".to_string(),
+            spec_type: "automation".to_string(),
+            description: "create worktree".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" },
+                    "base": { "type": "string" },
+                    "workspace_path": { "type": "string" }
+                },
+                "required": ["task_id", "base", "workspace_path"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "workspace_path": { "type": "string" },
+                    "repo_root": { "type": "string" },
+                    "branch": { "type": "string" }
+                },
+                "required": ["workspace_path", "repo_root", "branch"]
+            }),
+            spec_config: json!({"action":"create_task_worktree"}),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add create activity");
+
+    let create_job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({
+                "task_id": task_id,
+                "base": "agent-main",
+                "workspace_path": repo_root.to_string_lossy().to_string()
+            })),
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-create-wt-task-only".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add create job")
+        .job_id;
+    let create_run = runtime.run_job_now(&create_job_id).expect("run create job");
+    assert_eq!(create_run.state, JobRunState::Success);
+
+    let created_task = runtime.get_task(&task_id).expect("created task");
+    let workspace_path = created_task
+        .workspace_path
+        .clone()
+        .expect("task workspace_path");
+    let canonical_repo_root = repo_root.canonicalize().expect("canonicalize repo root");
+    assert_eq!(
+        created_task.repo_root.as_deref(),
+        Some(canonical_repo_root.to_string_lossy().as_ref())
+    );
+
+    std::fs::write(std::path::Path::new(&workspace_path).join("fix.rs"), "fixed\n").expect("write fix");
+    runtime
+        .update_task(
+            &task_id,
+            TaskUpdateParams {
+                title: None,
+                description: None,
+                plan: None,
+                execution_summary: Some(
+                    "Persisted task-scoped automation artifacts for downstream pipeline steps."
+                        .to_string(),
+                ),
+                comment: None,
+                status: None,
+                branch: None,
+                pr_number: None,
+            },
+        )
+        .expect("set execution summary");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-commit-task-only".to_string(),
+            spec_type: "automation".to_string(),
+            description: "commit changes from task fields".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" }
+                },
+                "required": ["task_id"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "commit_message": { "type": "string" },
+                    "changed_files": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["commit_message", "changed_files"]
+            }),
+            spec_config: json!({"action":"commit_task_changes"}),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add commit activity");
+
+    let commit_job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({ "task_id": task_id })),
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-commit-task-only".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add commit job")
+        .job_id;
+
+    let commit_run = runtime.run_job_now(&commit_job_id).expect("run commit job");
+    match previous_worktree_root {
+        Some(value) => unsafe { std::env::set_var("ORBIT_WORKTREE_ROOT", value) },
+        None => unsafe { std::env::remove_var("ORBIT_WORKTREE_ROOT") },
+    }
+    assert_eq!(commit_run.state, JobRunState::Success);
+
+    let commit_history = runtime.job_history(&commit_job_id).expect("commit history");
+    let commit_output = commit_history[0].steps[0]
+        .agent_response_json
+        .as_ref()
+        .expect("commit output");
+    assert_eq!(
+        commit_output["commit_message"],
+        json!(format!(
+            "fix: Persist pipeline artifacts [{task_id}]\n\nPersisted task-scoped automation artifacts for downstream pipeline steps."
+        ))
+    );
+    assert_eq!(commit_output["changed_files"], json!(vec!["fix.rs"]));
+
+    let expected_commit_message = format!(
+        "fix: Persist pipeline artifacts [{task_id}]\n\nPersisted task-scoped automation artifacts for downstream pipeline steps."
+    );
+    let updated_task = runtime.get_task(&task_id).expect("updated task");
+    assert_eq!(
+        updated_task.commit_message.as_deref(),
+        Some(expected_commit_message.as_str())
+    );
+    assert_eq!(updated_task.changed_files, Some(vec!["fix.rs".to_string()]));
+}
+
+#[test]
 fn open_pr_automation_uses_task_title_and_commit_output() {
     let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
     let dir = tempdir().expect("tempdir");
@@ -2599,6 +2794,303 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
 }
 
 #[test]
+fn open_pr_automation_supports_task_id_only_inputs() {
+    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let dir = tempdir().expect("tempdir");
+    let data_root = dir.path().join("orbit");
+    std::fs::create_dir_all(&data_root).expect("create data root");
+    let repo_root = dir.path().join("repo");
+    std::fs::create_dir_all(&repo_root).expect("create repo root");
+    init_git_repo(&repo_root);
+    std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
+    git_commit_all(&repo_root, "chore: seed repo");
+    Command::new("git")
+        .args(["branch", "-M", "agent-main"])
+        .current_dir(&repo_root)
+        .status()
+        .expect("rename branch");
+
+    let bare_dir = dir.path().join("origin.git");
+    std::fs::create_dir_all(&bare_dir).expect("create bare dir");
+    let status = Command::new("git")
+        .args(["init", "--bare", "-q"])
+        .current_dir(&bare_dir)
+        .status()
+        .expect("git init --bare");
+    assert!(status.success(), "git init --bare must succeed");
+    let status = Command::new("git")
+        .args(["remote", "add", "origin", &bare_dir.to_string_lossy()])
+        .current_dir(&repo_root)
+        .status()
+        .expect("git remote add origin");
+    assert!(status.success(), "git remote add must succeed");
+
+    let gh_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&gh_dir).expect("create gh dir");
+    let title_capture = dir.path().join("gh-title-task-only.txt");
+    let body_capture = dir.path().join("gh-body-task-only.txt");
+    let base_capture = dir.path().join("gh-base-task-only.txt");
+    let head_capture = dir.path().join("gh-head-task-only.txt");
+    let gh_script = gh_dir.join("gh");
+    let gh_body = format!(
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n",
+            "  shift 2\n",
+            "  while [ $# -gt 0 ]; do\n",
+            "    case \"$1\" in\n",
+            "      --title) printf '%s' \"$2\" > \"{title}\"; shift 2 ;;\n",
+            "      --body) printf '%s' \"$2\" > \"{body}\"; shift 2 ;;\n",
+            "      --base) printf '%s' \"$2\" > \"{base}\"; shift 2 ;;\n",
+            "      --head) printf '%s' \"$2\" > \"{head}\"; shift 2 ;;\n",
+            "      *) shift ;;\n",
+            "    esac\n",
+            "  done\n",
+            "  printf 'https://github.com/example/orbit/pull/42\\n'\n",
+            "  exit 0\n",
+            "fi\n",
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n",
+            "  printf '{{\"number\":42,\"title\":\"captured\",\"body\":\"captured\",\"headRefName\":\"orbit/test\",\"files\":[],\"commits\":[]}}'\n",
+            "  exit 0\n",
+            "fi\n",
+            "exit 1\n",
+        ),
+        title = title_capture.display(),
+        body = body_capture.display(),
+        base = base_capture.display(),
+        head = head_capture.display(),
+    );
+    std::fs::write(&gh_script, gh_body).expect("write gh script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&gh_script, std::fs::Permissions::from_mode(0o755)).expect("chmod gh");
+
+    let previous_path = std::env::var("PATH").ok();
+    unsafe {
+        std::env::set_var("PATH", prepend_path(&gh_dir));
+    }
+    let worktree_root = dir.path().join("worktrees");
+    let previous_worktree_root = std::env::var("ORBIT_WORKTREE_ROOT").ok();
+    unsafe {
+        std::env::set_var("ORBIT_WORKTREE_ROOT", &worktree_root);
+    }
+
+    let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
+    let task_id = runtime
+        .add_task(TaskAddParams {
+            title: "Open PR from stored artifacts".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: Some(repo_root.to_string_lossy().to_string()),
+            priority: TaskPriority::High,
+            task_type: TaskType::Feature,
+        })
+        .expect("add task")
+        .id;
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-create-wt-open-pr-task-only".to_string(),
+            spec_type: "automation".to_string(),
+            description: "create worktree".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" },
+                    "base": { "type": "string" },
+                    "workspace_path": { "type": "string" }
+                },
+                "required": ["task_id", "base", "workspace_path"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "workspace_path": { "type": "string" },
+                    "repo_root": { "type": "string" },
+                    "branch": { "type": "string" }
+                },
+                "required": ["workspace_path", "repo_root", "branch"]
+            }),
+            spec_config: json!({"action":"create_task_worktree"}),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add create activity");
+
+    let create_job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({
+                "task_id": task_id,
+                "base": "agent-main",
+                "workspace_path": repo_root.to_string_lossy().to_string()
+            })),
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-create-wt-open-pr-task-only".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add create job")
+        .job_id;
+    let create_run = runtime.run_job_now(&create_job_id).expect("run create job");
+    assert_eq!(create_run.state, JobRunState::Success);
+
+    let created_task = runtime.get_task(&task_id).expect("created task");
+    let workspace_path = created_task
+        .workspace_path
+        .clone()
+        .expect("task workspace_path");
+
+    std::fs::write(std::path::Path::new(&workspace_path).join("feature.rs"), "feature\n")
+        .expect("write feature file");
+    runtime
+        .update_task(
+            &task_id,
+            TaskUpdateParams {
+                title: None,
+                description: None,
+                plan: None,
+                execution_summary: Some(
+                    "Stored commit artifacts on the task so PR creation can run from task_id only."
+                        .to_string(),
+                ),
+                comment: None,
+                status: Some(TaskStatus::InProgress),
+                branch: None,
+                pr_number: None,
+            },
+        )
+        .expect("prepare task");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-commit-open-pr-task-only".to_string(),
+            spec_type: "automation".to_string(),
+            description: "commit changes from task fields".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" }
+                },
+                "required": ["task_id"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "commit_message": { "type": "string" }
+                },
+                "required": ["commit_message"]
+            }),
+            spec_config: json!({"action":"commit_task_changes"}),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add commit activity");
+    let commit_job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({ "task_id": task_id })),
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-commit-open-pr-task-only".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add commit job")
+        .job_id;
+    let commit_run = runtime.run_job_now(&commit_job_id).expect("run commit job");
+    assert_eq!(commit_run.state, JobRunState::Success);
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-open-pr-task-only".to_string(),
+            spec_type: "automation".to_string(),
+            description: "open pr from task fields".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" }
+                },
+                "required": ["task_id"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "pr_url": { "type": "string" },
+                    "pr_number": { "type": "string" },
+                    "title": { "type": "string" },
+                    "body": { "type": "string" }
+                },
+                "required": ["pr_url", "pr_number", "title", "body"]
+            }),
+            spec_config: json!({"action":"open_pr_from_task"}),
+            workspace_path: None,
+            identity_id: None,
+            created_by: None,
+        })
+        .expect("add open pr activity");
+
+    let open_pr_job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({ "task_id": task_id })),
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-open-pr-task-only".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add open pr job")
+        .job_id;
+
+    let run_result = runtime.run_job_now(&open_pr_job_id);
+    match previous_path {
+        Some(value) => unsafe { std::env::set_var("PATH", value) },
+        None => unsafe { std::env::remove_var("PATH") },
+    }
+    match previous_worktree_root {
+        Some(value) => unsafe { std::env::set_var("ORBIT_WORKTREE_ROOT", value) },
+        None => unsafe { std::env::remove_var("ORBIT_WORKTREE_ROOT") },
+    }
+    let run = run_result.expect("run open pr job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let body_content = std::fs::read_to_string(body_capture).expect("body");
+    assert!(body_content.contains("task_id only"), "body: {body_content}");
+    assert!(body_content.contains("feature.rs"), "body: {body_content}");
+    assert_eq!(
+        std::fs::read_to_string(title_capture).expect("title"),
+        "Open PR from stored artifacts"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base_capture).expect("base"),
+        "agent-main"
+    );
+    assert_eq!(
+        std::fs::read_to_string(head_capture).expect("head"),
+        format!("orbit/{task_id}")
+    );
+
+    let updated_task = runtime.get_task(&task_id).expect("updated task");
+    assert_eq!(updated_task.pr_number.as_deref(), Some("42"));
+    assert_eq!(updated_task.status, TaskStatus::Review);
+    assert_eq!(updated_task.changed_files, Some(vec!["feature.rs".to_string()]));
+}
+
+#[test]
 fn multi_step_same_agent_cli_each_step_gets_its_own_env_extra() {
     // Regression: env_extra was looked up by matching agent_cli (first match), so step 2
     // sharing the same agent_cli as step 1 would receive step 1's allowlist.
@@ -2699,4 +3191,3 @@ pass = ["HOME", "PATH"]
         "step2 must not have STEP1_SECRET"
     );
 }
-

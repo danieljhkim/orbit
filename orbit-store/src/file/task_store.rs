@@ -28,12 +28,15 @@ pub(crate) struct FileTaskInsert {
     pub execution_summary: String,
     pub context_files: Vec<String>,
     pub workspace_path: Option<String>,
+    pub repo_root: Option<String>,
     pub created_by: Option<String>,
     pub assigned_to: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub task_type: TaskType,
     pub branch: Option<String>,
+    pub commit_message: Option<String>,
+    pub changed_files: Option<Vec<String>>,
     pub pr_number: Option<String>,
     pub proposed_by: Option<String>,
     pub comments: Vec<TaskComment>,
@@ -48,12 +51,15 @@ pub(crate) struct FileTaskUpdate {
     pub execution_summary: Option<String>,
     pub context_files: Option<Vec<String>>,
     pub workspace_path: Option<Option<String>>,
+    pub repo_root: Option<Option<String>>,
     pub assigned_to: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
     pub task_type: Option<TaskType>,
     pub branch: Option<Option<String>>,
+    pub commit_message: Option<Option<String>>,
+    pub changed_files: Option<Option<Vec<String>>>,
     pub pr_number: Option<Option<String>>,
     pub proposed_by: Option<Option<String>>,
     pub status_event: Option<String>,
@@ -147,6 +153,8 @@ struct TaskFileDocument {
     #[serde(default)]
     workspace_path: Option<String>,
     #[serde(default)]
+    repo_root: Option<String>,
+    #[serde(default)]
     created_by: Option<String>,
     #[serde(default)]
     assigned_to: Option<String>,
@@ -154,6 +162,10 @@ struct TaskFileDocument {
     proposed_by: Option<String>,
     #[serde(default)]
     branch: Option<String>,
+    #[serde(default)]
+    commit_message: Option<String>,
+    #[serde(default)]
+    changed_files: Option<Vec<String>>,
     #[serde(default)]
     pr_number: Option<String>,
     #[serde(default)]
@@ -218,11 +230,14 @@ impl TaskFileStore {
                 description: params.description,
                 context_files: params.context_files,
                 workspace_path: params.workspace_path,
+                repo_root: params.repo_root,
                 assigned_to: params.assigned_to,
                 created_by: params.created_by,
                 priority: params.priority,
                 task_type: params.task_type,
                 branch: params.branch,
+                commit_message: params.commit_message,
+                changed_files: params.changed_files,
                 pr_number: params.pr_number,
                 proposed_by: params.proposed_by,
                 created_at: now,
@@ -346,6 +361,9 @@ impl TaskFileStore {
         if let Some(value) = &fields.workspace_path {
             bundle.doc.workspace_path = value.clone();
         }
+        if let Some(value) = &fields.repo_root {
+            bundle.doc.repo_root = value.clone();
+        }
         if let Some(value) = &fields.assigned_to {
             bundle.doc.assigned_to = value.clone();
         }
@@ -360,6 +378,12 @@ impl TaskFileStore {
         }
         if let Some(value) = &fields.branch {
             bundle.doc.branch = value.clone();
+        }
+        if let Some(value) = &fields.commit_message {
+            bundle.doc.commit_message = value.clone();
+        }
+        if let Some(value) = &fields.changed_files {
+            bundle.doc.changed_files = value.clone();
         }
         if let Some(value) = &fields.pr_number {
             bundle.doc.pr_number = value.clone();
@@ -594,6 +618,7 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
     yaml.push_str(&yaml_section("context"));
     yaml.push_str(&yaml_field("context_files", &doc.context_files)?);
     yaml.push_str(&yaml_field("workspace_path", &doc.workspace_path)?);
+    yaml.push_str(&yaml_field("repo_root", &doc.repo_root)?);
 
     yaml.push_str(&yaml_section("ownership"));
     yaml.push_str(&yaml_field("created_by", &doc.created_by)?);
@@ -604,6 +629,8 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
 
     yaml.push_str(&yaml_section("implementation"));
     yaml.push_str(&yaml_field("branch", &doc.branch)?);
+    yaml.push_str(&yaml_field("commit_message", &doc.commit_message)?);
+    yaml.push_str(&yaml_field("changed_files", &doc.changed_files)?);
     yaml.push_str(&yaml_field("pr_number", &doc.pr_number)?);
 
     yaml.push_str(&yaml_section("execution references"));
@@ -676,12 +703,15 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         execution_summary: bundle.execution_summary,
         context_files: bundle.doc.context_files,
         workspace_path: bundle.doc.workspace_path,
+        repo_root: bundle.doc.repo_root,
         assigned_to: bundle.doc.assigned_to,
         created_by: bundle.doc.created_by,
         status: state.to_status(),
         priority: bundle.doc.priority,
         task_type: bundle.doc.task_type,
         branch: bundle.doc.branch,
+        commit_message: bundle.doc.commit_message,
+        changed_files: bundle.doc.changed_files,
         pr_number: bundle.doc.pr_number,
         proposed_by: bundle.doc.proposed_by,
         comments: bundle.doc.comments,
@@ -710,12 +740,15 @@ mod tests {
             execution_summary: String::new(),
             context_files: vec!["orbit-store/src/file/task_store.rs".to_string()],
             workspace_path: Some("/tmp/workspace".to_string()),
+            repo_root: Some("/tmp/repo".to_string()),
             assigned_to: Some("Codex".to_string()),
             created_by: Some("Codex".to_string()),
             status,
             priority: TaskPriority::High,
             task_type: TaskType::Refactor,
             branch: None,
+            commit_message: None,
+            changed_files: None,
             pr_number: None,
             proposed_by: Some("daniel".to_string()),
             comments: Vec::new(),
@@ -938,12 +971,15 @@ mod tests {
                 execution_summary: String::new(),
                 context_files: vec![],
                 workspace_path: None,
+                repo_root: None,
                 assigned_to: None,
                 created_by: None,
                 status: TaskStatus::Done,
                 priority: TaskPriority::Medium,
                 task_type: TaskType::Task,
                 branch: None,
+                commit_message: None,
+                changed_files: None,
                 pr_number: None,
                 proposed_by: None,
                 comments: Vec::new(),

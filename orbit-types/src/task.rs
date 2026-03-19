@@ -204,6 +204,8 @@ pub struct Task {
     #[serde(default)]
     pub workspace_path: Option<String>,
     #[serde(default)]
+    pub repo_root: Option<String>,
+    #[serde(default)]
     pub assigned_to: Option<String>,
     #[serde(default)]
     pub created_by: Option<String>,
@@ -212,6 +214,10 @@ pub struct Task {
     pub task_type: TaskType,
     #[serde(default)]
     pub branch: Option<String>,
+    #[serde(default)]
+    pub commit_message: Option<String>,
+    #[serde(default)]
+    pub changed_files: Option<Vec<String>>,
     #[serde(default)]
     pub pr_number: Option<String>,
     #[serde(default)]

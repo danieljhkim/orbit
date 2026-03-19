@@ -19,7 +19,7 @@ activity:
     properties:
       workspace_path:
         type: string
-        description: Task workspace path propagated from dispatch_task for CLI execution.
+        description: Task workspace path for CLI execution. Optional when task_id is provided elsewhere in the pipeline and falls back to the task workspace_path.
   output_schema_json:
     type: object
     properties:

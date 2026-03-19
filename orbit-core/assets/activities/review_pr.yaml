@@ -51,10 +51,10 @@ activity:
         description: The Orbit task ID whose PR should be reviewed
       pr:
         type: string
-        description: PR number, URL, or branch name. If omitted, derived from the task's prNumber or branch field.
+        description: PR number, URL, or branch name. Optional when task_id is provided; falls back to the task prNumber and then the task branch.
       repo:
         type: string
-        description: Repository in owner/name format (optional, defaults to current repo)
+        description: Repository in owner/name format. Optional when task_id is provided and defaults to the current repository.
   output_schema_json:
     type: object
     required:

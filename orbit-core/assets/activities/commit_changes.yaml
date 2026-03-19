@@ -17,26 +17,22 @@ activity:
     type: object
     required:
       - task_id
-      - workspace_path
-      - repo_root
-      - branch
-      - summary
     properties:
       task_id:
         type: string
         description: The Orbit task ID whose changes should be committed.
       summary:
         type: string
-        description: One-paragraph summary of what was implemented, passed from implement_change output.
+        description: One-paragraph summary of what was implemented. Optional when task_id is provided; falls back to the task execution_summary.
       workspace_path:
         type: string
-        description: Dedicated task worktree path where implementation completed.
+        description: Dedicated task worktree path where implementation completed. Optional when task_id is provided; falls back to the task workspace_path.
       repo_root:
         type: string
-        description: Canonical repository root that owns the task worktree.
+        description: Canonical repository root that owns the task worktree. Optional when task_id is provided; falls back to input.workspace_path and then the task repo_root.
       branch:
         type: string
-        description: Task branch expected to be checked out in the worktree.
+        description: Task branch expected to be checked out in the worktree. Optional when task_id is provided; falls back to orbit/<task_id>.
   output_schema_json:
     type: object
     required:

@@ -102,16 +102,14 @@ activity:
         description: Optional task branch name expected to be checked out in the implementation workspace.
   output_schema_json:
     type: object
-    required:
-      - status
-      - summary
+    required: []
     properties:
       status:
         type: string
-        description: "Outcome: success or failed"
+        description: "Optional agent outcome: success or failed"
       summary:
         type: string
-        description: One-paragraph summary of what was implemented
+        description: Optional one-paragraph summary of what was implemented
       files_changed:
         type: array
         items:
