@@ -11,5 +11,6 @@ job:
     - target_type: activity
       target_id: review_tasks
       agent_cli: claude
+      model: sonnet-4.5
       timeout_seconds: 1200
       env_extra: []

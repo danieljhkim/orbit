@@ -777,6 +777,7 @@ mod tests {
             target_type: JobTargetType::Activity,
             target_id: target_id.to_string(),
             agent_cli: "mock-agent".to_string(),
+            model: None,
             timeout_seconds: 300,
             env_extra: vec![],
         }
@@ -940,6 +941,7 @@ mod tests {
             target_type: JobTargetType::Activity,
             target_id: "target-roundtrip".to_string(),
             agent_cli: "my-agent-cli".to_string(),
+            model: None,
             timeout_seconds: 600,
             env_extra: vec!["MY_VAR".to_string(), "OTHER_VAR".to_string()],
         };
@@ -974,6 +976,10 @@ mod tests {
             !raw.contains("updated_at:"),
             "updated_at must not appear in persisted job YAML but raw yaml was:\n{raw}"
         );
+        assert!(
+            !raw.contains("model:"),
+            "model must not appear when omitted but raw yaml was:\n{raw}"
+        );
 
         // Read back via the store and assert round-trip fidelity.
         let read_back = store
@@ -988,10 +994,43 @@ mod tests {
         assert_eq!(read_back.steps.len(), 1);
         assert_eq!(read_back.steps[0].target_id, "target-roundtrip");
         assert_eq!(read_back.steps[0].agent_cli, "my-agent-cli");
+        assert_eq!(read_back.steps[0].model, None);
         assert_eq!(read_back.steps[0].timeout_seconds, 600);
         assert_eq!(read_back.steps[0].env_extra, vec!["MY_VAR", "OTHER_VAR"]);
         // Timestamps are no longer stored in YAML; they are derived at read time
         // (from the job_id for standard IDs, or Utc::now() as fallback).
+    }
+
+    #[test]
+    fn job_write_read_roundtrip_preserves_step_model_when_present() {
+        let (_dir, store) = make_store();
+        let step = JobStep {
+            target_type: JobTargetType::Activity,
+            target_id: "target-model".to_string(),
+            agent_cli: "codex".to_string(),
+            model: Some("gpt-5.4".to_string()),
+            timeout_seconds: 600,
+            env_extra: vec![],
+        };
+        store
+            .insert_activity_v2(
+                Some("job-roundtrip-model".to_string()),
+                None,
+                1,
+                vec![step],
+                JobScheduleState::Enabled,
+            )
+            .expect("insert job");
+
+        let yaml_path = store.job_path("job-roundtrip-model");
+        let raw = std::fs::read_to_string(&yaml_path).expect("read yaml");
+        assert!(raw.contains("model: gpt-5.4"), "raw yaml was:\n{raw}");
+
+        let read_back = store
+            .get_job("job-roundtrip-model")
+            .expect("get_job ok")
+            .expect("job exists");
+        assert_eq!(read_back.steps[0].model.as_deref(), Some("gpt-5.4"));
     }
 
     #[test]

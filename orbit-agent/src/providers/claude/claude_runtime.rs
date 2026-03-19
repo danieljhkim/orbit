@@ -11,10 +11,10 @@ pub(crate) struct ClaudeRuntime {
 }
 
 impl ClaudeRuntime {
-    pub(crate) fn new(command: String) -> Self {
+    pub(crate) fn new(command: String, model: Option<String>) -> Self {
         Self {
             command,
-            cli: ClaudeCliTransport,
+            cli: ClaudeCliTransport::new(model),
         }
     }
 }

@@ -62,7 +62,7 @@ fn build_agent_invocation<H: EngineHost>(
     execution: &ExecutionContext,
 ) -> Result<orbit_agent::AgentResponse, AttemptOutcome> {
     let config = host
-        .agent_config_for(&execution.agent_cli)
+        .agent_config_for(&execution.agent_cli, execution.model.as_deref())
         .map_err(invocation_failed_outcome)?;
     let agent = Agent::new(&config).map_err(invocation_failed_outcome)?;
     let stdin_payload = host

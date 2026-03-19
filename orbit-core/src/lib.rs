@@ -227,6 +227,7 @@ mod tests {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-core-double-run".to_string(),
                     agent_cli: agent_path.to_string_lossy().to_string(),
+                    model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
                 }],

@@ -20,6 +20,7 @@ pub struct ExecutionContext {
     pub activity: Activity,
     pub job: Option<Job>,
     pub agent_cli: String,
+    pub model: Option<String>,
     pub timeout_seconds: u64,
     pub env_extra: Vec<String>,
     pub input: Value,
@@ -99,7 +100,11 @@ pub trait EngineHost {
     ) -> Result<bool, OrbitError>;
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError>;
 
-    fn agent_config_for(&self, agent_cli: &str) -> Result<AgentConfig, OrbitError>;
+    fn agent_config_for(
+        &self,
+        agent_cli: &str,
+        model: Option<&str>,
+    ) -> Result<AgentConfig, OrbitError>;
     fn execution_environment_mode(&self, env_extra: &[String]) -> EnvironmentMode;
     fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)>;
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String>;

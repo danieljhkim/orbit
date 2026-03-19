@@ -137,6 +137,7 @@ fn add_scheduled_activity_with_timeout_and_limit(
                 target_type: JobTargetType::Activity,
                 target_id: target_id.to_string(),
                 agent_cli: agent_cli.to_string(),
+                model: None,
                 timeout_seconds,
                 env_extra: vec![],
             }],
@@ -234,6 +235,7 @@ fn cli_command_activity_executes_without_agent_cli_and_captures_output_file() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-cli-command".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -295,6 +297,7 @@ fn cli_command_failures_redact_sensitive_environment_values_from_error_messages(
                 target_type: JobTargetType::Activity,
                 target_id: "spec-cli-secret-redaction".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -409,6 +412,7 @@ fn cli_command_receives_only_baseline_allowlisted_and_orbit_env_vars() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-cli-allowlisted-env".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -510,6 +514,7 @@ fn cli_command_step_env_extra_is_scoped_per_step() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-cli-env-step1".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP1_SECRET".to_string()],
                 },
@@ -517,6 +522,7 @@ fn cli_command_step_env_extra_is_scoped_per_step() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-cli-env-step2".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP2_SECRET".to_string()],
                 },
@@ -839,6 +845,7 @@ fn run_job_now_uses_job_default_input_when_manual_input_is_absent() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-default-input".to_string(),
                 agent_cli,
+                model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
             }],
@@ -889,6 +896,7 @@ fn run_job_now_with_input_overrides_job_default_input() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-default-override".to_string(),
                 agent_cli,
+                model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
             }],
@@ -958,6 +966,7 @@ fn run_job_now_finalizes_failed_when_pre_step_setup_errors_after_running() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-invalid-default-input".to_string(),
                 agent_cli: "mock-agent".to_string(),
+                model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
             }],
@@ -1190,6 +1199,48 @@ fn codex_job_run_uses_workspace_write_sandbox() {
     let captured: Vec<&str> = args.lines().collect();
     assert_eq!(captured[0..3], ["exec", "--sandbox", "workspace-write"]);
     assert!(!captured.contains(&"--output-schema"));
+}
+
+#[test]
+fn codex_job_run_passes_step_model_to_provider_cli() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let args_capture = dir.path().join("codex-model-args.txt");
+    let script_path = dir.path().join("codex");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{args}\"\ncat > /dev/null\nprintf '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null,\"durationMs\":1}}'\n",
+        args = args_capture.display(),
+    );
+    let agent_cli = write_agent_script(&script_path, &script);
+
+    add_activity(&runtime, "spec-codex-model");
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: None,
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-codex-model".to_string(),
+                agent_cli,
+                model: Some("gpt-5.4".to_string()),
+                timeout_seconds: 10,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let args = std::fs::read_to_string(args_capture).expect("read args");
+    let captured: Vec<&str> = args.lines().collect();
+    assert_eq!(
+        captured[0..5],
+        ["exec", "--model", "gpt-5.4", "--sandbox", "workspace-write"]
+    );
 }
 
 #[test]
@@ -1862,6 +1913,7 @@ fn claude_job_run_succeeds_with_mock_binary() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-claude-run".to_string(),
                 agent_cli,
+                model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
             }],
@@ -1892,6 +1944,54 @@ fn claude_job_run_succeeds_with_mock_binary() {
 }
 
 #[test]
+fn claude_job_run_passes_step_model_to_provider_cli() {
+    let dir = tempdir().expect("tempdir");
+    let args_capture = dir.path().join("claude-model-args.txt");
+    let script_path = dir.path().join("claude");
+    let script = format!(
+        concat!(
+            "#!/bin/sh\n",
+            "printf '%s\\n' \"$@\" > \"{args}\"\n",
+            "cat > /dev/null\n",
+            "printf '{{\"schemaVersion\":1,\"status\":\"success\",\"result\":{{}},\"error\":null,\"durationMs\":1}}'\n",
+        ),
+        args = args_capture.to_string_lossy(),
+    );
+    let agent_cli = write_agent_script(&script_path, &script);
+
+    write_runtime_config(dir.path(), "[execution.env]\npass = [\"HOME\", \"PATH\"]\n");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    add_activity(&runtime, "spec-claude-model");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: None,
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-claude-model".to_string(),
+                agent_cli,
+                model: Some("sonnet-4.5".to_string()),
+                timeout_seconds: 10,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let result = runtime
+        .run_job_now(&job_id)
+        .expect("claude job must succeed");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let args_raw = std::fs::read_to_string(args_capture).expect("args capture");
+    let captured: Vec<&str> = args_raw.lines().collect();
+    assert_eq!(captured[captured.len() - 2..], ["--model", "sonnet-4.5"]);
+}
+
+#[test]
 fn run_job_now_executes_job_successfully() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
@@ -1911,6 +2011,7 @@ fn run_job_now_executes_job_successfully() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-manual-run".to_string(),
                 agent_cli,
+                model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
             }],
@@ -2002,6 +2103,7 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-agent-output".to_string(),
                     agent_cli,
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
                 },
@@ -2009,6 +2111,7 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-cli-consumer".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
                 },
@@ -2118,6 +2221,7 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-agent-workspace-output".to_string(),
                     agent_cli,
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
                 },
@@ -2125,6 +2229,7 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-cli-workspace-consumer".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
                 },
@@ -2200,6 +2305,7 @@ fn agent_step_uses_workspace_path_as_process_current_dir() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-agent-current-dir".to_string(),
                 agent_cli,
+                model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
             }],
@@ -2353,6 +2459,7 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-create-task-worktree".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
                 },
@@ -2360,6 +2467,7 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-capture-worktree-context".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
                 },
@@ -2475,6 +2583,7 @@ fn start_task_automation_moves_task_into_progress() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-start-task".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -2572,6 +2681,7 @@ fn update_task_automation_moves_task_to_review_with_summary_comment_and_note() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-update-task".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -2713,6 +2823,7 @@ fn implement_change_result_status_flows_into_update_task_as_task_status() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-implement-like".to_string(),
                     agent_cli,
+                    model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
                 },
@@ -2720,6 +2831,7 @@ fn implement_change_result_status_flows_into_update_task_as_task_status() {
                     target_type: JobTargetType::Activity,
                     target_id: "spec-update-task-from-implement".to_string(),
                     agent_cli: String::new(),
+                    model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
                 },
@@ -2831,6 +2943,7 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-create-task-worktree-for-commit".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -2909,6 +3022,7 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-commit-task-worktree".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3015,7 +3129,7 @@ fn commit_task_changes_uses_summary_from_input() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "base": "agent-main", "workspace_path": repo_root.to_string_lossy().to_string()})),
             max_active_runs: None,
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-create-wt-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![] }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-create-wt-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![] }],
             initial_state_override: None,
         })
         .expect("add create job")
@@ -3061,7 +3175,7 @@ fn commit_task_changes_uses_summary_from_input() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "workspace_path": workspace_path, "repo_root": repo_root.to_string_lossy().to_string(), "branch": branch, "summary": "Hardened bundle writes using staged directory rename."})),
             max_active_runs: None,
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![] }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![] }],
             initial_state_override: None,
         })
         .expect("add success job")
@@ -3098,7 +3212,7 @@ fn commit_task_changes_uses_summary_from_input() {
             job_id: None,
             default_input: Some(json!({"task_id": task2_id, "workspace_path": workspace_path, "repo_root": repo_root.to_string_lossy().to_string(), "branch": branch, "summary": ""})),
             max_active_runs: None,
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![] }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![] }],
             initial_state_override: None,
         })
         .expect("add fail job")
@@ -3200,6 +3314,7 @@ fn commit_task_changes_supports_task_id_only_inputs() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-create-wt-task-only".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3280,6 +3395,7 @@ fn commit_task_changes_supports_task_id_only_inputs() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-commit-task-only".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3485,6 +3601,7 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-open-pr-from-task".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3680,6 +3797,7 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-create-wt-open-pr-task-only".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3753,6 +3871,7 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-commit-open-pr-task-only".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3800,6 +3919,7 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 target_type: JobTargetType::Activity,
                 target_id: "spec-open-pr-task-only".to_string(),
                 agent_cli: String::new(),
+                model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
             }],
@@ -3910,6 +4030,7 @@ pass = ["HOME", "PATH"]
                     target_type: JobTargetType::Activity,
                     target_id: "spec-multi-env-step1".to_string(),
                     agent_cli: agent_cli.clone(),
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP1_SECRET".to_string()],
                 },
@@ -3917,6 +4038,7 @@ pass = ["HOME", "PATH"]
                     target_type: JobTargetType::Activity,
                     target_id: "spec-multi-env-step2".to_string(),
                     agent_cli: agent_cli.clone(),
+                    model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP2_SECRET".to_string()],
                 },

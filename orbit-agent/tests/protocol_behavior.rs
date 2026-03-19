@@ -103,6 +103,23 @@ fn provider_mapper_supports_codex_approval_override() {
 }
 
 #[test]
+fn provider_mapper_supports_codex_model_override() {
+    let agent =
+        Agent::new(&AgentConfig::cli("codex").with_model(Some("gpt-5.4"))).expect("codex runtime");
+    let invocation = agent.invoke(job_request()).expect("codex invocation");
+    assert_eq!(
+        invocation.args,
+        vec![
+            "exec".to_string(),
+            "--model".to_string(),
+            "gpt-5.4".to_string(),
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn provider_mapper_supports_mock_agent() {
     let agent = Agent::new(&AgentConfig::cli("mock-agent")).expect("mock-agent runtime");
     let invocation = agent.invoke(job_request()).expect("mock-agent invocation");
@@ -138,6 +155,26 @@ fn provider_mapper_uses_binary_basename_for_paths() {
             "--output-format".to_string(),
             "text".to_string(),
             "--no-session-persistence".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn provider_mapper_supports_claude_model_override() {
+    let agent = Agent::new(&AgentConfig::cli("claude").with_model(Some("sonnet-4.5")))
+        .expect("claude runtime");
+    let invocation = agent.invoke(job_request()).expect("claude invocation");
+    assert_eq!(
+        invocation.args,
+        vec![
+            "-p".to_string(),
+            "--permission-mode".to_string(),
+            "bypassPermissions".to_string(),
+            "--output-format".to_string(),
+            "text".to_string(),
+            "--no-session-persistence".to_string(),
+            "--model".to_string(),
+            "sonnet-4.5".to_string(),
         ]
     );
 }

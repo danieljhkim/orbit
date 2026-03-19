@@ -53,6 +53,8 @@ struct DefaultJobStep {
     target_id: String,
     #[serde(default)]
     agent_cli: String,
+    #[serde(default)]
+    model: Option<String>,
     timeout_seconds: u64,
     #[serde(default)]
     env_extra: Vec<String>,
@@ -113,7 +115,9 @@ impl OrbitRuntime {
                 ));
             }
             if activity_requires_agent_cli(&activity.spec_type) {
-                let _ = Agent::new(&AgentConfig::cli(step.agent_cli.clone()))?;
+                let _ = Agent::new(
+                    &AgentConfig::cli(step.agent_cli.clone()).with_model(step.model.as_deref()),
+                )?;
             }
         }
 
@@ -329,6 +333,7 @@ fn default_job_steps(entry: &DefaultJobEntry) -> Result<Vec<JobStep>, OrbitError
                 target_type,
                 target_id: s.target_id.clone(),
                 agent_cli: s.agent_cli.clone(),
+                model: s.model.clone(),
                 timeout_seconds: s.timeout_seconds,
                 env_extra: s.env_extra.clone(),
             })
@@ -382,6 +387,12 @@ mod tests {
             .find(|spec| spec.job_id == "job_task_pipeline")
             .expect("task pipeline spec present");
         assert_eq!(pipeline.max_active_runs, 4);
+        assert_eq!(pipeline.steps[0].model.as_deref(), Some("gpt-5.4"));
+        let review = specs
+            .iter()
+            .find(|spec| spec.job_id == "job_review_tasks")
+            .expect("review job spec present");
+        assert_eq!(review.steps[0].model.as_deref(), Some("sonnet-4.5"));
     }
 
     #[test]

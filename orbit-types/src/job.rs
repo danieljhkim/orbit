@@ -139,6 +139,8 @@ pub struct JobStep {
     pub target_id: OrbitId,
     #[serde(default)]
     pub agent_cli: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub timeout_seconds: u64,
     /// Additional env var names to pass through in hermetic mode, on top of the global allowlist.
     #[serde(default)]

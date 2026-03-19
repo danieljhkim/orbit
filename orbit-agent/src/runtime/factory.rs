@@ -8,11 +8,13 @@ pub(crate) fn resolve_runtime(cfg: &AgentConfig) -> Result<RuntimeBackend, Orbit
     match AgentProvider::detect_from_cli(&cfg.command)? {
         AgentProvider::Codex => Ok(RuntimeBackend::CodexCli(CodexRuntime::new(
             cfg.command.clone(),
+            cfg.model.clone(),
             cfg.codex_sandbox.clone(),
             cfg.codex_approval_policy.clone(),
         ))),
         AgentProvider::Claude => Ok(RuntimeBackend::ClaudeCli(ClaudeRuntime::new(
             cfg.command.clone(),
+            cfg.model.clone(),
         ))),
         AgentProvider::MockAgent => Ok(RuntimeBackend::MockAgentCli(MockAgentRuntime::new(
             cfg.command.clone(),

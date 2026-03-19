@@ -12,12 +12,13 @@ pub(crate) struct CodexRuntime {
 impl CodexRuntime {
     pub(crate) fn new(
         command: String,
+        model: Option<String>,
         sandbox: Option<String>,
         approval_policy: Option<String>,
     ) -> Self {
         Self {
             command,
-            cli: CodexCliTransport::new(sandbox, approval_policy),
+            cli: CodexCliTransport::new(model, sandbox, approval_policy),
         }
     }
 }

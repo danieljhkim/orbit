@@ -110,6 +110,7 @@ mod tests {
                 target_type: JobTargetType::Activity,
                 target_id: "exec-1".to_string(),
                 agent_cli: "claude".to_string(),
+                model: None,
                 timeout_seconds: 300,
                 env_extra: vec![],
             }],

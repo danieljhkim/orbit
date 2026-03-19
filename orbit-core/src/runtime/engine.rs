@@ -56,6 +56,7 @@ fn build_agent_stdin_envelope_payload(
                     "target_type": s.target_type,
                     "target_id": s.target_id,
                     "agent_cli": s.agent_cli,
+                    "model": s.model,
                     "timeout_seconds": s.timeout_seconds,
                 })).collect::<Vec<_>>(),
             })
@@ -234,13 +235,17 @@ impl EngineHost for OrbitRuntime {
         self.context.job_store.get_job_run(run_id)
     }
 
-    fn agent_config_for(&self, agent_cli: &str) -> Result<AgentConfig, OrbitError> {
-        Ok(
-            AgentConfig::cli(agent_cli.to_string()).with_codex_execution(
+    fn agent_config_for(
+        &self,
+        agent_cli: &str,
+        model: Option<&str>,
+    ) -> Result<AgentConfig, OrbitError> {
+        Ok(AgentConfig::cli(agent_cli.to_string())
+            .with_model(model)
+            .with_codex_execution(
                 self.context.codex_execution_policy.sandbox(),
                 self.context.codex_execution_policy.approval_policy(),
-            ),
-        )
+            ))
     }
 
     fn execution_environment_mode(&self, env_extra: &[String]) -> EnvironmentMode {

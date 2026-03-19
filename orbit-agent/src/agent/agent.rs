@@ -6,6 +6,7 @@ use crate::types::{AgentRequest, AgentResponse};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
     pub command: String,
+    pub model: Option<String>,
     pub codex_sandbox: Option<String>,
     pub codex_approval_policy: Option<String>,
 }
@@ -14,9 +15,15 @@ impl AgentConfig {
     pub fn cli(command: impl Into<String>) -> Self {
         Self {
             command: command.into(),
+            model: None,
             codex_sandbox: None,
             codex_approval_policy: None,
         }
+    }
+
+    pub fn with_model(mut self, model: Option<&str>) -> Self {
+        self.model = model.map(ToString::to_string);
+        self
     }
 
     pub fn with_codex_execution(

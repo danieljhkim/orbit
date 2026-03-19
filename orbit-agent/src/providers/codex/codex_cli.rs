@@ -2,13 +2,19 @@ use crate::providers::common::render_prompt_with_embedded_envelope;
 use crate::types::AgentOperation;
 
 pub(crate) struct CodexCliTransport {
+    model: Option<String>,
     sandbox: Option<String>,
     approval_policy: Option<String>,
 }
 
 impl CodexCliTransport {
-    pub(crate) fn new(sandbox: Option<String>, approval_policy: Option<String>) -> Self {
+    pub(crate) fn new(
+        model: Option<String>,
+        sandbox: Option<String>,
+        approval_policy: Option<String>,
+    ) -> Self {
         Self {
+            model,
             sandbox,
             approval_policy,
         }
@@ -21,6 +27,10 @@ impl CodexCliTransport {
             args.push(approval_policy.clone());
         }
         args.push("exec".to_string());
+        if let Some(model) = &self.model {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
         args.push("--sandbox".to_string());
         args.push(
             self.sandbox

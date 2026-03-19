@@ -64,6 +64,28 @@ fn add_job(dir: &Path, target_id: &str, agent_cli: &str) -> String {
     String::from_utf8(output).expect("utf8").trim().to_string()
 }
 
+fn add_job_with_model(dir: &Path, target_id: &str, agent_cli: &str, model: &str) -> String {
+    let output = orbit_in(dir)
+        .args([
+            "job",
+            "add",
+            "--target-id",
+            target_id,
+            "--agent-cli",
+            agent_cli,
+            "--model",
+            model,
+            "--timeout",
+            "30s",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    String::from_utf8(output).expect("utf8").trim().to_string()
+}
+
 fn add_job_with_default_timeout(dir: &Path, target_id: &str, agent_cli: &str) -> String {
     let output = orbit_in(dir)
         .args([
@@ -175,7 +197,26 @@ fn job_add_list_show_json_flow() {
     assert_eq!(show["job_id"], job_id);
     assert_eq!(show["steps"][0]["target_type"], "activity");
     assert_eq!(show["steps"][0]["target_id"], spec_id);
+    assert!(show["steps"][0].get("model").is_none());
     assert_eq!(show["state"], "enabled");
+}
+
+#[test]
+fn job_add_show_json_includes_model_when_present() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let spec_id = add_activity(dir.path(), "spec-cli-model");
+
+    let job_id = add_job_with_model(dir.path(), &spec_id, "mock-agent", "gpt-5.4");
+
+    let show_output = orbit_in(dir.path())
+        .args(["job", "show", &job_id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_eq!(show["steps"][0]["model"], "gpt-5.4");
 }
 
 #[test]

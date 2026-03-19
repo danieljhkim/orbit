@@ -50,6 +50,8 @@ pub struct JobAddArgs {
     pub target_id: String,
     #[arg(long)]
     pub agent_cli: String,
+    #[arg(long)]
+    pub model: Option<String>,
     #[arg(long, default_value = "20m")]
     pub timeout: String,
     /// Comma-separated list of extra env var names to pass through in hermetic mode for this job.
@@ -71,6 +73,7 @@ impl Execute for JobAddArgs {
                 target_type: JobTargetType::Activity,
                 target_id: self.target_id,
                 agent_cli: self.agent_cli,
+                model: self.model,
                 timeout_seconds,
                 env_extra: crate::parse::csv_to_vec(&self.env_extra),
             }],
@@ -114,16 +117,17 @@ impl Execute for JobListArgs {
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
             println!(
-                "{:<26} {:<15} {:<28} {:<9} LAST_RUN",
-                "JOB_ID", "TARGET_TYPE", "TARGET_ID", "STATE"
+                "{:<26} {:<15} {:<28} {:<16} {:<9} LAST_RUN",
+                "JOB_ID", "TARGET_TYPE", "TARGET_ID", "MODEL", "STATE"
             );
             for (job, last_run) in &jobs_with_runs {
                 let first = job.steps.first();
                 println!(
-                    "{:<26} {:<15} {:<28} {:<9} {}",
+                    "{:<26} {:<15} {:<28} {:<16} {:<9} {}",
                     job.job_id,
                     first.map(|s| s.target_type.to_string()).unwrap_or_default(),
                     first.map(|s| s.target_id.as_str()).unwrap_or("-"),
+                    first.and_then(|s| s.model.as_deref()).unwrap_or("-"),
                     job.state,
                     format_last_run(last_run.as_ref()),
                 );
@@ -160,6 +164,9 @@ impl Execute for JobShowArgs {
                 println!("    Target Type:    {}", step.target_type);
                 println!("    Target ID:      {}", step.target_id);
                 println!("    Agent CLI:      {}", step.agent_cli);
+                if let Some(model) = &step.model {
+                    println!("    Model:          {}", model);
+                }
                 println!("    Timeout (s):    {}", step.timeout_seconds);
             }
             println!("Created:           {}", job.created_at.to_rfc3339());
@@ -326,14 +333,22 @@ fn job_to_json(job: &Job) -> Value {
         "max_active_runs": job.max_active_runs,
         "created_at": job.created_at.to_rfc3339(),
         "updated_at": job.updated_at.to_rfc3339(),
-        "steps": job.steps.iter().map(|s| json!({
-            "target_type": s.target_type.to_string(),
-            "target_id": s.target_id,
-            "agent_cli": s.agent_cli,
-            "timeout_seconds": s.timeout_seconds,
-            "env_extra": s.env_extra,
-        })).collect::<Vec<_>>(),
+        "steps": job.steps.iter().map(job_step_to_json).collect::<Vec<_>>(),
     })
+}
+
+fn job_step_to_json(step: &JobStep) -> Value {
+    let mut value = json!({
+        "target_type": step.target_type.to_string(),
+        "target_id": step.target_id,
+        "agent_cli": step.agent_cli,
+        "timeout_seconds": step.timeout_seconds,
+        "env_extra": step.env_extra,
+    });
+    if let Some(model) = &step.model {
+        value["model"] = Value::String(model.clone());
+    }
+    value
 }
 
 pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
