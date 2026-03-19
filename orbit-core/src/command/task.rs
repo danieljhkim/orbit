@@ -145,6 +145,20 @@ impl OrbitRuntime {
 
     pub fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
+        let is_field_update = params.title.is_some()
+            || params.description.is_some()
+            || params.plan.is_some()
+            || params.execution_summary.is_some()
+            || params.comment.is_some()
+            || params.branch.is_some()
+            || params.pr_number.is_some();
+
+        if is_field_update && matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
+            return Err(OrbitError::InvalidInput(format!(
+                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                task.status
+            )));
+        }
 
         if let Some(target_status) = params.status {
             if target_status == TaskStatus::Archived {

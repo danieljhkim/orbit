@@ -230,16 +230,20 @@ mod tests {
 
     #[test]
     fn rejected_can_transition_to_in_progress() {
-        assert!(TaskStatus::Rejected
-            .validate_transition(TaskStatus::InProgress)
-            .is_ok());
+        assert!(
+            TaskStatus::Rejected
+                .validate_transition(TaskStatus::InProgress)
+                .is_ok()
+        );
     }
 
     #[test]
     fn rejected_can_still_transition_to_backlog() {
-        assert!(TaskStatus::Rejected
-            .validate_transition(TaskStatus::Backlog)
-            .is_ok());
+        assert!(
+            TaskStatus::Rejected
+                .validate_transition(TaskStatus::Backlog)
+                .is_ok()
+        );
     }
 }
 

@@ -9,8 +9,7 @@ use orbit_core::command::job::JobAddParams;
 use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_types::{
-    JobRunState, JobStep, JobTargetType, OrbitError, TaskPriority, TaskStatus,
-    TaskType,
+    JobRunState, JobStep, JobTargetType, OrbitError, TaskPriority, TaskStatus, TaskType,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -2241,7 +2240,9 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
         .expect("git log");
     assert_eq!(
         String::from_utf8_lossy(&log.stdout).trim(),
-        format!("refactor: Refactor automation flow [{task_id}]\n\nImplemented the automation refactor.")
+        format!(
+            "refactor: Refactor automation flow [{task_id}]\n\nImplemented the automation refactor."
+        )
     );
     assert_eq!(git_current_branch(&repo_root), "agent-main");
 }
@@ -2314,11 +2315,24 @@ fn commit_task_changes_uses_summary_from_input() {
     let create_run = runtime.run_job_now(&create_job_id).expect("run create");
     assert_eq!(create_run.state, JobRunState::Success);
     let create_history = runtime.job_history(&create_job_id).expect("create history");
-    let create_output = create_history[0].steps[0].agent_response_json.as_ref().expect("output");
-    let workspace_path = create_output["workspace_path"].as_str().expect("workspace_path").to_string();
-    let branch = create_output["branch"].as_str().expect("branch").to_string();
+    let create_output = create_history[0].steps[0]
+        .agent_response_json
+        .as_ref()
+        .expect("output");
+    let workspace_path = create_output["workspace_path"]
+        .as_str()
+        .expect("workspace_path")
+        .to_string();
+    let branch = create_output["branch"]
+        .as_str()
+        .expect("branch")
+        .to_string();
 
-    std::fs::write(std::path::Path::new(&workspace_path).join("fix.rs"), "fixed\n").expect("write");
+    std::fs::write(
+        std::path::Path::new(&workspace_path).join("fix.rs"),
+        "fixed\n",
+    )
+    .expect("write");
 
     runtime
         .add_activity(ActivityAddParams {
@@ -2344,12 +2358,18 @@ fn commit_task_changes_uses_summary_from_input() {
         })
         .expect("add success job")
         .job_id;
-    let success_run = runtime.run_job_now(&success_job_id).expect("run success job");
+    let success_run = runtime
+        .run_job_now(&success_job_id)
+        .expect("run success job");
     match previous_worktree_root.as_ref() {
         Some(value) => unsafe { std::env::set_var("ORBIT_WORKTREE_ROOT", value) },
         None => unsafe { std::env::remove_var("ORBIT_WORKTREE_ROOT") },
     }
-    assert_eq!(success_run.state, JobRunState::Success, "must succeed when summary is in input");
+    assert_eq!(
+        success_run.state,
+        JobRunState::Success,
+        "must succeed when summary is in input"
+    );
 
     // Case 2: summary absent from input → must fail with clear error.
     let task2_id = runtime
@@ -2375,9 +2395,16 @@ fn commit_task_changes_uses_summary_from_input() {
         .expect("add fail job")
         .job_id;
     let fail_run = runtime.run_job_now(&fail_job_id).expect("run fail job");
-    assert_eq!(fail_run.state, JobRunState::Failed, "must fail when summary is absent");
+    assert_eq!(
+        fail_run.state,
+        JobRunState::Failed,
+        "must fail when summary is absent"
+    );
     let fail_history = runtime.job_history(&fail_job_id).expect("fail history");
-    let error_msg = fail_history[0].steps[0].error_message.as_deref().unwrap_or("");
+    let error_msg = fail_history[0].steps[0]
+        .error_message
+        .as_deref()
+        .unwrap_or("");
     assert!(
         error_msg.contains("requires a non-empty summary"),
         "error should mention missing summary, got: {error_msg}"
@@ -2581,9 +2608,18 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
         "Wire Orbit PR automation"
     );
     let body_content = std::fs::read_to_string(body_capture).expect("body");
-    assert!(body_content.contains("Orbit owns PR creation now."), "body: {body_content}");
-    assert!(body_content.contains("## Files Changed"), "body: {body_content}");
-    assert!(body_content.contains("automation.rs"), "body: {body_content}");
+    assert!(
+        body_content.contains("Orbit owns PR creation now."),
+        "body: {body_content}"
+    );
+    assert!(
+        body_content.contains("## Files Changed"),
+        "body: {body_content}"
+    );
+    assert!(
+        body_content.contains("automation.rs"),
+        "body: {body_content}"
+    );
     assert_eq!(
         std::fs::read_to_string(base_capture).expect("base"),
         "agent-main"
@@ -2699,4 +2735,3 @@ pass = ["HOME", "PATH"]
         "step2 must not have STEP1_SECRET"
     );
 }
-

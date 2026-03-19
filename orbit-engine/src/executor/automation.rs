@@ -153,7 +153,12 @@ fn open_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, Or
     let changed_files: Vec<String> = input
         .get("changed_files")
         .and_then(Value::as_array)
-        .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default();
     let body = format!(
         "## Changes\n{}\n\n## Files Changed\n{}",
@@ -380,11 +385,7 @@ fn fetch_remote_base(repo_root: &Path, base: &str) {
     let _ = run_process(
         &ExecRequest {
             program: "git".to_string(),
-            args: vec![
-                "fetch".to_string(),
-                "origin".to_string(),
-                base.to_string(),
-            ],
+            args: vec!["fetch".to_string(), "origin".to_string(), base.to_string()],
             current_dir: Some(repo_root.to_string_lossy().to_string()),
             timeout_ms: Some(60_000),
             stdin_mode: StdinMode::Null,

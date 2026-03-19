@@ -509,6 +509,144 @@ mod tests {
     }
 
     #[test]
+    fn update_task_rejects_field_mutations_for_done_tasks() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .context
+            .task_store
+            .create_task(StoreTaskCreateParams {
+                actor: "human".to_string(),
+                title: "done task".to_string(),
+                description: String::new(),
+                plan: String::new(),
+                execution_summary: "already shipped".to_string(),
+                context_files: Vec::new(),
+                workspace_path: None,
+                created_by: Some("human".to_string()),
+                assigned_to: Some("human".to_string()),
+                status: TaskStatus::Done,
+                priority: TaskPriority::Medium,
+                task_type: TaskType::Task,
+                branch: None,
+                pr_number: None,
+                proposed_by: None,
+                comments: Vec::new(),
+            })
+            .expect("create done task");
+
+        let result = runtime.update_task(
+            &task.id,
+            TaskUpdateParams {
+                title: Some("rename attempt".to_string()),
+                description: None,
+                plan: None,
+                execution_summary: None,
+                comment: None,
+                status: None,
+                branch: None,
+                pr_number: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::OrbitError::InvalidInput(message)) if message.contains("cannot be modified")
+        ));
+    }
+
+    #[test]
+    fn update_task_rejects_field_mutations_for_archived_tasks() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .context
+            .task_store
+            .create_task(StoreTaskCreateParams {
+                actor: "human".to_string(),
+                title: "archived task".to_string(),
+                description: String::new(),
+                plan: String::new(),
+                execution_summary: "archived after review".to_string(),
+                context_files: Vec::new(),
+                workspace_path: None,
+                created_by: Some("human".to_string()),
+                assigned_to: Some("human".to_string()),
+                status: TaskStatus::Archived,
+                priority: TaskPriority::Medium,
+                task_type: TaskType::Task,
+                branch: None,
+                pr_number: None,
+                proposed_by: None,
+                comments: Vec::new(),
+            })
+            .expect("create archived task");
+
+        let result = runtime.update_task(
+            &task.id,
+            TaskUpdateParams {
+                title: Some("rename attempt".to_string()),
+                description: None,
+                plan: None,
+                execution_summary: None,
+                comment: None,
+                status: None,
+                branch: None,
+                pr_number: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::OrbitError::InvalidInput(message)) if message.contains("cannot be modified")
+        ));
+    }
+
+    #[test]
+    fn update_task_allows_field_mutations_for_in_progress_tasks() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .context
+            .task_store
+            .create_task(StoreTaskCreateParams {
+                actor: "human".to_string(),
+                title: "active task".to_string(),
+                description: String::new(),
+                plan: String::new(),
+                execution_summary: String::new(),
+                context_files: Vec::new(),
+                workspace_path: None,
+                created_by: Some("human".to_string()),
+                assigned_to: Some("human".to_string()),
+                status: TaskStatus::InProgress,
+                priority: TaskPriority::Medium,
+                task_type: TaskType::Task,
+                branch: None,
+                pr_number: None,
+                proposed_by: None,
+                comments: Vec::new(),
+            })
+            .expect("create in-progress task");
+
+        let updated = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    title: Some("retitled active task".to_string()),
+                    description: None,
+                    plan: None,
+                    execution_summary: None,
+                    comment: None,
+                    status: None,
+                    branch: None,
+                    pr_number: None,
+                },
+            )
+            .expect("update in-progress task");
+
+        assert_eq!(updated.title, "retitled active task");
+        assert_eq!(updated.status, TaskStatus::InProgress);
+    }
+
+    #[test]
     fn add_task_comment_uses_effective_actor() {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
         let task = runtime
