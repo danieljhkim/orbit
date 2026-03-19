@@ -230,6 +230,16 @@ pub struct Task {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Display for Task {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}\t{}\t{}\t{}",
+            self.id, self.status, self.priority, self.title
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,15 +260,5 @@ mod tests {
                 .validate_transition(TaskStatus::Backlog)
                 .is_ok()
         );
-    }
-}
-
-impl Display for Task {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}\t{}\t{}\t{}",
-            self.id, self.status, self.priority, self.title
-        )
     }
 }
