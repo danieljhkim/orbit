@@ -355,6 +355,8 @@ impl OrbitRuntime {
                                 by: actor.label.clone(),
                                 event: "proposal_approved".to_string(),
                                 note: note.clone(),
+                                from_status: Some(TaskStatus::Proposed),
+                                to_status: Some(TaskStatus::Backlog),
                             }],
                             append_comments: append_comments.clone(),
                             ..Default::default()

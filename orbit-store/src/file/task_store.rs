@@ -248,6 +248,8 @@ impl TaskFileStore {
                     by: params.actor,
                     event: "created".to_string(),
                     note: None,
+                    from_status: None,
+                    to_status: Some(params.status),
                 }],
                 comments: params.comments,
                 activity_id: None,
@@ -402,19 +404,15 @@ impl TaskFileStore {
             .status
             .map(TaskStateDir::from_status)
             .unwrap_or(current_state);
+        let status_transition = (target_state != current_state)
+            .then_some((current_state.to_status(), target_state.to_status()));
 
         let event = if let Some(event) = fields.status_event.clone() {
             Some(event)
         } else if target_state == current_state {
             None
-        } else if target_state == TaskStateDir::Done {
-            Some("completed".to_string())
-        } else if target_state == TaskStateDir::Archived {
-            Some("archived".to_string())
-        } else if target_state == TaskStateDir::Rejected {
-            Some("rejected".to_string())
         } else {
-            Some("moved".to_string())
+            Some("status_changed".to_string())
         };
 
         bundle.doc.updated_at = Utc::now();
@@ -424,6 +422,8 @@ impl TaskFileStore {
                 by: fields.actor.clone(),
                 event,
                 note: fields.status_note.clone(),
+                from_status: status_transition.map(|(from, _)| from),
+                to_status: status_transition.map(|(_, to)| to),
             });
         }
         if title_changed {
@@ -432,6 +432,8 @@ impl TaskFileStore {
                 by: fields.actor.clone(),
                 event: "renamed".to_string(),
                 note: None,
+                from_status: None,
+                to_status: None,
             });
         }
 
@@ -928,6 +930,9 @@ mod tests {
         assert!(in_progress_dir.exists());
         let yaml = fs::read_to_string(in_progress_dir.join(TASK_DOC_FILE_NAME)).expect("read yaml");
         assert!(yaml.contains("by: daniel"));
+        assert!(yaml.contains("event: status_changed"));
+        assert!(yaml.contains("from_status: backlog"));
+        assert!(yaml.contains("to_status: in_progress"));
         assert_eq!(
             fs::read_to_string(in_progress_dir.join(ARTIFACTS_DIR_NAME).join("report.md"))
                 .expect("artifact"),
@@ -1053,6 +1058,36 @@ mod tests {
             err.to_string()
                 .contains("unsupported task schema version: 9")
         );
+    }
+
+    #[test]
+    fn get_task_loads_legacy_history_entries_without_transition_fields() {
+        let dir = tempdir().expect("tempdir");
+        let store = TaskFileStore::new(dir.path().to_path_buf());
+
+        let task = store
+            .create_task(sample_insert(TaskStatus::Backlog))
+            .expect("create task");
+        let yaml_path = dir
+            .path()
+            .join("backlog")
+            .join(&task.id)
+            .join(TASK_DOC_FILE_NAME);
+        let yaml = fs::read_to_string(&yaml_path).expect("read yaml");
+        fs::write(
+            &yaml_path,
+            yaml.replace(
+                "event: created\n  note: null\n  to_status: backlog\n",
+                "event: moved\n  note: null\n",
+            ),
+        )
+        .expect("write yaml");
+
+        let loaded = store.get_task(&task.id).expect("load task").expect("task");
+        assert_eq!(loaded.history.len(), 1);
+        assert_eq!(loaded.history[0].event, "moved");
+        assert_eq!(loaded.history[0].from_status, None);
+        assert_eq!(loaded.history[0].to_status, None);
     }
 
     #[test]

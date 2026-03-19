@@ -189,6 +189,10 @@ pub struct TaskHistoryEntry {
     pub event: String,
     #[serde(default)]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_status: Option<TaskStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_status: Option<TaskStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

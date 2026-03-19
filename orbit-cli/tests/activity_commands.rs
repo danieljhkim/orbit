@@ -78,8 +78,7 @@ fn add_job(dir: &Path, target_id: &str, agent_cli: &str) -> String {
         .get_output()
         .stdout
         .clone();
-    serde_json::from_slice::<Value>(&output)
-        .expect("job json")["job_id"]
+    serde_json::from_slice::<Value>(&output).expect("job json")["job_id"]
         .as_str()
         .expect("job id")
         .to_string()
@@ -665,8 +664,22 @@ fn update_task_activity_job_run_updates_task_and_history() {
             .any(|comment| comment["message"] == "Ready for review")
     );
     let history = updated["history"].as_array().expect("history");
-    assert_eq!(history.last().expect("history entry")["event"], "moved");
-    assert_eq!(history.last().expect("history entry")["note"], "handoff ready");
+    assert_eq!(
+        history.last().expect("history entry")["event"],
+        "status_changed"
+    );
+    assert_eq!(
+        history.last().expect("history entry")["note"],
+        "handoff ready"
+    );
+    assert_eq!(
+        history.last().expect("history entry")["from_status"],
+        "in_progress"
+    );
+    assert_eq!(
+        history.last().expect("history entry")["to_status"],
+        "review"
+    );
 }
 
 #[test]

@@ -735,6 +735,8 @@ fn task_start_backlog_moves_to_in_progress() {
         history.last().expect("latest")["note"],
         "picked up for implementation"
     );
+    assert_eq!(history.last().expect("latest")["from_status"], "backlog");
+    assert_eq!(history.last().expect("latest")["to_status"], "in_progress");
 }
 
 #[test]
@@ -769,10 +771,53 @@ fn task_start_proposed_records_approval_and_start() {
         history.iter().any(|entry| {
             entry["event"] == "proposal_approved"
                 && entry["note"] == "approved to begin immediately"
+                && entry["from_status"] == "proposed"
+                && entry["to_status"] == "backlog"
         }),
         "proposal approval must remain visible in history"
     );
     assert_eq!(history.last().expect("latest")["event"], "started");
+    assert_eq!(history.last().expect("latest")["from_status"], "proposed");
+    assert_eq!(history.last().expect("latest")["to_status"], "in_progress");
+}
+
+#[test]
+fn task_update_to_review_records_transition_details() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let id = add_task(dir.path(), "review transition");
+
+    orbit_in(dir.path())
+        .args(["task", "update", &id, "--status", "in-progress"])
+        .assert()
+        .success();
+    orbit_in(dir.path())
+        .args([
+            "task",
+            "update",
+            &id,
+            "--status",
+            "review",
+            "--execution-summary",
+            "Implemented and validated the change",
+        ])
+        .assert()
+        .success();
+
+    let show_output = orbit_in(dir.path())
+        .args(["task", "show", &id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
+    let history = show["history"].as_array().expect("history");
+    assert_eq!(history.last().expect("latest")["event"], "status_changed");
+    assert_eq!(
+        history.last().expect("latest")["from_status"],
+        "in_progress"
+    );
+    assert_eq!(history.last().expect("latest")["to_status"], "review");
 }
 
 #[test]
@@ -855,6 +900,8 @@ fn task_approve_proposed_to_backlog() {
         history.last().expect("latest")["note"],
         "approved verbally in sync"
     );
+    assert_eq!(history.last().expect("latest")["from_status"], "proposed");
+    assert_eq!(history.last().expect("latest")["to_status"], "backlog");
 }
 
 #[test]
@@ -958,6 +1005,56 @@ fn task_approve_comment_appends_with_approver_identity() {
     let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
     assert_eq!(show["comments"][0]["by"], "human");
     assert_eq!(show["comments"][0]["message"], "ready to schedule");
+}
+
+#[test]
+fn task_approve_review_to_done_records_transition_details() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = false\n",
+    )
+    .expect("write config");
+    let id = add_task(dir.path(), "review approval");
+
+    orbit_in(dir.path())
+        .args(["task", "update", &id, "--status", "in-progress"])
+        .assert()
+        .success();
+    orbit_in(dir.path())
+        .args([
+            "task",
+            "update",
+            &id,
+            "--status",
+            "review",
+            "--execution-summary",
+            "Ready for approval",
+        ])
+        .assert()
+        .success();
+
+    orbit_in(dir.path())
+        .args(["task", "approve", &id, "--note", "looks good"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Approved task"));
+
+    let show_output = orbit_in(dir.path())
+        .args(["task", "show", &id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: serde_json::Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_eq!(show["status"], "done");
+    let history = show["history"].as_array().expect("history");
+    assert_eq!(history.last().expect("latest")["event"], "review_approved");
+    assert_eq!(history.last().expect("latest")["note"], "looks good");
+    assert_eq!(history.last().expect("latest")["from_status"], "review");
+    assert_eq!(history.last().expect("latest")["to_status"], "done");
 }
 
 #[test]
@@ -1091,6 +1188,8 @@ fn task_reject_review_to_rejected() {
         history.last().expect("latest")["note"],
         "Needs stronger coverage before merge"
     );
+    assert_eq!(history.last().expect("latest")["from_status"], "review");
+    assert_eq!(history.last().expect("latest")["to_status"], "rejected");
 }
 
 #[test]

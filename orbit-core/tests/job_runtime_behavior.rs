@@ -2594,8 +2594,10 @@ fn update_task_automation_moves_task_to_review_with_summary_comment_and_note() {
         "Ready for review"
     );
     let history = updated.history.last().expect("history");
-    assert_eq!(history.event, "moved");
+    assert_eq!(history.event, "status_changed");
     assert_eq!(history.note.as_deref(), Some("handing off for review"));
+    assert_eq!(history.from_status, Some(TaskStatus::InProgress));
+    assert_eq!(history.to_status, Some(TaskStatus::Review));
 
     let history = runtime.job_history(&job_id).expect("job history");
     let output = history[0].steps[0]
