@@ -57,6 +57,78 @@ mod tests {
     }
 
     #[test]
+    fn activity_tool_allowlist_denies_unlisted_tool() {
+        use orbit_tools::ToolContext;
+        use orbit_types::Role;
+
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+
+        let tool_context = ToolContext {
+            cwd: None,
+            allowed_tools: vec!["time.now".to_string()],
+        };
+        let result = runtime.run_tool_with_context_and_role(
+            "fs.read",
+            json!({"path": "missing"}),
+            Role::Admin,
+            tool_context,
+        );
+
+        assert!(
+            matches!(result, Err(crate::OrbitError::PolicyDenied(_))),
+            "expected PolicyDenied for tool not in allowlist"
+        );
+
+        let audits = runtime.list_audits(10).expect("audits");
+        assert_eq!(audits.len(), 1);
+        assert_eq!(audits[0].event_type, "PolicyDenied");
+    }
+
+    #[test]
+    fn activity_tool_allowlist_permits_listed_tool() {
+        use orbit_tools::ToolContext;
+        use orbit_types::Role;
+
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+
+        let tool_context = ToolContext {
+            cwd: None,
+            allowed_tools: vec!["time.now".to_string()],
+        };
+        let result = runtime.run_tool_with_context_and_role(
+            "time.now",
+            json!({}),
+            Role::Admin,
+            tool_context,
+        );
+
+        assert!(result.is_ok(), "expected success for tool in allowlist");
+    }
+
+    #[test]
+    fn empty_allowlist_is_unrestricted() {
+        use orbit_tools::ToolContext;
+        use orbit_types::Role;
+
+        let dir = tempdir().expect("temp dir");
+        let file = dir.path().join("sample.txt");
+        std::fs::write(&file, "data").expect("write");
+
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+
+        // Empty allowed_tools = unrestricted
+        let tool_context = ToolContext::default();
+        let result = runtime.run_tool_with_context_and_role(
+            "fs.read",
+            json!({"path": file.to_string_lossy()}),
+            Role::Admin,
+            tool_context,
+        );
+
+        assert!(result.is_ok(), "empty allowlist should not restrict tools");
+    }
+
+    #[test]
     fn successful_tool_execution_persists_audit_and_event() {
         let dir = tempdir().expect("temp dir");
         let file = dir.path().join("sample.txt");
@@ -157,7 +229,6 @@ mod tests {
                     agent_cli: agent_path.to_string_lossy().to_string(),
                     timeout_seconds: 30,
                     env_extra: vec![],
-                    precondition: None,
                 }],
                 initial_state_override: None,
             })

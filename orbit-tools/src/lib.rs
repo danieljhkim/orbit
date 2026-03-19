@@ -13,6 +13,8 @@ pub use registry::ToolRegistry;
 #[derive(Debug, Clone, Default)]
 pub struct ToolContext {
     pub cwd: Option<String>,
+    /// If non-empty, only tools in this list may be called. Empty means unrestricted.
+    pub allowed_tools: Vec<String>,
     /// When set, fs tools enforce that all paths resolve inside this directory.
     /// Symlink escapes are blocked because paths are canonicalized before the check.
     /// If `None`, no boundary is enforced (used for tests and legacy callers).

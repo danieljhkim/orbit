@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use orbit_types::{OrbitError, OrbitEvent, StoredTool};
+use orbit_tools::ToolContext;
+use orbit_types::{OrbitError, OrbitEvent, Role, StoredTool};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -32,9 +33,29 @@ pub struct DoctorResult {
 
 impl OrbitRuntime {
     pub fn execute_tool_command(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
-        self.run_tool(name, input)
+        let allowed_tools = read_activity_tools_from_env();
+        let tool_context = ToolContext {
+            cwd: None,
+            allowed_tools,
+        };
+        self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
     }
+}
 
+fn read_activity_tools_from_env() -> Vec<String> {
+    std::env::var("ORBIT_ACTIVITY_TOOLS")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl OrbitRuntime {
     pub fn list_tools(&self) -> Result<Vec<ToolInfo>, OrbitError> {
         let registry_schemas = self.context.registry.schemas();
         let stored_tools = self.context.tool_store.list_tools()?;

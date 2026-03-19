@@ -188,6 +188,7 @@ mod tests {
         let req = super::orbit_exec_request(
             &ToolContext {
                 cwd: Some("/tmp/orbit-tools".to_string()),
+                allowed_tools: vec![],
                 ..Default::default()
             },
             vec!["task".to_string(), "show".to_string(), "T1".to_string()],

@@ -754,7 +754,6 @@ mod tests {
             agent_cli: "mock-agent".to_string(),
             timeout_seconds: 300,
             env_extra: vec![],
-            precondition: None,
         }
     }
 
@@ -917,7 +916,6 @@ mod tests {
             agent_cli: "my-agent-cli".to_string(),
             timeout_seconds: 600,
             env_extra: vec!["MY_VAR".to_string(), "OTHER_VAR".to_string()],
-            precondition: None,
         };
         let written = store
             .insert_activity_v2(

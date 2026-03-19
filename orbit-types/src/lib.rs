@@ -22,7 +22,7 @@ pub use id::OrbitId;
 pub use identity::{IdentityRole, ResolvedIdentity};
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
-    JobScheduleState, JobStep, JobStepPrecondition, JobTargetType,
+    JobScheduleState, JobStep, JobTargetType,
 };
 pub use memo::Memo;
 pub use redaction::{
@@ -113,7 +113,6 @@ mod tests {
                 agent_cli: "claude".to_string(),
                 timeout_seconds: 300,
                 env_extra: vec![],
-                precondition: None,
             }],
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -159,6 +158,7 @@ mod tests {
                 "skill_refs": ["orbit-assess-codebase"],
                 "tools": ["fs.read", "fs.write"]
             }),
+            tools: vec!["fs.read".to_string(), "fs.write".to_string()],
             workspace_path: None,
             identity_id: Some("prii".to_string()),
             created_by: Some("human".to_string()),

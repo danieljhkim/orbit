@@ -9,7 +9,7 @@ use orbit_core::command::job::JobAddParams;
 use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_types::{
-    JobRunState, JobStep, JobStepPrecondition, JobTargetType, OrbitError, TaskPriority, TaskStatus,
+    JobRunState, JobStep, JobTargetType, OrbitError, TaskPriority, TaskStatus,
     TaskType,
 };
 use serde_json::json;
@@ -90,7 +90,6 @@ fn add_scheduled_activity_with_timeout(
                 agent_cli: agent_cli.to_string(),
                 timeout_seconds,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -188,7 +187,6 @@ fn cli_command_activity_executes_without_agent_cli_and_captures_output_file() {
                 agent_cli: String::new(),
                 timeout_seconds: 30,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -244,7 +242,6 @@ fn cli_command_failures_redact_sensitive_environment_values_from_error_messages(
                 agent_cli: String::new(),
                 timeout_seconds: 30,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -541,7 +538,6 @@ fn run_job_now_uses_job_default_input_when_manual_input_is_absent() {
                 agent_cli,
                 timeout_seconds: 10,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -591,7 +587,6 @@ fn run_job_now_with_input_overrides_job_default_input() {
                 agent_cli,
                 timeout_seconds: 10,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -660,7 +655,6 @@ fn run_job_now_finalizes_failed_when_pre_step_setup_errors_after_running() {
                 agent_cli: "mock-agent".to_string(),
                 timeout_seconds: 10,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -1495,7 +1489,6 @@ fn claude_job_run_succeeds_with_mock_binary() {
                 agent_cli,
                 timeout_seconds: 10,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -1544,7 +1537,6 @@ fn run_job_now_executes_job_successfully() {
                 agent_cli,
                 timeout_seconds: 10,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -1637,7 +1629,6 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                     agent_cli,
                     timeout_seconds: 10,
                     env_extra: vec![],
-                    precondition: None,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -1645,7 +1636,6 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                     agent_cli: String::new(),
                     timeout_seconds: 10,
                     env_extra: vec![],
-                    precondition: None,
                 },
             ],
             initial_state_override: None,
@@ -1756,7 +1746,6 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                     agent_cli,
                     timeout_seconds: 10,
                     env_extra: vec![],
-                    precondition: None,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -1764,7 +1753,6 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                     agent_cli: String::new(),
                     timeout_seconds: 10,
                     env_extra: vec![],
-                    precondition: None,
                 },
             ],
             initial_state_override: None,
@@ -1840,7 +1828,6 @@ fn agent_step_uses_workspace_path_as_process_current_dir() {
                 agent_cli,
                 timeout_seconds: 10,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -1993,7 +1980,6 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                     agent_cli: String::new(),
                     timeout_seconds: 30,
                     env_extra: vec![],
-                    precondition: None,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -2001,7 +1987,6 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                     agent_cli: String::new(),
                     timeout_seconds: 30,
                     env_extra: vec![],
-                    precondition: None,
                 },
             ],
             initial_state_override: None,
@@ -2141,7 +2126,6 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 agent_cli: String::new(),
                 timeout_seconds: 30,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -2220,7 +2204,6 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 agent_cli: String::new(),
                 timeout_seconds: 30,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -2323,7 +2306,7 @@ fn commit_task_changes_uses_summary_from_input() {
         .add_job(JobAddParams {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "base": "agent-main", "workspace_path": repo_root.to_string_lossy().to_string()})),
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-create-wt-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![], precondition: None }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-create-wt-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![] }],
             initial_state_override: None,
         })
         .expect("add create job")
@@ -2356,7 +2339,7 @@ fn commit_task_changes_uses_summary_from_input() {
         .add_job(JobAddParams {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "workspace_path": workspace_path, "repo_root": repo_root.to_string_lossy().to_string(), "branch": branch, "summary": "Hardened bundle writes using staged directory rename."})),
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![], precondition: None }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![] }],
             initial_state_override: None,
         })
         .expect("add success job")
@@ -2386,7 +2369,7 @@ fn commit_task_changes_uses_summary_from_input() {
         .add_job(JobAddParams {
             job_id: None,
             default_input: Some(json!({"task_id": task2_id, "workspace_path": workspace_path, "repo_root": repo_root.to_string_lossy().to_string(), "branch": branch, "summary": ""})),
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![], precondition: None }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), timeout_seconds: 30, env_extra: vec![] }],
             initial_state_override: None,
         })
         .expect("add fail job")
@@ -2569,7 +2552,6 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
                 agent_cli: String::new(),
                 timeout_seconds: 30,
                 env_extra: vec![],
-                precondition: None,
             }],
             initial_state_override: None,
         })
@@ -2677,7 +2659,6 @@ pass = ["HOME", "PATH"]
                     agent_cli: agent_cli.clone(),
                     timeout_seconds: 10,
                     env_extra: vec!["STEP1_SECRET".to_string()],
-                    precondition: None,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -2685,7 +2666,6 @@ pass = ["HOME", "PATH"]
                     agent_cli: agent_cli.clone(),
                     timeout_seconds: 10,
                     env_extra: vec!["STEP2_SECRET".to_string()],
-                    precondition: None,
                 },
             ],
             initial_state_override: None,
@@ -2720,195 +2700,3 @@ pass = ["HOME", "PATH"]
     );
 }
 
-#[test]
-fn precondition_failing_with_skip_job_on_failure_completes_as_success() {
-    let dir = tempdir().expect("tempdir");
-    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-
-    // A cli_command activity that would fail if executed (never should be).
-    runtime
-        .add_activity(ActivityAddParams {
-            id: "spec-precond-guarded".to_string(),
-            spec_type: "cli_command".to_string(),
-            description: "must not be reached".to_string(),
-            input_schema_json: json!({}),
-            output_schema_json: json!({}),
-            spec_config: json!({
-                "command": "sh",
-                "args": ["-c", "echo 'should not run' && exit 1"]
-            }),
-            workspace_path: None,
-            identity_id: None,
-            created_by: None,
-        })
-        .expect("add activity");
-
-    let job = runtime
-        .add_job(JobAddParams {
-            job_id: None,
-            default_input: None,
-            steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
-                target_id: "spec-precond-guarded".to_string(),
-                agent_cli: String::new(),
-                timeout_seconds: 30,
-                env_extra: vec![],
-                precondition: Some(JobStepPrecondition {
-                    command: "sh".to_string(),
-                    args: vec!["-c".to_string(), "exit 1".to_string()],
-                    skip_job_on_failure: true,
-                }),
-            }],
-            initial_state_override: None,
-        })
-        .expect("add job");
-
-    let result = runtime.run_job_now(&job.job_id).expect("run job");
-    assert_eq!(
-        result.state,
-        JobRunState::Success,
-        "job should succeed when precondition fails with skip_job_on_failure=true"
-    );
-
-    // The activity itself must not have run — no step records.
-    let history = runtime.job_history(&job.job_id).expect("history");
-    assert_eq!(history.len(), 1, "one run recorded");
-    let run = &history[0];
-    assert_eq!(
-        run.steps.len(),
-        0,
-        "no steps executed when precondition blocks the pipeline"
-    );
-
-    // A JobSkipped event must be recorded with the step id in the reason.
-    let audits = runtime.list_audits(50).expect("audits");
-    let skipped = audits.iter().any(|a| {
-        a.event_type == "JobSkipped"
-            && a.payload.to_string().contains("spec-precond-guarded")
-    });
-    assert!(
-        skipped,
-        "JobSkipped event must be recorded with the step target_id"
-    );
-}
-
-#[test]
-fn precondition_failing_without_skip_job_on_failure_fails_job() {
-    let dir = tempdir().expect("tempdir");
-    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-
-    runtime
-        .add_activity(ActivityAddParams {
-            id: "spec-precond-fail".to_string(),
-            spec_type: "cli_command".to_string(),
-            description: "must not be reached".to_string(),
-            input_schema_json: json!({}),
-            output_schema_json: json!({}),
-            spec_config: json!({
-                "command": "sh",
-                "args": ["-c", "echo guarded"]
-            }),
-            workspace_path: None,
-            identity_id: None,
-            created_by: None,
-        })
-        .expect("add activity");
-
-    let job = runtime
-        .add_job(JobAddParams {
-            job_id: None,
-            default_input: None,
-            steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
-                target_id: "spec-precond-fail".to_string(),
-                agent_cli: String::new(),
-                timeout_seconds: 30,
-                env_extra: vec![],
-                precondition: Some(JobStepPrecondition {
-                    command: "sh".to_string(),
-                    args: vec!["-c".to_string(), "exit 1".to_string()],
-                    skip_job_on_failure: false,
-                }),
-            }],
-            initial_state_override: None,
-        })
-        .expect("add job");
-
-    // When skip_job_on_failure is false, a failing precondition returns an Err.
-    let err = runtime
-        .run_job_now(&job.job_id)
-        .expect_err("run_job_now must return Err when precondition fails with skip_job_on_failure=false");
-    assert!(
-        err.to_string().contains("Precondition failed"),
-        "error message should describe the precondition failure"
-    );
-
-    // The job run should be recorded as failed.
-    let history = runtime.job_history(&job.job_id).expect("history");
-    assert_eq!(history.len(), 1, "one run recorded");
-    assert_eq!(
-        history[0].state,
-        JobRunState::Failed,
-        "job run state should be failed"
-    );
-}
-
-#[test]
-fn precondition_passing_allows_step_to_execute() {
-    let dir = tempdir().expect("tempdir");
-    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
-
-    let marker = dir.path().join("step-ran.txt");
-    let script_path = dir.path().join("run-step.sh");
-    let script = format!(
-        "#!/bin/sh\ntouch \"{}\"\n",
-        marker.to_string_lossy()
-    );
-    std::fs::write(&script_path, &script).expect("write script");
-    #[cfg(unix)]
-    std::fs::set_permissions(
-        &script_path,
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .expect("chmod script");
-
-    runtime
-        .add_activity(ActivityAddParams {
-            id: "spec-precond-pass".to_string(),
-            spec_type: "cli_command".to_string(),
-            description: "should run when precondition passes".to_string(),
-            input_schema_json: json!({}),
-            output_schema_json: json!({}),
-            spec_config: json!({
-                "command": script_path.to_string_lossy().to_string()
-            }),
-            workspace_path: None,
-            identity_id: None,
-            created_by: None,
-        })
-        .expect("add activity");
-
-    let job = runtime
-        .add_job(JobAddParams {
-            job_id: None,
-            default_input: None,
-            steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
-                target_id: "spec-precond-pass".to_string(),
-                agent_cli: String::new(),
-                timeout_seconds: 30,
-                env_extra: vec![],
-                precondition: Some(JobStepPrecondition {
-                    command: "sh".to_string(),
-                    args: vec!["-c".to_string(), "exit 0".to_string()],
-                    skip_job_on_failure: true,
-                }),
-            }],
-            initial_state_override: None,
-        })
-        .expect("add job");
-
-    let result = runtime.run_job_now(&job.job_id).expect("run job");
-    assert_eq!(result.state, JobRunState::Success, "job should succeed");
-    assert!(marker.exists(), "step must have executed when precondition passed");
-}

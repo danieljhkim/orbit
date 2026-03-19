@@ -30,6 +30,22 @@ impl OrbitRuntime {
     ) -> Result<Value, OrbitError> {
         self.check_tool_enabled(name)?;
 
+        if !tool_context.allowed_tools.is_empty()
+            && !tool_context.allowed_tools.iter().any(|t| t == name)
+        {
+            self.with_mutation(|| {
+                Ok((
+                    (),
+                    OrbitEvent::PolicyDenied {
+                        tool: name.to_string(),
+                    },
+                ))
+            })?;
+            return Err(OrbitError::PolicyDenied(format!(
+                "tool '{name}' is not in the activity allowlist"
+            )));
+        }
+
         let decision = self.context.policy.evaluate(&PolicyContext {
             entrypoint: "cli".to_string(),
             tool_name: Some(name.to_string()),

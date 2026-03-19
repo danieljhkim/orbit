@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use orbit_agent::{Agent, AgentRequest, AgentResponseStatus, parse_and_validate_response};
-use orbit_exec::{ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{AgentResponseEnvelope, JobRunState, OrbitError};
 use tempfile::NamedTempFile;
 
@@ -109,6 +109,11 @@ fn execute_agent_process<H: EngineHost>(
     let (args, _stdout_schema_file) =
         prepare_exec_args(&invocation).map_err(invocation_failed_outcome)?;
 
+    let environment_mode = inject_activity_tools(
+        host.execution_environment_mode(&execution.env_extra),
+        &execution.activity.tools,
+    );
+
     run_process(
         &ExecRequest {
             program: invocation.program,
@@ -116,11 +121,29 @@ fn execute_agent_process<H: EngineHost>(
             current_dir: execution_working_directory(execution),
             timeout_ms: Some(execution.timeout_seconds.saturating_mul(1000)),
             stdin_mode: StdinMode::Bytes(invocation.stdin),
-            environment_mode: host.execution_environment_mode(&execution.env_extra),
+            environment_mode,
         },
         &NoSandbox,
     )
     .map_err(invocation_failed_outcome)
+}
+
+fn inject_activity_tools(mode: EnvironmentMode, tools: &[String]) -> EnvironmentMode {
+    if tools.is_empty() {
+        return mode;
+    }
+    let tools_str = tools.join(",");
+    match mode {
+        EnvironmentMode::ClearAndSet(mut pairs) => {
+            pairs.push(("ORBIT_ACTIVITY_TOOLS".to_string(), tools_str));
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+        EnvironmentMode::Inherit => {
+            let mut pairs: Vec<(String, String)> = std::env::vars().collect();
+            pairs.push(("ORBIT_ACTIVITY_TOOLS".to_string(), tools_str));
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+    }
 }
 
 fn process_agent_response<H: EngineHost>(

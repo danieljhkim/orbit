@@ -260,6 +260,18 @@ fn doc_to_work(
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 ) -> Activity {
+    let tools: Vec<String> = doc
+        .activity
+        .spec_config
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
     Activity {
         id: doc.activity.id,
         spec_type: doc.activity.spec_type,
@@ -267,6 +279,7 @@ fn doc_to_work(
         input_schema_json: normalize_json_schema_for_runtime(doc.activity.input_schema_json),
         output_schema_json: normalize_json_schema_for_runtime(doc.activity.output_schema_json),
         spec_config: Value::Object(doc.activity.spec_config),
+        tools,
         workspace_path: doc.activity.workspace_path,
         identity_id: doc.identity_id,
         created_by: doc.created_by,

@@ -14,6 +14,9 @@ pub struct Activity {
     pub output_schema_json: Value,
     #[serde(default)]
     pub spec_config: Value,
+    /// Tool allowlist for agent_invoke activities. Empty means unrestricted.
+    #[serde(default)]
+    pub tools: Vec<String>,
     #[serde(default)]
     pub workspace_path: Option<String>,
     #[serde(default)]

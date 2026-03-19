@@ -23,10 +23,6 @@ job:
       target_id: dispatch_task
       agent_cli: claude
       timeout_seconds: 1000
-      precondition:
-        command: orbit
-        args: [activity, run, check_dispatch_needed]
-        skip_job_on_failure: true
 
     - target_type: activity
       target_id: create_branch
@@ -34,7 +30,7 @@ job:
 
     - target_type: activity
       target_id: implement_change
-      agent_cli: claude
+      agent_cli: codex
       timeout_seconds: 1800
 
     - target_type: activity
