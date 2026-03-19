@@ -176,6 +176,7 @@ fn open_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, Or
     let title = task.title.trim().to_string();
     let tool_context = ToolContext {
         cwd: Some(repo_root.to_string_lossy().to_string()),
+        ..Default::default()
     };
 
     // Push the branch so GitHub can see it before creating the PR.

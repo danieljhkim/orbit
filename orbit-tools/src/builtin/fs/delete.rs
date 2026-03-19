@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
@@ -22,14 +23,16 @@ impl Tool for FsDeleteTool {
         }
     }
 
-    fn execute(&self, _ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        let path = input
+    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+        let path_str = input
             .get("path")
             .and_then(Value::as_str)
             .ok_or_else(|| OrbitError::InvalidInput("missing `path`".to_string()))?;
 
-        fs::remove_file(path).map_err(|e| OrbitError::Io(e.to_string()))?;
+        super::check_workspace_boundary(ctx, Path::new(path_str))?;
 
-        Ok(json!({"path": path, "deleted": true}))
+        fs::remove_file(path_str).map_err(|e| OrbitError::Io(e.to_string()))?;
+
+        Ok(json!({"path": path_str, "deleted": true}))
     }
 }
