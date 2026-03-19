@@ -10,7 +10,7 @@ impl Tool for ProcWhichTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "proc.which".to_string(),
-            description: "Resolve a command path using shell lookup".to_string(),
+            description: "Resolve a command path".to_string(),
             parameters: vec![ToolParam {
                 name: "command".to_string(),
                 description: "Command name to look up".to_string(),
@@ -27,10 +27,16 @@ impl Tool for ProcWhichTool {
             .and_then(Value::as_str)
             .ok_or_else(|| OrbitError::InvalidInput("missing `command`".to_string()))?;
 
+        let which_program = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
+
         let result = run_process(
             &ExecRequest {
-                program: "sh".to_string(),
-                args: vec!["-c".to_string(), format!("command -v {command}")],
+                program: which_program.to_string(),
+                args: vec![command.to_string()],
                 current_dir: None,
                 timeout_ms: Some(1_000),
                 stdin_mode: StdinMode::Inherit,
