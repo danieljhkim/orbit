@@ -98,8 +98,7 @@ where
         if attempt >= effective_max || !is_retryable {
             return outcome;
         }
-        let delay_seconds =
-            backoff_seconds.saturating_mul(1_u64 << (attempt - 1).min(30));
+        let delay_seconds = backoff_seconds.saturating_mul(1_u64 << (attempt - 1).min(30));
         eprintln!(
             "[orbit] step '{step_id}' transient error {} (attempt {}/{effective_max}), retrying in {delay_seconds}s",
             outcome.error_code.as_deref().unwrap_or("unknown"),
@@ -265,10 +264,7 @@ mod retry_tests {
         );
         // AGENT_INVOCATION_FAILED is non-transient, so stops after 1 attempt
         assert_eq!(outcome.state, JobRunState::Failed);
-        assert_eq!(
-            call_count.load(std::sync::atomic::Ordering::SeqCst),
-            1
-        );
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
 

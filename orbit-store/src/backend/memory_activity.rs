@@ -131,7 +131,9 @@ mod tests {
     use serde_json::json;
 
     use super::MemoryActivityStoreBackend;
-    use crate::backend::contracts::{ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams};
+    use crate::backend::contracts::{
+        ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams,
+    };
 
     fn sample_params(id: &str) -> ActivityCreateParams {
         ActivityCreateParams {
@@ -172,8 +174,12 @@ mod tests {
     #[test]
     fn list_activities_respects_include_inactive() {
         let store = MemoryActivityStoreBackend::default();
-        store.add_activity(sample_params("active")).expect("add active");
-        store.add_activity(sample_params("inactive")).expect("add inactive");
+        store
+            .add_activity(sample_params("active"))
+            .expect("add active");
+        store
+            .add_activity(sample_params("inactive"))
+            .expect("add inactive");
         store.disable_activity("inactive").expect("disable");
 
         let active_only = store.list_activities(false).expect("list active");

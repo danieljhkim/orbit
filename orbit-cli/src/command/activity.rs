@@ -117,16 +117,16 @@ impl Execute for ActivityListArgs {
             let mut table =
                 crate::output::table::build_table(&["ID", "TYPE", "ACTIVE", "DESCRIPTION"]);
             for spec in &specs {
-                let active = if spec.is_active {
-                    crate::output::color::job_state_color("active")
-                } else {
-                    crate::output::color::job_state_color("disabled")
-                };
+                use comfy_table::Cell;
                 table.add_row(vec![
-                    spec.id.clone(),
-                    spec.spec_type.clone(),
-                    active,
-                    spec.description.clone(),
+                    Cell::new(&spec.id),
+                    Cell::new(&spec.spec_type),
+                    crate::output::color::job_state_color_cell(if spec.is_active {
+                        "active"
+                    } else {
+                        "disabled"
+                    }),
+                    Cell::new(&spec.description),
                 ]);
             }
             println!("{table}");
@@ -162,8 +162,16 @@ impl Execute for ActivityShowArgs {
             }
             let active_str = if spec.is_active { "active" } else { "disabled" };
             println!("{} {}", bold("Active:"), job_state_color(active_str));
-            println!("{} {}", bold("Created:"), dimmed(&spec.created_at.to_rfc3339()));
-            println!("{} {}", bold("Updated:"), dimmed(&spec.updated_at.to_rfc3339()));
+            println!(
+                "{} {}",
+                bold("Created:"),
+                dimmed(&spec.created_at.to_rfc3339())
+            );
+            println!(
+                "{} {}",
+                bold("Updated:"),
+                dimmed(&spec.updated_at.to_rfc3339())
+            );
             Ok(())
         }
     }

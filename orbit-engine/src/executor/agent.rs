@@ -250,7 +250,10 @@ fn classify_invocation_error(message: &str) -> String {
         || lower.contains("tls error")
     {
         AGENT_TRANSPORT_FAILURE.to_string()
-    } else if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests") {
+    } else if lower.contains("429")
+        || lower.contains("rate limit")
+        || lower.contains("too many requests")
+    {
         AGENT_RATE_LIMIT.to_string()
     } else if lower.contains("500")
         || lower.contains("502")
@@ -270,8 +273,7 @@ fn classify_invocation_error(message: &str) -> String {
 mod tests {
     use super::classify_invocation_error;
     use crate::context::{
-        AGENT_INVOCATION_FAILED, AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT,
-        AGENT_TRANSPORT_FAILURE,
+        AGENT_INVOCATION_FAILED, AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT, AGENT_TRANSPORT_FAILURE,
     };
 
     #[test]

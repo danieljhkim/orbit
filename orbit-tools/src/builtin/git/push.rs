@@ -65,7 +65,7 @@ impl Tool for GitPushTool {
                 timeout_ms: Some(60_000),
                 stdin_mode: StdinMode::Null,
                 environment_mode: EnvironmentMode::Inherit,
-            debug: false,
+                debug: false,
             },
             &NoSandbox,
         )?;

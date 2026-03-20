@@ -421,10 +421,7 @@ mod tests {
 
         store.archive_job_run(&run.run_id).expect("archive");
         // After archiving, get_job_run returns None (archived not in active)
-        assert!(store
-            .get_job_run(&run.run_id)
-            .expect("get")
-            .is_none());
+        assert!(store.get_job_run(&run.run_id).expect("get").is_none());
 
         // Delete from archived
         store.delete_job_run(&run.run_id).expect("delete archived");

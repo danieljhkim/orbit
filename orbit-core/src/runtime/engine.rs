@@ -250,7 +250,9 @@ impl EnvironmentHost for OrbitRuntime {
         let provider_options = ProviderOptions::for_agent_cli(
             agent_cli,
             self.codex_execution_policy().sandbox().to_string(),
-            self.codex_execution_policy().approval_policy().map(|s| s.to_string()),
+            self.codex_execution_policy()
+                .approval_policy()
+                .map(|s| s.to_string()),
         )?;
         Ok(AgentConfig {
             command: agent_cli.to_string(),

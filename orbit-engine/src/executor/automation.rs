@@ -586,7 +586,7 @@ fn fetch_review_decision_from_gh(repo_root: &Path, pr_number: &str) -> Result<St
             timeout_ms: Some(15_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
-        debug: false,
+            debug: false,
         },
         &NoSandbox,
     )?;
@@ -699,7 +699,7 @@ fn fetch_remote_base(repo_root: &Path, base: &str) {
             timeout_ms: Some(60_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
-        debug: false,
+            debug: false,
         },
         &NoSandbox,
     );
@@ -871,7 +871,7 @@ fn git_output_raw(current_dir: &Path, args: &[&str]) -> Result<String, OrbitErro
             timeout_ms: Some(30_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
-        debug: false,
+            debug: false,
         },
         &NoSandbox,
     )?;
@@ -897,7 +897,7 @@ fn git_success(current_dir: &Path, args: &[&str]) -> Result<(), OrbitError> {
             timeout_ms: Some(30_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
-        debug: false,
+            debug: false,
         },
         &NoSandbox,
     )?;
@@ -923,7 +923,7 @@ fn git_command_success(current_dir: &Path, args: &[&str]) -> Result<bool, OrbitE
             timeout_ms: Some(30_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
-        debug: false,
+            debug: false,
         },
         &NoSandbox,
     )?;
@@ -1055,9 +1055,7 @@ mod tests {
             _target_type: JobTargetType,
             _target_id: &str,
         ) -> Result<Activity, OrbitError> {
-            unimplemented!(
-                "validate_activity_target_exists is not used in automation merge tests"
-            )
+            unimplemented!("validate_activity_target_exists is not used in automation merge tests")
         }
 
         fn run_tool_with_context_and_role(
@@ -1172,11 +1170,17 @@ mod tests {
         let repo_dir = tempfile::tempdir().expect("temp repo dir");
         git(repo_dir.path(), &["init", "--initial-branch=agent-main"]);
         git(repo_dir.path(), &["config", "user.name", "Orbit Tests"]);
-        git(repo_dir.path(), &["config", "user.email", "orbit-tests@example.com"]);
+        git(
+            repo_dir.path(),
+            &["config", "user.email", "orbit-tests@example.com"],
+        );
         fs::write(repo_dir.path().join("README.md"), "orbit\n").expect("write readme");
         git(repo_dir.path(), &["add", "README.md"]);
         git(repo_dir.path(), &["commit", "-m", "init"]);
-        git(repo_dir.path(), &["checkout", "-b", "orbit/T20260320-021158"]);
+        git(
+            repo_dir.path(),
+            &["checkout", "-b", "orbit/T20260320-021158"],
+        );
         git(repo_dir.path(), &["checkout", "agent-main"]);
         repo_dir
     }

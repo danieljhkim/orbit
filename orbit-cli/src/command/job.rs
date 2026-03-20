@@ -92,7 +92,9 @@ impl Execute for JobAddArgs {
 }
 
 #[derive(Args)]
-#[command(after_help = "Examples:\n  orbit job list\n  orbit job list --all\n  orbit job list --json")]
+#[command(
+    after_help = "Examples:\n  orbit job list\n  orbit job list --all\n  orbit job list --json"
+)]
 pub struct JobListArgs {
     /// Include disabled jobs
     #[arg(long)]
@@ -130,16 +132,23 @@ impl Execute for JobListArgs {
                 "LAST_RUN",
             ]);
             for (job, last_run) in &jobs_with_runs {
+                use comfy_table::Cell;
                 let first = job.steps.first();
                 table.add_row(vec![
-                    job.job_id.clone(),
-                    first.map(|s| s.target_type.to_string()).unwrap_or_default(),
-                    first.map(|s| s.target_id.clone()).unwrap_or_else(|| "-".to_string()),
-                    first
-                        .and_then(|s| s.model.clone())
-                        .unwrap_or_else(|| "-".to_string()),
-                    crate::output::color::job_state_color(&job.state.to_string()),
-                    format_last_run(last_run.as_ref()),
+                    Cell::new(&job.job_id),
+                    Cell::new(&first.map(|s| s.target_type.to_string()).unwrap_or_default()),
+                    Cell::new(
+                        &first
+                            .map(|s| s.target_id.clone())
+                            .unwrap_or_else(|| "-".to_string()),
+                    ),
+                    Cell::new(
+                        &first
+                            .and_then(|s| s.model.clone())
+                            .unwrap_or_else(|| "-".to_string()),
+                    ),
+                    crate::output::color::job_state_color_cell(&job.state.to_string()),
+                    Cell::new(&format_last_run(last_run.as_ref())),
                 ]);
             }
             println!("{table}");
@@ -163,7 +172,11 @@ impl Execute for JobShowArgs {
         } else {
             use crate::output::color::{bold, dimmed, job_state_color};
             println!("{} {}", bold("Job ID:"), job.job_id);
-            println!("{} {}", bold("State:"), job_state_color(&job.state.to_string()));
+            println!(
+                "{} {}",
+                bold("State:"),
+                job_state_color(&job.state.to_string())
+            );
             println!("{} {}", bold("Max Active Runs:"), job.max_active_runs);
             if let Some(default_input) = &job.default_input {
                 let rendered = serde_json::to_string(default_input)
@@ -181,8 +194,16 @@ impl Execute for JobShowArgs {
                 }
                 println!("    {} {}", bold("Timeout (s):"), step.timeout_seconds);
             }
-            println!("{} {}", bold("Created:"), dimmed(&job.created_at.to_rfc3339()));
-            println!("{} {}", bold("Updated:"), dimmed(&job.updated_at.to_rfc3339()));
+            println!(
+                "{} {}",
+                bold("Created:"),
+                dimmed(&job.created_at.to_rfc3339())
+            );
+            println!(
+                "{} {}",
+                bold("Updated:"),
+                dimmed(&job.updated_at.to_rfc3339())
+            );
             Ok(())
         }
     }
@@ -267,23 +288,30 @@ impl Execute for JobHistoryArgs {
                 "ERROR_MESSAGE",
             ]);
             for run in &runs {
+                use comfy_table::Cell;
                 table.add_row(vec![
-                    run.run_id.clone(),
-                    run.attempt.to_string(),
-                    crate::output::color::job_state_color(&run.state.to_string()),
-                    run.started_at
-                        .map(|v| v.to_rfc3339())
-                        .unwrap_or_else(|| "-".to_string()),
-                    run.finished_at
-                        .map(|v| v.to_rfc3339())
-                        .unwrap_or_else(|| "-".to_string()),
-                    run.steps
-                        .last()
-                        .and_then(|s| s.error_code.clone())
-                        .unwrap_or_else(|| "-".to_string()),
-                    summarize_error_message(
-                        run.steps.last().and_then(|s| s.error_message.as_deref()),
+                    Cell::new(&run.run_id),
+                    Cell::new(&run.attempt.to_string()),
+                    crate::output::color::job_state_color_cell(&run.state.to_string()),
+                    Cell::new(
+                        &run.started_at
+                            .map(|v| v.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                            .unwrap_or_else(|| "-".to_string()),
                     ),
+                    Cell::new(
+                        &run.finished_at
+                            .map(|v| v.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                    ),
+                    Cell::new(
+                        &run.steps
+                            .last()
+                            .and_then(|s| s.error_code.clone())
+                            .unwrap_or_else(|| "-".to_string()),
+                    ),
+                    Cell::new(&summarize_error_message(
+                        run.steps.last().and_then(|s| s.error_message.as_deref()),
+                    )),
                 ]);
             }
             println!("{table}");

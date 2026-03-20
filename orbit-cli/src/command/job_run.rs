@@ -83,24 +83,31 @@ impl Execute for JobRunListArgs {
                 "ERROR_MESSAGE",
             ]);
             for run in &runs {
+                use comfy_table::Cell;
                 table.add_row(vec![
-                    run.run_id.clone(),
-                    run.job_id.clone(),
-                    run.attempt.to_string(),
-                    crate::output::color::job_state_color(&run.state.to_string()),
-                    run.started_at
-                        .map(|value| value.to_rfc3339())
-                        .unwrap_or_else(|| "-".to_string()),
-                    run.finished_at
-                        .map(|value| value.to_rfc3339())
-                        .unwrap_or_else(|| "-".to_string()),
-                    run.steps
-                        .last()
-                        .and_then(|s| s.error_code.clone())
-                        .unwrap_or_else(|| "-".to_string()),
-                    summarize_error_message(
-                        run.steps.last().and_then(|s| s.error_message.as_deref()),
+                    Cell::new(&run.run_id),
+                    Cell::new(&run.job_id),
+                    Cell::new(&run.attempt.to_string()),
+                    crate::output::color::job_state_color_cell(&run.state.to_string()),
+                    Cell::new(
+                        &run.started_at
+                            .map(|value| value.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                            .unwrap_or_else(|| "-".to_string()),
                     ),
+                    Cell::new(
+                        &run.finished_at
+                            .map(|value| value.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                    ),
+                    Cell::new(
+                        &run.steps
+                            .last()
+                            .and_then(|s| s.error_code.clone())
+                            .unwrap_or_else(|| "-".to_string()),
+                    ),
+                    Cell::new(&summarize_error_message(
+                        run.steps.last().and_then(|s| s.error_message.as_deref()),
+                    )),
                 ]);
             }
             println!("{table}");
@@ -159,8 +166,16 @@ fn print_job_run(run: &JobRun) {
     println!("{} {}", bold("Run ID:"), run.run_id);
     println!("{} {}", bold("Job ID:"), run.job_id);
     println!("{} {}", bold("Attempt:"), run.attempt);
-    println!("{} {}", bold("State:"), job_state_color(&run.state.to_string()));
-    println!("{} {}", bold("Scheduled:"), dimmed(&run.scheduled_at.to_rfc3339()));
+    println!(
+        "{} {}",
+        bold("State:"),
+        job_state_color(&run.state.to_string())
+    );
+    println!(
+        "{} {}",
+        bold("Scheduled:"),
+        dimmed(&run.scheduled_at.to_rfc3339())
+    );
     println!(
         "{} {}",
         bold("Started:"),
@@ -206,5 +221,9 @@ fn print_job_run(run: &JobRun) {
             .map(|value| value.replace('\n', " "))
             .unwrap_or_else(|| "-".to_string())
     );
-    println!("{} {}", bold("Created:"), dimmed(&run.created_at.to_rfc3339()));
+    println!(
+        "{} {}",
+        bold("Created:"),
+        dimmed(&run.created_at.to_rfc3339())
+    );
 }

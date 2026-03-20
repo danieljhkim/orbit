@@ -83,20 +83,16 @@ impl Execute for ToolListArgs {
             let mut table =
                 crate::output::table::build_table(&["NAME", "ENABLED", "BUILTIN", "DESCRIPTION"]);
             for tool in &tools {
-                let enabled = if tool.enabled {
-                    crate::output::color::job_state_color("active")
-                } else {
-                    crate::output::color::job_state_color("disabled")
-                };
+                use comfy_table::Cell;
                 table.add_row(vec![
-                    tool.name.clone(),
-                    enabled,
-                    if tool.builtin {
-                        "yes".to_string()
+                    Cell::new(&tool.name),
+                    crate::output::color::job_state_color_cell(if tool.enabled {
+                        "active"
                     } else {
-                        "no".to_string()
-                    },
-                    tool.description.clone(),
+                        "disabled"
+                    }),
+                    Cell::new(if tool.builtin { "yes" } else { "no" }),
+                    Cell::new(&tool.description),
                 ]);
             }
             println!("{table}");
@@ -120,7 +116,11 @@ impl Execute for ToolShowArgs {
         use crate::output::color::{bold, job_state_color};
         println!("{} {}", bold("Name:"), tool.name);
         println!("{} {}", bold("Description:"), tool.description);
-        println!("{} {}", bold("Builtin:"), if tool.builtin { "yes" } else { "no" });
+        println!(
+            "{} {}",
+            bold("Builtin:"),
+            if tool.builtin { "yes" } else { "no" }
+        );
         println!(
             "{} {}",
             bold("Enabled:"),
@@ -311,16 +311,20 @@ fn execute_doctor(runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         if r.status != DoctorStatus::Ok {
             issues += 1;
         }
+        use comfy_table::Cell;
         table.add_row(vec![
-            r.tool_name.clone(),
-            crate::output::color::doctor_status_color(status_str),
-            r.message.clone(),
+            Cell::new(&r.tool_name),
+            crate::output::color::doctor_status_color_cell(status_str),
+            Cell::new(&r.message),
         ]);
     }
     println!("{table}");
 
     if issues == 0 {
-        println!("\n{}", crate::output::color::job_state_color("All tools healthy."));
+        println!(
+            "\n{}",
+            crate::output::color::job_state_color("All tools healthy.")
+        );
     } else {
         eprintln!("\n{} issue(s) found.", issues);
     }

@@ -4226,7 +4226,6 @@ fn open_pr_automation_rejects_stale_task_branches_before_pr_creation() {
     assert_eq!(updated_task.pr_number, None);
 }
 
-
 #[test]
 fn merge_pr_automation_rejects_stale_task_branches_before_merging() {
     let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());

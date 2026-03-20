@@ -123,7 +123,9 @@ impl Execute for TaskAddArgs {
 // --- List ---
 
 #[derive(Args)]
-#[command(after_help = "Examples:\n  orbit task list\n  orbit task list --status backlog\n  orbit task list --status in-progress\n  orbit task list --priority high\n  orbit task list --json")]
+#[command(
+    after_help = "Examples:\n  orbit task list\n  orbit task list --status backlog\n  orbit task list --status in-progress\n  orbit task list --priority high\n  orbit task list --json"
+)]
 pub struct TaskListArgs {
     /// Filter by task status (proposed, backlog, in-progress, review, done, blocked, rejected, archived)
     #[arg(long, value_enum)]
@@ -181,8 +183,16 @@ impl Execute for TaskShowArgs {
             use crate::output::color::{bold, dimmed, priority_color, status_color};
             println!("{} {}", bold("ID:"), task.id);
             println!("{} {}", bold("Title:"), task.title);
-            println!("{} {}", bold("Status:"), status_color(&task.status.to_string()));
-            println!("{} {}", bold("Priority:"), priority_color(&task.priority.to_string()));
+            println!(
+                "{} {}",
+                bold("Status:"),
+                status_color(&task.status.to_string())
+            );
+            println!(
+                "{} {}",
+                bold("Priority:"),
+                priority_color(&task.priority.to_string())
+            );
             if let Some(complexity) = task.complexity {
                 println!("{} {}", bold("Complexity:"), complexity);
             }
@@ -249,8 +259,16 @@ impl Execute for TaskShowArgs {
             if let Some(ref proposed_by) = task.proposed_by {
                 println!("{} {}", bold("Proposed By:"), proposed_by);
             }
-            println!("{} {}", bold("Created:"), dimmed(&task.created_at.to_rfc3339()));
-            println!("{} {}", bold("Updated:"), dimmed(&task.updated_at.to_rfc3339()));
+            println!(
+                "{} {}",
+                bold("Created:"),
+                dimmed(&task.created_at.to_rfc3339())
+            );
+            println!(
+                "{} {}",
+                bold("Updated:"),
+                dimmed(&task.updated_at.to_rfc3339())
+            );
             Ok(())
         }
     }
@@ -546,14 +564,15 @@ impl Execute for TaskSearchArgs {
 // --- Helpers ---
 
 fn print_task_table(tasks: &[orbit_core::Task]) {
+    use comfy_table::Cell;
     let mut table = crate::output::table::build_table(&["ID", "STATUS", "PRI", "TYPE", "TITLE"]);
     for task in tasks {
         table.add_row(vec![
-            task.id.clone(),
-            crate::output::color::status_color(&task.status.to_string()),
-            crate::output::color::priority_color(&task.priority.to_string()),
-            task.task_type.to_string(),
-            task.title.clone(),
+            Cell::new(&task.id),
+            crate::output::color::status_color_cell(&task.status.to_string()),
+            crate::output::color::priority_color_cell(&task.priority.to_string()),
+            Cell::new(&task.task_type.to_string()),
+            Cell::new(&task.title),
         ]);
     }
     println!("{table}");

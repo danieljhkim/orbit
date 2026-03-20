@@ -48,8 +48,7 @@ impl Execute for SkillListArgs {
             let values = skills.iter().map(skill_summary_json).collect::<Vec<_>>();
             crate::output::json::print_pretty(&Value::Array(values))
         } else {
-            let mut table =
-                crate::output::table::build_table(&["ID", "HASH", "TAGS", "SUMMARY"]);
+            let mut table = crate::output::table::build_table(&["ID", "HASH", "TAGS", "SUMMARY"]);
             for skill in skills {
                 let summary = skill
                     .meta
@@ -127,16 +126,20 @@ impl Execute for SkillDoctorArgs {
             if row.status != SkillDoctorStatus::Ok {
                 issues += 1;
             }
+            use comfy_table::Cell;
             table.add_row(vec![
-                row.skill_name.clone(),
-                crate::output::color::doctor_status_color(status),
-                row.message.clone(),
+                Cell::new(&row.skill_name),
+                crate::output::color::doctor_status_color_cell(status),
+                Cell::new(&row.message),
             ]);
         }
         println!("{table}");
 
         if issues == 0 {
-            println!("\n{}", crate::output::color::job_state_color("All skills healthy."));
+            println!(
+                "\n{}",
+                crate::output::color::job_state_color("All skills healthy.")
+            );
         } else {
             eprintln!("\n{} issue(s) found.", issues);
         }

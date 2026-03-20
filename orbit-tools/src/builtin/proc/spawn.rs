@@ -63,7 +63,7 @@ impl Tool for ProcSpawnTool {
                 timeout_ms,
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::Inherit,
-            debug: false,
+                debug: false,
             },
             &NoSandbox,
         )?;
