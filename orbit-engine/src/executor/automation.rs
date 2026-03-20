@@ -310,11 +310,7 @@ fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
             ))
         })?;
     let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
-    let review_decision = if let Some(value) = input_string_field(input, "review_decision") {
-        normalize_review_decision(&value)
-    } else {
-        resolve_review_decision(&repo_root, &pr_number)?
-    };
+    let review_decision = resolve_review_decision(&repo_root, &pr_number)?;
     if review_decision != "APPROVED" {
         return Err(OrbitError::Execution(format!(
             "pull request '{pr_number}' is not approved (review_decision={review_decision})"
@@ -960,9 +956,11 @@ fn json_number_to_string(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
     use std::process::Command;
+    use std::sync::{Mutex, OnceLock};
 
     use chrono::Utc;
     use orbit_tools::ToolContext;
@@ -972,6 +970,9 @@ mod tests {
 
     use super::*;
     use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[derive(Debug, Clone)]
     struct ToolInvocation {
@@ -1058,7 +1059,9 @@ mod tests {
             _target_type: JobTargetType,
             _target_id: &str,
         ) -> Result<Activity, OrbitError> {
-            unimplemented!("validate_activity_target_exists is not used in automation merge tests")
+            unimplemented!(
+                "validate_activity_target_exists is not used in automation merge tests"
+            )
         }
 
         fn run_tool_with_context_and_role(
@@ -1078,6 +1081,85 @@ mod tests {
         }
     }
 
+    struct PathGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        original_path: Option<String>,
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match self.original_path.take() {
+                Some(path) => unsafe { std::env::set_var("PATH", path) },
+                None => unsafe { std::env::remove_var("PATH") },
+            }
+        }
+    }
+
+    fn path_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn prepend_path(dir: &Path) -> String {
+        let mut entries = vec![dir.to_string_lossy().to_string()];
+        if let Some(existing) = std::env::var_os("PATH") {
+            entries.push(existing.to_string_lossy().to_string());
+        }
+        entries.join(":")
+    }
+
+    fn install_fake_gh(bin_dir: &Path, decisions: &[(&str, &str)]) {
+        let decision_map = decisions
+            .iter()
+            .map(|(pr_number, decision)| {
+                (
+                    pr_number.to_string(),
+                    format!("{{\"reviewDecision\":\"{decision}\"}}"),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let cases = decision_map
+            .iter()
+            .map(|(pr_number, payload)| {
+                format!("  {pr_number}) printf '%s' '{payload}'; exit 0 ;;\n")
+            })
+            .collect::<String>();
+        let script = format!(
+            concat!(
+                "#!/bin/sh\n",
+                "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ] && [ \"$4\" = \"--json\" ] && [ \"$5\" = \"reviewDecision\" ]; then\n",
+                "  case \"$3\" in\n",
+                "{cases}",
+                "  esac\n",
+                "fi\n",
+                "printf '%s\\n' \"unexpected gh args: $*\" >&2\n",
+                "exit 1\n"
+            ),
+            cases = cases
+        );
+        let gh_path = bin_dir.join("gh");
+        fs::write(&gh_path, script).expect("write fake gh");
+        #[cfg(unix)]
+        fs::set_permissions(&gh_path, fs::Permissions::from_mode(0o755)).expect("chmod gh");
+    }
+
+    fn use_fake_gh(decisions: &[(&str, &str)]) -> (TempDir, PathGuard) {
+        let bin_dir = tempfile::tempdir().expect("temp gh dir");
+        install_fake_gh(bin_dir.path(), decisions);
+        let lock = path_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_path = std::env::var("PATH").ok();
+        unsafe { std::env::set_var("PATH", prepend_path(bin_dir.path())) };
+        (
+            bin_dir,
+            PathGuard {
+                _lock: lock,
+                original_path,
+            },
+        )
+    }
+
     fn git(repo_root: &Path, args: &[&str]) {
         let status = Command::new("git")
             .args(args)
@@ -1091,17 +1173,11 @@ mod tests {
         let repo_dir = tempfile::tempdir().expect("temp repo dir");
         git(repo_dir.path(), &["init", "--initial-branch=agent-main"]);
         git(repo_dir.path(), &["config", "user.name", "Orbit Tests"]);
-        git(
-            repo_dir.path(),
-            &["config", "user.email", "orbit-tests@example.com"],
-        );
+        git(repo_dir.path(), &["config", "user.email", "orbit-tests@example.com"]);
         fs::write(repo_dir.path().join("README.md"), "orbit\n").expect("write readme");
         git(repo_dir.path(), &["add", "README.md"]);
         git(repo_dir.path(), &["commit", "-m", "init"]);
-        git(
-            repo_dir.path(),
-            &["checkout", "-b", "orbit/T20260320-021158"],
-        );
+        git(repo_dir.path(), &["checkout", "-b", "orbit/T20260320-021158"]);
         git(repo_dir.path(), &["checkout", "agent-main"]);
         repo_dir
     }
@@ -1120,7 +1196,6 @@ mod tests {
             created_by: Some("test".to_string()),
             status: TaskStatus::Review,
             priority: TaskPriority::High,
-            complexity: None,
             task_type: TaskType::Issue,
             branch: Some("orbit/T20260320-021158".to_string()),
             commit_message: None,
@@ -1135,8 +1210,9 @@ mod tests {
     }
 
     #[test]
-    fn merge_pr_from_task_uses_input_review_decision_when_present() {
+    fn merge_pr_from_task_prefers_github_approval_over_agent_reported_commented() {
         let repo_dir = init_repo();
+        let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "APPROVED")]);
         let host = FakeHost::new(test_task(repo_dir.path()));
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
 
@@ -1145,8 +1221,8 @@ mod tests {
             &json!({
                 "task_id": "T20260320-021158",
                 "repo_root": repo_dir.path().to_string_lossy().to_string(),
-                "review_decision": "APPROVED",
-                "action": "APPROVE",
+                "review_decision": "COMMENTED",
+                "action": "COMMENTED",
                 "pr_number": "18",
             }),
         )
@@ -1173,8 +1249,9 @@ mod tests {
     }
 
     #[test]
-    fn merge_pr_from_task_blocks_when_input_review_decision_is_not_approved() {
+    fn merge_pr_from_task_blocks_when_github_reports_commented_even_if_agent_reported_approved() {
         let repo_dir = init_repo();
+        let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "COMMENTED")]);
         let host = FakeHost::new(test_task(repo_dir.path()));
 
         let error = merge_pr_from_task(
@@ -1182,8 +1259,8 @@ mod tests {
             &json!({
                 "task_id": "T20260320-021158",
                 "repo_root": repo_dir.path().to_string_lossy().to_string(),
-                "review_decision": "COMMENTED",
-                "action": "COMMENTED",
+                "review_decision": "APPROVED",
+                "action": "APPROVE",
                 "pr_number": "18",
             }),
         )
