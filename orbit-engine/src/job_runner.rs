@@ -81,6 +81,7 @@ fn execute_activity_with_retries<H: EngineHost>(
         let mut total_duration_ms: u64 = 0;
         let mut last_protocol_violation = false;
         let mut current_input = merge_job_input(job.default_input.as_ref(), input)?;
+        let mut last_failure: Option<(String, String)> = None;
 
         for (step_index, step) in job.steps.iter().enumerate() {
             failure_step = (step_index, step.clone());
@@ -138,6 +139,10 @@ fn execute_activity_with_retries<H: EngineHost>(
             }
 
             if step_state != JobRunState::Success {
+                last_failure = Some((
+                    outcome.error_code.clone().unwrap_or_default(),
+                    outcome.error_message.clone().unwrap_or_default(),
+                ));
                 final_state = step_state;
                 break;
             }
@@ -155,6 +160,17 @@ fn execute_activity_with_retries<H: EngineHost>(
             run_id: run.run_id.clone(),
             state: final_state.to_string(),
         })?;
+
+        if final_state != JobRunState::Success {
+            if let Some((ref error_code, ref error_message)) = last_failure {
+                let _ = host.maybe_create_failure_task(
+                    &job.job_id,
+                    &run.run_id,
+                    error_code,
+                    error_message,
+                );
+            }
+        }
 
         if last_protocol_violation {
             host.record_event(OrbitEvent::JobProtocolViolation {
@@ -183,6 +199,12 @@ fn execute_activity_with_retries<H: EngineHost>(
             {
                 let (step_index, step) = &failure_step;
                 finalize_failed_started_run(host, &job, &run, *step_index, step, started_at, &err)?;
+                let _ = host.maybe_create_failure_task(
+                    &job.job_id,
+                    &run.run_id,
+                    ACTIVITY_EXECUTION_FAILED,
+                    &err.to_string(),
+                );
             }
             Err(err)
         }

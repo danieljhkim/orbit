@@ -230,6 +230,15 @@ pub trait RuntimeHost {
         role: Role,
         tool_context: ToolContext,
     ) -> Result<Value, OrbitError>;
+    /// Create a task capturing a job run failure, skipping creation if an open
+    /// task for the same `job_id` + `error_code` combination already exists.
+    fn maybe_create_failure_task(
+        &self,
+        job_id: &str,
+        run_id: &str,
+        error_code: &str,
+        error_message: &str,
+    ) -> Result<(), OrbitError>;
 }
 
 pub trait EngineHost:

@@ -4509,3 +4509,69 @@ pass = ["HOME", "PATH"]
         "step2 must not have STEP1_SECRET"
     );
 }
+
+#[test]
+fn failed_job_run_auto_creates_task_and_deduplicates() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-always-fails".to_string(),
+            spec_type: "cli_command".to_string(),
+            description: "activity that always fails".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({
+                "command": "sh",
+                "args": ["-c", "exit 1"],
+                "expected_exit_codes": [0]
+            }),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add activity");
+
+    let job = runtime
+        .add_job(JobAddParams {
+            job_id: Some("job-always-fails".to_string()),
+            default_input: None,
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_id: "spec-always-fails".to_string(),
+                timeout_seconds: 10,
+                ..Default::default()
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job");
+
+    // First run: job fails, task should be auto-created.
+    let run1 = runtime.run_job_now(&job.job_id).expect("first run");
+    assert_eq!(run1.state, JobRunState::Failed);
+
+    let tasks = runtime.list_tasks().expect("list tasks after first run");
+    assert_eq!(tasks.len(), 1, "one failure task should be created");
+    let task = &tasks[0];
+    assert!(
+        task.title.contains("job-always-fails"),
+        "task title should contain job_id, got: {}",
+        task.title
+    );
+    assert!(
+        task.title.contains("ACTIVITY_EXECUTION_FAILED"),
+        "task title should contain error_code, got: {}",
+        task.title
+    );
+    assert!(
+        task.description.contains("job-always-fails"),
+        "task description should reference the job"
+    );
+
+    // Second run: job fails again, no duplicate task should be created.
+    let run2 = runtime.run_job_now(&job.job_id).expect("second run");
+    assert_eq!(run2.state, JobRunState::Failed);
+
+    let tasks = runtime.list_tasks().expect("list tasks after second run");
+    assert_eq!(tasks.len(), 1, "no duplicate failure task should be created");
+}

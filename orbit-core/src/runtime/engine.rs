@@ -9,7 +9,7 @@ use orbit_store::{JobRunStepParams, TaskUpdateParams as StoreTaskUpdateParams};
 use orbit_tools::ToolContext;
 use orbit_types::{
     Activity, AgentCommitRequest, AgentResponseEnvelope, JobRun, JobRunState, JobTargetType,
-    OrbitError, OrbitEvent, Role, Task, TaskStatus,
+    OrbitError, OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -193,6 +193,48 @@ impl RuntimeHost for OrbitRuntime {
         tool_context: ToolContext,
     ) -> Result<Value, OrbitError> {
         OrbitRuntime::run_tool_with_context_and_role(self, name, input, role, tool_context)
+    }
+
+    fn maybe_create_failure_task(
+        &self,
+        job_id: &str,
+        run_id: &str,
+        error_code: &str,
+        error_message: &str,
+    ) -> Result<(), OrbitError> {
+        let title = format!("Job failure: {job_id} [{error_code}]");
+        let tasks = self.list_task_records()?;
+        let already_open = tasks.iter().any(|t| {
+            t.title == title
+                && !matches!(
+                    t.status,
+                    TaskStatus::Done | TaskStatus::Archived | TaskStatus::Rejected
+                )
+        });
+        if already_open {
+            return Ok(());
+        }
+        let description = format!(
+            "Job `{job_id}` failed during run `{run_id}` with error code `{error_code}`.\n\nError: {}",
+            if error_message.is_empty() { "No error message provided." } else { error_message }
+        );
+        let plan = format!(
+            "1. Investigate the root cause for job `{job_id}` failure (error code: `{error_code}`)\n\
+             2. Fix the underlying issue\n\
+             3. Re-run the job to verify it completes successfully"
+        );
+        let _ = self.add_task(crate::command::task::TaskAddParams {
+            title,
+            description,
+            plan,
+            comment: None,
+            context_files: vec![],
+            workspace_path: None,
+            priority: TaskPriority::High,
+            complexity: None,
+            task_type: TaskType::Task,
+        });
+        Ok(())
     }
 }
 

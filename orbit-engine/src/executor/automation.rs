@@ -1073,6 +1073,16 @@ mod tests {
             });
             Ok(json!({}))
         }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
     }
 
     struct PathGuard {
