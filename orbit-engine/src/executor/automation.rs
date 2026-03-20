@@ -12,6 +12,7 @@ const AUTOMATION_CREATE_TASK_WORKTREE: &str = "create_task_worktree";
 const AUTOMATION_START_TASK: &str = "start_task";
 const AUTOMATION_UPDATE_TASK: &str = "update_task";
 const AUTOMATION_COMMIT_TASK_CHANGES: &str = "commit_task_changes";
+const AUTOMATION_MERGE_PR_FROM_TASK: &str = "merge_pr_from_task";
 const AUTOMATION_OPEN_PR_FROM_TASK: &str = "open_pr_from_task";
 const AUTOMATION_FINALIZE_TASK_WORKTREE: &str = "finalize_task_worktree";
 
@@ -35,6 +36,7 @@ pub fn execute<H: EngineHost>(
         AUTOMATION_START_TASK => start_task(host, input),
         AUTOMATION_UPDATE_TASK => update_task(host, input),
         AUTOMATION_COMMIT_TASK_CHANGES => commit_task_changes(host, input),
+        AUTOMATION_MERGE_PR_FROM_TASK => merge_pr_from_task(host, input),
         AUTOMATION_OPEN_PR_FROM_TASK => open_pr_from_task(host, input),
         AUTOMATION_FINALIZE_TASK_WORKTREE => finalize_task_worktree(input),
         other => Err(OrbitError::InvalidInput(format!(
@@ -210,6 +212,79 @@ fn commit_task_changes<H: EngineHost>(host: &H, input: &Value) -> Result<Value, 
         "commit_message": message,
         "commit_sha": commit_sha,
         "changed_files": changed_files,
+    }))
+}
+
+fn merge_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+    let task_id = required_input_string(input, "task_id")?;
+    let task = host.get_task(task_id)?;
+    let repo_root = canonicalize_existing_dir(
+        &input_string_field(input, "repo_root")
+            .or_else(|| input_workspace_path(input))
+            .or_else(|| task.repo_root.clone())
+            .or_else(|| task.workspace_path.clone())
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(
+                    "merge_pr_from_task requires input.repo_root, input.workspace_path, task.repo_root, or task.workspace_path"
+                        .to_string(),
+                )
+            })?,
+        "repo_root",
+    )?;
+    let pr_number = input_string_field(input, "pr_number")
+        .or_else(|| task.pr_number.clone())
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "merge_pr_from_task requires input.pr_number or task.pr_number".to_string(),
+            )
+        })?;
+    let review_decision = resolve_review_decision(input, &repo_root, &pr_number)?;
+    if review_decision != "APPROVED" {
+        return Err(OrbitError::Execution(format!(
+            "pull request '{pr_number}' is not approved (review_decision={review_decision})"
+        )));
+    }
+
+    if !matches!(task.status, TaskStatus::Review | TaskStatus::Done) {
+        return Err(OrbitError::Execution(format!(
+            "task '{}' must be in review before merge_pr_from_task; current status is {}",
+            task.id, task.status
+        )));
+    }
+
+    let tool_context = ToolContext {
+        cwd: Some(repo_root.to_string_lossy().to_string()),
+        allowed_tools: vec![],
+        ..Default::default()
+    };
+    let strategy = input_string_field(input, "strategy").unwrap_or_else(|| "squash".to_string());
+    host.run_tool_with_context_and_role(
+        "github.pr.merge",
+        json!({
+            "pr": pr_number.clone(),
+            "strategy": strategy,
+        }),
+        Role::Admin,
+        tool_context,
+    )?;
+
+    host.apply_task_automation_update(
+        task_id,
+        TaskAutomationUpdate {
+            status: if task.status == TaskStatus::Review {
+                Some(TaskStatus::Done)
+            } else {
+                None
+            },
+            pr_number: Some(pr_number.clone()),
+            ..TaskAutomationUpdate::default()
+        },
+    )?;
+
+    Ok(json!({
+        "pr_number": pr_number,
+        "merged": true,
+        "review_decision": review_decision,
     }))
 }
 
@@ -411,6 +486,74 @@ fn input_repo_root(input: &Value) -> Result<String, OrbitError> {
     input_string_field(input, "repo_root")
         .or_else(|| input_workspace_path(input))
         .ok_or_else(|| OrbitError::InvalidInput("missing required input.repo_root".to_string()))
+}
+
+fn resolve_review_decision(
+    input: &Value,
+    repo_root: &Path,
+    pr_number: &str,
+) -> Result<String, OrbitError> {
+    if let Some(decision) =
+        input_string_field(input, "review_decision").or_else(|| input_string_field(input, "action"))
+    {
+        return Ok(normalize_review_decision(&decision));
+    }
+
+    fetch_review_decision_from_gh(repo_root, pr_number)
+}
+
+fn normalize_review_decision(value: &str) -> String {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "APPROVED" | "APPROVE" => "APPROVED".to_string(),
+        "REQUEST-CHANGES" | "REQUEST_CHANGES" | "CHANGES_REQUESTED" => {
+            "CHANGES_REQUESTED".to_string()
+        }
+        "COMMENT" | "COMMENTED" => "COMMENTED".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn fetch_review_decision_from_gh(repo_root: &Path, pr_number: &str) -> Result<String, OrbitError> {
+    let result = run_process(
+        &ExecRequest {
+            program: "gh".to_string(),
+            args: vec![
+                "pr".to_string(),
+                "view".to_string(),
+                pr_number.to_string(),
+                "--json".to_string(),
+                "reviewDecision".to_string(),
+            ],
+            current_dir: Some(repo_root.to_string_lossy().to_string()),
+            timeout_ms: Some(15_000),
+            stdin_mode: StdinMode::Null,
+            environment_mode: EnvironmentMode::Inherit,
+        },
+        &NoSandbox,
+    )?;
+
+    if !result.success {
+        return Err(OrbitError::Execution(format!(
+            "gh pr view failed while fetching reviewDecision for '{pr_number}': {}",
+            result.stderr.trim()
+        )));
+    }
+
+    let payload: Value = serde_json::from_str(&result.stdout).map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to parse gh pr view reviewDecision output for '{pr_number}': {error}"
+        ))
+    })?;
+    payload
+        .get("reviewDecision")
+        .and_then(Value::as_str)
+        .map(normalize_review_decision)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            OrbitError::Execution(format!(
+                "gh pr view did not return reviewDecision for '{pr_number}'"
+            ))
+        })
 }
 
 fn canonicalize_existing_dir(raw: &str, field_name: &str) -> Result<PathBuf, OrbitError> {

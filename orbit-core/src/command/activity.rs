@@ -40,6 +40,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/implement_change.yaml"),
     ),
     (
+        "merge_pr",
+        include_str!("../../assets/activities/merge_pr.yaml"),
+    ),
+    (
         "open_pr",
         include_str!("../../assets/activities/open_pr.yaml"),
     ),
@@ -559,6 +563,7 @@ activity:
                 "update_task",
                 "dispatch_task",
                 "implement_change",
+                "merge_pr",
                 "open_pr",
                 "review_tasks",
                 "oversee_orbit_operations",

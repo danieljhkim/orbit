@@ -39,6 +39,10 @@ fn activity_assets_use_grouped_sections_and_literal_instruction_blocks() {
             "implement_change",
             include_str!("../assets/activities/implement_change.yaml"),
         ),
+        (
+            "merge_pr",
+            include_str!("../assets/activities/merge_pr.yaml"),
+        ),
         ("open_pr", include_str!("../assets/activities/open_pr.yaml")),
         (
             "oversee_orbit_operations",

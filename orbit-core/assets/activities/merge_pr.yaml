@@ -1,0 +1,54 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- registration ----
+  id: merge_pr
+  spec_type: automation
+
+  # ---- content ----
+  description: Merge an approved Orbit pull request and advance the task to done
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: The Orbit task ID whose pull request should be merged
+      pr_number:
+        type: string
+        description: Pull request number, URL, or branch name. Optional when task_id is provided; falls back to the task pr_number.
+      review_decision:
+        type: string
+        description: Optional upstream review decision. When provided, APPROVED skips the extra gh pr view approval lookup.
+      repo_root:
+        type: string
+        description: Canonical repository root or task worktree used to resolve the current repository context. Optional when task_id is provided; falls back to input.workspace_path, task.repo_root, and then task.workspace_path.
+      strategy:
+        type: string
+        description: Merge strategy passed to github.pr.merge. Defaults to squash.
+  output_schema_json:
+    type: object
+    required:
+      - pr_number
+      - merged
+      - review_decision
+    properties:
+      pr_number:
+        type: string
+        description: Pull request number, URL, or branch name that was merged.
+      merged:
+        type: boolean
+        description: Whether the pull request merge completed successfully.
+      review_decision:
+        type: string
+        description: Review decision used to authorize the merge.
+
+  # ---- execution ----
+  action: merge_pr_from_task

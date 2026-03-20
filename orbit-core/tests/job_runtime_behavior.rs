@@ -3969,6 +3969,287 @@ fn open_pr_automation_supports_task_id_only_inputs() {
 }
 
 #[test]
+fn merge_pr_automation_uses_input_review_decision_without_extra_gh_lookup() {
+    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _snapshot = EnvSnapshot::capture(&["PATH"]);
+    let dir = tempdir().expect("tempdir");
+    let data_root = dir.path().join("orbit");
+    std::fs::create_dir_all(&data_root).expect("create data root");
+    let repo_root = dir.path().join("repo");
+    std::fs::create_dir_all(&repo_root).expect("create repo root");
+    init_git_repo(&repo_root);
+    std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
+    git_commit_all(&repo_root, "chore: seed repo");
+
+    let gh_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&gh_dir).expect("create gh dir");
+    let merge_capture = dir.path().join("gh-merge.txt");
+    let gh_script = gh_dir.join("gh");
+    let gh_body = format!(
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n",
+            "  echo 'unexpected gh pr view call' >&2\n",
+            "  exit 1\n",
+            "fi\n",
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"merge\" ]; then\n",
+            "  printf '%s' \"$3\" > \"{merge_capture}\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "exit 1\n",
+        ),
+        merge_capture = merge_capture.display(),
+    );
+    std::fs::write(&gh_script, gh_body).expect("write gh script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&gh_script, std::fs::Permissions::from_mode(0o755)).expect("chmod gh");
+
+    unsafe {
+        std::env::set_var("PATH", prepend_path(&gh_dir));
+    }
+
+    let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
+    let task_id = runtime
+        .add_task(TaskAddParams {
+            title: "Merge task PR".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: Some(repo_root.to_string_lossy().to_string()),
+            priority: TaskPriority::High,
+            task_type: TaskType::Task,
+        })
+        .expect("add task")
+        .id;
+    runtime
+        .start_task(&task_id, None, None)
+        .expect("start task");
+    runtime
+        .update_task(
+            &task_id,
+            TaskUpdateParams {
+                title: None,
+                description: None,
+                plan: None,
+                execution_summary: Some("Ready to merge".to_string()),
+                comment: None,
+                status: Some(TaskStatus::Review),
+                branch: Some(Some(format!("orbit/{task_id}"))),
+                pr_number: Some(Some("42".to_string())),
+            },
+        )
+        .expect("prepare task");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-merge-pr-from-input".to_string(),
+            spec_type: "automation".to_string(),
+            description: "merge pr using provided approval".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" },
+                    "review_decision": { "type": "string" }
+                },
+                "required": ["task_id", "review_decision"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "pr_number": { "type": "string" },
+                    "merged": { "type": "boolean" },
+                    "review_decision": { "type": "string" }
+                },
+                "required": ["pr_number", "merged", "review_decision"]
+            }),
+            spec_config: json!({"action":"merge_pr_from_task"}),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add merge activity");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({
+                "task_id": task_id,
+                "review_decision": "APPROVED",
+            })),
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-merge-pr-from-input".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add merge job")
+        .job_id;
+
+    let run = runtime.run_job_now(&job_id).expect("run merge job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("history");
+    let output = history[0].steps[0]
+        .agent_response_json
+        .as_ref()
+        .expect("merge output");
+    assert_eq!(output["pr_number"], json!("42"));
+    assert_eq!(output["merged"], json!(true));
+    assert_eq!(output["review_decision"], json!("APPROVED"));
+    assert_eq!(std::fs::read_to_string(merge_capture).expect("merge"), "42");
+
+    let updated_task = runtime.get_task(&task_id).expect("updated task");
+    assert_eq!(updated_task.status, TaskStatus::Done);
+}
+
+#[test]
+fn merge_pr_automation_fetches_review_decision_from_gh_when_not_provided() {
+    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let _snapshot = EnvSnapshot::capture(&["PATH"]);
+    let dir = tempdir().expect("tempdir");
+    let data_root = dir.path().join("orbit");
+    std::fs::create_dir_all(&data_root).expect("create data root");
+    let repo_root = dir.path().join("repo");
+    std::fs::create_dir_all(&repo_root).expect("create repo root");
+    init_git_repo(&repo_root);
+    std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
+    git_commit_all(&repo_root, "chore: seed repo");
+
+    let gh_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&gh_dir).expect("create gh dir");
+    let view_capture = dir.path().join("gh-view-count.txt");
+    let merge_capture = dir.path().join("gh-merge-count.txt");
+    std::fs::write(&view_capture, "0").expect("seed view count");
+    std::fs::write(&merge_capture, "0").expect("seed merge count");
+    let gh_script = gh_dir.join("gh");
+    let gh_body = format!(
+        concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n",
+            "  count=$(cat \"{view_capture}\")\n",
+            "  count=$((count + 1))\n",
+            "  printf '%s' \"$count\" > \"{view_capture}\"\n",
+            "  printf '{{\"reviewDecision\":\"APPROVED\"}}'\n",
+            "  exit 0\n",
+            "fi\n",
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"merge\" ]; then\n",
+            "  count=$(cat \"{merge_capture}\")\n",
+            "  count=$((count + 1))\n",
+            "  printf '%s' \"$count\" > \"{merge_capture}\"\n",
+            "  exit 0\n",
+            "fi\n",
+            "exit 1\n",
+        ),
+        view_capture = view_capture.display(),
+        merge_capture = merge_capture.display(),
+    );
+    std::fs::write(&gh_script, gh_body).expect("write gh script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&gh_script, std::fs::Permissions::from_mode(0o755)).expect("chmod gh");
+
+    unsafe {
+        std::env::set_var("PATH", prepend_path(&gh_dir));
+    }
+
+    let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
+    let task_id = runtime
+        .add_task(TaskAddParams {
+            title: "Merge task PR after gh lookup".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: Some(repo_root.to_string_lossy().to_string()),
+            priority: TaskPriority::High,
+            task_type: TaskType::Task,
+        })
+        .expect("add task")
+        .id;
+    runtime
+        .start_task(&task_id, None, None)
+        .expect("start task");
+    runtime
+        .update_task(
+            &task_id,
+            TaskUpdateParams {
+                title: None,
+                description: None,
+                plan: None,
+                execution_summary: Some("Ready to merge".to_string()),
+                comment: None,
+                status: Some(TaskStatus::Review),
+                branch: Some(Some(format!("orbit/{task_id}"))),
+                pr_number: Some(Some("24".to_string())),
+            },
+        )
+        .expect("prepare task");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-merge-pr-from-gh".to_string(),
+            spec_type: "automation".to_string(),
+            description: "merge pr using gh lookup".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" }
+                },
+                "required": ["task_id"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "pr_number": { "type": "string" },
+                    "merged": { "type": "boolean" },
+                    "review_decision": { "type": "string" }
+                },
+                "required": ["pr_number", "merged", "review_decision"]
+            }),
+            spec_config: json!({"action":"merge_pr_from_task"}),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add merge activity");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({
+                "task_id": task_id,
+            })),
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_type: JobTargetType::Activity,
+                target_id: "spec-merge-pr-from-gh".to_string(),
+                agent_cli: String::new(),
+                timeout_seconds: 30,
+                env_extra: vec![],
+            }],
+            initial_state_override: None,
+        })
+        .expect("add merge job")
+        .job_id;
+
+    let run = runtime.run_job_now(&job_id).expect("run merge job");
+    assert_eq!(run.state, JobRunState::Success);
+    assert_eq!(
+        std::fs::read_to_string(view_capture).expect("view count"),
+        "1"
+    );
+    assert_eq!(
+        std::fs::read_to_string(merge_capture).expect("merge count"),
+        "1"
+    );
+
+    let updated_task = runtime.get_task(&task_id).expect("updated task");
+    assert_eq!(updated_task.status, TaskStatus::Done);
+}
+
+#[test]
 fn multi_step_same_agent_cli_each_step_gets_its_own_env_extra() {
     // Regression: env_extra was looked up by matching agent_cli (first match), so step 2
     // sharing the same agent_cli as step 1 would receive step 1's allowlist.

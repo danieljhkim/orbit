@@ -17,6 +17,7 @@ job:
   #   commit_changes   — let Orbit stage and commit repository changes in the task worktree
   #   open_pr          — let Orbit open a PR using task title + execution_summary
   #   review_pr        — review the opened PR against task acceptance criteria
+  #   merge_pr         — merge approved PRs and advance tasks to done
   max_active_runs: 4
   default_input:
     base: agent-main
@@ -62,3 +63,7 @@ job:
       agent_cli: claude
       model: sonnet-4.5
       timeout_seconds: 600
+
+    - target_type: activity
+      target_id: merge_pr
+      timeout_seconds: 60
