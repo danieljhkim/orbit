@@ -65,6 +65,7 @@ impl Tool for GitCommitTool {
                 timeout_ms: Some(30_000),
                 stdin_mode: StdinMode::Null,
                 environment_mode: EnvironmentMode::Inherit,
+            debug: false,
             },
             &NoSandbox,
         )?;

@@ -24,6 +24,8 @@ pub struct ExecutionContext {
     pub timeout_seconds: u64,
     pub env_extra: Vec<String>,
     pub input: Value,
+    /// When `true`, stream agent stderr to the terminal and tee stdout live.
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -79,8 +79,17 @@ impl OrbitRuntime {
         job_id: &str,
         input: Value,
     ) -> Result<orbit_engine::JobRunResult, OrbitError> {
+        self.run_job_now_with_input_debug(job_id, input, false)
+    }
+
+    pub fn run_job_now_with_input_debug(
+        &self,
+        job_id: &str,
+        input: Value,
+        debug: bool,
+    ) -> Result<orbit_engine::JobRunResult, OrbitError> {
         let job = self.show_job(job_id)?;
-        orbit_engine::run_job_with_input(self, job, input)
+        orbit_engine::run_job_with_input(self, job, input, debug)
     }
 
     pub(crate) fn recover_stale_active_run_for_job(

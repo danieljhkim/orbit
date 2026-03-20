@@ -598,6 +598,7 @@ fn fetch_review_decision_from_gh(repo_root: &Path, pr_number: &str) -> Result<St
             timeout_ms: Some(15_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
+        debug: false,
         },
         &NoSandbox,
     )?;
@@ -710,6 +711,7 @@ fn fetch_remote_base(repo_root: &Path, base: &str) {
             timeout_ms: Some(60_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
+        debug: false,
         },
         &NoSandbox,
     );
@@ -881,6 +883,7 @@ fn git_output_raw(current_dir: &Path, args: &[&str]) -> Result<String, OrbitErro
             timeout_ms: Some(30_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
+        debug: false,
         },
         &NoSandbox,
     )?;
@@ -906,6 +909,7 @@ fn git_success(current_dir: &Path, args: &[&str]) -> Result<(), OrbitError> {
             timeout_ms: Some(30_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
+        debug: false,
         },
         &NoSandbox,
     )?;
@@ -931,6 +935,7 @@ fn git_command_success(current_dir: &Path, args: &[&str]) -> Result<bool, OrbitE
             timeout_ms: Some(30_000),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::Inherit,
+        debug: false,
         },
         &NoSandbox,
     )?;

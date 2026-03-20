@@ -239,6 +239,7 @@ impl OrbitRuntime {
             &activity,
             &params.agent_cli,
             params.timeout_seconds,
+            false,
         )?;
         if outcome.protocol_violation {
             self.record_event(OrbitEvent::ActivityProtocolViolation {

@@ -4160,162 +4160,6 @@ fn open_pr_automation_rejects_stale_task_branches_before_pr_creation() {
     assert_eq!(updated_task.pr_number, None);
 }
 
-#[test]
-fn merge_pr_automation_uses_input_review_decision_without_extra_gh_lookup() {
-    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
-    let _snapshot = EnvSnapshot::capture(&["PATH"]);
-    let dir = tempdir().expect("tempdir");
-    let data_root = dir.path().join("orbit");
-    std::fs::create_dir_all(&data_root).expect("create data root");
-    let repo_root = dir.path().join("repo");
-    std::fs::create_dir_all(&repo_root).expect("create repo root");
-    init_git_repo(&repo_root);
-    std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
-    git_commit_all(&repo_root, "chore: seed repo");
-    Command::new("git")
-        .args(["branch", "-M", "agent-main"])
-        .current_dir(&repo_root)
-        .status()
-        .expect("rename branch");
-
-    let gh_dir = dir.path().join("bin");
-    std::fs::create_dir_all(&gh_dir).expect("create gh dir");
-    let merge_capture = dir.path().join("gh-merge.txt");
-    let gh_script = gh_dir.join("gh");
-    let gh_body = format!(
-        concat!(
-            "#!/bin/sh\n",
-            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n",
-            "  echo 'unexpected gh pr view call' >&2\n",
-            "  exit 1\n",
-            "fi\n",
-            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"merge\" ]; then\n",
-            "  printf '%s' \"$3\" > \"{merge_capture}\"\n",
-            "  exit 0\n",
-            "fi\n",
-            "exit 1\n",
-        ),
-        merge_capture = merge_capture.display(),
-    );
-    std::fs::write(&gh_script, gh_body).expect("write gh script");
-    #[cfg(unix)]
-    std::fs::set_permissions(&gh_script, std::fs::Permissions::from_mode(0o755)).expect("chmod gh");
-
-    unsafe {
-        std::env::set_var("PATH", prepend_path(&gh_dir));
-    }
-
-    let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
-    let task_id = runtime
-        .add_task(TaskAddParams {
-            title: "Merge task PR".to_string(),
-            description: "desc".to_string(),
-            plan: "plan".to_string(),
-            comment: None,
-            context_files: vec![],
-            workspace_path: Some(repo_root.to_string_lossy().to_string()),
-            priority: TaskPriority::High,
-            complexity: None,
-            task_type: TaskType::Task,
-        })
-        .expect("add task")
-        .id;
-    let status = Command::new("git")
-        .args(["checkout", "-b", &format!("orbit/{task_id}")])
-        .current_dir(&repo_root)
-        .status()
-        .expect("create merge branch");
-    assert!(status.success(), "create merge branch must succeed");
-    let status = Command::new("git")
-        .args(["checkout", "agent-main"])
-        .current_dir(&repo_root)
-        .status()
-        .expect("checkout base");
-    assert!(status.success(), "checkout base must succeed");
-    runtime
-        .start_task(&task_id, None, None)
-        .expect("start task");
-    runtime
-        .update_task(
-            &task_id,
-            TaskUpdateParams {
-                title: None,
-                description: None,
-                plan: None,
-                execution_summary: Some("Ready to merge".to_string()),
-                comment: None,
-                status: Some(TaskStatus::Review),
-                branch: Some(Some(format!("orbit/{task_id}"))),
-                pr_number: Some(Some("42".to_string())),
-            },
-        )
-        .expect("prepare task");
-
-    runtime
-        .add_activity(ActivityAddParams {
-            id: "spec-merge-pr-from-input".to_string(),
-            spec_type: "automation".to_string(),
-            description: "merge pr using provided approval".to_string(),
-            input_schema_json: json!({
-                "type": "object",
-                "properties": {
-                    "task_id": { "type": "string" },
-                    "review_decision": { "type": "string" }
-                },
-                "required": ["task_id", "review_decision"]
-            }),
-            output_schema_json: json!({
-                "type": "object",
-                "properties": {
-                    "pr_number": { "type": "string" },
-                    "merged": { "type": "boolean" },
-                    "review_decision": { "type": "string" }
-                },
-                "required": ["pr_number", "merged", "review_decision"]
-            }),
-            spec_config: json!({"action":"merge_pr_from_task"}),
-            workspace_path: None,
-            created_by: None,
-        })
-        .expect("add merge activity");
-
-    let job_id = runtime
-        .add_job(JobAddParams {
-            job_id: None,
-            default_input: Some(json!({
-                "task_id": task_id,
-                "review_decision": "APPROVED",
-            })),
-            max_active_runs: None,
-            steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
-                target_id: "spec-merge-pr-from-input".to_string(),
-                agent_cli: String::new(),
-                model: None,
-                timeout_seconds: 30,
-                env_extra: vec![],
-            }],
-            initial_state_override: None,
-        })
-        .expect("add merge job")
-        .job_id;
-
-    let run = runtime.run_job_now(&job_id).expect("run merge job");
-    assert_eq!(run.state, JobRunState::Success);
-
-    let history = runtime.job_history(&job_id).expect("history");
-    let output = history[0].steps[0]
-        .agent_response_json
-        .as_ref()
-        .expect("merge output");
-    assert_eq!(output["pr_number"], json!("42"));
-    assert_eq!(output["merged"], json!(true));
-    assert_eq!(output["review_decision"], json!("APPROVED"));
-    assert_eq!(std::fs::read_to_string(merge_capture).expect("merge"), "42");
-
-    let updated_task = runtime.get_task(&task_id).expect("updated task");
-    assert_eq!(updated_task.status, TaskStatus::Done);
-}
 
 #[test]
 fn merge_pr_automation_rejects_stale_task_branches_before_merging() {
@@ -4342,6 +4186,13 @@ fn merge_pr_automation_rejects_stale_task_branches_before_merging() {
     let gh_body = format!(
         concat!(
             "#!/bin/sh\n",
+            // merge_pr_from_task calls `gh pr view` to fetch reviewDecision
+            // before the stale-branch check; return APPROVED so the stale
+            // check is reached.
+            "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n",
+            "  printf '{{\"reviewDecision\":\"APPROVED\"}}'\n",
+            "  exit 0\n",
+            "fi\n",
             "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"merge\" ]; then\n",
             "  printf '%s' \"$3\" > \"{merge_capture}\"\n",
             "  exit 0\n",

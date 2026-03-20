@@ -14,6 +14,7 @@ pub fn run_activity_direct<H: EngineHost>(
     activity: &Activity,
     agent_cli: &str,
     timeout_seconds: u64,
+    debug: bool,
 ) -> Result<DirectActivityRunOutcome, OrbitError> {
     let execution = ExecutionContext {
         activity: activity.clone(),
@@ -23,6 +24,7 @@ pub fn run_activity_direct<H: EngineHost>(
         timeout_seconds,
         env_extra: vec![],
         input: json!({}),
+        debug,
     };
     let outcome = execute_single_attempt(host, &execution);
     Ok(DirectActivityRunOutcome {
@@ -39,6 +41,7 @@ pub fn build_execution_context_for_step<H: RuntimeHost>(
     job: &Job,
     step: &JobStep,
     input: Value,
+    debug: bool,
 ) -> Result<ExecutionContext, OrbitError> {
     let activity = host.validate_activity_target_exists(step.target_type, &step.target_id)?;
     validate_activity_input_schema(&activity, &input)?;
@@ -50,6 +53,7 @@ pub fn build_execution_context_for_step<H: RuntimeHost>(
         timeout_seconds: step.timeout_seconds,
         env_extra: step.env_extra.clone(),
         input,
+        debug,
     })
 }
 

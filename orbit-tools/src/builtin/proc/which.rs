@@ -41,6 +41,7 @@ impl Tool for ProcWhichTool {
                 timeout_ms: Some(1_000),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::Inherit,
+            debug: false,
             },
             &NoSandbox,
         )?;

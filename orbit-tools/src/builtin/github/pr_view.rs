@@ -32,6 +32,7 @@ pub(super) fn build_exec_request(
         timeout_ms: Some(15_000),
         stdin_mode: StdinMode::Null,
         environment_mode: EnvironmentMode::Inherit,
+        debug: false,
     })
 }
 

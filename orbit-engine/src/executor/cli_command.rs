@@ -130,6 +130,7 @@ pub fn execute(
             ),
             stdin_mode: StdinMode::Null,
             environment_mode: EnvironmentMode::ClearAndSet(env.into_iter().collect()),
+        debug: false,
         },
         &NoSandbox,
     )?;

@@ -13,6 +13,7 @@ pub fn run_job_with_input<H: EngineHost>(
     host: &H,
     job: Job,
     input: Value,
+    debug: bool,
 ) -> Result<JobRunResult, OrbitError> {
     let _ = recover_stale_active_run_for_job(host, &job, Utc::now())?;
     let active_runs = host.list_pending_or_running_job_runs(&job.job_id)?;
@@ -31,7 +32,7 @@ pub fn run_job_with_input<H: EngineHost>(
         job_id: job.job_id.clone(),
     })?;
 
-    execute_activity_with_retries(host, job, Utc::now(), None, input)
+    execute_activity_with_retries(host, job, Utc::now(), None, input, debug)
 }
 
 fn execute_activity_with_retries<H: EngineHost>(
@@ -40,6 +41,7 @@ fn execute_activity_with_retries<H: EngineHost>(
     scheduled_at: DateTime<Utc>,
     initial_run: Option<JobRun>,
     input: Value,
+    debug: bool,
 ) -> Result<JobRunResult, OrbitError> {
     let attempt = initial_run.as_ref().map(|r| r.attempt).unwrap_or(1);
 
@@ -84,7 +86,7 @@ fn execute_activity_with_retries<H: EngineHost>(
             failure_step = (step_index, step.clone());
 
             let execution =
-                build_execution_context_for_step(host, &job, step, current_input.clone())?;
+                build_execution_context_for_step(host, &job, step, current_input.clone(), debug)?;
             let step_started = Utc::now();
             let outcome = execute_single_attempt(host, &execution);
             let step_finished = Utc::now();

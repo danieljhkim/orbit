@@ -139,6 +139,7 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
             timeout_ms: Some(execution.timeout_seconds.saturating_mul(1000)),
             stdin_mode: StdinMode::Bytes(invocation.stdin),
             environment_mode,
+            debug: execution.debug,
         },
         &NoSandbox,
     )

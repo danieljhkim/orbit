@@ -185,12 +185,18 @@ pub struct JobRunArgs {
     pub input: Vec<String>,
     #[arg(long)]
     pub json: bool,
+    /// Stream agent stderr to the terminal and tee stdout live for debugging.
+    #[arg(long)]
+    pub debug: bool,
 }
 
 impl Execute for JobRunArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let run =
-            runtime.run_job_now_with_input(&self.job_id, build_job_run_input(&self.input)?)?;
+        let run = runtime.run_job_now_with_input_debug(
+            &self.job_id,
+            build_job_run_input(&self.input)?,
+            self.debug,
+        )?;
         let run_details = runtime
             .job_history(&self.job_id)?
             .into_iter()

@@ -46,6 +46,7 @@ pub(super) fn orbit_exec_request(ctx: &ToolContext, args: Vec<String>) -> ExecRe
         timeout_ms: Some(ORBIT_TIMEOUT_MS),
         stdin_mode: StdinMode::Null,
         environment_mode: EnvironmentMode::ClearAndSet(env.into_iter().collect()),
+        debug: false,
     }
 }
 

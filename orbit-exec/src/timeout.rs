@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::Child;
 use std::thread;
 use std::time::Duration;
@@ -18,14 +18,35 @@ pub(crate) struct WaitResult {
 pub(crate) fn wait_with_optional_timeout(
     mut child: Child,
     timeout_ms: Option<u64>,
+    debug: bool,
 ) -> Result<WaitResult, OrbitError> {
     // Drain stdout/stderr in background threads so the child never blocks on a
     // full pipe buffer (which would prevent it from exiting).
+    //
+    // In debug mode, stdout is tee'd to stderr so the user sees agent output
+    // live while we still accumulate it for JSON parsing.  Stderr is inherited
+    // directly by the child process (set in process::spawn), so no thread is
+    // needed for it.
     let stdout_thread = child.stdout.take().map(|mut out| {
         thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = out.read_to_end(&mut buf);
-            buf
+            if debug {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    match out.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            let _ = std::io::stderr().write_all(&chunk[..n]);
+                            buf.extend_from_slice(&chunk[..n]);
+                        }
+                    }
+                }
+                buf
+            } else {
+                let mut buf = Vec::new();
+                let _ = out.read_to_end(&mut buf);
+                buf
+            }
         })
     });
     let stderr_thread = child.stderr.take().map(|mut err| {

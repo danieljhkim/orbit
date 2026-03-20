@@ -28,6 +28,9 @@ pub struct ExecRequest {
     pub timeout_ms: Option<u64>,
     pub stdin_mode: StdinMode,
     pub environment_mode: EnvironmentMode,
+    /// When `true`, stream agent stderr directly to the terminal and tee
+    /// stdout to stderr while accumulating it for JSON parsing.
+    pub debug: bool,
 }
 
 pub fn run_process(
@@ -49,7 +52,7 @@ pub fn run_process(
             ));
         }
     }
-    let result = crate::timeout::wait_with_optional_timeout(child, req.timeout_ms)?;
+    let result = crate::timeout::wait_with_optional_timeout(child, req.timeout_ms, req.debug)?;
 
     Ok(ExecutionResult {
         success: result.exit_success,
@@ -77,6 +80,7 @@ mod tests {
                 timeout_ms: Some(1000),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::Inherit,
+                debug: false,
             },
             &NoSandbox,
         )
@@ -96,6 +100,7 @@ mod tests {
                 timeout_ms: Some(1000),
                 stdin_mode: StdinMode::Bytes(b"hello-stdin".to_vec()),
                 environment_mode: EnvironmentMode::Inherit,
+                debug: false,
             },
             &NoSandbox,
         )
@@ -115,6 +120,7 @@ mod tests {
                 timeout_ms: Some(100),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::Inherit,
+                debug: false,
             },
             &NoSandbox,
         )
@@ -134,6 +140,7 @@ mod tests {
                 timeout_ms: Some(1000),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::ClearAndSet(Vec::new()),
+                debug: false,
             },
             &NoSandbox,
         )
@@ -156,6 +163,7 @@ mod tests {
                     "PATH".to_string(),
                     path.clone(),
                 )]),
+                debug: false,
             },
             &NoSandbox,
         )
@@ -188,6 +196,7 @@ mod tests {
                 timeout_ms: Some(2000),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::ClearAndSet(pairs),
+                debug: false,
             },
             &NoSandbox,
         )
@@ -207,6 +216,7 @@ mod tests {
                 timeout_ms: Some(1000),
                 stdin_mode: StdinMode::Inherit,
                 environment_mode: EnvironmentMode::Inherit,
+                debug: false,
             },
             &NoSandbox,
         )
