@@ -161,15 +161,15 @@ fn execute_activity_with_retries<H: EngineHost>(
             state: final_state.to_string(),
         })?;
 
-        if final_state != JobRunState::Success {
-            if let Some((ref error_code, ref error_message)) = last_failure {
-                let _ = host.maybe_create_failure_task(
-                    &job.job_id,
-                    &run.run_id,
-                    error_code,
-                    error_message,
-                );
-            }
+        if final_state != JobRunState::Success
+            && let Some((ref error_code, ref error_message)) = last_failure
+        {
+            let _ = host.maybe_create_failure_task(
+                &job.job_id,
+                &run.run_id,
+                error_code,
+                error_message,
+            );
         }
 
         if last_protocol_violation {
