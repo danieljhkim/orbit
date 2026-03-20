@@ -23,19 +23,7 @@ pub fn parse_and_validate_response(
 ) -> Result<(AgentResponseEnvelope, AgentResponseStatus), OrbitError> {
     match parse_json_envelope(exec_result) {
         Ok(parsed) => Ok(parsed),
-        Err(parse_err) => {
-            // An agent that exits 0 without valid JSON violated the protocol — it claimed
-            // success but produced no parseable envelope. Treat this as a protocol violation
-            // so callers can retry or surface a meaningful error rather than propagating a
-            // synthesized success with result=null through the pipeline.
-            if exec_result.exit_code.unwrap_or(1) == 0 && !is_timeout(exec_result) {
-                Err(OrbitError::AgentProtocolViolation(format!(
-                    "agent exited successfully but stdout is not a valid JSON envelope: {parse_err}"
-                )))
-            } else {
-                Ok(synthesize_response(exec_result))
-            }
-        }
+        Err(_) => Ok(synthesize_response(exec_result)),
     }
 }
 

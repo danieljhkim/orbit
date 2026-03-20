@@ -1049,7 +1049,7 @@ fn job_run_omits_identity_block_from_agent_envelope() {
 }
 
 #[test]
-fn invalid_agent_json_with_zero_exit_falls_back_to_success() {
+fn invalid_agent_json_with_zero_exit_returns_output_missing_error() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
     let script_path = dir.path().join("mock-agent");
@@ -1059,24 +1059,17 @@ fn invalid_agent_json_with_zero_exit_falls_back_to_success() {
     let job_id = add_scheduled_activity(&runtime, "spec-protocol", &agent_cli);
 
     let run = runtime.run_job_now(&job_id).expect("run job");
-    assert_eq!(run.state, JobRunState::Success);
+    assert_eq!(run.state, JobRunState::Failed);
 
     let history = runtime.job_history(&job_id).expect("history");
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0].state, JobRunState::Success);
-    assert!(
+    assert_eq!(history[0].state, JobRunState::Failed);
+    assert_eq!(
         history[0]
             .steps
             .last()
-            .and_then(|s| s.error_code.as_deref())
-            .is_none()
-    );
-
-    let audits = runtime.list_session_events(25).expect("audits");
-    assert!(
-        !audits
-            .iter()
-            .any(|audit| audit.event_type == "JobProtocolViolation")
+            .and_then(|s| s.error_code.as_deref()),
+        Some("AGENT_OUTPUT_MISSING")
     );
 }
 
@@ -1171,8 +1164,10 @@ fn codex_job_run_uses_workspace_write_sandbox() {
     add_activity(&runtime, "spec-codex-sandbox");
     let job_id = add_scheduled_activity(&runtime, "spec-codex-sandbox", &agent_cli);
 
+    // The mock codex produces no JSON output so the run fails with AGENT_OUTPUT_MISSING,
+    // but the args file is still written — that is what this test verifies.
     let run = runtime.run_job_now(&job_id).expect("run job");
-    assert_eq!(run.state, JobRunState::Success);
+    assert_eq!(run.state, JobRunState::Failed);
 
     let args = std::fs::read_to_string(args_capture).expect("read args");
     let captured: Vec<&str> = args.lines().collect();
@@ -4574,4 +4569,138 @@ fn failed_job_run_auto_creates_task_and_deduplicates() {
 
     let tasks = runtime.list_tasks().expect("list tasks after second run");
     assert_eq!(tasks.len(), 1, "no duplicate failure task should be created");
+}
+
+#[test]
+fn create_branch_includes_local_base_commits_not_yet_pushed_to_remote() {
+    // Regression: when local agent-main is ahead of origin/agent-main (e.g. a
+    // commit was made locally but not yet pushed), the task worktree must be
+    // created from the local branch so that local work is not silently dropped.
+    let _guard = env_lock().lock().unwrap_or_else(|err| err.into_inner());
+    let dir = tempdir().expect("tempdir");
+    let data_root = dir.path().join("orbit");
+    std::fs::create_dir_all(&data_root).expect("create data root");
+    let repo_root = dir.path().join("repo");
+    std::fs::create_dir_all(&repo_root).expect("create repo root");
+    init_git_repo(&repo_root);
+    std::fs::write(repo_root.join("README.md"), "seed\n").expect("write seed file");
+    git_commit_all(&repo_root, "chore: seed repo");
+    Command::new("git")
+        .args(["branch", "-M", "agent-main"])
+        .current_dir(&repo_root)
+        .status()
+        .expect("rename branch");
+
+    // Set up a bare remote and push the initial commit.
+    let bare_dir = dir.path().join("origin.git");
+    std::fs::create_dir_all(&bare_dir).expect("create bare dir");
+    Command::new("git")
+        .args(["init", "--bare", "-q"])
+        .current_dir(&bare_dir)
+        .status()
+        .expect("init bare origin");
+    Command::new("git")
+        .args(["remote", "add", "origin", &bare_dir.to_string_lossy()])
+        .current_dir(&repo_root)
+        .status()
+        .expect("add remote");
+    let push_status = Command::new("git")
+        .args(["push", "-u", "origin", "agent-main"])
+        .current_dir(&repo_root)
+        .status()
+        .expect("push agent-main");
+    assert!(push_status.success(), "initial push must succeed");
+
+    // Make a local commit that has NOT been pushed to origin.
+    std::fs::write(repo_root.join("LOCAL_ONLY.txt"), "local change\n").expect("write local file");
+    git_commit_all(&repo_root, "chore: local only change");
+
+    let worktree_root = dir.path().join("worktrees");
+    let _snapshot = EnvSnapshot::capture(&["ORBIT_WORKTREE_ROOT"]);
+    unsafe {
+        std::env::set_var("ORBIT_WORKTREE_ROOT", &worktree_root);
+    }
+
+    let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
+    let task_id = runtime
+        .add_task(TaskAddParams {
+            title: "Create worktree from fresh local base".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: Some(repo_root.to_string_lossy().to_string()),
+            priority: TaskPriority::High,
+            complexity: None,
+            task_type: TaskType::Task,
+        })
+        .expect("add task")
+        .id;
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-create-worktree-local-base".to_string(),
+            spec_type: "automation".to_string(),
+            description: "create isolated task worktree".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "task_id": { "type": "string" },
+                    "base": { "type": "string" }
+                },
+                "required": ["task_id", "base"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "workspace_path": { "type": "string" },
+                    "repo_root": { "type": "string" },
+                    "branch": { "type": "string" }
+                },
+                "required": ["workspace_path", "repo_root", "branch"]
+            }),
+            spec_config: json!({"action": "create_task_worktree"}),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add activity");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({
+                "task_id": task_id.clone(),
+                "base": "agent-main"
+            })),
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_id: "spec-create-worktree-local-base".to_string(),
+                timeout_seconds: 30,
+                ..Default::default()
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let result = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("job history");
+    let create_output = history[0]
+        .steps
+        .first()
+        .and_then(|step| step.agent_response_json.as_ref())
+        .expect("create output");
+    let task_worktree = std::path::PathBuf::from(
+        create_output["workspace_path"]
+            .as_str()
+            .expect("workspace_path"),
+    );
+
+    assert!(
+        task_worktree.join("LOCAL_ONLY.txt").exists(),
+        "task worktree must include the local-only base commit, not stale origin/agent-main"
+    );
+    assert_eq!(git_current_branch(&repo_root), "agent-main");
 }

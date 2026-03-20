@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 use super::git::{
-    fetch_remote_base, git_command_success, git_output, git_success, resolve_worktree_start_point,
+    fetch_remote_base, git_command_success, git_output, git_success, refresh_local_base_branch,
+    resolve_worktree_start_point,
 };
 use super::input::{
     canonicalize_existing_dir, input_repo_root, input_string_field, input_workspace_path,
@@ -35,6 +36,7 @@ pub(super) fn create_task_worktree<H: RuntimeHost + TaskHost + ?Sized>(
         ensure_existing_task_worktree(&worktree_path, &branch)?;
     } else {
         fetch_remote_base(&repo_root, &base);
+        refresh_local_base_branch(&repo_root, &base)?;
         let start_point = resolve_worktree_start_point(&repo_root, &base)?;
         create_or_attach_task_worktree(&repo_root, &worktree_path, &branch, &start_point)?;
     }

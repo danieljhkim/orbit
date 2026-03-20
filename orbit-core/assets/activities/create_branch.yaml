@@ -10,7 +10,7 @@ activity:
   spec_type: automation
 
   # ---- content ----
-  description: Create or reuse an isolated git worktree for a task branch using the orbit/<task_id> naming convention
+  description: Refresh the local base branch from remote, then create or reuse an isolated git worktree for a task branch using the orbit/<task_id> naming convention
 
   # ---- interface ----
   input_schema_json:
