@@ -1,0 +1,27 @@
+name: bug-fix
+description: Template for reproducing and fixing a defect
+task_type: issue
+priority: high
+description_template: |
+  <SUMMARY_OF_THE_BUG>
+
+  Steps to reproduce:
+  1. <STEP_1>
+  2. <STEP_2>
+
+  Expected behavior: <EXPECTED>
+  Actual behavior: <ACTUAL>
+plan_template: |
+  1. Reproduce the bug locally and confirm the failure.
+  2. Identify the root cause in the code.
+  3. Write a failing test that captures the regression.
+  4. Implement the fix.
+  5. Confirm the test passes and no existing tests regress.
+  6. Update relevant documentation if behavior changes.
+instructions_template: |
+  Fix the bug described in the task description.
+
+  - Confirm the issue is reproducible before changing any code.
+  - Add a regression test so this cannot silently reappear.
+  - Keep the fix minimal; do not refactor unrelated code.
+  - Note the root cause in the execution summary.

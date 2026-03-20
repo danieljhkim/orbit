@@ -1,0 +1,19 @@
+name: chore
+description: Template for maintenance, housekeeping, or non-functional work
+task_type: chore
+priority: low
+description_template: |
+  <DESCRIPTION_OF_THE_MAINTENANCE_WORK>
+
+  Motivation: <WHY_THIS_NEEDS_TO_BE_DONE>
+plan_template: |
+  1. Identify the scope of the chore.
+  2. Make the required changes.
+  3. Verify no existing behavior is broken.
+  4. Clean up any related lint, dead code, or outdated references.
+instructions_template: |
+  Complete the maintenance task described in the task description.
+
+  - Keep changes focused on the stated scope.
+  - Do not introduce new features or refactor unrelated code.
+  - Ensure all tests still pass after the change.

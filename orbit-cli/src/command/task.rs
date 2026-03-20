@@ -1,6 +1,8 @@
 use clap::{Args, Subcommand};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
-use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskPriority, TaskStatus, TaskType};
+use orbit_core::{
+    OrbitError, OrbitRuntime, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -41,6 +43,8 @@ pub enum TaskSubcommand {
     Delete(TaskDeleteArgs),
     /// Search tasks by title or description
     Search(TaskSearchArgs),
+    /// Manage task templates
+    Templates(TaskTemplatesCommand),
 }
 
 impl Execute for TaskSubcommand {
@@ -57,6 +61,7 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Unarchive(args) => args.execute(runtime),
             TaskSubcommand::Delete(args) => args.execute(runtime),
             TaskSubcommand::Search(args) => args.execute(runtime),
+            TaskSubcommand::Templates(cmd) => cmd.execute(runtime),
         }
     }
 }
@@ -68,12 +73,15 @@ pub struct TaskAddArgs {
     /// Task title
     #[arg(long)]
     pub title: String,
-    /// Task description
-    #[arg(long)]
+    /// Task description (overrides template if --template is also given)
+    #[arg(long, default_value = "")]
     pub description: String,
-    /// Task plan payload (agent planning input)
-    #[arg(long, alias = "instructions")]
+    /// Task plan payload (agent planning input; overrides template if --template is also given)
+    #[arg(long, alias = "instructions", default_value = "")]
     pub plan: String,
+    /// Pre-populate description, plan, and instructions from a named template
+    #[arg(long)]
+    pub template: Option<String>,
     /// Append an initial task comment
     #[arg(long)]
     pub comment: Option<String>,
@@ -99,22 +107,134 @@ pub struct TaskAddArgs {
 
 impl Execute for TaskAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        // If a template is requested, resolve it and use its fields as defaults.
+        let (description, plan, priority, task_type) = if let Some(ref tpl_name) = self.template {
+            let tpl = runtime.get_task_template(tpl_name)?;
+            let description = if self.description.is_empty() {
+                tpl.description_template
+            } else {
+                self.description
+            };
+            let plan = if self.plan.is_empty() {
+                // Combine plan_template and instructions_template.
+                let combined = format!(
+                    "{}\n\n---\n\n{}",
+                    tpl.plan_template.trim_end(),
+                    tpl.instructions_template.trim_end()
+                );
+                combined
+            } else {
+                self.plan
+            };
+            // Template priority/type only apply when the caller didn't override them
+            // (detect override by comparing against defaults).
+            let priority = if self.priority == TaskPriority::Medium {
+                tpl.priority
+            } else {
+                self.priority
+            };
+            let task_type = if self.task_type == TaskType::Task {
+                tpl.task_type
+            } else {
+                self.task_type
+            };
+            (description, plan, priority, task_type)
+        } else {
+            (self.description, self.plan, self.priority, self.task_type)
+        };
+
         let task = runtime.add_task(TaskAddParams {
             title: self.title,
-            description: self.description,
-            plan: self.plan,
+            description,
+            plan,
             comment: self.comment,
             context_files: parse_context_csv(&self.context),
             workspace_path: Some(self.workspace),
-            priority: self.priority,
+            priority,
             complexity: self.complexity,
-            task_type: self.task_type,
+            task_type,
         })?;
 
         if self.json {
             crate::output::json::print_pretty(&task_to_json(&task))
         } else {
             println!("{}", task.id);
+            Ok(())
+        }
+    }
+}
+
+// --- Templates ---
+
+#[derive(Args)]
+pub struct TaskTemplatesCommand {
+    #[command(subcommand)]
+    pub command: TaskTemplatesSubcommand,
+}
+
+impl Execute for TaskTemplatesCommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
+    }
+}
+
+#[derive(Subcommand)]
+pub enum TaskTemplatesSubcommand {
+    /// List available task templates (built-in and user-defined)
+    List(TaskTemplatesListArgs),
+}
+
+impl Execute for TaskTemplatesSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            TaskTemplatesSubcommand::List(args) => args.execute(runtime),
+        }
+    }
+}
+
+#[derive(Args)]
+pub struct TaskTemplatesListArgs {
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for TaskTemplatesListArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let templates = runtime.list_task_templates()?;
+
+        if self.json {
+            let json_templates: Vec<Value> = templates
+                .iter()
+                .map(|t| {
+                    json!({
+                        "name": t.name,
+                        "description": t.description,
+                        "task_type": t.task_type.to_string(),
+                        "priority": t.priority.to_string(),
+                        "description_template": t.description_template,
+                        "plan_template": t.plan_template,
+                        "instructions_template": t.instructions_template,
+                        "builtin": t.builtin,
+                    })
+                })
+                .collect();
+            crate::output::json::print_pretty(&Value::Array(json_templates))
+        } else {
+            use comfy_table::Cell;
+            let mut table =
+                crate::output::table::build_table(&["NAME", "TYPE", "PRIORITY", "SOURCE", "DESCRIPTION"]);
+            for t in &templates {
+                let source = if t.builtin { "built-in" } else { "user" };
+                table.add_row(vec![
+                    Cell::new(&t.name),
+                    Cell::new(t.task_type.to_string()),
+                    Cell::new(t.priority.to_string()),
+                    Cell::new(source),
+                    Cell::new(&t.description),
+                ]);
+            }
+            println!("{table}");
             Ok(())
         }
     }

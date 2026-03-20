@@ -12,6 +12,7 @@ pub use orbit_store::skill_store as skill_catalog;
 pub use context::{ActorIdentity, ActorKind, OrbitContext};
 pub use orbit_store::AuditEventInsertParams;
 pub use orbit_types::OrbitError;
+pub use command::task_template::TaskTemplate;
 pub use orbit_types::{
     Activity, AuditEvent, AuditEventStatus, AuditStats, Job, JobRun, JobRunState, JobScheduleState,
     JobStep, JobTargetType, Role, Skill, Task, TaskComment, TaskComplexity, TaskPriority,

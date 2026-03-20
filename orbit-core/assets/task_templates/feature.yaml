@@ -1,0 +1,26 @@
+name: feature
+description: Template for building a new user-facing feature
+task_type: feature
+priority: medium
+description_template: |
+  <FEATURE_DESCRIPTION>
+
+  Motivation: <WHY_THIS_FEATURE_IS_NEEDED>
+
+  Acceptance criteria:
+  - <CRITERION_1>
+  - <CRITERION_2>
+plan_template: |
+  1. Clarify requirements and acceptance criteria.
+  2. Design the public API or interface.
+  3. Implement the feature behind the interface.
+  4. Write unit and integration tests covering the acceptance criteria.
+  5. Update documentation and usage examples.
+  6. Submit for review.
+instructions_template: |
+  Implement the feature described in the task description.
+
+  - Follow the existing code style and patterns in this codebase.
+  - Cover all acceptance criteria with tests.
+  - Do not add features beyond the stated scope (YAGNI).
+  - Summarize what was built and any design decisions in the execution summary.

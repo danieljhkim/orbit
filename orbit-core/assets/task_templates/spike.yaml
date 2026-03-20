@@ -1,0 +1,20 @@
+name: spike
+description: Template for a time-boxed research or investigation task
+task_type: task
+priority: medium
+description_template: |
+  <QUESTION_OR_TOPIC_TO_INVESTIGATE>
+
+  Goal: Produce a concrete finding or recommendation by <TIMEBOX>.
+plan_template: |
+  1. Define the specific question(s) to answer.
+  2. Gather relevant information (docs, code, experiments).
+  3. Prototype or test candidate approaches if needed.
+  4. Document findings and a recommendation.
+  5. Present conclusions in the execution summary.
+instructions_template: |
+  Investigate the topic described in the task description.
+
+  - This is a time-boxed spike; do not implement production code unless explicitly requested.
+  - Record your findings and a clear recommendation in the execution summary.
+  - If you discover the scope is larger than expected, flag it as a follow-up task rather than expanding the spike.
