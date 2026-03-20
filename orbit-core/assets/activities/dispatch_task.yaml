@@ -19,7 +19,9 @@ activity:
        {"task_id": "None", "comment": "No tasks available. Nothing to dispatch."}
 
     2. Call orbit.task.list with status: "in_progress" to retrieve tasks currently being worked on.
-       For each in-progress task, call orbit.task.show to read its description and plan.
+       Collect the union of all context_files from every in-progress task — this is the
+       "blocked file set". For each in-progress task, call orbit.task.show if you need
+       its full context_files list.
 
     3. For the top candidates, call orbit.task.show with the task id to read description, plan, and priority.
 
@@ -27,12 +29,15 @@ activity:
 
        a. Apply priority rules: critical > high > medium > low.
 
-       b. Skip any task whose scope or target files clearly overlap with an
-          in-progress task — prefer work that can land independently without causing merge
-          conflicts or duplicating effort.
+       b. Conflict check: for each candidate task, compare its context_files against the
+          blocked file set. A conflict exists when any path in the candidate's context_files
+          exactly matches, or is a path prefix of, any path in the blocked file set (and
+          vice versa). Skip any candidate with a conflict and note the reason.
+          Tasks with an empty context_files list are never skipped by this check.
 
     5. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Orbit: <one sentence rationale>"
-       to record the dispatch rationale.
+       to record the dispatch rationale. If one or more candidates were skipped due to a
+       conflict, include "Skipped <id> (conflicts with in-progress <id>: <file>)" in the comment.
 
     6. Return a JSON result with EXACTLY these fields (no prose, no explanation):
        Output the selected task_id and the rationale comment.

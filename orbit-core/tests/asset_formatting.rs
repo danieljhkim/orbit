@@ -103,6 +103,23 @@ fn dispatch_task_asset_accepts_shared_pipeline_base_input() {
 }
 
 #[test]
+fn dispatch_task_asset_checks_context_files_for_conflict() {
+    let raw = include_str!("../assets/activities/dispatch_task.yaml");
+    assert!(
+        raw.contains("context_files"),
+        "dispatch_task should explicitly reference context_files for conflict detection"
+    );
+    assert!(
+        raw.contains("blocked file set") || raw.contains("conflict"),
+        "dispatch_task should describe the conflict check logic"
+    );
+    assert!(
+        raw.contains("empty context_files") || raw.contains("empty"),
+        "dispatch_task should document that tasks with empty context_files are not skipped"
+    );
+}
+
+#[test]
 fn pipeline_cli_activity_assets_document_workspace_path_input() {
     let assets = [
         include_str!("../assets/activities/run_tests.yaml"),
