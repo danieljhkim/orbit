@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 chrono.workspace = true
+libc = { workspace = true }
 jsonschema.workspace = true
 orbit-agent = { path = "../orbit-agent" }
 orbit-exec = { path = "../orbit-exec" }

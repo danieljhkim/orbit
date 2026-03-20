@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::activity_runner::{build_execution_context_for_step, execute_with_retry};
 use crate::context::{
     ACTIVITY_EXECUTION_FAILED, AGENT_INVOCATION_FAILED, EngineHost, JobRunHost, JobRunResult,
-    RuntimeHost, STALE_RUN_GRACE_SECONDS, step_output_for_following_input,
+    RUN_ABANDONED, RuntimeHost, STALE_RUN_GRACE_SECONDS, step_output_for_following_input,
 };
 
 pub fn run_job_with_input<H: EngineHost>(
@@ -58,7 +58,7 @@ fn execute_activity_with_retries<H: EngineHost>(
     };
 
     let started_at = Utc::now();
-    let changed = host.mark_job_run_running(&run.run_id, started_at)?;
+    let changed = host.mark_job_run_running(&run.run_id, started_at, std::process::id())?;
     if !changed {
         return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
     }
@@ -201,6 +201,51 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
     let mut recovered_any = false;
 
     for active_run in active_runs {
+        // PID-based abandonment: if the owning process has died, fail the run immediately.
+        if let Some(pid) = active_run.pid
+            && !pid_is_alive(pid)
+        {
+            eprintln!(
+                "orbit: abandoning stale run '{}' (owner pid {} is no longer alive)",
+                active_run.run_id, pid
+            );
+            let duration_ms = active_run.started_at.map(|started| {
+                now.signed_duration_since(started).num_milliseconds().max(0) as u64
+            });
+            if let Some(first_step) = job.steps.first() {
+                let _ = host.complete_job_run_step(
+                    &active_run.run_id,
+                    &JobRunStepParams {
+                        step_index: 0,
+                        target_type: first_step.target_type,
+                        target_id: first_step.target_id.clone(),
+                        started_at: active_run.started_at.unwrap_or(active_run.created_at),
+                        finished_at: now,
+                        duration_ms,
+                        exit_code: Some(1),
+                        agent_response_json: None,
+                        state: JobRunState::Failed,
+                        error_code: Some(RUN_ABANDONED.to_string()),
+                        error_message: Some(format!(
+                            "run abandoned: owner pid {} is no longer alive",
+                            pid
+                        )),
+                    },
+                );
+            }
+            let changed = host.abandon_job_run(&active_run.run_id, now)?;
+            if !changed {
+                return Err(OrbitError::JobRunNotFound(active_run.run_id.clone()));
+            }
+            host.record_event(OrbitEvent::JobRunCompleted {
+                job_id: job.job_id.clone(),
+                run_id: active_run.run_id.clone(),
+                state: JobRunState::Failed.to_string(),
+            })?;
+            recovered_any = true;
+            continue;
+        }
+
         if !is_stale_active_run(job, &active_run, now) {
             continue;
         }
@@ -256,6 +301,20 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
     }
 
     Ok(recovered_any)
+}
+
+/// Returns `true` if the process with the given PID is currently alive.
+/// On non-Unix platforms, conservatively returns `true` (never abandon).
+#[cfg(unix)]
+fn pid_is_alive(pid: u32) -> bool {
+    // kill(pid, 0) checks process existence without sending a signal.
+    // Returns 0 if the process exists, -1 with ESRCH if it does not.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn pid_is_alive(_pid: u32) -> bool {
+    true
 }
 
 fn finalize_failed_started_run<H: JobRunHost + RuntimeHost>(

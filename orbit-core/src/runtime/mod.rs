@@ -288,10 +288,21 @@ impl OrbitRuntime {
         &self,
         run_id: &str,
         started_at: chrono::DateTime<chrono::Utc>,
+        pid: u32,
     ) -> Result<bool, OrbitError> {
         self.context
             .job_store()
-            .mark_job_run_running(run_id, started_at)
+            .mark_job_run_running(run_id, started_at, pid)
+    }
+
+    pub(crate) fn abandon_job_run_record(
+        &self,
+        run_id: &str,
+        finished_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, OrbitError> {
+        self.context
+            .job_store()
+            .abandon_job_run(run_id, finished_at)
     }
 
     pub(crate) fn complete_job_run_step_record(

@@ -151,6 +151,12 @@ pub trait JobStoreBackend: Send + Sync {
         &self,
         run_id: &str,
         started_at: DateTime<Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError>;
+    fn abandon_job_run(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
     ) -> Result<bool, OrbitError>;
     fn complete_job_run_step(
         &self,

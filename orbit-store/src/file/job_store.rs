@@ -306,6 +306,7 @@ impl JobFileStore {
             started_at: None,
             finished_at: None,
             duration_ms: None,
+            pid: None,
             created_at: Utc::now(),
             steps: vec![],
         };
@@ -317,6 +318,7 @@ impl JobFileStore {
         &self,
         run_id: &str,
         started_at: DateTime<Utc>,
+        pid: u32,
     ) -> Result<bool, OrbitError> {
         let Some((job_id, run_dir)) = self.find_run_path(run_id)? else {
             return Ok(false);
@@ -324,8 +326,17 @@ impl JobFileStore {
         let mut run = self.read_run_at(&run_dir)?;
         run.state = JobRunState::Running;
         run.started_at = Some(started_at);
+        run.pid = Some(pid);
         self.write_run(&job_id, &run)?;
         Ok(true)
+    }
+
+    pub(crate) fn abandon_job_run(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        self.finalize_job_run(run_id, JobRunState::Failed, finished_at, None)
     }
 
     pub(crate) fn complete_job_run_step(

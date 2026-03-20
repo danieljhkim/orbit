@@ -571,7 +571,7 @@ fn print_task_table(tasks: &[orbit_core::Task]) {
             Cell::new(&task.id),
             crate::output::color::status_color_cell(&task.status.to_string()),
             crate::output::color::priority_color_cell(&task.priority.to_string()),
-            Cell::new(&task.task_type.to_string()),
+            Cell::new(task.task_type.to_string()),
             Cell::new(&task.title),
         ]);
     }

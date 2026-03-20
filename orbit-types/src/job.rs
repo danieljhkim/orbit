@@ -201,6 +201,10 @@ pub struct JobRun {
     pub finished_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     pub created_at: DateTime<Utc>,
+    /// OS PID of the process that owns this run; set when the run transitions to `running`.
+    /// Used to detect abandoned runs when the owning process has died.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
     /// Step execution results; populated in-memory from step files, not stored in jrun.yaml.
     #[serde(skip)]
     pub steps: Vec<JobRunStep>,

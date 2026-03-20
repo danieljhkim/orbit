@@ -136,19 +136,19 @@ impl Execute for JobListArgs {
                 let first = job.steps.first();
                 table.add_row(vec![
                     Cell::new(&job.job_id),
-                    Cell::new(&first.map(|s| s.target_type.to_string()).unwrap_or_default()),
+                    Cell::new(first.map(|s| s.target_type.to_string()).unwrap_or_default()),
                     Cell::new(
-                        &first
+                        first
                             .map(|s| s.target_id.clone())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
                     Cell::new(
-                        &first
+                        first
                             .and_then(|s| s.model.clone())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
                     crate::output::color::job_state_color_cell(&job.state.to_string()),
-                    Cell::new(&format_last_run(last_run.as_ref())),
+                    Cell::new(format_last_run(last_run.as_ref())),
                 ]);
             }
             println!("{table}");
@@ -291,25 +291,25 @@ impl Execute for JobHistoryArgs {
                 use comfy_table::Cell;
                 table.add_row(vec![
                     Cell::new(&run.run_id),
-                    Cell::new(&run.attempt.to_string()),
+                    Cell::new(run.attempt.to_string()),
                     crate::output::color::job_state_color_cell(&run.state.to_string()),
                     Cell::new(
-                        &run.started_at
+                        run.started_at
                             .map(|v| v.format("%Y-%m-%dT%H:%M:%SZ").to_string())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
                     Cell::new(
-                        &run.finished_at
+                        run.finished_at
                             .map(|v| v.format("%Y-%m-%dT%H:%M:%SZ").to_string())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
                     Cell::new(
-                        &run.steps
+                        run.steps
                             .last()
                             .and_then(|s| s.error_code.clone())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
-                    Cell::new(&summarize_error_message(
+                    Cell::new(summarize_error_message(
                         run.steps.last().and_then(|s| s.error_message.as_deref()),
                     )),
                 ]);

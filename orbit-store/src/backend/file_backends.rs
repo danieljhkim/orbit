@@ -204,8 +204,17 @@ impl JobStoreBackend for JobFileStore {
         &self,
         run_id: &str,
         started_at: DateTime<Utc>,
+        pid: u32,
     ) -> Result<bool, OrbitError> {
-        self.mark_job_run_running(run_id, started_at)
+        self.mark_job_run_running(run_id, started_at, pid)
+    }
+
+    fn abandon_job_run(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        self.abandon_job_run(run_id, finished_at)
     }
 
     fn complete_job_run_step(

@@ -233,6 +233,7 @@ impl JobStoreBackend for MemoryJobStoreBackend {
             started_at: None,
             finished_at: None,
             duration_ms: None,
+            pid: None,
             created_at: Utc::now(),
             steps: vec![],
         };
@@ -244,6 +245,7 @@ impl JobStoreBackend for MemoryJobStoreBackend {
         &self,
         run_id: &str,
         started_at: DateTime<Utc>,
+        pid: u32,
     ) -> Result<bool, OrbitError> {
         let mut state = self.inner.lock().map_err(lock_err)?;
         let Some(run) = state.active_runs.get_mut(run_id) else {
@@ -251,7 +253,16 @@ impl JobStoreBackend for MemoryJobStoreBackend {
         };
         run.state = JobRunState::Running;
         run.started_at = Some(started_at);
+        run.pid = Some(pid);
         Ok(true)
+    }
+
+    fn abandon_job_run(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
+    ) -> Result<bool, OrbitError> {
+        self.finalize_job_run(run_id, JobRunState::Failed, finished_at, None)
     }
 
     fn complete_job_run_step(
@@ -378,7 +389,7 @@ mod tests {
         assert!(run.run_id.starts_with("jrun-"));
 
         store
-            .mark_job_run_running(&run.run_id, now)
+            .mark_job_run_running(&run.run_id, now, 99999)
             .expect("mark running");
 
         let step_params = JobRunStepParams {

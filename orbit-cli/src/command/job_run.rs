@@ -87,25 +87,25 @@ impl Execute for JobRunListArgs {
                 table.add_row(vec![
                     Cell::new(&run.run_id),
                     Cell::new(&run.job_id),
-                    Cell::new(&run.attempt.to_string()),
+                    Cell::new(run.attempt.to_string()),
                     crate::output::color::job_state_color_cell(&run.state.to_string()),
                     Cell::new(
-                        &run.started_at
+                        run.started_at
                             .map(|value| value.format("%Y-%m-%dT%H:%M:%SZ").to_string())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
                     Cell::new(
-                        &run.finished_at
+                        run.finished_at
                             .map(|value| value.format("%Y-%m-%dT%H:%M:%SZ").to_string())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
                     Cell::new(
-                        &run.steps
+                        run.steps
                             .last()
                             .and_then(|s| s.error_code.clone())
                             .unwrap_or_else(|| "-".to_string()),
                     ),
-                    Cell::new(&summarize_error_message(
+                    Cell::new(summarize_error_message(
                         run.steps.last().and_then(|s| s.error_message.as_deref()),
                     )),
                 ]);

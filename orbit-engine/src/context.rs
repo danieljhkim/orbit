@@ -19,6 +19,7 @@ pub const AGENT_PROVIDER_OVERLOAD: &str = "AGENT_PROVIDER_OVERLOAD";
 /// HTTP 429 rate-limit from provider — safe to retry with backoff.
 pub const AGENT_RATE_LIMIT: &str = "AGENT_RATE_LIMIT";
 pub const ACTIVITY_EXECUTION_FAILED: &str = "ACTIVITY_EXECUTION_FAILED";
+pub const RUN_ABANDONED: &str = "RUN_ABANDONED";
 pub const STALE_RUN_GRACE_SECONDS: u64 = 30;
 
 /// Returns `true` for error codes that indicate a transient infrastructure failure
@@ -144,6 +145,12 @@ pub trait JobRunHost {
         &self,
         run_id: &str,
         started_at: chrono::DateTime<chrono::Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError>;
+    fn abandon_job_run(
+        &self,
+        run_id: &str,
+        finished_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<bool, OrbitError>;
     fn complete_job_run_step(
         &self,
