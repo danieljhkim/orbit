@@ -34,6 +34,11 @@ activity:
        - If input.plan is provided, follow the plan steps in order.
        - Write code with fs.write. Keep changes minimal and focused on the task scope.
        - Do not refactor unrelated code or add unrequested features.
+       - Only modify files that are within the task scope: files listed in input.context_files
+         or files the plan explicitly names. If a build or test failure can only be resolved
+         by modifying a file outside that scope, do NOT silently make the change — return
+         status: "blocked" and document the conflict in execution_summary so a human can
+         decide whether to widen the task scope or file a separate task.
 
     5. Verify the implementation:
        - Use proc.spawn to run the project's test and lint commands from input.workspace_path.
