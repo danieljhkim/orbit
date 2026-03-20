@@ -1541,6 +1541,130 @@ fn task_list_multi_status_filter() {
 }
 
 #[test]
+fn task_approve_multi_id_approves_all() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = true\n",
+    )
+    .expect("write config");
+
+    let id1 = add_agent_task(dir.path(), "bulk-approve-1");
+    let id2 = add_agent_task(dir.path(), "bulk-approve-2");
+
+    let output = orbit_in(dir.path())
+        .args(["task", "approve", &id1, &id2, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let tasks: serde_json::Value = serde_json::from_slice(&output).expect("json");
+    let tasks = tasks.as_array().expect("array");
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().any(|t| t["id"] == id1));
+    assert!(tasks.iter().any(|t| t["id"] == id2));
+    assert!(tasks.iter().all(|t| t["status"] == "backlog"));
+}
+
+#[test]
+fn task_reject_multi_id_rejects_all() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = true\n",
+    )
+    .expect("write config");
+
+    let id1 = add_agent_task(dir.path(), "bulk-reject-1");
+    let id2 = add_agent_task(dir.path(), "bulk-reject-2");
+
+    let output = orbit_in(dir.path())
+        .args(["task", "reject", &id1, &id2, "--note", "out of scope", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let tasks: serde_json::Value = serde_json::from_slice(&output).expect("json");
+    let tasks = tasks.as_array().expect("array");
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().any(|t| t["id"] == id1));
+    assert!(tasks.iter().any(|t| t["id"] == id2));
+    assert!(tasks.iter().all(|t| t["status"] == "rejected"));
+}
+
+#[test]
+fn task_approve_all_proposed_with_yes_flag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = true\n",
+    )
+    .expect("write config");
+
+    let id1 = add_agent_task(dir.path(), "all-proposed-1");
+    let id2 = add_agent_task(dir.path(), "all-proposed-2");
+
+    let output = orbit_in(dir.path())
+        .args(["task", "approve", "--all-proposed", "--yes", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let tasks: serde_json::Value = serde_json::from_slice(&output).expect("json");
+    let tasks = tasks.as_array().expect("array");
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().any(|t| t["id"] == id1));
+    assert!(tasks.iter().any(|t| t["id"] == id2));
+    assert!(tasks.iter().all(|t| t["status"] == "backlog"));
+}
+
+#[test]
+fn task_reject_all_proposed_with_yes_flag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join(".orbit")).expect("create .orbit");
+    std::fs::write(
+        dir.path().join(".orbit").join("config.toml"),
+        "[task.approval]\nrequired_for_agent = true\n",
+    )
+    .expect("write config");
+
+    let id1 = add_agent_task(dir.path(), "all-reject-proposed-1");
+    let id2 = add_agent_task(dir.path(), "all-reject-proposed-2");
+
+    let output = orbit_in(dir.path())
+        .args([
+            "task",
+            "reject",
+            "--all-proposed",
+            "--yes",
+            "--note",
+            "batch rejected",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let tasks: serde_json::Value = serde_json::from_slice(&output).expect("json");
+    let tasks = tasks.as_array().expect("array");
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().any(|t| t["id"] == id1));
+    assert!(tasks.iter().any(|t| t["id"] == id2));
+    assert!(tasks.iter().all(|t| t["status"] == "rejected"));
+}
+
+#[test]
 fn task_update_status_rejected_is_blocked() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "direct-reject-blocked");

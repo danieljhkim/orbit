@@ -425,8 +425,15 @@ impl Execute for TaskStartArgs {
 
 #[derive(Args)]
 pub struct TaskApproveArgs {
-    /// Task ID
-    pub id: String,
+    /// Task ID(s) to approve (one or more)
+    #[arg(num_args = 1.., required_unless_present = "all_proposed", conflicts_with = "all_proposed")]
+    pub ids: Vec<String>,
+    /// Approve all tasks currently in proposed status
+    #[arg(long)]
+    pub all_proposed: bool,
+    /// Skip confirmation prompt (for use with --all-proposed)
+    #[arg(long)]
+    pub yes: bool,
     /// Optional approval note
     #[arg(long)]
     pub note: Option<String>,
@@ -440,11 +447,51 @@ pub struct TaskApproveArgs {
 
 impl Execute for TaskApproveArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let task = runtime.approve_task(&self.id, self.note, self.comment)?;
-        if self.json {
-            crate::output::json::print_pretty(&task_to_json(&task))
+        let ids = if self.all_proposed {
+            let proposed = runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None)?;
+            if proposed.is_empty() {
+                println!("No proposed tasks found.");
+                return Ok(());
+            }
+            if !self.yes {
+                println!("The following {} task(s) will be approved:", proposed.len());
+                for task in &proposed {
+                    println!("  {} — {}", task.id, task.title);
+                }
+                print!("Proceed? [y/N] ");
+                use std::io::Write;
+                std::io::stdout().flush().map_err(|e| OrbitError::Io(e.to_string()))?;
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(|e| OrbitError::Io(e.to_string()))?;
+                if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            }
+            proposed.into_iter().map(|t| t.id).collect::<Vec<_>>()
         } else {
-            println!("Approved task '{}'", task.id);
+            self.ids
+        };
+
+        let bulk = self.all_proposed || ids.len() > 1;
+        if self.json {
+            let mut results = Vec::new();
+            for id in &ids {
+                let task = runtime.approve_task(id, self.note.clone(), self.comment.clone())?;
+                results.push(task_to_json(&task));
+            }
+            if bulk {
+                crate::output::json::print_pretty(&Value::Array(results))
+            } else {
+                crate::output::json::print_pretty(results.first().unwrap_or(&Value::Null))
+            }
+        } else {
+            for id in &ids {
+                let task = runtime.approve_task(id, self.note.clone(), self.comment.clone())?;
+                println!("Approved task '{}'", task.id);
+            }
             Ok(())
         }
     }
@@ -454,8 +501,15 @@ impl Execute for TaskApproveArgs {
 
 #[derive(Args)]
 pub struct TaskRejectArgs {
-    /// Task ID
-    pub id: String,
+    /// Task ID(s) to reject (one or more)
+    #[arg(num_args = 1.., required_unless_present = "all_proposed", conflicts_with = "all_proposed")]
+    pub ids: Vec<String>,
+    /// Reject all tasks currently in proposed status
+    #[arg(long)]
+    pub all_proposed: bool,
+    /// Skip confirmation prompt (for use with --all-proposed)
+    #[arg(long)]
+    pub yes: bool,
     /// Rejection note
     #[arg(long)]
     pub note: String,
@@ -469,11 +523,51 @@ pub struct TaskRejectArgs {
 
 impl Execute for TaskRejectArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let task = runtime.reject_task(&self.id, self.note, self.comment)?;
-        if self.json {
-            crate::output::json::print_pretty(&task_to_json(&task))
+        let ids = if self.all_proposed {
+            let proposed = runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None)?;
+            if proposed.is_empty() {
+                println!("No proposed tasks found.");
+                return Ok(());
+            }
+            if !self.yes {
+                println!("The following {} task(s) will be rejected:", proposed.len());
+                for task in &proposed {
+                    println!("  {} — {}", task.id, task.title);
+                }
+                print!("Proceed? [y/N] ");
+                use std::io::Write;
+                std::io::stdout().flush().map_err(|e| OrbitError::Io(e.to_string()))?;
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(|e| OrbitError::Io(e.to_string()))?;
+                if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            }
+            proposed.into_iter().map(|t| t.id).collect::<Vec<_>>()
         } else {
-            println!("Rejected task '{}'", task.id);
+            self.ids
+        };
+
+        let bulk = self.all_proposed || ids.len() > 1;
+        if self.json {
+            let mut results = Vec::new();
+            for id in &ids {
+                let task = runtime.reject_task(id, self.note.clone(), self.comment.clone())?;
+                results.push(task_to_json(&task));
+            }
+            if bulk {
+                crate::output::json::print_pretty(&Value::Array(results))
+            } else {
+                crate::output::json::print_pretty(results.first().unwrap_or(&Value::Null))
+            }
+        } else {
+            for id in &ids {
+                let task = runtime.reject_task(id, self.note.clone(), self.comment.clone())?;
+                println!("Rejected task '{}'", task.id);
+            }
             Ok(())
         }
     }

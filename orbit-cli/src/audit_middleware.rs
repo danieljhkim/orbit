@@ -209,8 +209,12 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Update(args) => ("update", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Start(args) => ("start", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Approve(args) => ("approve", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Reject(args) => ("reject", Some("task"), Some(args.id.as_str())),
+                TaskSubcommand::Approve(args) => {
+                    ("approve", Some("task"), args.ids.first().map(|s| s.as_str()))
+                }
+                TaskSubcommand::Reject(args) => {
+                    ("reject", Some("task"), args.ids.first().map(|s| s.as_str()))
+                }
                 TaskSubcommand::Archive(args) => ("archive", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Unarchive(args) => {
                     ("unarchive", Some("task"), Some(args.id.as_str()))
