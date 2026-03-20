@@ -261,6 +261,33 @@ fn invocation_failed_outcome(err: OrbitError) -> AttemptOutcome {
     AttemptOutcome::failed(&error_code, message)
 }
 
+/// Returns true if `message` contains `code` as a standalone numeric token — not
+/// immediately preceded or followed by another ASCII digit.  This prevents bare
+/// substrings like "500" from matching unrelated numbers such as "5001" or "15004".
+fn contains_status_code(message: &str, code: &str) -> bool {
+    let bytes = message.as_bytes();
+    let code_bytes = code.as_bytes();
+    let code_len = code_bytes.len();
+    let msg_len = bytes.len();
+
+    if msg_len < code_len {
+        return false;
+    }
+
+    let mut i = 0;
+    while i <= msg_len - code_len {
+        if bytes[i..i + code_len] == *code_bytes {
+            let before_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
+            let after_ok = i + code_len == msg_len || !bytes[i + code_len].is_ascii_digit();
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn classify_invocation_error(message: &str) -> String {
     let lower = message.to_lowercase();
     if lower.contains("connection refused")
@@ -276,10 +303,10 @@ fn classify_invocation_error(message: &str) -> String {
         || lower.contains("too many requests")
     {
         AGENT_RATE_LIMIT.to_string()
-    } else if lower.contains("500")
-        || lower.contains("502")
-        || lower.contains("503")
-        || lower.contains("504")
+    } else if contains_status_code(&lower, "500")
+        || contains_status_code(&lower, "502")
+        || contains_status_code(&lower, "503")
+        || contains_status_code(&lower, "504")
         || lower.contains("overloaded")
         || lower.contains("service unavailable")
         || lower.contains("internal server error")
@@ -350,6 +377,54 @@ mod tests {
         assert_eq!(
             classify_invocation_error("binary not found: claude"),
             AGENT_INVOCATION_FAILED
+        );
+    }
+
+    #[test]
+    fn http_status_codes_do_not_match_longer_numeric_substrings() {
+        // "5001" must not match 500
+        assert_eq!(
+            classify_invocation_error("provider returned error code 5001"),
+            AGENT_INVOCATION_FAILED
+        );
+        // "15004" must not match 500 or 504
+        assert_eq!(
+            classify_invocation_error("request id 15004 was rejected"),
+            AGENT_INVOCATION_FAILED
+        );
+        // "50200" must not match 502
+        assert_eq!(
+            classify_invocation_error("batch 50200 exceeded quota"),
+            AGENT_INVOCATION_FAILED
+        );
+        // "5030" must not match 503
+        assert_eq!(
+            classify_invocation_error("invoice 5030 pending"),
+            AGENT_INVOCATION_FAILED
+        );
+    }
+
+    #[test]
+    fn http_status_codes_match_at_token_boundaries() {
+        // Code at the start of the message
+        assert_eq!(
+            classify_invocation_error("500 internal server error"),
+            AGENT_PROVIDER_OVERLOAD
+        );
+        // Code preceded by non-digit
+        assert_eq!(
+            classify_invocation_error("request failed: 502 bad gateway"),
+            AGENT_PROVIDER_OVERLOAD
+        );
+        // Code at end of message
+        assert_eq!(
+            classify_invocation_error("upstream returned http status 504"),
+            AGENT_PROVIDER_OVERLOAD
+        );
+        // Mixed-case passthrough (lowercased before matching)
+        assert_eq!(
+            classify_invocation_error("Got HTTP 503 from upstream"),
+            AGENT_PROVIDER_OVERLOAD
         );
     }
 }
