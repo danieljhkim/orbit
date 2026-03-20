@@ -90,6 +90,11 @@ fn validate_skill_output_schema(
         return Ok(());
     }
     let skills = runtime.resolve_activity_skill_refs(&skill_refs)?;
+    // If no referenced skill defines an output schema, the skill_refs are context-only;
+    // there is no structured output contract to enforce here.
+    if skills.iter().all(|s| s.output_schema.is_none()) {
+        return Ok(());
+    }
     let Some(result) = envelope.result.as_ref() else {
         return Err(OrbitError::AgentProtocolViolation(
             "success response must include result payload".to_string(),
