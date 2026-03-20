@@ -13,9 +13,9 @@ pub use context::{ActorIdentity, ActorKind, OrbitContext};
 pub use orbit_store::AuditEventInsertParams;
 pub use orbit_types::OrbitError;
 pub use orbit_types::{
-    Activity, AuditEvent, AuditEventStatus, AuditStats, Job, JobRun, JobRunState, JobScheduleState,
-    JobStep, JobTargetType, Role, Skill, Task, TaskComment, TaskComplexity, TaskPriority,
-    TaskStatus, TaskType,
+    Activity, AuditEvent, AuditEventStatus, AuditStats, Job, JobRun, JobRunState, JobRunStep,
+    JobScheduleState, JobStep, JobTargetType, Role, Skill, Task, TaskComment, TaskComplexity,
+    TaskPriority, TaskStatus, TaskType,
 };
 pub use orbit_types::{
     redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,

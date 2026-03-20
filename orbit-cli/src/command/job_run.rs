@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use clap::{Args, Subcommand};
 use orbit_core::command::job_run::JobRunListParams;
-use orbit_core::{JobRun, JobRunState, OrbitError, OrbitRuntime};
+use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime};
 use serde_json::Value;
 
 use crate::command::Execute;
@@ -123,12 +123,42 @@ pub struct JobRunShowArgs {
     pub run_id: String,
     #[arg(long)]
     pub json: bool,
+    /// Dump full details for a specific step (0-based index).
+    #[arg(long)]
+    pub step: Option<usize>,
 }
 
 impl Execute for JobRunShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let run = runtime.show_job_run(&self.run_id)?;
-        if self.json {
+        if let Some(step_index) = self.step {
+            let step = run.steps.iter().find(|s| s.step_index as usize == step_index).ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "step {step_index} not found in run '{}' (run has {} step(s))",
+                    self.run_id,
+                    run.steps.len()
+                ))
+            })?;
+            if self.json {
+                use serde_json::json;
+                crate::output::json::print_pretty(&json!({
+                    "step_index": step.step_index,
+                    "target_type": step.target_type.to_string(),
+                    "target_id": step.target_id,
+                    "state": step.state.to_string(),
+                    "started_at": step.started_at.map(|v| v.to_rfc3339()),
+                    "finished_at": step.finished_at.map(|v| v.to_rfc3339()),
+                    "duration_ms": step.duration_ms,
+                    "exit_code": step.exit_code,
+                    "error_code": step.error_code,
+                    "error_message": step.error_message,
+                    "agent_response_json": step.agent_response_json,
+                }))
+            } else {
+                print_step_detail(step);
+                Ok(())
+            }
+        } else if self.json {
             crate::output::json::print_pretty(&job_run_to_json(&run))
         } else {
             print_job_run(&run);
@@ -212,33 +242,108 @@ fn print_job_run(run: &JobRun) {
             .map(|value| value.to_string())
             .unwrap_or_else(|| "-".to_string())
     );
-    let last_step = run.steps.last();
-    println!(
-        "{} {}",
-        bold("Exit Code:"),
-        last_step
-            .and_then(|s| s.exit_code)
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    );
-    println!(
-        "{} {}",
-        bold("Error Code:"),
-        last_step
-            .and_then(|s| s.error_code.as_deref())
-            .unwrap_or("-")
-    );
-    println!(
-        "{} {}",
-        bold("Error Message:"),
-        last_step
-            .and_then(|s| s.error_message.as_deref())
-            .map(|value| value.replace('\n', " "))
-            .unwrap_or_else(|| "-".to_string())
-    );
     println!(
         "{} {}",
         bold("Created:"),
         dimmed(&run.created_at.to_rfc3339())
     );
+
+    if run.steps.is_empty() {
+        println!("\n{}", bold("Steps: (none)"));
+    } else {
+        println!("\n{}", bold("Steps:"));
+        let mut table = crate::output::table::build_table(&[
+            "STEP",
+            "TARGET_ID",
+            "STATE",
+            "DURATION_MS",
+            "EXIT_CODE",
+            "ERROR_CODE",
+            "ERROR_MESSAGE",
+        ]);
+        for step in &run.steps {
+            use comfy_table::Cell;
+            table.add_row(vec![
+                Cell::new(step.step_index.to_string()),
+                Cell::new(&step.target_id),
+                crate::output::color::job_state_color_cell(&step.state.to_string()),
+                Cell::new(
+                    step.duration_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                Cell::new(
+                    step.exit_code
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                Cell::new(step.error_code.as_deref().unwrap_or("-")),
+                Cell::new(summarize_error_message(step.error_message.as_deref())),
+            ]);
+        }
+        println!("{table}");
+        println!("  {}", dimmed("Use --step <n> to inspect full details for a step."));
+    }
+}
+
+fn print_step_detail(step: &JobRunStep) {
+    use crate::output::color::{bold, dimmed, job_state_color};
+    println!("{} {}", bold("Step Index:"), step.step_index);
+    println!("{} {}", bold("Target Type:"), step.target_type);
+    println!("{} {}", bold("Target ID:"), step.target_id);
+    println!(
+        "{} {}",
+        bold("State:"),
+        job_state_color(&step.state.to_string())
+    );
+    println!(
+        "{} {}",
+        bold("Started:"),
+        step.started_at
+            .map(|v| v.to_rfc3339())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "{} {}",
+        bold("Finished:"),
+        step.finished_at
+            .map(|v| v.to_rfc3339())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "{} {}",
+        bold("Duration (ms):"),
+        step.duration_ms
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "{} {}",
+        bold("Exit Code:"),
+        step.exit_code
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "{} {}",
+        bold("Error Code:"),
+        step.error_code.as_deref().unwrap_or("-")
+    );
+    println!(
+        "{} {}",
+        bold("Error Message:"),
+        step.error_message
+            .as_deref()
+            .unwrap_or("-")
+    );
+    if let Some(resp) = &step.agent_response_json {
+        let rendered = serde_json::to_string_pretty(resp)
+            .unwrap_or_else(|_| "<invalid-json>".to_string());
+        println!("{}", bold("Agent Response:"));
+        for line in rendered.lines() {
+            println!("  {}", dimmed(line));
+        }
+    } else {
+        println!("{} -", bold("Agent Response:"));
+    }
 }
