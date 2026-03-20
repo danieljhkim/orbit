@@ -25,7 +25,7 @@ job:
     - target_type: activity
       target_id: dispatch_task
       agent_cli: claude
-      model: claude-haiku-4-5-20251001
+      model: claude-sonnet-4-6
       timeout_seconds: 1000
 
     - target_type: activity
