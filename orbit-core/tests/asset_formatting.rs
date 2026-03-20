@@ -100,6 +100,22 @@ fn dispatch_task_asset_accepts_shared_pipeline_base_input() {
         raw.contains("Output the selected task_id and the rationale comment."),
         "dispatch_task should instruct the agent to return only the selected task id and rationale"
     );
+    assert!(
+        raw.contains("Only use the tools listed in this activity's tools section."),
+        "dispatch_task should explicitly prohibit unlisted tools"
+    );
+    assert!(
+        raw.contains("Failed to retrieve open PRs. Cannot safely select task without PR overlap data."),
+        "dispatch_task should fail fast when PR overlap data is unavailable"
+    );
+    assert!(
+        raw.contains("- github.pr.list"),
+        "dispatch_task should declare github.pr.list as an allowed tool"
+    );
+    assert!(
+        raw.contains("Use the literal string \"None\" only when no rejected or backlog tasks exist"),
+        "dispatch_task output schema should reserve task_id None for the no-tasks case"
+    );
 }
 
 #[test]

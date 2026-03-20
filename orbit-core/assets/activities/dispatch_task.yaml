@@ -12,6 +12,7 @@ activity:
   description: Review the backlog and rejected queues and dispatch the single highest-priority task for execution.
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.
+    Only use the tools listed in this activity's tools section. Do not use sed, shell commands, git, or any tool outside this activity.
     Pick the single best task and dispatch it.
 
     1. Call orbit.task.list with status: "rejected" to retrieve all rejected tasks.
@@ -19,12 +20,17 @@ activity:
        If both lists are empty, return this JSON and exit:
        {"task_id": "None", "comment": "No tasks available. Nothing to dispatch."}
 
-    2. Call orbit.task.list with status: "in_progress" to retrieve tasks currently being worked on.
+    2. Call github.pr.list with state: "open" to retrieve open PRs and their head branches.
+       If github.pr.list fails for any reason or returns unusable PR overlap data, fail the activity immediately with this exact error:
+       Failed to retrieve open PRs. Cannot safely select task without PR overlap data.
+       Do not continue, do not speculate, and do not return task_id: "None" for this case.
+
+    3. Call orbit.task.list with status: "in_progress" to retrieve tasks currently being worked on.
        For each in-progress task, call orbit.task.show to read its description and plan.
 
-    3. For the top candidates, call orbit.task.show with the task id to read description, plan, and priority.
+    4. For the top candidates, call orbit.task.show with the task id to read description, plan, and priority.
 
-    4. Select the single task most valuable to execute next using this priority order:
+    5. Select the single task most valuable to execute next using this priority order:
 
        a. Rejected tasks take precedence over backlog tasks. A rejected task represents work
           already reviewed and found incomplete — it is a regression or incomplete change that
@@ -34,14 +40,17 @@ activity:
           critical > high > medium > low.
 
        c. Skip any task whose scope or target files clearly overlap with an
-          in-progress task — prefer work that can land independently without causing merge
-          conflicts or duplicating effort.
+          in-progress task or an open PR head branch — prefer work that can land independently
+          without causing merge conflicts or duplicating effort. Without PR data, safe overlap
+          detection is impossible, so task selection is unreliable and the activity must fail.
 
-    5. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Orbit: <one sentence rationale>"
+    6. Call orbit.task.update with id: "<selected_task_id>" and comment: "Dispatched by Orbit: <one sentence rationale>"
        to record the dispatch rationale.
 
-    6. Return a JSON result with EXACTLY these fields (no prose, no explanation):
+    7. Return a JSON result with EXACTLY these fields (no prose, no explanation):
        Output the selected task_id and the rationale comment.
+       Return task_id: "None" only when step 1 found no rejected or backlog tasks.
+       Dependency failures, missing PR data, or tool misuse must fail the run instead of returning "None".
        {
          "task_id": "<selected task id, or the string 'None' if nothing is available>",
          "comment": "<the rationale string you passed to orbit.task.update>"
@@ -63,8 +72,10 @@ activity:
     properties:
       task_id:
         type: string
+        description: Selected task id. Use the literal string "None" only when no rejected or backlog tasks exist, never to mask dependency failures.
       comment:
         type: string
+        description: Dispatch rationale passed to orbit.task.update, or the explicit no-tasks message when task_id is "None".
     additional_properties: false
 
   # ---- execution ----
@@ -74,3 +85,4 @@ activity:
     - orbit.task.list
     - orbit.task.show
     - orbit.task.update
+    - github.pr.list
