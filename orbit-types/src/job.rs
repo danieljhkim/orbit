@@ -11,6 +11,10 @@ pub const fn default_job_max_active_runs() -> u32 {
     1
 }
 
+pub const fn default_retry_backoff_seconds() -> u64 {
+    10
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +80,8 @@ pub enum JobRunState {
     Success,
     Failed,
     Timeout,
+    /// Transient state emitted while the engine is sleeping between retry attempts.
+    Retrying,
 }
 
 impl Display for JobRunState {
@@ -86,6 +92,7 @@ impl Display for JobRunState {
             JobRunState::Success => write!(f, "success"),
             JobRunState::Failed => write!(f, "failed"),
             JobRunState::Timeout => write!(f, "timeout"),
+            JobRunState::Retrying => write!(f, "retrying"),
         }
     }
 }
@@ -100,6 +107,7 @@ impl FromStr for JobRunState {
             "success" => Ok(JobRunState::Success),
             "failed" => Ok(JobRunState::Failed),
             "timeout" => Ok(JobRunState::Timeout),
+            "retrying" => Ok(JobRunState::Retrying),
             other => Err(format!("unknown job run state: {other}")),
         }
     }
@@ -145,6 +153,12 @@ pub struct JobStep {
     /// Additional env var names to pass through in hermetic mode, on top of the global allowlist.
     #[serde(default)]
     pub env_extra: Vec<String>,
+    /// Maximum number of total attempts (including the first). Zero means no retry.
+    #[serde(default)]
+    pub retry_max_attempts: u32,
+    /// Initial backoff delay in seconds before the first retry; doubles with each attempt.
+    #[serde(default = "default_retry_backoff_seconds")]
+    pub retry_backoff_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

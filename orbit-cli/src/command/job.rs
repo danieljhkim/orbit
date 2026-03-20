@@ -76,6 +76,8 @@ impl Execute for JobAddArgs {
                 model: self.model,
                 timeout_seconds,
                 env_extra: crate::parse::csv_to_vec(&self.env_extra),
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })?;

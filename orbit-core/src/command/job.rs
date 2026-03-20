@@ -58,6 +58,10 @@ struct DefaultJobStep {
     timeout_seconds: u64,
     #[serde(default)]
     env_extra: Vec<String>,
+    #[serde(default)]
+    retry_max_attempts: u32,
+    #[serde(default = "orbit_types::default_retry_backoff_seconds")]
+    retry_backoff_seconds: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +347,8 @@ fn default_job_steps(entry: &DefaultJobEntry) -> Result<Vec<JobStep>, OrbitError
                 model: s.model.clone(),
                 timeout_seconds: s.timeout_seconds,
                 env_extra: s.env_extra.clone(),
+                retry_max_attempts: s.retry_max_attempts,
+                retry_backoff_seconds: s.retry_backoff_seconds,
             })
         })
         .collect()

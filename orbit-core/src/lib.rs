@@ -228,6 +228,8 @@ mod tests {
                     model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 }],
                 initial_state_override: None,
             })

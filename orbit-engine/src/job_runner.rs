@@ -3,7 +3,7 @@ use orbit_store::JobRunStepParams;
 use orbit_types::{Job, JobRun, JobRunState, JobStep, OrbitError, OrbitEvent};
 use serde_json::Value;
 
-use crate::activity_runner::{build_execution_context_for_step, execute_single_attempt};
+use crate::activity_runner::{build_execution_context_for_step, execute_with_retry};
 use crate::context::{
     ACTIVITY_EXECUTION_FAILED, AGENT_INVOCATION_FAILED, EngineHost, JobRunHost, JobRunResult,
     RuntimeHost, STALE_RUN_GRACE_SECONDS, step_output_for_following_input,
@@ -88,7 +88,12 @@ fn execute_activity_with_retries<H: EngineHost>(
             let execution =
                 build_execution_context_for_step(host, &job, step, current_input.clone(), debug)?;
             let step_started = Utc::now();
-            let outcome = execute_single_attempt(host, &execution);
+            let outcome = execute_with_retry(
+                host,
+                &execution,
+                step.retry_max_attempts,
+                step.retry_backoff_seconds,
+            );
             let step_finished = Utc::now();
 
             if let Some(d) = outcome.duration_ms {

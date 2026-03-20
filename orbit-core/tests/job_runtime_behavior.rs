@@ -140,6 +140,8 @@ fn add_scheduled_activity_with_timeout_and_limit(
                 model: None,
                 timeout_seconds,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -238,6 +240,8 @@ fn cli_command_activity_executes_without_agent_cli_and_captures_output_file() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -300,6 +304,8 @@ fn cli_command_failures_redact_sensitive_environment_values_from_error_messages(
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -415,6 +421,8 @@ fn cli_command_receives_only_baseline_allowlisted_and_orbit_env_vars() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -517,6 +525,8 @@ fn cli_command_step_env_extra_is_scoped_per_step() {
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP1_SECRET".to_string()],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -525,6 +535,8 @@ fn cli_command_step_env_extra_is_scoped_per_step() {
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP2_SECRET".to_string()],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
             ],
             initial_state_override: None,
@@ -848,6 +860,8 @@ fn run_job_now_uses_job_default_input_when_manual_input_is_absent() {
                 model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -899,6 +913,8 @@ fn run_job_now_with_input_overrides_job_default_input() {
                 model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -969,6 +985,8 @@ fn run_job_now_finalizes_failed_when_pre_step_setup_errors_after_running() {
                 model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -1226,6 +1244,8 @@ fn codex_job_run_passes_step_model_to_provider_cli() {
                 model: Some("gpt-5.4".to_string()),
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -1916,6 +1936,8 @@ fn claude_job_run_succeeds_with_mock_binary() {
                 model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -1975,6 +1997,8 @@ fn claude_job_run_passes_step_model_to_provider_cli() {
                 model: Some("sonnet-4.5".to_string()),
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -2014,6 +2038,8 @@ fn run_job_now_executes_job_successfully() {
                 model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -2106,6 +2132,8 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -2114,6 +2142,8 @@ fn agent_step_result_fields_flow_into_next_step_input() {
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
             ],
             initial_state_override: None,
@@ -2224,6 +2254,8 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -2232,6 +2264,8 @@ fn agent_step_workspace_path_flows_into_cli_working_directory() {
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
             ],
             initial_state_override: None,
@@ -2308,6 +2342,8 @@ fn agent_step_uses_workspace_path_as_process_current_dir() {
                 model: None,
                 timeout_seconds: 10,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -2463,6 +2499,8 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                     model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -2471,6 +2509,8 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
                     model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
             ],
             initial_state_override: None,
@@ -2588,6 +2628,8 @@ fn start_task_automation_moves_task_into_progress() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -2687,6 +2729,8 @@ fn update_task_automation_moves_task_to_review_with_summary_comment_and_note() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -2830,6 +2874,8 @@ fn implement_change_result_status_flows_into_update_task_as_task_status() {
                     model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -2838,6 +2884,8 @@ fn implement_change_result_status_flows_into_update_task_as_task_status() {
                     model: None,
                     timeout_seconds: 30,
                     env_extra: vec![],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
             ],
             initial_state_override: None,
@@ -2951,6 +2999,8 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3030,6 +3080,8 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3135,7 +3187,7 @@ fn commit_task_changes_uses_summary_from_input() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "base": "agent-main", "workspace_path": repo_root.to_string_lossy().to_string()})),
             max_active_runs: None,
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-create-wt-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![] }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-create-wt-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![], retry_max_attempts: 0, retry_backoff_seconds: 10 }],
             initial_state_override: None,
         })
         .expect("add create job")
@@ -3181,7 +3233,7 @@ fn commit_task_changes_uses_summary_from_input() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "workspace_path": workspace_path, "repo_root": repo_root.to_string_lossy().to_string(), "branch": branch, "summary": "Hardened bundle writes using staged directory rename."})),
             max_active_runs: None,
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![] }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![], retry_max_attempts: 0, retry_backoff_seconds: 10 }],
             initial_state_override: None,
         })
         .expect("add success job")
@@ -3219,7 +3271,7 @@ fn commit_task_changes_uses_summary_from_input() {
             job_id: None,
             default_input: Some(json!({"task_id": task2_id, "workspace_path": workspace_path, "repo_root": repo_root.to_string_lossy().to_string(), "branch": branch, "summary": ""})),
             max_active_runs: None,
-            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![] }],
+            steps: vec![JobStep { target_type: JobTargetType::Activity, target_id: "spec-commit-regression".to_string(), agent_cli: String::new(), model: None, timeout_seconds: 30, env_extra: vec![], retry_max_attempts: 0, retry_backoff_seconds: 10 }],
             initial_state_override: None,
         })
         .expect("add fail job")
@@ -3325,6 +3377,8 @@ fn commit_task_changes_supports_task_id_only_inputs() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3406,6 +3460,8 @@ fn commit_task_changes_supports_task_id_only_inputs() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3618,6 +3674,8 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3823,6 +3881,8 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3897,6 +3957,8 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -3945,6 +4007,8 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -4131,6 +4195,8 @@ fn open_pr_automation_rejects_stale_task_branches_before_pr_creation() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -4305,6 +4371,8 @@ fn merge_pr_automation_rejects_stale_task_branches_before_merging() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -4474,6 +4542,8 @@ fn merge_pr_automation_fetches_review_decision_from_gh_when_not_provided() {
                 model: None,
                 timeout_seconds: 30,
                 env_extra: vec![],
+                retry_max_attempts: 0,
+                retry_backoff_seconds: 10,
             }],
             initial_state_override: None,
         })
@@ -4560,6 +4630,8 @@ pass = ["HOME", "PATH"]
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP1_SECRET".to_string()],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
                 JobStep {
                     target_type: JobTargetType::Activity,
@@ -4568,6 +4640,8 @@ pass = ["HOME", "PATH"]
                     model: None,
                     timeout_seconds: 10,
                     env_extra: vec!["STEP2_SECRET".to_string()],
+                    retry_max_attempts: 0,
+                    retry_backoff_seconds: 10,
                 },
             ],
             initial_state_override: None,

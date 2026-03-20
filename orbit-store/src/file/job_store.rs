@@ -780,6 +780,8 @@ mod tests {
             model: None,
             timeout_seconds: 300,
             env_extra: vec![],
+            retry_max_attempts: 0,
+            retry_backoff_seconds: 10,
         }
     }
 
@@ -944,6 +946,8 @@ mod tests {
             model: None,
             timeout_seconds: 600,
             env_extra: vec!["MY_VAR".to_string(), "OTHER_VAR".to_string()],
+            retry_max_attempts: 0,
+            retry_backoff_seconds: 10,
         };
         let written = store
             .insert_activity_v2(
@@ -1011,6 +1015,8 @@ mod tests {
             model: Some("gpt-5.4".to_string()),
             timeout_seconds: 600,
             env_extra: vec![],
+            retry_max_attempts: 0,
+            retry_backoff_seconds: 10,
         };
         store
             .insert_activity_v2(

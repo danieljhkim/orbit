@@ -7,7 +7,8 @@ use tempfile::NamedTempFile;
 
 use super::ActivityExecutor;
 use crate::context::{
-    AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED, AGENT_PROTOCOL_VIOLATION, AGENT_TIMEOUT,
+    AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED, AGENT_PROTOCOL_VIOLATION,
+    AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT, AGENT_TIMEOUT, AGENT_TRANSPORT_FAILURE,
     AgentProtocolHost, AttemptOutcome, EngineHost, EnvironmentHost, ExecutionContext,
     execution_working_directory,
 };
@@ -239,14 +240,107 @@ fn validate_agent_success<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
 }
 
 fn invocation_failed_outcome(err: OrbitError) -> AttemptOutcome {
+    let message = err.to_string();
+    let error_code = classify_invocation_error(&message);
     AttemptOutcome {
         state: JobRunState::Failed,
         exit_code: Some(1),
         duration_ms: None,
         response_json: None,
-        error_code: Some(AGENT_INVOCATION_FAILED.to_string()),
-        error_message: Some(err.to_string()),
+        error_code: Some(error_code),
+        error_message: Some(message),
         protocol_violation: false,
+    }
+}
+
+fn classify_invocation_error(message: &str) -> String {
+    let lower = message.to_lowercase();
+    if lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("failed to connect")
+        || lower.contains("network error")
+        || lower.contains("websocket")
+        || lower.contains("tls error")
+    {
+        AGENT_TRANSPORT_FAILURE.to_string()
+    } else if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests") {
+        AGENT_RATE_LIMIT.to_string()
+    } else if lower.contains("500")
+        || lower.contains("502")
+        || lower.contains("503")
+        || lower.contains("504")
+        || lower.contains("overloaded")
+        || lower.contains("service unavailable")
+        || lower.contains("internal server error")
+    {
+        AGENT_PROVIDER_OVERLOAD.to_string()
+    } else {
+        AGENT_INVOCATION_FAILED.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_invocation_error;
+    use crate::context::{
+        AGENT_INVOCATION_FAILED, AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT,
+        AGENT_TRANSPORT_FAILURE,
+    };
+
+    #[test]
+    fn transport_failure_patterns_classify_correctly() {
+        assert_eq!(
+            classify_invocation_error("connection refused to 127.0.0.1:8080"),
+            AGENT_TRANSPORT_FAILURE
+        );
+        assert_eq!(
+            classify_invocation_error("failed to connect: timeout"),
+            AGENT_TRANSPORT_FAILURE
+        );
+        assert_eq!(
+            classify_invocation_error("websocket handshake failed"),
+            AGENT_TRANSPORT_FAILURE
+        );
+    }
+
+    #[test]
+    fn provider_overload_patterns_classify_correctly() {
+        assert_eq!(
+            classify_invocation_error("HTTP 500 internal server error"),
+            AGENT_PROVIDER_OVERLOAD
+        );
+        assert_eq!(
+            classify_invocation_error("provider is overloaded, try again later"),
+            AGENT_PROVIDER_OVERLOAD
+        );
+        assert_eq!(
+            classify_invocation_error("503 Service Unavailable"),
+            AGENT_PROVIDER_OVERLOAD
+        );
+    }
+
+    #[test]
+    fn rate_limit_patterns_classify_correctly() {
+        assert_eq!(
+            classify_invocation_error("HTTP 429 Too Many Requests"),
+            AGENT_RATE_LIMIT
+        );
+        assert_eq!(
+            classify_invocation_error("rate limit exceeded"),
+            AGENT_RATE_LIMIT
+        );
+    }
+
+    #[test]
+    fn unrecognized_error_falls_back_to_invocation_failed() {
+        assert_eq!(
+            classify_invocation_error("missing required environment variable ANTHROPIC_API_KEY"),
+            AGENT_INVOCATION_FAILED
+        );
+        assert_eq!(
+            classify_invocation_error("binary not found: claude"),
+            AGENT_INVOCATION_FAILED
+        );
     }
 }
 

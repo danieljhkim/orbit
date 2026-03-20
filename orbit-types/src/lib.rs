@@ -21,6 +21,7 @@ pub use id::OrbitId;
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
     JobScheduleState, JobStep, JobTargetType, default_job_max_active_runs,
+    default_retry_backoff_seconds,
 };
 pub use memo::Memo;
 pub use redaction::{
@@ -115,6 +116,8 @@ mod tests {
                 model: None,
                 timeout_seconds: 300,
                 env_extra: vec![],
+                retry_max_attempts: 3,
+                retry_backoff_seconds: 10,
             }],
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -124,6 +127,8 @@ mod tests {
         assert_eq!(job_value["default_input"]["base"], "main");
         assert_eq!(job_value["max_active_runs"], 2);
         assert_eq!(job_value["steps"][0]["target_type"], "activity");
+        assert_eq!(job_value["steps"][0]["retry_max_attempts"], 3);
+        assert_eq!(job_value["steps"][0]["retry_backoff_seconds"], 10);
 
         let run = JobRun {
             run_id: "run-1".to_string(),
@@ -140,6 +145,16 @@ mod tests {
         let run_value = serde_json::to_value(run).expect("serialize run");
         assert_eq!(run_value["state"], "running");
         assert_eq!(run_value["attempt"], 1);
+
+        // Retrying variant serializes and parses correctly
+        assert_eq!(
+            serde_json::to_value(JobRunState::Retrying).expect("serialize retrying"),
+            "retrying"
+        );
+        assert_eq!(
+            "retrying".parse::<JobRunState>().expect("parse retrying"),
+            JobRunState::Retrying
+        );
     }
 
     #[test]

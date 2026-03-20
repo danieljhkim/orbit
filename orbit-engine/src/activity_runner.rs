@@ -3,7 +3,8 @@ use serde_json::{Value, json};
 
 use crate::context::{
     ACTIVITY_EXECUTION_FAILED, AttemptOutcome, DirectActivityRunOutcome, EngineHost,
-    ExecutionContext, RuntimeHost, input_workspace_path, redact_attempt_outcome,
+    ExecutionContext, RuntimeHost, input_workspace_path, is_transient_error,
+    redact_attempt_outcome,
 };
 use crate::executor::builtin_activity_executor_registry;
 use crate::json_schema::validate_instance_against_schema;
@@ -55,6 +56,57 @@ pub fn build_execution_context_for_step<H: RuntimeHost>(
         input,
         debug,
     })
+}
+
+/// Execute a step with automatic retry on transient failures.
+///
+/// `max_attempts` is the total number of attempts (including the first). Zero or one means
+/// no retry — the step runs exactly once. Backoff doubles after each failed attempt starting
+/// at `backoff_seconds`.
+pub fn execute_with_retry<H: EngineHost>(
+    host: &H,
+    execution: &ExecutionContext,
+    max_attempts: u32,
+    backoff_seconds: u64,
+) -> AttemptOutcome {
+    execute_with_retry_inner(
+        || execute_single_attempt(host, execution),
+        &execution.activity.id,
+        max_attempts,
+        backoff_seconds,
+    )
+}
+
+pub(crate) fn execute_with_retry_inner<F>(
+    mut attempt_fn: F,
+    step_id: &str,
+    max_attempts: u32,
+    backoff_seconds: u64,
+) -> AttemptOutcome
+where
+    F: FnMut() -> AttemptOutcome,
+{
+    let effective_max = max_attempts.max(1);
+    let mut attempt = 0_u32;
+    loop {
+        attempt += 1;
+        let outcome = attempt_fn();
+        let is_retryable = outcome
+            .error_code
+            .as_deref()
+            .is_some_and(is_transient_error);
+        if attempt >= effective_max || !is_retryable {
+            return outcome;
+        }
+        let delay_seconds =
+            backoff_seconds.saturating_mul(1_u64 << (attempt - 1).min(30));
+        eprintln!(
+            "[orbit] step '{step_id}' transient error {} (attempt {}/{effective_max}), retrying in {delay_seconds}s",
+            outcome.error_code.as_deref().unwrap_or("unknown"),
+            attempt,
+        );
+        std::thread::sleep(std::time::Duration::from_secs(delay_seconds));
+    }
 }
 
 pub fn execute_single_attempt<H: EngineHost>(
@@ -109,6 +161,129 @@ pub(crate) fn execution_template_context_with_env(
             .workspace_path
             .clone()
             .or_else(|| input_workspace_path(&execution.input)),
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use orbit_types::JobRunState;
+
+    use super::execute_with_retry_inner;
+    use crate::context::{
+        AGENT_INVOCATION_FAILED, AGENT_PROTOCOL_VIOLATION, AGENT_TRANSPORT_FAILURE, AttemptOutcome,
+    };
+
+    fn failed_outcome(error_code: &str) -> AttemptOutcome {
+        AttemptOutcome {
+            state: JobRunState::Failed,
+            exit_code: Some(1),
+            duration_ms: None,
+            response_json: None,
+            error_code: Some(error_code.to_string()),
+            error_message: Some(format!("error: {error_code}")),
+            protocol_violation: false,
+        }
+    }
+
+    fn success_outcome() -> AttemptOutcome {
+        AttemptOutcome {
+            state: JobRunState::Success,
+            exit_code: Some(0),
+            duration_ms: Some(100),
+            response_json: None,
+            error_code: None,
+            error_message: None,
+            protocol_violation: false,
+        }
+    }
+
+    #[test]
+    fn retries_transient_failure_then_succeeds() {
+        let call_count = std::sync::atomic::AtomicU32::new(0);
+        let outcomes = [
+            failed_outcome(AGENT_TRANSPORT_FAILURE),
+            failed_outcome(AGENT_TRANSPORT_FAILURE),
+            success_outcome(),
+        ];
+        let outcome = execute_with_retry_inner(
+            || {
+                let i = call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as usize;
+                outcomes[i.min(outcomes.len() - 1)].clone()
+            },
+            "test-step",
+            3,
+            0, // zero backoff so tests don't sleep
+        );
+        assert_eq!(outcome.state, JobRunState::Success);
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "should have called executor 3 times"
+        );
+    }
+
+    #[test]
+    fn does_not_retry_non_transient_failure() {
+        let call_count = std::sync::atomic::AtomicU32::new(0);
+        let outcome = execute_with_retry_inner(
+            || {
+                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                failed_outcome(AGENT_PROTOCOL_VIOLATION)
+            },
+            "test-step",
+            3,
+            0,
+        );
+        assert_eq!(outcome.state, JobRunState::Failed);
+        assert_eq!(
+            outcome.error_code.as_deref(),
+            Some(AGENT_PROTOCOL_VIOLATION)
+        );
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "non-transient failure must not retry"
+        );
+    }
+
+    #[test]
+    fn zero_max_attempts_runs_exactly_once() {
+        let call_count = std::sync::atomic::AtomicU32::new(0);
+        let outcome = execute_with_retry_inner(
+            || {
+                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                failed_outcome(AGENT_TRANSPORT_FAILURE)
+            },
+            "test-step",
+            0, // zero = no retry
+            0,
+        );
+        assert_eq!(outcome.state, JobRunState::Failed);
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "max_attempts=0 must still run exactly once"
+        );
+    }
+
+    #[test]
+    fn exhausted_retries_returns_last_failed_outcome() {
+        let call_count = std::sync::atomic::AtomicU32::new(0);
+        let outcome = execute_with_retry_inner(
+            || {
+                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                failed_outcome(AGENT_INVOCATION_FAILED)
+            },
+            "test-step",
+            3,
+            0,
+        );
+        // AGENT_INVOCATION_FAILED is non-transient, so stops after 1 attempt
+        assert_eq!(outcome.state, JobRunState::Failed);
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
     }
 }
 

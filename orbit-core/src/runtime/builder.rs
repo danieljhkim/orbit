@@ -1,11 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Utc;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    Store, activity_store_file, audit_event_store_sqlite, job_store_file, task_store_file,
-    tool_store_sqlite,
+    Store, activity_store_file, activity_store_memory, audit_event_store_sqlite, job_store_file,
+    job_store_memory, task_store_file, task_store_memory, tool_store_sqlite,
 };
 
 use orbit_tools::ToolRegistry;
@@ -38,21 +37,11 @@ pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitCont
 
 pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
     let store = Store::open_in_memory()?;
-    let temp_root = std::env::temp_dir().join(format!(
-        "orbit-runtime-{}",
-        Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
-    let task_store = task_store_file(temp_root.join("tasks"))?;
-    let activity_store = activity_store_file(temp_root.join("activities"))?;
-    let job_store = job_store_file(temp_root.join("jobs"))?;
-    let orbit_root = temp_root.join(".orbit");
-    let runtime_config = RuntimeConfig::default_for_data_root(&orbit_root);
-    let data_root = runtime_config
-        .persistence
-        .task
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf();
+    let task_store = task_store_memory();
+    let activity_store = activity_store_memory();
+    let job_store = job_store_memory();
+    let runtime_config = RuntimeConfig::default_for_data_root(Path::new(".orbit"));
+    let data_root = Path::new(".").to_path_buf();
 
     build_context_common(
         store,

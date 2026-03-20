@@ -12,8 +12,8 @@ pub use backend::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, AuditEventStoreBackend,
     JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams,
     LockStoreBackend, TaskCreateParams, TaskStoreBackend, TaskUpdateParams, ToolStoreBackend,
-    activity_store_file, audit_event_store_sqlite, job_store_file, lock_store_memory,
-    task_store_file, tool_store_sqlite,
+    activity_store_file, activity_store_memory, audit_event_store_sqlite, job_store_file,
+    job_store_memory, lock_store_memory, task_store_file, task_store_memory, tool_store_sqlite,
 };
 pub use sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 pub use sqlite::connection::{Store, StoreTx};
