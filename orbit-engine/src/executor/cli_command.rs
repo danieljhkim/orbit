@@ -1,11 +1,17 @@
 use std::collections::HashMap;
 
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_types::JobRunState;
 use orbit_types::OrbitError;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
+use super::ActivityExecutor;
+use crate::activity_runner::{
+    execution_template_context_with_env, validate_activity_output_schema,
+};
+use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, EngineHost, ExecutionContext};
 use crate::template::{TemplateContext, render};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -23,6 +29,58 @@ pub struct CliCommandSpec {
 
 fn default_exit_codes() -> Vec<i32> {
     vec![0]
+}
+
+pub struct CliCommandExecutor;
+
+impl ActivityExecutor for CliCommandExecutor {
+    fn spec_type(&self) -> &str {
+        "cli_command"
+    }
+
+    fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome {
+        let template_context = execution_template_context_with_env(
+            execution,
+            host.cli_command_environment(&execution.env_extra),
+        );
+        match execute(
+            &execution.activity.spec_config,
+            &template_context,
+            execution.timeout_seconds,
+        ) {
+            Ok((result, duration_ms, exit_code)) => {
+                if let Err(err) = validate_activity_output_schema(&execution.activity, &result) {
+                    return AttemptOutcome {
+                        state: JobRunState::Failed,
+                        exit_code,
+                        duration_ms: Some(duration_ms),
+                        response_json: Some(result),
+                        error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
+                        error_message: Some(err.to_string()),
+                        protocol_violation: false,
+                    };
+                }
+                AttemptOutcome {
+                    state: JobRunState::Success,
+                    exit_code,
+                    duration_ms: Some(duration_ms),
+                    response_json: Some(result),
+                    error_code: None,
+                    error_message: None,
+                    protocol_violation: false,
+                }
+            }
+            Err(err) => AttemptOutcome {
+                state: JobRunState::Failed,
+                exit_code: Some(1),
+                duration_ms: None,
+                response_json: None,
+                error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
+                error_message: Some(err.to_string()),
+                protocol_violation: false,
+            },
+        }
+    }
 }
 
 pub fn execute(

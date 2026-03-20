@@ -2,11 +2,15 @@ use std::path::{Path, PathBuf};
 
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_tools::ToolContext;
-use orbit_types::{Activity, OrbitError, Role, TaskStatus, TaskType};
+use orbit_types::{Activity, JobRunState, OrbitError, Role, TaskStatus, TaskType};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::context::{EngineHost, TaskAutomationUpdate};
+use super::ActivityExecutor;
+use crate::activity_runner::validate_activity_output_schema;
+use crate::context::{
+    ACTIVITY_EXECUTION_FAILED, AttemptOutcome, EngineHost, ExecutionContext, TaskAutomationUpdate,
+};
 
 const AUTOMATION_CREATE_TASK_WORKTREE: &str = "create_task_worktree";
 const AUTOMATION_START_TASK: &str = "start_task";
@@ -29,7 +33,51 @@ struct BranchFreshness {
     commits_ahead: u64,
 }
 
-pub fn execute<H: EngineHost>(
+pub struct AutomationExecutor;
+
+impl ActivityExecutor for AutomationExecutor {
+    fn spec_type(&self) -> &str {
+        "automation"
+    }
+
+    fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome {
+        match execute(host, &execution.activity, &execution.input) {
+            Ok(result) => {
+                if let Err(err) = validate_activity_output_schema(&execution.activity, &result) {
+                    return AttemptOutcome {
+                        state: JobRunState::Failed,
+                        exit_code: Some(0),
+                        duration_ms: None,
+                        response_json: Some(result),
+                        error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
+                        error_message: Some(err.to_string()),
+                        protocol_violation: false,
+                    };
+                }
+                AttemptOutcome {
+                    state: JobRunState::Success,
+                    exit_code: Some(0),
+                    duration_ms: None,
+                    response_json: Some(result),
+                    error_code: None,
+                    error_message: None,
+                    protocol_violation: false,
+                }
+            }
+            Err(err) => AttemptOutcome {
+                state: JobRunState::Failed,
+                exit_code: Some(1),
+                duration_ms: None,
+                response_json: None,
+                error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
+                error_message: Some(err.to_string()),
+                protocol_violation: false,
+            },
+        }
+    }
+}
+
+pub fn execute<H: EngineHost + ?Sized>(
     host: &H,
     activity: &Activity,
     input: &Value,
@@ -53,7 +101,10 @@ pub fn execute<H: EngineHost>(
     }
 }
 
-fn create_task_worktree<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+fn create_task_worktree<H: EngineHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let repo_root = host.repo_root().or_else(|_| {
         let task = host.get_task(task_id)?;
@@ -106,7 +157,7 @@ fn create_task_worktree<H: EngineHost>(host: &H, input: &Value) -> Result<Value,
     }))
 }
 
-fn start_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+fn start_task<H: EngineHost + ?Sized>(host: &H, input: &Value) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let task = host.start_task(
         task_id,
@@ -123,7 +174,7 @@ fn start_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitErro
     }))
 }
 
-fn update_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+fn update_task<H: EngineHost + ?Sized>(host: &H, input: &Value) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let status = required_input_string(input, "status")?
         .parse::<TaskStatus>()
@@ -141,7 +192,10 @@ fn update_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitErr
     })
 }
 
-fn commit_task_changes<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+fn commit_task_changes<H: EngineHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let workspace_path = canonicalize_existing_dir(
@@ -223,7 +277,10 @@ fn commit_task_changes<H: EngineHost>(host: &H, input: &Value) -> Result<Value, 
     }))
 }
 
-fn merge_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+fn merge_pr_from_task<H: EngineHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(
@@ -306,7 +363,7 @@ fn merge_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, O
     }))
 }
 
-fn open_pr_from_task<H: EngineHost>(host: &H, input: &Value) -> Result<Value, OrbitError> {
+fn open_pr_from_task<H: EngineHost + ?Sized>(host: &H, input: &Value) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(

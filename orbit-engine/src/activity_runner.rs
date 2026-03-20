@@ -5,7 +5,7 @@ use crate::context::{
     ACTIVITY_EXECUTION_FAILED, AttemptOutcome, DirectActivityRunOutcome, EngineHost,
     ExecutionContext, input_workspace_path, redact_attempt_outcome,
 };
-use crate::executor::{agent, api, automation, cli_command};
+use crate::executor::builtin_activity_executor_registry;
 use crate::json_schema::validate_instance_against_schema;
 use crate::template::TemplateContext;
 
@@ -57,148 +57,27 @@ pub fn execute_single_attempt<H: EngineHost>(
     host: &H,
     execution: &ExecutionContext,
 ) -> AttemptOutcome {
-    let outcome = match execution.activity.spec_type.as_str() {
-        "agent_invoke" => agent::execute(host, execution),
-        "cli_command" => execute_cli_command_attempt(host, execution),
-        "api" => execute_api_attempt(execution),
-        "automation" => execute_automation_attempt(host, execution),
-        other => AttemptOutcome {
-            state: JobRunState::Failed,
-            exit_code: Some(1),
-            duration_ms: None,
-            response_json: None,
-            error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-            error_message: Some(format!("unsupported activity spec_type '{other}'")),
-            protocol_violation: false,
-        },
-    };
+    let registry = builtin_activity_executor_registry();
+    let spec_type = execution.activity.spec_type.as_str();
+    let supported_spec_types = registry.supported_spec_types().join(", ");
+    let outcome = registry
+        .get(spec_type)
+        .map(|executor| executor.execute(host, execution))
+        .unwrap_or_else(|| unsupported_spec_type_outcome(spec_type, &supported_spec_types));
     redact_attempt_outcome(outcome)
 }
 
-fn execute_cli_command_attempt<H: EngineHost>(
-    host: &H,
-    execution: &ExecutionContext,
-) -> AttemptOutcome {
-    let template_context = execution_template_context_with_env(
-        execution,
-        host.cli_command_environment(&execution.env_extra),
-    );
-    match cli_command::execute(
-        &execution.activity.spec_config,
-        &template_context,
-        execution.timeout_seconds,
-    ) {
-        Ok((result, duration_ms, exit_code)) => {
-            if let Err(err) = validate_activity_output_schema(&execution.activity, &result) {
-                return AttemptOutcome {
-                    state: JobRunState::Failed,
-                    exit_code,
-                    duration_ms: Some(duration_ms),
-                    response_json: Some(result),
-                    error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-                    error_message: Some(err.to_string()),
-                    protocol_violation: false,
-                };
-            }
-            AttemptOutcome {
-                state: JobRunState::Success,
-                exit_code,
-                duration_ms: Some(duration_ms),
-                response_json: Some(result),
-                error_code: None,
-                error_message: None,
-                protocol_violation: false,
-            }
-        }
-        Err(err) => AttemptOutcome {
-            state: JobRunState::Failed,
-            exit_code: Some(1),
-            duration_ms: None,
-            response_json: None,
-            error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-            error_message: Some(err.to_string()),
-            protocol_violation: false,
-        },
-    }
-}
-
-fn execute_api_attempt(execution: &ExecutionContext) -> AttemptOutcome {
-    let template_context = execution_template_context(execution);
-    match api::execute(
-        &execution.activity.spec_config,
-        &template_context,
-        execution.timeout_seconds,
-    ) {
-        Ok(result) => {
-            if let Err(err) = validate_activity_output_schema(&execution.activity, &result) {
-                return AttemptOutcome {
-                    state: JobRunState::Failed,
-                    exit_code: Some(0),
-                    duration_ms: None,
-                    response_json: Some(result),
-                    error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-                    error_message: Some(err.to_string()),
-                    protocol_violation: false,
-                };
-            }
-            AttemptOutcome {
-                state: JobRunState::Success,
-                exit_code: Some(0),
-                duration_ms: None,
-                response_json: Some(result),
-                error_code: None,
-                error_message: None,
-                protocol_violation: false,
-            }
-        }
-        Err(err) => AttemptOutcome {
-            state: JobRunState::Failed,
-            exit_code: Some(1),
-            duration_ms: None,
-            response_json: None,
-            error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-            error_message: Some(err.to_string()),
-            protocol_violation: false,
-        },
-    }
-}
-
-fn execute_automation_attempt<H: EngineHost>(
-    host: &H,
-    execution: &ExecutionContext,
-) -> AttemptOutcome {
-    match automation::execute(host, &execution.activity, &execution.input) {
-        Ok(result) => {
-            if let Err(err) = validate_activity_output_schema(&execution.activity, &result) {
-                return AttemptOutcome {
-                    state: JobRunState::Failed,
-                    exit_code: Some(0),
-                    duration_ms: None,
-                    response_json: Some(result),
-                    error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-                    error_message: Some(err.to_string()),
-                    protocol_violation: false,
-                };
-            }
-            AttemptOutcome {
-                state: JobRunState::Success,
-                exit_code: Some(0),
-                duration_ms: None,
-                response_json: Some(result),
-                error_code: None,
-                error_message: None,
-                protocol_violation: false,
-            }
-        }
-        Err(err) => AttemptOutcome {
-            state: JobRunState::Failed,
-            exit_code: Some(1),
-            duration_ms: None,
-            response_json: None,
-            error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
-            error_message: Some(err.to_string()),
-            protocol_violation: false,
-        },
+fn unsupported_spec_type_outcome(spec_type: &str, supported_spec_types: &str) -> AttemptOutcome {
+    AttemptOutcome {
+        state: JobRunState::Failed,
+        exit_code: Some(1),
+        duration_ms: None,
+        response_json: None,
+        error_code: Some(ACTIVITY_EXECUTION_FAILED.to_string()),
+        error_message: Some(format!(
+            "unsupported activity spec_type '{spec_type}' (supported: {supported_spec_types})"
+        )),
+        protocol_violation: false,
     }
 }
 
@@ -206,7 +85,7 @@ pub fn execution_template_context(execution: &ExecutionContext) -> TemplateConte
     execution_template_context_with_env(execution, std::env::vars().collect())
 }
 
-fn execution_template_context_with_env(
+pub(crate) fn execution_template_context_with_env(
     execution: &ExecutionContext,
     env_pairs: Vec<(String, String)>,
 ) -> TemplateContext {
