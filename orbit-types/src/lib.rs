@@ -42,7 +42,7 @@ mod tests {
 
     use crate::{
         Activity, AgentCommitRequest, AgentResponseEnvelope, ExecutionResult, Job, JobRun,
-        JobRunState, JobScheduleState, JobStep, JobTargetType, OrbitEvent, Role, Skill, TaskStatus,
+        JobRunState, JobScheduleState, JobStep, OrbitEvent, Role, Skill, TaskStatus,
     };
 
     #[test]
@@ -110,14 +110,11 @@ mod tests {
             default_input: Some(serde_json::json!({"base": "main"})),
             max_active_runs: 2,
             steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
                 target_id: "exec-1".to_string(),
                 agent_cli: "claude".to_string(),
-                model: None,
                 timeout_seconds: 300,
-                env_extra: vec![],
                 retry_max_attempts: 3,
-                retry_backoff_seconds: 10,
+                ..Default::default()
             }],
             created_at: Utc::now(),
             updated_at: Utc::now(),

@@ -785,14 +785,10 @@ mod tests {
 
     fn make_step(target_id: &str) -> JobStep {
         JobStep {
-            target_type: JobTargetType::Activity,
             target_id: target_id.to_string(),
             agent_cli: "mock-agent".to_string(),
-            model: None,
             timeout_seconds: 300,
-            env_extra: vec![],
-            retry_max_attempts: 0,
-            retry_backoff_seconds: 10,
+            ..Default::default()
         }
     }
 
@@ -951,14 +947,11 @@ mod tests {
     fn job_write_read_roundtrip_preserves_all_fields() {
         let (_dir, store) = make_store();
         let step = JobStep {
-            target_type: JobTargetType::Activity,
             target_id: "target-roundtrip".to_string(),
             agent_cli: "my-agent-cli".to_string(),
-            model: None,
             timeout_seconds: 600,
             env_extra: vec!["MY_VAR".to_string(), "OTHER_VAR".to_string()],
-            retry_max_attempts: 0,
-            retry_backoff_seconds: 10,
+            ..Default::default()
         };
         let written = store
             .insert_activity_v2(
@@ -1020,14 +1013,11 @@ mod tests {
     fn job_write_read_roundtrip_preserves_step_model_when_present() {
         let (_dir, store) = make_store();
         let step = JobStep {
-            target_type: JobTargetType::Activity,
             target_id: "target-model".to_string(),
             agent_cli: "codex".to_string(),
             model: Some("gpt-5.4".to_string()),
             timeout_seconds: 600,
-            env_extra: vec![],
-            retry_max_attempts: 0,
-            retry_backoff_seconds: 10,
+            ..Default::default()
         };
         store
             .insert_activity_v2(

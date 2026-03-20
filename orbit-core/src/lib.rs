@@ -29,7 +29,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use orbit_policy::PolicyEngine;
-    use orbit_types::{JobRunState, JobStep, JobTargetType, OrbitEvent, TaskPriority, TaskStatus};
+    use orbit_types::{JobRunState, JobStep, OrbitEvent, TaskPriority, TaskStatus};
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -222,14 +222,10 @@ mod tests {
                 default_input: None,
                 max_active_runs: None,
                 steps: vec![JobStep {
-                    target_type: JobTargetType::Activity,
                     target_id: "spec-core-double-run".to_string(),
                     agent_cli: agent_path.to_string_lossy().to_string(),
-                    model: None,
                     timeout_seconds: 30,
-                    env_extra: vec![],
-                    retry_max_attempts: 0,
-                    retry_backoff_seconds: 10,
+                    ..Default::default()
                 }],
                 initial_state_override: None,
             })

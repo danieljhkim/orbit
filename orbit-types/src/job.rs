@@ -15,10 +15,11 @@ pub const fn default_retry_backoff_seconds() -> u64 {
     10
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
 pub enum JobTargetType {
+    #[default]
     #[cfg_attr(feature = "clap", value(name = "activity", alias = "activity"))]
     Activity,
 }
@@ -141,6 +142,10 @@ pub struct AgentCommitRequest {
 }
 
 /// A single step within a job definition.
+///
+/// `Default::default()` matches serde defaults for all fields:
+/// - `retry_backoff_seconds` defaults to 10 (matching `#[serde(default = "default_retry_backoff_seconds")]`)
+/// - `timeout_seconds` defaults to 0; callers must set this explicitly
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JobStep {
     pub target_type: JobTargetType,
@@ -159,6 +164,21 @@ pub struct JobStep {
     /// Initial backoff delay in seconds before the first retry; doubles with each attempt.
     #[serde(default = "default_retry_backoff_seconds")]
     pub retry_backoff_seconds: u64,
+}
+
+impl Default for JobStep {
+    fn default() -> Self {
+        Self {
+            target_type: JobTargetType::default(),
+            target_id: OrbitId::default(),
+            agent_cli: String::new(),
+            model: None,
+            timeout_seconds: 0,
+            env_extra: Vec::new(),
+            retry_max_attempts: 0,
+            retry_backoff_seconds: default_retry_backoff_seconds(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

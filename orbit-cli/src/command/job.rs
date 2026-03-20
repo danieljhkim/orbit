@@ -1,6 +1,6 @@
 use clap::{Args, Subcommand};
 use orbit_core::command::job::JobAddParams;
-use orbit_core::{Job, JobRun, JobStep, JobTargetType, OrbitError, OrbitRuntime};
+use orbit_core::{Job, JobRun, JobStep, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -70,14 +70,12 @@ impl Execute for JobAddArgs {
             default_input: None,
             max_active_runs: Some(self.max_active_runs),
             steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
                 target_id: self.target_id,
                 agent_cli: self.agent_cli,
                 model: self.model,
                 timeout_seconds,
                 env_extra: crate::parse::csv_to_vec(&self.env_extra),
-                retry_max_attempts: 0,
-                retry_backoff_seconds: 10,
+                ..Default::default()
             }],
             initial_state_override: None,
         })?;

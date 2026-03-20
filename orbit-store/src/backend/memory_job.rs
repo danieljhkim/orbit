@@ -352,14 +352,10 @@ mod tests {
             default_input: None,
             max_active_runs: 1,
             steps: vec![JobStep {
-                target_type: JobTargetType::Activity,
                 target_id: target_id.to_string(),
                 agent_cli: "mock".to_string(),
-                model: None,
                 timeout_seconds: 300,
-                env_extra: vec![],
-                retry_max_attempts: 0,
-                retry_backoff_seconds: 10,
+                ..Default::default()
             }],
             initial_state: JobScheduleState::Enabled,
         }
