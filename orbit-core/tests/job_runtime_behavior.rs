@@ -2095,6 +2095,229 @@ fn agent_step_result_fields_flow_into_next_step_input() {
 }
 
 #[test]
+fn step_output_map_renames_keys_before_flowing_to_next_step() {
+    use std::collections::HashMap;
+
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    // Step 1: agent that returns {summary: "hello", extra: "world"}
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\ncat >/dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"summary\":\"hello\",\"extra\":\"world\"},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-agent-map-source".to_string(),
+            spec_type: "agent_invoke".to_string(),
+            description: "agent producing output for mapping".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({ "instruction": "Return summary and extra." }),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add agent activity");
+
+    // Step 2: cli that captures pr_body and extra from env
+    let cli_script_path = dir.path().join("capture-mapped.sh");
+    std::fs::write(
+        &cli_script_path,
+        "#!/bin/sh\nprintf '{\"seen_pr_body\":\"%s\",\"seen_extra\":\"%s\"}' \"$PR_BODY\" \"$EXTRA\" > \"$ORBIT_OUTPUT_FILE\"\n",
+    )
+    .expect("write cli script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&cli_script_path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod cli script");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-cli-map-consumer".to_string(),
+            spec_type: "cli_command".to_string(),
+            description: "consume mapped output".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "pr_body": { "type": "string" },
+                    "extra": { "type": "string" }
+                },
+                "required": ["pr_body", "extra"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "seen_pr_body": { "type": "string" },
+                    "seen_extra": { "type": "string" }
+                },
+                "required": ["seen_pr_body", "seen_extra"]
+            }),
+            spec_config: json!({
+                "command": cli_script_path.to_string_lossy().to_string(),
+                "expected_exit_codes": [0],
+                "env": {
+                    "PR_BODY": "{{input.pr_body}}",
+                    "EXTRA": "{{input.extra}}"
+                }
+            }),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add cli activity");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: None,
+            max_active_runs: None,
+            steps: vec![
+                JobStep {
+                    target_id: "spec-agent-map-source".to_string(),
+                    agent_cli,
+                    timeout_seconds: 10,
+                    output_map: HashMap::from([
+                        ("summary".to_string(), "pr_body".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                JobStep {
+                    target_id: "spec-cli-map-consumer".to_string(),
+                    timeout_seconds: 10,
+                    ..Default::default()
+                },
+            ],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let result = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("job history");
+    let cli_output = history[0]
+        .steps
+        .get(1)
+        .and_then(|step| step.agent_response_json.as_ref())
+        .expect("cli step output");
+
+    // "summary" was renamed to "pr_body"
+    assert_eq!(cli_output["seen_pr_body"], json!("hello"));
+    // "extra" passed through unmapped
+    assert_eq!(cli_output["seen_extra"], json!("world"));
+}
+
+#[test]
+fn step_output_map_silently_skips_missing_source_keys() {
+    use std::collections::HashMap;
+
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+
+    // Agent returns only {value: "present"}
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\ncat >/dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"value\":\"present\"},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-agent-skip-source".to_string(),
+            spec_type: "agent_invoke".to_string(),
+            description: "agent with partial output".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({ "instruction": "Return value only." }),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add agent activity");
+
+    let cli_script_path = dir.path().join("capture-skip.sh");
+    std::fs::write(
+        &cli_script_path,
+        "#!/bin/sh\nprintf '{\"seen_value\":\"%s\"}' \"$VALUE\" > \"$ORBIT_OUTPUT_FILE\"\n",
+    )
+    .expect("write cli script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&cli_script_path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod cli script");
+
+    runtime
+        .add_activity(ActivityAddParams {
+            id: "spec-cli-skip-consumer".to_string(),
+            spec_type: "cli_command".to_string(),
+            description: "consume with missing mapped key".to_string(),
+            input_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "value": { "type": "string" }
+                },
+                "required": ["value"]
+            }),
+            output_schema_json: json!({
+                "type": "object",
+                "properties": {
+                    "seen_value": { "type": "string" }
+                },
+                "required": ["seen_value"]
+            }),
+            spec_config: json!({
+                "command": cli_script_path.to_string_lossy().to_string(),
+                "expected_exit_codes": [0],
+                "env": {
+                    "VALUE": "{{input.value}}"
+                }
+            }),
+            workspace_path: None,
+            created_by: None,
+        })
+        .expect("add cli activity");
+
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: None,
+            max_active_runs: None,
+            steps: vec![
+                JobStep {
+                    target_id: "spec-agent-skip-source".to_string(),
+                    agent_cli,
+                    timeout_seconds: 10,
+                    output_map: HashMap::from([
+                        // "missing_key" doesn't exist in output — should be silently skipped
+                        ("missing_key".to_string(), "renamed".to_string()),
+                    ]),
+                    ..Default::default()
+                },
+                JobStep {
+                    target_id: "spec-cli-skip-consumer".to_string(),
+                    timeout_seconds: 10,
+                    ..Default::default()
+                },
+            ],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let result = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(result.state, JobRunState::Success);
+
+    let history = runtime.job_history(&job_id).expect("job history");
+    let cli_output = history[0]
+        .steps
+        .get(1)
+        .and_then(|step| step.agent_response_json.as_ref())
+        .expect("cli step output");
+
+    // "value" passed through unchanged despite the mapping for a missing key
+    assert_eq!(cli_output["seen_value"], json!("present"));
+}
+
+#[test]
 fn agent_step_workspace_path_flows_into_cli_working_directory() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");

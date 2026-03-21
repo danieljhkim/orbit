@@ -62,6 +62,8 @@ struct DefaultJobStep {
     retry_max_attempts: u32,
     #[serde(default = "orbit_types::default_retry_backoff_seconds")]
     retry_backoff_seconds: u64,
+    #[serde(default)]
+    output_map: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -349,6 +351,7 @@ fn default_job_steps(entry: &DefaultJobEntry) -> Result<Vec<JobStep>, OrbitError
                 env_extra: s.env_extra.clone(),
                 retry_max_attempts: s.retry_max_attempts,
                 retry_backoff_seconds: s.retry_backoff_seconds,
+                output_map: s.output_map.clone(),
             })
         })
         .collect()

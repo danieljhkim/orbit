@@ -109,8 +109,17 @@ fn execute_activity_with_retries<H: EngineHost>(
                 )
                 && let Value::Object(ref mut input_map) = current_input
             {
-                for (key, value) in output_map {
-                    input_map.insert(key.clone(), value.clone());
+                let mut merged: serde_json::Map<String, Value> = output_map
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                for (source, target) in &step.output_map {
+                    if let Some(value) = merged.remove(source) {
+                        merged.insert(target.clone(), value);
+                    }
+                }
+                for (key, value) in merged {
+                    input_map.insert(key, value);
                 }
             }
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
@@ -178,6 +179,10 @@ pub struct JobStep {
     /// Initial backoff delay in seconds before the first retry; doubles with each attempt.
     #[serde(default = "default_retry_backoff_seconds")]
     pub retry_backoff_seconds: u64,
+    /// Rename output keys before merging into the next step's input.
+    /// Each entry maps `source_key -> target_key`. Unmapped keys pass through unchanged.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub output_map: HashMap<String, String>,
 }
 
 impl Default for JobStep {
@@ -191,6 +196,7 @@ impl Default for JobStep {
             env_extra: Vec::new(),
             retry_max_attempts: 0,
             retry_backoff_seconds: default_retry_backoff_seconds(),
+            output_map: HashMap::new(),
         }
     }
 }
