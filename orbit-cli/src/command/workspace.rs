@@ -73,7 +73,9 @@ impl WorkspaceInitArgs {
     pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
         let orbit_dir = cwd.join(".orbit");
-        std::fs::create_dir_all(&orbit_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+        // Workspace .orbit/ only contains tasks/ by default
+        let tasks_dir = orbit_dir.join("tasks");
+        std::fs::create_dir_all(&tasks_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
 
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(&cwd));
 

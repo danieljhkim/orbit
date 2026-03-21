@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::command::init::{InitOptions, init_workspace_from_root_override};
+use orbit_core::command::init::{InitOptions, init_global};
 use orbit_core::{OrbitError, OrbitRuntime};
 use std::path::Path;
 
@@ -7,17 +7,21 @@ use crate::command::Execute;
 
 #[derive(Args)]
 pub struct InitCommand {
-    /// Reset the target Orbit root to defaults before initialization
+    /// Reset the global Orbit root (~/.orbit/) to defaults before initialization
     #[arg(long)]
     pub force: bool,
 }
 
 impl Execute for InitCommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.init_workspace_with_options(InitOptions {
-            force: self.force,
-            refresh_defaults: true,
-        })?;
+    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        // Even with a runtime, orbit init targets the global root
+        let result = init_global(
+            None,
+            InitOptions {
+                force: self.force,
+                refresh_defaults: true,
+            },
+        )?;
         print_init_result(&result);
         Ok(())
     }
@@ -25,7 +29,7 @@ impl Execute for InitCommand {
 
 impl InitCommand {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        let result = init_workspace_from_root_override(
+        let result = init_global(
             root_override,
             InitOptions {
                 force: self.force,

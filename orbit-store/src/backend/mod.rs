@@ -1,6 +1,8 @@
 mod contracts;
 mod factory;
 mod file_backends;
+mod layered_activity;
+mod layered_job;
 mod memory_activity;
 mod memory_backends;
 mod memory_job;

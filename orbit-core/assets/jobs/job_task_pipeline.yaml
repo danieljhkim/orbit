@@ -25,10 +25,8 @@ job:
     - target_type: activity
       target_id: dispatch_task
       agent_cli: codex
-      model: gpt-5.4-mini
+      model: gpt-5.4
       timeout_seconds: 1000
-      retry_max_attempts: 3
-      retry_backoff_seconds: 10
 
     - target_type: activity
       target_id: create_branch
@@ -42,8 +40,6 @@ job:
       target_id: implement_change
       agent_cli: claude
       timeout_seconds: 2000
-      retry_max_attempts: 3
-      retry_backoff_seconds: 10
 
     - target_type: activity
       target_id: update_task

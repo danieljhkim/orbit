@@ -112,19 +112,18 @@ fn rewrite_file(path: &std::path::Path, replacements: &[(&str, &str)]) {
 }
 
 #[test]
-fn init_creates_default_runtime_assets_under_cwd_orbit() {
-    let workspace = tempfile::tempdir().expect("workspace");
+fn init_creates_default_runtime_assets_under_global_orbit() {
     let home = tempfile::tempdir().expect("home");
 
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    // orbit init now targets ~/.orbit/ (global root = HOME/.orbit)
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success()
         .stdout(predicate::str::contains("skills: root="))
         .stdout(predicate::str::contains("config: path="));
 
-    let skills_root = workspace.path().join(".orbit").join("skills");
+    let skills_root = home.path().join(".orbit").join("skills");
     assert!(skills_root.join("orbit").join("SKILL.md").exists());
     assert!(
         skills_root
@@ -157,7 +156,7 @@ fn init_creates_default_runtime_assets_under_cwd_orbit() {
             .exists()
     );
 
-    let config_path = workspace.path().join(".orbit").join("config.toml");
+    let config_path = home.path().join(".orbit").join("config.toml");
     assert!(config_path.exists());
     let config_raw = std::fs::read_to_string(config_path).expect("read config");
     assert!(config_raw.contains("[execution.env]"));
@@ -165,25 +164,23 @@ fn init_creates_default_runtime_assets_under_cwd_orbit() {
     assert!(config_raw.contains("[task.approval]"));
     assert!(!config_raw.contains("[watch]"));
 
-    assert_default_skill_links(workspace.path());
-    assert_default_named_activities_visible(workspace.path());
-    assert_default_named_jobs_visible_and_enabled(workspace.path());
+    assert_default_skill_links(home.path());
+    assert_default_named_activities_visible(home.path());
+    assert_default_named_jobs_visible_and_enabled(home.path());
 }
 
 #[test]
 fn init_refreshes_full_bundled_activity_and_job_set() {
-    let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success()
         .stdout(predicate::str::contains("default_activities_refreshed=14"))
         .stdout(predicate::str::contains("default_jobs_refreshed=4"));
 
-    let activities_dir = workspace
+    let activities_dir = home
         .path()
         .join(".orbit")
         .join("activities")
@@ -208,7 +205,7 @@ fn init_refreshes_full_bundled_activity_and_job_set() {
         );
     }
 
-    let jobs_dir = workspace.path().join(".orbit").join("jobs").join("jobs");
+    let jobs_dir = home.path().join(".orbit").join("jobs").join("jobs");
     for job_id in [
         "job_oversee_orbit_operations",
         "job_perform_maintenance",
@@ -221,17 +218,15 @@ fn init_refreshes_full_bundled_activity_and_job_set() {
         );
     }
 
-    assert_default_named_activities_visible(workspace.path());
-    assert_default_named_jobs_visible_and_enabled(workspace.path());
+    assert_default_named_activities_visible(home.path());
+    assert_default_named_jobs_visible_and_enabled(home.path());
 }
 
 #[test]
 fn init_is_idempotent_for_existing_defaults() {
-    let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success()
@@ -239,8 +234,7 @@ fn init_is_idempotent_for_existing_defaults() {
         .stdout(predicate::str::contains("refreshed=6"));
 
     // Second init also refreshes all defaults (overwrite in place).
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success()
@@ -253,19 +247,21 @@ fn explicit_init_refreshes_builtin_activities_and_jobs_but_implicit_bootstrap_do
     let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
+    // orbit init targets HOME/.orbit (global root)
     orbit_in(workspace.path())
         .env("HOME", home.path())
         .args(["init"])
         .assert()
         .success();
 
-    let activity_path = workspace
+    // Activities and jobs live in the global root (HOME/.orbit)
+    let activity_path = home
         .path()
         .join(".orbit")
         .join("activities")
         .join("active")
         .join("dispatch_task.yaml");
-    let job_path = workspace
+    let job_path = home
         .path()
         .join(".orbit")
         .join("jobs")
@@ -278,6 +274,7 @@ fn explicit_init_refreshes_builtin_activities_and_jobs_but_implicit_bootstrap_do
     );
     rewrite_file(&job_path, &[("dispatch_task", "tampered_dispatch_task")]);
 
+    // Implicit bootstrap (non-init command) should NOT refresh defaults
     orbit_in(workspace.path())
         .env("HOME", home.path())
         .args(["task", "list", "--json"])
@@ -289,6 +286,7 @@ fn explicit_init_refreshes_builtin_activities_and_jobs_but_implicit_bootstrap_do
     let job_raw = std::fs::read_to_string(&job_path).expect("read job");
     assert!(job_raw.contains("tampered_dispatch_task"));
 
+    // Explicit init SHOULD refresh defaults at global root
     orbit_in(workspace.path())
         .env("HOME", home.path())
         .args(["init"])
@@ -308,29 +306,29 @@ fn explicit_init_refreshes_builtin_activities_and_jobs_but_implicit_bootstrap_do
 
 #[test]
 fn init_repairs_broken_per_skill_symlink_targets() {
-    let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
-    let broken_target = workspace
+    // Create broken symlinks at HOME (where init places skill links)
+    let broken_target = home
         .path()
         .join(".orbit")
         .join("skills")
         .join("does-not-exist");
     for skills_link_root in [
-        workspace.path().join(".agents").join("skills"),
-        workspace.path().join(".claude").join("skills"),
+        home.path().join(".agents").join("skills"),
+        home.path().join(".claude").join("skills"),
     ] {
         std::fs::create_dir_all(&skills_link_root).expect("create skills link root");
         create_dir_symlink(&broken_target, &skills_link_root.join("orbit-approve-task"));
     }
 
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    // orbit init targets HOME/.orbit and repairs broken symlinks
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success();
 
-    let expected_target = workspace
+    let expected_target = home
         .path()
         .join(".orbit")
         .join("skills")
@@ -338,13 +336,11 @@ fn init_repairs_broken_per_skill_symlink_targets() {
         .canonicalize()
         .expect("canonical expected target");
     for repaired_link in [
-        workspace
-            .path()
+        home.path()
             .join(".agents")
             .join("skills")
             .join("orbit-approve-task"),
-        workspace
-            .path()
+        home.path()
             .join(".claude")
             .join("skills")
             .join("orbit-approve-task"),
@@ -361,11 +357,11 @@ fn init_repairs_broken_per_skill_symlink_targets() {
 }
 
 #[test]
-fn init_force_resets_cwd_orbit_to_defaults() {
-    let workspace = tempfile::tempdir().expect("workspace");
+fn init_force_resets_global_orbit_to_defaults() {
     let home = tempfile::tempdir().expect("home");
 
-    let orbit_root = workspace.path().join(".orbit");
+    // Pre-populate HOME/.orbit with legacy/junk content
+    let orbit_root = home.path().join(".orbit");
     std::fs::create_dir_all(orbit_root.join("skills").join("orbit-approve-task"))
         .expect("create legacy skills");
     std::fs::write(
@@ -384,8 +380,8 @@ fn init_force_resets_cwd_orbit_to_defaults() {
     std::fs::create_dir_all(orbit_root.join("junk")).expect("create junk dir");
     std::fs::write(orbit_root.join("junk").join("stale.txt"), "stale").expect("write stale file");
 
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    // orbit init --force resets HOME/.orbit
+    orbit_in(home.path())
         .args(["init", "--force"])
         .assert()
         .success();
@@ -410,14 +406,14 @@ fn init_force_resets_cwd_orbit_to_defaults() {
 }
 
 #[test]
-fn init_uses_explicit_orbit_root_when_invoked_inside_git_repository() {
+fn init_always_targets_global_root_regardless_of_cwd() {
     let repo = tempfile::tempdir().expect("repo");
     let home = tempfile::tempdir().expect("home");
     std::fs::create_dir_all(repo.path().join(".git")).expect("create git marker");
     let nested = repo.path().join("nested").join("workdir");
     std::fs::create_dir_all(&nested).expect("create nested workdir");
-    let repo_orbit = nested.join(".orbit");
 
+    // Even when cwd is inside a git repo, orbit init targets HOME/.orbit
     orbit_in(&nested)
         .env("HOME", home.path())
         .args(["init"])
@@ -425,57 +421,57 @@ fn init_uses_explicit_orbit_root_when_invoked_inside_git_repository() {
         .success()
         .stdout(predicate::str::contains(format!(
             "skills: root={}",
-            nested.join(".orbit").join("skills").display()
+            home.path().join(".orbit").join("skills").display()
         )));
 
+    // Skills are at HOME/.orbit, not at the workspace
     assert!(
-        nested
+        home.path()
             .join(".orbit")
             .join("skills")
             .join("orbit-approve-task")
             .join("SKILL.md")
             .exists()
     );
+    assert!(!nested.join(".orbit").join("skills").exists());
 
-    assert_default_skill_links(repo.path());
+    // Skill links are at HOME (parent of .orbit)
+    assert_default_skill_links(home.path());
 
-    let config_raw =
-        std::fs::read_to_string(repo_orbit.join("config.toml")).expect("read repo config");
-    assert!(config_raw.contains("path = \"skills\""));
-    assert!(config_raw.contains("path = \"orbit.db\""));
+    let config_raw = std::fs::read_to_string(home.path().join(".orbit").join("config.toml"))
+        .expect("read global config");
+    assert!(config_raw.contains("[execution.env]"));
 
-    assert_default_named_jobs_visible_and_enabled(repo.path());
+    assert_default_named_jobs_visible_and_enabled(home.path());
 }
 
 #[test]
 fn init_refreshes_modified_defaults_without_destroying_tasks() {
-    let workspace = tempfile::tempdir().expect("workspace");
     let home = tempfile::tempdir().expect("home");
 
-    // First init to seed everything.
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    // First init to seed everything at HOME/.orbit (global root).
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success();
 
-    let orbit_root = workspace.path().join(".orbit");
+    let global_orbit = home.path().join(".orbit");
 
-    // Tamper with a default skill file.
-    let skill_path = orbit_root
+    // Tamper with a default skill file in global root.
+    let skill_path = global_orbit
         .join("skills")
         .join("orbit-approve-task")
         .join("SKILL.md");
     std::fs::write(&skill_path, "TAMPERED SKILL").expect("tamper skill");
 
-    // Create a fake task artifact that must survive.
-    let task_dir = orbit_root.join("tasks").join("backlog").join("T-fake-task");
+    // Create a fake task artifact in global root (simulating pre-migration state).
+    // Tasks normally live in workspace, but this ensures init doesn't wipe unrelated dirs.
+    let task_dir = global_orbit.join("tasks").join("backlog").join("T-fake-task");
     std::fs::create_dir_all(&task_dir).expect("create task dir");
     std::fs::write(task_dir.join("task.yaml"), "id: T-fake-task\n").expect("write task");
 
     // Re-run plain init (no --force).
-    orbit_in(workspace.path())
-        .env("HOME", home.path())
+    orbit_in(home.path())
         .args(["init"])
         .assert()
         .success()
@@ -486,6 +482,6 @@ fn init_refreshes_modified_defaults_without_destroying_tasks() {
     assert!(!skill_raw.contains("TAMPERED"));
     assert!(skill_raw.contains("name: orbit-approve-task"));
 
-    // Task artifact must still exist.
+    // Task artifact must still exist (init without --force preserves non-default dirs).
     assert!(task_dir.join("task.yaml").exists());
 }

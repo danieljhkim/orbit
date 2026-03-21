@@ -43,11 +43,32 @@ impl RuntimeConfig {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn load_from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
-        let config_path = data_root.join("config.toml");
-        if !config_path.exists() {
-            return Ok(Self::default_for_data_root(data_root));
-        }
+        Self::load_layered(data_root, data_root)
+    }
+
+    /// Load config with workspace-replaces-global semantics.
+    /// If workspace_root/config.toml exists, it replaces global entirely.
+    /// Otherwise falls back to global_root/config.toml.
+    pub(crate) fn load_layered(
+        global_root: &Path,
+        workspace_root: &Path,
+    ) -> Result<Self, OrbitError> {
+        let ws_config = workspace_root.join("config.toml");
+        let global_config = global_root.join("config.toml");
+
+        // Workspace config replaces global entirely if present
+        let (config_path, config_root) = if ws_config.exists() && workspace_root != global_root {
+            (ws_config, workspace_root)
+        } else if global_config.exists() {
+            (global_config, global_root)
+        } else {
+            return Ok(Self {
+                persistence: PersistenceConfig::default_for_roots(global_root, workspace_root),
+                ..Self::default_for_data_root(global_root)
+            });
+        };
 
         let raw = fs::read_to_string(&config_path).map_err(|err| {
             OrbitError::Io(format!(
@@ -69,7 +90,12 @@ impl RuntimeConfig {
             codex_execution: CodexExecutionPolicy::from_raw(
                 parsed.execution.clone().and_then(|v| v.codex),
             )?,
-            persistence: PersistenceConfig::from_raw(data_root, &parsed)?,
+            persistence: PersistenceConfig::from_raw_layered(
+                global_root,
+                workspace_root,
+                config_root,
+                &parsed,
+            )?,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
             user_name: parse_user_name(parsed.user.as_ref())?,
         })

@@ -44,20 +44,32 @@ pub(crate) struct PersistenceConfig {
 
 impl PersistenceConfig {
     pub(crate) fn default_for_data_root(data_root: &Path) -> Self {
-        let sqlite_default = data_root.join("orbit.db");
+        Self::default_for_roots(data_root, data_root)
+    }
+
+    /// Two-root defaults: tasks in workspace, everything else in global.
+    /// Skills use workspace if `workspace_root/skills` exists, else global.
+    pub(crate) fn default_for_roots(global_root: &Path, workspace_root: &Path) -> Self {
+        let sqlite_default = global_root.join("orbit.db");
+        let ws_skills = workspace_root.join("skills");
+        let skill_path = if ws_skills.is_dir() {
+            ws_skills
+        } else {
+            global_root.join("skills")
+        };
         Self {
             job: EntityPersistenceConfig {
                 persistence_type: PersistenceType::File,
-                path: data_root.join("jobs"),
+                path: global_root.join("jobs"),
                 format: Some("yaml".to_string()),
             },
             activity: EntityPersistenceConfig {
                 persistence_type: PersistenceType::File,
-                path: data_root.join("activities"),
+                path: global_root.join("activities"),
                 format: Some("yaml".to_string()),
             },
-            skill: data_root.join("skills"),
-            task: data_root.join("tasks"),
+            skill: skill_path,
+            task: workspace_root.join("tasks"),
             audit: EntityPersistenceConfig {
                 persistence_type: PersistenceType::Sqlite,
                 path: sqlite_default,
@@ -66,8 +78,21 @@ impl PersistenceConfig {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn from_raw(data_root: &Path, raw: &RawRuntimeConfig) -> Result<Self, OrbitError> {
-        let defaults = Self::default_for_data_root(data_root);
+        Self::from_raw_layered(data_root, data_root, data_root, raw)
+    }
+
+    /// Parse persistence config with two-root awareness.
+    /// `global_root`/`workspace_root` set the defaults; `config_root` is used as
+    /// the base directory for resolving relative paths in the config file.
+    pub(super) fn from_raw_layered(
+        global_root: &Path,
+        workspace_root: &Path,
+        config_root: &Path,
+        raw: &RawRuntimeConfig,
+    ) -> Result<Self, OrbitError> {
+        let defaults = Self::default_for_roots(global_root, workspace_root);
         if raw.watch.is_some() {
             return Err(OrbitError::InvalidInput(
                 "watch config is no longer supported; remove the [watch] section from the runtime config file (.orbit/config.toml in a repo-local workspace, or <data_root>/config.toml)"
@@ -78,13 +103,13 @@ impl PersistenceConfig {
         let skill = resolve_path_only_entity(
             raw.skill.as_ref().and_then(|v| v.persistence.as_ref()),
             &defaults.skill,
-            data_root,
+            config_root,
         )?;
 
         let task = resolve_path_only_entity(
             raw.task.as_ref().and_then(|v| v.persistence.as_ref()),
             &defaults.task,
-            data_root,
+            config_root,
         )?;
 
         Ok(Self {
@@ -94,7 +119,7 @@ impl PersistenceConfig {
                 &defaults.job,
                 false,
                 "yaml",
-                data_root,
+                config_root,
             )?,
             activity: parse_configurable_entity(
                 "activity",
@@ -102,7 +127,7 @@ impl PersistenceConfig {
                 &defaults.activity,
                 false,
                 "yaml",
-                data_root,
+                config_root,
             )?,
             skill,
             task,
@@ -110,7 +135,7 @@ impl PersistenceConfig {
                 "audit",
                 raw.audit.as_ref().and_then(|v| v.persistence.as_ref()),
                 &defaults.audit,
-                data_root,
+                config_root,
             )?,
         })
     }

@@ -25,7 +25,9 @@ use crate::OrbitContext;
 use crate::command::init::ensure_orbit_root_initialized;
 use crate::context::ActorIdentity;
 
-pub(crate) use resolve::{resolve_data_root_full, resolve_initialize_data_root};
+pub(crate) use resolve::{
+    resolve_data_root_full, resolve_global_root, resolve_initialize_data_root,
+};
 
 #[derive(Clone)]
 pub struct OrbitRuntime {
@@ -47,14 +49,22 @@ impl OrbitRuntime {
         workspace_override: Option<&str>,
     ) -> Result<Self, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let data_root = resolve_data_root_full(&cwd, root_override, workspace_override)?;
-        ensure_orbit_root_initialized(&data_root)?;
-        Self::from_data_root(&data_root)
+        let workspace_root = resolve_data_root_full(&cwd, root_override, workspace_override)?;
+        let global_root = resolve_global_root()?;
+        ensure_orbit_root_initialized(&global_root, &workspace_root)?;
+        Self::from_roots(&global_root, &workspace_root)
     }
 
     pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
         Ok(Self {
             context: builder::build_context_from_data_root(data_root)?,
+            event_log: event_bus::EventLog::default(),
+        })
+    }
+
+    pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
+        Ok(Self {
+            context: builder::build_context_from_roots(global_root, workspace_root)?,
             event_log: event_bus::EventLog::default(),
         })
     }
@@ -116,10 +126,19 @@ impl OrbitRuntime {
         self.context.data_root().to_path_buf()
     }
 
-    /// Returns the runtime config file at `<data_root>/config.toml`
-    /// which is typically `.orbit/config.toml` in a repo-local workspace.
+    pub fn global_root(&self) -> PathBuf {
+        self.context.global_root().to_path_buf()
+    }
+
+    /// Returns the effective config.toml path.
+    /// Workspace config replaces global if present; otherwise global.
     pub fn config_path(&self) -> PathBuf {
-        self.data_root().join("config.toml")
+        let ws_config = self.data_root().join("config.toml");
+        if ws_config.exists() && self.data_root() != self.global_root() {
+            ws_config
+        } else {
+            self.global_root().join("config.toml")
+        }
     }
 
     pub fn persistence_config_json(&self) -> Value {

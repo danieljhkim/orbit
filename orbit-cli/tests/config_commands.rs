@@ -254,7 +254,7 @@ fn config_show_json_reports_workspace_config_path_when_local_config_is_used() {
 }
 
 #[test]
-fn non_init_commands_in_repo_bootstrap_repo_local_scope() {
+fn non_init_commands_bootstrap_global_root() {
     let dir = tempfile::tempdir().expect("tempdir");
     let workspace = dir.path().join("workspace");
     let home = dir.path().join("home");
@@ -279,8 +279,10 @@ fn non_init_commands_in_repo_bootstrap_repo_local_scope() {
     let value: Value = serde_json::from_slice(&output).expect("json");
 
     assert_eq!(value["exists"], serde_json::json!(true));
-    assert!(workspace.join(".orbit").join("config.toml").exists());
-    assert!(!home.join(".orbit").exists());
+    // Global root (~/.orbit/) gets bootstrapped with config.toml
+    assert!(home.join(".orbit").join("config.toml").exists());
+    // Workspace root gets tasks/ dir
+    assert!(workspace.join(".orbit").join("tasks").is_dir());
 }
 
 #[test]

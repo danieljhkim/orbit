@@ -37,7 +37,8 @@ pub struct ConfigShowArgs {
 
 impl Execute for ConfigShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let selected_root = runtime.data_root();
+        let global_root = runtime.global_root();
+        let workspace_root = runtime.data_root();
         let config_path = runtime.config_path();
         let (inherit, pass) = runtime.execution_env_config();
         let (codex_sandbox, codex_approval_policy) = runtime.codex_execution_config();
@@ -46,8 +47,10 @@ impl Execute for ConfigShowArgs {
         let task_delegate_approval = runtime.task_delegate_approval();
         if self.json {
             crate::output::json::print_pretty(&json!({
-                "root": selected_root.to_string_lossy(),
-                "selected_root": selected_root.to_string_lossy(),
+                "global_root": global_root.to_string_lossy(),
+                "workspace_root": workspace_root.to_string_lossy(),
+                "root": workspace_root.to_string_lossy(),
+                "selected_root": workspace_root.to_string_lossy(),
                 "path": config_path.to_string_lossy(),
                 "config_path": config_path.to_string_lossy(),
                 "exists": config_path.exists(),
@@ -70,9 +73,10 @@ impl Execute for ConfigShowArgs {
                 "persistence": persistence,
             }))
         } else {
+            println!("Global root:         {}", global_root.to_string_lossy());
             println!(
-                "ORBIT_ROOT (Selected Root): {}",
-                selected_root.to_string_lossy()
+                "Workspace root:      {}",
+                workspace_root.to_string_lossy()
             );
             println!("Config path:         {}", config_path.to_string_lossy());
             println!("Exists:              {}", config_path.exists());

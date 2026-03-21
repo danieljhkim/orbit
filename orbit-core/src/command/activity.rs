@@ -276,10 +276,10 @@ impl OrbitRuntime {
 
 pub(crate) fn seed_default_activities(
     runtime: &OrbitRuntime,
+    global_root: &Path,
     overwrite: bool,
 ) -> Result<usize, OrbitError> {
-    let orbit_root = runtime.data_root();
-    let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, Some(&orbit_root))?;
+    let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, Some(global_root))?;
     seed_default_activities_from_specs(runtime, &specs, overwrite)
 }
 

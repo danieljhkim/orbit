@@ -43,9 +43,32 @@ impl OrbitRuntime {
     }
 }
 
-pub(crate) fn ensure_orbit_root_initialized(orbit_root: &Path) -> Result<(), OrbitError> {
-    let _ = init_workspace_at_root(orbit_root, InitOptions::default())?;
+/// Ensures both global and workspace roots are bootstrapped.
+/// Global root gets full init (config, skills, activities, jobs, db).
+/// Workspace root just needs tasks/ directory.
+pub(crate) fn ensure_orbit_root_initialized(
+    global_root: &Path,
+    workspace_root: &Path,
+) -> Result<(), OrbitError> {
+    // Bootstrap global root with all defaults
+    let _ = init_workspace_at_root(global_root, InitOptions::default())?;
+    // Ensure workspace tasks directory exists
+    let tasks_dir = workspace_root.join("tasks");
+    fs::create_dir_all(&tasks_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
     Ok(())
+}
+
+/// Initialize the global `~/.orbit/` root. Always targets `~/.orbit/`
+/// regardless of cwd, unless `--root` override is provided.
+pub fn init_global(
+    root_override: Option<&Path>,
+    options: InitOptions,
+) -> Result<InitResult, OrbitError> {
+    let global_root = match root_override {
+        Some(root) => root.to_path_buf(),
+        None => crate::workspace_registry::global_orbit_dir()?,
+    };
+    init_workspace_at_root(&global_root, options)
 }
 
 pub fn init_workspace_from_root_override(
@@ -84,7 +107,7 @@ fn init_workspace_at_root(
     }
 
     let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
-    let refreshed_default_activities = seed_default_activities(&init_runtime, overwrite)?;
+    let refreshed_default_activities = seed_default_activities(&init_runtime, &orbit_root, overwrite)?;
     let refreshed_default_jobs = seed_default_jobs(&init_runtime, overwrite)?;
 
     Ok(InitResult {

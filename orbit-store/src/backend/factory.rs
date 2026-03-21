@@ -7,6 +7,8 @@ use super::contracts::{
     ActivityStoreBackend, AuditEventStoreBackend, JobStoreBackend, LockStoreBackend,
     TaskStoreBackend, ToolStoreBackend,
 };
+use super::layered_activity::LayeredActivityStore;
+use super::layered_job::LayeredJobStore;
 use super::memory_activity::MemoryActivityStoreBackend;
 use super::memory_backends::MemoryLockStoreBackend;
 use super::memory_job::MemoryJobStoreBackend;
@@ -57,4 +59,38 @@ pub fn activity_store_memory() -> Arc<dyn ActivityStoreBackend> {
 
 pub fn job_store_memory() -> Arc<dyn JobStoreBackend> {
     Arc::new(MemoryJobStoreBackend::default())
+}
+
+/// Creates a layered activity store that merges workspace and global file stores.
+/// Workspace entries shadow global entries by ID. If `workspace_root` is `None`
+/// or the directory doesn't exist, returns the global store directly.
+pub fn activity_store_layered(
+    global_root: PathBuf,
+    workspace_root: Option<PathBuf>,
+) -> Result<Arc<dyn ActivityStoreBackend>, OrbitError> {
+    let global = activity_store_file(global_root)?;
+    match workspace_root {
+        Some(ws_root) if ws_root.is_dir() => {
+            let workspace = activity_store_file(ws_root)?;
+            Ok(Arc::new(LayeredActivityStore::new(workspace, global)))
+        }
+        _ => Ok(global),
+    }
+}
+
+/// Creates a layered job store that merges workspace and global file stores.
+/// Workspace entries shadow global entries by job ID. If `workspace_root` is `None`
+/// or the directory doesn't exist, returns the global store directly.
+pub fn job_store_layered(
+    global_root: PathBuf,
+    workspace_root: Option<PathBuf>,
+) -> Result<Arc<dyn JobStoreBackend>, OrbitError> {
+    let global = job_store_file(global_root)?;
+    match workspace_root {
+        Some(ws_root) if ws_root.is_dir() => {
+            let workspace = job_store_file(ws_root)?;
+            Ok(Arc::new(LayeredJobStore::new(workspace, global)))
+        }
+        _ => Ok(global),
+    }
 }

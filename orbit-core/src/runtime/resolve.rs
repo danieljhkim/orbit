@@ -7,6 +7,11 @@ use serde::Deserialize;
 use crate::paths;
 use crate::workspace_registry;
 
+/// Returns the global orbit root at `~/.orbit/`.
+pub(crate) fn resolve_global_root() -> Result<PathBuf, OrbitError> {
+    workspace_registry::global_orbit_dir()
+}
+
 /// Resolves the `.orbit` data root using the full resolution chain.
 ///
 /// Resolution order:

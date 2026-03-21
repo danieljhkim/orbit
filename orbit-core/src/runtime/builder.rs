@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    Store, activity_store_file, activity_store_memory, audit_event_store_sqlite, job_store_file,
-    job_store_memory, task_store_file, task_store_memory, tool_store_sqlite,
+    Store, activity_store_layered, activity_store_memory, audit_event_store_sqlite,
+    job_store_layered, job_store_memory, task_store_file, task_store_memory, tool_store_sqlite,
 };
 
 use orbit_tools::ToolRegistry;
@@ -16,18 +16,50 @@ use crate::config::RuntimeConfig;
 use crate::context::ActorIdentity;
 use crate::skill_catalog::SkillCatalog;
 
+/// Legacy single-root builder. Treats data_root as both global and workspace root.
 pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitContext, OrbitError> {
-    let runtime_config = RuntimeConfig::load_from_data_root(data_root)?;
+    build_context_from_roots(data_root, data_root)
+}
+
+/// Two-root builder. Global root provides activities, jobs, skills, config, SQLite.
+/// Workspace root provides tasks. Workspace can optionally override activities, jobs,
+/// skills, and config.
+pub(crate) fn build_context_from_roots(
+    global_root: &Path,
+    workspace_root: &Path,
+) -> Result<OrbitContext, OrbitError> {
+    let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
     let db_path = runtime_config.persistence.audit.path.clone();
     let store = Store::open(&db_path)?;
 
     let task_store = task_store_file(runtime_config.persistence.task.clone())?;
-    let activity_store = activity_store_file(runtime_config.persistence.activity.path.clone())?;
-    let job_store = job_store_file(runtime_config.persistence.job.path.clone())?;
+
+    let ws_activities_dir = workspace_root.join("activities");
+    let ws_activities = if ws_activities_dir.is_dir() {
+        Some(ws_activities_dir)
+    } else {
+        None
+    };
+    let activity_store = activity_store_layered(
+        runtime_config.persistence.activity.path.clone(),
+        ws_activities,
+    )?;
+
+    let ws_jobs_dir = workspace_root.join("jobs");
+    let ws_jobs = if ws_jobs_dir.is_dir() {
+        Some(ws_jobs_dir)
+    } else {
+        None
+    };
+    let job_store = job_store_layered(
+        runtime_config.persistence.job.path.clone(),
+        ws_jobs,
+    )?;
 
     build_context_common(
         store,
-        data_root.to_path_buf(),
+        global_root.to_path_buf(),
+        workspace_root.to_path_buf(),
         runtime_config,
         task_store,
         activity_store,
@@ -45,6 +77,7 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
 
     build_context_common(
         store,
+        data_root.clone(),
         data_root,
         runtime_config,
         task_store,
@@ -55,7 +88,8 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
 
 fn build_context_common(
     store: Store,
-    data_root: PathBuf,
+    global_root: PathBuf,
+    workspace_root: PathBuf,
     runtime_config: RuntimeConfig,
     task_store: Arc<dyn orbit_store::TaskStoreBackend>,
     activity_store: Arc<dyn orbit_store::ActivityStoreBackend>,
@@ -81,7 +115,8 @@ fn build_context_common(
     let task_delegate_approval = runtime_config.task_approval.delegate_approval;
 
     Ok(OrbitContext::new(
-        data_root,
+        global_root,
+        workspace_root,
         task_store,
         activity_store,
         job_store,

@@ -68,7 +68,8 @@ impl Default for ActorIdentity {
 
 #[derive(Clone)]
 pub struct OrbitContext {
-    data_root: PathBuf,
+    global_root: PathBuf,
+    workspace_root: PathBuf,
     task_store: Arc<dyn TaskStoreBackend>,
     activity_store: Arc<dyn ActivityStoreBackend>,
     job_store: Arc<dyn JobStoreBackend>,
@@ -89,7 +90,8 @@ pub struct OrbitContext {
 impl OrbitContext {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        data_root: PathBuf,
+        global_root: PathBuf,
+        workspace_root: PathBuf,
         task_store: Arc<dyn TaskStoreBackend>,
         activity_store: Arc<dyn ActivityStoreBackend>,
         job_store: Arc<dyn JobStoreBackend>,
@@ -107,7 +109,8 @@ impl OrbitContext {
         task_delegate_approval: bool,
     ) -> Self {
         Self {
-            data_root,
+            global_root,
+            workspace_root,
             task_store,
             activity_store,
             job_store,
@@ -126,8 +129,18 @@ impl OrbitContext {
         }
     }
 
+    /// Returns the workspace root (backward-compatible alias).
     pub(crate) fn data_root(&self) -> &Path {
-        &self.data_root
+        &self.workspace_root
+    }
+
+    pub(crate) fn global_root(&self) -> &Path {
+        &self.global_root
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn workspace_root(&self) -> &Path {
+        &self.workspace_root
     }
 
     pub(crate) fn task_store(&self) -> &Arc<dyn TaskStoreBackend> {
