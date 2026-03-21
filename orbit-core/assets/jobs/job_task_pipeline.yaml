@@ -40,6 +40,8 @@ job:
       target_id: implement_change
       agent_cli: claude
       timeout_seconds: 2000
+      output_map:
+        execution_summary: summary
 
     - target_type: activity
       target_id: update_task
@@ -56,6 +58,8 @@ job:
     - target_type: activity
       target_id: open_pr
       timeout_seconds: 300
+      output_map:
+        pr_url: pr
 
     - target_type: activity
       target_id: review_pr
