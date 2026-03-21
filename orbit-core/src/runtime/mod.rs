@@ -7,6 +7,7 @@ pub mod pipeline;
 mod resolve;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::Utc;
 use orbit_policy::PolicyEngine;
@@ -33,6 +34,7 @@ pub(crate) use resolve::{
 pub struct OrbitRuntime {
     context: OrbitContext,
     pub event_log: event_bus::EventLog,
+    _temp_dir: Option<Arc<builder::TempDir>>,
 }
 
 impl OrbitRuntime {
@@ -59,6 +61,7 @@ impl OrbitRuntime {
         Ok(Self {
             context: builder::build_context_from_data_root(data_root)?,
             event_log: event_bus::EventLog::default(),
+            _temp_dir: None,
         })
     }
 
@@ -66,13 +69,16 @@ impl OrbitRuntime {
         Ok(Self {
             context: builder::build_context_from_roots(global_root, workspace_root)?,
             event_log: event_bus::EventLog::default(),
+            _temp_dir: None,
         })
     }
 
     pub fn in_memory() -> Result<Self, OrbitError> {
+        let (context, temp_dir) = builder::build_context_in_memory()?;
         Ok(Self {
-            context: builder::build_context_in_memory()?,
+            context,
             event_log: event_bus::EventLog::default(),
+            _temp_dir: Some(Arc::new(temp_dir)),
         })
     }
 

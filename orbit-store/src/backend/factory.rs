@@ -4,15 +4,11 @@ use std::sync::Arc;
 use orbit_types::OrbitError;
 
 use super::contracts::{
-    ActivityStoreBackend, AuditEventStoreBackend, JobStoreBackend, LockStoreBackend,
-    TaskStoreBackend, ToolStoreBackend,
+    ActivityStoreBackend, AuditEventStoreBackend, JobStoreBackend, TaskStoreBackend,
+    ToolStoreBackend,
 };
 use super::layered_activity::LayeredActivityStore;
 use super::layered_job::LayeredJobStore;
-use super::memory_activity::MemoryActivityStoreBackend;
-use super::memory_backends::MemoryLockStoreBackend;
-use super::memory_job::MemoryJobStoreBackend;
-use super::memory_task::MemoryTaskStoreBackend;
 use super::sqlite_backends::{SqliteAuditEventStoreBackend, SqliteToolStoreBackend};
 use crate::Store;
 use crate::file::activity_store::ActivityFileStore;
@@ -78,22 +74,6 @@ pub fn tool_store_sqlite(store: Store) -> Arc<dyn ToolStoreBackend> {
 
 pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend> {
     Arc::new(SqliteAuditEventStoreBackend { store })
-}
-
-pub fn lock_store_memory() -> Arc<dyn LockStoreBackend> {
-    Arc::new(MemoryLockStoreBackend::default())
-}
-
-pub fn task_store_memory() -> Arc<dyn TaskStoreBackend> {
-    Arc::new(MemoryTaskStoreBackend::default())
-}
-
-pub fn activity_store_memory() -> Arc<dyn ActivityStoreBackend> {
-    Arc::new(MemoryActivityStoreBackend::default())
-}
-
-pub fn job_store_memory() -> Arc<dyn JobStoreBackend> {
-    Arc::new(MemoryJobStoreBackend::default())
 }
 
 /// Creates a task store from a resolved scope. Tasks only support `Single`.

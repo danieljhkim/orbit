@@ -73,8 +73,34 @@ impl ActivityStoreBackend for LayeredActivityStore {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
-    use crate::backend::memory_activity::MemoryActivityStoreBackend;
+    use crate::backend::activity_store_file;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("tmp")
+                .join(format!("{prefix}-{n}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn make_params(id: &str) -> ActivityCreateParams {
         ActivityCreateParams {
@@ -90,19 +116,21 @@ mod tests {
     }
 
     fn make_layered() -> (
-        Arc<MemoryActivityStoreBackend>,
-        Arc<MemoryActivityStoreBackend>,
+        Arc<dyn ActivityStoreBackend>,
+        Arc<dyn ActivityStoreBackend>,
         LayeredActivityStore,
+        TempDir,
     ) {
-        let ws = Arc::new(MemoryActivityStoreBackend::default());
-        let global = Arc::new(MemoryActivityStoreBackend::default());
+        let dir = TempDir::new("layered-activity");
+        let ws = activity_store_file(dir.0.join("ws")).unwrap();
+        let global = activity_store_file(dir.0.join("global")).unwrap();
         let layered = LayeredActivityStore::new(ws.clone(), global.clone());
-        (ws, global, layered)
+        (ws, global, layered, dir)
     }
 
     #[test]
     fn workspace_shadows_global_by_id() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         global.add_activity(make_params("shared")).unwrap();
         ws.add_activity(make_params("shared")).unwrap();
 
@@ -113,7 +141,7 @@ mod tests {
 
     #[test]
     fn global_only_entries_visible() {
-        let (_ws, global, layered) = make_layered();
+        let (_ws, global, layered, _dir) = make_layered();
         global.add_activity(make_params("global-only")).unwrap();
 
         let result = layered.get_activity("global-only").unwrap();
@@ -125,7 +153,7 @@ mod tests {
 
     #[test]
     fn workspace_only_entries_visible() {
-        let (ws, _global, layered) = make_layered();
+        let (ws, _global, layered, _dir) = make_layered();
         ws.add_activity(make_params("ws-only")).unwrap();
 
         let result = layered.get_activity("ws-only").unwrap();
@@ -134,7 +162,7 @@ mod tests {
 
     #[test]
     fn merge_returns_union() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         global.add_activity(make_params("g1")).unwrap();
         global.add_activity(make_params("g2")).unwrap();
         ws.add_activity(make_params("w1")).unwrap();
@@ -146,7 +174,7 @@ mod tests {
 
     #[test]
     fn writes_go_to_workspace() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         layered.add_activity(make_params("new")).unwrap();
 
         assert!(ws.get_activity("new").unwrap().is_some());
@@ -155,7 +183,7 @@ mod tests {
 
     #[test]
     fn update_targets_owning_store() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         global.add_activity(make_params("gact")).unwrap();
         ws.add_activity(make_params("wact")).unwrap();
 
@@ -178,7 +206,7 @@ mod tests {
 
     #[test]
     fn disable_targets_owning_store() {
-        let (_ws, global, layered) = make_layered();
+        let (_ws, global, layered, _dir) = make_layered();
         global.add_activity(make_params("gact")).unwrap();
 
         assert!(layered.disable_activity("gact").unwrap());

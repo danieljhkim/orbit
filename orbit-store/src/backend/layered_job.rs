@@ -177,9 +177,35 @@ impl JobStoreBackend for LayeredJobStore {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
-    use crate::backend::memory_job::MemoryJobStoreBackend;
+    use crate::backend::job_store_file;
     use orbit_types::JobStep;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(prefix: &str) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("tmp")
+                .join(format!("{prefix}-{n}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn make_params(id: &str) -> JobCreateParams {
         JobCreateParams {
@@ -196,19 +222,21 @@ mod tests {
     }
 
     fn make_layered() -> (
-        Arc<MemoryJobStoreBackend>,
-        Arc<MemoryJobStoreBackend>,
+        Arc<dyn JobStoreBackend>,
+        Arc<dyn JobStoreBackend>,
         LayeredJobStore,
+        TempDir,
     ) {
-        let ws = Arc::new(MemoryJobStoreBackend::default());
-        let global = Arc::new(MemoryJobStoreBackend::default());
+        let dir = TempDir::new("layered-job");
+        let ws = job_store_file(dir.0.join("ws")).unwrap();
+        let global = job_store_file(dir.0.join("global")).unwrap();
         let layered = LayeredJobStore::new(ws.clone(), global.clone());
-        (ws, global, layered)
+        (ws, global, layered, dir)
     }
 
     #[test]
     fn workspace_shadows_global_by_job_id() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         global.add_job(make_params("shared")).unwrap();
         ws.add_job(make_params("shared")).unwrap();
 
@@ -219,7 +247,7 @@ mod tests {
 
     #[test]
     fn global_only_jobs_visible() {
-        let (_ws, global, layered) = make_layered();
+        let (_ws, global, layered, _dir) = make_layered();
         global.add_job(make_params("global-only")).unwrap();
 
         assert!(layered.get_job("global-only").unwrap().is_some());
@@ -229,7 +257,7 @@ mod tests {
 
     #[test]
     fn merge_returns_union() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         global.add_job(make_params("g1")).unwrap();
         global.add_job(make_params("g2")).unwrap();
         ws.add_job(make_params("w1")).unwrap();
@@ -241,7 +269,7 @@ mod tests {
 
     #[test]
     fn writes_go_to_workspace() {
-        let (ws, global, layered) = make_layered();
+        let (ws, global, layered, _dir) = make_layered();
         layered.add_job(make_params("new")).unwrap();
 
         assert!(ws.get_job("new").unwrap().is_some());
@@ -250,7 +278,7 @@ mod tests {
 
     #[test]
     fn update_targets_owning_store() {
-        let (_ws, global, layered) = make_layered();
+        let (_ws, global, layered, _dir) = make_layered();
         global.add_job(make_params("gj")).unwrap();
 
         let update = JobUpdateParams {

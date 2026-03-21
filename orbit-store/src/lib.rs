@@ -11,11 +11,9 @@ use chrono::{DateTime, Utc};
 pub use backend::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, AuditEventStoreBackend,
     JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams,
-    LockStoreBackend, ResolvedScope, ScopeResolution, TaskCreateParams, TaskStoreBackend,
-    TaskUpdateParams, ToolStoreBackend, activity_store_file, activity_store_memory,
-    activity_store_resolved, audit_event_store_sqlite, job_store_file, job_store_memory,
-    job_store_resolved, lock_store_memory, task_store_file, task_store_memory, task_store_resolved,
-    tool_store_sqlite,
+    ResolvedScope, ScopeResolution, TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
+    ToolStoreBackend, activity_store_file, activity_store_resolved, audit_event_store_sqlite,
+    job_store_file, job_store_resolved, task_store_file, task_store_resolved, tool_store_sqlite,
 };
 pub use sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 pub use sqlite::connection::{Store, StoreTx};

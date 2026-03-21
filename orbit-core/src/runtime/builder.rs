@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    Store, activity_store_memory, activity_store_resolved, audit_event_store_sqlite,
-    job_store_memory, job_store_resolved, task_store_memory, task_store_resolved,
-    tool_store_sqlite,
+    Store, activity_store_file, activity_store_resolved, audit_event_store_sqlite, job_store_file,
+    job_store_resolved, task_store_file, task_store_resolved, tool_store_sqlite,
 };
 
 use orbit_tools::ToolRegistry;
@@ -50,15 +50,33 @@ pub(crate) fn build_context_from_roots(
     )
 }
 
-pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
-    let store = Store::open_in_memory()?;
-    let task_store = task_store_memory();
-    let activity_store = activity_store_memory();
-    let job_store = job_store_memory();
-    let runtime_config = RuntimeConfig::default_for_data_root(Path::new(".orbit"));
-    let data_root = Path::new(".").to_path_buf();
+pub(super) struct TempDir(PathBuf);
 
-    build_context_common(
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+static IN_MEMORY_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), OrbitError> {
+    let n = IN_MEMORY_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let data_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("tmp")
+        .join(format!("in-memory-{n}"));
+    std::fs::create_dir_all(&data_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let guard = TempDir(data_root.clone());
+
+    let store = Store::open_in_memory()?;
+    let task_store = task_store_file(data_root.join("tasks"))?;
+    let activity_store = activity_store_file(data_root.join("activities"))?;
+    let job_store = job_store_file(data_root.join("jobs"))?;
+    let runtime_config = RuntimeConfig::default_for_data_root(&data_root);
+
+    let context = build_context_common(
         store,
         data_root.clone(),
         data_root,
@@ -66,7 +84,8 @@ pub(crate) fn build_context_in_memory() -> Result<OrbitContext, OrbitError> {
         task_store,
         activity_store,
         job_store,
-    )
+    )?;
+    Ok((context, guard))
 }
 
 fn build_context_common(

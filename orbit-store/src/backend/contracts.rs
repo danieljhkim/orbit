@@ -210,9 +210,3 @@ pub trait AuditEventStoreBackend: Send + Sync {
     ) -> Result<Vec<i64>, OrbitError>;
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError>;
 }
-
-pub trait LockStoreBackend: Send + Sync {
-    fn try_lock(&self, name: &str) -> Result<bool, OrbitError>;
-    fn unlock(&self, name: &str) -> Result<bool, OrbitError>;
-    fn global_job_lock_name(&self) -> &'static str;
-}
