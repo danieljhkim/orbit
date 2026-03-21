@@ -38,13 +38,7 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
             )
         })?;
     let head = input_string_field(input, "branch")
-        .or_else(|| task.branch.clone())
-        .ok_or_else(|| {
-            OrbitError::Execution(format!(
-                "task '{}' does not have a branch for PR merge",
-                task.id
-            ))
-        })?;
+        .unwrap_or_else(|| format!("orbit/{task_id}"));
     let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
     let review_decision = resolve_review_decision(&repo_root, &pr_number)?;
     if review_decision != "APPROVED" {
@@ -115,21 +109,15 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
             })?,
         "repo_root",
     )?;
-    let branch = input_string_field(input, "branch");
+    let head = input_string_field(input, "branch")
+        .unwrap_or_else(|| format!("orbit/{task_id}"));
     let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
     let commit_message = input_string_field(input, "commit_message")
-        .or_else(|| task.commit_message.clone())
         .unwrap_or_default();
     let changed_files = match input.get("changed_files") {
         Some(_) => input_string_array_field(input, "changed_files")?,
-        None => task.changed_files.clone().unwrap_or_default(),
+        None => vec![],
     };
-    let head = branch.or_else(|| task.branch.clone()).ok_or_else(|| {
-        OrbitError::Execution(format!(
-            "task '{}' does not have a branch for PR creation",
-            task.id
-        ))
-    })?;
     let freshness = ensure_branch_fresh_against_base(&repo_root, &head, &base)?;
     let body = format!(
         "## Changes\n{}\n\n## Branch Freshness\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}\n\n## Files Changed\n{}",
@@ -205,7 +193,6 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
         task_id,
         TaskAutomationUpdate {
             status: target_status,
-            branch: Some(head.clone()),
             pr_number: Some(pr_number.clone()),
             execution_summary: Some(body.clone()),
             ..TaskAutomationUpdate::default()
@@ -485,9 +472,6 @@ mod tests {
             status: TaskStatus::Review,
             priority: TaskPriority::High,
             task_type: TaskType::Issue,
-            branch: Some("orbit/T20260320-021158".to_string()),
-            commit_message: None,
-            changed_files: None,
             pr_number: Some("18".to_string()),
             proposed_by: None,
             complexity: None,

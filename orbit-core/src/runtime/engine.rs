@@ -423,9 +423,6 @@ impl TaskHost for OrbitRuntime {
                     status: update.status,
                     workspace_path: update.workspace_path.clone().map(Some),
                     repo_root: update.repo_root.clone().map(Some),
-                    branch: update.branch.clone().map(Some),
-                    commit_message: update.commit_message.clone().map(Some),
-                    changed_files: update.changed_files.clone().map(Some),
                     pr_number: update.pr_number.clone().map(Some),
                     ..Default::default()
                 },

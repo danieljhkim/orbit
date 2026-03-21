@@ -45,7 +45,6 @@ pub struct TaskUpdateParams {
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
     pub status: Option<TaskStatus>,
-    pub branch: Option<Option<String>>,
     pub pr_number: Option<Option<String>>,
 }
 
@@ -57,7 +56,6 @@ impl From<TaskUpdateParams> for StoreTaskUpdateParams {
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,
-            branch: p.branch,
             pr_number: p.pr_number,
             ..Default::default()
         }
@@ -90,7 +88,6 @@ impl OrbitRuntime {
                 priority: params.priority,
                 complexity: params.complexity,
                 task_type: params.task_type,
-                branch: None,
                 pr_number: None,
                 proposed_by: Some(actor.label.clone()),
                 comments: comments.clone(),
@@ -143,7 +140,6 @@ impl OrbitRuntime {
                 execution_summary,
                 comment,
                 status: Some(status),
-                branch: None,
                 pr_number: None,
             },
             note,
@@ -162,7 +158,6 @@ impl OrbitRuntime {
             || params.plan.is_some()
             || params.execution_summary.is_some()
             || params.comment.is_some()
-            || params.branch.is_some()
             || params.pr_number.is_some();
 
         if is_field_update && matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
@@ -539,7 +534,6 @@ impl OrbitRuntime {
             priority: TaskPriority::Medium,
             complexity: None,
             task_type: TaskType::Task,
-            branch: None,
             pr_number: None,
             proposed_by: (status == TaskStatus::Proposed).then_some(actor),
             comments: Vec::new(),

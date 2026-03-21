@@ -36,9 +36,6 @@ pub(crate) struct FileTaskInsert {
     pub priority: TaskPriority,
     pub complexity: Option<TaskComplexity>,
     pub task_type: TaskType,
-    pub branch: Option<String>,
-    pub commit_message: Option<String>,
-    pub changed_files: Option<Vec<String>>,
     pub pr_number: Option<String>,
     pub proposed_by: Option<String>,
     pub comments: Vec<TaskComment>,
@@ -60,9 +57,6 @@ pub(crate) struct FileTaskUpdate {
     pub priority: Option<TaskPriority>,
     pub complexity: Option<TaskComplexity>,
     pub task_type: Option<TaskType>,
-    pub branch: Option<Option<String>>,
-    pub commit_message: Option<Option<String>>,
-    pub changed_files: Option<Option<Vec<String>>>,
     pub pr_number: Option<Option<String>>,
     pub proposed_by: Option<Option<String>>,
     pub status_event: Option<String>,
@@ -166,19 +160,7 @@ struct TaskFileDocument {
     #[serde(default)]
     proposed_by: Option<String>,
     #[serde(default)]
-    branch: Option<String>,
-    #[serde(default)]
-    commit_message: Option<String>,
-    #[serde(default)]
-    changed_files: Option<Vec<String>>,
-    #[serde(default)]
     pr_number: Option<String>,
-    #[serde(default)]
-    activity_id: Option<String>,
-    #[serde(default)]
-    job_id: Option<String>,
-    #[serde(default)]
-    job_run_id: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     #[serde(default)]
@@ -241,9 +223,6 @@ impl TaskFileStore {
                 priority: params.priority,
                 complexity: params.complexity,
                 task_type: params.task_type,
-                branch: params.branch,
-                commit_message: params.commit_message,
-                changed_files: params.changed_files,
                 pr_number: params.pr_number,
                 proposed_by: params.proposed_by,
                 created_at: now,
@@ -258,9 +237,6 @@ impl TaskFileStore {
                     to_status: Some(params.status),
                 }],
                 comments: params.comments,
-                activity_id: None,
-                job_id: None,
-                job_run_id: None,
             },
             plan: params.plan,
             execution_summary: params.execution_summary,
@@ -386,15 +362,6 @@ impl TaskFileStore {
         }
         if let Some(value) = fields.task_type {
             bundle.doc.task_type = value;
-        }
-        if let Some(value) = &fields.branch {
-            bundle.doc.branch = value.clone();
-        }
-        if let Some(value) = &fields.commit_message {
-            bundle.doc.commit_message = value.clone();
-        }
-        if let Some(value) = &fields.changed_files {
-            bundle.doc.changed_files = value.clone();
         }
         if let Some(value) = &fields.pr_number {
             bundle.doc.pr_number = value.clone();
@@ -642,15 +609,7 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
     yaml.push_str(&yaml_field("proposed_by", &doc.proposed_by)?);
 
     yaml.push_str(&yaml_section("implementation"));
-    yaml.push_str(&yaml_field("branch", &doc.branch)?);
-    yaml.push_str(&yaml_field("commit_message", &doc.commit_message)?);
-    yaml.push_str(&yaml_field("changed_files", &doc.changed_files)?);
     yaml.push_str(&yaml_field("pr_number", &doc.pr_number)?);
-
-    yaml.push_str(&yaml_section("execution references"));
-    yaml.push_str(&yaml_field("activity_id", &doc.activity_id)?);
-    yaml.push_str(&yaml_field("job_id", &doc.job_id)?);
-    yaml.push_str(&yaml_field("job_run_id", &doc.job_run_id)?);
 
     yaml.push_str(&yaml_section("timestamps"));
     yaml.push_str(&yaml_field("created_at", &doc.created_at)?);
@@ -724,9 +683,6 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         priority: bundle.doc.priority,
         complexity: bundle.doc.complexity,
         task_type: bundle.doc.task_type,
-        branch: bundle.doc.branch,
-        commit_message: bundle.doc.commit_message,
-        changed_files: bundle.doc.changed_files,
         pr_number: bundle.doc.pr_number,
         proposed_by: bundle.doc.proposed_by,
         comments: bundle.doc.comments,
@@ -762,9 +718,6 @@ mod tests {
             priority: TaskPriority::High,
             complexity: Some(TaskComplexity::Medium),
             task_type: TaskType::Refactor,
-            branch: None,
-            commit_message: None,
-            changed_files: None,
             pr_number: None,
             proposed_by: Some("daniel".to_string()),
             comments: Vec::new(),
@@ -996,9 +949,6 @@ mod tests {
                 priority: TaskPriority::Medium,
                 complexity: None,
                 task_type: TaskType::Task,
-                branch: None,
-                commit_message: None,
-                changed_files: None,
                 pr_number: None,
                 proposed_by: None,
                 comments: Vec::new(),

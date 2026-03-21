@@ -384,9 +384,6 @@ impl Execute for TaskShowArgs {
                     }
                 }
             }
-            if let Some(ref branch) = task.branch {
-                println!("{} {}", bold("Branch:"), branch);
-            }
             if let Some(ref pr_number) = task.pr_number {
                 println!("{} {}", bold("PR Number:"), pr_number);
             }
@@ -432,9 +429,6 @@ pub struct TaskUpdateArgs {
     /// New status
     #[arg(long, value_enum)]
     pub status: Option<TaskUpdateStatusArg>,
-    /// Git branch name (empty string clears)
-    #[arg(long)]
-    pub branch: Option<String>,
     /// Pull request number (empty string clears)
     #[arg(long)]
     pub pr_number: Option<String>,
@@ -445,13 +439,6 @@ pub struct TaskUpdateArgs {
 
 impl Execute for TaskUpdateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let branch = self.branch.map(|value| {
-            if value.trim().is_empty() {
-                None
-            } else {
-                Some(value)
-            }
-        });
         let pr_number = self.pr_number.map(|value| {
             if value.trim().is_empty() {
                 None
@@ -469,7 +456,6 @@ impl Execute for TaskUpdateArgs {
                 execution_summary: self.execution_summary,
                 comment: self.comment,
                 status: self.status.map(Into::into),
-                branch,
                 pr_number,
             },
         )?;
@@ -836,7 +822,6 @@ fn task_to_json(task: &orbit_core::Task) -> Value {
         "priority": task.priority.to_string(),
         "complexity": task.complexity.map(|value| value.to_string()),
         "type": task.task_type.to_string(),
-        "branch": task.branch,
         "pr_number": task.pr_number,
         "proposed_by": task.proposed_by,
         "comments": task.comments,

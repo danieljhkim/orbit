@@ -452,7 +452,7 @@ mod tests {
                     execution_summary: Some("verified by tests".to_string()),
                     comment: Some("ready for review".to_string()),
                     status: Some(TaskStatus::Review),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -561,7 +561,7 @@ mod tests {
                     execution_summary: Some("validated with unit tests".to_string()),
                     comment: None,
                     status: None,
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -592,7 +592,7 @@ mod tests {
                 execution_summary: None,
                 comment: None,
                 status: None,
-                branch: None,
+
                 pr_number: None,
             },
         );
@@ -619,7 +619,7 @@ mod tests {
                 execution_summary: None,
                 comment: None,
                 status: None,
-                branch: None,
+
                 pr_number: None,
             },
         );
@@ -647,7 +647,7 @@ mod tests {
                     execution_summary: None,
                     comment: None,
                     status: None,
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -693,7 +693,7 @@ mod tests {
                     execution_summary: None,
                     comment: Some("follow-up note".to_string()),
                     status: None,
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -732,7 +732,7 @@ mod tests {
                     execution_summary: None,
                     comment: Some("configured follow-up".to_string()),
                     status: None,
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -822,7 +822,7 @@ mod tests {
                     execution_summary: None,
                     comment: None,
                     status: Some(TaskStatus::InProgress),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -837,7 +837,7 @@ mod tests {
                     execution_summary: Some("Implemented and verified".to_string()),
                     comment: None,
                     status: Some(TaskStatus::Review),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -867,7 +867,7 @@ mod tests {
                     execution_summary: None,
                     comment: None,
                     status: Some(TaskStatus::InProgress),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -882,7 +882,7 @@ mod tests {
                     execution_summary: Some("ready".to_string()),
                     comment: None,
                     status: Some(TaskStatus::Review),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -951,7 +951,7 @@ mod tests {
                     execution_summary: None,
                     comment: None,
                     status: Some(TaskStatus::InProgress),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -966,7 +966,7 @@ mod tests {
                     execution_summary: Some("Implemented initial pass.".to_string()),
                     comment: None,
                     status: Some(TaskStatus::Review),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -1029,7 +1029,7 @@ mod tests {
                     execution_summary: None,
                     comment: None,
                     status: Some(TaskStatus::InProgress),
-                    branch: None,
+
                     pr_number: None,
                 },
             )
@@ -1044,7 +1044,7 @@ mod tests {
                 execution_summary: None,
                 comment: None,
                 status: Some(TaskStatus::Review),
-                branch: None,
+
                 pr_number: None,
             },
         );
@@ -1063,7 +1063,7 @@ mod tests {
                     execution_summary: Some("Implemented change and validated tests.".to_string()),
                     comment: None,
                     status: Some(TaskStatus::Review),
-                    branch: None,
+
                     pr_number: None,
                 },
             )

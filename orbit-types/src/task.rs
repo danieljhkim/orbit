@@ -252,12 +252,6 @@ pub struct Task {
     pub complexity: Option<TaskComplexity>,
     pub task_type: TaskType,
     #[serde(default)]
-    pub branch: Option<String>,
-    #[serde(default)]
-    pub commit_message: Option<String>,
-    #[serde(default)]
-    pub changed_files: Option<Vec<String>>,
-    #[serde(default)]
     pub pr_number: Option<String>,
     #[serde(default)]
     pub proposed_by: Option<String>,

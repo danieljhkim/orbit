@@ -3290,7 +3290,7 @@ fn commit_task_changes_supports_task_id_only_inputs() {
                 ),
                 comment: None,
                 status: None,
-                branch: None,
+
                 pr_number: None,
             },
         )
@@ -3360,12 +3360,10 @@ fn commit_task_changes_supports_task_id_only_inputs() {
     let expected_commit_message = format!(
         "fix: Persist pipeline artifacts [{task_id}]\n\nPersisted task-scoped automation artifacts for downstream pipeline steps."
     );
-    let updated_task = runtime.get_task(&task_id).expect("updated task");
     assert_eq!(
-        updated_task.commit_message.as_deref(),
-        Some(expected_commit_message.as_str())
+        commit_output["commit_message"],
+        json!(expected_commit_message)
     );
-    assert_eq!(updated_task.changed_files, Some(vec!["fix.rs".to_string()]));
 }
 
 #[test]
@@ -3485,7 +3483,7 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
                 execution_summary: None,
                 comment: None,
                 status: Some(TaskStatus::InProgress),
-                branch: Some(Some(format!("orbit/{task_id}"))),
+
                 pr_number: None,
             },
         )
@@ -3774,7 +3772,7 @@ fn open_pr_automation_supports_task_id_only_inputs() {
                 ),
                 comment: None,
                 status: Some(TaskStatus::InProgress),
-                branch: None,
+
                 pr_number: None,
             },
         )
@@ -3804,23 +3802,6 @@ fn open_pr_automation_supports_task_id_only_inputs() {
             created_by: None,
         })
         .expect("add commit activity");
-    let commit_job_id = runtime
-        .add_job(JobAddParams {
-            job_id: None,
-            default_input: Some(json!({ "task_id": task_id })),
-            max_active_runs: None,
-            steps: vec![JobStep {
-                target_id: "spec-commit-open-pr-task-only".to_string(),
-                timeout_seconds: 30,
-                ..Default::default()
-            }],
-            initial_state_override: None,
-        })
-        .expect("add commit job")
-        .job_id;
-    let commit_run = runtime.run_job_now(&commit_job_id).expect("run commit job");
-    assert_eq!(commit_run.state, JobRunState::Success);
-
     runtime
         .add_activity(ActivityAddParams {
             id: "spec-open-pr-task-only".to_string(),
@@ -3829,7 +3810,9 @@ fn open_pr_automation_supports_task_id_only_inputs() {
             input_schema_json: json!({
                 "type": "object",
                 "properties": {
-                    "task_id": { "type": "string" }
+                    "task_id": { "type": "string" },
+                    "commit_message": { "type": "string" },
+                    "changed_files": { "type": "array", "items": { "type": "string" } }
                 },
                 "required": ["task_id"]
             }),
@@ -3849,22 +3832,29 @@ fn open_pr_automation_supports_task_id_only_inputs() {
         })
         .expect("add open pr activity");
 
-    let open_pr_job_id = runtime
+    let combined_job_id = runtime
         .add_job(JobAddParams {
             job_id: None,
             default_input: Some(json!({ "task_id": task_id })),
             max_active_runs: None,
-            steps: vec![JobStep {
-                target_id: "spec-open-pr-task-only".to_string(),
-                timeout_seconds: 30,
-                ..Default::default()
-            }],
+            steps: vec![
+                JobStep {
+                    target_id: "spec-commit-open-pr-task-only".to_string(),
+                    timeout_seconds: 30,
+                    ..Default::default()
+                },
+                JobStep {
+                    target_id: "spec-open-pr-task-only".to_string(),
+                    timeout_seconds: 30,
+                    ..Default::default()
+                },
+            ],
             initial_state_override: None,
         })
-        .expect("add open pr job")
+        .expect("add combined commit+pr job")
         .job_id;
 
-    let run_result = runtime.run_job_now(&open_pr_job_id);
+    let run_result = runtime.run_job_now(&combined_job_id);
     match previous_path {
         Some(value) => unsafe { std::env::set_var("PATH", value) },
         None => unsafe { std::env::remove_var("PATH") },
@@ -3878,7 +3868,7 @@ fn open_pr_automation_supports_task_id_only_inputs() {
 
     let body_content = std::fs::read_to_string(body_capture).expect("body");
     assert!(
-        body_content.contains("task_id only"),
+        body_content.contains("Open PR from stored artifacts"),
         "body: {body_content}"
     );
     assert!(body_content.contains("feature.rs"), "body: {body_content}");
@@ -3898,10 +3888,6 @@ fn open_pr_automation_supports_task_id_only_inputs() {
     let updated_task = runtime.get_task(&task_id).expect("updated task");
     assert_eq!(updated_task.pr_number.as_deref(), Some("42"));
     assert_eq!(updated_task.status, TaskStatus::Review);
-    assert_eq!(
-        updated_task.changed_files,
-        Some(vec!["feature.rs".to_string()])
-    );
 }
 
 #[test]
@@ -3988,7 +3974,6 @@ fn open_pr_automation_rejects_stale_task_branches_before_pr_creation() {
                 execution_summary: None,
                 comment: None,
                 status: Some(TaskStatus::InProgress),
-                branch: Some(Some(branch_name.clone())),
                 pr_number: None,
             },
         )
@@ -4164,7 +4149,6 @@ fn merge_pr_automation_rejects_stale_task_branches_before_merging() {
                 execution_summary: Some("Ready to merge".to_string()),
                 comment: None,
                 status: Some(TaskStatus::Review),
-                branch: Some(Some(branch_name)),
                 pr_number: Some(Some("42".to_string())),
             },
         )
@@ -4333,7 +4317,7 @@ fn merge_pr_automation_fetches_review_decision_from_gh_when_not_provided() {
                 execution_summary: Some("Ready to merge".to_string()),
                 comment: None,
                 status: Some(TaskStatus::Review),
-                branch: Some(Some(format!("orbit/{task_id}"))),
+
                 pr_number: Some(Some("24".to_string())),
             },
         )

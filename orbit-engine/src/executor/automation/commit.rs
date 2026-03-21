@@ -3,7 +3,7 @@ use std::path::Path;
 use orbit_types::OrbitError;
 use serde_json::{Value, json};
 
-use crate::context::{TaskAutomationUpdate, TaskHost};
+use crate::context::TaskHost;
 
 use super::git::{git_output, git_output_paths, git_success};
 use super::input::{
@@ -77,15 +77,6 @@ pub(super) fn commit_task_changes<H: TaskHost + ?Sized>(
     let message = task_commit_message(&task.task_type, &task.title, &task.id, &summary);
     git_success(&workspace_path, &["commit", "-m", &message])?;
     let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
-    host.apply_task_automation_update(
-        task_id,
-        TaskAutomationUpdate {
-            commit_message: Some(message.clone()),
-            changed_files: Some(changed_files.clone()),
-            ..TaskAutomationUpdate::default()
-        },
-    )?;
-
     Ok(json!({
         "repo_root": repo_root.to_string_lossy().to_string(),
         "workspace_path": workspace_path.to_string_lossy().to_string(),

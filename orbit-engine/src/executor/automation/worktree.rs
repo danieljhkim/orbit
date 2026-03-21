@@ -59,7 +59,6 @@ pub(super) fn create_task_worktree<H: RuntimeHost + TaskHost + ?Sized>(
         TaskAutomationUpdate {
             workspace_path: Some(canonical_worktree.to_string_lossy().to_string()),
             repo_root: Some(canonical_repo_root.to_string_lossy().to_string()),
-            branch: Some(branch.clone()),
             ..TaskAutomationUpdate::default()
         },
     )?;
