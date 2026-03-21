@@ -88,7 +88,7 @@ ci: fmt clippy test
 # Install
 # ------------------------------------------------------------
 install:
-	cargo install --path $(BIN_CRATE) --force --offline
+	cargo install --path $(BIN_CRATE) --force
 
 uninstall:
 	cargo uninstall $(BINARY) || true
