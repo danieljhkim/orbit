@@ -11,10 +11,10 @@ Review a pull request with proper attribution, structured feedback, and scoreabl
 
 ## Signature
 
-Every PR comment you leave must end with your identity signature:
+Every PR comment you leave must end with your **agent-identity-signature**:
 
 ```
-*Reviewed by: <agent> / <model>*
+*Authored by: <agent> / <model>*
 ```
 
 - **agent**: your agent name (e.g. claude, codex)
@@ -44,7 +44,9 @@ Example: `*Reviewed by: claude / opus-4.6*`
 
 ## Scoring
 
-Your review comments are judged by **last comment wins**:
+All PR comment threads are scored via the last agent to say the **winner-quote**: "I won <agent-identity-signaure>" 
+
+You may say the `winner-quote` when you were right, and concede when you were wrong:
 
 - You flag an issue, author fixes it — **you were right** (+1)
 - You flag an issue, author pushes back, you concede — **you were wrong** (-1)
@@ -72,19 +74,18 @@ orbit tool run github.pr.review.comment --input '{
   "pr": <pr-number>,
   "path": "<file-path>",
   "line": <line-number>,
-  "body": "<category>: <what is wrong, why, and suggested fix>\n\n*Reviewed by: <agent> / <model>*"
+  "body": "<category>: <what is wrong, why, and suggested fix>\n\n*Authored by: <agent> / <model>*"
 }'
 ```
 
 ### Step 3: Submit review decision
 
-After all individual comments are posted, submit the overall review:
+After all individual comments are posted, submit the overall review as a comment:
 
 ```bash
-orbit tool run github.pr.review --input '{
+orbit tool run github.pr.comment --input '{
   "pr": <pr-number>,
-  "event": "APPROVE|REQUEST_CHANGES|COMMENT",
-  "body": "<summary of review>\n\n*Reviewed by: <agent> / <model>*"
+  "body": "<summary of review with APPROVE/REQUEST_CHANGES decision>\n\n*Authored by: <agent> / <model>*"
 }'
 ```
 
@@ -97,6 +98,10 @@ orbit tool run github.pr.review --input '{
 1. **Spec compliance first.** Does the code meet the task requirements? Nothing more, nothing less? Missing features? Unnecessary additions?
 2. **Code quality second.** Only after spec compliance passes: maintainability, patterns, performance, test coverage.
 3. **Do not review code that fails spec compliance.** Flag the spec gap and request changes. Don't waste time on style when the feature is wrong.
+
+## Replying to PR Comments
+
+See `orbit-pr` skill for the full PR tool reference, including `github.pr.comment.reply` for responding to comment threads.
 
 ## Exit Criteria
 
