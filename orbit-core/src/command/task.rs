@@ -256,7 +256,9 @@ impl OrbitRuntime {
             }
         });
 
-        let task = self.with_mutation(|| {
+        let old_status = task.status;
+        let target_status = params.status;
+        let updated = self.with_mutation(|| {
             let task = self.update_task_record(
                 id,
                 StoreTaskUpdateParams {
@@ -272,7 +274,13 @@ impl OrbitRuntime {
             Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))
         })?;
 
-        Ok(task)
+        if let Some(new_status) = target_status {
+            if new_status != old_status {
+                self.try_record_friction_transition(&task, old_status, new_status);
+            }
+        }
+
+        Ok(updated)
     }
 
     pub fn approve_task(
@@ -352,14 +360,11 @@ impl OrbitRuntime {
             ))),
         }?;
 
-        // Friction bounty: record issues-accepted on approval
-        if task.task_type.is_friction() {
-            if let (Some(a), Some(m)) = (&task.agent, &task.model) {
-                if let Some(repo_root) = find_git_repo_root(self.data_root_path()) {
-                    let _ = friction_bounty::record_friction_accepted(&repo_root, a, m);
-                }
-            }
-        }
+        self.try_record_friction_transition(
+            &task,
+            task.status,
+            if task.status == TaskStatus::Proposed { TaskStatus::Backlog } else { TaskStatus::Done },
+        );
 
         Ok(result)
     }
@@ -388,7 +393,7 @@ impl OrbitRuntime {
 
         match task.status {
             TaskStatus::Proposed => {
-                let task = self.with_mutation(|| {
+                let result = self.with_mutation(|| {
                     let at = Utc::now();
                     let task = self.update_task_record(
                         id,
@@ -420,7 +425,12 @@ impl OrbitRuntime {
                         },
                     ))
                 })?;
-                Ok(task)
+                self.try_record_friction_transition(
+                    &task,
+                    TaskStatus::Proposed,
+                    TaskStatus::InProgress,
+                );
+                Ok(result)
             }
             TaskStatus::Backlog | TaskStatus::Someday | TaskStatus::Blocked => {
                 let task = self.with_mutation(|| {
@@ -541,14 +551,7 @@ impl OrbitRuntime {
             ))),
         }?;
 
-        // Friction bounty: record issues-rejected on rejection
-        if task.task_type.is_friction() {
-            if let (Some(a), Some(m)) = (&task.agent, &task.model) {
-                if let Some(repo_root) = find_git_repo_root(self.data_root_path()) {
-                    let _ = friction_bounty::record_friction_rejected(&repo_root, a, m);
-                }
-            }
-        }
+        self.try_record_friction_transition(&task, task.status, TaskStatus::Rejected);
 
         Ok(result)
     }
@@ -610,6 +613,37 @@ impl OrbitRuntime {
 
     pub fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         self.search_task_records(query)
+    }
+
+    /// Best-effort friction bounty scoreboard update after a status transition.
+    fn try_record_friction_transition(
+        &self,
+        task: &Task,
+        from: TaskStatus,
+        to: TaskStatus,
+    ) {
+        if !task.task_type.is_friction() {
+            return;
+        }
+        let (Some(agent), Some(model)) = (&task.agent, &task.model) else {
+            return;
+        };
+        let Some(repo_root) = find_git_repo_root(self.data_root_path()) else {
+            return;
+        };
+
+        let is_approval = matches!(
+            (from, to),
+            (TaskStatus::Proposed, TaskStatus::Backlog)
+                | (TaskStatus::Proposed, TaskStatus::InProgress)
+                | (TaskStatus::Review, TaskStatus::Done)
+        );
+
+        if is_approval {
+            let _ = friction_bounty::record_friction_accepted(&repo_root, agent, model);
+        } else if to == TaskStatus::Rejected {
+            let _ = friction_bounty::record_friction_rejected(&repo_root, agent, model);
+        }
     }
 
     #[cfg(test)]
