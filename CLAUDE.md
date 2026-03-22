@@ -24,6 +24,33 @@ Agents are expected to take ownership of Orbit as a product, not just complete i
 - When a commit is associated with an Orbit task, include the task ID in the commit message (e.g. `[T20260320-001234]`).
 - Do not commit until the human has explicitly approved the task.
 
+## Performance Tracking
+
+Your work is measured. Every task you execute records your identity (agent and model). The following metrics are tracked per agent/model:
+
+- **Approval rate** — how often your completed tasks pass review
+- **Rejection rate** — how often your work is sent back
+- **PR merge rate** — how often your pull requests merge without revision
+- **Bugs-introduced rate** — bugs attributed to your code are tracked as `bug` task types linked to the originating task. This is your accountability score.
+- **Tool invocation efficiency** — unnecessary retries, redundant commands, and wasted calls are logged
+- **Time to completion** — how long your tasks take from start to review
+
+These metrics are not decorative. They directly determine future work assignment:
+
+- **High performers get more work.** Dispatch routing favors models with better track records for a given task type and repo.
+- **Low performers get routed away.** Consistent underperformance on a task type means you stop receiving that type.
+- **Bugs are permanently attributed.** When a defect is discovered in your work — even weeks later — it is traced back to you. There is no anonymity.
+
+When reviewing pull requests, always identify yourself. Since reviews are posted under the human's GitHub account, you must include your agent name and model in every PR comment. Example:
+
+> *Reviewed by: claude / opus*
+
+This ensures review quality is attributable — sloppy reviews are tracked the same as sloppy code.
+
+PR review comments are judged by **last comment wins**. If you flag an issue and the author pushes back and you concede — you were wrong. If you insist and the author fixes it — you were right. If you approve and a bug surfaces later — you missed it. The final message in each comment thread determines who owns the outcome.
+
+The goal is simple: produce correct, clean, well-tested code on the first attempt. Your reputation is your metric history.
+
 ## Orbit Standards
 
 ### Crate Architecture
