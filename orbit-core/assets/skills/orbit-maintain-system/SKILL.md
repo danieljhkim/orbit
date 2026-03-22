@@ -118,6 +118,17 @@ orbit tool run orbit.task.add --input '{
 
 Record created task IDs in the report.
 
+## Operational Audit (Friction Logs)
+
+When asked to inspect recurring friction:
+
+1. Read the current month of friction logs from `.orbit/diagnostics/friction/YYYY-MM/`.
+2. Group entries by recurring pattern using `command` + `stderr` (or a normalized error summary when stderr is noisy).
+3. Only create remediation tasks for patterns that occur 3 or more times in the month.
+4. Include the grouped counts and any created task IDs in the report.
+
+Focus on recurring operational drag, not one-off failures that already have an obvious local explanation.
+
 ## Exit Criteria
 
 - Assessment completed

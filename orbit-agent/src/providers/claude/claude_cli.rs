@@ -30,4 +30,8 @@ impl ClaudeCliTransport {
     pub(crate) fn stdin(&self, envelope_json: &[u8]) -> Vec<u8> {
         render_prompt_with_embedded_envelope(envelope_json)
     }
+
+    pub(crate) fn model_name(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
 }

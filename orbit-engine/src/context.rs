@@ -139,6 +139,8 @@ pub struct TaskAutomationUpdate {
     pub repo_root: Option<String>,
     pub pr_number: Option<String>,
     pub execution_summary: Option<String>,
+    pub agent: Option<String>,
+    pub model: Option<String>,
 }
 
 pub trait JobRunHost {

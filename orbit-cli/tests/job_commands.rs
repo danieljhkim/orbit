@@ -131,6 +131,18 @@ fn add_job_with_max_active_runs(
     String::from_utf8(output).expect("utf8").trim().to_string()
 }
 
+fn add_task(dir: &Path, title: &str) -> String {
+    let output = orbit_in(dir)
+        .args(["task", "add", "--title", title, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let task: Value = serde_json::from_slice(&output).expect("task json");
+    task["id"].as_str().expect("task id").to_string()
+}
+
 fn write_mock_agent(dir: &Path) -> String {
     let path = dir.join("mock-agent");
     std::fs::write(
@@ -300,6 +312,7 @@ fn job_run_with_task_id_passes_input_to_agent() {
     );
     let agent_cli = write_stdin_capturing_agent(dir.path(), &stdin_capture);
     let job_id = add_job(dir.path(), &spec_id, &agent_cli);
+    let task_id = add_task(dir.path(), "CLI task id propagation");
 
     orbit_in(dir.path())
         .args([
@@ -307,7 +320,7 @@ fn job_run_with_task_id_passes_input_to_agent() {
             "run",
             &job_id,
             "--input",
-            "task_id=T20260310-045900-1773118740023227000",
+            &format!("task_id={task_id}"),
             "--json",
         ])
         .assert()
@@ -315,10 +328,7 @@ fn job_run_with_task_id_passes_input_to_agent() {
 
     let stdin_raw = std::fs::read_to_string(stdin_capture).expect("stdin capture");
     let payload: Value = serde_json::from_str(&stdin_raw).expect("valid stdin payload");
-    assert_eq!(
-        payload["input"]["task_id"],
-        "T20260310-045900-1773118740023227000"
-    );
+    assert_eq!(payload["input"]["task_id"], task_id);
 }
 
 #[test]

@@ -26,6 +26,8 @@ pub struct TaskCreateParams {
     /// sub-directory of a monorepo and git operations must run from the root.
     pub repo_root: Option<String>,
     pub created_by: Option<String>,
+    pub agent: Option<String>,
+    pub model: Option<String>,
     pub assigned_to: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
@@ -55,6 +57,8 @@ pub struct TaskUpdateParams {
     pub repo_root: Option<Option<String>>,
     pub assigned_to: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
+    pub agent: Option<Option<String>>,
+    pub model: Option<Option<String>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
     pub complexity: Option<TaskComplexity>,

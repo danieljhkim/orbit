@@ -24,6 +24,7 @@ pub mod audit;
 pub mod audit_event;
 pub mod error;
 pub mod event;
+pub mod friction;
 pub mod id;
 pub mod job;
 pub mod policy_decision;
@@ -39,6 +40,7 @@ pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats};
 pub use error::OrbitError;
 pub use event::OrbitEvent;
+pub use friction::FrictionEntry;
 pub use id::OrbitId;
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
@@ -64,8 +66,8 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        Activity, AgentCommitRequest, AgentResponseEnvelope, ExecutionResult, Job, JobRun,
-        JobRunState, JobScheduleState, JobStep, OrbitEvent, Role, Skill, TaskStatus,
+        Activity, AgentCommitRequest, AgentResponseEnvelope, ExecutionResult, FrictionEntry, Job,
+        JobRun, JobRunState, JobScheduleState, JobStep, OrbitEvent, Role, Skill, TaskStatus,
     };
 
     #[test]
@@ -261,5 +263,27 @@ mod tests {
             TaskStatus::InProgress
         );
         assert_eq!(TaskStatus::InProgress.to_string(), "in-progress");
+    }
+
+    #[test]
+    fn friction_entry_round_trips() {
+        let entry = FrictionEntry {
+            ts: Utc::now(),
+            job_run: "JR-123".to_string(),
+            step: "commit_changes".to_string(),
+            task_id: Some("T20260322-022125".to_string()),
+            command: "commit_task_changes".to_string(),
+            input: "{\"task_id\":\"T20260322-022125\"}".to_string(),
+            exit_code: Some(1),
+            stderr: "boom".to_string(),
+            agent: Some("codex".to_string()),
+            model: Some("gpt-5.4".to_string()),
+        };
+
+        let json = serde_json::to_string(&entry).expect("serialize friction entry");
+        let decoded: FrictionEntry =
+            serde_json::from_str(&json).expect("deserialize friction entry");
+
+        assert_eq!(decoded, entry);
     }
 }

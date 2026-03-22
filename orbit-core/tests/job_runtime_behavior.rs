@@ -8,6 +8,7 @@ use orbit_core::command::activity::{ActivityAddParams, ActivityRunParams};
 use orbit_core::command::job::JobAddParams;
 use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
+use orbit_store::friction_log::read_friction_entries_for_month;
 use orbit_types::{JobRunState, JobStep, OrbitError, TaskPriority, TaskStatus, TaskType};
 use serde_json::json;
 use tempfile::tempdir;
@@ -760,6 +761,132 @@ fn job_run_executes_agent_and_records_success_run() {
 }
 
 #[test]
+fn agent_step_records_task_agent_and_model_when_execution_starts() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("codex");
+    let script = "#!/bin/sh\ncat >/dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n";
+    let agent_cli = write_agent_script(&script_path, script);
+
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Track agent metadata".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: None,
+            priority: TaskPriority::High,
+            complexity: None,
+            task_type: TaskType::Feature,
+        })
+        .expect("add task");
+
+    add_activity_with_input_schema(
+        &runtime,
+        "spec-record-agent-model",
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string" }
+            },
+            "required": ["task_id"]
+        }),
+    );
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({ "task_id": task.id })),
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_id: "spec-record-agent-model".to_string(),
+                agent_cli,
+                model: Some("gpt-5.4".to_string()),
+                timeout_seconds: 10,
+                ..Default::default()
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Success);
+
+    let updated = runtime.get_task(&task.id).expect("get task");
+    assert_eq!(updated.agent.as_deref(), Some("codex"));
+    assert_eq!(updated.model.as_deref(), Some("gpt-5.4"));
+}
+
+#[test]
+fn failed_steps_append_friction_entries_to_daily_log() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("codex");
+    let script = "#!/bin/sh\ncat >/dev/null\nprintf '{\"schemaVersion\":1,\"status\":\"failed\",\"result\":null,\"error\":{\"code\":\"MOCK_FAILURE\",\"message\":\"tool wrapper broke\",\"details\":{}},\"durationMs\":1}'\n";
+    let agent_cli = write_agent_script(&script_path, script);
+
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Record friction".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: None,
+            priority: TaskPriority::High,
+            complexity: None,
+            task_type: TaskType::Issue,
+        })
+        .expect("add task");
+
+    add_activity_with_input_schema(
+        &runtime,
+        "spec-friction-failure",
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string" }
+            },
+            "required": ["task_id"]
+        }),
+    );
+    let job_id = runtime
+        .add_job(JobAddParams {
+            job_id: None,
+            default_input: Some(json!({ "task_id": task.id })),
+            max_active_runs: None,
+            steps: vec![JobStep {
+                target_id: "spec-friction-failure".to_string(),
+                agent_cli,
+                model: Some("gpt-5.4".to_string()),
+                timeout_seconds: 10,
+                ..Default::default()
+            }],
+            initial_state_override: None,
+        })
+        .expect("add job")
+        .job_id;
+
+    let run = runtime.run_job_now(&job_id).expect("run job");
+    assert_eq!(run.state, JobRunState::Failed);
+
+    let entries = read_friction_entries_for_month(
+        &runtime.data_root(),
+        &Utc::now().format("%Y-%m").to_string(),
+    )
+    .expect("read friction entries");
+    let entry = entries.last().expect("friction entry");
+    assert_eq!(entry.job_run, run.run_id);
+    assert_eq!(entry.step, "spec-friction-failure");
+    assert_eq!(entry.task_id.as_deref(), Some(task.id.as_str()));
+    assert_eq!(entry.command, "codex");
+    assert_eq!(entry.agent.as_deref(), Some("codex"));
+    assert_eq!(entry.model.as_deref(), Some("gpt-5.4"));
+    assert!(!entry.stderr.trim().is_empty(), "stderr: {}", entry.stderr);
+}
+
+#[test]
 fn run_job_now_with_input_passes_manual_input_to_agent() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
@@ -770,6 +897,19 @@ fn run_job_now_with_input_passes_manual_input_to_agent() {
         stdin = stdin_capture.to_string_lossy(),
     );
     let agent_cli = write_agent_script(&script_path, &script);
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Manual input task".to_string(),
+            description: "desc".to_string(),
+            plan: "plan".to_string(),
+            comment: None,
+            context_files: vec![],
+            workspace_path: None,
+            priority: TaskPriority::Medium,
+            complexity: None,
+            task_type: TaskType::Task,
+        })
+        .expect("add task");
 
     add_activity_with_input_schema(
         &runtime,
@@ -785,13 +925,13 @@ fn run_job_now_with_input_passes_manual_input_to_agent() {
     let job_id = add_scheduled_activity(&runtime, "spec-success-with-input", &agent_cli);
 
     let run = runtime
-        .run_job_now_with_input(&job_id, json!({ "task_id": "T123" }))
+        .run_job_now_with_input(&job_id, json!({ "task_id": task.id }))
         .expect("run job");
 
     assert_eq!(run.state, JobRunState::Success);
     let stdin_raw = std::fs::read_to_string(stdin_capture).expect("stdin capture");
     let payload: serde_json::Value = serde_json::from_str(&stdin_raw).expect("valid stdin payload");
-    assert_eq!(payload["input"]["task_id"], "T123");
+    assert_eq!(payload["input"]["task_id"], task.id);
 }
 
 #[test]

@@ -95,7 +95,7 @@ impl OrbitRuntime {
         debug: bool,
     ) -> Result<orbit_engine::JobRunResult, OrbitError> {
         let job = self.show_job(job_id)?;
-        orbit_engine::run_job_with_input(self, job, input, debug)
+        orbit_engine::run_job_with_input(self, &self.data_root(), job, input, debug)
     }
 
     pub(crate) fn recover_stale_active_run_for_job(
@@ -103,7 +103,7 @@ impl OrbitRuntime {
         job: &Job,
         now: DateTime<Utc>,
     ) -> Result<bool, OrbitError> {
-        orbit_engine::recover_stale_active_run_for_job(self, job, now)
+        orbit_engine::recover_stale_active_run_for_job(self, &self.data_root(), job, now)
     }
 
     pub fn add_job(&self, params: JobAddParams) -> Result<Job, OrbitError> {

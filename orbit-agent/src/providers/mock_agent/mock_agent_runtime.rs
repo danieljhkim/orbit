@@ -28,4 +28,8 @@ impl AgentRuntime for MockAgentRuntime {
             self.cli.stdin(&req.envelope_json),
         ))
     }
+
+    fn model_name(&self) -> Option<&str> {
+        None
+    }
 }

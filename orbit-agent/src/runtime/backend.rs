@@ -19,4 +19,12 @@ impl AgentRuntime for RuntimeBackend {
             RuntimeBackend::MockAgentCli(runtime) => runtime.invoke(req),
         }
     }
+
+    fn model_name(&self) -> Option<&str> {
+        match self {
+            RuntimeBackend::CodexCli(runtime) => runtime.model_name(),
+            RuntimeBackend::ClaudeCli(runtime) => runtime.model_name(),
+            RuntimeBackend::MockAgentCli(runtime) => runtime.model_name(),
+        }
+    }
 }

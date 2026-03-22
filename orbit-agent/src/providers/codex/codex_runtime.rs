@@ -36,4 +36,8 @@ impl AgentRuntime for CodexRuntime {
             self.cli.stdin(&req.envelope_json),
         ))
     }
+
+    fn model_name(&self) -> Option<&str> {
+        self.cli.model_name()
+    }
 }

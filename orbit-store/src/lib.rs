@@ -31,6 +31,10 @@ pub mod skill_store {
     pub use crate::file::skill_store::*;
 }
 
+pub mod friction_log {
+    pub use crate::file::friction_log::{append_friction_entry, read_friction_entries_for_month};
+}
+
 use chrono::{DateTime, Utc};
 
 pub use backend::{

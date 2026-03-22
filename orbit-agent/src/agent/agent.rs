@@ -77,4 +77,8 @@ impl Agent {
     pub fn invoke(&self, req: AgentRequest) -> Result<AgentResponse, OrbitError> {
         self.runtime.invoke(req)
     }
+
+    pub fn model_name(&self) -> Option<&str> {
+        self.runtime.model_name()
+    }
 }

@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
+use orbit_agent::Agent;
+use orbit_store::friction_log::append_friction_entry;
 use orbit_store::JobRunStepParams;
-use orbit_types::{Job, JobRun, JobRunState, JobStep, OrbitError, OrbitEvent};
+use orbit_types::{FrictionEntry, Job, JobRun, JobRunState, JobStep, OrbitError, OrbitEvent};
 use serde_json::Value;
+use std::path::Path;
 
 use crate::activity_runner::{build_execution_context_for_step, execute_with_retry};
 use crate::context::{
@@ -11,11 +14,12 @@ use crate::context::{
 
 pub fn run_job_with_input<H: EngineHost>(
     host: &H,
+    data_root: &Path,
     job: Job,
     input: Value,
     debug: bool,
 ) -> Result<JobRunResult, OrbitError> {
-    let _ = recover_stale_active_run_for_job(host, &job, Utc::now())?;
+    let _ = recover_stale_active_run_for_job(host, data_root, &job, Utc::now())?;
     let active_runs = host.list_pending_or_running_job_runs(&job.job_id)?;
     if active_runs.len() as u32 >= job.max_active_runs {
         let latest_active_run = active_runs.first().expect("active run exists");
@@ -32,11 +36,12 @@ pub fn run_job_with_input<H: EngineHost>(
         job_id: job.job_id.clone(),
     })?;
 
-    execute_activity_with_retries(host, job, Utc::now(), None, input, debug)
+    execute_activity_with_retries(host, data_root, job, Utc::now(), None, input, debug)
 }
 
 fn execute_activity_with_retries<H: EngineHost>(
     host: &H,
+    data_root: &Path,
     job: Job,
     scheduled_at: DateTime<Utc>,
     initial_run: Option<JobRun>,
@@ -88,6 +93,7 @@ fn execute_activity_with_retries<H: EngineHost>(
 
             let execution =
                 build_execution_context_for_step(host, &job, step, current_input.clone(), debug)?;
+            record_task_agent_context(host, &execution)?;
             let step_started = Utc::now();
             let outcome = execute_with_retry(
                 host,
@@ -153,6 +159,19 @@ fn execute_activity_with_retries<H: EngineHost>(
                 return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
             }
 
+            if step_state != JobRunState::Success {
+                append_failed_step_friction(
+                    data_root,
+                    host,
+                    &run.run_id,
+                    &step.target_id,
+                    &execution,
+                    outcome.exit_code,
+                    outcome.error_message.as_deref().unwrap_or(""),
+                    step_finished,
+                );
+            }
+
             if outcome.protocol_violation {
                 last_protocol_violation = true;
             }
@@ -213,7 +232,16 @@ fn execute_activity_with_retries<H: EngineHost>(
                 )
             {
                 let (step_index, step) = &failure_step;
-                finalize_failed_started_run(host, &job, &run, *step_index, step, started_at, &err)?;
+                finalize_failed_started_run(
+                    host,
+                    data_root,
+                    &job,
+                    &run,
+                    *step_index,
+                    step,
+                    started_at,
+                    &err,
+                )?;
                 let _ = host.maybe_create_failure_task(
                     &job.job_id,
                     &run.run_id,
@@ -228,6 +256,7 @@ fn execute_activity_with_retries<H: EngineHost>(
 
 pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
     host: &H,
+    data_root: &Path,
     job: &Job,
     now: DateTime<Utc>,
 ) -> Result<bool, OrbitError> {
@@ -268,6 +297,15 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
                             pid
                         )),
                     },
+                );
+                append_failed_step_friction_without_execution(
+                    data_root,
+                    &active_run.run_id,
+                    &first_step.target_id,
+                    FrictionContext::default(),
+                    Some(1),
+                    &format!("run abandoned: owner pid {} is no longer alive", pid),
+                    now,
                 );
             }
             let changed = host.abandon_job_run(&active_run.run_id, now)?;
@@ -322,6 +360,15 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
                     error_message: Some(message.clone()),
                 },
             );
+            append_failed_step_friction_without_execution(
+                data_root,
+                &active_run.run_id,
+                &first_step.target_id,
+                FrictionContext::default(),
+                Some(1),
+                &message,
+                now,
+            );
         }
 
         let changed =
@@ -356,6 +403,7 @@ fn pid_is_alive(_pid: u32) -> bool {
 
 fn finalize_failed_started_run<H: JobRunHost + RuntimeHost>(
     host: &H,
+    data_root: &Path,
     job: &Job,
     run: &JobRun,
     step_index: usize,
@@ -391,6 +439,15 @@ fn finalize_failed_started_run<H: JobRunHost + RuntimeHost>(
     if !changed {
         return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
     }
+    append_failed_step_friction_without_execution(
+        data_root,
+        &run.run_id,
+        &step.target_id,
+        FrictionContext::default(),
+        Some(1),
+        &message,
+        finished_at,
+    );
 
     let changed =
         host.finalize_job_run(&run.run_id, JobRunState::Failed, finished_at, duration_ms)?;
@@ -440,6 +497,144 @@ fn merge_job_input(default_input: Option<&Value>, input: Value) -> Result<Value,
     }
 
     Ok(Value::Object(merged))
+}
+
+fn record_task_agent_context<H: EngineHost>(
+    host: &H,
+    execution: &crate::context::ExecutionContext,
+) -> Result<(), OrbitError> {
+    if execution.agent_cli.trim().is_empty() {
+        return Ok(());
+    }
+    let Some(task_id) = extract_task_id(&execution.input) else {
+        return Ok(());
+    };
+
+    host.apply_task_automation_update(
+        task_id,
+        crate::context::TaskAutomationUpdate {
+            agent: Some(normalize_agent_label(&execution.agent_cli)),
+            model: resolved_model_name(host, execution),
+            ..Default::default()
+        },
+    )
+}
+
+fn resolved_model_name<H: EngineHost>(
+    host: &H,
+    execution: &crate::context::ExecutionContext,
+) -> Option<String> {
+    let config = host
+        .agent_config_for(&execution.agent_cli, execution.model.as_deref())
+        .ok()?;
+    let model_from_config = config.model.clone();
+    let agent = Agent::new(&config).ok();
+    agent
+        .and_then(|agent| agent.model_name().map(ToOwned::to_owned))
+        .or(model_from_config)
+}
+
+#[derive(Default)]
+struct FrictionContext {
+    input: Option<Value>,
+    command: Option<String>,
+    agent: Option<String>,
+    model: Option<String>,
+}
+
+fn append_failed_step_friction<H: EngineHost>(
+    data_root: &Path,
+    host: &H,
+    run_id: &str,
+    step_id: &str,
+    execution: &crate::context::ExecutionContext,
+    exit_code: Option<i32>,
+    stderr: &str,
+    ts: DateTime<Utc>,
+) {
+    append_failed_step_friction_without_execution(
+        data_root,
+        run_id,
+        step_id,
+        FrictionContext {
+            input: Some(execution.input.clone()),
+            command: Some(command_label(execution)),
+            agent: (!execution.agent_cli.trim().is_empty())
+                .then(|| normalize_agent_label(&execution.agent_cli)),
+            model: resolved_model_name(host, execution),
+        },
+        exit_code,
+        stderr,
+        ts,
+    );
+}
+
+fn append_failed_step_friction_without_execution(
+    data_root: &Path,
+    run_id: &str,
+    step_id: &str,
+    context: FrictionContext,
+    exit_code: Option<i32>,
+    stderr: &str,
+    ts: DateTime<Utc>,
+) {
+    let input = context
+        .input
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    let entry = FrictionEntry {
+        ts,
+        job_run: run_id.to_string(),
+        step: step_id.to_string(),
+        task_id: extract_task_id(&input).map(ToOwned::to_owned),
+        command: context.command.unwrap_or_else(|| step_id.to_string()),
+        input: serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string()),
+        exit_code,
+        stderr: stderr.to_string(),
+        agent: context.agent,
+        model: context.model,
+    };
+    if let Err(error) = append_friction_entry(data_root, &entry) {
+        eprintln!("orbit: failed to append friction log entry: {error}");
+    }
+}
+
+fn command_label(execution: &crate::context::ExecutionContext) -> String {
+    let config = &execution.activity.spec_config;
+    match execution.activity.spec_type.as_str() {
+        "automation" => config
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or(execution.activity.id.as_str())
+            .to_string(),
+        "cli_command" => config
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or(execution.activity.id.as_str())
+            .to_string(),
+        "api" => {
+            let method = config.get("method").and_then(Value::as_str).unwrap_or("API");
+            let url = config.get("url").and_then(Value::as_str).unwrap_or("");
+            format!("{method} {url}").trim().to_string()
+        }
+        "agent_invoke" => normalize_agent_label(&execution.agent_cli),
+        _ => execution.activity.id.to_string(),
+    }
+}
+
+fn extract_task_id(input: &Value) -> Option<&str> {
+    input
+        .as_object()
+        .and_then(|map| map.get("task_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn normalize_agent_label(agent_cli: &str) -> String {
+    std::path::Path::new(agent_cli)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(agent_cli)
+        .to_ascii_lowercase()
 }
 
 fn json_value_type_name(value: &Value) -> &'static str {

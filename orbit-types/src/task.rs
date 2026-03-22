@@ -288,6 +288,10 @@ pub struct Task {
     pub assigned_to: Option<String>,
     #[serde(default)]
     pub created_by: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     #[serde(default)]
@@ -369,6 +373,8 @@ mod tests {
             "status": "backlog",
             "priority": "medium",
             "task_type": "task",
+            "agent": "codex",
+            "model": "gpt-5.4",
             "comments": [],
             "history": [],
             "created_at": "2026-03-20T00:00:00Z",
@@ -377,5 +383,30 @@ mod tests {
         .expect("deserialize task");
 
         assert_eq!(task.complexity, None);
+        assert_eq!(task.agent.as_deref(), Some("codex"));
+        assert_eq!(task.model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[test]
+    fn task_missing_agent_and_model_deserializes_to_none() {
+        let task: Task = serde_json::from_value(serde_json::json!({
+            "id": "T20260320-000002",
+            "title": "Missing agent metadata",
+            "description": "desc",
+            "plan": "plan",
+            "execution_summary": "",
+            "context_files": [],
+            "status": "backlog",
+            "priority": "medium",
+            "task_type": "task",
+            "comments": [],
+            "history": [],
+            "created_at": "2026-03-20T00:00:00Z",
+            "updated_at": "2026-03-20T00:00:00Z"
+        }))
+        .expect("deserialize task");
+
+        assert_eq!(task.agent, None);
+        assert_eq!(task.model, None);
     }
 }

@@ -482,6 +482,8 @@ mod tests {
             repo_root: Some(repo_root.to_string_lossy().to_string()),
             assigned_to: None,
             created_by: Some("test".to_string()),
+            agent: None,
+            model: None,
             status: TaskStatus::Review,
             priority: TaskPriority::High,
             task_type: TaskType::Issue,
