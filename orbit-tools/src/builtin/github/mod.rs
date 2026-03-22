@@ -4,6 +4,7 @@ pub mod pr_checks;
 pub mod pr_close;
 pub mod pr_comment;
 pub mod pr_comment_reply;
+pub mod pr_comments;
 pub mod pr_create;
 pub mod pr_list;
 pub mod pr_merge;
@@ -25,6 +26,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(pr_checkout::GithubPrCheckoutTool);
     registry.register(pr_comment::GithubPrCommentTool);
     registry.register(pr_comment_reply::GithubPrCommentReplyTool);
+    registry.register(pr_comments::GithubPrCommentsTool);
     registry.register(pr_review::GithubPrReviewTool);
     registry.register(pr_merge::GithubPrMergeTool);
     registry.register(pr_close::GithubPrCloseTool);
@@ -81,6 +83,7 @@ mod tests {
             "github.pr.checkout",
             "github.pr.comment",
             "github.pr.comment.reply",
+            "github.pr.comments",
             "github.pr.review",
             "github.pr.merge",
             "github.pr.close",
@@ -153,9 +156,11 @@ mod tests {
 
     #[test]
     fn pr_comment_rejects_missing_pr() {
-        let err =
-            super::pr_comment::build_exec_request(&ToolContext::default(), &json!({ "body": "msg" }))
-                .expect_err("must fail");
+        let err = super::pr_comment::build_exec_request(
+            &ToolContext::default(),
+            &json!({ "body": "msg" }),
+        )
+        .expect_err("must fail");
         assert!(err.to_string().contains("pr"), "{err}");
     }
 
@@ -201,7 +206,10 @@ mod tests {
         .expect("valid");
         assert_eq!(req.program, "gh");
         assert_eq!(req.args[0], "api");
-        assert_eq!(req.args[1], "repos/owner/repo/pulls/34/comments/12345/replies");
+        assert_eq!(
+            req.args[1],
+            "repos/owner/repo/pulls/34/comments/12345/replies"
+        );
         assert_eq!(req.args[2], "-f");
         assert_eq!(req.args[3], "body=looks good");
     }
