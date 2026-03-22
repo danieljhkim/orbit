@@ -802,7 +802,7 @@ fn task_start_rejects_review_status() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "start requires 'proposed', 'backlog', or 'blocked'",
+            "start requires 'proposed', 'backlog', 'someday', or 'blocked'",
         ));
 }
 
@@ -1591,12 +1591,13 @@ fn task_reject_all_proposed_with_yes_flag() {
 }
 
 #[test]
-fn task_update_status_rejected_is_blocked() {
+fn task_update_status_rejected_is_allowed_with_relaxed_rules() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let id = add_task(dir.path(), "direct-reject-blocked");
+    let id = add_task(dir.path(), "direct-reject-allowed");
 
+    // Relaxed transition rules allow setting status to rejected directly.
     orbit_in(dir.path())
         .args(["task", "update", &id, "--status", "rejected"])
         .assert()
-        .failure();
+        .success();
 }

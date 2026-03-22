@@ -473,6 +473,7 @@ impl Execute for TaskUpdateArgs {
 pub enum TaskUpdateStatusArg {
     Proposed,
     Backlog,
+    Someday,
     #[value(name = "in-progress", alias = "in_progress")]
     InProgress,
     Review,
@@ -486,6 +487,7 @@ impl From<TaskUpdateStatusArg> for TaskStatus {
         match value {
             TaskUpdateStatusArg::Proposed => TaskStatus::Proposed,
             TaskUpdateStatusArg::Backlog => TaskStatus::Backlog,
+            TaskUpdateStatusArg::Someday => TaskStatus::Someday,
             TaskUpdateStatusArg::InProgress => TaskStatus::InProgress,
             TaskUpdateStatusArg::Review => TaskStatus::Review,
             TaskUpdateStatusArg::Done => TaskStatus::Done,

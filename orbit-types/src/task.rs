@@ -2,39 +2,30 @@
 //!
 //! ## Task Status Lifecycle
 //!
-//! ```text
-//!                     ┌──────────┐
-//!               ┌────►│ Proposed │────► Rejected ──┐
-//!               │     └──────────┘                  │
-//!               │           │ approve                │
-//!               │           ▼                        │
-//!               │       ┌────────┐                   │
-//!               │       │Backlog │◄──────────────────┘
-//!               │       └────────┘  (re-open)
-//!               │           │ start
-//!               │           ▼
-//!               │     ┌───────────┐
-//!               │     │InProgress │────► Review ────► Done
-//!               │     └───────────┘         │
-//!               │           ▲               │ reject
-//!               │           │               ▼
-//!               │       ┌───────┐       Rejected ───► Backlog / InProgress
-//!               │       │Blocked│         (can be re-opened)
-//!               │       └───────┘
-//!               │           ▲
-//!               │           │  (any state except Archived/Rejected can block)
-//!               │
-//!               └── Archived ──► Backlog  (archive is always allowed; unarchive restores to backlog)
-//! ```
+//! Transitions are **permissive by default** — any move is allowed unless it
+//! violates one of the three invariants below.
 //!
-//! ### Key invariants
-//! - **Archived** is always reachable from any state and from Archived you can only go back to Backlog.
-//! - **Blocked** is reachable from any state except Archived and Rejected. Unblocking resumes to
-//!   Backlog or InProgress depending on where you want to re-enter.
-//! - **Done** is terminal — no further transitions are permitted.
-//! - **Rejected** tasks can be re-opened to Backlog or InProgress (second-chance policy).
+//! ### Invariants (blocklist)
+//! 1. **Done is terminal** — no transitions out of done.
+//! 2. **Archived requires dedicated command** — use `orbit task archive`; the
+//!    bare `--status archived` path is rejected.
+//! 3. **InProgress → Review requires execution_summary** — enforced at the
+//!    command layer, not in [`TaskStatus::validate_transition`].
 //!
-//! See [`TaskStatus::validate_transition`] for the machine implementation.
+//! ### Statuses
+//! | Status       | Purpose |
+//! |--------------|---------|
+//! | Proposed     | Awaiting human approval before entering the backlog. |
+//! | Backlog      | Approved and queued for work. |
+//! | Someday      | Future-scoped — wanted but not yet actionable. Agents skip someday tasks. |
+//! | InProgress   | Actively being worked on. |
+//! | Review       | Implementation complete; awaiting review/merge. |
+//! | Done         | Accepted and closed. Terminal. |
+//! | Blocked      | Temporarily paused. |
+//! | Archived     | Soft-deleted. Restorable to Backlog. |
+//! | Rejected     | Declined. Can be re-opened. |
+//!
+//! See [`TaskStatus::validate_transition`] for the blocklist implementation.
 
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -68,6 +59,8 @@ pub enum TaskStatus {
     Archived,
     /// Declined. Can be re-opened to Backlog or InProgress.
     Rejected,
+    /// Future-scoped — wanted but not yet actionable. Agents skip someday tasks.
+    Someday,
 }
 
 impl Display for TaskStatus {
@@ -90,6 +83,7 @@ impl FromStr for TaskStatus {
             "blocked" => Ok(TaskStatus::Blocked),
             "archived" => Ok(TaskStatus::Archived),
             "rejected" => Ok(TaskStatus::Rejected),
+            "someday" => Ok(TaskStatus::Someday),
             other => Err(format!("unknown task status: {other}")),
         }
     }
@@ -106,40 +100,39 @@ impl TaskStatus {
             TaskStatus::Blocked => "blocked",
             TaskStatus::Archived => "archived",
             TaskStatus::Rejected => "rejected",
+            TaskStatus::Someday => "someday",
         }
     }
 
+    /// Validates a status transition using a short blocklist of invariants:
+    ///
+    /// 1. **Done is terminal** — no transitions out of done.
+    /// 2. **Archived requires dedicated command** — use `orbit task archive`, not a
+    ///    bare status update (enforced upstream; blocked here as defense-in-depth).
+    /// 3. **InProgress → Review requires execution_summary** — enforced upstream in
+    ///    `update_task_with_status_note`, not here (we lack the task data).
+    ///
+    /// Everything else is allowed.
     pub fn validate_transition(&self, target: TaskStatus) -> Result<(), String> {
+        // No-op transitions are always fine.
+        if *self == target {
+            return Ok(());
+        }
+
+        // Done is terminal.
+        if *self == TaskStatus::Done {
+            return Err(format!("invalid status transition: {} -> {} (done is terminal)", self, target));
+        }
+
+        // Archived requires the dedicated archive command.
         if target == TaskStatus::Archived {
-            return Ok(());
-        }
-        if target == TaskStatus::Blocked
-            && *self != TaskStatus::Archived
-            && *self != TaskStatus::Rejected
-        {
-            return Ok(());
+            return Err(format!(
+                "invalid status transition: {} -> {} (use the archive command)",
+                self, target
+            ));
         }
 
-        let allowed = match self {
-            TaskStatus::Proposed => target == TaskStatus::Backlog || target == TaskStatus::Rejected,
-            TaskStatus::Backlog => target == TaskStatus::InProgress,
-            TaskStatus::InProgress => target == TaskStatus::Review,
-            TaskStatus::Review => target == TaskStatus::Done || target == TaskStatus::Rejected,
-            TaskStatus::Done => false,
-            TaskStatus::Blocked => {
-                target == TaskStatus::Backlog || target == TaskStatus::InProgress
-            }
-            TaskStatus::Archived => target == TaskStatus::Backlog,
-            TaskStatus::Rejected => {
-                target == TaskStatus::Backlog || target == TaskStatus::InProgress
-            }
-        };
-
-        if allowed {
-            Ok(())
-        } else {
-            Err(format!("invalid status transition: {} -> {}", self, target))
-        }
+        Ok(())
     }
 }
 

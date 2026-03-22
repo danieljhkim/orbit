@@ -725,11 +725,13 @@ fn update_task_activity_rejects_invalid_status_transition() {
     let dir = tempfile::tempdir().expect("tempdir");
     init_orbit(dir.path());
 
+    // Create a task and move it to done (terminal state).
     let task = add_task(dir.path(), "Wrong transition");
     let task_id = task["id"].as_str().expect("task id").to_string();
 
+    // First move to done.
     let job_id = add_job(dir.path(), "update_task", "");
-    let run_output = orbit_in(dir.path())
+    orbit_in(dir.path())
         .args([
             "job",
             "run",
@@ -739,7 +741,23 @@ fn update_task_activity_rejects_invalid_status_transition() {
             "--input",
             "status=done",
             "--input",
-            "execution_summary=Should not matter",
+            "execution_summary=Completed",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    // Now try to transition out of done — should fail (done is terminal).
+    let job_id2 = add_job(dir.path(), "update_task", "");
+    let run_output = orbit_in(dir.path())
+        .args([
+            "job",
+            "run",
+            &job_id2,
+            "--input",
+            &format!("task_id={task_id}"),
+            "--input",
+            "status=backlog",
             "--json",
         ])
         .assert()
@@ -753,7 +771,7 @@ fn update_task_activity_rejects_invalid_status_transition() {
         run["error_message"]
             .as_str()
             .expect("error message")
-            .contains("invalid status transition")
+            .contains("done is terminal")
     );
 }
 

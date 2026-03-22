@@ -28,6 +28,7 @@ pub(crate) struct TaskFileStore {
 enum TaskStateDir {
     Proposed,
     Backlog,
+    Someday,
     InProgress,
     Review,
     Done,
@@ -41,6 +42,7 @@ impl TaskStateDir {
         match self {
             TaskStateDir::Proposed => "proposed",
             TaskStateDir::Backlog => "backlog",
+            TaskStateDir::Someday => "someday",
             TaskStateDir::InProgress => "in_progress",
             TaskStateDir::Review => "review",
             TaskStateDir::Done => "done",
@@ -54,6 +56,7 @@ impl TaskStateDir {
         match self {
             TaskStateDir::Proposed => TaskStatus::Proposed,
             TaskStateDir::Backlog => TaskStatus::Backlog,
+            TaskStateDir::Someday => TaskStatus::Someday,
             TaskStateDir::InProgress => TaskStatus::InProgress,
             TaskStateDir::Review => TaskStatus::Review,
             TaskStateDir::Done => TaskStatus::Done,
@@ -67,6 +70,7 @@ impl TaskStateDir {
         match status {
             TaskStatus::Proposed => TaskStateDir::Proposed,
             TaskStatus::Backlog => TaskStateDir::Backlog,
+            TaskStatus::Someday => TaskStateDir::Someday,
             TaskStatus::InProgress => TaskStateDir::InProgress,
             TaskStatus::Review => TaskStateDir::Review,
             TaskStatus::Done => TaskStateDir::Done,
@@ -76,10 +80,11 @@ impl TaskStateDir {
         }
     }
 
-    fn all() -> [TaskStateDir; 8] {
+    fn all() -> [TaskStateDir; 9] {
         [
             TaskStateDir::Proposed,
             TaskStateDir::Backlog,
+            TaskStateDir::Someday,
             TaskStateDir::InProgress,
             TaskStateDir::Review,
             TaskStateDir::Done,

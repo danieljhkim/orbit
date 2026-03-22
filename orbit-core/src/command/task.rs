@@ -174,12 +174,6 @@ impl OrbitRuntime {
                         .to_string(),
                 ));
             }
-            if target_status == TaskStatus::Rejected {
-                return Err(OrbitError::InvalidInput(
-                    "use `orbit task reject <id>` instead of setting status to rejected"
-                        .to_string(),
-                ));
-            }
             task.status
                 .validate_transition(target_status)
                 .map_err(OrbitError::TaskStatusTransition)?;
@@ -337,7 +331,7 @@ impl OrbitRuntime {
                 })?;
                 Ok(task)
             }
-            TaskStatus::Backlog | TaskStatus::Blocked => {
+            TaskStatus::Backlog | TaskStatus::Someday | TaskStatus::Blocked => {
                 let task = self.with_mutation(|| {
                     let task = self.update_task_record(
                         id,
@@ -366,7 +360,7 @@ impl OrbitRuntime {
                 "task '{id}' is already in-progress"
             ))),
             other => Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{other}'; start requires 'proposed', 'backlog', or 'blocked'"
+                "task '{id}' is in status '{other}'; start requires 'proposed', 'backlog', 'someday', or 'blocked'"
             ))),
         }
     }
