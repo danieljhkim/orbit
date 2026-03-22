@@ -10,7 +10,7 @@ activity:
   spec_type: automation
 
   # ---- content ----
-  description: "Safety net: persist task status and execution details if the task is not already at the target status. Skips with skipped=true when the task status already matches."
+  description: "Safety net: persist task status if the task is not already at the target status. Skips silently when the task status already matches."
 
   # ---- interface ----
   input_schema_json:
@@ -25,23 +25,9 @@ activity:
       status:
         type: string
         description: The target task status to apply using Orbit's normal transition rules.
-      execution_summary:
-        type: string
-        description: Optional replacement execution summary for the task. Required for in-progress to review transitions.
-      comment:
-        type: string
-        description: Optional task comment to append while persisting the result.
   output_schema_json:
     type: object
-    required:
-      - task_id
-    properties:
-      task_id:
-        type: string
-        description: The updated task ID.
-      skipped:
-        type: boolean
-        description: True when the task was already at the target status and no mutation occurred.
+    properties: {}
 
   # ---- execution ----
   action: update_task

@@ -17,11 +17,9 @@ activity:
 
     Steps:
     1. Load task context:
-       - If input.task_id is present, call orbit.task.show with id: input.task_id to fetch
-         the task's title, description, plan, and context_files.
-       - If input.task_id is absent, proceed without task metadata — this activity can run
-         in taskless pipelines (e.g., lint-fix, deploy).
-       - input.workspace_path is the authoritative implementation workspace.
+       - Call orbit.task.show with id: input.task_id to fetch the task's title, description,
+         plan, context_files, workspace_path, and repo_root.
+       - The task's workspace_path is the authoritative implementation workspace.
 
     2. Confirm the task lifecycle state:
        - In the standard `job_task_pipeline`, the `create_branch` activity automatically
@@ -31,7 +29,7 @@ activity:
 
     3. Explore the workspace:
        - Read the files listed in the task's context_files. Understand the existing code before writing.
-       - All relative file and process work should happen inside input.workspace_path.
+       - All relative file and process work should happen inside the task's workspace_path.
 
     4. Implement the task:
        - If the task has a plan, follow the plan steps in order.
@@ -44,7 +42,7 @@ activity:
          decide whether to widen the task scope or file a separate task.
 
     5. Verify the implementation:
-       - Use proc.spawn to run the project's test and lint commands from input.workspace_path.
+       - Use proc.spawn to run the project's test and lint commands from the task's workspace_path.
          Common commands: `cargo test --workspace`, `make check`, `npm test`.
        - If tests fail, fix the issue before continuing. Do not move to review with
          failing tests.
@@ -78,10 +76,15 @@ activity:
            - <next step>
        - Do not stage files, create commits, or open pull requests. The job pipeline will handle persistence and those steps after this activity succeeds.
 
-    7. Return output:
+    7. Persist execution details to the task:
+       - Call orbit.task.update with id: input.task_id and:
+         - execution_summary: the full markdown summary
+       - This writes the execution summary directly to the task so downstream steps can load it.
+
+    8. Return output:
        - status: "review" when implementation is ready for persistence and verification
        - status: "blocked" when implementation could not be completed safely
-       - execution_summary: the full markdown summary (will be passed to update_task for persistence)
+       - execution_summary: the full markdown summary
 
     If any step fails unrecoverably (tests cannot be fixed, plan is ambiguous, required
     files are missing), return status: "blocked" with the execution_summary documenting
@@ -90,37 +93,28 @@ activity:
   # ---- interface ----
   input_schema_json:
     type: object
+    required:
+      - task_id
     properties:
       task_id:
         type: string
-        description: Optional Orbit task ID. When present, the agent loads task metadata via orbit.task.show.
-      workspace_path:
-        type: string
-        description: Optional task worktree path. If provided, it is the authoritative implementation workspace.
-      repo_root:
-        type: string
-        description: Optional repository root or task worktree path to use for git operations.
-      branch:
-        type: string
-        description: Optional task branch name expected to be checked out in the implementation workspace.
+        description: Orbit task ID. The agent loads task metadata (workspace_path, repo_root, branch) via orbit.task.show.
   output_schema_json:
     type: object
     properties:
-      task_id:
-        type: string
-        description: Optional Orbit task ID. When present, downstream steps can load status and execution details from the task directly.
       status:
         type: string
         description: Target Orbit task status for the follow-up update_task step, typically review or blocked.
       execution_summary:
         type: string
-        description: Full markdown execution summary (passed to update_task activity for persistence)
+        description: Full markdown execution summary (agent also persists this to the task via orbit.task.update)
 
   # ---- execution ----
   skill_refs:
     - orbit
   tools:
     - orbit.task.show
+    - orbit.task.update
     - fs.write
     - fs.delete
     - proc.spawn

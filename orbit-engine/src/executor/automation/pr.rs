@@ -5,10 +5,8 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 use super::freshness::ensure_branch_fresh_against_base;
-use super::input::{
-    canonicalize_existing_dir, input_string_array_field, input_string_field, input_workspace_path,
-    json_number_to_string, required_input_string,
-};
+use super::git::git_output;
+use super::input::{canonicalize_existing_dir, json_number_to_string, required_input_string};
 use super::review::resolve_review_decision;
 
 pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
@@ -18,29 +16,25 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(
-        &input_string_field(input, "repo_root")
-            .or_else(|| input_workspace_path(input))
-            .or_else(|| task.repo_root.clone())
-            .or_else(|| task.workspace_path.clone())
+        &task
+            .repo_root
+            .as_deref()
+            .or(task.workspace_path.as_deref())
             .ok_or_else(|| {
                 OrbitError::InvalidInput(
-                    "merge_pr_from_task requires input.repo_root, input.workspace_path, task.repo_root, or task.workspace_path"
-                        .to_string(),
+                    "merge_pr_from_task requires task.repo_root or task.workspace_path".to_string(),
                 )
             })?,
         "repo_root",
     )?;
-    let pr_number = input_string_field(input, "pr_number")
-        .or_else(|| task.pr_number.clone())
-        .ok_or_else(|| {
-            OrbitError::InvalidInput(
-                "merge_pr_from_task requires input.pr_number or task.pr_number".to_string(),
-            )
-        })?;
-    let head = input_string_field(input, "branch")
-        .unwrap_or_else(|| format!("orbit/{task_id}"));
-    let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
-    let review_decision = resolve_review_decision(&repo_root, &pr_number)?;
+    let pr_number = task.pr_number.as_deref().ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "merge_pr_from_task requires task.pr_number".to_string(),
+        )
+    })?;
+    let head = format!("orbit/{task_id}");
+    let base = "agent-main".to_string();
+    let review_decision = resolve_review_decision(&repo_root, pr_number)?;
     if review_decision != "APPROVED" {
         return Err(OrbitError::Execution(format!(
             "pull request '{pr_number}' is not approved (review_decision={review_decision})"
@@ -60,12 +54,11 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
         allowed_tools: vec![],
         ..Default::default()
     };
-    let strategy = input_string_field(input, "strategy").unwrap_or_else(|| "squash".to_string());
     host.run_tool_with_context_and_role(
         "github.pr.merge",
         json!({
-            "pr": pr_number.clone(),
-            "strategy": strategy,
+            "pr": pr_number,
+            "strategy": "squash",
         }),
         Role::Admin,
         tool_context,
@@ -79,15 +72,13 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
             } else {
                 None
             },
-            pr_number: Some(pr_number.clone()),
+            pr_number: Some(pr_number.to_string()),
             ..TaskAutomationUpdate::default()
         },
     )?;
 
     Ok(json!({
-        "pr_number": pr_number,
         "merged": true,
-        "review_decision": review_decision,
     }))
 }
 
@@ -98,20 +89,19 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(
-        &input_string_field(input, "repo_root")
-            .or_else(|| input_workspace_path(input))
-            .or_else(|| task.repo_root.clone())
+        &task
+            .repo_root
+            .as_deref()
+            .or(task.workspace_path.as_deref())
             .ok_or_else(|| {
                 OrbitError::InvalidInput(
-                    "open_pr_from_task requires input.repo_root, input.workspace_path, or task.repo_root"
-                        .to_string(),
+                    "open_pr_from_task requires task.repo_root or task.workspace_path".to_string(),
                 )
             })?,
         "repo_root",
     )?;
-    let head = input_string_field(input, "branch")
-        .unwrap_or_else(|| format!("orbit/{task_id}"));
-    let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
+    let head = format!("orbit/{task_id}");
+    let base = "agent-main".to_string();
 
     // Idempotent: if the task already has a PR number, skip creation and return
     // the existing PR info.  This handles the case where the agent (or a
@@ -128,37 +118,29 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
             Role::Admin,
             tool_context,
         );
-        if let Ok(view) = pr_view {
-            let pr_url = view
-                .get("pull_request")
-                .and_then(|pr| pr.get("url"))
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            return Ok(json!({
-                "pr_url": pr_url,
-                "pr_number": existing_pr,
-                "title": task.title.trim(),
-                "body": "",
-                "base": base,
-                "head": head,
-                "skipped": true,
-            }));
+        if pr_view.is_ok() {
+            return Ok(json!({}));
         }
         // If the PR view failed (e.g. PR was closed/deleted), fall through to
         // create a new one.
     }
 
-    let commit_message = input_string_field(input, "commit_message")
-        .unwrap_or_default();
-    let changed_files = match input.get("changed_files") {
-        Some(_) => input_string_array_field(input, "changed_files")?,
-        None => vec![],
-    };
     let freshness = ensure_branch_fresh_against_base(&repo_root, &head, &base)?;
+
+    // Derive changed files from git diff against base.
+    let diff_output = git_output(
+        &repo_root,
+        &["diff", "--name-only", &format!("{base}...{head}")],
+    )
+    .unwrap_or_default();
+    let changed_files: Vec<&str> = diff_output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .collect();
+
     let body = format!(
         "## Changes\n{}\n\n## Branch Freshness\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}\n\n## Files Changed\n{}",
-        commit_message,
+        task.execution_summary.trim(),
         freshness.base_ref,
         freshness.head_ref,
         freshness.commits_behind,
@@ -236,14 +218,7 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
         },
     )?;
 
-    Ok(json!({
-        "pr_url": pr_create["url"].clone(),
-        "pr_number": pr_number,
-        "title": title,
-        "body": body,
-        "base": base,
-        "head": head,
-    }))
+    Ok(json!({}))
 }
 
 #[cfg(test)]
@@ -529,16 +504,11 @@ mod tests {
             &host,
             &json!({
                 "task_id": "T20260320-021158",
-                "repo_root": repo_dir.path().to_string_lossy().to_string(),
-                "review_decision": "COMMENTED",
-                "action": "COMMENTED",
-                "pr_number": "18",
             }),
         )
         .expect("merge should succeed");
 
         assert_eq!(result["merged"], json!(true));
-        assert_eq!(result["review_decision"], json!("APPROVED"));
 
         let tool_invocations = host.tool_invocations.borrow();
         assert_eq!(tool_invocations.len(), 1);
@@ -567,10 +537,6 @@ mod tests {
             &host,
             &json!({
                 "task_id": "T20260320-021158",
-                "repo_root": repo_dir.path().to_string_lossy().to_string(),
-                "review_decision": "APPROVED",
-                "action": "APPROVE",
-                "pr_number": "18",
             }),
         )
         .expect_err("merge should fail");
@@ -596,8 +562,6 @@ mod tests {
             &host,
             &json!({
                 "task_id": "T20260320-025301",
-                "repo_root": repo_dir.path().to_string_lossy().to_string(),
-                "pr_number": "20",
             }),
         )
         .expect_err("merge should fail when reviewDecision is null");

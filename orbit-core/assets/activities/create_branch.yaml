@@ -26,20 +26,7 @@ activity:
         description: Branch or commit to start from (e.g. main). Defaults to main in job_task_pipeline.
   output_schema_json:
     type: object
-    required:
-      - workspace_path
-      - repo_root
-      - branch
-    properties:
-      workspace_path:
-        type: string
-        description: Dedicated task worktree path for downstream execution.
-      repo_root:
-        type: string
-        description: Canonical repository root used to create the worktree.
-      branch:
-        type: string
-        description: Task branch checked out inside the worktree.
+    properties: {}
 
   # ---- execution ----
   action: create_task_worktree

@@ -20,41 +20,15 @@ activity:
     properties:
       task_id:
         type: string
-        description: The Orbit task ID whose pull request should be merged
-      pr_number:
-        type: string
-        description: Pull request number, URL, or branch name. Optional when task_id is provided; falls back to the task pr_number.
-      review_decision:
-        type: string
-        description: Optional upstream review decision. When provided, APPROVED skips the extra gh pr view approval lookup.
-      repo_root:
-        type: string
-        description: Canonical repository root or task worktree used to resolve the current repository context. Optional when task_id is provided; falls back to input.workspace_path, task.repo_root, and then task.workspace_path.
-      branch:
-        type: string
-        description: Task branch expected to be merged. Optional when task_id is provided; falls back to the task branch.
-      base:
-        type: string
-        description: Base branch the PR targets (defaults to agent-main) and to compare for branch freshness before merging.
-      strategy:
-        type: string
-        description: Merge strategy passed to github.pr.merge. Defaults to squash.
+        description: The Orbit task ID whose pull request should be merged. All other fields (pr_number, repo_root, branch, base) are loaded from the task or use conventions.
   output_schema_json:
     type: object
     required:
-      - pr_number
       - merged
-      - review_decision
     properties:
-      pr_number:
-        type: string
-        description: Pull request number, URL, or branch name that was merged.
       merged:
         type: boolean
         description: Whether the pull request merge completed successfully.
-      review_decision:
-        type: string
-        description: Review decision used to authorize the merge.
 
   # ---- execution ----
   action: merge_pr_from_task

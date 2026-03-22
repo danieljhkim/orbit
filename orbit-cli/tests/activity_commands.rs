@@ -622,6 +622,21 @@ fn update_task_activity_job_run_updates_task_and_history() {
         .assert()
         .success();
 
+    // In the task_id-as-spine model, execution_summary is written to the task
+    // before update_task runs (e.g. by the implement_change agent calling
+    // orbit.task.update).  Simulate that here.
+    orbit_in(dir.path())
+        .args([
+            "task",
+            "update",
+            &task_id,
+            "--execution-summary",
+            "Implemented change and validated tests.",
+            "--json",
+        ])
+        .assert()
+        .success();
+
     let job_id = add_job(dir.path(), "update_task", "");
     let run_output = orbit_in(dir.path())
         .args([
@@ -632,10 +647,6 @@ fn update_task_activity_job_run_updates_task_and_history() {
             &format!("task_id={task_id}"),
             "--input",
             "status=review",
-            "--input",
-            "execution_summary=Implemented change and validated tests.",
-            "--input",
-            "comment=Ready for review",
             "--input",
             "note=handoff ready",
             "--json",
@@ -653,13 +664,6 @@ fn update_task_activity_job_run_updates_task_and_history() {
     assert_eq!(
         updated["execution_summary"],
         "Implemented change and validated tests."
-    );
-    assert!(
-        updated["comments"]
-            .as_array()
-            .expect("comments")
-            .iter()
-            .any(|comment| comment["message"] == "Ready for review")
     );
     let history = updated["history"].as_array().expect("history");
     assert_eq!(

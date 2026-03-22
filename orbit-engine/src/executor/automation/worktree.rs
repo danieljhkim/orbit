@@ -74,11 +74,7 @@ pub(super) fn create_task_worktree<H: RuntimeHost + TaskHost + ?Sized>(
         },
     )?;
 
-    Ok(json!({
-        "workspace_path": canonical_worktree.to_string_lossy().to_string(),
-        "repo_root": canonical_repo_root.to_string_lossy().to_string(),
-        "branch": branch,
-    }))
+    Ok(json!({}))
 }
 
 pub(super) fn finalize_task_worktree(input: &Value) -> Result<Value, OrbitError> {

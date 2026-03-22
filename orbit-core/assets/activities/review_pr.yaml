@@ -15,17 +15,13 @@ activity:
     Only use skills listed in this activity's skill_refs. Ignore all others.
     You are reviewing a pull request for an Orbit task.
     Steps:
-    1. Load task context (if available):
-       - If input.task_id is present, call orbit.task.show with input: {"id": "<task_id>"}
-         to fetch the task's title, description, plan, and acceptanceCriteria.
+    1. Load task context:
+       - Call orbit.task.show with input: {"id": "<task_id>"} to fetch the task's title,
+         description, plan, acceptanceCriteria, and prNumber.
          Example: orbit.task.show --input '{"id": "T20260315-123456"}'
-       - If input.task_id is absent, proceed without task metadata — review the PR on its
-         own merits using the PR description and changed files.
     2. Determine the PR identifier:
-       - If input.pr is provided, use it directly.
-       - If input.task_id is present, use the task's `prNumber` field if set, or fall back
-         to the branch name "orbit/<task_id>".
-    3. Call github.pr.view with pr: <identifier> (and repo: "{{input.repo}}" if provided).
+       - Use the task's `prNumber` field if set, or fall back to the branch name "orbit/<task_id>".
+    3. Call github.pr.view with pr: <identifier>.
        - Inspect the PR title, body, changed files, and commits.
     4. Evaluate the PR against the task:
        - Does the implementation cover all acceptance criteria?
@@ -56,37 +52,22 @@ activity:
        - pr: <identifier>
        - action: <chosen action>
        - body: <review summary> (required for request-changes and comment)
-       - repo: "{{input.repo}}" if provided
     7. Return the action and body in the output.
 
-    If input.task_id was provided but the task is not found, or the PR cannot be located,
-    return a clear error.
+    If the task is not found, or the PR cannot be located, return a clear error.
 
   # ---- interface ----
   input_schema_json:
     type: object
+    required:
+      - task_id
     properties:
       task_id:
         type: string
-        description: Optional Orbit task ID whose PR should be reviewed. When present, the agent loads task metadata via orbit.task.show.
-      pr:
-        type: string
-        description: PR number, URL, or branch name. Optional when task_id is provided; falls back to the task prNumber and then the task branch.
-      repo:
-        type: string
-        description: Repository in owner/name format. Optional when task_id is provided and defaults to the current repository.
+        description: Orbit task ID whose PR should be reviewed. The agent loads task metadata (including prNumber) via orbit.task.show.
   output_schema_json:
     type: object
-    required:
-      - action
-      - body
-    properties:
-      action:
-        type: string
-        description: "Review decision: approve, request-changes, or comment"
-      body:
-        type: string
-        description: Review body summarising findings
+    properties: {}
 
   # ---- execution ----
   skill_refs:

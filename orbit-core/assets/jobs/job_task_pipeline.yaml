@@ -52,8 +52,6 @@ job:
     - target_type: activity
       target_id: open_pr
       timeout_seconds: 300
-      output_map:
-        pr_url: pr
 
     - target_type: activity
       target_id: review_pr

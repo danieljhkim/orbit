@@ -15,39 +15,20 @@ activity:
   # ---- interface ----
   input_schema_json:
     type: object
-    required: []
+    required:
+      - task_id
     properties:
-      workspace_path:
+      task_id:
         type: string
-        description: Task workspace path for CLI execution. Optional when task_id is provided elsewhere in the pipeline and falls back to the task workspace_path.
+        description: Orbit task ID. The engine loads the task's workspace_path into the template context so {{workspace_path}} resolves automatically.
   output_schema_json:
     type: object
-    properties:
-      exit_code:
-        type: integer
+    properties: {}
 
   # ---- execution ----
   # Convention: the workspace project must expose a `make check` target that runs
   # tests, formatting, and linting in one step. This keeps the activity simple and
   # lets each project own what "check" means.
-  #
-  # For stack auto-detection, replace command/args with:
-  #   command: bash
-  #   args:
-  #     - -c
-  #     - |
-  #       set -e
-  #       if [ -f Cargo.toml ]; then
-  #         cargo fmt --check && cargo clippy -- -D warnings && cargo test --workspace
-  #       elif [ -f package.json ]; then
-  #         npm run lint --if-present && npm test
-  #       elif [ -f pyproject.toml ]; then
-  #         python -m pytest
-  #       elif [ -f Makefile ]; then
-  #         make check
-  #       else
-  #         echo "No recognized project type in $(pwd)" >&2; exit 1
-  #       fi
   command: make
   args:
     - check

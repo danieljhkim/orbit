@@ -7,6 +7,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
+use serde_json::Value as JsonValue;
+
 use super::ActivityExecutor;
 use crate::activity_runner::{
     execution_template_context_with_env, validate_activity_output_schema,
@@ -39,10 +41,20 @@ impl ActivityExecutor for CliCommandExecutor {
     }
 
     fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome {
-        let template_context = execution_template_context_with_env(
+        let mut template_context = execution_template_context_with_env(
             execution,
             host.cli_command_environment(&execution.env_extra),
         );
+        // When a cli_command step has task_id in its input, load the task and
+        // inject its fields into the template context so {{workspace_path}}
+        // resolves from the task without explicit pipeline input.
+        if template_context.workspace_path.is_none() {
+            if let Some(task_id) = execution.input.get("task_id").and_then(JsonValue::as_str) {
+                if let Ok(task) = host.get_task(task_id) {
+                    template_context.workspace_path = task.workspace_path;
+                }
+            }
+        }
         match execute(
             &execution.activity.spec_config,
             &template_context,

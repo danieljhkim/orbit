@@ -25,36 +25,6 @@ pub(super) fn input_string_field(input: &Value, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-pub(super) fn input_string_array_field(
-    input: &Value,
-    key: &str,
-) -> Result<Vec<String>, OrbitError> {
-    let Some(values) = input
-        .as_object()
-        .and_then(|map| map.get(key))
-        .and_then(Value::as_array)
-    else {
-        return Ok(Vec::new());
-    };
-
-    values
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            value
-                .as_str()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| {
-                    OrbitError::InvalidInput(format!(
-                        "input.{key}[{index}] must be a non-empty string"
-                    ))
-                })
-        })
-        .collect()
-}
-
 pub(super) fn input_workspace_path(input: &Value) -> Option<String> {
     input
         .as_object()

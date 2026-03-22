@@ -17,22 +17,11 @@ pub(super) fn update_task<H: TaskHost + ?Sized>(
     // Idempotent: if task is already at the target status, skip the update.
     let task = host.get_task(task_id)?;
     if task.status == status {
-        return Ok(json!({
-            "task_id": task.id.to_string(),
-            "skipped": true,
-        }));
+        return Ok(json!({}));
     }
 
     let note = input_string_field(input, "note")
         .or_else(|| Some(format!("automation: update_task → {status}")));
-    let task = host.update_task_from_activity(
-        task_id,
-        status,
-        input_string_field(input, "execution_summary"),
-        input_string_field(input, "comment"),
-        note,
-    )?;
-    Ok(json!({
-        "task_id": task.id.to_string(),
-    }))
+    host.update_task_from_activity(task_id, status, None, None, note)?;
+    Ok(json!({}))
 }

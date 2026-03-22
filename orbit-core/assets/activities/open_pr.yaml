@@ -10,7 +10,7 @@ activity:
   spec_type: automation
 
   # ---- content ----
-  description: "Safety net: open a pull request from Orbit task metadata if the task does not already have one. Skips with skipped=true when the task already references an open PR."
+  description: "Safety net: open a pull request from Orbit task metadata if the task does not already have one. Skips silently when the task already references an open PR."
 
   # ---- interface ----
   input_schema_json:
@@ -20,47 +20,10 @@ activity:
     properties:
       task_id:
         type: string
-        description: The Orbit task ID whose branch should be opened as a PR
-      repo_root:
-        type: string
-        description: Canonical repository root or task worktree used to resolve the current repository context. Optional when task_id is provided; falls back to input.workspace_path and then the task repo_root.
-      branch:
-        type: string
-        description: Task branch to open as a PR. Optional when task_id is provided; falls back to the task branch.
-      base:
-        type: string
-        description: Base branch to merge into (defaults to agent-main) and to compare for branch freshness before PR creation.
-      commit_message:
-        type: string
-        description: Commit message from the preceding commit_task_changes step, used as PR body header. Optional when task_id is provided; falls back to the task commit_message.
-      changed_files:
-        type: array
-        items:
-          type: string
-        description: List of changed file paths from the preceding commit_task_changes step. Optional when task_id is provided; falls back to the task changed_files.
+        description: The Orbit task ID whose branch should be opened as a PR. All other fields (repo_root, branch, base, execution_summary, changed_files) are loaded from the task or derived from git.
   output_schema_json:
     type: object
-    required:
-      - pr_url
-      - pr_number
-      - title
-      - body
-    properties:
-      pr_url:
-        type: string
-        description: URL of the created pull request
-      pr_number:
-        type: string
-        description: Pull request number returned after creation.
-      title:
-        type: string
-        description: Pull request title derived from the Orbit task title.
-      body:
-        type: string
-        description: Pull request body built from commit_message, branch freshness details, and changed_files, whether passed explicitly or loaded from the task.
-      skipped:
-        type: boolean
-        description: True when the task already had an open PR and creation was skipped.
+    properties: {}
 
   # ---- execution ----
   action: open_pr_from_task

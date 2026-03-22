@@ -6,10 +6,7 @@ use serde_json::{Value, json};
 use crate::context::TaskHost;
 
 use super::git::{git_output, git_output_paths, git_success};
-use super::input::{
-    canonicalize_existing_dir, input_string_field, input_workspace_path, required_input_string,
-    task_commit_message,
-};
+use super::input::{canonicalize_existing_dir, required_input_string, task_commit_message};
 
 pub(super) fn commit_task_changes<H: TaskHost + ?Sized>(
     host: &H,
@@ -18,35 +15,18 @@ pub(super) fn commit_task_changes<H: TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let workspace_path = canonicalize_existing_dir(
-        &input_workspace_path(input)
-            .or_else(|| task.workspace_path.clone())
-            .ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "commit_task_changes requires input.workspace_path or task.workspace_path"
-                        .to_string(),
-                )
-            })?,
+        &task.workspace_path.as_deref().ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "commit_task_changes requires task.workspace_path".to_string(),
+            )
+        })?,
         "workspace_path",
     )?;
-    let repo_root = canonicalize_existing_dir(
-        &input_string_field(input, "repo_root")
-            .or_else(|| input_workspace_path(input))
-            .or_else(|| task.repo_root.clone())
-            .ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "commit_task_changes requires input.repo_root, input.workspace_path, or task.repo_root"
-                        .to_string(),
-                )
-            })?,
-        "repo_root",
-    )?;
-    let expected_branch =
-        input_string_field(input, "branch").unwrap_or_else(|| format!("orbit/{task_id}"));
-    let summary = input_string_field(input, "execution_summary")
-        .unwrap_or_else(|| task.execution_summary.clone());
+    let expected_branch = format!("orbit/{task_id}");
+    let summary = task.execution_summary.clone();
     if summary.trim().is_empty() {
         return Err(OrbitError::Execution(format!(
-            "task '{}' commit_task_changes requires a non-empty execution_summary from input or task",
+            "task '{}' commit_task_changes requires a non-empty execution_summary on the task",
             task_id
         )));
     }
@@ -69,32 +49,15 @@ pub(super) fn commit_task_changes<H: TaskHost + ?Sized>(
     )?;
 
     // Idempotent: if there are no uncommitted changes (e.g. the agent already
-    // committed), return success with skipped=true instead of erroring.
+    // committed), return success instead of erroring.
     if changed_files.is_empty() {
         git_success(&workspace_path, &["reset", "HEAD"])?;
-        let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
-        return Ok(json!({
-            "repo_root": repo_root.to_string_lossy().to_string(),
-            "workspace_path": workspace_path.to_string_lossy().to_string(),
-            "branch": actual_branch.trim(),
-            "commit_message": "",
-            "commit_sha": commit_sha,
-            "changed_files": [],
-            "skipped": true,
-        }));
+        return Ok(json!({}));
     }
 
     let message = task_commit_message(&task.task_type, &task.title, &task.id, &summary);
     git_success(&workspace_path, &["commit", "-m", &message])?;
-    let commit_sha = git_output(&workspace_path, &["rev-parse", "HEAD"])?;
-    Ok(json!({
-        "repo_root": repo_root.to_string_lossy().to_string(),
-        "workspace_path": workspace_path.to_string_lossy().to_string(),
-        "branch": actual_branch.trim(),
-        "commit_message": message,
-        "commit_sha": commit_sha,
-        "changed_files": changed_files,
-    }))
+    Ok(json!({}))
 }
 
 fn ensure_no_unmerged_changes(workspace_path: &Path) -> Result<(), OrbitError> {

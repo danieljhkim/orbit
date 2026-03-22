@@ -9,11 +9,49 @@ description: Use this when executing human-initiated code change or existing orb
 
 Handle a human-requested engineering change or existing Orbit task from intent to verified implementation, with explicit task lifecycle tracking.
 
+## Command Reference
+
+All agent Orbit interactions go through `orbit tool run`. **Never guess command names — use exactly these:**
+
+```bash
+# Load a task
+orbit tool run orbit.task.show --input '{"id": "<task-id>"}'
+
+# Start a task (backlog/proposed -> in-progress)
+orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why>"}'
+
+# Update task status
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review"}'
+
+# Update execution summary
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>"}'
+
+# Add a comment
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "comment": "<what happened>"}'
+
+# List tasks
+orbit tool run orbit.task.list --input '{"status": "backlog"}'
+```
+
+**Important:** Always use `orbit tool run` — never use `orbit task ...` directly. The tool interface tracks agent provenance. Direct CLI usage is reserved for humans.
+
+**If running from a worktree**, pass `--root` pointing to the original repo's `.orbit` directory so commands resolve correctly.
+
+## When Commands Fail
+
+If any `orbit tool run` command fails unexpectedly (unknown tool, missing field, unclear error), **do not silently work around it**. Immediately create a friction task:
+
+```bash
+orbit tool run orbit.task.add --input '{"title": "<short problem statement>", "description": "<what command failed, the error message, and why it caused friction>", "type": "issue", "priority": "medium"}'
+```
+
+Then continue with your work. The friction must be recorded so it gets fixed for the next agent.
+
 ## Workflow
 
 ### Step 1: Load or create the task
 
-**If given an existing task ID**, load it first:
+**If given an existing task ID**, load it:
 
 ```bash
 orbit tool run orbit.task.show --input '{"id": "<task-id>"}'
@@ -106,6 +144,6 @@ Task ID: <orbit-task-id>
 
 - Requested change implemented
 - Validation completed
-- Task started via `orbit.task.start` before execution
+- Task started via `orbit tool run orbit.task.start` before execution
 - Task advanced through `review`
 - Execution summary persisted via `orbit tool run orbit.task.update --input '{"id": "...", "execution_summary": "..."}'`

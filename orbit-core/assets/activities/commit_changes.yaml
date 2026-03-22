@@ -10,7 +10,7 @@ activity:
   spec_type: automation
 
   # ---- content ----
-  description: "Safety net: stage and commit task worktree changes if the agent left uncommitted work. Skips with skipped=true when the worktree is already clean."
+  description: "Safety net: stage and commit task worktree changes if the agent left uncommitted work. Skips silently when the worktree is already clean."
 
   # ---- interface ----
   input_schema_json:
@@ -20,52 +20,10 @@ activity:
     properties:
       task_id:
         type: string
-        description: The Orbit task ID whose changes should be committed.
-      execution_summary:
-        type: string
-        description: Execution summary for the commit message body. Optional when task_id is provided; falls back to the task execution_summary.
-      workspace_path:
-        type: string
-        description: Dedicated task worktree path where implementation completed. Optional when task_id is provided; falls back to the task workspace_path.
-      repo_root:
-        type: string
-        description: Canonical repository root that owns the task worktree. Optional when task_id is provided; falls back to input.workspace_path and then the task repo_root.
-      branch:
-        type: string
-        description: Task branch expected to be checked out in the worktree. Optional when task_id is provided; falls back to orbit/<task_id>.
+        description: The Orbit task ID whose changes should be committed. All other fields (workspace_path, repo_root, branch, execution_summary) are loaded from the task.
   output_schema_json:
     type: object
-    required:
-      - repo_root
-      - workspace_path
-      - branch
-      - commit_message
-      - commit_sha
-      - changed_files
-    properties:
-      repo_root:
-        type: string
-        description: Canonical repository root that owns the task worktree.
-      workspace_path:
-        type: string
-        description: Task worktree path where the commit was created.
-      branch:
-        type: string
-        description: Branch the commit was created on.
-      commit_message:
-        type: string
-        description: Commit message generated from task metadata with implementation summary as body.
-      commit_sha:
-        type: string
-        description: Commit SHA created by Orbit automation.
-      changed_files:
-        type: array
-        items:
-          type: string
-        description: Repository-relative file paths included in the commit. Empty when skipped.
-      skipped:
-        type: boolean
-        description: True when the worktree had no uncommitted changes (agent already committed).
+    properties: {}
 
   # ---- execution ----
   action: commit_task_changes
