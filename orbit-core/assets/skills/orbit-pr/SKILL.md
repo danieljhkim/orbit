@@ -29,6 +29,9 @@ orbit tool run github.pr.create --input '{
 # View a PR
 orbit tool run github.pr.view --input '{"pr": <pr-number>}'
 
+# List PR conversation (general comments + inline review comments)
+orbit tool run github.pr.comments --input '{"pr": <pr-number>}'
+
 # Reply to an existing comment thread
 orbit tool run github.pr.comment.reply --input '{
   "pr": <pr-number>,
