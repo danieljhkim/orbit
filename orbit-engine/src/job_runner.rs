@@ -546,9 +546,7 @@ fn should_run_step(condition: StepCondition, previous_step_state: Option<JobRunS
         StepCondition::OnSuccess => {
             previous_step_state.is_none_or(|state| matches!(state, JobRunState::Success))
         }
-        StepCondition::OnFailure => {
-            previous_step_state.is_some_and(|state| matches!(state, JobRunState::Failed))
-        }
+        StepCondition::OnFailure => previous_step_state.is_some_and(step_state_records_failure),
         StepCondition::OnTimeout => {
             previous_step_state.is_some_and(|state| matches!(state, JobRunState::Timeout))
         }
@@ -765,6 +763,14 @@ mod tests {
         assert!(should_run_step(
             StepCondition::OnFailure,
             Some(JobRunState::Failed)
+        ));
+    }
+
+    #[test]
+    fn on_failure_condition_runs_after_timeout() {
+        assert!(should_run_step(
+            StepCondition::OnFailure,
+            Some(JobRunState::Timeout)
         ));
     }
 
