@@ -2,10 +2,7 @@ use jsonschema::JSONSchema;
 use orbit_types::OrbitError;
 use serde_json::Value;
 
-pub fn validate_schema_document(
-    schema: &Value,
-    context: &str,
-) -> Result<JSONSchema, OrbitError> {
+pub fn validate_schema_document(schema: &Value, context: &str) -> Result<JSONSchema, OrbitError> {
     enforce_minimum_supported_draft(schema, context)?;
     JSONSchema::options().compile(schema).map_err(|err| {
         OrbitError::SkillValidation(format!(

@@ -49,7 +49,10 @@ impl ActivityFileStore {
         Ok(())
     }
 
-    pub(crate) fn insert_work(&self, params: &ActivityCreateParams) -> Result<Activity, OrbitError> {
+    pub(crate) fn insert_work(
+        &self,
+        params: &ActivityCreateParams,
+    ) -> Result<Activity, OrbitError> {
         self.ensure_layout()?;
         if self.get_activity(&params.id)?.is_some() {
             return Err(OrbitError::InvalidInput(format!(
@@ -278,7 +281,6 @@ fn file_timestamps(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), OrbitE
     let updated_at = updated_at.unwrap_or(created_at);
     Ok((created_at, updated_at))
 }
-
 
 fn is_yaml(path: &Path) -> bool {
     path.extension()

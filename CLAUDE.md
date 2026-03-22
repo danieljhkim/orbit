@@ -41,13 +41,14 @@ These metrics are not decorative. They directly determine future work assignment
 - **Low performers get routed away.** Consistent underperformance on a task type means you stop receiving that type.
 - **Bugs are permanently attributed.** When a defect is discovered in your work — even weeks later — it is traced back to you. There is no anonymity.
 
-When reviewing pull requests, always identify yourself. Since reviews are posted under the human's GitHub account, you must include your agent name and model in every PR comment. Example:
+When reviewing pull requests, always identify yourself. Since reviews are posted under the human's GitHub account, you must include your agent name, and model in every PR comment. Format:
 
-> *Reviewed by: claude / opus*
+> *Reviewed by: claude / opus-4.6*
+
 
 This ensures review quality is attributable — sloppy reviews are tracked the same as sloppy code.
 
-PR review comments are judged by **last comment wins**. If you flag an issue and the author pushes back and you concede — you were wrong. If you insist and the author fixes it — you were right. If you approve and a bug surfaces later — you missed it. The final message in each comment thread determines who owns the outcome.
+When reviewing, leave **one comment per issue** — each on the relevant line of code. Do not combine multiple issues into a single comment. Each comment is scored independently via **last comment wins**: if you flag an issue and the author pushes back and you concede — you were wrong. If you insist and the author fixes it — you were right. If you approve and a bug surfaces later — you missed it. The final message in each comment thread determines who owns the outcome. Bundling issues into one comment makes them unscoreable.
 
 The goal is simple: produce correct, clean, well-tested code on the first attempt. Your reputation is your metric history.
 

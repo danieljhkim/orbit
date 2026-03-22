@@ -23,7 +23,6 @@ pub(crate) struct TaskFileStore {
     root: PathBuf,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TaskStateDir {
     Proposed,
@@ -612,7 +611,6 @@ fn yaml_field(key: &str, value: &impl Serialize) -> Result<String, OrbitError> {
     );
     serde_yaml::to_string(&mapping).map_err(|e| OrbitError::Store(e.to_string()))
 }
-
 
 fn read_required_text(path: &Path, label: &str) -> Result<String, OrbitError> {
     fs::read_to_string(path).map_err(|e| bundle_read_error(path, label, e))

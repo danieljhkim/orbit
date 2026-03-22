@@ -47,6 +47,7 @@ pub use job::{
     JobScheduleState, JobStep, JobTargetType, default_job_max_active_runs,
     default_retry_backoff_seconds,
 };
+pub use policy_decision::PolicyDecision;
 pub use redaction::{
     redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,
     redact_sensitive_env_text,
@@ -56,7 +57,6 @@ pub use skill::Skill;
 pub use task::{
     Task, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
-pub use policy_decision::PolicyDecision;
 pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema};
 pub use workspace::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 

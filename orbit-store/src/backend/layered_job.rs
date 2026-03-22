@@ -30,7 +30,6 @@ impl LayeredJobStore {
             Ok(self.global.as_ref())
         }
     }
-
 }
 
 impl JobStoreBackend for LayeredJobStore {

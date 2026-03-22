@@ -2316,9 +2316,7 @@ fn step_output_map_renames_keys_before_flowing_to_next_step() {
                     target_id: "spec-agent-map-source".to_string(),
                     agent_cli,
                     timeout_seconds: 10,
-                    output_map: HashMap::from([
-                        ("summary".to_string(), "pr_body".to_string()),
-                    ]),
+                    output_map: HashMap::from([("summary".to_string(), "pr_body".to_string())]),
                     ..Default::default()
                 },
                 JobStep {
@@ -2798,7 +2796,10 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
     // workspace_path and repo_root to the task instead of returning them
     // in the output.  Verify via the task object.
     let updated_task = runtime.get_task(&task_id).expect("get task");
-    let task_worktree = updated_task.workspace_path.as_deref().expect("task workspace_path");
+    let task_worktree = updated_task
+        .workspace_path
+        .as_deref()
+        .expect("task workspace_path");
     let canonical_task_worktree = std::path::PathBuf::from(task_worktree)
         .canonicalize()
         .expect("canonical task worktree");
@@ -2994,9 +2995,7 @@ fn implement_change_result_status_flows_into_update_task_as_task_status() {
                 title: None,
                 description: None,
                 plan: None,
-                execution_summary: Some(
-                    "Implemented the change and validated tests.".to_string(),
-                ),
+                execution_summary: Some("Implemented the change and validated tests.".to_string()),
                 comment: None,
                 status: None,
                 pr_number: None,
@@ -3158,7 +3157,10 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
     assert_eq!(create_run.state, JobRunState::Success);
     // After the task_id-as-spine refactor, read workspace_path from the task
     let created_task = runtime.get_task(&task_id).expect("get task after create");
-    let workspace_path = created_task.workspace_path.clone().expect("task workspace_path");
+    let workspace_path = created_task
+        .workspace_path
+        .clone()
+        .expect("task workspace_path");
 
     let worktree_path = std::path::PathBuf::from(&workspace_path);
     std::fs::write(worktree_path.join("README.md"), "seed\nupdated\n").expect("update tracked");
@@ -3303,7 +3305,11 @@ fn commit_task_changes_uses_summary_from_task() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id, "base": "agent-main"})),
             max_active_runs: None,
-            steps: vec![JobStep { target_id: "spec-create-wt-regression".to_string(), timeout_seconds: 30, ..Default::default() }],
+            steps: vec![JobStep {
+                target_id: "spec-create-wt-regression".to_string(),
+                timeout_seconds: 30,
+                ..Default::default()
+            }],
             initial_state_override: None,
         })
         .expect("add create job")
@@ -3311,7 +3317,10 @@ fn commit_task_changes_uses_summary_from_task() {
     let create_run = runtime.run_job_now(&create_job_id).expect("run create");
     assert_eq!(create_run.state, JobRunState::Success);
     let created_task = runtime.get_task(&task_id).expect("get task");
-    let workspace_path = created_task.workspace_path.clone().expect("task workspace_path");
+    let workspace_path = created_task
+        .workspace_path
+        .clone()
+        .expect("task workspace_path");
 
     std::fs::write(
         std::path::Path::new(&workspace_path).join("fix.rs"),
@@ -3338,7 +3347,11 @@ fn commit_task_changes_uses_summary_from_task() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id})),
             max_active_runs: None,
-            steps: vec![JobStep { target_id: "spec-commit-regression".to_string(), timeout_seconds: 30, ..Default::default() }],
+            steps: vec![JobStep {
+                target_id: "spec-commit-regression".to_string(),
+                timeout_seconds: 30,
+                ..Default::default()
+            }],
             initial_state_override: None,
         })
         .expect("add fail job")
@@ -3367,7 +3380,9 @@ fn commit_task_changes_uses_summary_from_task() {
                 title: None,
                 description: None,
                 plan: None,
-                execution_summary: Some("Hardened bundle writes using staged directory rename.".to_string()),
+                execution_summary: Some(
+                    "Hardened bundle writes using staged directory rename.".to_string(),
+                ),
                 comment: None,
                 status: None,
                 pr_number: None,
@@ -3380,7 +3395,11 @@ fn commit_task_changes_uses_summary_from_task() {
             job_id: None,
             default_input: Some(json!({"task_id": task_id})),
             max_active_runs: None,
-            steps: vec![JobStep { target_id: "spec-commit-regression".to_string(), timeout_seconds: 30, ..Default::default() }],
+            steps: vec![JobStep {
+                target_id: "spec-commit-regression".to_string(),
+                timeout_seconds: 30,
+                ..Default::default()
+            }],
             initial_state_override: None,
         })
         .expect("add success job")
@@ -3577,7 +3596,9 @@ fn commit_task_changes_supports_task_id_only_inputs() {
         .current_dir(&workspace_path)
         .output()
         .expect("git diff");
-    let changed = String::from_utf8_lossy(&diff_files.stdout).trim().to_string();
+    let changed = String::from_utf8_lossy(&diff_files.stdout)
+        .trim()
+        .to_string();
     assert_eq!(changed, "fix.rs");
 }
 
@@ -4827,7 +4848,10 @@ fn create_branch_includes_local_base_commits_not_yet_pushed_to_remote() {
     // After the task_id-as-spine refactor, read workspace_path from the task
     let updated_task = runtime.get_task(&task_id).expect("get task");
     let task_worktree = std::path::PathBuf::from(
-        updated_task.workspace_path.as_deref().expect("task workspace_path"),
+        updated_task
+            .workspace_path
+            .as_deref()
+            .expect("task workspace_path"),
     );
 
     assert!(

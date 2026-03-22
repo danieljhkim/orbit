@@ -27,7 +27,6 @@ pub(crate) fn current_dir_orbit_root() -> PathBuf {
     cwd_orbit_root(&cwd)
 }
 
-
 pub(crate) fn resolve_path_value(
     raw: &str,
     base_dir: &Path,

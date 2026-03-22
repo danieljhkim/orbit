@@ -2,7 +2,7 @@ use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
 
-use crate::{Tool, ToolContext, TIMEOUT_FAST_MS};
+use crate::{TIMEOUT_FAST_MS, Tool, ToolContext};
 
 pub struct ProcWhichTool;
 

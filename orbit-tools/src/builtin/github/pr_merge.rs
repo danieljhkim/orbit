@@ -2,7 +2,7 @@ use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
 
-use crate::{Tool, ToolContext, TIMEOUT_SLOW_MS, check_exec_result};
+use crate::{TIMEOUT_SLOW_MS, Tool, ToolContext, check_exec_result};
 
 pub struct GithubPrMergeTool;
 

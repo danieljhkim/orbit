@@ -741,7 +741,6 @@ fn parse_timestamp_from_job_id(job_id: &str) -> DateTime<Utc> {
     Utc::now()
 }
 
-
 fn is_yaml(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())

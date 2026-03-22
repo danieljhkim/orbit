@@ -16,9 +16,7 @@ pub(super) fn commit_task_changes<H: TaskHost + ?Sized>(
     let task = host.get_task(task_id)?;
     let workspace_path = canonicalize_existing_dir(
         &task.workspace_path.as_deref().ok_or_else(|| {
-            OrbitError::InvalidInput(
-                "commit_task_changes requires task.workspace_path".to_string(),
-            )
+            OrbitError::InvalidInput("commit_task_changes requires task.workspace_path".to_string())
         })?,
         "workspace_path",
     )?;

@@ -121,7 +121,10 @@ impl TaskStatus {
 
         // Done is terminal.
         if *self == TaskStatus::Done {
-            return Err(format!("invalid status transition: {} -> {} (done is terminal)", self, target));
+            return Err(format!(
+                "invalid status transition: {} -> {} (done is terminal)",
+                self, target
+            ));
         }
 
         // Archived requires the dedicated archive command.

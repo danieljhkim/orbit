@@ -30,9 +30,7 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
         "repo_root",
     )?;
     let pr_number = task.pr_number.as_deref().ok_or_else(|| {
-        OrbitError::InvalidInput(
-            "merge_pr_from_task requires task.pr_number".to_string(),
-        )
+        OrbitError::InvalidInput("merge_pr_from_task requires task.pr_number".to_string())
     })?;
     let head = format!("orbit/{task_id}");
     let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
