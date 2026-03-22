@@ -214,6 +214,11 @@ impl FromStr for TaskComplexity {
 pub enum TaskType {
     Task,
     Feature,
+    /// Agent-reported friction, DX issues, or system problems.
+    /// Preferred type for agent issue reports — triggers scoreboard hooks.
+    Friction,
+    /// Legacy alias for Friction. Both types trigger scoreboard hooks.
+    #[serde(alias = "issue")]
     Issue,
     /// An attributable defect — tracks which agent/model introduced the bug
     /// via the `agent`, `model`, and `source_task_id` fields on [`Task`].
@@ -229,6 +234,7 @@ impl Display for TaskType {
         let s = match self {
             TaskType::Task => "task",
             TaskType::Feature => "feature",
+            TaskType::Friction => "friction",
             TaskType::Issue => "issue",
             TaskType::Bug => "bug",
             TaskType::Chore => "chore",
@@ -245,6 +251,7 @@ impl FromStr for TaskType {
         match s {
             "task" => Ok(TaskType::Task),
             "feature" => Ok(TaskType::Feature),
+            "friction" => Ok(TaskType::Friction),
             "issue" => Ok(TaskType::Issue),
             "bug" => Ok(TaskType::Bug),
             "chore" => Ok(TaskType::Chore),
@@ -253,6 +260,13 @@ impl FromStr for TaskType {
             "refactor" => Ok(TaskType::Refactor),
             other => Err(format!("unknown task type: {other}")),
         }
+    }
+}
+
+impl TaskType {
+    /// Returns true for task types that trigger friction bounty scoreboard hooks.
+    pub fn is_friction(&self) -> bool {
+        matches!(self, TaskType::Friction | TaskType::Issue)
     }
 }
 

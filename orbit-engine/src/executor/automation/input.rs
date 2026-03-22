@@ -69,7 +69,7 @@ pub(super) fn task_commit_message(
 ) -> String {
     let prefix = match task_type {
         TaskType::Task | TaskType::Feature => "feat",
-        TaskType::Issue | TaskType::Bug => "fix",
+        TaskType::Friction | TaskType::Issue | TaskType::Bug => "fix",
         TaskType::Chore => "chore",
         TaskType::Refactor => "refactor",
     };

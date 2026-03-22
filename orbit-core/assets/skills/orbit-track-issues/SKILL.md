@@ -54,7 +54,7 @@ Do **not ignore friction**. Always create a task.
 orbit tool run orbit.task.add --input '{
   "title": "<short, specific problem statement>",
   "description": "<what happened, where, and why it caused friction>",
-  "type": "issue",
+  "type": "friction",
   "priority": "<low|medium|high|critical>",
   "agent": "<agent>",
   "model": "<model>"

@@ -10,6 +10,7 @@
 //! file-based stores.
 
 pub(crate) mod activity_store;
+pub(crate) mod friction_bounty;
 pub(crate) mod friction_log;
 pub(crate) mod fs_utils;
 pub(crate) mod job_store;

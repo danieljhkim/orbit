@@ -1,6 +1,7 @@
 use chrono::Utc;
 use orbit_store::{
     TaskCreateParams as StoreTaskCreateParams, TaskUpdateParams as StoreTaskUpdateParams,
+    friction_bounty,
 };
 use orbit_types::{
     OrbitError, OrbitEvent, Task, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
@@ -9,6 +10,7 @@ use orbit_types::{
 
 use crate::OrbitRuntime;
 use crate::context::ActorKind;
+use crate::paths::find_git_repo_root;
 
 pub struct TaskAddParams {
     pub title: String,
@@ -85,7 +87,7 @@ impl OrbitRuntime {
             };
         let comments = build_task_comments(params.comment.clone(), effective_label.as_str())?;
 
-        self.with_mutation(|| {
+        let task = self.with_mutation(|| {
             let task = self.create_task_record(StoreTaskCreateParams {
                 actor: effective_label.clone(),
                 title: params.title.clone(),
@@ -114,7 +116,18 @@ impl OrbitRuntime {
                     id: task.id.clone(),
                 },
             ))
-        })
+        })?;
+
+        // Friction bounty: record issues-reported on creation when agent+model present
+        if params.task_type.is_friction() {
+            if let (Some(a), Some(m)) = (&agent, &model) {
+                if let Some(repo_root) = find_git_repo_root(self.data_root_path()) {
+                    let _ = friction_bounty::record_friction_reported(&repo_root, a, m);
+                }
+            }
+        }
+
+        Ok(task)
     }
 
     pub fn get_task(&self, id: &str) -> Result<Task, OrbitError> {
@@ -284,9 +297,9 @@ impl OrbitRuntime {
         let effective_label = effective_actor_label(&actor.label, agent.as_deref(), model.as_deref());
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
 
-        match task.status {
+        let result = match task.status {
             TaskStatus::Proposed => {
-                let task = self.with_mutation(|| {
+                self.with_mutation(|| {
                     let task = self.update_task_record(
                         id,
                         StoreTaskUpdateParams {
@@ -308,11 +321,10 @@ impl OrbitRuntime {
                             approved_by: effective_label.clone(),
                         },
                     ))
-                })?;
-                Ok(task)
+                })
             }
             TaskStatus::Review => {
-                let task = self.with_mutation(|| {
+                self.with_mutation(|| {
                     let task = self.update_task_record(
                         id,
                         StoreTaskUpdateParams {
@@ -333,13 +345,23 @@ impl OrbitRuntime {
                             approved_by: effective_label.clone(),
                         },
                     ))
-                })?;
-                Ok(task)
+                })
             }
             other => Err(OrbitError::InvalidInput(format!(
                 "task '{id}' is in status '{other}'; approve requires 'proposed' or 'review'"
             ))),
+        }?;
+
+        // Friction bounty: record issues-accepted on approval
+        if task.task_type.is_friction() {
+            if let (Some(a), Some(m)) = (&task.agent, &task.model) {
+                if let Some(repo_root) = find_git_repo_root(self.data_root_path()) {
+                    let _ = friction_bounty::record_friction_accepted(&repo_root, a, m);
+                }
+            }
         }
+
+        Ok(result)
     }
 
     pub fn start_task(
@@ -465,9 +487,9 @@ impl OrbitRuntime {
         let reason = reason.to_string();
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
 
-        match task.status {
+        let result = match task.status {
             TaskStatus::Proposed => {
-                let task = self.with_mutation(|| {
+                self.with_mutation(|| {
                     let task = self.update_task_record(
                         id,
                         StoreTaskUpdateParams {
@@ -488,11 +510,10 @@ impl OrbitRuntime {
                             rejected_by: effective_label.clone(),
                         },
                     ))
-                })?;
-                Ok(task)
+                })
             }
             TaskStatus::Review => {
-                let task = self.with_mutation(|| {
+                self.with_mutation(|| {
                     let task = self.update_task_record(
                         id,
                         StoreTaskUpdateParams {
@@ -513,13 +534,23 @@ impl OrbitRuntime {
                             rejected_by: effective_label.clone(),
                         },
                     ))
-                })?;
-                Ok(task)
+                })
             }
             other => Err(OrbitError::InvalidInput(format!(
                 "task '{id}' is in status '{other}'; reject requires 'proposed' or 'review'"
             ))),
+        }?;
+
+        // Friction bounty: record issues-rejected on rejection
+        if task.task_type.is_friction() {
+            if let (Some(a), Some(m)) = (&task.agent, &task.model) {
+                if let Some(repo_root) = find_git_repo_root(self.data_root_path()) {
+                    let _ = friction_bounty::record_friction_rejected(&repo_root, a, m);
+                }
+            }
         }
+
+        Ok(result)
     }
 
     pub fn archive_task(&self, id: &str) -> Result<(), OrbitError> {

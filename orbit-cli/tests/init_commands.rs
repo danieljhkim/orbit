@@ -226,7 +226,7 @@ fn init_is_idempotent_for_existing_defaults() {
         .assert()
         .success()
         .stdout(predicate::str::contains("skills: root="))
-        .stdout(predicate::str::contains("refreshed=6"));
+        .stdout(predicate::str::contains("refreshed=8"));
 
     // Second init also refreshes all defaults (overwrite in place).
     orbit_in(home.path())
@@ -234,7 +234,7 @@ fn init_is_idempotent_for_existing_defaults() {
         .assert()
         .success()
         .stdout(predicate::str::contains("skills: root="))
-        .stdout(predicate::str::contains("refreshed=6"));
+        .stdout(predicate::str::contains("refreshed=8"));
 }
 
 #[test]
