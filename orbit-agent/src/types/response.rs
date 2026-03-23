@@ -35,22 +35,55 @@ fn parse_single_json_document(stdout: &str) -> Result<Value, OrbitError> {
     let mut stream = Deserializer::from_str(stdout).into_iter::<Value>();
 
     let Some(first) = stream.next() else {
-        return Err(OrbitError::AgentProtocolViolation(
-            "stdout does not contain a JSON document".to_string(),
-        ));
+        return extract_embedded_json(stdout);
     };
 
-    let first = first.map_err(|error| {
-        OrbitError::AgentProtocolViolation(format!("stdout is not valid JSON: {error}"))
-    })?;
+    let first = match first {
+        Ok(value) => value,
+        Err(_) => return extract_embedded_json(stdout),
+    };
 
-    if stream.next().is_some() {
+    // Accept a valid first document even if followed by non-JSON trailing text.
+    // Only reject when there are genuinely multiple valid JSON documents.
+    if let Some(Ok(_)) = stream.next() {
         return Err(OrbitError::AgentProtocolViolation(
             "stdout contains multiple JSON documents".to_string(),
         ));
     }
 
     Ok(first)
+}
+
+/// Scan stdout for an embedded JSON object when strict parsing fails.
+///
+/// Agents using `--output-format text` may emit non-JSON text before or after
+/// the JSON envelope. This function searches for the first `{` that begins a
+/// valid JSON object, which handles the common case of explanatory text
+/// surrounding the envelope.
+fn extract_embedded_json(stdout: &str) -> Result<Value, OrbitError> {
+    let bytes = stdout.as_bytes();
+    let mut pos = 0;
+    while pos < bytes.len() {
+        if bytes[pos] == b'{' {
+            let slice = &stdout[pos..];
+            if let Ok(value) = serde_json::from_str::<Value>(slice) {
+                if value.is_object() {
+                    return Ok(value);
+                }
+            }
+            // Try streaming deserializer to handle trailing text after the JSON
+            let mut stream = Deserializer::from_str(slice).into_iter::<Value>();
+            if let Some(Ok(value)) = stream.next() {
+                if value.is_object() {
+                    return Ok(value);
+                }
+            }
+        }
+        pos += 1;
+    }
+    Err(OrbitError::AgentProtocolViolation(
+        "stdout does not contain a JSON document".to_string(),
+    ))
 }
 
 fn validate_exit_alignment(

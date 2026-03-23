@@ -29,6 +29,8 @@ job:
       agent_cli: claude
       model: sonnet
       timeout_seconds: 1000
+      retry_max_attempts: 2
+      retry_backoff_seconds: 15
 
     - target_type: activity
       target_id: create_branch
@@ -41,6 +43,8 @@ job:
       model: opus
       condition: on_success
       timeout_seconds: 2000
+      retry_max_attempts: 2
+      retry_backoff_seconds: 15
 
     - target_type: activity
       target_id: update_task
@@ -68,6 +72,8 @@ job:
       model: gpt-5.4
       condition: on_success
       timeout_seconds: 600
+      retry_max_attempts: 2
+      retry_backoff_seconds: 15
       env_set:
         GH_TOKEN: "${GITHUB_TOKEN_REVIEWER}"
         GH_CONFIG_DIR: "/tmp/orbit-gh-reviewer"

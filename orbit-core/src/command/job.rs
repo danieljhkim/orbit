@@ -454,13 +454,13 @@ mod tests {
             .find(|spec| spec.job_id == "job_task_pipeline")
             .expect("task pipeline spec present");
         assert_eq!(pipeline.max_active_runs, 4);
-        assert_eq!(pipeline.steps[0].model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(pipeline.steps[0].model.as_deref(), Some("sonnet"));
         assert_eq!(pipeline.steps[1].condition, StepCondition::OnSuccess);
         let review = specs
             .iter()
             .find(|spec| spec.job_id == "job_review_tasks")
             .expect("review job spec present");
-        assert_eq!(review.steps[0].model.as_deref(), None);
+        assert_eq!(review.steps[0].model.as_deref(), Some("gpt-5.4"));
         let review_loop = specs
             .iter()
             .find(|spec| spec.job_id == "job_review_loop")

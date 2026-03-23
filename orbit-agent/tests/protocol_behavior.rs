@@ -300,3 +300,82 @@ fn protocol_parser_falls_back_to_success_for_invalid_json_stdout_on_zero_exit() 
     assert_eq!(envelope.status, "success");
     assert!(envelope.result.is_none());
 }
+
+#[test]
+fn protocol_parser_extracts_json_envelope_from_mixed_text_stdout() {
+    let json_str = serde_json::to_string(&json!({
+        "schemaVersion": 1,
+        "status": "success",
+        "result": {"status": "review", "execution_summary": "done"},
+        "error": null,
+        "durationMs": 200
+    }))
+    .expect("serialize");
+
+    let exec = ExecutionResult {
+        success: true,
+        stdout: format!("Some explanatory text before the JSON:\n{json_str}\n"),
+        stderr: String::new(),
+        exit_code: Some(0),
+        duration_ms: 200,
+        output: None,
+    };
+
+    let (envelope, state) = parse_and_validate_response(&exec).expect("should extract envelope");
+    assert_eq!(state, AgentResponseStatus::Success);
+    assert_eq!(envelope.status, "success");
+    assert!(envelope.result.is_some());
+}
+
+#[test]
+fn protocol_parser_extracts_json_envelope_with_trailing_text() {
+    let json_str = serde_json::to_string(&json!({
+        "schemaVersion": 1,
+        "status": "success",
+        "result": {"ok": true},
+        "error": null,
+        "durationMs": 50
+    }))
+    .expect("serialize");
+
+    let exec = ExecutionResult {
+        success: true,
+        stdout: format!("{json_str}\nSome trailing text here"),
+        stderr: String::new(),
+        exit_code: Some(0),
+        duration_ms: 50,
+        output: None,
+    };
+
+    let (envelope, state) = parse_and_validate_response(&exec).expect("should extract envelope");
+    assert_eq!(state, AgentResponseStatus::Success);
+    assert!(envelope.result.is_some());
+}
+
+#[test]
+fn protocol_parser_extracts_json_after_markdown_fences() {
+    let json_str = serde_json::to_string(&json!({
+        "schemaVersion": 1,
+        "status": "failed",
+        "result": {},
+        "error": {"code": "TASK_BLOCKED", "message": "cannot proceed", "details": null},
+        "durationMs": 10
+    }))
+    .expect("serialize");
+
+    let exec = ExecutionResult {
+        success: false,
+        stdout: format!("```json\n{json_str}\n```"),
+        stderr: String::new(),
+        exit_code: Some(1),
+        duration_ms: 10,
+        output: None,
+    };
+
+    let (envelope, state) = parse_and_validate_response(&exec).expect("should extract envelope");
+    assert_eq!(state, AgentResponseStatus::Failed);
+    assert_eq!(
+        envelope.error.as_ref().expect("error").code,
+        "TASK_BLOCKED"
+    );
+}
