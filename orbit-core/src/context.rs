@@ -85,6 +85,7 @@ pub struct OrbitContext {
     actor: ActorIdentity,
     task_approval_required_for_agent: bool,
     task_delegate_approval: bool,
+    scoring_enabled: bool,
 }
 
 impl OrbitContext {
@@ -107,6 +108,7 @@ impl OrbitContext {
         actor: ActorIdentity,
         task_approval_required_for_agent: bool,
         task_delegate_approval: bool,
+        scoring_enabled: bool,
     ) -> Self {
         Self {
             global_root,
@@ -126,6 +128,7 @@ impl OrbitContext {
             actor,
             task_approval_required_for_agent,
             task_delegate_approval,
+            scoring_enabled,
         }
     }
 
@@ -209,6 +212,10 @@ impl OrbitContext {
 
     pub(crate) fn task_delegate_approval(&self) -> bool {
         self.task_delegate_approval
+    }
+
+    pub(crate) fn scoring_enabled(&self) -> bool {
+        self.scoring_enabled
     }
 }
 

@@ -163,6 +163,10 @@ impl OrbitRuntime {
         self.context.task_delegate_approval()
     }
 
+    pub fn scoring_enabled(&self) -> bool {
+        self.context.scoring_enabled()
+    }
+
     pub fn user_name(&self) -> &str {
         self.context.user_name()
     }

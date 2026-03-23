@@ -7,7 +7,13 @@ pub(super) struct RawRuntimeConfig {
     #[allow(dead_code)]
     pub(super) identity: Option<toml::Value>,
     pub(super) task: Option<RawTaskSection>,
+    pub(super) scoring: Option<RawScoringConfig>,
     pub(super) watch: Option<toml::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawScoringConfig {
+    pub(super) enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

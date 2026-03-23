@@ -111,6 +111,10 @@ fn init_workspace_at_root(
         seed_default_activities(&init_runtime, &orbit_root, overwrite)?;
     let refreshed_default_jobs = seed_default_jobs(&init_runtime, overwrite)?;
 
+    if init_runtime.scoring_enabled() {
+        seed_scoreboard_templates(&orbit_root)?;
+    }
+
     Ok(InitResult {
         refreshed_skill_files,
         skills_root: skills_root.to_string_lossy().to_string(),
@@ -155,6 +159,23 @@ fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
 
 fn find_git_repo_root(start: &Path) -> Option<PathBuf> {
     crate::paths::find_git_repo_root(start)
+}
+
+fn seed_scoreboard_templates(orbit_root: &Path) -> Result<(), OrbitError> {
+    let scoreboard_dir = orbit_root.join("scoreboard");
+    fs::create_dir_all(&scoreboard_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+
+    let pr_path = scoreboard_dir.join("pr.json");
+    if !pr_path.exists() {
+        fs::write(&pr_path, "{}\n").map_err(|e| OrbitError::Io(e.to_string()))?;
+    }
+
+    let friction_path = scoreboard_dir.join("friction_bounty.json");
+    if !friction_path.exists() {
+        fs::write(&friction_path, "{}\n").map_err(|e| OrbitError::Io(e.to_string()))?;
+    }
+
+    Ok(())
 }
 
 fn ensure_skill_links(

@@ -9,3 +9,6 @@ sandbox = "workspace-write"
 [task.approval]
 required_for_agent = true
 delegate_approval = true
+
+[scoring]
+enabled = true

@@ -1,6 +1,6 @@
 //! Friction bounty scoreboard auto-increment.
 //!
-//! Updates `scoreboard/friction_bounty.json` when friction/issue tasks
+//! Updates `.orbit/scoreboard/friction_bounty.json` when friction/issue tasks
 //! transition through lifecycle states:
 //! - **creation** (agent + model present): increment `issues-reported`
 //! - **approval** (proposed→backlog, review→done): increment `issues-accepted`
@@ -43,7 +43,10 @@ pub fn record_friction_rejected(
 }
 
 fn increment(repo_root: &Path, metric: &str, agent: &str, model: &str) -> Result<(), OrbitError> {
-    let path = repo_root.join("scoreboard").join("friction_bounty.json");
+    let path = repo_root
+        .join(".orbit")
+        .join("scoreboard")
+        .join("friction_bounty.json");
     let mut scoreboard: Scoreboard = if path.exists() {
         let content = fs::read_to_string(&path)
             .map_err(|e| OrbitError::Io(format!("read friction_bounty.json: {e}")))?;
@@ -88,7 +91,7 @@ mod tests {
         // First increment creates the file
         record_friction_reported(root, "claude", "opus-4.6").unwrap();
 
-        let path = root.join("scoreboard/friction_bounty.json");
+        let path = root.join(".orbit/scoreboard/friction_bounty.json");
         assert!(path.exists());
         let sb: Scoreboard = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(sb["issues-reported"]["claude"]["opus-4.6"], 1);
@@ -114,7 +117,7 @@ mod tests {
         record_friction_reported(root, "claude", "opus-4.6").unwrap();
         record_friction_reported(root, "codex", "gpt-5.4").unwrap();
 
-        let path = root.join("scoreboard/friction_bounty.json");
+        let path = root.join(".orbit/scoreboard/friction_bounty.json");
         let sb: Scoreboard = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(sb["issues-reported"]["claude"]["opus-4.6"], 1);
         assert_eq!(sb["issues-reported"]["codex"]["gpt-5.4"], 1);

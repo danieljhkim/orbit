@@ -26,7 +26,7 @@ If something slows the agent down, it should be tracked.
 
 ## Scoreboard
 
-Every issue you report is tracked in `scoreboard/friction_bounty.json`. Your score increments when you create an issue task:
+Every issue you report is tracked in `.orbit/scoreboard/friction_bounty.json`. Your score increments when you create an issue task:
 
 - **issues-reported** — incremented when you create the task
 - **issues-accepted** — incremented when the issue is approved (moved to backlog or done)

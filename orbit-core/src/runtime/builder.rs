@@ -115,6 +115,7 @@ fn build_context_common(
     let actor = ActorIdentity::from_env();
     let task_approval_required_for_agent = runtime_config.task_approval.required_for_agent;
     let task_delegate_approval = runtime_config.task_approval.delegate_approval;
+    let scoring_enabled = runtime_config.scoring_enabled;
 
     Ok(OrbitContext::new(
         global_root,
@@ -134,6 +135,7 @@ fn build_context_common(
         actor,
         task_approval_required_for_agent,
         task_delegate_approval,
+        scoring_enabled,
     ))
 }
 fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(), OrbitError> {

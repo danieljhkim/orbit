@@ -123,7 +123,8 @@ impl OrbitRuntime {
         })?;
 
         // Friction bounty: record issues-reported on creation when agent+model present
-        if params.task_type.is_friction()
+        if self.scoring_enabled()
+            && params.task_type.is_friction()
             && let (Some(a), Some(m)) = (&agent, &model)
             && let Some(repo_root) = find_git_repo_root(self.data_root_path())
         {
@@ -622,7 +623,7 @@ impl OrbitRuntime {
 
     /// Best-effort friction bounty scoreboard update after a status transition.
     fn try_record_friction_transition(&self, task: &Task, from: TaskStatus, to: TaskStatus) {
-        if !task.task_type.is_friction() {
+        if !self.scoring_enabled() || !task.task_type.is_friction() {
             return;
         }
         let (Some(agent), Some(model)) = (&task.agent, &task.model) else {

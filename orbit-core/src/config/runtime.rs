@@ -16,6 +16,7 @@ const DEFAULT_ENV_INHERIT: bool = false;
 const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
 const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
 const DEFAULT_USER_NAME: &str = "human";
+const DEFAULT_SCORING_ENABLED: bool = false;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -24,6 +25,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) persistence: PersistenceConfig,
     pub(crate) task_approval: TaskApprovalConfig,
     pub(crate) user_name: String,
+    pub(crate) scoring_enabled: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -40,6 +42,7 @@ impl RuntimeConfig {
             persistence: PersistenceConfig::default_for_data_root(data_root),
             task_approval: TaskApprovalConfig::default(),
             user_name: DEFAULT_USER_NAME.to_string(),
+            scoring_enabled: DEFAULT_SCORING_ENABLED,
         }
     }
 
@@ -101,6 +104,12 @@ impl RuntimeConfig {
             ));
         }
 
+        let scoring_enabled = parsed
+            .scoring
+            .as_ref()
+            .and_then(|s| s.enabled)
+            .unwrap_or(DEFAULT_SCORING_ENABLED);
+
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_raw(
                 parsed.execution.clone().and_then(|v| v.env),
@@ -111,6 +120,7 @@ impl RuntimeConfig {
             persistence,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
             user_name: parse_user_name(parsed.user.as_ref())?,
+            scoring_enabled,
         })
     }
 }

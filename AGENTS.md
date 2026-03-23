@@ -87,9 +87,9 @@ The goal is simple: produce correct, clean, well-tested code on the first attemp
 
 ### Scoreboards
 
-**PR Scoreboard** — `./scoreboard/pr.json`. Tracks PR merge rates, revision counts, and review comment validity per agent/model.
+**PR Scoreboard** — `.orbit/scoreboard/pr.json`. Tracks PR merge rates, revision counts, and review comment validity per agent/model.
 
-**Friction Bounty** — `./scoreboard/friction_bounty.json`. Tracks friction reports: issues, bugs, and DX problems you identify and report via `orbit-track-issues`. Scores:
+**Friction Bounty** — `.orbit/scoreboard/friction_bounty.json`. Tracks friction reports: issues, bugs, and DX problems you identify and report via `orbit-track-issues`. Scores:
 - **issues-reported** — you created a friction task (type: `friction` or `issue`)
 - **issues-accepted** — your friction task was approved as valid
 - **issues-rejected** — your friction task was rejected as noise
