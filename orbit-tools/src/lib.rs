@@ -54,7 +54,8 @@ pub struct ToolContext {
     pub allowed_tools: Vec<String>,
     /// When set, fs tools enforce that all paths resolve inside this directory.
     /// Symlink escapes are blocked because paths are canonicalized before the check.
-    /// If `None`, no boundary is enforced (used for tests and legacy callers).
+    /// If `None`, fs tools deny all access (fail-closed). The runtime pipeline
+    /// auto-populates this from the data root's parent directory.
     pub workspace_root: Option<PathBuf>,
     /// The resolved `.orbit` data directory (e.g. `<repo>/.orbit`). Distinct from
     /// `workspace_root` (the repo root used for fs sandboxing) because the data
@@ -148,6 +149,30 @@ mod tests {
 
     #[test]
     fn fs_read_returns_file_contents() {
+        let workspace = tempdir().expect("workspace dir");
+        let path = workspace.path().join("note.txt");
+        fs::write(&path, "hello").expect("write file");
+
+        let ctx = ToolContext {
+            workspace_root: Some(workspace.path().canonicalize().expect("canonicalize")),
+            ..Default::default()
+        };
+        let mut registry = ToolRegistry::new();
+        registry.register_builtins();
+
+        let output = registry
+            .execute(
+                "fs.read",
+                &ctx,
+                json!({"path": path.to_string_lossy()}),
+            )
+            .expect("tool executes");
+
+        assert_eq!(output["content"], "hello");
+    }
+
+    #[test]
+    fn fs_read_denied_when_workspace_root_is_none() {
         let dir = tempdir().expect("temp dir");
         let path = dir.path().join("note.txt");
         fs::write(&path, "hello").expect("write file");
@@ -155,15 +180,17 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register_builtins();
 
-        let output = registry
+        let err = registry
             .execute(
                 "fs.read",
                 &ToolContext::default(),
                 json!({"path": path.to_string_lossy()}),
             )
-            .expect("tool executes");
-
-        assert_eq!(output["content"], "hello");
+            .expect_err("read with no workspace_root must be denied");
+        assert!(
+            err.to_string().contains("workspace_root is not set"),
+            "expected fail-closed denial, got: {err}"
+        );
     }
 
     #[test]

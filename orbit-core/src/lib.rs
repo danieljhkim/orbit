@@ -133,11 +133,11 @@ mod tests {
         use orbit_tools::ToolContext;
         use orbit_types::Role;
 
-        let dir = tempdir().expect("temp dir");
-        let file = dir.path().join("sample.txt");
-        std::fs::write(&file, "data").expect("write");
-
         let runtime = OrbitRuntime::in_memory().expect("runtime");
+
+        // Create file inside the workspace root so the boundary check passes
+        let file = runtime.data_root().join("sample.txt");
+        std::fs::write(&file, "data").expect("write");
 
         // Empty allowed_tools = unrestricted
         let tool_context = ToolContext::default();
@@ -153,11 +153,12 @@ mod tests {
 
     #[test]
     fn successful_tool_execution_persists_audit_and_event() {
-        let dir = tempdir().expect("temp dir");
-        let file = dir.path().join("sample.txt");
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+
+        // Create file inside the workspace root so the boundary check passes
+        let file = runtime.data_root().join("sample.txt");
         std::fs::write(&file, "ok").expect("write file");
 
-        let runtime = OrbitRuntime::in_memory().expect("runtime");
         let output = runtime
             .run_tool("fs.read", json!({"path": file.to_string_lossy()}))
             .expect("tool succeeds");
@@ -320,11 +321,12 @@ mod tests {
 
     #[test]
     fn enable_tool_restores_execution() {
-        let dir = tempdir().expect("temp dir");
-        let file = dir.path().join("test.txt");
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+
+        // Create file inside the workspace root so the boundary check passes
+        let file = runtime.data_root().join("test.txt");
         std::fs::write(&file, "restored").expect("write");
 
-        let runtime = OrbitRuntime::in_memory().expect("runtime");
         runtime.disable_tool("fs.read").expect("disable");
         runtime.enable_tool("fs.read").expect("enable");
 

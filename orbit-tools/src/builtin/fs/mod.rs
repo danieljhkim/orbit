@@ -16,22 +16,27 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(list::FsListTool);
 }
 
-/// Checks that `path` resolves inside the context workspace root (if one is set).
+/// Checks that `path` resolves inside the context workspace root.
 ///
 /// Symlink escapes are blocked because the path is canonicalized before the check.
 /// For paths that do not yet exist (e.g. `fs.write` creating a new file), the
 /// nearest existing ancestor is canonicalized and the remaining components are
 /// appended before the check.
 ///
-/// Returns `Ok` when no workspace root is set, or when the canonical path is
-/// inside the root. Returns `Err(PolicyDenied)` otherwise.
+/// Returns `Err(PolicyDenied)` when no workspace root is set (fail-closed) or
+/// when the canonical path is outside the root. Returns `Ok` only when the
+/// canonical path is inside the workspace root.
 pub(super) fn check_workspace_boundary(
     ctx: &ToolContext,
     path: &Path,
 ) -> Result<PathBuf, OrbitError> {
     let workspace_root = match &ctx.workspace_root {
         Some(root) => root,
-        None => return Ok(path.to_path_buf()),
+        None => {
+            return Err(OrbitError::PolicyDenied(
+                "workspace_root is not set; filesystem access denied".to_string(),
+            ))
+        }
     };
 
     let canonical = if path.exists() {
@@ -52,7 +57,13 @@ pub(super) fn check_workspace_boundary(
         canonical_parent.join(file_name)
     };
 
-    if !canonical.starts_with(workspace_root) {
+    // Canonicalize the workspace root so symlinks (e.g. /var -> /private/var on
+    // macOS) don't cause false negatives when comparing against the canonical path.
+    let canonical_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.clone());
+
+    if !canonical.starts_with(&canonical_root) {
         return Err(OrbitError::PolicyDenied(format!(
             "path is outside workspace: {}",
             canonical.display()

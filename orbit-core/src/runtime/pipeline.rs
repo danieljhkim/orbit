@@ -34,6 +34,14 @@ impl OrbitRuntime {
             tool_context.orbit_root = Some(self.data_root_path().to_path_buf());
         }
 
+        // Ensure fs tools always have a workspace boundary for sandboxing.
+        // The workspace root is the parent of the .orbit data directory (the repo root).
+        if tool_context.workspace_root.is_none() {
+            if let Some(parent) = self.data_root_path().parent() {
+                tool_context.workspace_root = Some(parent.to_path_buf());
+            }
+        }
+
         self.check_tool_enabled(name)?;
 
         if !tool_context.allowed_tools.is_empty()
