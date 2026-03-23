@@ -255,6 +255,10 @@ impl RuntimeHost for OrbitRuntime {
         });
         Ok(())
     }
+
+    fn scoring_enabled(&self) -> bool {
+        self.context.scoring_enabled()
+    }
 }
 
 impl JobRunHost for OrbitRuntime {

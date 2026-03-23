@@ -43,11 +43,10 @@ pub(super) fn load_pr_comments<H: RuntimeHost + TaskHost + ?Sized>(
         }));
     }
 
-    if let (Some(agent), Some(model)) = (&task.agent, &task.model) {
-        let root = std::path::Path::new(repo_root);
-        let _ = pr_scoreboard::record_pr_revision(root, agent, model);
-        for _ in &unresolved {
-            let _ = pr_scoreboard::record_comment_resolved(root, agent, model);
+    if host.scoring_enabled() {
+        if let (Some(agent), Some(model)) = (&task.agent, &task.model) {
+            let root = std::path::Path::new(repo_root);
+            let _ = pr_scoreboard::record_pr_revision(root, agent, model);
         }
     }
 
@@ -240,13 +239,20 @@ mod tests {
     #[derive(Default)]
     struct FakeHost {
         task: RefCell<Option<Task>>,
+        scoring_enabled: bool,
     }
 
     impl FakeHost {
         fn new(task: Task) -> Self {
             Self {
                 task: RefCell::new(Some(task)),
+                scoring_enabled: false,
             }
+        }
+
+        fn with_scoring(mut self) -> Self {
+            self.scoring_enabled = true;
+            self
         }
     }
 
@@ -335,6 +341,10 @@ mod tests {
             _error_message: &str,
         ) -> Result<(), OrbitError> {
             Ok(())
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            self.scoring_enabled
         }
     }
 
@@ -454,7 +464,7 @@ mod tests {
         .unwrap();
 
         let (_gh_dir, _path_guard) = use_fake_gh(&comments_json, &threads_json);
-        let host = FakeHost::new(test_task(repo_dir.path()));
+        let host = FakeHost::new(test_task(repo_dir.path())).with_scoring();
 
         let result = load_pr_comments(&host, &json!({"task_id": "T20260320-021158"}))
             .expect("load_pr_comments should succeed");
@@ -464,7 +474,6 @@ mod tests {
 
         let sb = read_pr_scoreboard(repo_dir.path()).expect("scoreboard should exist");
         assert_eq!(sb["revisions"]["claude"]["opus-4.6"], 1);
-        assert_eq!(sb["comments-resolved"]["claude"]["opus-4.6"], 2);
     }
 
     #[test]

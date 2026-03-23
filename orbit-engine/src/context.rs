@@ -255,6 +255,7 @@ pub trait RuntimeHost {
         error_code: &str,
         error_message: &str,
     ) -> Result<(), OrbitError>;
+    fn scoring_enabled(&self) -> bool;
 }
 
 /// Aggregates all five sub-traits required at the top-level engine boundary.

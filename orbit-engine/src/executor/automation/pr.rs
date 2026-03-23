@@ -77,8 +77,10 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
         },
     )?;
 
-    if let (Some(agent), Some(model)) = (&task.agent, &task.model) {
-        let _ = pr_scoreboard::record_pr_merged(&repo_root, agent, model);
+    if host.scoring_enabled() {
+        if let (Some(agent), Some(model)) = (&task.agent, &task.model) {
+            let _ = pr_scoreboard::record_pr_merged(&repo_root, agent, model);
+        }
     }
 
     Ok(json!({
@@ -262,6 +264,7 @@ mod tests {
         task: RefCell<Option<Task>>,
         tool_invocations: RefCell<Vec<ToolInvocation>>,
         automation_updates: RefCell<Vec<TaskAutomationUpdate>>,
+        scoring_enabled: bool,
     }
 
     impl FakeHost {
@@ -270,7 +273,13 @@ mod tests {
                 task: RefCell::new(Some(task)),
                 tool_invocations: RefCell::new(Vec::new()),
                 automation_updates: RefCell::new(Vec::new()),
+                scoring_enabled: false,
             }
+        }
+
+        fn with_scoring(mut self) -> Self {
+            self.scoring_enabled = true;
+            self
         }
     }
 
@@ -368,6 +377,10 @@ mod tests {
             _error_message: &str,
         ) -> Result<(), OrbitError> {
             Ok(())
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            self.scoring_enabled
         }
     }
 
@@ -516,7 +529,7 @@ mod tests {
         let mut task = test_task(repo_dir.path());
         task.agent = Some("claude".to_string());
         task.model = Some("opus-4.6".to_string());
-        let host = FakeHost::new(task);
+        let host = FakeHost::new(task).with_scoring();
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
 
         let result = merge_pr_from_task(
