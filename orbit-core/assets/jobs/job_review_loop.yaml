@@ -42,5 +42,6 @@ job:
 
     - target_type: activity
       target_id: review_pr
+      agent_cli: claude
       condition: on_success
       timeout_seconds: 600
