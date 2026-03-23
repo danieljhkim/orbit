@@ -253,7 +253,7 @@ impl RuntimeHost for OrbitRuntime {
                 workspace_path: None,
                 priority: TaskPriority::High,
                 complexity: None,
-                task_type: TaskType::Issue,
+                task_type: TaskType::Friction,
                 source_task_id: None,
             },
             agent.map(ToOwned::to_owned),
