@@ -51,6 +51,17 @@ impl Tool for GitPushTool {
             .filter(|v| !v.is_empty())
             .unwrap_or("origin");
 
+        if remote.starts_with('-') {
+            return Err(OrbitError::InvalidInput(
+                "remote name must not start with '-'".to_string(),
+            ));
+        }
+        if branch.starts_with('-') {
+            return Err(OrbitError::InvalidInput(
+                "branch name must not start with '-'".to_string(),
+            ));
+        }
+
         let result = run_process(
             &ExecRequest {
                 program: "git".to_string(),
@@ -58,6 +69,7 @@ impl Tool for GitPushTool {
                     "-C".to_string(),
                     repo_root.to_string_lossy().to_string(),
                     "push".to_string(),
+                    "--".to_string(),
                     remote.to_string(),
                     branch.to_string(),
                 ],
