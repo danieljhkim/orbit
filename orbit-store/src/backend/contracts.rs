@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Activity, AuditEvent, Job, JobRun, JobRunState, JobScheduleState, JobStep, OrbitError,
+    Activity, AuditEvent, Job, JobRun, JobRunState, JobScheduleState, JobStep, OrbitError, OrbitId,
     StoredTool, Task, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
     TaskType,
 };
@@ -11,6 +11,7 @@ use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams}
 #[derive(Debug, Clone)]
 pub struct TaskCreateParams {
     pub actor: String,
+    pub parent_id: Option<OrbitId>,
     pub title: String,
     pub description: String,
     pub plan: String,
@@ -129,6 +130,7 @@ pub trait TaskStoreBackend: Send + Sync {
         &self,
         status: Option<TaskStatus>,
         priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError>;
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError>;
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError>;

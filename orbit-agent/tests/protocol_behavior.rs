@@ -200,9 +200,7 @@ fn provider_mapper_supports_claude_model_override() {
 
 #[test]
 fn provider_mapper_rejects_unsupported_provider() {
-    let err = AgentConfig::cli("custom-agent")
-        .err()
-        .expect("unsupported provider must fail");
+    let err = AgentConfig::cli("custom-agent").expect_err("unsupported provider must fail");
     assert!(matches!(
         err,
         OrbitError::UnsupportedAgentProvider(provider) if provider == "custom-agent"

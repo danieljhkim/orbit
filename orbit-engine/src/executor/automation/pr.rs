@@ -18,8 +18,7 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(
-        &task
-            .repo_root
+        task.repo_root
             .as_deref()
             .or(task.workspace_path.as_deref())
             .ok_or_else(|| {
@@ -89,8 +88,7 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(
-        &task
-            .repo_root
+        task.repo_root
             .as_deref()
             .or(task.workspace_path.as_deref())
             .ok_or_else(|| {
@@ -481,6 +479,7 @@ mod tests {
     fn test_task(repo_root: &Path) -> Task {
         Task {
             id: "T20260320-021158".to_string(),
+            parent_id: None,
             title: "merge_pr_from_task uses GitHub review decision".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),

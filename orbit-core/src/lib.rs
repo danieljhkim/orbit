@@ -534,7 +534,7 @@ mod tests {
         runtime.archive_task(&t2.id).expect("archive");
 
         let backlog = runtime
-            .list_tasks_filtered(Some(TaskStatus::Backlog), None)
+            .list_tasks_filtered(Some(TaskStatus::Backlog), None, None)
             .expect("filter");
         assert_eq!(backlog.len(), 1);
         assert_eq!(backlog[0].title, "open");
@@ -559,10 +559,41 @@ mod tests {
             .expect("add");
 
         let high = runtime
-            .list_tasks_filtered(None, Some(TaskPriority::High))
+            .list_tasks_filtered(None, Some(TaskPriority::High), None)
             .expect("filter");
         assert_eq!(high.len(), 1);
         assert_eq!(high[0].title, "high");
+    }
+
+    #[test]
+    fn list_tasks_filters_by_parent_id() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let parent = runtime
+            .add_task(TaskAddParams {
+                title: "parent".to_string(),
+                ..Default::default()
+            })
+            .expect("add parent");
+        let child = runtime
+            .add_task(TaskAddParams {
+                parent_id: Some(parent.id.clone()),
+                title: "child".to_string(),
+                ..Default::default()
+            })
+            .expect("add child");
+        runtime
+            .add_task(TaskAddParams {
+                title: "other".to_string(),
+                ..Default::default()
+            })
+            .expect("add other");
+
+        let subtasks = runtime
+            .list_tasks_filtered(None, None, Some(&parent.id))
+            .expect("filter by parent");
+        assert_eq!(subtasks.len(), 1);
+        assert_eq!(subtasks[0].id, child.id);
+        assert_eq!(subtasks[0].parent_id.as_deref(), Some(parent.id.as_str()));
     }
 
     #[test]

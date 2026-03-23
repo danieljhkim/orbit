@@ -112,7 +112,7 @@ impl Execute for WorkspaceListArgs {
         // Save back if staleness changed any status
         workspace_registry::save_registry_to(&registry, &registry_path)?;
 
-        println!("{:<20} {:<12} {:<8} {}", "NAME", "ID", "STATUS", "ROOT");
+        println!("{:<20} {:<12} {:<8} ROOT", "NAME", "ID", "STATUS");
         for ws in &registry.workspaces {
             println!(
                 "{:<20} {:<12} {:<8} {}",

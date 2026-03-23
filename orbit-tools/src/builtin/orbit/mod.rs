@@ -412,6 +412,7 @@ mod tests {
                 "description": "Details",
                 "plan": "Plan",
                 "workspace": "/tmp/orbit",
+                "parent_id": "T20260316-000001",
                 "comment": "seed comment",
                 "context": "a.rs,b.rs",
                 "priority": "high",
@@ -446,6 +447,8 @@ mod tests {
                 "hard".to_string(),
                 "--type".to_string(),
                 "feature".to_string(),
+                "--parent".to_string(),
+                "T20260316-000001".to_string(),
                 "--agent".to_string(),
                 "codex".to_string(),
                 "--model".to_string(),
@@ -537,6 +540,26 @@ mod tests {
                 "--json".to_string(),
                 "--status".to_string(),
                 "backlog".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn task_list_builds_parent_filter_when_present() {
+        let req = super::task_list::build_exec_request(
+            &ToolContext::default(),
+            &json!({"parent_id": "T20260316-000001"}),
+        )
+        .expect("valid list input");
+
+        assert_eq!(
+            req.args,
+            vec![
+                "task".to_string(),
+                "list".to_string(),
+                "--json".to_string(),
+                "--parent".to_string(),
+                "T20260316-000001".to_string(),
             ]
         );
     }

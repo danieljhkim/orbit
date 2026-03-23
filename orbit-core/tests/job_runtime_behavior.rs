@@ -777,6 +777,7 @@ fn agent_step_records_task_agent_and_model_when_execution_starts() {
 
     let task = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Track agent metadata".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -837,6 +838,7 @@ fn failed_steps_append_friction_entries_to_daily_log() {
 
     let task = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Record friction".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -910,6 +912,7 @@ fn run_job_now_with_input_passes_manual_input_to_agent() {
     let agent_cli = write_agent_script(&script_path, &script);
     let task = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Manual input task".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -2787,6 +2790,7 @@ fn create_branch_creates_isolated_worktree_without_mutating_main_checkout() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Create worktree".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -2945,6 +2949,7 @@ fn update_task_automation_moves_task_to_review_with_summary_comment_and_note() {
 
     let task = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Review me".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -3048,6 +3053,7 @@ fn implement_change_result_status_flows_into_update_task_as_task_status() {
 
     let task = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Implement then persist".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -3216,6 +3222,7 @@ fn commit_changes_automation_commits_dirty_task_worktree() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Refactor automation flow".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -3396,6 +3403,7 @@ fn commit_task_changes_uses_summary_from_task() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Fix bundle atomicity".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -3570,6 +3578,7 @@ fn commit_task_changes_supports_task_id_only_inputs() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Persist pipeline artifacts".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -3811,6 +3820,7 @@ fn open_pr_automation_uses_task_title_and_commit_output() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Wire Orbit PR automation".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -4016,6 +4026,7 @@ fn open_pr_automation_supports_task_id_only_inputs() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Open PR from stored artifacts".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -4249,6 +4260,7 @@ fn open_pr_automation_rejects_stale_task_branches_before_pr_creation() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Reject stale PR branches".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -4423,6 +4435,7 @@ fn merge_pr_automation_rejects_stale_task_branches_before_merging() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Reject stale merge branches".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -4598,6 +4611,7 @@ fn merge_pr_automation_fetches_review_decision_from_gh_when_not_provided() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Merge task PR after gh lookup".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),
@@ -4930,6 +4944,7 @@ fn create_branch_includes_local_base_commits_not_yet_pushed_to_remote() {
     let runtime = OrbitRuntime::from_data_root(&data_root).expect("runtime");
     let task_id = runtime
         .add_task(TaskAddParams {
+            parent_id: None,
             title: "Create worktree from fresh local base".to_string(),
             description: "desc".to_string(),
             plan: "plan".to_string(),

@@ -159,10 +159,10 @@ fn home_dir() -> Result<PathBuf, OrbitError> {
 
 fn dirs_or_fallback() -> Result<PathBuf, OrbitError> {
     // Try HOME env first (works in tests), then platform default
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return Ok(PathBuf::from(home));
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return Ok(PathBuf::from(home));
     }
     #[cfg(windows)]
     if let Ok(profile) = std::env::var("USERPROFILE") {

@@ -139,6 +139,34 @@ fn task_add_json_returns_task_object() {
 }
 
 #[test]
+fn task_add_json_includes_parent_id_when_provided() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let parent_id = add_task(dir.path(), "parent task");
+
+    let output = orbit_in(dir.path())
+        .args([
+            "task",
+            "add",
+            "--title",
+            "child task",
+            "--description",
+            "json description",
+            "--plan",
+            "json plan",
+            "--parent",
+            &parent_id,
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let task: serde_json::Value = serde_json::from_slice(&output).expect("task json");
+    assert_eq!(task["parent_id"], parent_id);
+}
+
+#[test]
 fn task_add_json_includes_complexity_when_provided() {
     let dir = tempfile::tempdir().expect("tempdir");
 
@@ -247,6 +275,49 @@ fn task_list_json() {
 }
 
 #[test]
+fn task_list_parent_filters_subtasks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let parent_id = add_task(dir.path(), "parent task");
+    let child_output = orbit_in(dir.path())
+        .args([
+            "task",
+            "add",
+            "--title",
+            "child task",
+            "--description",
+            "desc",
+            "--plan",
+            "plan",
+            "--parent",
+            &parent_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let child_id = String::from_utf8(child_output)
+        .expect("utf8")
+        .trim()
+        .to_string();
+    let _unrelated_id = add_task(dir.path(), "unrelated task");
+
+    let output = orbit_in(dir.path())
+        .args(["task", "list", "--all", "--parent", &parent_id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON");
+    let arr = parsed.as_array().expect("array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], child_id);
+    assert_eq!(arr[0]["parent_id"], parent_id);
+}
+
+#[test]
 fn task_show_displays_fields() {
     let dir = tempfile::tempdir().expect("tempdir");
     let id = add_task(dir.path(), "showable task");
@@ -261,12 +332,71 @@ fn task_show_displays_fields() {
 }
 
 #[test]
+fn task_show_displays_parent_task_when_present() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let parent_id = add_task(dir.path(), "parent task");
+    let child_output = orbit_in(dir.path())
+        .args([
+            "task",
+            "add",
+            "--title",
+            "child task",
+            "--description",
+            "desc",
+            "--plan",
+            "plan",
+            "--parent",
+            &parent_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let child_id = String::from_utf8(child_output)
+        .expect("utf8")
+        .trim()
+        .to_string();
+
+    orbit_in(dir.path())
+        .args(["task", "show", &child_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Parent Task:"))
+        .stdout(predicate::str::contains(&parent_id));
+}
+
+#[test]
 fn task_show_nonexistent() {
     let dir = tempfile::tempdir().expect("tempdir");
     orbit_in(dir.path())
         .args(["task", "show", "task-nonexistent"])
         .assert()
         .failure();
+}
+
+#[test]
+fn task_add_warns_when_parent_is_missing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    orbit_in(dir.path())
+        .args([
+            "task",
+            "add",
+            "--title",
+            "child task",
+            "--description",
+            "desc",
+            "--plan",
+            "plan",
+            "--parent",
+            "T20260320-999999",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "warning: parent task 'T20260320-999999' was not found",
+        ));
 }
 
 #[test]

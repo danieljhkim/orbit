@@ -4,8 +4,8 @@ use orbit_store::{
     friction_bounty,
 };
 use orbit_types::{
-    OrbitError, OrbitEvent, Task, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
-    TaskStatus, TaskType,
+    OrbitError, OrbitEvent, OrbitId, Task, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskStatus, TaskType,
 };
 
 use crate::OrbitRuntime;
@@ -13,6 +13,7 @@ use crate::context::ActorKind;
 use crate::paths::find_git_repo_root;
 
 pub struct TaskAddParams {
+    pub parent_id: Option<OrbitId>,
     pub title: String,
     pub description: String,
     pub plan: String,
@@ -28,6 +29,7 @@ pub struct TaskAddParams {
 impl Default for TaskAddParams {
     fn default() -> Self {
         Self {
+            parent_id: None,
             title: String::new(),
             description: String::new(),
             plan: String::new(),
@@ -91,6 +93,7 @@ impl OrbitRuntime {
         let task = self.with_mutation(|| {
             let task = self.create_task_record(StoreTaskCreateParams {
                 actor: effective_label.clone(),
+                parent_id: params.parent_id.clone(),
                 title: params.title.clone(),
                 description: params.description.clone(),
                 plan: params.plan.clone(),
@@ -120,12 +123,11 @@ impl OrbitRuntime {
         })?;
 
         // Friction bounty: record issues-reported on creation when agent+model present
-        if params.task_type.is_friction() {
-            if let (Some(a), Some(m)) = (&agent, &model) {
-                if let Some(repo_root) = find_git_repo_root(self.data_root_path()) {
-                    let _ = friction_bounty::record_friction_reported(&repo_root, a, m);
-                }
-            }
+        if params.task_type.is_friction()
+            && let (Some(a), Some(m)) = (&agent, &model)
+            && let Some(repo_root) = find_git_repo_root(self.data_root_path())
+        {
+            let _ = friction_bounty::record_friction_reported(&repo_root, a, m);
         }
 
         Ok(task)
@@ -144,8 +146,9 @@ impl OrbitRuntime {
         &self,
         status: Option<TaskStatus>,
         priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
-        self.list_task_records_filtered(status, priority)
+        self.list_task_records_filtered(status, priority, parent_id)
     }
 
     pub fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
@@ -277,10 +280,10 @@ impl OrbitRuntime {
             Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))
         })?;
 
-        if let Some(new_status) = target_status {
-            if new_status != old_status {
-                self.try_record_friction_transition(&task, old_status, new_status);
-            }
+        if let Some(new_status) = target_status
+            && new_status != old_status
+        {
+            self.try_record_friction_transition(&task, old_status, new_status);
         }
 
         Ok(updated)
@@ -665,6 +668,7 @@ impl OrbitRuntime {
 
         self.create_task_record(StoreTaskCreateParams {
             actor: actor.clone(),
+            parent_id: None,
             title: title.to_string(),
             description: String::new(),
             plan: String::new(),

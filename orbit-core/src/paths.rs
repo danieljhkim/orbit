@@ -97,6 +97,7 @@ fn resolve_main_repo_from_worktree_gitfile(git_file: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

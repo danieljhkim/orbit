@@ -25,8 +25,9 @@ impl TaskStoreBackend for TaskFileStore {
         &self,
         status: Option<TaskStatus>,
         priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
-        self.list_tasks_filtered(status, priority)
+        self.list_tasks_filtered(status, priority, parent_id)
     }
 
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {

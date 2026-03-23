@@ -386,6 +386,7 @@ fn classify_invocation_error(message: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::classify_invocation_error;
     use crate::context::{

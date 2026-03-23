@@ -157,7 +157,7 @@ impl OrbitRuntime {
                 .filter(|entry| {
                     let p = entry.path();
                     p.extension()
-                        .map_or(false, |ext| ext == "yaml" || ext == "yml")
+                        .is_some_and(|ext| ext == "yaml" || ext == "yml")
                 })
                 .collect::<Vec<_>>();
             entries.sort_by_key(|e| e.file_name());

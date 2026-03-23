@@ -46,10 +46,10 @@ pub(crate) fn resolve_initialize_data_root(
     if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd) {
         // Check if this .orbit has a config.toml with a root redirect
         let config_path = orbit_dir.join("config.toml");
-        if config_path.exists() {
-            if let Some(configured_root) = configured_root_from_config(&config_path)? {
-                return Ok(configured_root);
-            }
+        if config_path.exists()
+            && let Some(configured_root) = configured_root_from_config(&config_path)?
+        {
+            return Ok(configured_root);
         }
         return Ok(orbit_dir);
     }
@@ -182,9 +182,8 @@ mod tests {
         .expect("write repo config");
 
         let previous = std::env::var("ORBIT_ROOT").ok();
-        match previous {
-            Some(_) => unsafe { std::env::remove_var("ORBIT_ROOT") },
-            None => {}
+        if previous.is_some() {
+            unsafe { std::env::remove_var("ORBIT_ROOT") };
         }
         let chosen = resolve_initialize_data_root(&cwd, None).expect("resolve");
         if let Some(value) = previous {
@@ -203,9 +202,8 @@ mod tests {
         std::fs::create_dir_all(&cwd).expect("create cwd");
 
         let previous = std::env::var("ORBIT_ROOT").ok();
-        match previous {
-            Some(_) => unsafe { std::env::remove_var("ORBIT_ROOT") },
-            None => {}
+        if previous.is_some() {
+            unsafe { std::env::remove_var("ORBIT_ROOT") };
         }
         let chosen = resolve_initialize_data_root(&cwd, None).expect("resolve");
         if let Some(value) = previous {
@@ -222,9 +220,8 @@ mod tests {
         std::fs::create_dir_all(&cwd).expect("create cwd");
 
         let previous = std::env::var("ORBIT_ROOT").ok();
-        match previous {
-            Some(_) => unsafe { std::env::remove_var("ORBIT_ROOT") },
-            None => {}
+        if previous.is_some() {
+            unsafe { std::env::remove_var("ORBIT_ROOT") };
         }
         let chosen = resolve_initialize_data_root(&cwd, None).expect("resolve");
         if let Some(value) = previous {
@@ -242,9 +239,8 @@ mod tests {
         std::fs::create_dir_all(repo.join(".git")).expect("create git dir");
         std::fs::create_dir_all(&cwd).expect("create cwd");
         let previous = std::env::var("ORBIT_ROOT").ok();
-        match previous {
-            Some(_) => unsafe { std::env::remove_var("ORBIT_ROOT") },
-            None => {}
+        if previous.is_some() {
+            unsafe { std::env::remove_var("ORBIT_ROOT") };
         }
         let chosen = resolve_initialize_data_root(&cwd, None).expect("resolve");
         if let Some(value) = previous {

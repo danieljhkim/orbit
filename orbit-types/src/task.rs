@@ -293,6 +293,8 @@ pub struct TaskHistoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Task {
     pub id: OrbitId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<OrbitId>,
     pub title: String,
     pub description: String,
     #[serde(default, alias = "instructions")]
@@ -408,6 +410,28 @@ mod tests {
         assert_eq!(task.complexity, None);
         assert_eq!(task.agent.as_deref(), Some("codex"));
         assert_eq!(task.model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[test]
+    fn task_missing_parent_id_deserializes_to_none() {
+        let task: Task = serde_json::from_value(serde_json::json!({
+            "id": "T20260320-000001",
+            "title": "Missing parent",
+            "description": "desc",
+            "plan": "plan",
+            "execution_summary": "",
+            "context_files": [],
+            "status": "backlog",
+            "priority": "medium",
+            "task_type": "task",
+            "comments": [],
+            "history": [],
+            "created_at": "2026-03-20T00:00:00Z",
+            "updated_at": "2026-03-20T00:00:00Z"
+        }))
+        .expect("deserialize task");
+
+        assert_eq!(task.parent_id, None);
     }
 
     #[test]

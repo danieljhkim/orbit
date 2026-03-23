@@ -99,10 +99,10 @@ fn execute_activity_with_retries<H: EngineHost>(
 
             // Clear loop_exit flag at the start of each iteration so a
             // previous iteration's flag doesn't short-circuit immediately.
-            if iteration > 0 {
-                if let Value::Object(ref mut map) = current_input {
-                    map.remove("loop_exit");
-                }
+            if iteration > 0
+                && let Value::Object(ref mut map) = current_input
+            {
+                map.remove("loop_exit");
             }
 
             for (step_index, step) in job.steps.iter().enumerate() {
@@ -140,9 +140,8 @@ fn execute_activity_with_retries<H: EngineHost>(
                 // ---- Job-as-step: delegate to a nested job run ----
                 if step.target_type == JobTargetType::Job {
                     let step_started = Utc::now();
-                    let sub_result = execute_job_step(
-                        host, data_root, &step.target_id, &current_input, debug,
-                    );
+                    let sub_result =
+                        execute_job_step(host, data_root, &step.target_id, &current_input, debug);
                     let step_finished = Utc::now();
                     let (step_state, duration_ms, error_code, error_message) = match &sub_result {
                         Ok(result) => (result.state, None, None, None),
@@ -190,8 +189,13 @@ fn execute_activity_with_retries<H: EngineHost>(
                 // task's agent/model fields so the original implementer is used.
                 let resolved_step = resolve_step_agent_from_task(host, step, &current_input);
                 let effective_step = resolved_step.as_ref().unwrap_or(step);
-                let execution =
-                    build_execution_context_for_step(host, &job, effective_step, current_input.clone(), debug)?;
+                let execution = build_execution_context_for_step(
+                    host,
+                    &job,
+                    effective_step,
+                    current_input.clone(),
+                    debug,
+                )?;
                 // Only record agent context when the step explicitly specifies
                 // agent_cli — skip when resolved from the task to avoid overwriting.
                 if !step.agent_cli.trim().is_empty() {
@@ -517,6 +521,7 @@ fn pid_is_alive(_pid: u32) -> bool {
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finalize_failed_started_run<H: JobRunHost + RuntimeHost>(
     host: &H,
     data_root: &Path,
@@ -723,6 +728,7 @@ struct FrictionContext {
     model: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_failed_step_friction<H: EngineHost>(
     data_root: &Path,
     host: &H,
@@ -821,6 +827,7 @@ fn normalize_agent_label(agent_cli: &str) -> String {
         .to_ascii_lowercase()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_step_metrics<H: EngineHost>(
     data_root: &Path,
     host: &H,

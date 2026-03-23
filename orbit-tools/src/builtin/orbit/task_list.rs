@@ -17,6 +17,12 @@ pub(super) fn build_exec_request(
         args.push("--status".to_string());
         args.push(status);
     }
+    if let Some(parent_id) =
+        super::optional_string_alias(input, &["parent_id", "parent", "parentId"])?
+    {
+        args.push("--parent".to_string());
+        args.push(parent_id);
+    }
 
     Ok(super::orbit_exec_request_with_identity(
         ctx, args, &identity,
@@ -25,16 +31,24 @@ pub(super) fn build_exec_request(
 
 impl Tool for OrbitTaskListTool {
     fn schema(&self) -> ToolSchema {
-        let mut parameters = vec![ToolParam {
-            name: "status".to_string(),
-            description: "Optional task status filter".to_string(),
-            param_type: "string".to_string(),
-            required: false,
-        }];
+        let mut parameters = vec![
+            ToolParam {
+                name: "status".to_string(),
+                description: "Optional task status filter".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "parent_id".to_string(),
+                description: "Optional parent task ID to list subtasks for".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+        ];
         parameters.extend(super::identity_params());
         ToolSchema {
             name: "orbit.task.list".to_string(),
-            description: "List Orbit tasks, optionally filtered by status".to_string(),
+            description: "List Orbit tasks, optionally filtered by status or parent".to_string(),
             parameters,
             builtin: true,
         }

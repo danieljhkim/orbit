@@ -6,8 +6,8 @@ use orbit_types::{
     Activity, Job, JobRun, JobRunState, JobTargetType, OrbitError, OrbitEvent, Role, Task,
     TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
 };
-use std::path::Path;
 use serde_json::Value;
+use std::path::Path;
 
 pub const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 pub const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";

@@ -68,6 +68,9 @@ impl Execute for TaskSubcommand {
 
 #[derive(Args)]
 pub struct TaskAddArgs {
+    /// Parent task ID for hierarchical decomposition
+    #[arg(long = "parent")]
+    pub parent_id: Option<String>,
     /// Task title
     #[arg(long)]
     pub title: String,
@@ -111,6 +114,12 @@ pub struct TaskAddArgs {
 
 impl Execute for TaskAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if let Some(parent_id) = self.parent_id.as_deref()
+            && runtime.get_task(parent_id).is_err()
+        {
+            eprintln!("warning: parent task '{parent_id}' was not found; creating subtask anyway");
+        }
+
         // If a template is requested, resolve it and use its fields as defaults.
         let (description, plan, priority, task_type) = if let Some(ref tpl_name) = self.template {
             let tpl = runtime.get_task_template(tpl_name)?;
@@ -149,6 +158,7 @@ impl Execute for TaskAddArgs {
 
         let task = runtime.add_task_with_identity(
             TaskAddParams {
+                parent_id: self.parent_id,
                 title: self.title,
                 description,
                 plan,
@@ -258,7 +268,7 @@ impl Execute for TaskTemplatesListArgs {
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status in-progress,review\n  orbit task list --priority high\n  orbit task list --json"
+    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status in-progress,review\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --json"
 )]
 pub struct TaskListArgs {
     /// Filter by one or more statuses (comma-separated). Defaults to backlog,in-progress.
@@ -270,6 +280,9 @@ pub struct TaskListArgs {
     /// Filter by priority level (low, medium, high)
     #[arg(long, value_enum)]
     pub priority: Option<TaskPriority>,
+    /// Filter to subtasks belonging to a parent task
+    #[arg(long = "parent")]
+    pub parent_id: Option<String>,
     /// Output full task objects as JSON
     #[arg(long)]
     pub json: bool,
@@ -283,6 +296,7 @@ impl Execute for TaskListArgs {
         let all = self.all;
         let status = self.status;
         let priority = self.priority;
+        let parent_id = self.parent_id;
 
         let all_tasks = runtime.list_tasks()?;
         let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
@@ -298,6 +312,11 @@ impl Execute for TaskListArgs {
             .into_iter()
             .filter(|t| status_filter.is_empty() || status_filter.contains(&t.status))
             .filter(|t| priority.is_none_or(|p| t.priority == p))
+            .filter(|t| {
+                parent_id
+                    .as_deref()
+                    .is_none_or(|p| t.parent_id.as_deref() == Some(p))
+            })
             .collect();
 
         if self.ops {
@@ -333,6 +352,9 @@ impl Execute for TaskShowArgs {
         } else {
             use crate::output::color::{bold, dimmed, priority_color, status_color};
             println!("{} {}", bold("ID:"), task.id);
+            if let Some(ref parent_id) = task.parent_id {
+                println!("{} {}", bold("Parent Task:"), parent_id);
+            }
             println!("{} {}", bold("Title:"), task.title);
             println!(
                 "{} {}",
@@ -602,7 +624,7 @@ pub struct TaskApproveArgs {
 impl Execute for TaskApproveArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let ids = if self.all_proposed {
-            let proposed = runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None)?;
+            let proposed = runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None, None)?;
             if proposed.is_empty() {
                 println!("No proposed tasks found.");
                 return Ok(());
@@ -698,7 +720,7 @@ pub struct TaskRejectArgs {
 impl Execute for TaskRejectArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let ids = if self.all_proposed {
-            let proposed = runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None)?;
+            let proposed = runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None, None)?;
             if proposed.is_empty() {
                 println!("No proposed tasks found.");
                 return Ok(());
@@ -880,6 +902,7 @@ fn print_task_table(tasks: &[orbit_core::Task]) {
 fn task_to_signal_json(task: &orbit_core::Task) -> Value {
     json!({
         "id": task.id,
+        "parent_id": task.parent_id,
         "title": task.title,
         "type": task.task_type.to_string(),
         "status": task.status.to_string(),
@@ -891,6 +914,7 @@ fn task_to_signal_json(task: &orbit_core::Task) -> Value {
 fn task_to_json(task: &orbit_core::Task) -> Value {
     json!({
         "id": task.id,
+        "parent_id": task.parent_id,
         "title": task.title,
         "description": task.description,
         "plan": task.plan,

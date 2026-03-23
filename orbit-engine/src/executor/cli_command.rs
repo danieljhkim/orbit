@@ -48,12 +48,11 @@ impl ActivityExecutor for CliCommandExecutor {
         // When a cli_command step has task_id in its input, load the task and
         // inject its fields into the template context so {{workspace_path}}
         // resolves from the task without explicit pipeline input.
-        if template_context.workspace_path.is_none() {
-            if let Some(task_id) = execution.input.get("task_id").and_then(JsonValue::as_str) {
-                if let Ok(task) = host.get_task(task_id) {
-                    template_context.workspace_path = task.workspace_path;
-                }
-            }
+        if template_context.workspace_path.is_none()
+            && let Some(task_id) = execution.input.get("task_id").and_then(JsonValue::as_str)
+            && let Ok(task) = host.get_task(task_id)
+        {
+            template_context.workspace_path = task.workspace_path;
         }
         match execute(
             &execution.activity.spec_config,

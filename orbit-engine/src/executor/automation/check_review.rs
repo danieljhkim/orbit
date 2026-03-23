@@ -12,8 +12,7 @@ pub(super) fn check_review_decision<H: TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
     let repo_root = canonicalize_existing_dir(
-        &task
-            .repo_root
+        task.repo_root
             .as_deref()
             .or(task.workspace_path.as_deref())
             .ok_or_else(|| {

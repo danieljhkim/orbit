@@ -169,6 +169,7 @@ pub(crate) fn execution_template_context_with_env(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod retry_tests {
     use orbit_types::JobRunState;
 

@@ -122,7 +122,11 @@ fn filter_unresolved_comments(
         .map(|threads| {
             threads
                 .iter()
-                .filter(|t| t.get("isResolved").and_then(Value::as_bool).unwrap_or(false))
+                .filter(|t| {
+                    t.get("isResolved")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
                 .flat_map(|t| {
                     t.get("comments")
                         .and_then(Value::as_array)

@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    OrbitError, Task, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
-    TaskType,
+    OrbitError, OrbitId, Task, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority,
+    TaskStatus, TaskType,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value as YamlValue};
@@ -100,6 +100,8 @@ struct TaskFileDocument {
     #[serde(rename = "schema_version")]
     schema_version: u8,
     id: String,
+    #[serde(default)]
+    parent_id: Option<OrbitId>,
     #[serde(rename = "type", default = "default_task_type")]
     task_type: TaskType,
     priority: TaskPriority,
@@ -182,6 +184,7 @@ impl TaskFileStore {
             doc: TaskFileDocument {
                 schema_version: TASK_SCHEMA_VERSION,
                 id,
+                parent_id: params.parent_id,
                 title: params.title,
                 description: params.description,
                 context_files: params.context_files,
@@ -251,12 +254,14 @@ impl TaskFileStore {
         &self,
         status: Option<TaskStatus>,
         priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
         let tasks = self.list_tasks()?;
         Ok(tasks
             .into_iter()
             .filter(|task| status.is_none_or(|value| task.status == value))
             .filter(|task| priority.is_none_or(|value| task.priority == value))
+            .filter(|task| parent_id.is_none_or(|value| task.parent_id.as_deref() == Some(value)))
             .collect())
     }
 
@@ -563,6 +568,9 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
 
     yaml.push_str(&yaml_section("identity"));
     yaml.push_str(&yaml_field("id", &doc.id)?);
+    if let Some(ref parent_id) = doc.parent_id {
+        yaml.push_str(&yaml_field("parent_id", parent_id)?);
+    }
     yaml.push_str(&yaml_field("type", &doc.task_type)?);
     yaml.push_str(&yaml_field("priority", &doc.priority)?);
     if let Some(complexity) = doc.complexity {
@@ -638,6 +646,7 @@ fn bundle_read_error(path: &Path, label: &str, err: std::io::Error) -> OrbitErro
 fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
     Task {
         id: bundle.doc.id,
+        parent_id: bundle.doc.parent_id,
         title: bundle.doc.title,
         description: bundle.doc.description,
         plan: bundle.plan,
@@ -677,6 +686,7 @@ mod tests {
     fn sample_insert(status: TaskStatus) -> TaskCreateParams {
         TaskCreateParams {
             actor: "Codex".to_string(),
+            parent_id: None,
             title: "Bundle task".to_string(),
             description: "Task description".to_string(),
             plan: "Task plan".to_string(),
@@ -716,6 +726,7 @@ mod tests {
 
         let yaml = fs::read_to_string(task_dir.join(TASK_DOC_FILE_NAME)).expect("read yaml");
         assert!(yaml.contains("schema_version: 4"));
+        assert!(!yaml.contains("parent_id:"));
         assert!(yaml.contains("description: Task description"));
         assert!(yaml.contains("context_files:"));
         assert!(yaml.contains("created_by: Codex"));
@@ -917,6 +928,7 @@ mod tests {
         let two = store
             .create_task(TaskCreateParams {
                 actor: "Codex".to_string(),
+                parent_id: None,
                 title: "Another task".to_string(),
                 description: "Searchable phrase".to_string(),
                 plan: "Other plan".to_string(),
@@ -948,6 +960,84 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].id, two.id);
         assert_eq!(matches[0].description, "Searchable phrase");
+    }
+
+    #[test]
+    fn create_task_persists_parent_id_when_present() {
+        let dir = tempdir().expect("tempdir");
+        let store = TaskFileStore::new(dir.path().to_path_buf());
+
+        let created = store
+            .create_task(TaskCreateParams {
+                actor: "Codex".to_string(),
+                parent_id: Some("T20260320-000001".to_string()),
+                title: "Nested task".to_string(),
+                description: "desc".to_string(),
+                plan: "plan".to_string(),
+                execution_summary: String::new(),
+                context_files: vec![],
+                workspace_path: None,
+                repo_root: None,
+                assigned_to: None,
+                created_by: None,
+                agent: None,
+                model: None,
+                status: TaskStatus::Backlog,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Task,
+                pr_number: None,
+                proposed_by: None,
+                source_task_id: None,
+                comments: Vec::new(),
+            })
+            .expect("create nested task");
+
+        assert_eq!(created.parent_id.as_deref(), Some("T20260320-000001"));
+        let yaml = fs::read_to_string(
+            dir.path()
+                .join("backlog")
+                .join(&created.id)
+                .join(TASK_DOC_FILE_NAME),
+        )
+        .expect("read yaml");
+        assert!(yaml.contains("parent_id: T20260320-000001"));
+    }
+
+    #[test]
+    fn list_tasks_filtered_by_parent_id_returns_only_matching_subtasks() {
+        let dir = tempdir().expect("tempdir");
+        let store = TaskFileStore::new(dir.path().to_path_buf());
+
+        let parent = store
+            .create_task(TaskCreateParams {
+                title: "Parent".to_string(),
+                ..sample_insert(TaskStatus::Backlog)
+            })
+            .expect("create parent");
+
+        let child = store
+            .create_task(TaskCreateParams {
+                parent_id: Some(parent.id.clone()),
+                title: "Child".to_string(),
+                ..sample_insert(TaskStatus::Backlog)
+            })
+            .expect("create child");
+
+        store
+            .create_task(TaskCreateParams {
+                title: "Unrelated".to_string(),
+                ..sample_insert(TaskStatus::Backlog)
+            })
+            .expect("create unrelated");
+
+        let subtasks = store
+            .list_tasks_filtered(None, None, Some(&parent.id))
+            .expect("filter by parent");
+
+        assert_eq!(subtasks.len(), 1);
+        assert_eq!(subtasks[0].id, child.id);
+        assert_eq!(subtasks[0].parent_id.as_deref(), Some(parent.id.as_str()));
     }
 
     #[test]

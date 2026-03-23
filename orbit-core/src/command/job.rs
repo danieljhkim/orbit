@@ -132,13 +132,13 @@ impl OrbitRuntime {
             }
             if step.target_type == JobTargetType::Job {
                 // Reject self-references.
-                if let Some(ref job_id) = params.job_id {
-                    if step.target_id == *job_id {
-                        return Err(OrbitError::JobValidation(format!(
-                            "job '{}' cannot reference itself as a step",
-                            job_id
-                        )));
-                    }
+                if let Some(ref job_id) = params.job_id
+                    && step.target_id == *job_id
+                {
+                    return Err(OrbitError::JobValidation(format!(
+                        "job '{}' cannot reference itself as a step",
+                        job_id
+                    )));
                 }
                 // Validate that the referenced job exists.
                 let referenced_job = self.get_job_backend(&step.target_id)?.ok_or_else(|| {
@@ -168,8 +168,7 @@ impl OrbitRuntime {
             // When agent_cli is specified, validate it eagerly. When empty,
             // the runner resolves it from the task's agent field at runtime
             // (e.g. review loop steps that route back to the original implementer).
-            if activity_requires_agent_cli(&activity.spec_type)
-                && !step.agent_cli.trim().is_empty()
+            if activity_requires_agent_cli(&activity.spec_type) && !step.agent_cli.trim().is_empty()
             {
                 let _ = Agent::new(
                     &AgentConfig::cli(step.agent_cli.clone())?.with_model(step.model.as_deref()),

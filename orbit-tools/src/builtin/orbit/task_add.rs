@@ -57,6 +57,12 @@ pub(super) fn build_exec_request(
         args.push("--source-task".to_string());
         args.push(source_task);
     }
+    if let Some(parent_id) =
+        super::optional_string_alias(input, &["parent_id", "parent", "parentId"])?
+    {
+        args.push("--parent".to_string());
+        args.push(parent_id);
+    }
     super::append_identity_flags(&mut args, &identity);
 
     args.push("--json".to_string());
@@ -126,6 +132,12 @@ impl Tool for OrbitTaskAddTool {
                 name: "source_task_id".to_string(),
                 description: "For bug tasks: originating task ID that introduced the defect"
                     .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "parent_id".to_string(),
+                description: "Optional parent task ID for a subtask relationship".to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },

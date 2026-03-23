@@ -241,6 +241,7 @@ impl RuntimeHost for OrbitRuntime {
              3. Re-run the job to verify it completes successfully"
         );
         let _ = self.add_task(crate::command::task::TaskAddParams {
+            parent_id: None,
             title,
             description,
             plan,
