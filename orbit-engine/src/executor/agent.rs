@@ -10,7 +10,7 @@ use crate::context::{
     AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED, AGENT_OUTPUT_MISSING, AGENT_PROTOCOL_VIOLATION,
     AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT, AGENT_TIMEOUT, AGENT_TRANSPORT_FAILURE,
     AgentProtocolHost, AttemptOutcome, EngineHost, EnvironmentHost, ExecutionContext,
-    execution_working_directory,
+    execution_working_directory, execution_working_directory_with_task,
 };
 
 pub struct AgentExecutor;
@@ -21,7 +21,10 @@ impl ActivityExecutor for AgentExecutor {
     }
 
     fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome {
-        execute(host, execution)
+        // Resolve working directory here where EngineHost (which includes
+        // TaskHost) is available, so we can fall back to task.workspace_path.
+        let working_dir = execution_working_directory_with_task(host, execution);
+        execute_with_cwd(host, execution, working_dir)
     }
 }
 
@@ -29,11 +32,20 @@ pub fn execute<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
     host: &H,
     execution: &ExecutionContext,
 ) -> AttemptOutcome {
+    let working_dir = execution_working_directory(execution);
+    execute_with_cwd(host, execution, working_dir)
+}
+
+fn execute_with_cwd<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
+    host: &H,
+    execution: &ExecutionContext,
+    working_dir: Option<String>,
+) -> AttemptOutcome {
     let invocation = match build_agent_invocation(host, execution) {
         Ok(invocation) => invocation,
         Err(outcome) => return outcome,
     };
-    let exec_result = match execute_agent_process(host, execution, invocation) {
+    let exec_result = match execute_agent_process(host, execution, invocation, working_dir) {
         Ok(result) => result,
         Err(outcome) => return outcome,
     };
@@ -143,6 +155,7 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
     host: &H,
     execution: &ExecutionContext,
     invocation: orbit_agent::AgentResponse,
+    working_dir: Option<String>,
 ) -> Result<orbit_types::ExecutionResult, AttemptOutcome> {
     let (args, _stdout_schema_file) =
         prepare_exec_args(&invocation).map_err(invocation_failed_outcome)?;
@@ -161,7 +174,7 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
         &ExecRequest {
             program: invocation.program,
             args,
-            current_dir: execution_working_directory(execution),
+            current_dir: working_dir,
             timeout_ms: Some(execution.timeout_seconds.saturating_mul(1000)),
             stdin_mode: StdinMode::Bytes(invocation.stdin),
             environment_mode,

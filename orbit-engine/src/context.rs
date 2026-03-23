@@ -312,6 +312,24 @@ pub fn execution_working_directory(execution: &ExecutionContext) -> Option<Strin
         .or_else(|| input_workspace_path(&execution.input))
 }
 
+/// Resolve the working directory for an execution context, falling back to the
+/// task's workspace_path when neither the activity nor input provides one.
+/// This is the preferred variant for agent_invoke and cli_command executors
+/// where a [`TaskHost`] is available.
+pub fn execution_working_directory_with_task<H: TaskHost + ?Sized>(
+    host: &H,
+    execution: &ExecutionContext,
+) -> Option<String> {
+    execution_working_directory(execution).or_else(|| {
+        execution
+            .input
+            .get("task_id")
+            .and_then(Value::as_str)
+            .and_then(|task_id| host.get_task(task_id).ok())
+            .and_then(|task| task.workspace_path)
+    })
+}
+
 pub fn redact_attempt_outcome(mut outcome: AttemptOutcome) -> AttemptOutcome {
     outcome.response_json = outcome.response_json.map(redact_sensitive_env_json);
     outcome.error_message = redact_sensitive_env_option(outcome.error_message);
