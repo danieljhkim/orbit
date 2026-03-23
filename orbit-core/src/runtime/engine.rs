@@ -214,6 +214,8 @@ impl RuntimeHost for OrbitRuntime {
         run_id: &str,
         error_code: &str,
         error_message: &str,
+        agent: Option<&str>,
+        model: Option<&str>,
     ) -> Result<(), OrbitError> {
         let title = format!("Job failure: {job_id} [{error_code}]");
         let tasks = self.list_task_records()?;
@@ -240,19 +242,23 @@ impl RuntimeHost for OrbitRuntime {
              2. Fix the underlying issue\n\
              3. Re-run the job to verify it completes successfully"
         );
-        let _ = self.add_task(crate::command::task::TaskAddParams {
-            parent_id: None,
-            title,
-            description,
-            plan,
-            comment: None,
-            context_files: vec![],
-            workspace_path: None,
-            priority: TaskPriority::High,
-            complexity: None,
-            task_type: TaskType::Task,
-            source_task_id: None,
-        });
+        let _ = self.add_task_with_identity(
+            crate::command::task::TaskAddParams {
+                parent_id: None,
+                title,
+                description,
+                plan,
+                comment: None,
+                context_files: vec![],
+                workspace_path: None,
+                priority: TaskPriority::High,
+                complexity: None,
+                task_type: TaskType::Issue,
+                source_task_id: None,
+            },
+            agent.map(ToOwned::to_owned),
+            model.map(ToOwned::to_owned),
+        );
         Ok(())
     }
 

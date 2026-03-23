@@ -339,6 +339,8 @@ mod tests {
             _run_id: &str,
             _error_code: &str,
             _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
         ) -> Result<(), OrbitError> {
             Ok(())
         }

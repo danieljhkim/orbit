@@ -40,7 +40,7 @@ pub fn run_job_with_input<H: EngineHost>(
         job_id: job.job_id.clone(),
     })?;
 
-    execute_activity_with_retries(host, data_root, job, Utc::now(), None, input, debug)
+    execute_activity_with_retries(host, data_root, job, Utc::now(), None, input, debug, true)
 }
 
 fn execute_activity_with_retries<H: EngineHost>(
@@ -51,6 +51,10 @@ fn execute_activity_with_retries<H: EngineHost>(
     initial_run: Option<JobRun>,
     input: Value,
     debug: bool,
+    // When `true`, a failure task is created on pipeline failure.
+    // Nested (sub-job) runs pass `false` so only the outermost pipeline
+    // creates a single failure task.
+    create_failure_task: bool,
 ) -> Result<JobRunResult, OrbitError> {
     let attempt = initial_run.as_ref().map(|r| r.attempt).unwrap_or(1);
 
@@ -90,7 +94,7 @@ fn execute_activity_with_retries<H: EngineHost>(
         let mut total_duration_ms: u64 = 0;
         let mut last_protocol_violation = false;
         let mut current_input = merge_job_input(job.default_input.as_ref(), input)?;
-        let mut last_failure: Option<(String, String)> = None;
+        let mut last_failure: Option<FailureInfo> = None;
         let num_steps = job.steps.len();
         let max_iterations = job.max_iterations.max(1);
 
@@ -175,10 +179,17 @@ fn execute_activity_with_retries<H: EngineHost>(
                     }
 
                     if step_state_records_failure(step_state) {
-                        last_failure = Some((
-                            error_code.unwrap_or_default(),
-                            error_message.unwrap_or_default(),
-                        ));
+                        // Preserve the first failure — subsequent handler failures
+                        // should not overwrite the original root cause.
+                        if last_failure.is_none() {
+                            last_failure = Some(FailureInfo {
+                                error_code: error_code.unwrap_or_default(),
+                                error_message: error_message.unwrap_or_default(),
+                                agent: (!step.agent_cli.trim().is_empty())
+                                    .then(|| normalize_agent_label(&step.agent_cli)),
+                                model: step.model.clone(),
+                            });
+                        }
                         final_state = step_state;
                     }
                     continue;
@@ -287,10 +298,17 @@ fn execute_activity_with_retries<H: EngineHost>(
                 }
 
                 if step_state_records_failure(step_state) {
-                    last_failure = Some((
-                        outcome.error_code.clone().unwrap_or_default(),
-                        outcome.error_message.clone().unwrap_or_default(),
-                    ));
+                    // Preserve the first failure — subsequent handler failures
+                    // should not overwrite the original root cause.
+                    if last_failure.is_none() {
+                        last_failure = Some(FailureInfo {
+                            error_code: outcome.error_code.clone().unwrap_or_default(),
+                            error_message: outcome.error_message.clone().unwrap_or_default(),
+                            agent: (!execution.agent_cli.trim().is_empty())
+                                .then(|| normalize_agent_label(&execution.agent_cli)),
+                            model: resolved_model_name(host, &execution),
+                        });
+                    }
                     final_state = step_state;
                 }
 
@@ -319,11 +337,18 @@ fn execute_activity_with_retries<H: EngineHost>(
             state: final_state.to_string(),
         })?;
 
-        if final_state != JobRunState::Success
-            && let Some((ref error_code, ref error_message)) = last_failure
+        if create_failure_task
+            && final_state != JobRunState::Success
+            && let Some(ref failure) = last_failure
         {
-            let _ =
-                host.maybe_create_failure_task(&job.job_id, &run.run_id, error_code, error_message);
+            let _ = host.maybe_create_failure_task(
+                &job.job_id,
+                &run.run_id,
+                &failure.error_code,
+                &failure.error_message,
+                failure.agent.as_deref(),
+                failure.model.as_deref(),
+            );
         }
 
         if last_protocol_violation {
@@ -362,12 +387,17 @@ fn execute_activity_with_retries<H: EngineHost>(
                     started_at,
                     &err,
                 )?;
-                let _ = host.maybe_create_failure_task(
-                    &job.job_id,
-                    &run.run_id,
-                    ACTIVITY_EXECUTION_FAILED,
-                    &err.to_string(),
-                );
+                if create_failure_task {
+                    let agent = failure_step.1.agent_cli.trim();
+                    let _ = host.maybe_create_failure_task(
+                        &job.job_id,
+                        &run.run_id,
+                        ACTIVITY_EXECUTION_FAILED,
+                        &err.to_string(),
+                        (!agent.is_empty()).then(|| normalize_agent_label(agent)).as_deref(),
+                        failure_step.1.model.as_deref(),
+                    );
+                }
             }
             Err(err)
         }
@@ -621,6 +651,8 @@ fn merge_job_input(default_input: Option<&Value>, input: Value) -> Result<Value,
 }
 
 /// Execute a nested job step by loading the referenced job and running it.
+/// Nested jobs do not create their own failure tasks — the outermost pipeline
+/// is responsible for creating a single failure task.
 fn execute_job_step<H: EngineHost>(
     host: &H,
     data_root: &Path,
@@ -631,7 +663,23 @@ fn execute_job_step<H: EngineHost>(
     let sub_job = host
         .get_job(job_id)?
         .ok_or_else(|| OrbitError::JobValidation(format!("nested job '{}' not found", job_id)))?;
-    run_job_with_input(host, data_root, sub_job, input.clone(), debug)
+    let _ = recover_stale_active_run_for_job(host, data_root, &sub_job, Utc::now())?;
+    let active_runs = host.list_pending_or_running_job_runs(&sub_job.job_id)?;
+    if active_runs.len() as u32 >= sub_job.max_active_runs {
+        let latest_active_run = active_runs.first().expect("active run exists");
+        return Err(OrbitError::JobValidation(format!(
+            "job '{}' already has {} active run(s), reaching max_active_runs={} (latest active run '{}' in state '{}')",
+            sub_job.job_id,
+            active_runs.len(),
+            sub_job.max_active_runs,
+            latest_active_run.run_id,
+            latest_active_run.state,
+        )));
+    }
+    host.record_event(OrbitEvent::JobTriggered {
+        job_id: sub_job.job_id.clone(),
+    })?;
+    execute_activity_with_retries(host, data_root, sub_job, Utc::now(), None, input.clone(), debug, false)
 }
 
 /// Returns `true` if the accumulated input contains `"loop_exit": true`.
@@ -718,6 +766,15 @@ fn resolved_model_name<H: EngineHost>(
     agent
         .and_then(|agent| agent.model_name().map(ToOwned::to_owned))
         .or(model_from_config)
+}
+
+/// Captures information about the first step failure in a pipeline run,
+/// including agent attribution for the failure task.
+struct FailureInfo {
+    error_code: String,
+    error_message: String,
+    agent: Option<String>,
+    model: Option<String>,
 }
 
 #[derive(Default)]

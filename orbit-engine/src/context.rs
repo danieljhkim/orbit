@@ -248,12 +248,16 @@ pub trait RuntimeHost {
     ) -> Result<Value, OrbitError>;
     /// Create a task capturing a job run failure, skipping creation if an open
     /// task for the same `job_id` + `error_code` combination already exists.
+    /// When `agent` and `model` are provided, they are recorded on the created
+    /// task so attribution reflects the actual agent that was running.
     fn maybe_create_failure_task(
         &self,
         job_id: &str,
         run_id: &str,
         error_code: &str,
         error_message: &str,
+        agent: Option<&str>,
+        model: Option<&str>,
     ) -> Result<(), OrbitError>;
     fn scoring_enabled(&self) -> bool;
 }
