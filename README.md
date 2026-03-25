@@ -127,15 +127,24 @@ job:
 Orbit is structured as a layered set of Rust crates. Lower layers have no knowledge of higher layers.
 
 ```
-orbit-cli          ← binary; CLI parsing and command dispatch
-    └── orbit-core         ← runtime facade; wires all subsystems together
-            ├── orbit-engine       ← job and activity execution loop
-            │       ├── orbit-agent    ← agent invocation (Claude, Codex)
-            │       ├── orbit-exec     ← subprocess execution and sandboxing
-            │       ├── orbit-tools    ← built-in tool registry
-            │       └── orbit-store    ← persistence backends
-            ├── orbit-policy       ← tool access control and role enforcement
-            └── orbit-types        ← shared domain types and error definitions
+                        ┌─────────────────────────────────────────┐
+                        │            orbit-types (leaf)            │
+                        └──┬──────┬──────┬──────┬─────────────────┘
+                           │      │      │      │
+                       policy   exec   store   agent
+                           │      │
+                           └──┬───┘
+                            tools
+                              │
+                        ┌─────┴─────┐
+                        │  engine   │ → store, agent, exec, tools
+                        └─────┬─────┘
+                        ┌─────┴─────┐
+                        │   core    │ → engine, store, agent, policy, exec, tools
+                        └─────┬─────┘
+                        ┌─────┴─────┐
+                        │    cli    │
+                        └───────────┘
 ```
 
 
@@ -147,6 +156,22 @@ Orbit uses a dual-model strategy to balance reasoning depth against throughput:
 | :--- | :--- | :--- |
 | **Claude** | Planning, dispatch, review | High-order reasoning; architectural and code review quality |
 | **Codex** | Implementation, code generation | High throughput and rate limits for iterative coding tasks |
+
+---
+
+## Store & Scoping Model
+
+Orbit maintains two `.orbit/` directories: a **global** root (`~/.orbit/`) and a **workspace** root (`.orbit/` inside a repo). Each resource type has a fixed merge strategy:
+
+| Resource | Strategy | Behavior |
+| :--- | :--- | :--- |
+| Tasks, Runs, Scoreboard | **Workspace-only** | Read/write only in the workspace `.orbit/` |
+| Audits, Configs, Workspace registry | **Global-only** | Read/write only in `~/.orbit/` |
+| Activities, Jobs, Skills, Tools | **MergeByKey** | Global defaults + workspace overrides; workspace entries shadow global by key |
+
+When workspace and global roots are the same directory (e.g. `orbit init` in `$HOME`), layering is a no-op — a single store is used.
+
+These strategies are hardcoded per resource type; there is no runtime configuration.
 
 ---
 
