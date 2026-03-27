@@ -305,8 +305,6 @@ mod tests {
             exit_code: Some(1),
             stderr: "boom".to_string(),
             actor_identity: ActorIdentity::agent("codex", "gpt-5.4"),
-            agent: Some("codex".to_string()),
-            model: Some("gpt-5.4".to_string()),
         };
 
         let json = serde_json::to_string(&entry).expect("serialize friction entry");
@@ -324,8 +322,6 @@ mod tests {
             step: "execute_task".to_string(),
             task_id: Some("T20260322-024246".to_string()),
             actor_identity: ActorIdentity::agent("claude", "opus-4.6"),
-            agent: Some("claude".to_string()),
-            model: Some("opus-4.6".to_string()),
             tool_invocations: 12,
             token_usage: Some(25000),
             step_duration_ms: Some(60000),

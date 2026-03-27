@@ -104,8 +104,6 @@ mod tests {
             exit_code: Some(1),
             stderr: "boom".to_string(),
             actor_identity: ActorIdentity::agent("codex", "gpt-5.4"),
-            agent: Some("codex".to_string()),
-            model: Some("gpt-5.4".to_string()),
         }
     }
 

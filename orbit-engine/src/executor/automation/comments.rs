@@ -44,7 +44,7 @@ pub(super) fn load_pr_comments<H: RuntimeHost + TaskHost + ?Sized>(
     }
 
     if host.scoring_enabled()
-        && let (Some(agent), Some(model)) = (&task.agent, &task.model)
+        && let (Some(agent), Some(model)) = (task.actor_identity.agent_name(), task.actor_identity.agent_model())
     {
         let _ = pr_scoreboard::record_pr_revision(host.scoreboard_dir(), agent, model);
     }
@@ -448,8 +448,6 @@ mod tests {
             assigned_to: None,
             created_by: Some("test".to_string()),
             actor_identity: ActorIdentity::agent("claude", "opus-4.6"),
-            agent: Some("claude".to_string()),
-            model: Some("opus-4.6".to_string()),
             status: TaskStatus::Review,
             priority: TaskPriority::High,
             task_type: TaskType::Issue,
@@ -540,8 +538,7 @@ mod tests {
 
         let (_gh_dir, _path_guard) = use_fake_gh(&comments_json, &threads_json);
         let mut task = test_task(repo_dir.path());
-        task.agent = None;
-        task.model = None;
+        task.actor_identity = ActorIdentity::System;
         let host = FakeHost::new(task);
 
         let result = load_pr_comments(&host, &json!({"task_id": "T20260320-021158"}))

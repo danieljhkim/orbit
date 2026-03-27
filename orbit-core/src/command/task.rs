@@ -105,8 +105,6 @@ impl OrbitRuntime {
                     agent.as_deref(),
                     model.as_deref(),
                 ),
-                agent: agent.clone(),
-                model: model.clone(),
                 assigned_to: Some(effective_label.clone()),
                 status: initial_status,
                 priority: params.priority,
@@ -274,8 +272,10 @@ impl OrbitRuntime {
                     actor: effective_label.clone(),
                     assigned_to,
                     status_note,
-                    agent: agent.clone().map(Some),
-                    model: model.clone().map(Some),
+                    actor_identity: agent.as_ref().map(|_| ActorIdentity::from_legacy(
+                        agent.as_deref(),
+                        model.as_deref(),
+                    )),
                     append_comments: append_comments.clone(),
                     ..StoreTaskUpdateParams::from(params)
                 },
@@ -325,8 +325,10 @@ impl OrbitRuntime {
                         status_event: Some("proposal_approved".to_string()),
                         status_note: note.clone(),
                         assigned_to: Some(Some(effective_label.clone())),
-                        agent: agent.clone().map(Some),
-                        model: model.clone().map(Some),
+                        actor_identity: agent.as_ref().map(|_| ActorIdentity::from_legacy(
+                            agent.as_deref(),
+                            model.as_deref(),
+                        )),
                         append_comments: append_comments.clone(),
                         ..Default::default()
                     },
@@ -347,8 +349,10 @@ impl OrbitRuntime {
                         status: Some(TaskStatus::Done),
                         status_event: Some("review_approved".to_string()),
                         status_note: note.clone(),
-                        agent: agent.clone().map(Some),
-                        model: model.clone().map(Some),
+                        actor_identity: agent.as_ref().map(|_| ActorIdentity::from_legacy(
+                            agent.as_deref(),
+                            model.as_deref(),
+                        )),
                         append_comments: append_comments.clone(),
                         ..Default::default()
                     },
@@ -413,8 +417,6 @@ impl OrbitRuntime {
                             status: Some(TaskStatus::InProgress),
                             status_event: Some("started".to_string()),
                             assigned_to: Some(Some(effective_label.clone())),
-                            agent: agent.clone().map(Some),
-                            model: model.clone().map(Some),
                             append_history: vec![TaskHistoryEntry {
                                 at,
                                 by: effective_label.clone(),
@@ -453,8 +455,6 @@ impl OrbitRuntime {
                             status_event: Some("started".to_string()),
                             status_note: note.clone(),
                             assigned_to: Some(Some(effective_label.clone())),
-                            agent: agent.clone().map(Some),
-                            model: model.clone().map(Some),
                             append_comments: append_comments.clone(),
                             ..Default::default()
                         },
@@ -518,8 +518,6 @@ impl OrbitRuntime {
                         status: Some(TaskStatus::Rejected),
                         status_event: Some("proposal_rejected".to_string()),
                         status_note: Some(reason.clone()),
-                        agent: agent.clone().map(Some),
-                        model: model.clone().map(Some),
                         append_comments: append_comments.clone(),
                         ..Default::default()
                     },
@@ -540,8 +538,6 @@ impl OrbitRuntime {
                         status: Some(TaskStatus::Rejected),
                         status_event: Some("review_rejected".to_string()),
                         status_note: Some(reason.clone()),
-                        agent: agent.clone().map(Some),
-                        model: model.clone().map(Some),
                         append_comments: append_comments.clone(),
                         ..Default::default()
                     },
@@ -628,7 +624,7 @@ impl OrbitRuntime {
         if !self.scoring_enabled() || !task.task_type.is_friction() {
             return;
         }
-        let (Some(agent), Some(model)) = (&task.agent, &task.model) else {
+        let (Some(agent), Some(model)) = (task.actor_identity.agent_name(), task.actor_identity.agent_model()) else {
             return;
         };
         let scoreboard_dir = &self.paths().scoreboard_dir;
@@ -679,8 +675,6 @@ impl OrbitRuntime {
             repo_root: None,
             created_by: Some(actor.clone()),
             actor_identity: ActorIdentity::System,
-            agent: None,
-            model: None,
             assigned_to: Some(actor.clone()),
             status,
             priority: TaskPriority::Medium,

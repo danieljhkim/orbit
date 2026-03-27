@@ -78,7 +78,7 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     )?;
 
     if host.scoring_enabled()
-        && let (Some(agent), Some(model)) = (&task.agent, &task.model)
+        && let (Some(agent), Some(model)) = (task.actor_identity.agent_name(), task.actor_identity.agent_model())
     {
         let _ = pr_scoreboard::record_pr_merged(host.scoreboard_dir(), agent, model);
     }
@@ -160,8 +160,8 @@ pub(super) fn open_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     let tool_context = ToolContext {
         cwd: Some(repo_root.to_string_lossy().to_string()),
         allowed_tools: vec![],
-        agent_name: task.agent.clone(),
-        model_name: task.model.clone(),
+        agent_name: task.actor_identity.agent_name().map(ToOwned::to_owned),
+        model_name: task.actor_identity.agent_model().map(ToOwned::to_owned),
         ..Default::default()
     };
 
@@ -526,8 +526,6 @@ mod tests {
             assigned_to: None,
             created_by: Some("test".to_string()),
             actor_identity: ActorIdentity::System,
-            agent: None,
-            model: None,
             status: TaskStatus::Review,
             priority: TaskPriority::High,
             task_type: TaskType::Issue,
@@ -547,8 +545,7 @@ mod tests {
         let repo_dir = init_repo();
         let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "APPROVED")]);
         let mut task = test_task(repo_dir.path());
-        task.agent = Some("claude".to_string());
-        task.model = Some("opus-4.6".to_string());
+        task.actor_identity = ActorIdentity::agent("claude", "opus-4.6");
         let host = FakeHost::new(task).with_scoring();
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
 
@@ -579,7 +576,7 @@ mod tests {
     fn merge_pr_from_task_skips_scoreboard_when_agent_or_model_missing() {
         let repo_dir = init_repo();
         let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "APPROVED")]);
-        // test_task has agent: None, model: None by default
+        // test_task has actor_identity: System by default (no agent/model)
         let host = FakeHost::new(test_task(repo_dir.path()));
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
 

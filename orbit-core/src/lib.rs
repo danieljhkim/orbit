@@ -820,8 +820,8 @@ mod tests {
         assert_eq!(task.assigned_to.as_deref(), Some("codex / gpt-5.4"));
         assert_eq!(task.proposed_by.as_deref(), Some("codex / gpt-5.4"));
         assert_eq!(task.comments[0].by, "codex / gpt-5.4");
-        assert_eq!(task.agent.as_deref(), Some("codex"));
-        assert_eq!(task.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(task.actor_identity.agent_name(), Some("codex"));
+        assert_eq!(task.actor_identity.agent_model(), Some("gpt-5.4"));
 
         let started = runtime
             .start_task_with_identity(

@@ -313,12 +313,6 @@ pub struct Task {
     /// Typed identity of the agent/human who created or last worked on this task.
     #[serde(default)]
     pub actor_identity: ActorIdentity,
-    /// Legacy agent name field — prefer `actor_identity`.
-    #[serde(default)]
-    pub agent: Option<String>,
-    /// Legacy model name field — prefer `actor_identity`.
-    #[serde(default)]
-    pub model: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     #[serde(default)]
@@ -413,8 +407,6 @@ mod tests {
         .expect("deserialize task");
 
         assert_eq!(task.complexity, None);
-        assert_eq!(task.agent.as_deref(), Some("codex"));
-        assert_eq!(task.model.as_deref(), Some("gpt-5.4"));
     }
 
     #[test]
@@ -440,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn task_missing_agent_and_model_deserializes_to_none() {
+    fn task_missing_agent_and_model_deserializes_with_system_identity() {
         let task: Task = serde_json::from_value(serde_json::json!({
             "id": "T20260320-000002",
             "title": "Missing agent metadata",
@@ -458,8 +450,7 @@ mod tests {
         }))
         .expect("deserialize task");
 
-        assert_eq!(task.agent, None);
-        assert_eq!(task.model, None);
+        assert_eq!(task.actor_identity, ActorIdentity::System);
     }
 
     #[test]
@@ -493,7 +484,6 @@ mod tests {
 
         assert_eq!(task.task_type, TaskType::Bug);
         assert_eq!(task.source_task_id.as_deref(), Some("T20260320-021158"));
-        assert_eq!(task.agent.as_deref(), Some("claude"));
     }
 
     #[test]

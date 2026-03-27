@@ -8,8 +8,8 @@ use orbit_exec::EnvironmentMode;
 use orbit_store::{JobRunStepParams, TaskUpdateParams as StoreTaskUpdateParams};
 use orbit_tools::ToolContext;
 use orbit_types::{
-    Activity, AgentCommitRequest, AgentResponseEnvelope, JobRun, JobRunState, JobTargetType,
-    OrbitError, OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType,
+    Activity, ActorIdentity, AgentCommitRequest, AgentResponseEnvelope, JobRun, JobRunState,
+    JobTargetType, OrbitError, OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -445,16 +445,10 @@ impl TaskHost for OrbitRuntime {
                     workspace_path: update.workspace_path.clone().map(Some),
                     repo_root: update.repo_root.clone().map(Some),
                     pr_number: update.pr_number.clone().map(Some),
-                    agent: update.agent.clone().map(Some),
-                    // When agent is being updated, always set model alongside
-                    // it — even clearing to None — so a stale model from a
-                    // previous step's agent (e.g. codex/gpt-5.4) doesn't
-                    // persist when a different agent (e.g. claude) takes over.
-                    model: if update.agent.is_some() {
-                        Some(update.model.clone())
-                    } else {
-                        update.model.clone().map(Some)
-                    },
+                    actor_identity: Some(ActorIdentity::from_legacy(
+                        update.agent.as_deref(),
+                        update.model.as_deref(),
+                    )).filter(|id| !id.is_system()),
                     ..Default::default()
                 },
             )?;
@@ -503,61 +497,51 @@ fn current_repo_root(runtime: &OrbitRuntime) -> Result<String, OrbitError> {
 mod tests {
     use super::*;
 
-    /// Regression: when agent is updated, model must always be written
-    /// (even clearing to None) so a stale model from a previous step's
-    /// agent doesn't persist. Before the fix, updating agent="claude"
-    /// with model=None left the old model="gpt-5.4" (from a prior codex
-    /// step) on the task, causing metrics/friction entries to log the
-    /// impossible combination agent=claude / model=gpt-5.4.
     #[test]
-    fn agent_update_clears_stale_model() {
+    fn actor_identity_from_agent_update() {
+        let update = TaskAutomationUpdate {
+            agent: Some("claude".to_string()),
+            model: Some("opus-4.6".to_string()),
+            ..Default::default()
+        };
+        let identity = ActorIdentity::from_legacy(
+            update.agent.as_deref(),
+            update.model.as_deref(),
+        );
+        assert_eq!(identity, ActorIdentity::agent("claude", "opus-4.6"));
+    }
+
+    #[test]
+    fn actor_identity_from_agent_without_model() {
         let update = TaskAutomationUpdate {
             agent: Some("claude".to_string()),
             model: None,
             ..Default::default()
         };
-        let mapped_model: Option<Option<String>> = if update.agent.is_some() {
-            Some(update.model.clone())
-        } else {
-            update.model.clone().map(Some)
-        };
+        let identity = ActorIdentity::from_legacy(
+            update.agent.as_deref(),
+            update.model.as_deref(),
+        );
         assert_eq!(
-            mapped_model,
-            Some(None),
-            "model should be cleared when agent is updated without a model"
+            identity,
+            ActorIdentity::Agent {
+                name: "claude".to_string(),
+                model: String::new(),
+            }
         );
     }
 
     #[test]
-    fn agent_update_with_model_preserves_model() {
-        let update = TaskAutomationUpdate {
-            agent: Some("codex".to_string()),
-            model: Some("gpt-5.4".to_string()),
-            ..Default::default()
-        };
-        let mapped_model: Option<Option<String>> = if update.agent.is_some() {
-            Some(update.model.clone())
-        } else {
-            update.model.clone().map(Some)
-        };
-        assert_eq!(mapped_model, Some(Some("gpt-5.4".to_string())));
-    }
-
-    #[test]
-    fn no_agent_update_leaves_model_untouched() {
+    fn actor_identity_from_no_agent_is_system() {
         let update = TaskAutomationUpdate {
             agent: None,
             model: None,
             ..Default::default()
         };
-        let mapped_model: Option<Option<String>> = if update.agent.is_some() {
-            Some(update.model.clone())
-        } else {
-            update.model.clone().map(Some)
-        };
-        assert_eq!(
-            mapped_model, None,
-            "model should not be touched when agent is not updated"
+        let identity = ActorIdentity::from_legacy(
+            update.agent.as_deref(),
+            update.model.as_deref(),
         );
+        assert_eq!(identity, ActorIdentity::System);
     }
 }

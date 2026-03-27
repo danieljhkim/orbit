@@ -824,8 +824,8 @@ fn agent_step_records_task_agent_and_model_when_execution_starts() {
     assert_eq!(run.state, JobRunState::Success);
 
     let updated = runtime.get_task(&task.id).expect("get task");
-    assert_eq!(updated.agent.as_deref(), Some("codex"));
-    assert_eq!(updated.model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(updated.actor_identity.agent_name(), Some("codex"));
+    assert_eq!(updated.actor_identity.agent_model(), Some("gpt-5.4"));
 }
 
 #[test]
@@ -894,8 +894,8 @@ fn failed_steps_append_friction_entries_to_daily_log() {
     assert_eq!(entry.step, "spec-friction-failure");
     assert_eq!(entry.task_id.as_deref(), Some(task.id.as_str()));
     assert_eq!(entry.command, "codex");
-    assert_eq!(entry.agent.as_deref(), Some("codex"));
-    assert_eq!(entry.model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(entry.actor_identity.agent_name(), Some("codex"));
+    assert_eq!(entry.actor_identity.agent_model(), Some("gpt-5.4"));
     assert!(!entry.stderr.trim().is_empty(), "stderr: {}", entry.stderr);
 }
 

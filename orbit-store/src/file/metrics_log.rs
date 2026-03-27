@@ -100,8 +100,6 @@ mod tests {
             step: "execute_task".to_string(),
             task_id: Some(format!("T20260322-00000{day}")),
             actor_identity: ActorIdentity::agent("claude", "opus-4.6"),
-            agent: Some("claude".to_string()),
-            model: Some("opus-4.6".to_string()),
             tool_invocations: invocations,
             token_usage: Some(15000),
             step_duration_ms: Some(45000),

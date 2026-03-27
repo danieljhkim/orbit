@@ -121,9 +121,13 @@ struct TaskFileDocument {
     created_by: Option<String>,
     #[serde(default)]
     actor_identity: ActorIdentity,
-    #[serde(default)]
+    /// Legacy field — kept for deserialization of existing YAML files only.
+    /// Never written back; `actor_identity` is the source of truth.
+    #[serde(default, skip_serializing)]
     agent: Option<String>,
-    #[serde(default)]
+    /// Legacy field — kept for deserialization of existing YAML files only.
+    /// Never written back; `actor_identity` is the source of truth.
+    #[serde(default, skip_serializing)]
     model: Option<String>,
     #[serde(default)]
     assigned_to: Option<String>,
@@ -194,8 +198,8 @@ impl TaskFileStore {
                 assigned_to: params.assigned_to,
                 created_by: params.created_by,
                 actor_identity: params.actor_identity,
-                agent: params.agent,
-                model: params.model,
+                agent: None,
+                model: None,
                 priority: params.priority,
                 complexity: params.complexity,
                 task_type: params.task_type,
@@ -335,12 +339,6 @@ impl TaskFileStore {
         }
         if let Some(ref identity) = fields.actor_identity {
             bundle.doc.actor_identity = identity.clone();
-        }
-        if let Some(value) = &fields.agent {
-            bundle.doc.agent = value.clone();
-        }
-        if let Some(value) = &fields.model {
-            bundle.doc.model = value.clone();
         }
         if let Some(value) = fields.priority {
             bundle.doc.priority = value;
@@ -604,8 +602,6 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
 
     yaml.push_str(&yaml_section("implementation"));
     yaml.push_str(&yaml_field("actor_identity", &doc.actor_identity)?);
-    yaml.push_str(&yaml_field("agent", &doc.agent)?);
-    yaml.push_str(&yaml_field("model", &doc.model)?);
     yaml.push_str(&yaml_field("pr_number", &doc.pr_number)?);
 
     if doc.source_task_id.is_some() {
@@ -650,6 +646,19 @@ fn bundle_read_error(path: &Path, label: &str, err: std::io::Error) -> OrbitErro
 }
 
 fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
+    // When loading from YAML, if actor_identity is System (the default) but
+    // legacy agent/model fields are present, reconstruct the identity from them.
+    let actor_identity = if bundle.doc.actor_identity.is_system()
+        && bundle.doc.agent.is_some()
+    {
+        ActorIdentity::from_legacy(
+            bundle.doc.agent.as_deref(),
+            bundle.doc.model.as_deref(),
+        )
+    } else {
+        bundle.doc.actor_identity
+    };
+
     Task {
         id: bundle.doc.id,
         parent_id: bundle.doc.parent_id,
@@ -662,9 +671,7 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         repo_root: bundle.doc.repo_root,
         assigned_to: bundle.doc.assigned_to,
         created_by: bundle.doc.created_by,
-        actor_identity: bundle.doc.actor_identity,
-        agent: bundle.doc.agent,
-        model: bundle.doc.model,
+        actor_identity,
         status: state.to_status(),
         priority: bundle.doc.priority,
         complexity: bundle.doc.complexity,
@@ -704,8 +711,6 @@ mod tests {
             assigned_to: Some("Codex".to_string()),
             created_by: Some("Codex".to_string()),
             actor_identity: ActorIdentity::System,
-            agent: None,
-            model: None,
             status,
             priority: TaskPriority::High,
             complexity: Some(TaskComplexity::Medium),
@@ -775,8 +780,7 @@ mod tests {
                     description: Some("Updated description".to_string()),
                     plan: Some("Updated plan".to_string()),
                     execution_summary: Some("Validated bundle layout".to_string()),
-                    agent: Some(Some("codex".to_string())),
-                    model: Some(Some("gpt-5.4".to_string())),
+                    actor_identity: Some(ActorIdentity::agent("codex", "gpt-5.4")),
                     ..Default::default()
                 },
             )
@@ -785,13 +789,10 @@ mod tests {
         assert_eq!(updated.description, "Updated description");
         assert_eq!(updated.plan, "Updated plan");
         assert_eq!(updated.execution_summary, "Validated bundle layout");
-        assert_eq!(updated.agent.as_deref(), Some("codex"));
-        assert_eq!(updated.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(updated.actor_identity, ActorIdentity::agent("codex", "gpt-5.4"));
         let yaml = fs::read_to_string(task_dir.join(TASK_DOC_FILE_NAME)).expect("read yaml");
         assert!(yaml.contains("schema_version: 4"));
         assert!(yaml.contains("description: Updated description"));
-        assert!(yaml.contains("agent: codex"));
-        assert!(yaml.contains("model: gpt-5.4"));
         assert!(yaml.contains("updated_at:"));
         assert!(!yaml.contains("updatedAt:"));
         assert_eq!(
@@ -947,8 +948,6 @@ mod tests {
                 assigned_to: None,
                 created_by: None,
                 actor_identity: ActorIdentity::System,
-                agent: None,
-                model: None,
                 status: TaskStatus::Done,
                 priority: TaskPriority::Medium,
                 complexity: None,
@@ -990,8 +989,6 @@ mod tests {
                 assigned_to: None,
                 created_by: None,
                 actor_identity: ActorIdentity::System,
-                agent: None,
-                model: None,
                 status: TaskStatus::Backlog,
                 priority: TaskPriority::Medium,
                 complexity: None,

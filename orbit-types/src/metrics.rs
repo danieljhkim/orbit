@@ -16,12 +16,6 @@ pub struct MetricsEntry {
     /// Typed identity of the actor that executed this step.
     #[serde(default)]
     pub actor_identity: ActorIdentity,
-    /// Legacy agent name field — prefer `actor_identity`.
-    #[serde(default)]
-    pub agent: Option<String>,
-    /// Legacy model name field — prefer `actor_identity`.
-    #[serde(default)]
-    pub model: Option<String>,
     /// Number of tool invocations executed during this step.
     #[serde(default)]
     pub tool_invocations: u32,

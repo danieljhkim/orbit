@@ -402,10 +402,10 @@ impl Execute for TaskShowArgs {
             if let Some(ref created_by) = task.created_by {
                 println!("{} {}", bold("Created By:"), created_by);
             }
-            if let Some(ref agent) = task.agent {
+            if let Some(agent) = task.actor_identity.agent_name() {
                 println!("{} {}", bold("Agent:"), agent);
             }
-            if let Some(ref model) = task.model {
+            if let Some(model) = task.actor_identity.agent_model() {
                 println!("{} {}", bold("Model:"), model);
             }
             if !task.history.is_empty() {
@@ -925,8 +925,8 @@ fn task_to_json(task: &orbit_core::Task) -> Value {
         "context_files": task.context_files,
         "assigned_to": task.assigned_to,
         "created_by": task.created_by,
-        "agent": task.agent,
-        "model": task.model,
+        "agent": task.actor_identity.agent_name(),
+        "model": task.actor_identity.agent_model(),
         "status": task.status.to_string(),
         "priority": task.priority.to_string(),
         "complexity": task.complexity.map(|value| value.to_string()),

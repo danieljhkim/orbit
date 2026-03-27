@@ -18,10 +18,4 @@ pub struct FrictionEntry {
     /// Typed identity of the actor that triggered this friction event.
     #[serde(default)]
     pub actor_identity: ActorIdentity,
-    /// Legacy agent name field — prefer `actor_identity`.
-    #[serde(default)]
-    pub agent: Option<String>,
-    /// Legacy model name field — prefer `actor_identity`.
-    #[serde(default)]
-    pub model: Option<String>,
 }

@@ -735,11 +735,11 @@ fn resolve_step_agent_from_task<H: EngineHost>(
     }
     let task_id = extract_task_id(input)?;
     let task = host.get_task(task_id).ok()?;
-    let agent = task.agent.as_deref().filter(|a| !a.trim().is_empty())?;
+    let agent = task.actor_identity.agent_name().filter(|a| !a.trim().is_empty())?;
     let mut resolved = step.clone();
     resolved.agent_cli = agent.to_string();
     if resolved.model.is_none() {
-        resolved.model = task.model.clone();
+        resolved.model = task.actor_identity.agent_model().map(ToOwned::to_owned);
     }
     Some(resolved)
 }
@@ -850,8 +850,6 @@ fn append_failed_step_friction_without_execution(
         exit_code,
         stderr: stderr.to_string(),
         actor_identity,
-        agent: context.agent,
-        model: context.model,
     };
     if let Err(error) = append_friction_entry(data_root, &entry) {
         eprintln!("orbit: failed to append friction log entry: {error}");
@@ -923,8 +921,6 @@ fn append_step_metrics<H: EngineHost>(
         step: step_id.to_string(),
         task_id,
         actor_identity,
-        agent,
-        model,
         tool_invocations: 0, // Not yet tracked at the engine level
         token_usage: None,   // Not yet tracked at the engine level
         step_duration_ms: duration_ms,
