@@ -367,18 +367,25 @@ mod tests {
 
     #[test]
     fn pr_create_uses_body_file_when_body_absent() {
+        let workspace = tempfile::tempdir().expect("workspace dir");
+        let file = workspace.path().join("pr.md");
+        std::fs::write(&file, "body content").expect("write file");
+
+        let ctx = ToolContext {
+            workspace_root: Some(workspace.path().canonicalize().expect("canonicalize")),
+            ..Default::default()
+        };
         let req = super::pr_create::build_exec_request(
-            &ToolContext::default(),
+            &ctx,
             &json!({
                 "title": "T",
                 "base": "main",
                 "head": "branch",
-                "body_file": "/tmp/pr.md",
+                "body_file": file.to_string_lossy(),
             }),
         )
         .expect("valid");
         assert!(req.args.contains(&"--body-file".to_string()));
-        assert!(req.args.contains(&"/tmp/pr.md".to_string()));
     }
 
     #[test]

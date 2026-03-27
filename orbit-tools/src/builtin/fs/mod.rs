@@ -26,7 +26,7 @@ pub fn register(registry: &mut ToolRegistry) {
 /// Returns `Err(PolicyDenied)` when no workspace root is set (fail-closed) or
 /// when the canonical path is outside the root. Returns `Ok` only when the
 /// canonical path is inside the workspace root.
-pub(super) fn check_workspace_boundary(
+pub(crate) fn check_workspace_boundary(
     ctx: &ToolContext,
     path: &Path,
 ) -> Result<PathBuf, OrbitError> {

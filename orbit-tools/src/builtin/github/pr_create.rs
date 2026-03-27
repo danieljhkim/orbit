@@ -1,7 +1,10 @@
+use std::path::Path;
+
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
 
+use crate::builtin::fs::check_workspace_boundary;
 use crate::{TIMEOUT_SLOW_MS, Tool, ToolContext, check_exec_result, require_str};
 
 pub struct GithubPrCreateTool;
@@ -38,8 +41,9 @@ pub(super) fn build_exec_request(
         args.push("--body".to_string());
         args.push(super::append_signature(b, ctx, "Implemented"));
     } else if let Some(f) = body_file {
+        let validated = check_workspace_boundary(ctx, Path::new(f))?;
         args.push("--body-file".to_string());
-        args.push(f.to_string());
+        args.push(validated.to_string_lossy().to_string());
     }
 
     let label = input
@@ -130,5 +134,78 @@ impl Tool for GithubPrCreateTool {
             "stdout": result.stdout,
             "stderr": result.stderr,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::ToolContext;
+
+    fn base_input(body_file: &str) -> Value {
+        json!({
+            "title": "test pr",
+            "base": "main",
+            "head": "feature",
+            "body_file": body_file,
+        })
+    }
+
+    #[test]
+    fn body_file_inside_workspace_is_accepted() {
+        let workspace = tempdir().expect("workspace dir");
+        let file = workspace.path().join("pr_body.md");
+        fs::write(&file, "PR description").expect("write file");
+
+        let ctx = ToolContext {
+            workspace_root: Some(workspace.path().canonicalize().expect("canonicalize")),
+            ..Default::default()
+        };
+
+        let req = build_exec_request(&ctx, &base_input(&file.to_string_lossy()))
+            .expect("should accept body_file inside workspace");
+        assert!(req.args.contains(&"--body-file".to_string()));
+    }
+
+    #[test]
+    fn body_file_outside_workspace_is_denied() {
+        let workspace = tempdir().expect("workspace dir");
+        let outside = tempdir().expect("outside dir");
+        let outside_file = outside.path().join("secret.txt");
+        fs::write(&outside_file, "secret data").expect("write outside file");
+
+        let ctx = ToolContext {
+            workspace_root: Some(workspace.path().canonicalize().expect("canonicalize")),
+            ..Default::default()
+        };
+
+        let err = build_exec_request(&ctx, &base_input(&outside_file.to_string_lossy()))
+            .expect_err("body_file outside workspace must be denied");
+        assert!(
+            err.to_string().contains("outside workspace"),
+            "expected policy denied message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn body_file_denied_when_workspace_root_is_none() {
+        let dir = tempdir().expect("temp dir");
+        let file = dir.path().join("body.md");
+        fs::write(&file, "content").expect("write file");
+
+        let err = build_exec_request(
+            &ToolContext::default(),
+            &base_input(&file.to_string_lossy()),
+        )
+        .expect_err("body_file with no workspace_root must be denied");
+        assert!(
+            err.to_string().contains("workspace_root is not set"),
+            "expected fail-closed denial, got: {err}"
+        );
     }
 }
