@@ -10,15 +10,16 @@ pub(super) fn build_exec_request(
     ctx: &ToolContext,
     input: &Value,
 ) -> Result<ExecRequest, OrbitError> {
+    let repo = require_str(input, "repo")?;
     let pr = super::require_pr(input)?;
     let action = require_str(input, "action")?;
 
     let body = input.get("body").and_then(Value::as_str);
 
-    let action_flag = match action.as_str() {
-        "approve" => "--approve",
-        "request-changes" => "--request-changes",
-        "comment" => "--comment",
+    let event = match action.as_str() {
+        "approve" => "APPROVE",
+        "request-changes" => "REQUEST_CHANGES",
+        "comment" => "COMMENT",
         other => {
             return Err(OrbitError::InvalidInput(format!(
                 "invalid `action`: \"{other}\"; must be approve, request-changes, or comment"
@@ -32,24 +33,25 @@ pub(super) fn build_exec_request(
         )));
     }
 
+    let review_body = if let Some(b) = body {
+        super::append_signature(b, ctx, "Reviewed")
+    } else {
+        super::agent_signature(ctx, "Reviewed").unwrap_or_default()
+    };
+
+    // POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+    let endpoint = format!("repos/{repo}/pulls/{pr}/reviews");
+
     let mut args = vec![
-        "pr".to_string(),
-        "review".to_string(),
-        pr,
-        action_flag.to_string(),
+        "api".to_string(),
+        endpoint,
+        "-f".to_string(),
+        format!("event={event}"),
     ];
 
-    if let Some(b) = body {
-        args.push("--body".to_string());
-        args.push(super::append_signature(b, ctx, "Reviewed"));
-    } else if let Some(sig) = super::agent_signature(ctx, "Reviewed") {
-        args.push("--body".to_string());
-        args.push(sig);
-    }
-
-    if let Some(repo) = input.get("repo").and_then(Value::as_str) {
-        args.push("--repo".to_string());
-        args.push(repo.to_string());
+    if !review_body.is_empty() {
+        args.push("-f".to_string());
+        args.push(format!("body={review_body}"));
     }
 
     Ok(ExecRequest {
@@ -71,8 +73,14 @@ impl Tool for GithubPrReviewTool {
                 .to_string(),
             parameters: vec![
                 ToolParam {
+                    name: "repo".to_string(),
+                    description: "Repository in owner/name format".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                },
+                ToolParam {
                     name: "pr".to_string(),
-                    description: "PR number, URL, or branch name".to_string(),
+                    description: "PR number".to_string(),
                     param_type: "string".to_string(),
                     required: true,
                 },
@@ -89,12 +97,6 @@ impl Tool for GithubPrReviewTool {
                     param_type: "string".to_string(),
                     required: false,
                 },
-                ToolParam {
-                    name: "repo".to_string(),
-                    description: "Repository in owner/name format".to_string(),
-                    param_type: "string".to_string(),
-                    required: false,
-                },
             ],
             builtin: true,
         }
@@ -103,10 +105,12 @@ impl Tool for GithubPrReviewTool {
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         let req = build_exec_request(ctx, &input)?;
         let result = run_process(&req, &NoSandbox)?;
-        check_exec_result(&result, "gh pr review")?;
+        check_exec_result(&result, "gh api (pr review)")?;
+        let response: Value = serde_json::from_str(result.stdout.trim()).unwrap_or(json!({}));
+        let id = response.get("id").and_then(Value::as_u64).unwrap_or(0);
         Ok(json!({
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "id": id,
+            "reviewed": true,
         }))
     }
 }
