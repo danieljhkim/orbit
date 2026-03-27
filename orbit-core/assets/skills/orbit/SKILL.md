@@ -53,6 +53,16 @@ orbit tool run orbit.job_run.archive --input '{"id": "<job_run_id>"}'
 
 Never edit task files directly.
 
+## Common Mistakes — DO NOT
+
+| Mistake | Why it fails | Correct form |
+|---------|-------------|--------------|
+| `cargo run -- tool run ...` | Agents must use the installed `orbit` binary, not rebuild from source | `orbit tool run ...` |
+| `orbit task show <id>` | Direct CLI subcommands skip agent provenance tracking | `orbit tool run orbit.task.show --input '{"id":"<id>"}'` |
+| Inventing tool names (`orbit.task.transition`, `orbit.task.move`, `orbit.task.comment`) | These tools do not exist | Use only tools from the Command Reference above or run `orbit tool list` |
+
+**Rule:** If a tool name is not in the Command Reference, it does not exist. Never guess. Run `orbit tool list` to see all registered tools.
+
 ## Lifecycle
 
 ```text

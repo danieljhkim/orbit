@@ -39,6 +39,20 @@ orbit tool run orbit.task.list --input '{"status": "backlog", "agent": "<agent>"
 
 **If running from a worktree**, pass `--root` pointing to the original repo's `.orbit` directory so commands resolve correctly.
 
+## Common Mistakes — DO NOT
+
+Agents frequently make these mistakes. **Read this before running any command.**
+
+| Mistake | Why it fails | Correct form |
+|---------|-------------|--------------|
+| `cargo run -- tool run orbit.task.show ...` | `cargo run` rebuilds from source; agents must use the installed binary | `orbit tool run orbit.task.show ...` |
+| `orbit task show ...` | Direct CLI subcommands are for humans; agent provenance is not recorded | `orbit tool run orbit.task.show ...` |
+| `orbit tool run orbit.task.transition ...` | `orbit.task.transition` does not exist — there is no such tool | `orbit tool run orbit.task.start ...` or `orbit tool run orbit.task.update ...` |
+| `orbit tool run orbit.task.move ...` | `orbit.task.move` does not exist | `orbit tool run orbit.task.update --input '{"id":"...","status":"..."}'` |
+| `orbit tool run orbit.task.comment ...` | `orbit.task.comment` does not exist | `orbit tool run orbit.task.update --input '{"id":"...","comment":"..."}'` |
+
+**Rule:** If a tool name is not listed in the Command Reference above, it does not exist. Never invent tool names. Run `orbit tool list` to see all registered tools.
+
 ## When Commands Fail
 
 If any `orbit tool run` command fails unexpectedly (unknown tool, missing field, unclear error), **do not silently work around it**. Immediately create a friction task:
