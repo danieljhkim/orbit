@@ -64,8 +64,8 @@ job:
 
     - target_type: activity
       target_id: review_pr
-      agent_cli: codex
-      model: gpt-5.4
+      agent_cli: claude
+      model: sonnet
       condition: on_success
       timeout_seconds: 600
       env_set:
