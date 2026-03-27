@@ -282,9 +282,17 @@ mod tests {
     }
 
     #[test]
+    fn pr_review_rejects_missing_repo() {
+        let err =
+            super::pr_review::build_exec_request(&ToolContext::default(), &json!({ "pr": "42", "action": "approve" }))
+                .expect_err("must fail");
+        assert!(err.to_string().contains("repo"), "{err}");
+    }
+
+    #[test]
     fn pr_review_rejects_missing_action() {
         let err =
-            super::pr_review::build_exec_request(&ToolContext::default(), &json!({ "pr": "42" }))
+            super::pr_review::build_exec_request(&ToolContext::default(), &json!({ "repo": "owner/repo", "pr": "42" }))
                 .expect_err("must fail");
         assert!(err.to_string().contains("action"), "{err}");
     }
@@ -293,7 +301,7 @@ mod tests {
     fn pr_review_rejects_invalid_action() {
         let err = super::pr_review::build_exec_request(
             &ToolContext::default(),
-            &json!({ "pr": "42", "action": "lgtm" }),
+            &json!({ "repo": "owner/repo", "pr": "42", "action": "lgtm" }),
         )
         .expect_err("must fail");
         assert!(err.to_string().contains("action"), "{err}");
@@ -304,6 +312,7 @@ mod tests {
         let err = super::pr_review::build_exec_request(
             &ToolContext::default(),
             &json!({
+                "repo": "owner/repo",
                 "pr": "42",
                 "action": "request-changes",
             }),
@@ -410,14 +419,17 @@ mod tests {
         let req = super::pr_review::build_exec_request(
             &ToolContext::default(),
             &json!({
+                "repo": "owner/repo",
                 "pr": "42",
                 "action": "approve",
             }),
         )
         .expect("valid");
-        assert!(req.args.contains(&"review".to_string()));
-        assert!(req.args.contains(&"42".to_string()));
-        assert!(req.args.contains(&"--approve".to_string()));
+        assert_eq!(req.program, "gh");
+        assert_eq!(req.args[0], "api");
+        assert_eq!(req.args[1], "repos/owner/repo/pulls/42/reviews");
+        assert_eq!(req.args[2], "-f");
+        assert_eq!(req.args[3], "event=APPROVE");
     }
 
     #[test]
@@ -425,15 +437,18 @@ mod tests {
         let req = super::pr_review::build_exec_request(
             &ToolContext::default(),
             &json!({
+                "repo": "owner/repo",
                 "pr": "42",
                 "action": "request-changes",
                 "body": "fix it",
             }),
         )
         .expect("valid");
-        assert!(req.args.contains(&"--request-changes".to_string()));
-        assert!(req.args.contains(&"--body".to_string()));
-        assert!(req.args.contains(&"fix it".to_string()));
+        assert_eq!(req.args[0], "api");
+        assert_eq!(req.args[1], "repos/owner/repo/pulls/42/reviews");
+        assert_eq!(req.args[3], "event=REQUEST_CHANGES");
+        assert_eq!(req.args[4], "-f");
+        assert_eq!(req.args[5], "body=fix it");
     }
 
     #[test]
@@ -478,14 +493,16 @@ mod tests {
         let req = super::pr_review::build_exec_request(
             &ctx,
             &json!({
+                "repo": "owner/repo",
                 "pr": "42",
                 "action": "request-changes",
                 "body": "needs work",
             }),
         )
         .expect("valid");
-        let body_pos = req.args.iter().position(|a| a == "--body").unwrap();
-        let body = &req.args[body_pos + 1];
+        // body is passed as "-f" "body=..." in the gh api args
+        let body_pos = req.args.iter().position(|a| a.starts_with("body=")).unwrap();
+        let body = &req.args[body_pos];
         assert!(
             body.ends_with("\n\n*Reviewed by: codex / o3*"),
             "body missing signature: {body}"
@@ -502,14 +519,15 @@ mod tests {
         let req = super::pr_review::build_exec_request(
             &ctx,
             &json!({
+                "repo": "owner/repo",
                 "pr": "42",
                 "action": "approve",
             }),
         )
         .expect("valid");
-        let body_pos = req.args.iter().position(|a| a == "--body").unwrap();
-        let body = &req.args[body_pos + 1];
-        assert_eq!(body, "*Reviewed by: claude / sonnet-4*");
+        let body_pos = req.args.iter().position(|a| a.starts_with("body=")).unwrap();
+        let body = &req.args[body_pos];
+        assert_eq!(body, "body=*Reviewed by: claude / sonnet-4*");
     }
 
     #[test]
