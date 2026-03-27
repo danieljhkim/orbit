@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use orbit_types::OrbitError;
 
 use crate::providers::AgentProvider;
@@ -16,18 +18,29 @@ pub enum ProviderOptions {
 
 impl ProviderOptions {
     /// Build `ProviderOptions` for a given agent CLI binary, using the supplied
-    /// Codex-specific settings when the CLI resolves to Codex.  Callers that
-    /// do not need non-default Codex settings can use `AgentConfig::cli()`.
+    /// provider-agnostic config map.  Provider-specific keys are extracted
+    /// inside each provider's match arm:
+    ///
+    /// - Codex reads `"sandbox"` (defaults to `"workspace-write"`) and
+    ///   `"approval_policy"` (optional).
+    ///
+    /// Callers that do not need non-default settings can use `AgentConfig::cli()`.
     pub fn for_agent_cli(
         agent_cli: &str,
-        sandbox: String,
-        approval_policy: Option<String>,
+        config: &HashMap<String, String>,
     ) -> Result<Self, OrbitError> {
         match AgentProvider::detect_from_cli(agent_cli)? {
-            AgentProvider::Codex => Ok(Self::Codex {
-                sandbox,
-                approval_policy,
-            }),
+            AgentProvider::Codex => {
+                let sandbox = config
+                    .get("sandbox")
+                    .cloned()
+                    .unwrap_or_else(|| "workspace-write".to_string());
+                let approval_policy = config.get("approval_policy").cloned();
+                Ok(Self::Codex {
+                    sandbox,
+                    approval_policy,
+                })
+            }
             AgentProvider::Claude => Ok(Self::Claude),
             AgentProvider::MockAgent => Ok(Self::Mock),
         }
@@ -48,8 +61,7 @@ impl AgentConfig {
     /// directly when non-default Codex settings are required.
     pub fn cli(command: impl Into<String>) -> Result<Self, OrbitError> {
         let command = command.into();
-        let provider_options =
-            ProviderOptions::for_agent_cli(&command, "workspace-write".to_string(), None)?;
+        let provider_options = ProviderOptions::for_agent_cli(&command, &HashMap::new())?;
         Ok(Self {
             command,
             model: None,

@@ -7,6 +7,7 @@ use orbit_types::{
     TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
 };
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 
 pub const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
@@ -223,8 +224,11 @@ pub trait AgentProtocolHost {
 
 pub trait EnvironmentHost {
     // ── Config accessors (implementors provide these) ──────────────────
-    fn codex_sandbox_policy(&self) -> String;
-    fn codex_approval_policy(&self) -> Option<String>;
+
+    /// Returns provider-agnostic key-value configuration that is forwarded
+    /// to `ProviderOptions::for_agent_cli`.  Each provider extracts the keys
+    /// it cares about (e.g. Codex reads `"sandbox"` and `"approval_policy"`).
+    fn agent_provider_config(&self) -> HashMap<String, String>;
     fn execution_env_inherit(&self) -> bool;
     fn hydrated_env_allowlist(&self, env_extra: &[String]) -> Vec<(String, String)>;
     fn orbit_root(&self) -> Option<String>;
@@ -239,11 +243,8 @@ pub trait EnvironmentHost {
         model: Option<&str>,
     ) -> Result<AgentConfig, OrbitError> {
         use orbit_agent::ProviderOptions;
-        let provider_options = ProviderOptions::for_agent_cli(
-            agent_cli,
-            self.codex_sandbox_policy(),
-            self.codex_approval_policy(),
-        )?;
+        let config = self.agent_provider_config();
+        let provider_options = ProviderOptions::for_agent_cli(agent_cli, &config)?;
         Ok(AgentConfig {
             command: agent_cli.to_string(),
             model: model.map(|m| m.to_string()),

@@ -318,14 +318,14 @@ impl JobRunHost for OrbitRuntime {
 }
 
 impl EnvironmentHost for OrbitRuntime {
-    fn codex_sandbox_policy(&self) -> String {
-        self.codex_execution_policy().sandbox().to_string()
-    }
-
-    fn codex_approval_policy(&self) -> Option<String> {
-        self.codex_execution_policy()
-            .approval_policy()
-            .map(|s| s.to_string())
+    fn agent_provider_config(&self) -> std::collections::HashMap<String, String> {
+        let mut config = std::collections::HashMap::new();
+        let policy = self.codex_execution_policy();
+        config.insert("sandbox".to_string(), policy.sandbox().to_string());
+        if let Some(approval) = policy.approval_policy() {
+            config.insert("approval_policy".to_string(), approval.to_string());
+        }
+        config
     }
 
     fn execution_env_inherit(&self) -> bool {
