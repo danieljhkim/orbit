@@ -435,6 +435,26 @@ fn init_always_targets_global_root_regardless_of_cwd() {
 }
 
 #[test]
+fn init_with_custom_root_redacts_reported_paths() {
+    let dir = tempfile::tempdir().expect("dir");
+    let custom_root = dir.path().join("custom").join(".orbit");
+
+    orbit_in(dir.path())
+        .args(["--root", custom_root.to_str().unwrap(), "init"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "skills: root=<custom orbit root>/skills",
+        ))
+        .stdout(predicate::str::contains(
+            "config: path=<custom orbit root>/config.toml",
+        ));
+
+    assert!(custom_root.join("skills").exists());
+    assert!(custom_root.join("config.toml").exists());
+}
+
+#[test]
 fn init_refreshes_modified_defaults_without_destroying_tasks() {
     let home = tempfile::tempdir().expect("home");
 

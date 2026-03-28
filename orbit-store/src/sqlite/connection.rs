@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use orbit_types::OrbitError;
-use orbit_types::redaction::redact_home_dir;
 use rusqlite::{Connection, Transaction};
 
 use crate::sqlite::migration;
@@ -29,10 +28,7 @@ impl Store {
         // succeed.  This commonly occurs in worktree contexts where a parent
         // process already has the DB open in WAL mode.
         if let Err(e) = conn.pragma_update(None, "journal_mode", "WAL") {
-            eprintln!(
-                "orbit: warning: could not set WAL mode on {}: {e}",
-                redact_home_dir(&path.display().to_string())
-            );
+            eprintln!("orbit: warning: could not set WAL mode on the store database: {e}");
         }
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| OrbitError::Store(format!("failed to enable foreign keys: {e}")))?;
