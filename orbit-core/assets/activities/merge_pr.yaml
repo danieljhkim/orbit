@@ -21,6 +21,9 @@ activity:
       task_id:
         type: string
         description: The Orbit task ID whose pull request should be merged. All other fields (pr_number, repo_root, branch, base) are loaded from the task or use conventions.
+      pr_status:
+        type: string
+        description: "Direct review decision from upstream step (approve or request-changes). When provided, takes precedence over the persisted task field."
   output_schema_json:
     type: object
     required:

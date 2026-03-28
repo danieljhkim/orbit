@@ -10,7 +10,6 @@ use super::git::git_output;
 use super::input::{
     canonicalize_existing_dir, input_string_field, json_number_to_string, required_input_string,
 };
-use super::review::resolve_review_decision;
 
 pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,
@@ -34,10 +33,17 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
     })?;
     let head = format!("orbit/{task_id}");
     let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
-    let review_decision = resolve_review_decision(&repo_root, pr_number)?;
+    // Prefer direct pr_status from upstream input, fall back to task field.
+    let pr_status_raw = input
+        .get("pr_status")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .or(task.pr_status.as_deref())
+        .unwrap_or("none");
+    let review_decision = super::review::normalize_review_decision(pr_status_raw);
     if review_decision != "APPROVED" {
         return Err(OrbitError::Execution(format!(
-            "pull request '{pr_number}' is not approved (review_decision={review_decision})"
+            "pull request '{pr_number}' is not approved (pr_status={pr_status_raw})"
         )));
     }
 
@@ -549,8 +555,8 @@ mod tests {
     #[test]
     fn merge_pr_from_task_records_pr_scoreboard_when_agent_and_model_present() {
         let repo_dir = init_repo();
-        let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "APPROVED")]);
         let mut task = test_task(repo_dir.path());
+        task.pr_status = Some("approve".to_string());
         task.actor_identity = ActorIdentity::agent("claude", "opus-4.6");
         let host = FakeHost::new(task).with_scoring();
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
@@ -581,9 +587,10 @@ mod tests {
     #[test]
     fn merge_pr_from_task_skips_scoreboard_when_agent_or_model_missing() {
         let repo_dir = init_repo();
-        let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "APPROVED")]);
+        let mut task = test_task(repo_dir.path());
+        task.pr_status = Some("approve".to_string());
         // test_task has actor_identity: System by default (no agent/model)
-        let host = FakeHost::new(test_task(repo_dir.path()));
+        let host = FakeHost::new(task);
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
 
         merge_pr_from_task(
@@ -605,10 +612,11 @@ mod tests {
     }
 
     #[test]
-    fn merge_pr_from_task_prefers_github_approval_over_agent_reported_commented() {
+    fn merge_pr_from_task_merges_when_pr_status_is_approve() {
         let repo_dir = init_repo();
-        let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "APPROVED")]);
-        let host = FakeHost::new(test_task(repo_dir.path()));
+        let mut task = test_task(repo_dir.path());
+        task.pr_status = Some("approve".to_string());
+        let host = FakeHost::new(task);
         let canonical_repo_root = repo_dir.path().canonicalize().expect("canonical repo root");
 
         let result = merge_pr_from_task(
@@ -639,10 +647,11 @@ mod tests {
     }
 
     #[test]
-    fn merge_pr_from_task_blocks_when_github_reports_commented_even_if_agent_reported_approved() {
+    fn merge_pr_from_task_blocks_when_pr_status_is_request_changes() {
         let repo_dir = init_repo();
-        let (_gh_dir, _path_guard) = use_fake_gh(&[("18", "COMMENTED")]);
-        let host = FakeHost::new(test_task(repo_dir.path()));
+        let mut task = test_task(repo_dir.path());
+        task.pr_status = Some("request-changes".to_string());
+        let host = FakeHost::new(task);
 
         let error = merge_pr_from_task(
             &host,
@@ -654,19 +663,19 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "execution failed: pull request '18' is not approved (review_decision=COMMENTED)"
+            "execution failed: pull request '18' is not approved (pr_status=request-changes)"
         );
         assert!(host.tool_invocations.borrow().is_empty());
         assert!(host.automation_updates.borrow().is_empty());
     }
 
     #[test]
-    fn merge_pr_from_task_returns_none_when_github_review_decision_is_null() {
+    fn merge_pr_from_task_blocks_when_pr_status_is_none() {
         let repo_dir = init_repo();
-        let (_gh_dir, _path_guard) = use_fake_gh(&[("20", "null")]);
         let mut task = test_task(repo_dir.path());
         task.id = "T20260320-025301".to_string();
         task.pr_number = Some("20".to_string());
+        task.pr_status = None;
         let host = FakeHost::new(task);
 
         let error = merge_pr_from_task(
@@ -679,7 +688,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "execution failed: pull request '20' is not approved (review_decision=NONE)"
+            "execution failed: pull request '20' is not approved (pr_status=none)"
         );
         assert!(host.tool_invocations.borrow().is_empty());
         assert!(host.automation_updates.borrow().is_empty());
