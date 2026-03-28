@@ -3,6 +3,7 @@ use std::io::Write;
 use orbit_agent::{Agent, AgentRequest, AgentResponseStatus, parse_and_validate_response};
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{AgentResponseEnvelope, JobRunState, OrbitError};
+use serde_json::Value;
 use tempfile::NamedTempFile;
 
 use super::ActivityExecutor;
@@ -24,8 +25,73 @@ impl ActivityExecutor for AgentExecutor {
         // Resolve working directory here where EngineHost (which includes
         // TaskHost) is available, so we can fall back to task.workspace_path.
         let working_dir = execution_working_directory_with_task(host, execution);
-        execute_with_cwd(host, execution, working_dir)
+        let outcome = execute_with_cwd(host, execution, working_dir);
+
+        // When the agent exited 0 but produced no JSON output, attempt to
+        // recover a synthetic result from the task state. This makes the
+        // pipeline resilient to agent output formatting issues for activities
+        // that persist their results via orbit.task.update.
+        if outcome.error_code.as_deref() == Some(AGENT_OUTPUT_MISSING) {
+            if let Some(recovered) = try_recover_from_task(host, execution, &outcome) {
+                return recovered;
+            }
+        }
+
+        outcome
     }
+}
+
+/// Attempt to recover a synthetic agent result from task state when the agent
+/// exited successfully but produced no JSON envelope.
+fn try_recover_from_task(
+    host: &dyn EngineHost,
+    execution: &ExecutionContext,
+    original: &AttemptOutcome,
+) -> Option<AttemptOutcome> {
+    let task_id = execution.input.get("task_id")?.as_str()?;
+    let task = host.get_task(task_id).ok()?;
+
+    // Build synthetic result from task fields that match common output schema keys.
+    let mut result = serde_json::Map::new();
+
+    let status_str = task.status.cli_name().to_string();
+    result.insert("status".to_string(), Value::String(status_str));
+
+    if !task.execution_summary.is_empty() {
+        result.insert(
+            "execution_summary".to_string(),
+            Value::String(task.execution_summary.clone()),
+        );
+    }
+
+    if let Some(pr_status) = task.pr_status.as_ref() {
+        result.insert("pr_status".to_string(), Value::String(pr_status.clone()));
+    }
+
+    // Require at least execution_summary or pr_status for recovery — bare status
+    // alone is not evidence the agent actually persisted meaningful output.
+    if !result.contains_key("execution_summary") && !result.contains_key("pr_status") {
+        return None;
+    }
+
+    let envelope = AgentResponseEnvelope {
+        schema_version: 1,
+        status: "success".to_string(),
+        result: Some(Value::Object(result)),
+        error: None,
+        duration_ms: original.duration_ms.unwrap_or(0),
+    };
+
+    Some(AttemptOutcome {
+        state: JobRunState::Success,
+        exit_code: original.exit_code,
+        duration_ms: original.duration_ms,
+        response_json: serde_json::to_value(&envelope).ok(),
+        error_code: None,
+        error_message: None,
+        protocol_violation: false,
+        retry_count: 0,
+    })
 }
 
 pub fn execute<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
