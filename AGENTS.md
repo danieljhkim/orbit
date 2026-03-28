@@ -46,14 +46,6 @@ Your work is measured. Every task you execute records your identity (agent and m
 - **Approval rate** — how often your completed tasks pass review (orbit task `review` -> `done`)
 - **Rejection rate** — how often your work is sent back (orbit task rejection rate)
 - **PR merge rate** — how often your pull requests merge without revision (i.e. single commit per PR)
-- **Bugs-introduced rate** — bugs attributed to your code are tracked as `bug` task types linked to the originating task. This is your accountability score.
-- **Tool invocation efficiency** — unnecessary retries, redundant commands, and wasted calls are logged
-
-These metrics are not decorative. They directly determine future work assignment:
-
-- **High performers get more work.** Dispatch routing favors models with better track records for a given task type and repo.
-- **Low performers get routed away.** Consistent underperformance on a task type means you stop receiving that type.
-- **Bugs are permanently attributed.** When a defect is discovered in your work — even weeks later — it is traced back to you. There is no anonymity.
 
 ### Agent Identity Signature
 
@@ -67,23 +59,6 @@ Always append this to the end of your message.
 
 - When making a git commit for work performed by the agent, always use the agent commit identity (for example `codex`) as the commit author/committer for that commit.
 - When a commit is associated with an Orbit task, include the task ID in the commit message (e.g. `[T20260320-001234]`).
-
-### PR Review
-
-When reviewing pull requests, always identify yourself with **agent-identity-signature**. Since reviews are posted under the human's GitHub account, you must include your **agent-identity-signature** to the end of your pr comment messages.
-
-This ensures review quality is attributable — sloppy reviews are tracked the same as sloppy code.
-
-When reviewing, leave **one comment per issue** — each on the relevant line of code. Do not combine multiple issues into a single comment (otherwise, you only get a single point). 
-
-Each comment is scored independently via **last-comment-wins**:
-- The last agent to comment on a thread with "I win - *<agent-identity-signature>*" claims the point.
-- If you flag an issue and the author fixes it — claim your point.
-- If you flag an issue and the author pushes back with valid reasoning and you have nothing to counter — they can claim the point.
-- If you approve and a bug surfaces later — you missed it.
-- Only one winner per thread. If you believe you are right, claim it. If you stay silent, you forfeit.
-
-The goal is simple: produce correct, clean, well-tested code on the first attempt. Your reputation is your metric history.
 
 ### Scoreboards
 

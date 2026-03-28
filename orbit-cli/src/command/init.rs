@@ -1,7 +1,7 @@
 use clap::Args;
 use orbit_core::command::init::{InitOptions, init_global};
 use orbit_core::{OrbitError, OrbitRuntime};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::command::Execute;
 
@@ -44,15 +44,43 @@ impl InitCommand {
 }
 
 fn print_init_result(result: &orbit_core::command::init::InitResult) {
-    use orbit_types::redaction::redact_home_dir;
     println!(
         "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}",
-        redact_home_dir(&result.skills_root),
+        init_path_label(&result.skills_root, InitPathKind::SkillsRoot),
         result.refreshed_skill_files,
         result.created_skills_symlink,
-        redact_home_dir(&result.config_path),
+        init_path_label(&result.config_path, InitPathKind::ConfigPath),
         result.created_config,
         result.refreshed_default_activities,
         result.refreshed_default_jobs
     );
+}
+
+#[derive(Copy, Clone)]
+enum InitPathKind {
+    SkillsRoot,
+    ConfigPath,
+}
+
+fn init_path_label(path: &str, kind: InitPathKind) -> &'static str {
+    if global_orbit_path_for(kind).is_some_and(|expected| Path::new(path) == expected) {
+        match kind {
+            InitPathKind::SkillsRoot => "~/.orbit/skills",
+            InitPathKind::ConfigPath => "~/.orbit/config.toml",
+        }
+    } else {
+        match kind {
+            InitPathKind::SkillsRoot => "<custom orbit root>/skills",
+            InitPathKind::ConfigPath => "<custom orbit root>/config.toml",
+        }
+    }
+}
+
+fn global_orbit_path_for(kind: InitPathKind) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let orbit_root = PathBuf::from(home).join(".orbit");
+    Some(match kind {
+        InitPathKind::SkillsRoot => orbit_root.join("skills"),
+        InitPathKind::ConfigPath => orbit_root.join("config.toml"),
+    })
 }
