@@ -1328,6 +1328,12 @@ fn codex_job_run_uses_workspace_write_sandbox() {
     let args = std::fs::read_to_string(args_capture).expect("read args");
     let captured: Vec<&str> = args.lines().collect();
     assert_eq!(captured[0..3], ["exec", "--sandbox", "workspace-write"]);
+    assert!(
+        captured.windows(2).any(|window| {
+            window == ["--add-dir", dir.path().to_string_lossy().as_ref()]
+        }),
+        "codex should receive the resolved global Orbit root as an extra writable dir"
+    );
     assert!(!captured.contains(&"--output-schema"));
 }
 
@@ -1371,6 +1377,12 @@ fn codex_job_run_passes_step_model_to_provider_cli() {
         captured[0..5],
         ["exec", "--model", "gpt-5.4", "--sandbox", "workspace-write"]
     );
+    assert!(
+        captured.windows(2).any(|window| {
+            window == ["--add-dir", dir.path().to_string_lossy().as_ref()]
+        }),
+        "codex should receive the resolved global Orbit root as an extra writable dir"
+    );
 }
 
 #[test]
@@ -1408,6 +1420,12 @@ approval_policy = "on-request"
             "--sandbox",
             "workspace-write",
         ]
+    );
+    assert!(
+        captured.windows(2).any(|window| {
+            window == ["--add-dir", dir.path().to_string_lossy().as_ref()]
+        }),
+        "codex should receive the resolved global Orbit root as an extra writable dir"
     );
 }
 

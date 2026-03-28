@@ -15,10 +15,11 @@ impl CodexRuntime {
         model: Option<String>,
         sandbox: String,
         approval_policy: Option<String>,
+        writable_dirs: Vec<String>,
     ) -> Self {
         Self {
             command,
-            cli: CodexCliTransport::new(model, sandbox, approval_policy),
+            cli: CodexCliTransport::new(model, sandbox, approval_policy, writable_dirs),
         }
     }
 }

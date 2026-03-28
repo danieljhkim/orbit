@@ -9,11 +9,13 @@ pub(crate) fn resolve_runtime(cfg: &AgentConfig) -> Result<RuntimeBackend, Orbit
         ProviderOptions::Codex {
             sandbox,
             approval_policy,
+            writable_dirs,
         } => Ok(RuntimeBackend::CodexCli(CodexRuntime::new(
             cfg.command.clone(),
             cfg.model.clone(),
             sandbox.clone(),
             approval_policy.clone(),
+            writable_dirs.clone(),
         ))),
         ProviderOptions::Claude => Ok(RuntimeBackend::ClaudeCli(ClaudeRuntime::new(
             cfg.command.clone(),

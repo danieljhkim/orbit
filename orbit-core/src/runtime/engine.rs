@@ -325,6 +325,13 @@ impl EnvironmentHost for OrbitRuntime {
         if let Some(approval) = policy.approval_policy() {
             config.insert("approval_policy".to_string(), approval.to_string());
         }
+        if policy.sandbox() == "workspace-write" {
+            config.insert(
+                "writable_dirs_json".to_string(),
+                serde_json::to_string(&vec![self.context.paths().global_dir.to_string_lossy()])
+                    .unwrap_or_else(|_| "[]".to_string()),
+            );
+        }
         config
     }
 

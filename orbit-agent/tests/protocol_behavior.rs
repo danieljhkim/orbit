@@ -93,6 +93,7 @@ fn provider_mapper_supports_codex_approval_override() {
         provider_options: ProviderOptions::Codex {
             sandbox: "workspace-write".to_string(),
             approval_policy: Some("on-request".to_string()),
+            writable_dirs: Vec::new(),
         },
     };
     let agent = Agent::new(&config).expect("codex runtime");
@@ -106,6 +107,31 @@ fn provider_mapper_supports_codex_approval_override() {
             "exec".to_string(),
             "--sandbox".to_string(),
             "workspace-write".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn provider_mapper_supports_codex_extra_writable_dirs() {
+    let config = AgentConfig {
+        command: "codex".to_string(),
+        model: None,
+        provider_options: ProviderOptions::Codex {
+            sandbox: "workspace-write".to_string(),
+            approval_policy: None,
+            writable_dirs: vec!["/Users/daniel/.orbit".to_string()],
+        },
+    };
+    let agent = Agent::new(&config).expect("codex runtime");
+    let invocation = agent.invoke(job_request()).expect("codex invocation");
+    assert_eq!(
+        invocation.args,
+        vec![
+            "exec".to_string(),
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+            "--add-dir".to_string(),
+            "/Users/daniel/.orbit".to_string(),
         ]
     );
 }

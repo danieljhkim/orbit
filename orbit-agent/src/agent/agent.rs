@@ -12,6 +12,7 @@ pub enum ProviderOptions {
     Codex {
         sandbox: String,
         approval_policy: Option<String>,
+        writable_dirs: Vec<String>,
     },
     Mock,
 }
@@ -36,9 +37,21 @@ impl ProviderOptions {
                     .cloned()
                     .unwrap_or_else(|| "workspace-write".to_string());
                 let approval_policy = config.get("approval_policy").cloned();
+                let writable_dirs = config
+                    .get("writable_dirs_json")
+                    .map(|raw| {
+                        serde_json::from_str::<Vec<String>>(raw).map_err(|err| {
+                            OrbitError::InvalidInput(format!(
+                                "invalid codex writable_dirs_json provider option: {err}"
+                            ))
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
                 Ok(Self::Codex {
                     sandbox,
                     approval_policy,
+                    writable_dirs,
                 })
             }
             AgentProvider::Claude => Ok(Self::Claude),

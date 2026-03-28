@@ -4,6 +4,7 @@ pub(crate) struct CodexCliTransport {
     model: Option<String>,
     sandbox: String,
     approval_policy: Option<String>,
+    writable_dirs: Vec<String>,
 }
 
 impl CodexCliTransport {
@@ -11,11 +12,13 @@ impl CodexCliTransport {
         model: Option<String>,
         sandbox: String,
         approval_policy: Option<String>,
+        writable_dirs: Vec<String>,
     ) -> Self {
         Self {
             model,
             sandbox,
             approval_policy,
+            writable_dirs,
         }
     }
 
@@ -34,6 +37,10 @@ impl CodexCliTransport {
         }
         args.push("--sandbox".to_string());
         args.push(self.sandbox.clone());
+        for dir in &self.writable_dirs {
+            args.push("--add-dir".to_string());
+            args.push(dir.clone());
+        }
         args
     }
 

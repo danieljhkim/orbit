@@ -22,16 +22,7 @@ impl Store {
         }
 
         let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        // WAL mode is best-effort: when the database file is read-only (e.g.
-        // another process holds the WAL lock or the filesystem is read-only),
-        // fall back to the default journal mode so that read operations still
-        // succeed.  This commonly occurs in worktree contexts where a parent
-        // process already has the DB open in WAL mode.
-        if conn.pragma_update(None, "journal_mode", "WAL").is_err() {
-            eprintln!(
-                "orbit: warning: could not set WAL mode on the store database; continuing with the default journal mode"
-            );
-        }
+        enable_best_effort_wal_mode(&conn);
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| OrbitError::Store(format!("failed to enable foreign keys: {e}")))?;
 
@@ -72,5 +63,48 @@ impl Store {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         Ok(result)
+    }
+}
+
+fn enable_best_effort_wal_mode(conn: &Connection) {
+    // WAL mode is best-effort: when the database file is read-only or the
+    // filesystem refuses WAL sidecar writes, fall back to the default journal
+    // mode so that read operations can still succeed.
+    match set_journal_mode_wal(conn) {
+        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
+        Ok(mode) => {
+            eprintln!(
+                "orbit: warning: requested WAL mode on the store database, but SQLite kept journal_mode={mode}; continuing with the active journal mode"
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "orbit: warning: could not set WAL mode on the store database ({err}); continuing with the default journal mode"
+            );
+        }
+    }
+}
+
+fn set_journal_mode_wal(conn: &Connection) -> Result<String, OrbitError> {
+    conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0))
+        .map_err(|e| OrbitError::Store(format!("failed to set journal_mode=WAL: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+    use tempfile::tempdir;
+
+    use super::set_journal_mode_wal;
+
+    #[test]
+    fn set_journal_mode_wal_returns_effective_mode() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("orbit.db");
+        let conn = Connection::open(&db_path).expect("open sqlite db");
+
+        let mode = set_journal_mode_wal(&conn).expect("set journal mode");
+
+        assert_eq!(mode.to_ascii_lowercase(), "wal");
     }
 }
