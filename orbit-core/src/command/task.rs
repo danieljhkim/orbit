@@ -416,6 +416,9 @@ impl OrbitRuntime {
                             status: Some(TaskStatus::InProgress),
                             status_event: Some("started".to_string()),
                             assigned_to: Some(Some(effective_label.clone())),
+                            actor_identity: agent.as_ref().map(|_| {
+                                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())
+                            }),
                             append_history: vec![TaskHistoryEntry {
                                 at,
                                 by: effective_label.clone(),
@@ -454,6 +457,9 @@ impl OrbitRuntime {
                             status_event: Some("started".to_string()),
                             status_note: note.clone(),
                             assigned_to: Some(Some(effective_label.clone())),
+                            actor_identity: agent.as_ref().map(|_| {
+                                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())
+                            }),
                             append_comments: append_comments.clone(),
                             ..Default::default()
                         },
