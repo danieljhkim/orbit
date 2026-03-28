@@ -3,6 +3,7 @@ use std::io::Write;
 use orbit_agent::{Agent, AgentRequest, AgentResponseStatus, parse_and_validate_response};
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::{AgentResponseEnvelope, JobRunState, OrbitError};
+use serde_json::Value;
 use tempfile::NamedTempFile;
 
 use super::ActivityExecutor;
@@ -24,8 +25,114 @@ impl ActivityExecutor for AgentExecutor {
         // Resolve working directory here where EngineHost (which includes
         // TaskHost) is available, so we can fall back to task.workspace_path.
         let working_dir = execution_working_directory_with_task(host, execution);
-        execute_with_cwd(host, execution, working_dir)
+        let outcome = execute_with_cwd(host, execution, working_dir);
+
+        // When the agent exited 0 but produced no JSON output, attempt to
+        // recover a synthetic result from the task state. This makes the
+        // pipeline resilient to agent output formatting issues for activities
+        // that persist their results via orbit.task.update.
+        if outcome.error_code.as_deref() == Some(AGENT_OUTPUT_MISSING) {
+            if let Some(recovered) = try_recover_from_task(host, execution, &outcome) {
+                return recovered;
+            }
+        }
+
+        outcome
     }
+}
+
+/// Attempt to recover a synthetic agent result from task state when the agent
+/// exited successfully but produced no JSON envelope.
+fn try_recover_from_task(
+    host: &dyn EngineHost,
+    execution: &ExecutionContext,
+    original: &AttemptOutcome,
+) -> Option<AttemptOutcome> {
+    let task_id = execution.input.get("task_id")?.as_str()?;
+    let task = host.get_task(task_id).ok()?;
+
+    // Build candidate fields from task state.
+    let mut candidates = serde_json::Map::new();
+
+    let status_str = task.status.cli_name().to_string();
+    candidates.insert("status".to_string(), Value::String(status_str));
+
+    if !task.execution_summary.is_empty() {
+        candidates.insert(
+            "execution_summary".to_string(),
+            Value::String(task.execution_summary.clone()),
+        );
+    }
+
+    if let Some(pr_status) = task.pr_status.as_ref() {
+        candidates.insert("pr_status".to_string(), Value::String(pr_status.clone()));
+    }
+
+    // Require at least execution_summary or pr_status for recovery — bare status
+    // alone is not evidence the agent actually persisted meaningful output.
+    if !candidates.contains_key("execution_summary") && !candidates.contains_key("pr_status") {
+        return None;
+    }
+
+    // Filter the synthetic result to only include fields declared in the activity's
+    // output schema. This prevents leaking undeclared fields (e.g. "status") into
+    // downstream step input when the schema uses additionalProperties: false or
+    // simply doesn't declare them.
+    let result = filter_to_output_schema(&execution.activity, candidates);
+
+    // After filtering, re-check that we still have meaningful content.
+    if !result.contains_key("execution_summary") && !result.contains_key("pr_status") {
+        return None;
+    }
+
+    // Status is always "success" because recovery only runs on the exit_code == 0
+    // (AGENT_OUTPUT_MISSING) path — the agent process succeeded, it just didn't
+    // produce the expected JSON envelope.
+    let envelope = AgentResponseEnvelope {
+        schema_version: 1,
+        status: "success".to_string(),
+        result: Some(Value::Object(result)),
+        error: None,
+        duration_ms: original.duration_ms.unwrap_or(0),
+    };
+
+    // Validate the synthetic envelope against the activity's skill output schema.
+    // If validation fails, fall through to the original AGENT_OUTPUT_MISSING failure
+    // rather than returning an invalid payload.
+    if let Err(_) = host.validate_skill_output_schema(&execution.activity, &envelope) {
+        return None;
+    }
+
+    Some(AttemptOutcome {
+        state: JobRunState::Success,
+        exit_code: original.exit_code,
+        duration_ms: original.duration_ms,
+        response_json: serde_json::to_value(&envelope).ok(),
+        error_code: None,
+        error_message: None,
+        protocol_violation: false,
+        retry_count: 0,
+    })
+}
+
+/// Filter a candidate result map to only include keys declared in the activity's
+/// `output_schema_json.properties`. If the schema has no `properties` object
+/// (e.g. it is empty or uses a freeform schema), all candidates are kept.
+fn filter_to_output_schema(
+    activity: &orbit_types::Activity,
+    candidates: serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let Some(props) = activity
+        .output_schema_json
+        .get("properties")
+        .and_then(|v| v.as_object())
+    else {
+        return candidates;
+    };
+    candidates
+        .into_iter()
+        .filter(|(key, _)| props.contains_key(key))
+        .collect()
 }
 
 pub fn execute<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
@@ -430,7 +537,8 @@ fn classify_invocation_error(message: &str) -> String {
 mod tests {
     use super::classify_invocation_error;
     use crate::context::{
-        AGENT_INVOCATION_FAILED, AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT, AGENT_TRANSPORT_FAILURE,
+        AGENT_INVOCATION_FAILED, AGENT_OUTPUT_MISSING, AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT,
+        AGENT_TRANSPORT_FAILURE,
     };
 
     #[test]
@@ -534,6 +642,433 @@ mod tests {
         assert_eq!(
             classify_invocation_error("Got HTTP 503 from upstream"),
             AGENT_PROVIDER_OVERLOAD
+        );
+    }
+
+    // ── try_recover_from_task tests ──────────────────────────────────────
+
+    use super::try_recover_from_task;
+    use crate::context::{
+        AgentProtocolHost, AttemptOutcome, EnvironmentHost, ExecutionContext, JobRunHost,
+        RuntimeHost, TaskAutomationUpdate, TaskHost,
+    };
+    use chrono::Utc;
+    use orbit_store::JobRunStepParams;
+    use orbit_tools::ToolContext;
+    use orbit_types::{
+        Activity, ActorIdentity, AgentResponseEnvelope, Job, JobRun, JobRunState, JobTargetType,
+        OrbitError, OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType,
+    };
+    use serde_json::{Value, json};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    /// Minimal fake that implements EngineHost. Only `get_task` is exercised;
+    /// all other trait methods are stubs.
+    struct FakeEngineHost {
+        task: RefCell<Option<Task>>,
+    }
+
+    impl FakeEngineHost {
+        fn with_task(task: Task) -> Self {
+            Self {
+                task: RefCell::new(Some(task)),
+            }
+        }
+
+        fn empty() -> Self {
+            Self {
+                task: RefCell::new(None),
+            }
+        }
+    }
+
+    impl TaskHost for FakeEngineHost {
+        fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+            self.task
+                .borrow()
+                .clone()
+                .filter(|t| t.id == task_id)
+                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+        }
+        fn start_task(
+            &self,
+            _: &str,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!()
+        }
+        fn update_task_from_activity(
+            &self,
+            _: &str,
+            _: TaskStatus,
+            _: Option<String>,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!()
+        }
+        fn apply_task_automation_update(
+            &self,
+            _: &str,
+            _: TaskAutomationUpdate,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+    }
+
+    impl JobRunHost for FakeEngineHost {
+        fn list_pending_or_running_job_runs(&self, _: &str) -> Result<Vec<JobRun>, OrbitError> {
+            Ok(vec![])
+        }
+        fn insert_job_run(
+            &self,
+            _: &str,
+            _: u32,
+            _: chrono::DateTime<Utc>,
+        ) -> Result<JobRun, OrbitError> {
+            unimplemented!()
+        }
+        fn mark_job_run_running(
+            &self,
+            _: &str,
+            _: chrono::DateTime<Utc>,
+            _: u32,
+        ) -> Result<bool, OrbitError> {
+            unimplemented!()
+        }
+        fn abandon_job_run(
+            &self,
+            _: &str,
+            _: chrono::DateTime<Utc>,
+        ) -> Result<bool, OrbitError> {
+            unimplemented!()
+        }
+        fn complete_job_run_step(
+            &self,
+            _: &str,
+            _: &JobRunStepParams,
+        ) -> Result<bool, OrbitError> {
+            unimplemented!()
+        }
+        fn finalize_job_run(
+            &self,
+            _: &str,
+            _: JobRunState,
+            _: chrono::DateTime<Utc>,
+            _: Option<u64>,
+        ) -> Result<bool, OrbitError> {
+            unimplemented!()
+        }
+        fn get_job_run(&self, _: &str) -> Result<Option<JobRun>, OrbitError> {
+            Ok(None)
+        }
+    }
+
+    impl AgentProtocolHost for FakeEngineHost {
+        fn build_agent_stdin_envelope_payload(
+            &self,
+            _: &ExecutionContext,
+        ) -> Result<Vec<u8>, OrbitError> {
+            unimplemented!()
+        }
+        fn validate_skill_output_schema(
+            &self,
+            _: &Activity,
+            _: &AgentResponseEnvelope,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+        fn execute_commit_request_if_present(&self, _: &Value) -> Result<(), OrbitError> {
+            Ok(())
+        }
+    }
+
+    impl EnvironmentHost for FakeEngineHost {
+        fn agent_provider_config(&self) -> HashMap<String, String> {
+            HashMap::new()
+        }
+        fn execution_env_inherit(&self) -> bool {
+            true
+        }
+        fn hydrated_env_allowlist(&self, _: &[String]) -> Vec<(String, String)> {
+            vec![]
+        }
+        fn orbit_root(&self) -> Option<String> {
+            None
+        }
+        fn cli_command_environment(&self, _: &[String]) -> Vec<(String, String)> {
+            vec![]
+        }
+        fn missing_required_environment_vars(&self, _: &[&str]) -> Vec<String> {
+            vec![]
+        }
+    }
+
+    impl RuntimeHost for FakeEngineHost {
+        fn record_event(&self, _: OrbitEvent) -> Result<(), OrbitError> {
+            Ok(())
+        }
+        fn repo_root(&self) -> Result<String, OrbitError> {
+            Ok(".".to_string())
+        }
+        fn data_root(&self) -> &std::path::Path {
+            std::path::Path::new(".")
+        }
+        fn validate_activity_target_exists(
+            &self,
+            _: JobTargetType,
+            _: &str,
+        ) -> Result<Activity, OrbitError> {
+            unimplemented!()
+        }
+        fn get_job(&self, _: &str) -> Result<Option<Job>, OrbitError> {
+            Ok(None)
+        }
+        fn run_tool_with_context_and_role(
+            &self,
+            _: &str,
+            _: Value,
+            _: Role,
+            _: ToolContext,
+        ) -> Result<Value, OrbitError> {
+            Ok(json!({}))
+        }
+        fn maybe_create_failure_task(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+        fn scoring_enabled(&self) -> bool {
+            false
+        }
+        fn scoreboard_dir(&self) -> &std::path::Path {
+            std::path::Path::new(".")
+        }
+    }
+
+    fn make_task(execution_summary: &str, pr_status: Option<&str>) -> Task {
+        Task {
+            id: "T20260328-031712".to_string(),
+            parent_id: None,
+            title: "test task".to_string(),
+            description: "desc".to_string(),
+            plan: String::new(),
+            execution_summary: execution_summary.to_string(),
+            context_files: vec![],
+            workspace_path: None,
+            repo_root: None,
+            assigned_to: None,
+            created_by: Some("test".to_string()),
+            actor_identity: ActorIdentity::agent("claude", "opus-4.6"),
+            status: TaskStatus::Review,
+            priority: TaskPriority::High,
+            task_type: TaskType::Feature,
+            pr_number: None,
+            pr_status: pr_status.map(|s| s.to_string()),
+            proposed_by: None,
+            source_task_id: None,
+            complexity: None,
+            comments: vec![],
+            history: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn make_execution_context(task_id: &str) -> ExecutionContext {
+        ExecutionContext {
+            activity: Activity {
+                id: "implement_fix".to_string(),
+                spec_type: "agent_invoke".to_string(),
+                description: "test".to_string(),
+                input_schema_json: json!({}),
+                output_schema_json: json!({}),
+                spec_config: json!({}),
+                tools: vec![],
+                proc_allowed_programs: vec![],
+                workspace_path: None,
+                created_by: None,
+                is_active: true,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+            job: None,
+            agent_cli: "claude".to_string(),
+            model: None,
+            timeout_seconds: 60,
+            env_extra: vec![],
+            env_set: HashMap::new(),
+            input: json!({ "task_id": task_id }),
+            debug: false,
+        }
+    }
+
+    fn make_failure_outcome() -> AttemptOutcome {
+        AttemptOutcome {
+            state: JobRunState::Failed,
+            exit_code: Some(0),
+            duration_ms: Some(5000),
+            response_json: None,
+            error_code: Some(AGENT_OUTPUT_MISSING.to_string()),
+            error_message: Some(
+                "agent exited successfully but produced no JSON result envelope".to_string(),
+            ),
+            protocol_violation: false,
+            retry_count: 0,
+        }
+    }
+
+    #[test]
+    fn recover_succeeds_when_task_has_execution_summary() {
+        let task = make_task("Applied fixes to the codebase", None);
+        let host = FakeEngineHost::with_task(task);
+        let execution = make_execution_context("T20260328-031712");
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(recovered.is_some(), "recovery should succeed");
+
+        let outcome = recovered.unwrap();
+        assert_eq!(outcome.state, JobRunState::Success);
+        assert!(outcome.error_code.is_none());
+        assert!(outcome.error_message.is_none());
+        assert_eq!(outcome.exit_code, Some(0));
+        assert_eq!(outcome.duration_ms, Some(5000));
+
+        // Verify the synthetic envelope contains expected fields
+        let envelope: AgentResponseEnvelope =
+            serde_json::from_value(outcome.response_json.unwrap()).unwrap();
+        assert_eq!(envelope.status, "success");
+        let result = envelope.result.unwrap();
+        assert_eq!(result["execution_summary"], "Applied fixes to the codebase");
+        assert_eq!(result["status"], "review");
+    }
+
+    #[test]
+    fn recover_succeeds_when_task_has_pr_status() {
+        let task = make_task("", Some("approve"));
+        let host = FakeEngineHost::with_task(task);
+        let execution = make_execution_context("T20260328-031712");
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(recovered.is_some(), "recovery should succeed with pr_status");
+
+        let outcome = recovered.unwrap();
+        assert_eq!(outcome.state, JobRunState::Success);
+        let envelope: AgentResponseEnvelope =
+            serde_json::from_value(outcome.response_json.unwrap()).unwrap();
+        let result = envelope.result.unwrap();
+        assert_eq!(result["pr_status"], "approve");
+        // execution_summary should not be present when empty
+        assert!(result.get("execution_summary").is_none());
+    }
+
+    #[test]
+    fn recover_returns_none_when_task_lacks_execution_summary_and_pr_status() {
+        let task = make_task("", None);
+        let host = FakeEngineHost::with_task(task);
+        let execution = make_execution_context("T20260328-031712");
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(
+            recovered.is_none(),
+            "recovery should return None when task has no execution_summary or pr_status"
+        );
+    }
+
+    #[test]
+    fn recover_returns_none_when_task_not_found() {
+        let host = FakeEngineHost::empty();
+        let execution = make_execution_context("T20260328-031712");
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(
+            recovered.is_none(),
+            "recovery should return None when task does not exist"
+        );
+    }
+
+    #[test]
+    fn recover_returns_none_when_input_has_no_task_id() {
+        let task = make_task("some summary", None);
+        let host = FakeEngineHost::with_task(task);
+        let mut execution = make_execution_context("T20260328-031712");
+        execution.input = json!({}); // no task_id field
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(
+            recovered.is_none(),
+            "recovery should return None when input has no task_id"
+        );
+    }
+
+    #[test]
+    fn recover_filters_undeclared_fields_from_synthetic_result() {
+        let task = make_task("Applied fixes to the codebase", Some("approve"));
+        let host = FakeEngineHost::with_task(task);
+        let mut execution = make_execution_context("T20260328-031712");
+        // Output schema only declares execution_summary — status and pr_status
+        // should be stripped from the synthetic result.
+        execution.activity.output_schema_json = json!({
+            "properties": {
+                "execution_summary": { "type": "string" }
+            },
+            "type": "object"
+        });
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(recovered.is_some(), "recovery should succeed");
+
+        let outcome = recovered.unwrap();
+        assert_eq!(outcome.state, JobRunState::Success);
+
+        let envelope: AgentResponseEnvelope =
+            serde_json::from_value(outcome.response_json.unwrap()).unwrap();
+        let result = envelope.result.unwrap();
+        assert_eq!(result["execution_summary"], "Applied fixes to the codebase");
+        // Undeclared fields must not appear in the result
+        assert!(
+            result.get("status").is_none(),
+            "status should be filtered out when not in output schema"
+        );
+        assert!(
+            result.get("pr_status").is_none(),
+            "pr_status should be filtered out when not in output schema"
+        );
+    }
+
+    #[test]
+    fn recover_returns_none_when_all_meaningful_fields_filtered() {
+        // Task has pr_status but the output schema only declares "status" —
+        // after filtering, no meaningful fields remain, so recovery should fail.
+        let task = make_task("", Some("approve"));
+        let host = FakeEngineHost::with_task(task);
+        let mut execution = make_execution_context("T20260328-031712");
+        execution.activity.output_schema_json = json!({
+            "properties": {
+                "status": { "type": "string" }
+            },
+            "type": "object"
+        });
+        let original = make_failure_outcome();
+
+        let recovered = try_recover_from_task(&host, &execution, &original);
+        assert!(
+            recovered.is_none(),
+            "recovery should return None when meaningful fields are filtered out"
         );
     }
 }
