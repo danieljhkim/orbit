@@ -235,6 +235,7 @@ mod tests {
                 "tools": ["fs.read", "fs.write"]
             }),
             tools: vec!["fs.read".to_string(), "fs.write".to_string()],
+            proc_allowed_programs: vec![],
             workspace_path: None,
             created_by: Some("human".to_string()),
             is_active: true,

@@ -254,6 +254,18 @@ fn doc_to_work(
                 .collect()
         })
         .unwrap_or_default();
+    let proc_allowed_programs: Vec<String> = doc
+        .activity
+        .spec_config
+        .get("proc_allowed_programs")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
     Activity {
         id: doc.activity.id,
         spec_type: doc.activity.spec_type,
@@ -262,6 +274,7 @@ fn doc_to_work(
         output_schema_json: normalize_json_schema_for_runtime(doc.activity.output_schema_json),
         spec_config: Value::Object(doc.activity.spec_config),
         tools,
+        proc_allowed_programs,
         workspace_path: doc.activity.workspace_path,
         created_by: doc.created_by,
         is_active,

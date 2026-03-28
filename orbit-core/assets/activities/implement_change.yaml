@@ -119,3 +119,13 @@ activity:
     - fs.delete
     - proc.spawn
     - proc.which
+  proc_allowed_programs:
+    - cargo
+    - make
+    - npm
+    - npx
+    - node
+    - sh
+    - bash
+    - git
+    - orbit

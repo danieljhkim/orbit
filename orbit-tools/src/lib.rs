@@ -70,6 +70,9 @@ pub struct ToolContext {
     /// Resolved model identifier (e.g. `"opus-4.6"`). Used alongside `agent_name`
     /// for the attribution footer.
     pub model_name: Option<String>,
+    /// Program allowlist for `proc.spawn`. When non-empty, `proc.spawn` rejects
+    /// any program not in this list. Empty means unrestricted.
+    pub proc_allowed_programs: Vec<String>,
 }
 
 pub trait Tool: Send + Sync {

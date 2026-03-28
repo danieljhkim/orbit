@@ -35,6 +35,7 @@ impl OrbitRuntime {
     pub fn execute_tool_command(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
         let allowed_tools = read_activity_tools_from_env();
         let (agent_name, model_name) = read_agent_identity_from_env();
+        let proc_allowed_programs = read_proc_allowed_programs_from_env();
         let workspace_root = Some(self.paths().repo_root.clone());
         let tool_context = ToolContext {
             cwd: None,
@@ -42,6 +43,7 @@ impl OrbitRuntime {
             agent_name,
             model_name,
             workspace_root,
+            proc_allowed_programs,
             ..Default::default()
         };
         self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
@@ -56,6 +58,19 @@ fn read_agent_identity_from_env() -> (Option<String>, Option<String>) {
         .ok()
         .filter(|s| !s.is_empty());
     (agent, model)
+}
+
+fn read_proc_allowed_programs_from_env() -> Vec<String> {
+    std::env::var("ORBIT_PROC_ALLOWED_PROGRAMS")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn read_activity_tools_from_env() -> Vec<String> {

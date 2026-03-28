@@ -162,13 +162,16 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
 
     let resolved_model = resolve_model_for_env(host, execution);
     let environment_mode = apply_env_set(
-        inject_agent_identity(
-            inject_activity_tools(
-                host.execution_environment_mode(&execution.env_extra),
-                &execution.activity.tools,
+        inject_proc_allowed_programs(
+            inject_agent_identity(
+                inject_activity_tools(
+                    host.execution_environment_mode(&execution.env_extra),
+                    &execution.activity.tools,
+                ),
+                execution,
+                resolved_model.as_deref(),
             ),
-            execution,
-            resolved_model.as_deref(),
+            &execution.activity.proc_allowed_programs,
         ),
         &execution.env_set,
     );
@@ -201,6 +204,27 @@ fn inject_activity_tools(mode: EnvironmentMode, tools: &[String]) -> Environment
         EnvironmentMode::Inherit => {
             let mut pairs: Vec<(String, String)> = std::env::vars().collect();
             pairs.push(("ORBIT_ACTIVITY_TOOLS".to_string(), tools_str));
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+    }
+}
+
+fn inject_proc_allowed_programs(
+    mode: EnvironmentMode,
+    programs: &[String],
+) -> EnvironmentMode {
+    if programs.is_empty() {
+        return mode;
+    }
+    let programs_str = programs.join(",");
+    match mode {
+        EnvironmentMode::ClearAndSet(mut pairs) => {
+            pairs.push(("ORBIT_PROC_ALLOWED_PROGRAMS".to_string(), programs_str));
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+        EnvironmentMode::Inherit => {
+            let mut pairs: Vec<(String, String)> = std::env::vars().collect();
+            pairs.push(("ORBIT_PROC_ALLOWED_PROGRAMS".to_string(), programs_str));
             EnvironmentMode::ClearAndSet(pairs)
         }
     }

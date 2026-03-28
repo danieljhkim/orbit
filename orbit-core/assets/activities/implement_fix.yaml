@@ -83,3 +83,13 @@ activity:
     - proc.which
     - github.pr.comments
     - github.pr.comment.reply
+  proc_allowed_programs:
+    - cargo
+    - make
+    - npm
+    - npx
+    - node
+    - sh
+    - bash
+    - git
+    - orbit

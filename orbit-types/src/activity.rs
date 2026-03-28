@@ -17,6 +17,9 @@ pub struct Activity {
     /// Tool allowlist for agent_invoke activities. Empty means unrestricted.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Program allowlist for `proc.spawn`. Empty means unrestricted.
+    #[serde(default)]
+    pub proc_allowed_programs: Vec<String>,
     #[serde(default)]
     pub workspace_path: Option<String>,
     #[serde(default)]
