@@ -17,6 +17,11 @@ pub(super) fn merge_pr_from_task<H: RuntimeHost + TaskHost + ?Sized>(
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
+
+    if task.pr_number.is_none() {
+        return Ok(json!({ "merged": false, "skipped": true }));
+    }
+
     let repo_root = canonicalize_existing_dir(
         task.repo_root
             .as_deref()
@@ -684,6 +689,27 @@ mod tests {
             error.to_string(),
             "execution failed: pull request '20' is not approved (pr_status=none)"
         );
+        assert!(host.tool_invocations.borrow().is_empty());
+        assert!(host.automation_updates.borrow().is_empty());
+    }
+
+    #[test]
+    fn merge_pr_from_task_skips_when_no_pr_number() {
+        let repo_dir = init_repo();
+        let mut task = test_task(repo_dir.path());
+        task.pr_number = None;
+        let host = FakeHost::new(task);
+
+        let result = merge_pr_from_task(
+            &host,
+            &json!({
+                "task_id": "T20260320-021158",
+            }),
+        )
+        .expect("should succeed with skip when no pr_number");
+
+        assert_eq!(result["merged"], json!(false));
+        assert_eq!(result["skipped"], json!(true));
         assert!(host.tool_invocations.borrow().is_empty());
         assert!(host.automation_updates.borrow().is_empty());
     }

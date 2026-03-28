@@ -44,7 +44,7 @@ impl Tool for GithubPrViewTool {
             parameters: vec![
                 ToolParam {
                     name: "pr".to_string(),
-                    description: "PR number, URL, or branch name".to_string(),
+                    description: "PR number or GitHub PR URL".to_string(),
                     param_type: "string".to_string(),
                     required: true,
                 },

@@ -26,6 +26,15 @@ pub(super) fn load_pr_comments<H: RuntimeHost + TaskHost + ?Sized>(
 
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
+
+    if task.pr_number.is_none() {
+        return Ok(json!({
+            "loop_exit": true,
+            "comments": [],
+            "comment_summary": "No PR associated with task — skipping comment loading.",
+        }));
+    }
+
     let pr_number = task.pr_number.as_deref().ok_or_else(|| {
         OrbitError::InvalidInput("load_pr_comments requires task.pr_number".to_string())
     })?;
@@ -573,6 +582,24 @@ mod tests {
             sb.is_none(),
             "scoreboard should not exist when no unresolved comments"
         );
+    }
+
+    #[test]
+    fn load_pr_comments_skips_when_no_pr_number() {
+        let repo_dir = tempfile::tempdir().expect("temp dir");
+        let mut task = test_task(repo_dir.path());
+        task.pr_number = None;
+        let host = FakeHost::new(task);
+
+        let result = load_pr_comments(&host, &json!({"task_id": "T20260320-021158"}))
+            .expect("should succeed when no pr_number");
+
+        assert_eq!(result["loop_exit"], json!(true));
+        assert_eq!(result["comments"].as_array().unwrap().len(), 0);
+        assert!(result["comment_summary"]
+            .as_str()
+            .unwrap()
+            .contains("No PR"));
     }
 
     #[test]
