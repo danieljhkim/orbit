@@ -16,6 +16,12 @@ activity:
     review them carefully, and update the status accordingly.
     Output the task_id's that have been approved and rejected and leave a brief summary in the comment.
 
+    Return a JSON result with EXACTLY these fields (no prose, no explanation):
+    {
+      "comment": "Approved: [T..., T...]. Rejected: [T...]. <brief rationale>"
+    }
+    This JSON result is REQUIRED. The run will be marked as failed if it is missing.
+
   # ---- interface ----
   input_schema_json:
     type: object

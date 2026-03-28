@@ -48,8 +48,15 @@ activity:
        - If action is "approve": call github.pr.comment with a brief approval summary.
     7. Update the task with the review decision:
        - Call orbit.task.update with input: {"id": "<task_id>", "pr_status": "<pr_status>"}
-    8. Return task_id, pr_status, body, and loop_exit in the output.
+    8. Return a JSON result with EXACTLY these fields (no prose, no explanation):
+       {
+         "task_id": "<the Orbit task ID>",
+         "pr_status": "approve",
+         "body": "<review summary text>",
+         "loop_exit": true
+       }
        - Set loop_exit to true if pr_status is "approve", false otherwise.
+       This JSON result is REQUIRED. The run will be marked as failed if it is missing.
 
     If the task is not found, or the PR cannot be located, return a clear error.
 

@@ -47,8 +47,11 @@ activity:
        - Call orbit.task.update with id: input.task_id and execution_summary describing
          what was fixed and why.
 
-    7. Return output:
-       - execution_summary: markdown summary of fixes applied
+    7. Return a JSON result with EXACTLY these fields (no prose, no explanation):
+       {
+         "execution_summary": "<markdown summary of fixes applied>"
+       }
+       This JSON result is REQUIRED. The run will be marked as failed if it is missing.
 
     If a comment cannot be addressed (ambiguous, out of scope, or would require
     breaking changes), document the reason in the execution_summary so the reviewer

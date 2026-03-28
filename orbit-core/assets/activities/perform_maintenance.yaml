@@ -15,6 +15,12 @@ activity:
     Use `orbit-maintain-system` skill to perform system maintenance.
     Output a brief summary in the comment.
 
+    Return a JSON result with EXACTLY these fields (no prose, no explanation):
+    {
+      "comment": "<brief summary of maintenance actions taken>"
+    }
+    This JSON result is REQUIRED. The run will be marked as failed if it is missing.
+
   # ---- interface ----
   input_schema_json:
     type: object

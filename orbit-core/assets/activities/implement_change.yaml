@@ -81,10 +81,14 @@ activity:
          - execution_summary: the full markdown summary
        - This writes the execution summary directly to the task so downstream steps can load it.
 
-    8. Return output:
+    8. Return a JSON result with EXACTLY these fields (no prose, no explanation):
+       {
+         "status": "review",
+         "execution_summary": "<the full markdown execution summary>"
+       }
        - status: "review" when implementation is ready for persistence and verification
        - status: "blocked" when implementation could not be completed safely
-       - execution_summary: the full markdown summary
+       This JSON result is REQUIRED. The run will be marked as failed if it is missing.
 
     If any step fails unrecoverably (tests cannot be fixed, plan is ambiguous, required
     files are missing), return status: "blocked" with the execution_summary documenting

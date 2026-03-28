@@ -193,7 +193,9 @@ mod tests {
             )
             .expect("tool succeeds");
 
-        assert_eq!(output["stdout"], "[REDACTED_ENV]");
+        // proc.spawn now filters sensitive env vars (matching *TOKEN*, *KEY*,
+        // etc.) before spawning, so the child never sees the value.
+        assert_eq!(output["stdout"], "");
         assert_eq!(output["stderr"], "");
     }
 

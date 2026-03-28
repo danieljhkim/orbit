@@ -18,6 +18,12 @@ activity:
     Use `orbit-create-task` skill for any remediation tasks created.
     Any detected failures or operational issues must be investigated and converted into actionable Orbit tasks.
 
+    Return a JSON result with EXACTLY these fields (no prose, no explanation):
+    {
+      "comment": "<summary of audit findings and any remediation tasks created>"
+    }
+    This JSON result is REQUIRED. The run will be marked as failed if it is missing.
+
   # ---- interface ----
   input_schema_json:
     type: object
