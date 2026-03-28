@@ -29,7 +29,11 @@ impl OrbitRuntime {
         self.record_event(OrbitEvent::JobRunCancelled {
             job_id: run.job_id,
             run_id: run_id.to_string(),
-        })
+        })?;
+        if let Some(pid) = run.pid {
+            signal_run_owner_process(pid)?;
+        }
+        Ok(())
     }
 
     pub fn archive_job_run(&self, run_id: &str) -> Result<(), OrbitError> {
@@ -119,4 +123,32 @@ impl OrbitRuntime {
     fn get_job_run_backend(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
         self.get_job_run_record(run_id)
     }
+}
+
+#[cfg(unix)]
+fn signal_run_owner_process(pid: u32) -> Result<(), OrbitError> {
+    if pid == std::process::id() {
+        return Ok(());
+    }
+
+    // Safety: `kill` only sends a signal to the run owner process so it can
+    // tear down its active child process tree.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    if rc == 0 {
+        return Ok(());
+    }
+
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
+    }
+
+    Err(OrbitError::Execution(format!(
+        "failed to signal job run owner pid {pid}: {err}"
+    )))
+}
+
+#[cfg(not(unix))]
+fn signal_run_owner_process(_pid: u32) -> Result<(), OrbitError> {
+    Ok(())
 }

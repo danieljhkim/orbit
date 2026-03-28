@@ -157,6 +157,19 @@ fn execute_with_cwd<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
         Err(outcome) => return outcome,
     };
 
+    if agent_process_was_interrupted(&exec_result) && exec_result.stdout.trim().is_empty() {
+        return AttemptOutcome {
+            state: JobRunState::Cancelled,
+            exit_code: exec_result.exit_code,
+            duration_ms: Some(exec_result.duration_ms),
+            response_json: None,
+            error_code: None,
+            error_message: Some(exec_result.stderr.trim().to_string()),
+            protocol_violation: false,
+            retry_count: 0,
+        };
+    }
+
     if orbit_agent::is_timeout(&exec_result) && exec_result.stdout.trim().is_empty() {
         return AttemptOutcome {
             state: JobRunState::Timeout,
@@ -217,6 +230,10 @@ fn execute_with_cwd<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
             retry_count: 0,
         },
     }
+}
+
+fn agent_process_was_interrupted(exec_result: &orbit_types::ExecutionResult) -> bool {
+    !exec_result.success && exec_result.stderr.contains("process interrupted by signal")
 }
 
 fn build_agent_invocation<H: EnvironmentHost + AgentProtocolHost + ?Sized>(

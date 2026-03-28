@@ -2,6 +2,8 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
 use std::path::Path;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -9,6 +11,17 @@ use std::os::unix::fs::PermissionsExt;
 fn orbit_in(dir: &Path) -> Command {
     #[allow(deprecated)]
     let mut cmd = Command::cargo_bin("orbit").expect("binary exists");
+    cmd.current_dir(dir);
+    cmd.env("HOME", dir);
+    cmd.env("USERPROFILE", dir);
+    cmd.env("ORBIT_ROOT", dir.join(".orbit"));
+    cmd
+}
+
+#[cfg(unix)]
+fn orbit_process_in(dir: &Path) -> std::process::Command {
+    let orbit_bin = assert_cmd::cargo::cargo_bin!("orbit");
+    let mut cmd = std::process::Command::new(orbit_bin);
     cmd.current_dir(dir);
     cmd.env("HOME", dir);
     cmd.env("USERPROFILE", dir);
@@ -177,6 +190,82 @@ fn write_stdin_capturing_agent(dir: &Path, stdin_capture: &Path) -> String {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
         .expect("chmod capturing agent");
     path.to_string_lossy().to_string()
+}
+
+#[cfg(unix)]
+fn write_signal_trapping_agent(dir: &Path, started: &Path, terminated: &Path) -> String {
+    let path = dir.join("mock-agent");
+    let script = format!(
+        "#!/bin/sh\n\
+trap 'printf term > \"{terminated}\"; exit 0' TERM\n\
+trap 'printf int > \"{terminated}\"; exit 0' INT\n\
+printf ready > \"{started}\"\n\
+while :; do\n\
+  sleep 1\n\
+done\n",
+        started = started.to_string_lossy(),
+        terminated = terminated.to_string_lossy(),
+    );
+    std::fs::write(&path, script).expect("write signal-trapping agent");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod signal-trapping agent");
+    path.to_string_lossy().to_string()
+}
+
+#[cfg(unix)]
+fn wait_for<F>(timeout: Duration, mut predicate: F) -> bool
+where
+    F: FnMut() -> bool,
+{
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if predicate() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    predicate()
+}
+
+#[cfg(unix)]
+fn wait_for_running_run_id(dir: &Path, job_id: &str, timeout: Duration) -> String {
+    let mut run_id = None;
+    let found = wait_for(timeout, || {
+        let output = orbit_in(dir)
+            .args([
+                "job-run", "list", "--job", job_id, "--status", "running", "--json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let runs: Value = serde_json::from_slice(&output).expect("running run list json");
+        run_id = runs
+            .as_array()
+            .and_then(|values| values.first())
+            .and_then(|value| value.get("run_id"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        run_id.is_some()
+    });
+    assert!(found, "expected a running job run for job '{job_id}'");
+    run_id.expect("run id")
+}
+
+#[cfg(unix)]
+fn wait_for_process_exit(
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> Option<std::process::ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            return Some(status);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    None
 }
 
 #[test]
@@ -418,6 +507,102 @@ fn job_run_failure_json_includes_error_details() {
             .unwrap_or_default()
             .contains("network down")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn job_run_cancel_terminates_agent_subprocess() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let started = dir.path().join("agent-started");
+    let terminated = dir.path().join("agent-terminated");
+    let spec_id = add_activity(dir.path(), "spec-cli-cancel-signal");
+    let agent_cli = write_signal_trapping_agent(dir.path(), &started, &terminated);
+    let job_id = add_job(dir.path(), &spec_id, &agent_cli);
+
+    let mut run_child = orbit_process_in(dir.path())
+        .args(["job", "run", &job_id, "--json"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn orbit job run");
+
+    assert!(
+        wait_for(Duration::from_secs(5), || started.exists()),
+        "agent subprocess never reported startup"
+    );
+    let run_id = wait_for_running_run_id(dir.path(), &job_id, Duration::from_secs(5));
+
+    orbit_in(dir.path())
+        .args(["job-run", "cancel", &run_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cancelled job run"));
+
+    assert!(
+        wait_for(Duration::from_secs(5), || terminated.exists()),
+        "agent subprocess never observed SIGTERM after cancel"
+    );
+    let _status = wait_for_process_exit(&mut run_child, Duration::from_secs(5))
+        .expect("job run command did not exit after cancellation");
+
+    let show_output = orbit_in(dir.path())
+        .args(["job-run", "show", &run_id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_ne!(show["state"], "running");
+    assert_ne!(show["state"], "pending");
+}
+
+#[cfg(unix)]
+#[test]
+fn job_run_sigint_terminates_agent_subprocess() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let started = dir.path().join("agent-started");
+    let terminated = dir.path().join("agent-terminated");
+    let spec_id = add_activity(dir.path(), "spec-cli-sigint-signal");
+    let agent_cli = write_signal_trapping_agent(dir.path(), &started, &terminated);
+    let job_id = add_job(dir.path(), &spec_id, &agent_cli);
+
+    let mut run_child = orbit_process_in(dir.path())
+        .args(["job", "run", &job_id, "--json"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn orbit job run");
+
+    assert!(
+        wait_for(Duration::from_secs(5), || started.exists()),
+        "agent subprocess never reported startup"
+    );
+    let run_id = wait_for_running_run_id(dir.path(), &job_id, Duration::from_secs(5));
+
+    let status = std::process::Command::new("kill")
+        .args(["-INT", &run_child.id().to_string()])
+        .status()
+        .expect("send SIGINT");
+    assert!(status.success(), "expected kill -INT to succeed");
+
+    assert!(
+        wait_for(Duration::from_secs(5), || terminated.exists()),
+        "agent subprocess never observed termination after SIGINT"
+    );
+    let _status = wait_for_process_exit(&mut run_child, Duration::from_secs(5))
+        .expect("job run command did not exit after SIGINT");
+
+    let show_output = orbit_in(dir.path())
+        .args(["job-run", "show", &run_id, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_ne!(show["state"], "running");
+    assert_ne!(show["state"], "pending");
 }
 
 #[test]

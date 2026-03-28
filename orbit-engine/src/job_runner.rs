@@ -110,6 +110,11 @@ fn execute_activity_with_retries<H: EngineHost>(
             }
 
             for (step_index, step) in job.steps.iter().enumerate() {
+                if run_was_cancelled(host, &run.run_id)? {
+                    final_state = JobRunState::Cancelled;
+                    break 'outer;
+                }
+
                 let global_step_index = iteration as usize * num_steps + step_index;
                 failure_step = (global_step_index, step.clone());
 
@@ -178,7 +183,7 @@ fn execute_activity_with_retries<H: EngineHost>(
                         return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
                     }
 
-                    if step_state_records_failure(step_state) {
+                    if step_state_records_incident(step_state) {
                         // Preserve the first failure — subsequent handler failures
                         // should not overwrite the original root cause.
                         if last_failure.is_none() {
@@ -269,7 +274,7 @@ fn execute_activity_with_retries<H: EngineHost>(
                     return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
                 }
 
-                if step_state_records_failure(step_state) {
+                if step_state_records_incident(step_state) {
                     append_failed_step_friction(
                         data_root,
                         host,
@@ -297,7 +302,7 @@ fn execute_activity_with_retries<H: EngineHost>(
                     last_protocol_violation = true;
                 }
 
-                if step_state_records_failure(step_state) {
+                if step_state_records_incident(step_state) {
                     // Preserve the first failure — subsequent handler failures
                     // should not overwrite the original root cause.
                     if last_failure.is_none() {
@@ -344,7 +349,7 @@ fn execute_activity_with_retries<H: EngineHost>(
         })?;
 
         if create_failure_task
-            && final_state != JobRunState::Success
+            && !matches!(final_state, JobRunState::Success | JobRunState::Cancelled)
             && let Some(ref failure) = last_failure
         {
             let _ = host.maybe_create_failure_task(
@@ -726,6 +731,16 @@ fn step_state_records_failure(state: JobRunState) -> bool {
         state,
         JobRunState::Failed | JobRunState::Timeout | JobRunState::Cancelled
     )
+}
+
+fn step_state_records_incident(state: JobRunState) -> bool {
+    matches!(state, JobRunState::Failed | JobRunState::Timeout)
+}
+
+fn run_was_cancelled<H: JobRunHost>(host: &H, run_id: &str) -> Result<bool, OrbitError> {
+    Ok(host
+        .get_job_run(run_id)?
+        .is_some_and(|run| run.state == JobRunState::Cancelled))
 }
 
 /// When a step's `agent_cli` is empty, try to resolve it from the task's
