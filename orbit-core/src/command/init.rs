@@ -13,10 +13,8 @@ use crate::fs_utils::{create_dir_symlink, remove_path_if_exists};
 #[derive(Debug, Clone)]
 pub struct InitResult {
     pub refreshed_skill_files: usize,
-    pub skills_root: String,
     pub created_skills_symlink: bool,
     pub created_config: bool,
-    pub config_path: String,
     pub refreshed_default_activities: usize,
     pub refreshed_default_jobs: usize,
     pub scoring_enabled: bool,
@@ -139,10 +137,8 @@ fn init_workspace_at_root(
 
     Ok(InitResult {
         refreshed_skill_files,
-        skills_root: skills_root.to_string_lossy().to_string(),
         created_skills_symlink,
         created_config,
-        config_path: config_path.to_string_lossy().to_string(),
         refreshed_default_activities,
         refreshed_default_jobs,
         scoring_enabled,
