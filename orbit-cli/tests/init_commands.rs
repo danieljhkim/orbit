@@ -411,10 +411,7 @@ fn init_always_targets_global_root_regardless_of_cwd() {
         .args(["init"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(format!(
-            "skills: root={}",
-            home.path().join(".orbit").join("skills").display()
-        )));
+        .stdout(predicate::str::contains("skills: root=~/.orbit/skills"));
 
     // Skills are at HOME/.orbit, not at the workspace
     assert!(

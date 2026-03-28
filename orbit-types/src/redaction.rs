@@ -95,6 +95,26 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
     }
 }
 
+/// Replace the user's home directory with `~` in the given string.
+///
+/// This prevents user-identifiable paths (e.g. `/Users/alice/.orbit/store.db`)
+/// from appearing in log or terminal output, addressing CodeQL
+/// `rust/cleartext-logging` alerts.
+pub fn redact_home_dir(text: &str) -> String {
+    if let Some(home) = home_dir_string() {
+        text.replace(&home, "~")
+    } else {
+        text.to_string()
+    }
+}
+
+fn home_dir_string() -> Option<String> {
+    std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok())
+        .filter(|h| !h.is_empty())
+}
+
 fn sensitive_env_values() -> Vec<String> {
     let mut values = std::env::vars()
         .filter(|(name, value)| is_sensitive_env_name(name) && is_redactable_value(value))
@@ -135,9 +155,23 @@ mod tests {
     use crate::OrbitError;
 
     use super::{
-        REDACTED_ENV_VALUE, redact_sensitive_env_error, redact_sensitive_env_json,
-        redact_sensitive_env_text,
+        REDACTED_ENV_VALUE, redact_home_dir, redact_sensitive_env_error,
+        redact_sensitive_env_json, redact_sensitive_env_text,
     };
+
+    #[test]
+    fn redacts_home_dir_in_path() {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .expect("HOME or USERPROFILE must be set");
+        let input = format!("{home}/.orbit/store.db");
+        assert_eq!(redact_home_dir(&input), "~/.orbit/store.db");
+    }
+
+    #[test]
+    fn redact_home_dir_leaves_non_home_paths_unchanged() {
+        assert_eq!(redact_home_dir("/tmp/data.db"), "/tmp/data.db");
+    }
 
     #[test]
     fn redacts_sensitive_env_values_in_text() {

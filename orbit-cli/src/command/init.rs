@@ -44,12 +44,13 @@ impl InitCommand {
 }
 
 fn print_init_result(result: &orbit_core::command::init::InitResult) {
+    use orbit_types::redaction::redact_home_dir;
     println!(
         "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}",
-        result.skills_root,
+        redact_home_dir(&result.skills_root),
         result.refreshed_skill_files,
         result.created_skills_symlink,
-        result.config_path,
+        redact_home_dir(&result.config_path),
         result.created_config,
         result.refreshed_default_activities,
         result.refreshed_default_jobs
