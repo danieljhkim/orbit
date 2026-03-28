@@ -320,6 +320,8 @@ pub struct Task {
     pub task_type: TaskType,
     #[serde(default)]
     pub pr_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_status: Option<String>,
     #[serde(default)]
     pub proposed_by: Option<String>,
     /// For `Bug` tasks: the originating task whose implementation introduced the defect.

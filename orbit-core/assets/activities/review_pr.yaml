@@ -41,18 +41,14 @@ activity:
                               • out-of-scope behavioral change (see scope check)
                               • regression to a prior fix (see regression check)
                               • missing tests for changed behaviour
-         Body MUST list every blocking issue clearly.
        - "approve"          — all criteria met AND no blocking issues found.
-       - "comment"          — ONLY for a PR that is otherwise approvable but has minor
-                              non-blocking observations (style, naming, optional follow-ups).
-                              Do NOT use "comment" if there is any issue that should be fixed.
-                              Do NOT write "recommend merge" in a comment review — that is
-                              self-contradictory. If the PR is ready to merge, use "approve".
-    6. Call github.pr.review with:
-       - pr: <identifier>
-       - action: <chosen action>
-       - body: <review summary> (required for request-changes and comment)
-    7. Return the action and body in the output.
+    6. Post review feedback:
+       - If action is "request-changes": call github.pr.comment with a body listing
+         every blocking issue clearly, plus any non-blocking observations.
+       - If action is "approve": call github.pr.comment with a brief approval summary.
+    7. Update the task with the review decision:
+       - Call orbit.task.update with input: {"id": "<task_id>", "pr_status": "<pr_status>"}
+    8. Return task_id, pr_status, and body in the output.
 
     If the task is not found, or the PR cannot be located, return a clear error.
 
@@ -67,12 +63,24 @@ activity:
         description: Orbit task ID whose PR should be reviewed. The agent loads task metadata (including prNumber) via orbit.task.show.
   output_schema_json:
     type: object
-    properties: {}
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: The Orbit task ID that was reviewed
+      pr_status:
+        type: string
+        description: "Review decision: approve or request-changes"
+      body:
+        type: string
+        description: Review summary text
 
   # ---- execution ----
   skill_refs:
     - orbit
   tools:
     - orbit.task.show
+    - orbit.task.update
     - github.pr.view
-    - github.pr.review
+    - github.pr.comment

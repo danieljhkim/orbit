@@ -19,15 +19,14 @@ pub(super) fn build_exec_request(
     let event = match action.as_str() {
         "approve" => "APPROVE",
         "request-changes" => "REQUEST_CHANGES",
-        "comment" => "COMMENT",
         other => {
             return Err(OrbitError::InvalidInput(format!(
-                "invalid `action`: \"{other}\"; must be approve, request-changes, or comment"
+                "invalid `action`: \"{other}\"; must be approve or request-changes"
             )));
         }
     };
 
-    if matches!(action.as_str(), "request-changes" | "comment") && body.is_none() {
+    if action.as_str() == "request-changes" && body.is_none() {
         return Err(OrbitError::InvalidInput(format!(
             "`body` is required for action \"{action}\""
         )));
@@ -69,8 +68,7 @@ impl Tool for GithubPrReviewTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "github.pr.review".to_string(),
-            description: "Approve, request changes, or comment on a pull request review"
-                .to_string(),
+            description: "Approve or request changes on a pull request review".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "repo".to_string(),
@@ -86,14 +84,13 @@ impl Tool for GithubPrReviewTool {
                 },
                 ToolParam {
                     name: "action".to_string(),
-                    description: "Review action: approve, request-changes, or comment".to_string(),
+                    description: "Review action: approve or request-changes".to_string(),
                     param_type: "string".to_string(),
                     required: true,
                 },
                 ToolParam {
                     name: "body".to_string(),
-                    description: "Review body (required for request-changes and comment actions)"
-                        .to_string(),
+                    description: "Review body (required for request-changes action)".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },

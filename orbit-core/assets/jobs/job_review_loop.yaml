@@ -48,6 +48,3 @@ job:
       model: gpt-5.4
       condition: on_success
       timeout_seconds: 600
-      env_set:
-        GH_TOKEN: "${GITHUB_TOKEN_REVIEWER}"
-        GH_CONFIG_DIR: "/tmp/orbit-gh-reviewer"

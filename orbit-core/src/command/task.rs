@@ -43,6 +43,7 @@ impl Default for TaskAddParams {
     }
 }
 
+#[derive(Default)]
 pub struct TaskUpdateParams {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -51,6 +52,7 @@ pub struct TaskUpdateParams {
     pub comment: Option<String>,
     pub status: Option<TaskStatus>,
     pub pr_number: Option<Option<String>>,
+    pub pr_status: Option<Option<String>>,
 }
 
 impl From<TaskUpdateParams> for StoreTaskUpdateParams {
@@ -62,6 +64,7 @@ impl From<TaskUpdateParams> for StoreTaskUpdateParams {
             execution_summary: p.execution_summary,
             status: p.status,
             pr_number: p.pr_number,
+            pr_status: p.pr_status,
             ..Default::default()
         }
     }
@@ -181,6 +184,7 @@ impl OrbitRuntime {
                 comment,
                 status: Some(status),
                 pr_number: None,
+                pr_status: None,
             },
             note,
         )
@@ -209,7 +213,8 @@ impl OrbitRuntime {
             || params.plan.is_some()
             || params.execution_summary.is_some()
             || params.comment.is_some()
-            || params.pr_number.is_some();
+            || params.pr_number.is_some()
+            || params.pr_status.is_some();
 
         if is_field_update && matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
             return Err(OrbitError::InvalidInput(format!(

@@ -66,6 +66,7 @@ pub struct TaskUpdateParams {
     pub complexity: Option<TaskComplexity>,
     pub task_type: Option<TaskType>,
     pub pr_number: Option<Option<String>>,
+    pub pr_status: Option<Option<String>>,
     pub proposed_by: Option<Option<String>>,
     pub source_task_id: Option<Option<String>>,
     pub status_event: Option<String>,

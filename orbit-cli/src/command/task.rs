@@ -432,6 +432,9 @@ impl Execute for TaskShowArgs {
             if let Some(ref pr_number) = task.pr_number {
                 println!("{} {}", bold("PR Number:"), pr_number);
             }
+            if let Some(ref pr_status) = task.pr_status {
+                println!("{} {}", bold("PR Status:"), pr_status);
+            }
             if let Some(ref proposed_by) = task.proposed_by {
                 println!("{} {}", bold("Proposed By:"), proposed_by);
             }
@@ -480,6 +483,9 @@ pub struct TaskUpdateArgs {
     /// Pull request number (empty string clears)
     #[arg(long)]
     pub pr_number: Option<String>,
+    /// PR review status (approve, request-changes)
+    #[arg(long)]
+    pub pr_status: Option<String>,
     /// Explicit agent name to persist on the task artifact
     #[arg(long)]
     pub agent: Option<String>,
@@ -500,6 +506,13 @@ impl Execute for TaskUpdateArgs {
                 Some(value)
             }
         });
+        let pr_status = self.pr_status.map(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        });
 
         let task = runtime.update_task_with_identity(
             &self.id,
@@ -511,6 +524,7 @@ impl Execute for TaskUpdateArgs {
                 comment: self.comment,
                 status: self.status.map(Into::into),
                 pr_number,
+                pr_status,
             },
             self.agent,
             self.model,
@@ -932,6 +946,7 @@ fn task_to_json(task: &orbit_core::Task) -> Value {
         "complexity": task.complexity.map(|value| value.to_string()),
         "type": task.task_type.to_string(),
         "pr_number": task.pr_number,
+        "pr_status": task.pr_status,
         "proposed_by": task.proposed_by,
         "source_task_id": task.source_task_id,
         "comments": task.comments,

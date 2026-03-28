@@ -1,8 +1,8 @@
 use orbit_types::OrbitError;
 use serde_json::{Value, json};
 
-use super::input::{canonicalize_existing_dir, required_input_string};
-use super::review::resolve_review_decision;
+use super::input::required_input_string;
+use super::review::normalize_review_decision;
 use crate::context::TaskHost;
 
 pub(super) fn check_review_decision<H: TaskHost + ?Sized>(
@@ -11,28 +11,15 @@ pub(super) fn check_review_decision<H: TaskHost + ?Sized>(
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let task = host.get_task(task_id)?;
-    let repo_root = canonicalize_existing_dir(
-        task.repo_root
-            .as_deref()
-            .or(task.workspace_path.as_deref())
-            .ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "check_review_decision requires task.repo_root or task.workspace_path"
-                        .to_string(),
-                )
-            })?,
-        "repo_root",
-    )?;
-    let pr_number = task.pr_number.as_deref().ok_or_else(|| {
-        OrbitError::InvalidInput("check_review_decision requires task.pr_number".to_string())
-    })?;
 
-    let decision = resolve_review_decision(&repo_root, pr_number)?;
-    if decision == "APPROVED" {
-        Ok(json!({ "review_decision": decision }))
+    let pr_status = task.pr_status.as_deref().unwrap_or("none");
+    let normalized = normalize_review_decision(pr_status);
+    if normalized == "APPROVED" {
+        Ok(json!({ "review_decision": normalized }))
     } else {
+        let pr_number = task.pr_number.as_deref().unwrap_or("unknown");
         Err(OrbitError::Execution(format!(
-            "pull request '{pr_number}' is not approved (review_decision={decision})"
+            "pull request '{pr_number}' is not approved (pr_status={pr_status})"
         )))
     }
 }

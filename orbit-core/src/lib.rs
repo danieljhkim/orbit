@@ -480,6 +480,8 @@ mod tests {
                     status: Some(TaskStatus::Review),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("review");
@@ -620,6 +622,8 @@ mod tests {
                     status: None,
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("update");
@@ -651,6 +655,8 @@ mod tests {
                 status: None,
 
                 pr_number: None,
+
+                pr_status: None,
             },
         );
 
@@ -678,6 +684,8 @@ mod tests {
                 status: None,
 
                 pr_number: None,
+
+                pr_status: None,
             },
         );
 
@@ -706,6 +714,8 @@ mod tests {
                     status: None,
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("update in-progress task");
@@ -752,6 +762,8 @@ mod tests {
                     status: None,
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("update");
@@ -791,6 +803,8 @@ mod tests {
                     status: None,
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("update");
@@ -924,6 +938,8 @@ mod tests {
                     status: Some(TaskStatus::InProgress),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("in progress");
@@ -939,6 +955,8 @@ mod tests {
                     status: Some(TaskStatus::Review),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("review");
@@ -969,6 +987,8 @@ mod tests {
                     status: Some(TaskStatus::InProgress),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("in progress");
@@ -984,6 +1004,8 @@ mod tests {
                     status: Some(TaskStatus::Review),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("review");
@@ -1053,6 +1075,8 @@ mod tests {
                     status: Some(TaskStatus::InProgress),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("in progress");
@@ -1068,6 +1092,8 @@ mod tests {
                     status: Some(TaskStatus::Review),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("review");
@@ -1131,6 +1157,8 @@ mod tests {
                     status: Some(TaskStatus::InProgress),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("in progress");
@@ -1146,6 +1174,8 @@ mod tests {
                 status: Some(TaskStatus::Review),
 
                 pr_number: None,
+
+                pr_status: None,
             },
         );
         assert!(matches!(
@@ -1165,6 +1195,8 @@ mod tests {
                     status: Some(TaskStatus::Review),
 
                     pr_number: None,
+
+                    pr_status: None,
                 },
             )
             .expect("review with summary");

@@ -170,8 +170,7 @@ impl SkillCatalog {
         // Merge global candidates, workspace IDs take precedence.
         if let Some(ref global) = self.global_root {
             let global_ids = collect_candidate_ids(global)?;
-            let workspace_set: std::collections::HashSet<String> =
-                ids.iter().cloned().collect();
+            let workspace_set: std::collections::HashSet<String> = ids.iter().cloned().collect();
             for id in global_ids {
                 if !workspace_set.contains(&id) {
                     ids.push(id);
@@ -199,8 +198,7 @@ fn load_skill_from_dir(skill_id: &str, dir: &Path) -> Result<LoadedSkill, OrbitE
             skill_id
         )));
     }
-    let content =
-        fs::read_to_string(&skill_md_path).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let content = fs::read_to_string(&skill_md_path).map_err(|e| OrbitError::Io(e.to_string()))?;
     let sections = parse_skill_markdown(&content)?;
 
     let content_hash = sha256_hex(content.as_bytes());

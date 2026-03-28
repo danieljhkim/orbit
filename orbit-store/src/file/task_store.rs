@@ -136,6 +136,8 @@ struct TaskFileDocument {
     #[serde(default)]
     pr_number: Option<String>,
     #[serde(default)]
+    pr_status: Option<String>,
+    #[serde(default)]
     source_task_id: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -204,6 +206,7 @@ impl TaskFileStore {
                 complexity: params.complexity,
                 task_type: params.task_type,
                 pr_number: params.pr_number,
+                pr_status: None,
                 proposed_by: params.proposed_by,
                 source_task_id: params.source_task_id,
                 created_at: now,
@@ -351,6 +354,9 @@ impl TaskFileStore {
         }
         if let Some(value) = &fields.pr_number {
             bundle.doc.pr_number = value.clone();
+        }
+        if let Some(value) = &fields.pr_status {
+            bundle.doc.pr_status = value.clone();
         }
         if let Some(value) = &fields.proposed_by {
             bundle.doc.proposed_by = value.clone();
@@ -603,6 +609,7 @@ fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError>
     yaml.push_str(&yaml_section("implementation"));
     yaml.push_str(&yaml_field("actor_identity", &doc.actor_identity)?);
     yaml.push_str(&yaml_field("pr_number", &doc.pr_number)?);
+    yaml.push_str(&yaml_field("pr_status", &doc.pr_status)?);
 
     if doc.source_task_id.is_some() {
         yaml.push_str(&yaml_section("attribution"));
@@ -672,6 +679,7 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         complexity: bundle.doc.complexity,
         task_type: bundle.doc.task_type,
         pr_number: bundle.doc.pr_number,
+        pr_status: bundle.doc.pr_status,
         proposed_by: bundle.doc.proposed_by,
         source_task_id: bundle.doc.source_task_id,
         comments: bundle.doc.comments,

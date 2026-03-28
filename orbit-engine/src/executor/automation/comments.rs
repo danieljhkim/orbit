@@ -455,6 +455,7 @@ mod tests {
             priority: TaskPriority::High,
             task_type: TaskType::Issue,
             pr_number: Some("42".to_string()),
+            pr_status: None,
             proposed_by: None,
             source_task_id: None,
             complexity: None,

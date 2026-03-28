@@ -283,17 +283,21 @@ mod tests {
 
     #[test]
     fn pr_review_rejects_missing_repo() {
-        let err =
-            super::pr_review::build_exec_request(&ToolContext::default(), &json!({ "pr": "42", "action": "approve" }))
-                .expect_err("must fail");
+        let err = super::pr_review::build_exec_request(
+            &ToolContext::default(),
+            &json!({ "pr": "42", "action": "approve" }),
+        )
+        .expect_err("must fail");
         assert!(err.to_string().contains("repo"), "{err}");
     }
 
     #[test]
     fn pr_review_rejects_missing_action() {
-        let err =
-            super::pr_review::build_exec_request(&ToolContext::default(), &json!({ "repo": "owner/repo", "pr": "42" }))
-                .expect_err("must fail");
+        let err = super::pr_review::build_exec_request(
+            &ToolContext::default(),
+            &json!({ "repo": "owner/repo", "pr": "42" }),
+        )
+        .expect_err("must fail");
         assert!(err.to_string().contains("action"), "{err}");
     }
 
@@ -501,7 +505,11 @@ mod tests {
         )
         .expect("valid");
         // body is passed as "-f" "body=..." in the gh api args
-        let body_pos = req.args.iter().position(|a| a.starts_with("body=")).unwrap();
+        let body_pos = req
+            .args
+            .iter()
+            .position(|a| a.starts_with("body="))
+            .unwrap();
         let body = &req.args[body_pos];
         assert!(
             body.ends_with("\n\n*Reviewed by: codex / o3*"),
@@ -525,7 +533,11 @@ mod tests {
             }),
         )
         .expect("valid");
-        let body_pos = req.args.iter().position(|a| a.starts_with("body=")).unwrap();
+        let body_pos = req
+            .args
+            .iter()
+            .position(|a| a.starts_with("body="))
+            .unwrap();
         let body = &req.args[body_pos];
         assert_eq!(body, "body=*Reviewed by: claude / sonnet-4*");
     }

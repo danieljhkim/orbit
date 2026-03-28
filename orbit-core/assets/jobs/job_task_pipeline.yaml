@@ -68,9 +68,6 @@ job:
       model: sonnet
       condition: on_success
       timeout_seconds: 600
-      env_set:
-        GH_TOKEN: "${GITHUB_TOKEN_REVIEWER}"
-        GH_CONFIG_DIR: "/tmp/orbit-gh-reviewer"
 
     - target_type: activity
       target_id: check_review_decision
