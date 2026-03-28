@@ -33,9 +33,7 @@ mod tests {
     use std::cell::RefCell;
 
     use chrono::Utc;
-    use orbit_types::{
-        ActorIdentity, OrbitError, Task, TaskPriority, TaskStatus, TaskType,
-    };
+    use orbit_types::{ActorIdentity, OrbitError, Task, TaskPriority, TaskStatus, TaskType};
     use serde_json::json;
 
     use super::*;

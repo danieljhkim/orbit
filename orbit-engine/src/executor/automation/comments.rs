@@ -596,10 +596,12 @@ mod tests {
 
         assert_eq!(result["loop_exit"], json!(true));
         assert_eq!(result["comments"].as_array().unwrap().len(), 0);
-        assert!(result["comment_summary"]
-            .as_str()
-            .unwrap()
-            .contains("No PR"));
+        assert!(
+            result["comment_summary"]
+                .as_str()
+                .unwrap()
+                .contains("No PR")
+        );
     }
 
     #[test]

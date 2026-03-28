@@ -50,9 +50,7 @@ pub(super) fn validate_repo(repo: &str) -> Result<(), OrbitError> {
         let name = parts.next().unwrap_or("");
         !owner.is_empty()
             && !name.is_empty()
-            && owner
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && owner.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
             && name
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
@@ -428,7 +426,9 @@ mod tests {
         assert!(super::require_pr(&json!({ "pr": "abc" })).is_err());
         assert!(super::require_pr(&json!({ "pr": "42/../../etc" })).is_err());
         assert!(super::require_pr(&json!({ "pr": "12 34" })).is_err());
-        assert!(super::require_pr(&json!({ "pr": "https://github.com/owner/repo/pull/" })).is_err());
+        assert!(
+            super::require_pr(&json!({ "pr": "https://github.com/owner/repo/pull/" })).is_err()
+        );
         assert!(super::require_pr(&json!({ "pr": "https://example.com/pull/42" })).is_err());
     }
 

@@ -188,7 +188,11 @@ mod tests {
         let mut input = base_input(&file.to_string_lossy());
         input["label"] = json!("orbit");
         let req = build_exec_request(&ctx, &input).expect("should succeed with label");
-        let label_idx = req.args.iter().position(|a| a == "--label").expect("--label flag present");
+        let label_idx = req
+            .args
+            .iter()
+            .position(|a| a == "--label")
+            .expect("--label flag present");
         assert_eq!(req.args[label_idx + 1], "orbit");
     }
 

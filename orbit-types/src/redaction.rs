@@ -155,8 +155,8 @@ mod tests {
     use crate::OrbitError;
 
     use super::{
-        REDACTED_ENV_VALUE, redact_home_dir, redact_sensitive_env_error,
-        redact_sensitive_env_json, redact_sensitive_env_text,
+        REDACTED_ENV_VALUE, redact_home_dir, redact_sensitive_env_error, redact_sensitive_env_json,
+        redact_sensitive_env_text,
     };
 
     #[test]

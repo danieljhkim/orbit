@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use orbit_types::OrbitError;
+use orbit_types::redaction::redact_home_dir;
 
 use crate::paths;
 
@@ -87,13 +88,13 @@ impl RuntimeConfig {
         let raw = fs::read_to_string(&config_path).map_err(|err| {
             OrbitError::Io(format!(
                 "failed to read runtime config '{}': {err}",
-                config_path.display()
+                redact_home_dir(&config_path.display().to_string())
             ))
         })?;
         let parsed = toml::from_str::<RawRuntimeConfig>(&raw).map_err(|err| {
             OrbitError::InvalidInput(format!(
                 "invalid runtime config '{}': {err}",
-                config_path.display()
+                redact_home_dir(&config_path.display().to_string())
             ))
         })?;
 

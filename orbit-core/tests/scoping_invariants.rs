@@ -10,8 +10,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use orbit_core::command::task::TaskAddParams;
 use orbit_core::OrbitRuntime;
+use orbit_core::command::task::TaskAddParams;
 use orbit_types::{ActorIdentity, TaskType, WorkspacePaths};
 use tempfile::tempdir;
 
@@ -93,10 +93,7 @@ fn workspace_init_creates_tasks_and_scoreboard() {
 
     // tasks/ dir should NOT be created by init_workspace (that's ensure_orbit_root_initialized's job),
     // but the workspace itself should exist.
-    assert!(
-        workspace_root.exists(),
-        "workspace root should be created"
-    );
+    assert!(workspace_root.exists(), "workspace root should be created");
 
     // When scoring is enabled, scoreboard should be seeded at workspace scope.
     // Default config has scoring=false, so scoreboard is not created.

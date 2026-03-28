@@ -316,10 +316,7 @@ fn inject_activity_tools(mode: EnvironmentMode, tools: &[String]) -> Environment
     }
 }
 
-fn inject_proc_allowed_programs(
-    mode: EnvironmentMode,
-    programs: &[String],
-) -> EnvironmentMode {
+fn inject_proc_allowed_programs(mode: EnvironmentMode, programs: &[String]) -> EnvironmentMode {
     if programs.is_empty() {
         return mode;
     }
@@ -738,18 +735,10 @@ mod tests {
         ) -> Result<bool, OrbitError> {
             unimplemented!()
         }
-        fn abandon_job_run(
-            &self,
-            _: &str,
-            _: chrono::DateTime<Utc>,
-        ) -> Result<bool, OrbitError> {
+        fn abandon_job_run(&self, _: &str, _: chrono::DateTime<Utc>) -> Result<bool, OrbitError> {
             unimplemented!()
         }
-        fn complete_job_run_step(
-            &self,
-            _: &str,
-            _: &JobRunStepParams,
-        ) -> Result<bool, OrbitError> {
+        fn complete_job_run_step(&self, _: &str, _: &JobRunStepParams) -> Result<bool, OrbitError> {
             unimplemented!()
         }
         fn finalize_job_run(
@@ -960,7 +949,10 @@ mod tests {
         let original = make_failure_outcome();
 
         let recovered = try_recover_from_task(&host, &execution, &original);
-        assert!(recovered.is_some(), "recovery should succeed with pr_status");
+        assert!(
+            recovered.is_some(),
+            "recovery should succeed with pr_status"
+        );
 
         let outcome = recovered.unwrap();
         assert_eq!(outcome.state, JobRunState::Success);
