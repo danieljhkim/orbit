@@ -10,9 +10,9 @@ pub(super) fn build_exec_request(
     ctx: &ToolContext,
     input: &Value,
 ) -> Result<(ExecRequest, String), OrbitError> {
-    let repo = require_str(input, "repo")?;
+    let repo = super::require_repo(input)?;
     let pr = super::require_pr(input)?;
-    let comment_id = require_str(input, "comment_id")?;
+    let comment_id = super::require_numeric_str(input, "comment_id")?;
     let body = require_str(input, "body")?;
     let body = super::append_signature(&body, ctx, "Reviewed");
 

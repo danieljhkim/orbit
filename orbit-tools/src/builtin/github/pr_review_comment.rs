@@ -10,7 +10,7 @@ pub(super) fn build_exec_request(
     ctx: &ToolContext,
     input: &Value,
 ) -> Result<ExecRequest, OrbitError> {
-    let repo = require_str(input, "repo")?;
+    let repo = super::require_repo(input)?;
     let pr = super::require_pr(input)?;
     let body = require_str(input, "body")?;
     let path = require_str(input, "path")?;

@@ -35,9 +35,63 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(pr_checks::GithubPrChecksTool);
 }
 
-/// Extract a non-empty `pr` field from the tool input.
+/// Validate that `repo` matches the `owner/name` format expected by the GitHub API.
+///
+/// Rejects values containing path traversal sequences, extra slashes, or characters
+/// outside the set GitHub allows for owner and repository names.
+pub(super) fn validate_repo(repo: &str) -> Result<(), OrbitError> {
+    // GitHub owner: alphanumeric or hyphen (no leading hyphen, no consecutive hyphens in org names,
+    // but we keep the regex simple — GitHub itself will reject truly invalid names).
+    // Repo name: alphanumeric, hyphen, underscore, or dot.
+    // Exactly one slash separating owner and name.
+    let valid = repo.split('/').count() == 2 && {
+        let mut parts = repo.split('/');
+        let owner = parts.next().unwrap_or("");
+        let name = parts.next().unwrap_or("");
+        !owner.is_empty()
+            && !name.is_empty()
+            && owner
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    };
+    if !valid {
+        return Err(OrbitError::InvalidInput(format!(
+            "invalid `repo` format: \"{repo}\"; expected owner/name (e.g. octocat/hello-world)"
+        )));
+    }
+    Ok(())
+}
+
+/// Extract and validate a `repo` field in `owner/name` format.
+pub(super) fn require_repo(input: &Value) -> Result<String, OrbitError> {
+    let repo = require_str(input, "repo")?;
+    validate_repo(&repo)?;
+    Ok(repo)
+}
+
+/// Extract a non-empty `pr` field from the tool input, validated as numeric.
 pub(super) fn require_pr(input: &Value) -> Result<String, OrbitError> {
-    require_str(input, "pr")
+    let pr = require_str(input, "pr")?;
+    if !pr.chars().all(|c| c.is_ascii_digit()) || pr.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "invalid `pr`: \"{pr}\"; must be a numeric PR number"
+        )));
+    }
+    Ok(pr)
+}
+
+/// Extract a non-empty numeric string field from tool input.
+pub(super) fn require_numeric_str(input: &Value, key: &str) -> Result<String, OrbitError> {
+    let value = require_str(input, key)?;
+    if !value.chars().all(|c| c.is_ascii_digit()) || value.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "invalid `{key}`: \"{value}\"; must be numeric"
+        )));
+    }
+    Ok(value)
 }
 
 /// Build an agent attribution footer line.
@@ -323,6 +377,95 @@ mod tests {
         )
         .expect_err("must fail");
         assert!(err.to_string().contains("body"), "{err}");
+    }
+
+    // --- Path traversal / format validation ---
+
+    #[test]
+    fn validate_repo_accepts_valid_formats() {
+        assert!(super::validate_repo("owner/repo").is_ok());
+        assert!(super::validate_repo("my-org/my-repo").is_ok());
+        assert!(super::validate_repo("octocat/hello-world").is_ok());
+        assert!(super::validate_repo("org/repo_name").is_ok());
+        assert!(super::validate_repo("org/repo.name").is_ok());
+    }
+
+    #[test]
+    fn validate_repo_rejects_path_traversal() {
+        assert!(super::validate_repo("../evil/repo").is_err());
+        assert!(super::validate_repo("owner/../other").is_err());
+        assert!(super::validate_repo("owner/repo/../../etc").is_err());
+    }
+
+    #[test]
+    fn validate_repo_rejects_malformed_values() {
+        assert!(super::validate_repo("noslash").is_err());
+        assert!(super::validate_repo("too/many/slashes").is_err());
+        assert!(super::validate_repo("/leading").is_err());
+        assert!(super::validate_repo("trailing/").is_err());
+        assert!(super::validate_repo("").is_err());
+        assert!(super::validate_repo("has spaces/repo").is_err());
+    }
+
+    #[test]
+    fn require_pr_rejects_non_numeric() {
+        assert!(super::require_pr(&json!({ "pr": "42" })).is_ok());
+        assert!(super::require_pr(&json!({ "pr": "abc" })).is_err());
+        assert!(super::require_pr(&json!({ "pr": "42/../../etc" })).is_err());
+        assert!(super::require_pr(&json!({ "pr": "12 34" })).is_err());
+    }
+
+    #[test]
+    fn require_numeric_str_rejects_non_numeric() {
+        assert!(super::require_numeric_str(&json!({ "id": "12345" }), "id").is_ok());
+        assert!(super::require_numeric_str(&json!({ "id": "abc" }), "id").is_err());
+        assert!(super::require_numeric_str(&json!({ "id": "../123" }), "id").is_err());
+    }
+
+    #[test]
+    fn pr_review_comment_rejects_traversal_repo() {
+        let err = super::pr_review_comment::build_exec_request(
+            &ToolContext::default(),
+            &json!({
+                "repo": "evil/../other",
+                "pr": "42",
+                "path": "src/main.rs",
+                "line": 10,
+                "body": "issue"
+            }),
+        )
+        .expect_err("must reject path traversal");
+        assert!(err.to_string().contains("repo"), "{err}");
+    }
+
+    #[test]
+    fn pr_comment_reply_rejects_traversal_repo() {
+        let err = super::pr_comment_reply::build_exec_request(
+            &ToolContext::default(),
+            &json!({
+                "repo": "evil/../other",
+                "pr": "42",
+                "comment_id": "123",
+                "body": "reply"
+            }),
+        )
+        .expect_err("must reject path traversal");
+        assert!(err.to_string().contains("repo"), "{err}");
+    }
+
+    #[test]
+    fn pr_comment_reply_rejects_non_numeric_comment_id() {
+        let err = super::pr_comment_reply::build_exec_request(
+            &ToolContext::default(),
+            &json!({
+                "repo": "owner/repo",
+                "pr": "42",
+                "comment_id": "abc/../123",
+                "body": "reply"
+            }),
+        )
+        .expect_err("must reject non-numeric comment_id");
+        assert!(err.to_string().contains("comment_id"), "{err}");
     }
 
     #[test]
