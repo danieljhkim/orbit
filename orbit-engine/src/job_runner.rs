@@ -312,8 +312,14 @@ fn execute_activity_with_retries<H: EngineHost>(
                     final_state = step_state;
                 }
 
-                // Check for loop_exit signal after each successful step.
-                if step_state == JobRunState::Success && check_loop_exit(&current_input) {
+                // Check for loop_exit signal after each successful step, but
+                // only when the job is actually looping (max_iterations > 1).
+                // Single-pass pipelines must not exit early on loop_exit — the
+                // signal is meant for nested looping jobs like job_review_loop.
+                if max_iterations > 1
+                    && step_state == JobRunState::Success
+                    && check_loop_exit(&current_input)
+                {
                     break 'outer;
                 }
             }
