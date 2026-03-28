@@ -28,12 +28,17 @@ pub(super) fn load_pr_comments<H: RuntimeHost + TaskHost + ?Sized>(
             )
         })?;
 
-    let comments = fetch_pr_review_comments(repo_root, pr_number)?;
+    let review_comments = fetch_pr_review_comments(repo_root, pr_number)?;
 
     // Filter to unresolved comments (not part of a resolved thread).
     // GitHub's REST API doesn't directly flag "resolved" on individual comments,
     // but we can use the review threads endpoint to check.
-    let unresolved = filter_unresolved_comments(repo_root, pr_number, &comments)?;
+    let mut unresolved = filter_unresolved_comments(repo_root, pr_number, &review_comments)?;
+
+    // Also fetch general issue comments (posted via github.pr.comment).
+    // These are not part of review threads and are always "unresolved".
+    let issue_comments = fetch_pr_issue_comments(repo_root, pr_number)?;
+    unresolved.extend(issue_comments);
 
     if unresolved.is_empty() {
         return Ok(json!({
@@ -84,6 +89,33 @@ fn fetch_pr_review_comments(repo_root: &str, pr_number: &str) -> Result<Vec<Valu
             pr_number,
             result.stderr.trim()
         )));
+    }
+
+    let comments: Vec<Value> = serde_json::from_str(result.stdout.trim()).unwrap_or_default();
+    Ok(comments)
+}
+
+fn fetch_pr_issue_comments(repo_root: &str, pr_number: &str) -> Result<Vec<Value>, OrbitError> {
+    let result = run_process(
+        &ExecRequest {
+            program: "gh".to_string(),
+            args: vec![
+                "api".to_string(),
+                format!("repos/{{owner}}/{{repo}}/issues/{pr_number}/comments"),
+                "--paginate".to_string(),
+            ],
+            current_dir: Some(repo_root.to_string()),
+            timeout_ms: Some(TIMEOUT_MS),
+            stdin_mode: StdinMode::Null,
+            environment_mode: EnvironmentMode::Inherit,
+            debug: false,
+        },
+        &NoSandbox,
+    )?;
+
+    if !result.success {
+        // Non-fatal: issue comments are supplementary.
+        return Ok(vec![]);
     }
 
     let comments: Vec<Value> = serde_json::from_str(result.stdout.trim()).unwrap_or_default();
@@ -395,13 +427,18 @@ mod tests {
 
     /// Install a fake `gh` script that responds to:
     /// - `gh api repos/{owner}/{repo}/pulls/{pr}/comments --paginate` → `comments_json`
+    /// - `gh api repos/{owner}/{repo}/issues/{pr}/comments --paginate` → `[]` (empty)
     /// - `gh pr view {pr} --json reviewThreads` → `threads_json`
     fn install_fake_gh(bin_dir: &Path, comments_json: &str, threads_json: &str) {
         let script = format!(
             concat!(
                 "#!/bin/sh\n",
                 "if [ \"$1\" = \"api\" ]; then\n",
-                "  printf '%s' '{comments}'\n",
+                "  case \"$2\" in\n",
+                "    *pulls*) printf '%s' '{comments}' ;;\n",
+                "    *issues*) printf '%s' '[]' ;;\n",
+                "    *) printf '%s\\n' \"unexpected api endpoint: $2\" >&2; exit 1 ;;\n",
+                "  esac\n",
                 "  exit 0\n",
                 "fi\n",
                 "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ] && [ \"$4\" = \"--json\" ] && [ \"$5\" = \"reviewThreads\" ]; then\n",
