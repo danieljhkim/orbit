@@ -129,6 +129,27 @@ fn pipeline_cli_activity_assets_use_task_id_input() {
 }
 
 #[test]
+fn review_pr_activity_uses_structured_review_contract() {
+    let raw = include_str!("../assets/activities/review_pr.yaml");
+    assert!(
+        raw.contains("    - orbit-review-pr"),
+        "review_pr should load the dedicated Orbit PR review skill"
+    );
+    assert!(
+        raw.contains("    - github.pr.review.comment"),
+        "review_pr should allow inline PR review comments"
+    );
+    assert!(
+        raw.contains("Never bundle multiple findings into one comment."),
+        "review_pr should require one finding per comment"
+    );
+    assert!(
+        raw.contains("After all issue-specific comments are posted:"),
+        "review_pr should separate issue comments from the overall summary"
+    );
+}
+
+#[test]
 fn worktree_pipeline_assets_use_task_id_spine() {
     let create_branch = include_str!("../assets/activities/create_branch.yaml");
     assert!(
