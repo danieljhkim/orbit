@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::command::init::{InitOptions, InitResult, init_global};
+use orbit_core::command::init::{InitOptions, init_global};
 use orbit_core::{OrbitError, OrbitRuntime};
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,16 @@ impl Execute for InitCommand {
                 ..Default::default()
             },
         )?;
-        print_init_result(&result, reported_init_paths(None));
+        let paths = reported_init_paths(None);
+        print_init_result(InitOutput {
+            skills_root: paths.skills_root,
+            refreshed_skill_files: result.refreshed_skill_files,
+            created_skills_symlink: result.created_skills_symlink,
+            config_path: paths.config_path,
+            created_config: result.created_config,
+            refreshed_default_activities: result.refreshed_default_activities,
+            refreshed_default_jobs: result.refreshed_default_jobs,
+        });
         Ok(())
     }
 }
@@ -38,22 +47,42 @@ impl InitCommand {
                 ..Default::default()
             },
         )?;
-        print_init_result(&result, reported_init_paths(root_override));
+        let paths = reported_init_paths(root_override);
+        print_init_result(InitOutput {
+            skills_root: paths.skills_root,
+            refreshed_skill_files: result.refreshed_skill_files,
+            created_skills_symlink: result.created_skills_symlink,
+            config_path: paths.config_path,
+            created_config: result.created_config,
+            refreshed_default_activities: result.refreshed_default_activities,
+            refreshed_default_jobs: result.refreshed_default_jobs,
+        });
         Ok(())
     }
 }
 
-fn print_init_result(result: &InitResult, paths: ReportedInitPaths) {
+fn print_init_result(output: InitOutput) {
     println!(
         "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}",
-        paths.skills_root,
-        result.refreshed_skill_files,
-        result.created_skills_symlink,
-        paths.config_path,
-        result.created_config,
-        result.refreshed_default_activities,
-        result.refreshed_default_jobs
+        output.skills_root,
+        output.refreshed_skill_files,
+        output.created_skills_symlink,
+        output.config_path,
+        output.created_config,
+        output.refreshed_default_activities,
+        output.refreshed_default_jobs
     );
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+struct InitOutput {
+    skills_root: &'static str,
+    refreshed_skill_files: usize,
+    created_skills_symlink: bool,
+    config_path: &'static str,
+    created_config: bool,
+    refreshed_default_activities: usize,
+    refreshed_default_jobs: usize,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

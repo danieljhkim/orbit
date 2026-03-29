@@ -1177,28 +1177,19 @@ mod tests {
     #[test]
     fn loop_exit_true_in_input_exits() {
         let host = FakeTaskHost::empty();
-        assert!(check_loop_exit(
-            &host,
-            &json!({ "loop_exit": true })
-        ));
+        assert!(check_loop_exit(&host, &json!({ "loop_exit": true })));
     }
 
     #[test]
     fn loop_exit_false_in_input_does_not_exit() {
         let host = FakeTaskHost::empty();
-        assert!(!check_loop_exit(
-            &host,
-            &json!({ "loop_exit": false })
-        ));
+        assert!(!check_loop_exit(&host, &json!({ "loop_exit": false })));
     }
 
     #[test]
     fn no_loop_exit_no_task_does_not_exit() {
         let host = FakeTaskHost::empty();
-        assert!(!check_loop_exit(
-            &host,
-            &json!({ "task_id": "T-missing" })
-        ));
+        assert!(!check_loop_exit(&host, &json!({ "task_id": "T-missing" })));
     }
 
     #[test]

@@ -137,13 +137,13 @@ mod tests {
     #[test]
     fn missing_status_is_noop() {
         let host = FakeHost::new(test_task());
-        let result = update_task(
-            &host,
-            &json!({ "task_id": "T20260328-001" }),
-        )
-        .expect("should succeed as no-op");
+        let result = update_task(&host, &json!({ "task_id": "T20260328-001" }))
+            .expect("should succeed as no-op");
         assert_eq!(result, json!({}));
-        assert!(host.updated_status.borrow().is_none(), "host should not be called");
+        assert!(
+            host.updated_status.borrow().is_none(),
+            "host should not be called"
+        );
     }
 
     #[test]

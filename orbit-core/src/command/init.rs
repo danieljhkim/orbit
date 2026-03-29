@@ -17,7 +17,6 @@ pub struct InitResult {
     pub created_config: bool,
     pub refreshed_default_activities: usize,
     pub refreshed_default_jobs: usize,
-    pub scoring_enabled: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -54,7 +53,7 @@ pub(crate) fn ensure_orbit_root_initialized(
     workspace_root: &Path,
 ) -> Result<(), OrbitError> {
     // Bootstrap global root — skip workspace-only artifacts (scoreboards, task dirs, job runs)
-    let global_init = init_workspace_at_root(
+    init_workspace_at_root(
         global_root,
         InitOptions {
             global_only: true,
@@ -65,7 +64,7 @@ pub(crate) fn ensure_orbit_root_initialized(
     let tasks_dir = workspace_root.join("tasks");
     fs::create_dir_all(&tasks_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
     // Seed scoreboard templates at workspace root (scoreboards are workspace-scoped)
-    if global_init.scoring_enabled {
+    if OrbitRuntime::from_data_root(global_root)?.scoring_enabled() {
         seed_scoreboard_templates(workspace_root)?;
     }
     Ok(())
@@ -141,7 +140,6 @@ fn init_workspace_at_root(
         created_config,
         refreshed_default_activities,
         refreshed_default_jobs,
-        scoring_enabled,
     })
 }
 
