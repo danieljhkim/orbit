@@ -36,13 +36,15 @@ impl OrbitRuntime {
         let allowed_tools = read_activity_tools_from_env();
         let (agent_name, model_name) = read_agent_identity_from_env();
         let proc_allowed_programs = read_proc_allowed_programs_from_env();
-        let workspace_root = Some(self.paths().repo_root.clone());
+        let cwd = std::env::current_dir()
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned());
         let tool_context = ToolContext {
-            cwd: None,
+            cwd,
             allowed_tools,
             agent_name,
             model_name,
-            workspace_root,
+            workspace_root: None,
             proc_allowed_programs,
             ..Default::default()
         };

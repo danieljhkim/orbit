@@ -47,8 +47,8 @@ pub use friction::FrictionEntry;
 pub use id::OrbitId;
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
-    JobScheduleState, JobStep, JobTargetType, RunEvent, StepCondition,
-    default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
+    JobScheduleState, JobStep, JobTargetType, RunEvent, StepCondition, default_job_max_active_runs,
+    default_max_iterations, default_retry_backoff_seconds,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;

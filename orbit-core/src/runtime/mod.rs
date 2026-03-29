@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
+use orbit_lock::FileLockStore;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     ActivityCreateParams, ActivityUpdateParams, AuditEventFilter, AuditEventInsertParams,
@@ -195,6 +196,10 @@ impl OrbitRuntime {
         self.context.paths()
     }
 
+    pub(crate) fn file_lock_store(&self) -> &Arc<FileLockStore> {
+        self.context.file_lock_store()
+    }
+
     pub(crate) fn data_root_path(&self) -> &Path {
         self.context.data_root()
     }
@@ -326,9 +331,13 @@ impl OrbitRuntime {
         input: Option<serde_json::Value>,
         retry_source_run_id: Option<String>,
     ) -> Result<JobRun, OrbitError> {
-        self.context
-            .job_store()
-            .insert_job_run(job_id, attempt, scheduled_at, input, retry_source_run_id)
+        self.context.job_store().insert_job_run(
+            job_id,
+            attempt,
+            scheduled_at,
+            input,
+            retry_source_run_id,
+        )
     }
 
     pub(crate) fn mark_job_run_running_record(

@@ -40,4 +40,6 @@ pub use context::{
     execution_working_directory, execution_working_directory_with_task, input_workspace_path,
     redact_attempt_outcome, step_output_for_following_input,
 };
-pub use job_runner::{recover_stale_active_run_for_job, retry_job_run_from_step, run_job_with_input};
+pub use job_runner::{
+    recover_stale_active_run_for_job, retry_job_run_from_step, run_job_with_input,
+};

@@ -29,7 +29,8 @@ impl Tool for FsDeleteTool {
             .and_then(Value::as_str)
             .ok_or_else(|| OrbitError::InvalidInput("missing `path`".to_string()))?;
 
-        super::check_workspace_boundary(ctx, Path::new(path_str))?;
+        let canonical = super::check_workspace_boundary(ctx, Path::new(path_str))?;
+        super::check_file_lock(ctx, &canonical)?;
 
         fs::remove_file(path_str).map_err(|e| OrbitError::Io(e.to_string()))?;
 

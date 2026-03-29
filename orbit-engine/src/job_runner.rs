@@ -25,6 +25,7 @@ pub fn run_job_with_input<H: EngineHost>(
     input: Value,
     debug: bool,
 ) -> Result<JobRunResult, OrbitError> {
+    let _ = host.cleanup_stale_file_locks()?;
     let _ = recover_stale_active_run_for_job(host, data_root, &job, Utc::now())?;
     let active_runs = host.list_pending_or_running_job_runs(&job.job_id)?;
     if active_runs.len() as u32 >= job.max_active_runs {
@@ -69,6 +70,7 @@ pub fn retry_job_run_from_step<H: EngineHost>(
     retry_step_target_id: &str,
     debug: bool,
 ) -> Result<JobRunResult, OrbitError> {
+    let _ = host.cleanup_stale_file_locks()?;
     // Find the step index to retry from (in the job definition, not the run steps).
     // Only supports first iteration (iteration 0) for v1.
     let retry_from_index = job
@@ -184,7 +186,7 @@ fn execute_activity_with_retries<H: EngineHost>(
         let mut final_state = JobRunState::Success;
         let mut total_duration_ms: u64 = 0;
         let mut last_protocol_violation = false;
-        let mut current_input = merge_job_input(job.default_input.as_ref(), input)?;
+        let mut current_input = merge_job_input(job.default_input.as_ref(), input.clone())?;
         let mut last_failure: Option<FailureInfo> = None;
         let num_steps = job.steps.len();
         let max_iterations = job.max_iterations.max(1);
@@ -494,6 +496,9 @@ fn execute_activity_with_retries<H: EngineHost>(
         if !changed {
             return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
         }
+        if final_state != JobRunState::Success {
+            release_task_locks_for_job_input(host, &input)?;
+        }
         host.record_event(OrbitEvent::JobRunCompleted {
             job_id: job.job_id.clone(),
             run_id: run.run_id.clone(),
@@ -564,6 +569,7 @@ fn execute_activity_with_retries<H: EngineHost>(
                     );
                 }
             }
+            release_task_locks_for_job_input(host, &input)?;
             Err(err)
         }
     }
@@ -688,6 +694,10 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
             host.finalize_job_run(&active_run.run_id, JobRunState::Failed, now, duration_ms)?;
         if !changed {
             return Err(OrbitError::JobRunNotFound(active_run.run_id.clone()));
+        }
+        let empty_input = Value::Null;
+        if let Some(task_id) = extract_task_id(active_run.input.as_ref().unwrap_or(&empty_input)) {
+            let _ = host.release_file_locks(task_id);
         }
         host.record_event(OrbitEvent::JobRunCompleted {
             job_id: job.job_id.clone(),
@@ -821,6 +831,7 @@ fn finalize_failed_started_run<H: JobRunHost + RuntimeHost>(
     if !changed {
         return Err(OrbitError::JobRunNotFound(run.run_id.clone()));
     }
+    release_task_locks_for_job_input(host, run.input.as_ref().unwrap_or(&Value::Null))?;
     host.record_event(OrbitEvent::JobRunCompleted {
         job_id: job.job_id.clone(),
         run_id: run.run_id.clone(),
@@ -1143,6 +1154,16 @@ fn normalize_agent_label(agent_cli: &str) -> String {
         .and_then(|value| value.to_str())
         .unwrap_or(agent_cli)
         .to_ascii_lowercase()
+}
+
+fn release_task_locks_for_job_input<H: RuntimeHost>(
+    host: &H,
+    input: &Value,
+) -> Result<(), OrbitError> {
+    if let Some(task_id) = extract_task_id(input) {
+        let _ = host.release_file_locks(task_id)?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

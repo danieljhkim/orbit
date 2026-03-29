@@ -1,0 +1,63 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- registration ----
+  id: parallel_dispatch_tasks
+  spec_type: automation
+
+  # ---- content ----
+  description: Execute an explicit, conflict-free task batch using the dedicated parallel worker pipeline.
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - task_ids
+    properties:
+      task_ids:
+        type: array
+        items:
+          type: string
+        description: Ordered task ids selected for this parallel wave.
+      base:
+        type: string
+        description: Base branch used for dedicated parallel worker worktrees. Defaults to orbit-parallel-work-branch.
+      parallelism:
+        type: integer
+        minimum: 1
+        description: Maximum number of worker pipelines to run concurrently.
+  output_schema_json:
+    type: object
+    required:
+      - launched
+      - succeeded
+      - failed
+      - skipped
+    properties:
+      launched:
+        type: integer
+      succeeded:
+        type: integer
+      failed:
+        type: integer
+      skipped:
+        type: integer
+      failures:
+        type: array
+        items:
+          type: object
+          properties:
+            task_id:
+              type: string
+            error:
+              type: string
+          required:
+            - task_id
+            - error
+
+  # ---- execution ----
+  action: run_parallel_task_pipeline

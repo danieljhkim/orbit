@@ -1,0 +1,36 @@
+schemaVersion: 1
+
+# ---- job ----
+job:
+  # ---- registration ----
+  job_id: job_parallel_task_finalize
+  state: enabled
+
+  # ---- execution ----
+  #
+  # Finalize one task after the parallel implementation phase has drained.
+  # This stage runs serially so tests, commits, PR creation, and review fixes
+  # do not compete across dedicated parallel worktrees.
+  max_active_runs: 1
+  default_input:
+    base: orbit-parallel-work-branch
+  steps:
+    - target_type: activity
+      target_id: run_tests
+      condition: on_success
+      timeout_seconds: 600
+
+    - target_type: activity
+      target_id: commit_changes
+      condition: on_success
+      timeout_seconds: 60
+
+    - target_type: activity
+      target_id: open_pr
+      condition: on_success
+      timeout_seconds: 300
+
+    - target_type: job
+      target_id: job_review_cycle
+      condition: on_success
+      timeout_seconds: 7200

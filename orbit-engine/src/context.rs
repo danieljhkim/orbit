@@ -4,7 +4,7 @@ use orbit_store::JobRunStepParams;
 use orbit_tools::ToolContext;
 use orbit_types::{
     Activity, Job, JobRun, JobRunState, JobTargetType, OrbitError, OrbitEvent, ReviewThread, Role,
-    Task, TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
+    Task, TaskPriority, TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -163,6 +163,12 @@ pub trait JobRunHost {
 
 pub trait TaskHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError>;
+    fn list_tasks_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
+    ) -> Result<Vec<Task>, OrbitError>;
     fn start_task(
         &self,
         task_id: &str,
@@ -253,6 +259,20 @@ pub trait RuntimeHost {
     fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError>;
     fn repo_root(&self) -> Result<String, OrbitError>;
     fn data_root(&self) -> &Path;
+    fn acquire_file_locks(
+        &self,
+        task_id: &str,
+        repo_root: &str,
+        paths: &[&str],
+    ) -> Result<(), OrbitError>;
+    fn release_file_locks(&self, task_id: &str) -> Result<usize, OrbitError>;
+    fn cleanup_stale_file_locks(&self) -> Result<usize, OrbitError>;
+    fn run_job_now_with_input_debug(
+        &self,
+        job_id: &str,
+        input: Value,
+        debug: bool,
+    ) -> Result<JobRunResult, OrbitError>;
     fn validate_activity_target_exists(
         &self,
         target_type: JobTargetType,
@@ -296,12 +316,12 @@ pub trait RuntimeHost {
 /// but the trait object boundary at `ActivityExecutor::execute` forces `EngineHost` at the
 /// top level.
 pub trait EngineHost:
-    JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost
+    JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost + Sync
 {
 }
 
 impl<T> EngineHost for T where
-    T: JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost
+    T: JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost + Sync
 {
 }
 

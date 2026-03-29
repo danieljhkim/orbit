@@ -41,7 +41,8 @@ impl Tool for FsWriteTool {
             .and_then(Value::as_str)
             .ok_or_else(|| OrbitError::InvalidInput("missing `content`".to_string()))?;
 
-        super::check_workspace_boundary(ctx, Path::new(path_str))?;
+        let canonical = super::check_workspace_boundary(ctx, Path::new(path_str))?;
+        super::check_file_lock(ctx, &canonical)?;
 
         fs::write(path_str, content).map_err(|e| OrbitError::Io(e.to_string()))?;
 

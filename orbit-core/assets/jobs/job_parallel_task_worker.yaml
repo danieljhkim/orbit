@@ -1,0 +1,35 @@
+schemaVersion: 1
+
+# ---- job ----
+job:
+  # ---- registration ----
+  job_id: job_parallel_task_worker
+  state: enabled
+
+  # ---- execution ----
+  max_active_runs: 16
+  default_input:
+    base: orbit-parallel-work-branch
+  steps:
+    - target_type: activity
+      target_id: plan_task
+      agent_cli: claude
+      model: opus
+      timeout_seconds: 1000
+
+    - target_type: activity
+      target_id: create_branch
+      condition: on_success
+      timeout_seconds: 60
+
+    - target_type: activity
+      target_id: implement_change
+      agent_cli: codex
+      model: gpt-5.4
+      condition: on_success
+      timeout_seconds: 2000
+
+    - target_type: activity
+      target_id: update_task
+      condition: on_success
+      timeout_seconds: 15

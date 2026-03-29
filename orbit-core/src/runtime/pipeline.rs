@@ -1,7 +1,11 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use orbit_lock::FileLockChecker;
 use orbit_policy::PolicyContext;
 use orbit_tools::ToolContext;
 use orbit_types::{
-    OrbitEvent, PolicyDecision, Role, redact_sensitive_env_error, redact_sensitive_env_json,
+    OrbitEvent, PolicyDecision, Role, Task, redact_sensitive_env_error, redact_sensitive_env_json,
 };
 use serde_json::Value;
 
@@ -28,6 +32,16 @@ impl OrbitRuntime {
         role: Role,
         mut tool_context: ToolContext,
     ) -> Result<Value, OrbitError> {
+        if tool_context.cwd.is_none() {
+            tool_context.cwd = std::env::current_dir()
+                .ok()
+                .map(|cwd| cwd.to_string_lossy().into_owned());
+        }
+
+        if tool_context.task_id.is_none() {
+            tool_context.task_id = resolve_task_id_from_context(self, &tool_context)?;
+        }
+
         // Ensure orbit tools always know the resolved data root so they can
         // inject --root into spawned orbit CLI calls (worktree-safe).
         if tool_context.orbit_root.is_none() {
@@ -36,7 +50,12 @@ impl OrbitRuntime {
 
         // Ensure fs tools always have a workspace boundary for sandboxing.
         if tool_context.workspace_root.is_none() {
-            tool_context.workspace_root = Some(self.context.paths().repo_root.clone());
+            tool_context.workspace_root = resolve_workspace_root_from_context(self, &tool_context)?;
+        }
+
+        if tool_context.file_lock_checker.is_none() {
+            let checker: Arc<dyn FileLockChecker> = self.context.file_lock_store().clone();
+            tool_context.file_lock_checker = Some(checker);
         }
 
         self.check_tool_enabled(name)?;
@@ -145,6 +164,49 @@ impl OrbitRuntime {
         }
         Ok(())
     }
+}
+
+fn resolve_task_id_from_context(
+    runtime: &OrbitRuntime,
+    tool_context: &ToolContext,
+) -> Result<Option<String>, OrbitError> {
+    let Some(cwd) = tool_context.cwd.as_deref() else {
+        return Ok(None);
+    };
+    let canonical_cwd = match Path::new(cwd).canonicalize() {
+        Ok(path) => path,
+        Err(_) => PathBuf::from(cwd),
+    };
+
+    let tasks = runtime.list_task_records()?;
+    Ok(tasks
+        .into_iter()
+        .find(|task| task_workspace_matches(task, &canonical_cwd))
+        .map(|task| task.id))
+}
+
+fn resolve_workspace_root_from_context(
+    runtime: &OrbitRuntime,
+    tool_context: &ToolContext,
+) -> Result<Option<PathBuf>, OrbitError> {
+    if let Some(task_id) = tool_context.task_id.as_deref()
+        && let Ok(task) = runtime.get_task(task_id)
+        && let Some(workspace_path) = task.workspace_path
+    {
+        return Ok(Some(PathBuf::from(workspace_path)));
+    }
+    Ok(Some(runtime.context.paths().repo_root.clone()))
+}
+
+fn task_workspace_matches(task: &Task, canonical_cwd: &Path) -> bool {
+    let Some(workspace_path) = task.workspace_path.as_deref() else {
+        return false;
+    };
+    let workspace_path = Path::new(workspace_path);
+    let canonical_workspace = workspace_path
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_path.to_path_buf());
+    canonical_cwd.starts_with(&canonical_workspace)
 }
 
 #[derive(Debug, Clone)]

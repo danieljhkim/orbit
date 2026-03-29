@@ -1,0 +1,26 @@
+schemaVersion: 1
+
+# ---- job ----
+job:
+  # ---- registration ----
+  job_id: job_parallel_task_pipeline
+  state: enabled
+
+  # ---- execution ----
+  # Orchestrates a backlog snapshot by launching multiple dedicated
+  # job_parallel_task_worker runs in parallel against orbit-parallel-work-branch.
+  max_active_runs: 1
+  default_input:
+    base: orbit-parallel-work-branch
+    parallelism: 4
+  steps:
+    - target_type: activity
+      target_id: dispatch_parallel_task
+      agent_cli: claude
+      model: sonnet
+      timeout_seconds: 1200
+
+    - target_type: activity
+      target_id: parallel_dispatch_tasks
+      condition: on_success
+      timeout_seconds: 7200

@@ -20,10 +20,7 @@ impl OrbitRuntime {
         run.state
             .try_transition(orbit_types::RunEvent::Cancel)
             .map_err(|msg| {
-                OrbitError::JobValidation(format!(
-                    "cannot cancel job run '{}': {}",
-                    run_id, msg
-                ))
+                OrbitError::JobValidation(format!("cannot cancel job run '{}': {}", run_id, msg))
             })?;
         let now = chrono::Utc::now();
         let duration_ms = run

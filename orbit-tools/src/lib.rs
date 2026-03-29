@@ -25,7 +25,9 @@ pub mod external;
 pub mod registry;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use orbit_lock::FileLockChecker;
 use serde_json::{Map, Value};
 
 use orbit_types::{OrbitError, ToolSchema};
@@ -47,7 +49,7 @@ pub const TIMEOUT_LONG_MS: u64 = 60_000;
 
 pub use registry::ToolRegistry;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ToolContext {
     pub cwd: Option<String>,
     /// If non-empty, only tools in this list may be called. Empty means unrestricted.
@@ -64,6 +66,10 @@ pub struct ToolContext {
     /// `--root <path>` so the spawned orbit CLI resolves to the correct data root
     /// regardless of the agent's working directory (e.g. inside a git worktree).
     pub orbit_root: Option<PathBuf>,
+    /// Active Orbit task id for the current tool invocation when known.
+    pub task_id: Option<String>,
+    /// Shared file-lock checker used by fs tools for write/delete conflict prevention.
+    pub file_lock_checker: Option<Arc<dyn FileLockChecker>>,
     /// Normalized agent name (e.g. `"claude"`). When set, GitHub tools auto-append
     /// an attribution footer to PR bodies and review comments.
     pub agent_name: Option<String>,
@@ -73,6 +79,29 @@ pub struct ToolContext {
     /// Program allowlist for `proc.spawn`. When non-empty, `proc.spawn` rejects
     /// any program not in this list. Empty means unrestricted.
     pub proc_allowed_programs: Vec<String>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("cwd", &self.cwd)
+            .field("allowed_tools", &self.allowed_tools)
+            .field("workspace_root", &self.workspace_root)
+            .field("orbit_root", &self.orbit_root)
+            .field("task_id", &self.task_id)
+            .field(
+                "has_file_lock_checker",
+                &self
+                    .file_lock_checker
+                    .as_ref()
+                    .map(|_| true)
+                    .unwrap_or(false),
+            )
+            .field("agent_name", &self.agent_name)
+            .field("model_name", &self.model_name)
+            .field("proc_allowed_programs", &self.proc_allowed_programs)
+            .finish()
+    }
 }
 
 pub trait Tool: Send + Sync {

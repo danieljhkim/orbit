@@ -4,6 +4,7 @@ mod commit;
 mod freshness;
 mod git;
 mod input;
+mod parallel;
 mod pr;
 mod push;
 pub(crate) mod review;
@@ -29,6 +30,7 @@ const AUTOMATION_CHECK_REVIEW_DECISION: &str = "check_review_decision";
 const AUTOMATION_LOAD_PR_COMMENTS: &str = "load_pr_comments";
 const AUTOMATION_PUSH_TASK_CHANGES: &str = "push_task_changes";
 const AUTOMATION_SYNC_REVIEW_TO_GITHUB: &str = "sync_review_to_github";
+const AUTOMATION_RUN_PARALLEL_TASK_PIPELINE: &str = "run_parallel_task_pipeline";
 
 #[derive(Debug, Clone, Deserialize)]
 struct AutomationSpec {
@@ -69,7 +71,7 @@ impl ActivityExecutor for AutomationExecutor {
 }
 
 /// Shared test utilities for automation sub-modules.
-pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + ?Sized>(
+pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync + ?Sized>(
     host: &H,
     activity: &Activity,
     input: &Value,
@@ -90,6 +92,7 @@ pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + ?Size
         AUTOMATION_LOAD_PR_COMMENTS => comments::load_pr_comments(host, input),
         AUTOMATION_PUSH_TASK_CHANGES => push::push_task_changes(host, input),
         AUTOMATION_SYNC_REVIEW_TO_GITHUB => sync_review::sync_review_to_github(host, input),
+        AUTOMATION_RUN_PARALLEL_TASK_PIPELINE => parallel::run_parallel_task_pipeline(host, input),
         other => Err(OrbitError::InvalidInput(format!(
             "unsupported automation action '{other}'"
         ))),

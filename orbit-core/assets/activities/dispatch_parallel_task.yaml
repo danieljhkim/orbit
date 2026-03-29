@@ -1,0 +1,71 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- registration ----
+  id: dispatch_parallel_task
+  spec_type: agent_invoke
+
+  # ---- content ----
+  description: Select a coherent, conflict-free batch of backlog tasks for one parallel execution wave.
+  instruction: |
+    Only use skills listed in this activity's skill_refs. Ignore all others.
+    Pick a group of backlog tasks that make sense to execute together in one parallel batch.
+
+    1. Call orbit.task.list with status: "backlog" to retrieve all backlog tasks.
+       If the list is empty, return this JSON and exit:
+       {"task_ids": [], "comment": "No backlog tasks available for parallel dispatch."}
+
+    2. For the strongest candidates, call orbit.task.show with the task id and read:
+       description, acceptance_criteria, context_files, priority, parent_id, and task type.
+
+    3. Build a single batch that satisfies ALL of these rules:
+       - No two selected tasks may conflict on context_files.
+       - A conflict exists when any path exactly matches, or is a path prefix of, another path.
+       - Prefer tasks that belong together logically: same area, same parent, same initiative, or
+         same kind of change. Do not group unrelated tasks just to fill the batch.
+       - Respect input.parallelism as the maximum batch size when it is provided.
+       - If only one task is a good fit, returning a one-task batch is valid.
+
+    4. For every selected task, call orbit.task.update with:
+       - id: "<selected task id>"
+       - comment: "Parallel batch dispatched: <one sentence rationale>"
+
+    5. Return a JSON result with EXACTLY these fields:
+       {
+         "task_ids": ["<selected task ids in batch order>"],
+         "comment": "<the rationale string you used in orbit.task.update>"
+       }
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    properties:
+      parallelism:
+        type: integer
+        minimum: 1
+        description: Maximum number of tasks to include in the batch.
+    additional_properties: false
+  output_schema_json:
+    type: object
+    required:
+      - task_ids
+    properties:
+      task_ids:
+        type: array
+        items:
+          type: string
+      comment:
+        type: string
+    additional_properties: false
+
+  # ---- execution ----
+  skill_refs:
+    - orbit
+  tools:
+    - orbit.task.list
+    - orbit.task.show
+    - orbit.task.update

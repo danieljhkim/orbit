@@ -412,7 +412,7 @@ impl JobFileStore {
                 return Err(OrbitError::JobRunStateTransition(format!(
                     "cannot finalize to non-terminal state: {}",
                     other
-                )))
+                )));
             }
         };
         run.state = run

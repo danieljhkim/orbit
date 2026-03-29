@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use orbit_lock::FileLockStore;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     ActivityStoreBackend, AuditEventStoreBackend, JobStoreBackend, TaskStoreBackend,
@@ -70,6 +71,7 @@ impl Default for ActorIdentity {
 #[derive(Clone)]
 pub struct OrbitContext {
     paths: WorkspacePaths,
+    file_lock_store: Arc<FileLockStore>,
     task_store: Arc<dyn TaskStoreBackend>,
     activity_store: Arc<dyn ActivityStoreBackend>,
     job_store: Arc<dyn JobStoreBackend>,
@@ -92,6 +94,7 @@ impl OrbitContext {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         paths: WorkspacePaths,
+        file_lock_store: Arc<FileLockStore>,
         task_store: Arc<dyn TaskStoreBackend>,
         activity_store: Arc<dyn ActivityStoreBackend>,
         job_store: Arc<dyn JobStoreBackend>,
@@ -111,6 +114,7 @@ impl OrbitContext {
     ) -> Self {
         Self {
             paths,
+            file_lock_store,
             task_store,
             activity_store,
             job_store,
@@ -145,6 +149,10 @@ impl OrbitContext {
 
     pub(crate) fn task_store(&self) -> &Arc<dyn TaskStoreBackend> {
         &self.task_store
+    }
+
+    pub(crate) fn file_lock_store(&self) -> &Arc<FileLockStore> {
+        &self.file_lock_store
     }
 
     pub(crate) fn activity_store(&self) -> &Arc<dyn ActivityStoreBackend> {

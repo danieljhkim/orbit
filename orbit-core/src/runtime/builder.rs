@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use orbit_lock::{FileLockStore, apply_lock_schema};
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     LayeredActivityStore, LayeredJobStore, Store, activity_store_file, audit_event_store_sqlite,
@@ -11,6 +13,7 @@ use orbit_store::{
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 use orbit_types::{OrbitError, WorkspacePaths};
+use rusqlite::Connection;
 
 use crate::OrbitContext;
 use crate::config::RuntimeConfig;
@@ -65,6 +68,7 @@ pub(crate) fn build_context_from_roots(
         workspace_root.to_path_buf(),
         global_root.to_path_buf(),
     );
+    let file_lock_store = Arc::new(open_file_lock_store(&paths.orbit_dir)?);
 
     let tool_store = tool_store_sqlite(store.clone());
     let audit_event_store = audit_event_store_sqlite(store.clone());
@@ -94,6 +98,7 @@ pub(crate) fn build_context_from_roots(
 
     Ok(OrbitContext::new(
         paths,
+        file_lock_store,
         task_store,
         activity_store,
         job_store,
@@ -136,6 +141,7 @@ pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), Orbit
     let context = build_context_from_roots(&data_root, &data_root)?;
     Ok((context, guard))
 }
+
 fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(), OrbitError> {
     let stored_tools = store.list_tools()?;
     for tool in stored_tools {
@@ -148,4 +154,17 @@ fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(),
         }
     }
     Ok(())
+}
+
+fn open_file_lock_store(orbit_dir: &Path) -> Result<FileLockStore, OrbitError> {
+    std::fs::create_dir_all(orbit_dir).map_err(|error| OrbitError::Store(error.to_string()))?;
+    let db_path = orbit_dir.join("file_locks.db");
+    let conn = Connection::open(&db_path).map_err(|error| {
+        OrbitError::Store(format!(
+            "failed to open file lock database '{}': {error}",
+            db_path.display()
+        ))
+    })?;
+    apply_lock_schema(&conn)?;
+    Ok(FileLockStore::new(Arc::new(Mutex::new(conn))))
 }

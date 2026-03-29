@@ -54,17 +54,26 @@ pub(super) fn create_task_worktree<H: RuntimeHost + TaskHost + ?Sized>(
         ))
     })?;
 
+    let task = host.get_task(task_id)?;
+    let lock_paths = task
+        .context_files
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !lock_paths.is_empty() {
+        host.acquire_file_locks(task_id, &canonical_repo_root.to_string_lossy(), &lock_paths)?;
+    }
+
     // Transition task to in-progress when creating the worktree (replaces the
     // former standalone start_task automation step).  Only apply the transition
     // when the task is not already in-progress to keep the step idempotent.
-    let task = host.get_task(task_id)?;
     let status = if task.status != TaskStatus::InProgress {
         Some(TaskStatus::InProgress)
     } else {
         None
     };
 
-    host.apply_task_automation_update(
+    if let Err(error) = host.apply_task_automation_update(
         task_id,
         TaskAutomationUpdate {
             status,
@@ -72,7 +81,10 @@ pub(super) fn create_task_worktree<H: RuntimeHost + TaskHost + ?Sized>(
             repo_root: Some(canonical_repo_root.to_string_lossy().to_string()),
             ..TaskAutomationUpdate::default()
         },
-    )?;
+    ) {
+        let _ = host.release_file_locks(task_id);
+        return Err(error);
+    }
 
     Ok(json!({}))
 }

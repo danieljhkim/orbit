@@ -1,16 +1,11 @@
 [package]
-name = "orbit-tools"
+name = "orbit-lock"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 chrono.workspace = true
-orbit-exec = { path = "../orbit-exec" }
-orbit-lock = { path = "../orbit-lock" }
 orbit-types = { path = "../orbit-types" }
-serde_json.workspace = true
-
-[dev-dependencies]
 rusqlite.workspace = true
-tempfile = "3"
+serde.workspace = true

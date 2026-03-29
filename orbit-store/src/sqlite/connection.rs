@@ -64,6 +64,10 @@ impl Store {
 
         Ok(result)
     }
+
+    pub fn connection(&self) -> Arc<Mutex<Connection>> {
+        self.conn.clone()
+    }
 }
 
 fn enable_best_effort_wal_mode(conn: &Connection) {

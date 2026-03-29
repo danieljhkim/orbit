@@ -4,6 +4,7 @@ members = [
   "orbit-cli",
   "orbit-core",
   "orbit-engine",
+  "orbit-lock",
   "orbit-types",
   "orbit-store",
   "orbit-policy",

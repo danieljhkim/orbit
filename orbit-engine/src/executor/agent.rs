@@ -674,25 +674,25 @@ mod tests {
         OrbitError, OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType,
     };
     use serde_json::{Value, json};
-    use std::cell::RefCell;
     use std::collections::HashMap;
+    use std::sync::Mutex;
 
     /// Minimal fake that implements EngineHost. Only `get_task` is exercised;
     /// all other trait methods are stubs.
     struct FakeEngineHost {
-        task: RefCell<Option<Task>>,
+        task: Mutex<Option<Task>>,
     }
 
     impl FakeEngineHost {
         fn with_task(task: Task) -> Self {
             Self {
-                task: RefCell::new(Some(task)),
+                task: Mutex::new(Some(task)),
             }
         }
 
         fn empty() -> Self {
             Self {
-                task: RefCell::new(None),
+                task: Mutex::new(None),
             }
         }
     }
@@ -700,10 +700,38 @@ mod tests {
     impl TaskHost for FakeEngineHost {
         fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
             self.task
-                .borrow()
+                .lock()
+                .expect("fake task mutex poisoned")
                 .clone()
                 .filter(|t| t.id == task_id)
                 .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+        }
+        fn list_tasks_filtered(
+            &self,
+            status: Option<TaskStatus>,
+            priority: Option<TaskPriority>,
+            parent_id: Option<&str>,
+        ) -> Result<Vec<Task>, OrbitError> {
+            let tasks = self
+                .task
+                .lock()
+                .expect("fake task mutex poisoned")
+                .clone()
+                .into_iter()
+                .filter(|task| match status {
+                    Some(value) => task.status == value,
+                    None => true,
+                })
+                .filter(|task| match priority {
+                    Some(value) => task.priority == value,
+                    None => true,
+                })
+                .filter(|task| match parent_id {
+                    Some(value) => task.parent_id.as_deref() == Some(value),
+                    None => true,
+                })
+                .collect();
+            Ok(tasks)
         }
         fn start_task(
             &self,
@@ -823,6 +851,23 @@ mod tests {
         }
         fn data_root(&self) -> &std::path::Path {
             std::path::Path::new(".")
+        }
+        fn acquire_file_locks(&self, _: &str, _: &str, _: &[&str]) -> Result<(), OrbitError> {
+            Ok(())
+        }
+        fn release_file_locks(&self, _: &str) -> Result<usize, OrbitError> {
+            Ok(0)
+        }
+        fn cleanup_stale_file_locks(&self) -> Result<usize, OrbitError> {
+            Ok(0)
+        }
+        fn run_job_now_with_input_debug(
+            &self,
+            _: &str,
+            _: Value,
+            _: bool,
+        ) -> Result<crate::context::JobRunResult, OrbitError> {
+            unimplemented!()
         }
         fn validate_activity_target_exists(
             &self,

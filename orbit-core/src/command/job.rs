@@ -12,6 +12,11 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 use crate::command::activity::activity_requires_agent_cli;
 
+const JOB_TASK_PIPELINE: &str = "job_task_pipeline";
+const JOB_PARALLEL_TASK_PIPELINE: &str = "job_parallel_task_pipeline";
+const JOB_PARALLEL_TASK_WORKER: &str = "job_parallel_task_worker";
+const JOB_PARALLEL_TASK_FINALIZE: &str = "job_parallel_task_finalize";
+
 const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "job_review_tasks",
@@ -36,6 +41,18 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     (
         "job_task_pipeline",
         include_str!("../../assets/jobs/job_task_pipeline.yaml"),
+    ),
+    (
+        "job_parallel_task_worker",
+        include_str!("../../assets/jobs/job_parallel_task_worker.yaml"),
+    ),
+    (
+        "job_parallel_task_pipeline",
+        include_str!("../../assets/jobs/job_parallel_task_pipeline.yaml"),
+    ),
+    (
+        "job_parallel_task_finalize",
+        include_str!("../../assets/jobs/job_parallel_task_finalize.yaml"),
     ),
 ];
 
@@ -109,8 +126,46 @@ impl OrbitRuntime {
         input: Value,
         debug: bool,
     ) -> Result<orbit_engine::JobRunResult, OrbitError> {
+        self.ensure_pipeline_mode_is_exclusive(job_id)?;
         let job = self.show_job(job_id)?;
         orbit_engine::run_job_with_input(self, &self.data_root(), job, input, debug)
+    }
+
+    fn ensure_pipeline_mode_is_exclusive(&self, job_id: &str) -> Result<(), OrbitError> {
+        let conflicting_job_ids: &[&str] = match job_id {
+            JOB_TASK_PIPELINE => &[
+                JOB_PARALLEL_TASK_PIPELINE,
+                JOB_PARALLEL_TASK_WORKER,
+                JOB_PARALLEL_TASK_FINALIZE,
+            ],
+            JOB_PARALLEL_TASK_PIPELINE => &[
+                JOB_TASK_PIPELINE,
+                JOB_PARALLEL_TASK_PIPELINE,
+                JOB_PARALLEL_TASK_WORKER,
+                JOB_PARALLEL_TASK_FINALIZE,
+            ],
+            JOB_PARALLEL_TASK_WORKER | JOB_PARALLEL_TASK_FINALIZE => &[JOB_TASK_PIPELINE],
+            _ => return Ok(()),
+        };
+
+        let mut conflicting_runs = Vec::new();
+        for conflicting_job_id in conflicting_job_ids {
+            let runs = self.list_pending_or_running_job_runs_record(conflicting_job_id)?;
+            conflicting_runs.extend(
+                runs.into_iter()
+                    .map(|run| format!("{conflicting_job_id}:{}", run.run_id)),
+            );
+        }
+
+        if conflicting_runs.is_empty() {
+            return Ok(());
+        }
+
+        Err(OrbitError::JobValidation(format!(
+            "job '{}' cannot start while conflicting pipeline runs are active: {}",
+            job_id,
+            conflicting_runs.join(", ")
+        )))
     }
 
     pub(crate) fn recover_stale_active_run_for_job(
