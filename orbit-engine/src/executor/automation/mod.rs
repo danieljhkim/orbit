@@ -6,7 +6,7 @@ mod git;
 mod input;
 mod pr;
 mod push;
-mod review;
+pub(crate) mod review;
 mod task;
 mod worktree;
 

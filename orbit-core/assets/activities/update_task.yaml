@@ -17,14 +17,13 @@ activity:
     type: object
     required:
       - task_id
-      - status
     properties:
       task_id:
         type: string
         description: The Orbit task ID to mutate.
       status:
         type: string
-        description: The target task status to apply using Orbit's normal transition rules.
+        description: "The target task status to apply using Orbit's normal transition rules. When absent, the step is a no-op (the agent already persisted status directly)."
   output_schema_json:
     type: object
     properties: {}

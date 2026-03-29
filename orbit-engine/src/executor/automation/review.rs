@@ -11,7 +11,7 @@ pub(super) fn resolve_review_decision(
     fetch_review_decision_from_gh(repo_root, pr_number)
 }
 
-pub(super) fn normalize_review_decision(value: &str) -> String {
+pub(crate) fn normalize_review_decision(value: &str) -> String {
     match value.trim().to_ascii_uppercase().as_str() {
         "APPROVED" | "APPROVE" => "APPROVED".to_string(),
         "REQUEST-CHANGES" | "REQUEST_CHANGES" | "CHANGES_REQUESTED" => {

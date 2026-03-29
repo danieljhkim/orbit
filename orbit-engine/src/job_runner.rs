@@ -325,7 +325,7 @@ fn execute_activity_with_retries<H: EngineHost>(
                 // signal is meant for nested looping jobs like job_review_loop.
                 if max_iterations > 1
                     && step_state == JobRunState::Success
-                    && check_loop_exit(&current_input)
+                    && check_loop_exit(host, &current_input)
                 {
                     break 'outer;
                 }
@@ -758,12 +758,32 @@ fn execute_job_step<H: EngineHost>(
 }
 
 /// Returns `true` if the accumulated input contains `"loop_exit": true`.
-fn check_loop_exit(input: &Value) -> bool {
-    input
+fn check_loop_exit<H: crate::context::TaskHost + ?Sized>(host: &H, input: &Value) -> bool {
+    // Primary: check for explicit loop_exit signal in piped input.
+    let explicit = input
         .as_object()
         .and_then(|map| map.get("loop_exit"))
         .and_then(Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if explicit {
+        return true;
+    }
+
+    // Fallback: if the agent persisted pr_status to the task but crashed before
+    // returning structured output (with loop_exit), check the task directly.
+    if let Some(task_id) = extract_task_id(input) {
+        if let Ok(task) = host.get_task(task_id) {
+            if let Some(ref pr_status) = task.pr_status {
+                let normalized =
+                    crate::executor::automation::review::normalize_review_decision(pr_status);
+                if normalized == "APPROVED" {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn should_run_step(condition: StepCondition, previous_step_state: Option<JobRunState>) -> bool {
@@ -1019,9 +1039,99 @@ fn json_value_type_name(value: &Value) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use orbit_types::{JobRunState, StepCondition};
+    use std::cell::RefCell;
 
-    use super::should_run_step;
+    use chrono::Utc;
+    use orbit_types::{
+        ActorIdentity, JobRunState, OrbitError, StepCondition, Task, TaskPriority, TaskStatus,
+        TaskType,
+    };
+    use serde_json::json;
+
+    use super::{check_loop_exit, should_run_step};
+    use crate::context::{TaskAutomationUpdate, TaskHost};
+
+    struct FakeTaskHost {
+        task: RefCell<Option<Task>>,
+    }
+
+    impl FakeTaskHost {
+        fn new(task: Task) -> Self {
+            Self {
+                task: RefCell::new(Some(task)),
+            }
+        }
+
+        fn empty() -> Self {
+            Self {
+                task: RefCell::new(None),
+            }
+        }
+    }
+
+    impl TaskHost for FakeTaskHost {
+        fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+            self.task
+                .borrow()
+                .clone()
+                .filter(|t| t.id == task_id)
+                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+        }
+        fn start_task(
+            &self,
+            _: &str,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!()
+        }
+        fn update_task_from_activity(
+            &self,
+            _: &str,
+            _: TaskStatus,
+            _: Option<String>,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!()
+        }
+        fn apply_task_automation_update(
+            &self,
+            _: &str,
+            _: TaskAutomationUpdate,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+    }
+
+    fn test_task() -> Task {
+        Task {
+            id: "T20260328-001".to_string(),
+            parent_id: None,
+            title: "test".to_string(),
+            description: String::new(),
+            plan: String::new(),
+            execution_summary: String::new(),
+            context_files: vec![],
+            workspace_path: None,
+            repo_root: None,
+            assigned_to: None,
+            created_by: None,
+            actor_identity: ActorIdentity::System,
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            task_type: TaskType::Task,
+            pr_number: Some("42".to_string()),
+            pr_status: None,
+            proposed_by: None,
+            source_task_id: None,
+            complexity: None,
+            comments: vec![],
+            history: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
 
     #[test]
     fn on_failure_condition_skips_after_success() {
@@ -1060,5 +1170,70 @@ mod tests {
         for state in states {
             assert!(should_run_step(StepCondition::Always, state));
         }
+    }
+
+    // ---- check_loop_exit tests ----
+
+    #[test]
+    fn loop_exit_true_in_input_exits() {
+        let host = FakeTaskHost::empty();
+        assert!(check_loop_exit(
+            &host,
+            &json!({ "loop_exit": true })
+        ));
+    }
+
+    #[test]
+    fn loop_exit_false_in_input_does_not_exit() {
+        let host = FakeTaskHost::empty();
+        assert!(!check_loop_exit(
+            &host,
+            &json!({ "loop_exit": false })
+        ));
+    }
+
+    #[test]
+    fn no_loop_exit_no_task_does_not_exit() {
+        let host = FakeTaskHost::empty();
+        assert!(!check_loop_exit(
+            &host,
+            &json!({ "task_id": "T-missing" })
+        ));
+    }
+
+    #[test]
+    fn fallback_to_task_pr_status_approved() {
+        let mut task = test_task();
+        task.pr_status = Some("approve".to_string());
+        let host = FakeTaskHost::new(task);
+
+        // No loop_exit in input, but task has pr_status=approve.
+        assert!(check_loop_exit(
+            &host,
+            &json!({ "task_id": "T20260328-001" })
+        ));
+    }
+
+    #[test]
+    fn fallback_to_task_pr_status_not_approved() {
+        let mut task = test_task();
+        task.pr_status = Some("request-changes".to_string());
+        let host = FakeTaskHost::new(task);
+
+        assert!(!check_loop_exit(
+            &host,
+            &json!({ "task_id": "T20260328-001" })
+        ));
+    }
+
+    #[test]
+    fn fallback_to_task_pr_status_none() {
+        let task = test_task(); // pr_status is None
+        let host = FakeTaskHost::new(task);
+
+        assert!(!check_loop_exit(
+            &host,
+            &json!({ "task_id": "T20260328-001" })
+        ));
     }
 }

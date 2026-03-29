@@ -21,9 +21,6 @@ activity:
       task_id:
         type: string
         description: The Orbit task ID whose review decision should be checked.
-      pr_status:
-        type: string
-        description: "Direct review decision from upstream step (approve or request-changes). When provided, takes precedence over the persisted task field."
   output_schema_json:
     type: object
     properties:
