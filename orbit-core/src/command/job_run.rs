@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use orbit_store::JobRunQuery;
 use orbit_types::{JobRun, JobRunState, OrbitError, OrbitEvent};
+#[cfg(unix)]
+use std::process::Command;
 
 use crate::OrbitRuntime;
 
@@ -25,12 +27,16 @@ impl OrbitRuntime {
         let duration_ms = run
             .started_at
             .map(|s| now.signed_duration_since(s).num_milliseconds().max(0) as u64);
+        let should_signal_owner = run_owner_identity_matches(&run);
+        let owner_pid = run.pid;
         self.finalize_job_run_record(run_id, JobRunState::Cancelled, now, duration_ms)?;
         self.record_event(OrbitEvent::JobRunCancelled {
             job_id: run.job_id,
             run_id: run_id.to_string(),
         })?;
-        if let Some(pid) = run.pid {
+        if let Some(pid) = owner_pid
+            && should_signal_owner
+        {
             signal_run_owner_process(pid)?;
         }
         Ok(())
@@ -151,4 +157,33 @@ fn signal_run_owner_process(pid: u32) -> Result<(), OrbitError> {
 #[cfg(not(unix))]
 fn signal_run_owner_process(_pid: u32) -> Result<(), OrbitError> {
     Ok(())
+}
+
+#[cfg(unix)]
+fn run_owner_identity_matches(run: &JobRun) -> bool {
+    let Some(pid) = run.pid else {
+        return false;
+    };
+    let Some(expected) = run.pid_start_time.as_deref() else {
+        return false;
+    };
+    process_start_time_token(pid).as_deref() == Some(expected)
+}
+
+#[cfg(not(unix))]
+fn run_owner_identity_matches(_run: &JobRun) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn process_start_time_token(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!token.is_empty()).then_some(token)
 }

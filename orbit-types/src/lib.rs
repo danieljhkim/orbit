@@ -169,6 +169,7 @@ mod tests {
             finished_at: None,
             duration_ms: None,
             pid: Some(12345),
+            pid_start_time: Some("Sat Mar 28 17:05:00 2026".to_string()),
             steps: vec![],
             created_at: Utc::now(),
         };
@@ -176,12 +177,14 @@ mod tests {
         assert_eq!(run_value["state"], "running");
         assert_eq!(run_value["attempt"], 1);
         assert_eq!(run_value["pid"], 12345);
+        assert_eq!(run_value["pid_start_time"], "Sat Mar 28 17:05:00 2026");
 
         // Old jrun.yaml without pid must deserialize cleanly (serde default)
         let no_pid_json = r#"{"run_id":"r","job_id":"j","attempt":1,"state":"pending","scheduled_at":"2026-01-01T00:00:00Z","created_at":"2026-01-01T00:00:00Z"}"#;
         let deserialized: JobRun =
             serde_json::from_str(no_pid_json).expect("deserialize run without pid");
         assert_eq!(deserialized.pid, None);
+        assert_eq!(deserialized.pid_start_time, None);
 
         // Retrying variant serializes and parses correctly
         assert_eq!(

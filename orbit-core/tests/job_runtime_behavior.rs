@@ -1861,6 +1861,54 @@ fn job_history_recovers_stale_running_run_to_failed() {
 }
 
 #[test]
+fn job_history_abandons_running_run_when_owner_identity_mismatches() {
+    let dir = tempdir().expect("tempdir");
+    let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");
+    let script_path = dir.path().join("mock-agent");
+    let agent_cli = write_agent_script(
+        &script_path,
+        "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null,\"durationMs\":1}'\n",
+    );
+
+    add_activity(&runtime, "spec-history-owner-mismatch");
+    let job_id = add_scheduled_activity(&runtime, "spec-history-owner-mismatch", &agent_cli);
+    let run_id = insert_fresh_running_run(&runtime, dir.path(), &job_id);
+
+    let jrun_path = dir
+        .path()
+        .join("jobs")
+        .join("runs")
+        .join(&job_id)
+        .join(&run_id)
+        .join("jrun.yaml");
+    let raw = std::fs::read_to_string(&jrun_path).expect("read jrun.yaml");
+    let mut doc: JobRunFileDocument = serde_yaml::from_str(&raw).expect("parse run doc");
+    doc.run.pid = Some(std::process::id());
+    doc.run.pid_start_time = Some("definitely-not-the-current-process".to_string());
+    let updated = serde_yaml::to_string(&doc).expect("serialize run doc");
+    std::fs::write(&jrun_path, updated).expect("write jrun.yaml");
+
+    let history = runtime.job_history(&job_id).expect("history");
+    let recovered = history
+        .iter()
+        .find(|run| run.run_id == run_id)
+        .expect("run should exist");
+    assert_eq!(recovered.state, JobRunState::Failed);
+    assert_eq!(
+        recovered.steps.last().and_then(|s| s.error_code.as_deref()),
+        Some("RUN_ABANDONED")
+    );
+    assert!(
+        recovered
+            .steps
+            .last()
+            .and_then(|s| s.error_message.as_deref())
+            .unwrap_or_default()
+            .contains("no longer matches the recorded process identity")
+    );
+}
+
+#[test]
 fn run_job_now_recovers_stale_running_run_and_executes_new_attempt() {
     let dir = tempdir().expect("tempdir");
     let runtime = OrbitRuntime::from_data_root(dir.path()).expect("runtime");

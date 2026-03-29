@@ -90,7 +90,7 @@ pub(crate) fn wait_with_optional_timeout(
             Some(status) => {
                 #[cfg(unix)]
                 if let Some(signal) = signal_guard.take_signal() {
-                    kill_process_group(child.id());
+                    terminate_orphaned_process_group(child.id(), signal);
                     break (false, Some(signal), false, Some(128 + signal));
                 }
 
@@ -146,20 +146,14 @@ pub(crate) fn wait_with_optional_timeout(
 
 #[cfg(unix)]
 fn terminate_process_group(child: &mut Child, signal: i32) -> Result<(), OrbitError> {
-    send_signal_to_process_group(child.id(), signal);
-    match child
-        .wait_timeout(TERMINATION_GRACE_PERIOD)
-        .map_err(|e| OrbitError::Execution(format!("wait timeout error: {e}")))?
-    {
-        Some(_) => {
-            kill_process_group(child.id());
-        }
-        None => {
-            kill_process_group(child.id());
-            child.kill().ok();
-            child.wait().ok();
-        }
+    let pid = child.id();
+    send_signal_to_process_group(pid, signal);
+    if wait_for_process_group_exit(pid, Some(child), TERMINATION_GRACE_PERIOD)? {
+        return Ok(());
     }
+    kill_process_group(pid);
+    child.kill().ok();
+    child.wait().ok();
     Ok(())
 }
 
@@ -172,6 +166,15 @@ fn terminate_process_group(child: &mut Child, _signal: i32) -> Result<(), OrbitE
 
 fn signal_message(signal: i32) -> String {
     format!("process interrupted by signal {}", signal_name(signal))
+}
+
+#[cfg(unix)]
+fn terminate_orphaned_process_group(pid: u32, signal: i32) {
+    send_signal_to_process_group(pid, signal);
+    if wait_for_process_group_exit(pid, None, TERMINATION_GRACE_PERIOD).unwrap_or(false) {
+        return;
+    }
+    kill_process_group(pid);
 }
 
 #[cfg(unix)]
@@ -216,6 +219,45 @@ fn send_signal_to_process_group(pid: u32, signal: i32) {
     unsafe {
         libc::killpg(pid as libc::pid_t, signal);
     }
+}
+
+#[cfg(unix)]
+fn wait_for_process_group_exit(
+    pid: u32,
+    mut child: Option<&mut Child>,
+    timeout: Duration,
+) -> Result<bool, OrbitError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(child) = child.as_deref_mut() {
+            child
+                .try_wait()
+                .map_err(|e| OrbitError::Execution(format!("failed waiting for process: {e}")))?;
+        }
+        if !process_group_is_alive(pid) {
+            if let Some(child) = child.as_deref_mut() {
+                child.wait().ok();
+            }
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        thread::sleep(WAIT_POLL_INTERVAL);
+    }
+}
+
+#[cfg(unix)]
+fn process_group_is_alive(pid: u32) -> bool {
+    // `killpg(..., 0)` checks whether any process still belongs to the group.
+    let rc = unsafe { libc::killpg(pid as libc::pid_t, 0) };
+    if rc == 0 {
+        return true;
+    }
+    !matches!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    )
 }
 
 #[cfg(not(unix))]

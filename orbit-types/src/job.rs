@@ -283,6 +283,10 @@ pub struct JobRun {
     /// Used to detect abandoned runs when the owning process has died.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
+    /// Process start-time token captured alongside `pid` so reused PIDs are not
+    /// mistaken for the original run owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start_time: Option<String>,
     /// Step execution results; populated in-memory from step files, not stored in jrun.yaml.
     #[serde(skip)]
     pub steps: Vec<JobRunStep>,

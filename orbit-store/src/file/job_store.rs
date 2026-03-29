@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use orbit_types::{
@@ -303,6 +305,7 @@ impl JobFileStore {
             finished_at: None,
             duration_ms: None,
             pid: None,
+            pid_start_time: None,
             created_at: Utc::now(),
             steps: vec![],
         };
@@ -323,6 +326,7 @@ impl JobFileStore {
         run.state = JobRunState::Running;
         run.started_at = Some(started_at);
         run.pid = Some(pid);
+        run.pid_start_time = process_start_time_token(pid);
         self.write_run(&job_id, &run)?;
         Ok(true)
     }
@@ -721,6 +725,24 @@ impl JobFileStore {
         }
         Err(OrbitError::JobRunNotFound(run_id.to_string()))
     }
+}
+
+#[cfg(unix)]
+fn process_start_time_token(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!token.is_empty()).then_some(token)
+}
+
+#[cfg(not(unix))]
+fn process_start_time_token(_pid: u32) -> Option<String> {
+    None
 }
 
 fn validate_max_active_runs(max_active_runs: u32) -> Result<u32, OrbitError> {

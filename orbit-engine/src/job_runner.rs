@@ -9,6 +9,8 @@ use orbit_types::{
 };
 use serde_json::Value;
 use std::path::Path;
+#[cfg(unix)]
+use std::process::Command;
 
 use crate::activity_runner::{build_execution_context_for_step, execute_with_retry};
 use crate::context::{
@@ -432,11 +434,12 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
     for active_run in active_runs {
         // PID-based abandonment: if the owning process has died, fail the run immediately.
         if let Some(pid) = active_run.pid
-            && !pid_is_alive(pid)
+            && owner_process_missing_or_reused(&active_run)
         {
+            let error_message = abandoned_run_message(&active_run, pid);
             eprintln!(
-                "orbit: abandoning stale run '{}' (owner pid {} is no longer alive)",
-                active_run.run_id, pid
+                "orbit: abandoning stale run '{}' ({})",
+                active_run.run_id, error_message
             );
             let duration_ms = active_run
                 .started_at
@@ -455,10 +458,7 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
                         agent_response_json: None,
                         state: JobRunState::Failed,
                         error_code: Some(RUN_ABANDONED.to_string()),
-                        error_message: Some(format!(
-                            "run abandoned: owner pid {} is no longer alive",
-                            pid
-                        )),
+                        error_message: Some(error_message.clone()),
                     },
                 );
                 append_failed_step_friction_without_execution(
@@ -467,7 +467,7 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
                     &first_step.target_id,
                     FrictionContext::default(),
                     Some(1),
-                    &format!("run abandoned: owner pid {} is no longer alive", pid),
+                    &error_message,
                     now,
                 );
             }
@@ -562,6 +562,59 @@ fn pid_is_alive(pid: u32) -> bool {
 #[cfg(not(unix))]
 fn pid_is_alive(_pid: u32) -> bool {
     true
+}
+
+#[cfg(unix)]
+fn owner_process_missing_or_reused(run: &JobRun) -> bool {
+    let Some(pid) = run.pid else {
+        return false;
+    };
+    if !pid_is_alive(pid) {
+        return true;
+    }
+    let Some(expected) = run.pid_start_time.as_deref() else {
+        return false;
+    };
+    process_start_time_token(pid)
+        .as_deref()
+        .is_some_and(|actual| actual != expected)
+}
+
+#[cfg(not(unix))]
+fn owner_process_missing_or_reused(_run: &JobRun) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn abandoned_run_message(run: &JobRun, pid: u32) -> String {
+    if let Some(expected) = run.pid_start_time.as_deref()
+        && process_start_time_token(pid)
+            .as_deref()
+            .is_some_and(|actual| actual != expected)
+    {
+        return format!(
+            "run abandoned: owner pid {pid} no longer matches the recorded process identity"
+        );
+    }
+    format!("run abandoned: owner pid {pid} is no longer alive")
+}
+
+#[cfg(not(unix))]
+fn abandoned_run_message(_run: &JobRun, pid: u32) -> String {
+    format!("run abandoned: owner pid {pid} is no longer alive")
+}
+
+#[cfg(unix)]
+fn process_start_time_token(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!token.is_empty()).then_some(token)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -213,6 +213,39 @@ done\n",
 }
 
 #[cfg(unix)]
+fn write_descendant_grace_agent(
+    dir: &Path,
+    started: &Path,
+    parent_terminated: &Path,
+    descendant_terminated: &Path,
+) -> String {
+    let path = dir.join("mock-agent");
+    let script = format!(
+        "#!/bin/sh\n\
+trap 'printf term > \"{parent_terminated}\"; exit 0' TERM\n\
+trap 'printf int > \"{parent_terminated}\"; exit 0' INT\n\
+(\n\
+  trap 'sleep 1; printf term > \"{descendant_terminated}\"; exit 0' TERM\n\
+  trap 'sleep 1; printf int > \"{descendant_terminated}\"; exit 0' INT\n\
+  while :; do\n\
+    sleep 1\n\
+  done\n\
+) &\n\
+printf ready > \"{started}\"\n\
+while :; do\n\
+  sleep 1\n\
+done\n",
+        started = started.to_string_lossy(),
+        parent_terminated = parent_terminated.to_string_lossy(),
+        descendant_terminated = descendant_terminated.to_string_lossy(),
+    );
+    std::fs::write(&path, script).expect("write descendant-grace agent");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod descendant-grace agent");
+    path.to_string_lossy().to_string()
+}
+
+#[cfg(unix)]
 fn wait_for<F>(timeout: Duration, mut predicate: F) -> bool
 where
     F: FnMut() -> bool,
@@ -603,6 +636,54 @@ fn job_run_sigint_terminates_agent_subprocess() {
     let show: Value = serde_json::from_slice(&show_output).expect("show json");
     assert_ne!(show["state"], "running");
     assert_ne!(show["state"], "pending");
+}
+
+#[cfg(unix)]
+#[test]
+fn job_run_cancel_allows_descendants_to_exit_within_grace_period() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let started = dir.path().join("agent-started");
+    let parent_terminated = dir.path().join("agent-parent-terminated");
+    let descendant_terminated = dir.path().join("agent-descendant-terminated");
+    let spec_id = add_activity(dir.path(), "spec-cli-cancel-descendant-grace");
+    let agent_cli = write_descendant_grace_agent(
+        dir.path(),
+        &started,
+        &parent_terminated,
+        &descendant_terminated,
+    );
+    let job_id = add_job(dir.path(), &spec_id, &agent_cli);
+
+    let mut run_child = orbit_process_in(dir.path())
+        .args(["job", "run", &job_id, "--json"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn orbit job run");
+
+    assert!(
+        wait_for(Duration::from_secs(5), || started.exists()),
+        "agent subprocess never reported startup"
+    );
+
+    let run_id = wait_for_running_run_id(dir.path(), &job_id, Duration::from_secs(5));
+
+    orbit_in(dir.path())
+        .args(["job-run", "cancel", &run_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cancelled job run"));
+
+    assert!(
+        wait_for(Duration::from_secs(5), || parent_terminated.exists()),
+        "agent parent never observed forwarded termination"
+    );
+    assert!(
+        wait_for(Duration::from_secs(5), || descendant_terminated.exists()),
+        "descendant did not get time to exit during the grace period"
+    );
+    let _status = wait_for_process_exit(&mut run_child, Duration::from_secs(5))
+        .expect("job run command did not exit after cancellation");
 }
 
 #[test]
