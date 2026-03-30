@@ -10,6 +10,12 @@
 //! `orbit-types`. All other crates are consumed transitively via `orbit-core`.
 //! This binary is the `orbit` executable.
 //!
+//! # Key responsibilities
+//! - Parse the top-level CLI surface and route subcommands to their handlers
+//! - Bootstrap the runtime, including optional `--root` overrides for worktrees
+//! - Emit machine-readable JSON or human-readable table output
+//! - Wrap command execution in audit logging so human and agent actions are recorded
+//!
 //! # Dependency direction
 //! orbit-core, orbit-types → `orbit-cli` (binary crate, no dependents)
 

@@ -17,6 +17,13 @@
 //! - [`check_exec_result`] — helper to turn a failed [`ExecutionResult`] into an `OrbitError`
 //! - Timeout constants: [`TIMEOUT_FAST_MS`], [`TIMEOUT_DEFAULT_MS`], [`TIMEOUT_SLOW_MS`], [`TIMEOUT_LONG_MS`]
 //!
+//! # Registry contents
+//! The builtin registry wires together the standard Orbit tool families:
+//! filesystem mutation, git and GitHub helpers, Orbit task/job commands,
+//! process spawning, network fetches, and time utilities. Each tool executes
+//! inside a [`ToolContext`] that carries workspace boundaries, task identity,
+//! Orbit data-root resolution, and any agent-specific allowlists.
+//!
 //! # Dependency direction
 //! `orbit-types` → `orbit-exec` → `orbit-tools` → orbit-engine, orbit-core
 
