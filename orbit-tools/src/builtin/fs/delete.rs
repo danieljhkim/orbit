@@ -81,7 +81,11 @@ mod tests {
 
         assert!(!target.exists());
         // Canonicalize before deletion to handle macOS /var -> /private/var
-        let canonical_target = dir.path().canonicalize().expect("canonical dir").join("target.txt");
+        let canonical_target = dir
+            .path()
+            .canonicalize()
+            .expect("canonical dir")
+            .join("target.txt");
         assert_eq!(result["path"], canonical_target.display().to_string());
         assert_eq!(result["deleted"], true);
     }

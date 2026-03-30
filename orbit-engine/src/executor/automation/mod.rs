@@ -1,5 +1,4 @@
 mod check_review;
-mod comments;
 mod commit;
 mod commit_and_pr;
 mod freshness;
@@ -13,7 +12,6 @@ mod snapshot;
 mod sync_review;
 mod task;
 mod verify;
-mod worktree;
 
 use orbit_types::{Activity, JobRunState, OrbitError};
 use serde::Deserialize;
@@ -23,16 +21,7 @@ use super::ActivityExecutor;
 use crate::activity_runner::validate_activity_output_schema;
 use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, EngineHost, ExecutionContext};
 
-const AUTOMATION_CREATE_TASK_WORKTREE: &str = "create_task_worktree";
 const AUTOMATION_UPDATE_TASK: &str = "update_task";
-const AUTOMATION_COMMIT_TASK_CHANGES: &str = "commit_task_changes";
-const AUTOMATION_MERGE_PR_FROM_TASK: &str = "merge_pr_from_task";
-const AUTOMATION_OPEN_PR_FROM_TASK: &str = "open_pr_from_task";
-const AUTOMATION_FINALIZE_TASK_WORKTREE: &str = "finalize_task_worktree";
-const AUTOMATION_CHECK_REVIEW_DECISION: &str = "check_review_decision";
-const AUTOMATION_LOAD_PR_COMMENTS: &str = "load_pr_comments";
-const AUTOMATION_PUSH_TASK_CHANGES: &str = "push_task_changes";
-const AUTOMATION_SYNC_REVIEW_TO_GITHUB: &str = "sync_review_to_github";
 const AUTOMATION_RUN_PARALLEL_TASK_PIPELINE: &str = "run_parallel_task_pipeline";
 const AUTOMATION_COMMIT_BATCH_CHANGES: &str = "commit_batch_changes";
 const AUTOMATION_OPEN_BATCH_PR: &str = "open_batch_pr";
@@ -95,16 +84,7 @@ pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync 
         })?;
 
     match spec.action.as_str() {
-        AUTOMATION_CREATE_TASK_WORKTREE => worktree::create_task_worktree(host, input),
         AUTOMATION_UPDATE_TASK => task::update_task(host, input),
-        AUTOMATION_COMMIT_TASK_CHANGES => commit::commit_task_changes(host, input),
-        AUTOMATION_MERGE_PR_FROM_TASK => pr::merge_pr_from_task(host, input),
-        AUTOMATION_OPEN_PR_FROM_TASK => pr::open_pr_from_task(host, input),
-        AUTOMATION_FINALIZE_TASK_WORKTREE => worktree::finalize_task_worktree(input),
-        AUTOMATION_CHECK_REVIEW_DECISION => check_review::check_review_decision(host, input),
-        AUTOMATION_LOAD_PR_COMMENTS => comments::load_pr_comments(host, input),
-        AUTOMATION_PUSH_TASK_CHANGES => push::push_task_changes(host, input),
-        AUTOMATION_SYNC_REVIEW_TO_GITHUB => sync_review::sync_review_to_github(host, input),
         AUTOMATION_RUN_PARALLEL_TASK_PIPELINE => {
             parallel::run_parallel_task_pipeline(host, input, debug)
         }

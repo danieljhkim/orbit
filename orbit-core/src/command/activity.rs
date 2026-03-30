@@ -12,24 +12,8 @@ use crate::paths::ORBIT_ROOT_TOKEN;
 
 pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
-        "checkout_branch",
-        include_str!("../../assets/activities/checkout_branch.yaml"),
-    ),
-    (
-        "commit_changes",
-        include_str!("../../assets/activities/commit_changes.yaml"),
-    ),
-    (
-        "create_branch",
-        include_str!("../../assets/activities/create_branch.yaml"),
-    ),
-    (
         "update_task",
         include_str!("../../assets/activities/update_task.yaml"),
-    ),
-    (
-        "dispatch_task",
-        include_str!("../../assets/activities/dispatch_task.yaml"),
     ),
     (
         "dispatch_and_plan_batch",
@@ -48,20 +32,8 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/commit_and_open_batch_pr.yaml"),
     ),
     (
-        "plan_task",
-        include_str!("../../assets/activities/plan_task.yaml"),
-    ),
-    (
         "implement_change",
         include_str!("../../assets/activities/implement_change.yaml"),
-    ),
-    (
-        "merge_pr",
-        include_str!("../../assets/activities/merge_pr.yaml"),
-    ),
-    (
-        "open_pr",
-        include_str!("../../assets/activities/open_pr.yaml"),
     ),
     (
         "review_tasks",
@@ -76,32 +48,8 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/perform_maintenance.yaml"),
     ),
     (
-        "review_pr",
-        include_str!("../../assets/activities/review_pr.yaml"),
-    ),
-    (
         "run_tests",
         include_str!("../../assets/activities/run_tests.yaml"),
-    ),
-    (
-        "check_review_decision",
-        include_str!("../../assets/activities/check_review_decision.yaml"),
-    ),
-    (
-        "load_pr_comments",
-        include_str!("../../assets/activities/load_pr_comments.yaml"),
-    ),
-    (
-        "implement_fix",
-        include_str!("../../assets/activities/implement_fix.yaml"),
-    ),
-    (
-        "push_changes",
-        include_str!("../../assets/activities/push_changes.yaml"),
-    ),
-    (
-        "sync_review_to_github",
-        include_str!("../../assets/activities/sync_review_to_github.yaml"),
     ),
     (
         "snapshot_batch_state",
@@ -110,6 +58,34 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "verify_batch",
         include_str!("../../assets/activities/verify_batch.yaml"),
+    ),
+    (
+        "implement_batch_fix",
+        include_str!("../../assets/activities/implement_batch_fix.yaml"),
+    ),
+    (
+        "merge_batch_pr",
+        include_str!("../../assets/activities/merge_batch_pr.yaml"),
+    ),
+    (
+        "review_batch_pr",
+        include_str!("../../assets/activities/review_batch_pr.yaml"),
+    ),
+    (
+        "sync_batch_review_to_github",
+        include_str!("../../assets/activities/sync_batch_review_to_github.yaml"),
+    ),
+    (
+        "commit_batch_changes",
+        include_str!("../../assets/activities/commit_batch_changes.yaml"),
+    ),
+    (
+        "push_batch_changes",
+        include_str!("../../assets/activities/push_batch_changes.yaml"),
+    ),
+    (
+        "check_batch_review_decision",
+        include_str!("../../assets/activities/check_batch_review_decision.yaml"),
     ),
 ];
 

@@ -12,7 +12,6 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 use crate::command::activity::activity_requires_agent_cli;
 
-const JOB_TASK_PIPELINE: &str = "job_task_pipeline";
 const JOB_PARALLEL_TASK_PIPELINE: &str = "job_parallel_task_pipeline";
 const JOB_PARALLEL_TASK_WORKER: &str = "job_parallel_task_worker";
 const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
@@ -29,24 +28,20 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/jobs/job_perform_maintenance.yaml"),
     ),
     (
-        "job_review_loop",
-        include_str!("../../assets/jobs/job_review_loop.yaml"),
-    ),
-    (
-        "job_review_cycle",
-        include_str!("../../assets/jobs/job_review_cycle.yaml"),
-    ),
-    (
-        "job_task_pipeline",
-        include_str!("../../assets/jobs/job_task_pipeline.yaml"),
-    ),
-    (
         "job_parallel_task_worker",
         include_str!("../../assets/jobs/job_parallel_task_worker.yaml"),
     ),
     (
         "job_parallel_task_pipeline",
         include_str!("../../assets/jobs/job_parallel_task_pipeline.yaml"),
+    ),
+    (
+        "job_batch_review_cycle",
+        include_str!("../../assets/jobs/job_batch_review_cycle.yaml"),
+    ),
+    (
+        "job_batch_review_loop",
+        include_str!("../../assets/jobs/job_batch_review_loop.yaml"),
     ),
 ];
 
@@ -127,13 +122,7 @@ impl OrbitRuntime {
 
     fn ensure_pipeline_mode_is_exclusive(&self, job_id: &str) -> Result<(), OrbitError> {
         let conflicting_job_ids: &[&str] = match job_id {
-            JOB_TASK_PIPELINE => &[JOB_PARALLEL_TASK_PIPELINE, JOB_PARALLEL_TASK_WORKER],
-            JOB_PARALLEL_TASK_PIPELINE => &[
-                JOB_TASK_PIPELINE,
-                JOB_PARALLEL_TASK_PIPELINE,
-                JOB_PARALLEL_TASK_WORKER,
-            ],
-            JOB_PARALLEL_TASK_WORKER => &[JOB_TASK_PIPELINE],
+            JOB_PARALLEL_TASK_PIPELINE => &[JOB_PARALLEL_TASK_PIPELINE, JOB_PARALLEL_TASK_WORKER],
             _ => return Ok(()),
         };
 

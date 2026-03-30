@@ -2,19 +2,9 @@ use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process
 use orbit_types::{OrbitError, ReviewThread};
 use serde_json::{Value, json};
 
-use super::input::required_input_string;
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 const TIMEOUT_MS: u64 = 15_000;
-
-pub(super) fn sync_review_to_github<H: RuntimeHost + TaskHost + ?Sized>(
-    host: &H,
-    input: &Value,
-) -> Result<Value, OrbitError> {
-    let task_id = required_input_string(input, "task_id")?;
-    let synced_count = sync_task_review_to_github(host, task_id)?;
-    Ok(json!({ "synced_count": synced_count }))
-}
 
 pub(super) fn sync_batch_review_to_github<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,

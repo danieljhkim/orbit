@@ -31,8 +31,8 @@ orbit workspace init
 # once task is created, approve the task
 orbit task approve <task_id>
 
-# run job_task_pipeline job
-orbit job run job_task_pipeline 
+# run the parallel task pipeline
+orbit job run job_parallel_task_pipeline
 ```
 
 ---
@@ -73,7 +73,7 @@ Activities are atomic, reusable units of work:
 - Self-contained operations with defined schemas (input/output)
 - Each has a spec_type that determines how it's implemented (i.e. automation, agent_invoke, api, cli_command)
 - Can be run individually via CLI or as part of a job
-- Example activities: run_tests, review_pr, review_tasks, implement_change
+- Example activities: run_tests, review_batch_pr, review_tasks, implement_change
 
 ### Jobs
 
@@ -84,45 +84,37 @@ You can chain one or more **activities** and run them as a single job.
 ```yaml
 schemaVersion: 1
 job:
-  job_id: job_task_pipeline
+  job_id: job_parallel_task_pipeline
   state: enabled
-  max_active_runs: 4
+  max_active_runs: 1
   default_input:
     base: agent-main
+    parallelism: 2
   steps:
     - target_type: activity
-      target_id: dispatch_task
+      target_id: dispatch_and_plan_batch
       agent_cli: claude
-      model: sonnet
-      timeout_seconds: 1000
-    - target_type: activity
-      target_id: create_branch
-      condition: on_success
-      timeout_seconds: 60
-    - target_type: activity
-      target_id: implement_change
-      agent_cli: codex
-      model: gpt-5.4
-      condition: on_success
+      model: opus
+      condition: always
       timeout_seconds: 2000
     - target_type: activity
-      target_id: update_task
+      target_id: snapshot_batch_state
       condition: on_success
-      timeout_seconds: 15
+      timeout_seconds: 30
     - target_type: activity
-      target_id: run_tests
+      target_id: parallel_dispatch_tasks
+      condition: on_success
+      timeout_seconds: 7200
+    - target_type: activity
+      target_id: verify_batch
       condition: on_success
       timeout_seconds: 600
     - target_type: activity
-      target_id: commit_changes
-      condition: on_success
-      timeout_seconds: 60
-    - target_type: activity
-      target_id: open_pr
+      target_id: commit_and_open_batch_pr
       condition: on_success
       timeout_seconds: 300
     - target_type: job
-      target_id: job_review_cycle
+      target_id: job_batch_review_cycle
       condition: on_success
       timeout_seconds: 7200
 ```

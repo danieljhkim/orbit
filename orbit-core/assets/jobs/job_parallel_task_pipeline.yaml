@@ -15,7 +15,7 @@ job:
   max_active_runs: 1
   default_input:
     base: agent-main
-    parallelism: 2
+    parallelism: 3
   steps:
     # 1. Select a conflict-free batch, author plans, refine context_files.
     - target_type: activity

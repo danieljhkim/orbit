@@ -998,7 +998,7 @@ mod tests {
     fn make_execution_context(task_id: &str) -> ExecutionContext {
         ExecutionContext {
             activity: Activity {
-                id: "implement_fix".to_string(),
+                id: "implement_change".to_string(),
                 spec_type: "agent_invoke".to_string(),
                 description: "test".to_string(),
                 input_schema_json: json!({}),

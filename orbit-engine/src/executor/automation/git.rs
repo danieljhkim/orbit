@@ -102,51 +102,6 @@ pub(super) fn fetch_remote_base(repo_root: &Path, base: &str) {
     );
 }
 
-/// Advance the local base branch to match the freshly-fetched remote ref.
-///
-/// - If the local branch is checked out and clean, run `git pull --rebase`.
-/// - If the local branch is not checked out and is a strict ancestor of
-///   `origin/<base>`, fast-forward it with `git branch -f`.
-/// - Skips silently when either ref is missing or when the working tree is dirty.
-pub(super) fn refresh_local_base_branch(repo_root: &Path, base: &str) -> Result<(), OrbitError> {
-    let local_base_exists = git_command_success(
-        repo_root,
-        &["rev-parse", "--verify", &format!("{base}^{{commit}}")],
-    )?;
-    let remote_base = format!("origin/{base}");
-    let remote_base_exists = git_command_success(
-        repo_root,
-        &[
-            "rev-parse",
-            "--verify",
-            &format!("{remote_base}^{{commit}}"),
-        ],
-    )?;
-
-    if !local_base_exists || !remote_base_exists {
-        return Ok(());
-    }
-
-    let current_branch = git_output(repo_root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if current_branch == base {
-        if !git_worktree_is_clean(repo_root)? {
-            return Ok(());
-        }
-        git_success(repo_root, &["pull", "--rebase", "origin", base])?;
-        return Ok(());
-    }
-
-    // Fast-forward a non-checked-out local base branch to the fetched remote ref when possible.
-    if git_command_success(
-        repo_root,
-        &["merge-base", "--is-ancestor", base, &remote_base],
-    )? {
-        git_success(repo_root, &["branch", "-f", base, &remote_base])?;
-    }
-
-    Ok(())
-}
-
 pub(super) fn resolve_worktree_start_point(
     repo_root: &Path,
     base: &str,
@@ -175,8 +130,4 @@ pub(super) fn resolve_worktree_start_point(
     Err(OrbitError::Execution(format!(
         "unable to resolve base ref '{base}' for task worktree creation"
     )))
-}
-
-fn git_worktree_is_clean(current_dir: &Path) -> Result<bool, OrbitError> {
-    Ok(git_output(current_dir, &["status", "--porcelain"])?.is_empty())
 }

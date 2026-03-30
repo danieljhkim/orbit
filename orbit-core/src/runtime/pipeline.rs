@@ -183,10 +183,8 @@ fn resolve_task_id_from_context(
     Ok(tasks
         .into_iter()
         .filter_map(|task| {
-            let workspace = validated_task_workspace(
-                &canonical_repo_root,
-                task.workspace_path.as_deref()?,
-            )?;
+            let workspace =
+                validated_task_workspace(&canonical_repo_root, task.workspace_path.as_deref()?)?;
             task_workspace_matches(&workspace, &canonical_cwd).then_some((task.id, workspace))
         })
         .max_by_key(|(_, workspace)| workspace.to_string_lossy().len())
