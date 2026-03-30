@@ -13,6 +13,7 @@ const DEFAULT_PARALLEL_BASE: &str = "agent-main";
 const DEFAULT_PARALLELISM: usize = 4;
 const PARALLEL_WORKER_JOB_ID: &str = "job_parallel_task_worker";
 const SHARED_WORKTREE_NAME: &str = "parallel-batch";
+const SHARED_WORKTREE_BRANCH: &str = "orbit/parallel-batch";
 
 #[derive(Debug, Clone)]
 struct PendingTask {
@@ -209,7 +210,7 @@ pub(super) fn run_parallel_task_pipeline<H: RuntimeHost + TaskHost + Sync + ?Siz
     }))
 }
 
-fn resolve_shared_worktree_path(repo_root: &Path) -> Result<PathBuf, OrbitError> {
+pub(super) fn resolve_shared_worktree_path(repo_root: &Path) -> Result<PathBuf, OrbitError> {
     match std::env::var("ORBIT_WORKTREE_ROOT")
         .ok()
         .map(|value| value.trim().to_string())
@@ -240,32 +241,16 @@ fn resolve_shared_worktree_path(repo_root: &Path) -> Result<PathBuf, OrbitError>
 fn ensure_shared_worktree(
     repo_root: &Path,
     worktree_path: &Path,
-    branch: &str,
+    base_branch: &str,
 ) -> Result<(), OrbitError> {
+    let worktree_branch = SHARED_WORKTREE_BRANCH;
+
     if worktree_path.exists() {
-        let current_branch = git_output(worktree_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-        if current_branch.trim() == branch {
-            return Ok(());
-        }
-
-        git_success(
-            repo_root,
-            &[
-                "worktree",
-                "remove",
-                "--force",
-                &worktree_path.to_string_lossy(),
-            ],
-        )?;
-
-        if worktree_path.exists() {
-            std::fs::remove_dir_all(worktree_path).map_err(|error| {
-                OrbitError::Execution(format!(
-                    "failed to clean stale shared worktree directory '{}': {error}",
-                    worktree_path.display()
-                ))
-            })?;
-        }
+        // Worktree already exists — reset it to the base branch tip so it's fresh.
+        let target = git_output(repo_root, &["rev-parse", base_branch])?;
+        git_success(worktree_path, &["checkout", "-B", worktree_branch, target.trim()])?;
+        git_success(worktree_path, &["clean", "-fd"])?;
+        return Ok(());
     }
 
     if let Some(parent) = worktree_path.parent() {
@@ -277,34 +262,21 @@ fn ensure_shared_worktree(
         })?;
     }
 
-    let start_point = resolve_worktree_start_point(repo_root, branch)?;
+    let start_point = resolve_worktree_start_point(repo_root, base_branch)?;
 
-    if git_command_success(
+    // Create the worktree on its own branch, based off the base branch.
+    // This avoids "branch already checked out" errors.
+    git_success(
         repo_root,
         &[
-            "show-ref",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{branch}"),
+            "worktree",
+            "add",
+            "-b",
+            worktree_branch,
+            &worktree_path.to_string_lossy(),
+            &start_point,
         ],
-    )? {
-        git_success(
-            repo_root,
-            &["worktree", "add", &worktree_path.to_string_lossy(), branch],
-        )
-    } else {
-        git_success(
-            repo_root,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                &worktree_path.to_string_lossy(),
-                &start_point,
-            ],
-        )
-    }
+    )
 }
 
 impl From<Task> for PendingTask {

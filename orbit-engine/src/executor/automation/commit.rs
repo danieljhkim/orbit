@@ -65,15 +65,12 @@ pub(super) fn commit_batch_changes<H: TaskHost + ?Sized>(
     let workspace_path_str = required_input_string(input, "workspace_path")?;
     let workspace_path = canonicalize_existing_dir(workspace_path_str, "workspace_path")?;
 
-    let expected_branch =
-        super::input::input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
     let actual_branch = git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if actual_branch.trim() != expected_branch {
+    let actual_branch = actual_branch.trim();
+    if actual_branch == "HEAD" {
         return Err(OrbitError::Execution(format!(
-            "workspace '{}' is on branch '{}' but '{}' was expected",
+            "workspace '{}' has detached HEAD; expected a named branch",
             workspace_path.display(),
-            actual_branch.trim(),
-            expected_branch
         )));
     }
 

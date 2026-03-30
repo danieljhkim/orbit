@@ -8,13 +8,13 @@ activity:
     type: object
     required:
       - run_id
-      - workspace_path
     properties:
       run_id:
         type: string
         description: "Job run ID, used as batch_id to query tasks belonging to this batch."
       workspace_path:
         type: string
+        description: "Path to the shared worktree. Resolved automatically if omitted."
       base:
         type: string
         description: "Branch name the worktree should be on. Defaults to agent-main."

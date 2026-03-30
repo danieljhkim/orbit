@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 
 use orbit_types::OrbitError;
@@ -8,18 +9,18 @@ use crate::context::RuntimeHost;
 use super::input::input_string_field;
 
 pub(super) fn verify_batch<H: RuntimeHost + ?Sized>(
-    _host: &H,
+    host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let workspace_path = input_string_field(input, "workspace_path")
-        .or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|p| p.to_string_lossy().into_owned())
-        })
-        .ok_or_else(|| {
-            OrbitError::InvalidInput("verify_batch: unable to determine workspace_path".to_string())
-        })?;
+    let workspace_path = match input_string_field(input, "workspace_path") {
+        Some(p) => p,
+        None => {
+            let repo_root_str = host.repo_root()?;
+            let repo_root = Path::new(&repo_root_str);
+            let worktree = super::parallel::resolve_shared_worktree_path(repo_root)?;
+            worktree.to_string_lossy().to_string()
+        }
+    };
 
     let workspace = super::input::canonicalize_existing_dir(&workspace_path, "workspace_path")?;
 

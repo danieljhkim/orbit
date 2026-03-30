@@ -261,10 +261,11 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         )));
     }
 
-    let head = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
-    let base = "agent-main";
+    let head = git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let head = head.trim().to_string();
+    let base = input_string_field(input, "base").unwrap_or_else(|| "agent-main".to_string());
 
-    let freshness = ensure_branch_fresh_against_base(&workspace_path, &head, base)?;
+    let freshness = ensure_branch_fresh_against_base(&workspace_path, &head, &base)?;
 
     let diff_output = git_output(
         &workspace_path,

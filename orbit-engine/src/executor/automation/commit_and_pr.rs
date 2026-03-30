@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use orbit_types::OrbitError;
 use serde_json::Value;
 
@@ -11,8 +13,10 @@ pub(super) fn commit_and_open_batch_pr<H: RuntimeHost + TaskHost + Sync + ?Sized
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let mut commit_result = super::commit::commit_batch_changes(host, input)?;
-    let pr_result = super::pr::open_batch_pr(host, input)?;
+    let input = ensure_workspace_path(host, input)?;
+
+    let mut commit_result = super::commit::commit_batch_changes(host, &input)?;
+    let pr_result = super::pr::open_batch_pr(host, &input)?;
 
     // Merge pr_result fields into commit_result so the caller gets a union of both outputs.
     if let (Some(base), Some(overlay)) = (commit_result.as_object_mut(), pr_result.as_object()) {
@@ -22,4 +26,27 @@ pub(super) fn commit_and_open_batch_pr<H: RuntimeHost + TaskHost + Sync + ?Sized
     }
 
     Ok(commit_result)
+}
+
+/// If `workspace_path` is missing from input, resolve it from the repo root.
+fn ensure_workspace_path<H: RuntimeHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    if input.get("workspace_path").and_then(Value::as_str).is_some() {
+        return Ok(input.clone());
+    }
+
+    let repo_root_str = host.repo_root()?;
+    let repo_root = Path::new(&repo_root_str);
+    let worktree = super::parallel::resolve_shared_worktree_path(repo_root)?;
+
+    let mut patched = input.clone();
+    if let Some(obj) = patched.as_object_mut() {
+        obj.insert(
+            "workspace_path".to_string(),
+            Value::String(worktree.to_string_lossy().to_string()),
+        );
+    }
+    Ok(patched)
 }
