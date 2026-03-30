@@ -14,6 +14,8 @@ pub struct AgentRequest {
     /// providers that support structured output (e.g. Claude CLI).
     /// `None` or an empty object `{}` means freeform output.
     pub output_schema_json: Option<Value>,
+    /// When `true`, the agent CLI should produce verbose/debug output on stderr.
+    pub verbose: bool,
 }
 
 impl AgentRequest {
@@ -28,6 +30,7 @@ impl AgentRequest {
             },
             envelope_json,
             output_schema_json,
+            verbose: false,
         }
     }
 
@@ -44,6 +47,13 @@ impl AgentRequest {
             },
             envelope_json,
             output_schema_json,
+            verbose: false,
         }
+    }
+
+    /// Set the verbose flag on this request.
+    pub fn with_verbose(mut self, verbose: bool) -> Self {
+        self.verbose = verbose;
+        self
     }
 }

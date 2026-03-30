@@ -24,7 +24,7 @@ impl AgentRuntime for ClaudeRuntime {
         Ok(build_agent_response(
             AgentProvider::Claude,
             self.command.clone(),
-            self.cli.args(req.output_schema_json.as_ref()),
+            self.cli.args(req.output_schema_json.as_ref(), req.verbose),
             self.cli.stdin(&req.envelope_json),
         ))
     }

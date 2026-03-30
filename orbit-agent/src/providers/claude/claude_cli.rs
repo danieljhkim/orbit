@@ -15,7 +15,7 @@ impl ClaudeCliTransport {
 
     // Claude is prompt-in-stdin; operation metadata is embedded in the envelope,
     // so CLI args are identical for all operation types.
-    pub(crate) fn args(&self, output_schema_json: Option<&Value>) -> Vec<String> {
+    pub(crate) fn args(&self, output_schema_json: Option<&Value>, verbose: bool) -> Vec<String> {
         let use_structured = has_concrete_output_schema(output_schema_json);
 
         let mut args = vec![
@@ -28,6 +28,10 @@ impl ClaudeCliTransport {
             "text".to_string(),
             "--no-session-persistence".to_string(),
         ];
+
+        if verbose {
+            args.push("--verbose".to_string());
+        }
 
         if use_structured {
             let envelope_schema = build_envelope_schema(output_schema_json.unwrap());
