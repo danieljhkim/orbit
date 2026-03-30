@@ -111,6 +111,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         "sync_review_to_github",
         include_str!("../../assets/activities/sync_review_to_github.yaml"),
     ),
+    (
+        "snapshot_batch_state",
+        include_str!("../../assets/activities/snapshot_batch_state.yaml"),
+    ),
 ];
 
 const VALID_ACTIVITY_SPEC_TYPES: &[&str] = &["agent_invoke", "cli_command", "api", "automation"];
