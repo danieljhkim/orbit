@@ -83,24 +83,21 @@ pub(crate) fn wait_with_optional_timeout(
             })
             .unwrap_or(WAIT_POLL_INTERVAL);
 
-        match child
+        if let Some(status) = child
             .wait_timeout(wait_slice)
             .map_err(|e| OrbitError::Execution(format!("wait timeout error: {e}")))?
         {
-            Some(status) => {
-                #[cfg(unix)]
-                if let Some(signal) = signal_guard.take_signal() {
-                    terminate_orphaned_process_group(child.id(), signal);
-                    break (false, Some(signal), false, Some(128 + signal));
-                }
-
-                // Child exited successfully within the timeout. Kill its process
-                // group so any orphan subprocesses still holding the pipes open
-                // are reaped before we join the reader threads below.
-                kill_process_group(child.id());
-                break (false, None, status.success(), status.code());
+            #[cfg(unix)]
+            if let Some(signal) = signal_guard.take_signal() {
+                terminate_orphaned_process_group(child.id(), signal);
+                break (false, Some(signal), false, Some(128 + signal));
             }
-            None => {}
+
+            // Child exited successfully within the timeout. Kill its process
+            // group so any orphan subprocesses still holding the pipes open
+            // are reaped before we join the reader threads below.
+            kill_process_group(child.id());
+            break (false, None, status.success(), status.code());
         }
 
         #[cfg(unix)]

@@ -13,10 +13,7 @@ pub struct AgentRequest {
 }
 
 impl AgentRequest {
-    pub fn activity(
-        activity_id: impl Into<String>,
-        envelope_json: Vec<u8>,
-    ) -> Self {
+    pub fn activity(activity_id: impl Into<String>, envelope_json: Vec<u8>) -> Self {
         Self {
             operation: AgentOperation::Activity {
                 activity_id: activity_id.into(),

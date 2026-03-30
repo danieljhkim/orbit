@@ -80,12 +80,13 @@ pub(super) fn require_pr(input: &Value) -> Result<String, OrbitError> {
     }
     // Try to extract PR number from a GitHub URL like
     // https://github.com/owner/repo/pull/123
-    if pr.contains("github.com/") && pr.contains("/pull/") {
-        if let Some(num) = pr.rsplit('/').next() {
-            if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
-                return Ok(num.to_string());
-            }
-        }
+    if pr.contains("github.com/")
+        && pr.contains("/pull/")
+        && let Some(num) = pr.rsplit('/').next()
+        && !num.is_empty()
+        && num.chars().all(|c| c.is_ascii_digit())
+    {
+        return Ok(num.to_string());
     }
     Err(OrbitError::InvalidInput(format!(
         "invalid `pr`: \"{pr}\"; must be a numeric PR number or GitHub PR URL"

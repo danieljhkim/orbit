@@ -308,3 +308,154 @@ impl OrbitRuntime {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use std::sync::{Mutex, OnceLock};
+
+    use orbit_types::OrbitError;
+    use serde_json::{Value, json};
+
+    use super::read_activity_tools_from_env;
+    use crate::OrbitRuntime;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    const TEST_ENV_KEYS: &[&str] = &[
+        "ORBIT_TASK_ACTOR_KIND",
+        "ORBIT_TASK_ACTOR_LABEL",
+        "ORBIT_ACTIVITY_TOOLS",
+        "ORBIT_AGENT_NAME",
+        "ORBIT_AGENT_MODEL",
+        "ORBIT_PROC_ALLOWED_PROGRAMS",
+    ];
+
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn capture() -> Self {
+            Self {
+                saved: TEST_ENV_KEYS
+                    .iter()
+                    .map(|key| (*key, std::env::var(key).ok()))
+                    .collect(),
+            }
+        }
+
+        fn clear_test_keys() {
+            for key in TEST_ENV_KEYS {
+                unsafe { std::env::remove_var(key) };
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            Self::clear_test_keys();
+            for (key, value) in self.saved.drain(..) {
+                if let Some(value) = value {
+                    unsafe { std::env::set_var(key, value) };
+                }
+            }
+        }
+    }
+
+    fn with_test_env<R>(updates: &[(&'static str, Option<&str>)], f: impl FnOnce() -> R) -> R {
+        let _lock = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock");
+        let _guard = EnvGuard::capture();
+        EnvGuard::clear_test_keys();
+
+        for (key, value) in updates {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+
+        f()
+    }
+
+    #[test]
+    fn read_activity_tools_returns_allowlist_for_agent_actor() {
+        with_test_env(
+            &[
+                ("ORBIT_TASK_ACTOR_KIND", Some("agent")),
+                ("ORBIT_ACTIVITY_TOOLS", Some("fs.read, fs.write")),
+            ],
+            || {
+                assert_eq!(
+                    read_activity_tools_from_env(),
+                    vec!["fs.read".to_string(), "fs.write".to_string()]
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn read_activity_tools_returns_empty_without_agent_actor_kind() {
+        with_test_env(
+            &[("ORBIT_ACTIVITY_TOOLS", Some("fs.read,fs.write"))],
+            || {
+                assert!(read_activity_tools_from_env().is_empty());
+            },
+        );
+    }
+
+    #[test]
+    fn read_activity_tools_returns_empty_when_allowlist_is_missing() {
+        with_test_env(&[("ORBIT_TASK_ACTOR_KIND", Some("agent"))], || {
+            assert!(read_activity_tools_from_env().is_empty());
+        });
+    }
+
+    #[test]
+    fn execute_tool_command_allows_allowlisted_tool_for_agent_actor() {
+        with_test_env(
+            &[
+                ("ORBIT_TASK_ACTOR_KIND", Some("agent")),
+                ("ORBIT_TASK_ACTOR_LABEL", Some("codex")),
+                ("ORBIT_ACTIVITY_TOOLS", Some("time.now")),
+                ("ORBIT_AGENT_NAME", Some("codex")),
+                ("ORBIT_AGENT_MODEL", Some("gpt-5.4")),
+            ],
+            || {
+                let runtime = OrbitRuntime::in_memory().expect("runtime");
+                let output = runtime
+                    .execute_tool_command("time.now", json!({}))
+                    .expect("allowlisted tool should run");
+
+                assert!(output.get("now").and_then(Value::as_str).is_some());
+            },
+        );
+    }
+
+    #[test]
+    fn execute_tool_command_rejects_disallowed_tool_for_agent_actor() {
+        with_test_env(
+            &[
+                ("ORBIT_TASK_ACTOR_KIND", Some("agent")),
+                ("ORBIT_TASK_ACTOR_LABEL", Some("codex")),
+                ("ORBIT_ACTIVITY_TOOLS", Some("time.now")),
+                ("ORBIT_AGENT_NAME", Some("codex")),
+                ("ORBIT_AGENT_MODEL", Some("gpt-5.4")),
+            ],
+            || {
+                let runtime = OrbitRuntime::in_memory().expect("runtime");
+                let error = runtime
+                    .execute_tool_command("time.sleep", json!({"ms": 0}))
+                    .expect_err("disallowed tool should be rejected");
+
+                assert!(matches!(
+                    error,
+                    OrbitError::PolicyDenied(message)
+                    if message == "tool 'time.sleep' is not in the activity allowlist"
+                ));
+            },
+        );
+    }
+}

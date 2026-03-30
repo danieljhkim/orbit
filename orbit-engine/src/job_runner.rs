@@ -47,13 +47,15 @@ pub fn run_job_with_input<H: EngineHost>(
         host,
         data_root,
         job,
-        Utc::now(),
-        None,
-        input.clone(),
-        debug,
-        true,
-        0,
-        &[],
+        ActivityExecutionRequest {
+            scheduled_at: Utc::now(),
+            initial_run: None,
+            input: input.clone(),
+            debug,
+            create_failure_task: true,
+            skip_to_step: 0,
+            replayed_steps: &[],
+        },
     )
 }
 
@@ -115,20 +117,19 @@ pub fn retry_job_run_from_step<H: EngineHost>(
         host,
         data_root,
         job,
-        now,
-        None,
-        base_input,
-        debug,
-        true,
-        retry_from_index,
-        &source_run.steps,
+        ActivityExecutionRequest {
+            scheduled_at: now,
+            initial_run: None,
+            input: base_input,
+            debug,
+            create_failure_task: true,
+            skip_to_step: retry_from_index,
+            replayed_steps: &source_run.steps,
+        },
     )
 }
 
-fn execute_activity_with_retries<H: EngineHost>(
-    host: &H,
-    data_root: &Path,
-    job: Job,
+struct ActivityExecutionRequest<'a> {
     scheduled_at: DateTime<Utc>,
     initial_run: Option<JobRun>,
     input: Value,
@@ -141,8 +142,24 @@ fn execute_activity_with_retries<H: EngineHost>(
     // replayed data from the source run. Execution starts from this index.
     skip_to_step: usize,
     // Source run steps used to replay data when `skip_to_step > 0`.
-    replayed_steps: &[orbit_types::JobRunStep],
+    replayed_steps: &'a [orbit_types::JobRunStep],
+}
+
+fn execute_activity_with_retries<H: EngineHost>(
+    host: &H,
+    data_root: &Path,
+    job: Job,
+    request: ActivityExecutionRequest<'_>,
 ) -> Result<JobRunResult, OrbitError> {
+    let ActivityExecutionRequest {
+        scheduled_at,
+        initial_run,
+        input,
+        debug,
+        create_failure_task,
+        skip_to_step,
+        replayed_steps,
+    } = request;
     let attempt = initial_run.as_ref().map(|r| r.attempt).unwrap_or(1);
 
     let mut run = if let Some(existing) = initial_run {
@@ -234,20 +251,19 @@ fn execute_activity_with_retries<H: EngineHost>(
                             if let Some(output_map) = step_output_for_following_input(
                                 &activity,
                                 src.agent_response_json.as_ref(),
-                            ) {
-                                if let Value::Object(ref mut input_map) = current_input {
-                                    let mut merged: serde_json::Map<String, Value> = output_map
-                                        .iter()
-                                        .map(|(k, v)| (k.clone(), v.clone()))
-                                        .collect();
-                                    for (source_key, target_key) in &step.output_map {
-                                        if let Some(value) = merged.remove(source_key) {
-                                            merged.insert(target_key.clone(), value);
-                                        }
+                            ) && let Value::Object(ref mut input_map) = current_input
+                            {
+                                let mut merged: serde_json::Map<String, Value> = output_map
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect();
+                                for (source_key, target_key) in &step.output_map {
+                                    if let Some(value) = merged.remove(source_key) {
+                                        merged.insert(target_key.clone(), value);
                                     }
-                                    for (key, value) in merged {
-                                        input_map.insert(key, value);
-                                    }
+                                }
+                                for (key, value) in merged {
+                                    input_map.insert(key, value);
                                 }
                             }
                         }
@@ -935,13 +951,15 @@ fn execute_job_step<H: EngineHost>(
         host,
         data_root,
         sub_job,
-        Utc::now(),
-        None,
-        input.clone(),
-        debug,
-        false,
-        0,
-        &[],
+        ActivityExecutionRequest {
+            scheduled_at: Utc::now(),
+            initial_run: None,
+            input: input.clone(),
+            debug,
+            create_failure_task: false,
+            skip_to_step: 0,
+            replayed_steps: &[],
+        },
     )
 }
 
@@ -959,15 +977,13 @@ fn check_loop_exit<H: crate::context::TaskHost + ?Sized>(host: &H, input: &Value
 
     // Fallback: if the agent persisted pr_status to the task but crashed before
     // returning structured output (with loop_exit), check the task directly.
-    if let Some(task_id) = extract_task_id(input) {
-        if let Ok(task) = host.get_task(task_id) {
-            if let Some(ref pr_status) = task.pr_status {
-                let normalized =
-                    crate::executor::automation::review::normalize_review_decision(pr_status);
-                if normalized == "APPROVED" {
-                    return true;
-                }
-            }
+    if let Some(task_id) = extract_task_id(input)
+        && let Ok(task) = host.get_task(task_id)
+        && let Some(ref pr_status) = task.pr_status
+    {
+        let normalized = crate::executor::automation::review::normalize_review_decision(pr_status);
+        if normalized == "APPROVED" {
+            return true;
         }
     }
 

@@ -30,10 +30,7 @@ pub const STALE_RUN_GRACE_SECONDS: u64 = 30;
 pub fn is_transient_error(code: &str) -> bool {
     matches!(
         code,
-        AGENT_TRANSPORT_FAILURE
-            | AGENT_PROVIDER_OVERLOAD
-            | AGENT_RATE_LIMIT
-            | AGENT_TIMEOUT
+        AGENT_TRANSPORT_FAILURE | AGENT_PROVIDER_OVERLOAD | AGENT_RATE_LIMIT | AGENT_TIMEOUT
     )
 }
 #[derive(Debug, Clone)]
@@ -232,10 +229,10 @@ pub trait EnvironmentHost {
             EnvironmentMode::Inherit
         } else {
             let mut env = self.hydrated_env_allowlist(env_extra);
-            if let Some(orbit_root) = self.orbit_root() {
-                if !env.iter().any(|(k, _)| k == "ORBIT_ROOT") {
-                    env.push(("ORBIT_ROOT".to_string(), orbit_root));
-                }
+            if let Some(orbit_root) = self.orbit_root()
+                && !env.iter().any(|(k, _)| k == "ORBIT_ROOT")
+            {
+                env.push(("ORBIT_ROOT".to_string(), orbit_root));
             }
             EnvironmentMode::ClearAndSet(env)
         }

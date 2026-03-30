@@ -6,9 +6,8 @@ use orbit_engine::{
 use orbit_store::{JobRunStepParams, TaskUpdateParams as StoreTaskUpdateParams};
 use orbit_tools::ToolContext;
 use orbit_types::{
-    Activity, ActorIdentity, AgentCommitRequest, JobRun, JobRunState,
-    JobTargetType, OrbitError, OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType,
-    WorkspacePaths,
+    Activity, ActorIdentity, AgentCommitRequest, JobRun, JobRunState, JobTargetType, OrbitError,
+    OrbitEvent, Role, Task, TaskPriority, TaskStatus, TaskType, WorkspacePaths,
 };
 use serde::Serialize;
 use serde_json::{Value, json};

@@ -7,9 +7,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Replaces ad-hoc `(Option<String>, Option<String>)` agent/model pairs.
 /// Used in tasks, friction logs, metrics entries, audit trails, and
 /// anywhere provenance matters.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ActorIdentity {
     /// The Orbit system itself (automated processes with no specific agent).
+    #[default]
     System,
     /// An AI agent with a name and model identifier.
     Agent { name: String, model: String },
@@ -111,12 +112,6 @@ impl ActorIdentity {
             ),
             Self::Human { .. } => (None, None),
         }
-    }
-}
-
-impl Default for ActorIdentity {
-    fn default() -> Self {
-        Self::System
     }
 }
 

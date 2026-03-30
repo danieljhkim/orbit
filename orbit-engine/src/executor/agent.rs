@@ -129,10 +129,7 @@ fn build_agent_invocation<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
                     execution.activity.id.clone(),
                     stdin_payload,
                 ),
-                None => AgentRequest::activity(
-                    execution.activity.id.clone(),
-                    stdin_payload,
-                ),
+                None => AgentRequest::activity(execution.activity.id.clone(), stdin_payload),
             }
             .with_verbose(execution.debug),
         )
@@ -166,13 +163,16 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
     let resolved_model = resolve_model_for_env(host, execution);
     let environment_mode = apply_env_set(
         inject_proc_allowed_programs(
-            inject_agent_identity(
-                inject_activity_tools(
-                    host.execution_environment_mode(&execution.env_extra),
-                    &execution.activity.tools,
+            inject_actor_kind(
+                inject_agent_identity(
+                    inject_activity_tools(
+                        host.execution_environment_mode(&execution.env_extra),
+                        &execution.activity.tools,
+                    ),
+                    execution,
+                    resolved_model.as_deref(),
                 ),
                 execution,
-                resolved_model.as_deref(),
             ),
             &execution.activity.proc_allowed_programs,
         ),
@@ -245,6 +245,32 @@ fn inject_agent_identity(
         if !model.is_empty() {
             pairs.push(("ORBIT_AGENT_MODEL".to_string(), model.to_string()));
         }
+    };
+    match mode {
+        EnvironmentMode::ClearAndSet(mut pairs) => {
+            inject(&mut pairs);
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+        EnvironmentMode::Inherit => {
+            let mut pairs: Vec<(String, String)> = std::env::vars().collect();
+            inject(&mut pairs);
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+    }
+}
+
+fn inject_actor_kind(mode: EnvironmentMode, execution: &ExecutionContext) -> EnvironmentMode {
+    let actor_label = normalize_agent_label(&execution.agent_cli);
+    let inject = |pairs: &mut Vec<(String, String)>| {
+        pairs.push(("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()));
+        pairs.push((
+            "ORBIT_TASK_ACTOR_LABEL".to_string(),
+            if actor_label.is_empty() {
+                "agent".to_string()
+            } else {
+                actor_label.clone()
+            },
+        ));
     };
     match mode {
         EnvironmentMode::ClearAndSet(mut pairs) => {
@@ -414,11 +440,65 @@ fn classify_invocation_error(message: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
-    use super::classify_invocation_error;
+    use std::collections::HashMap;
+
+    use chrono::Utc;
+    use orbit_exec::EnvironmentMode;
+    use orbit_types::Activity;
+    use serde_json::json;
+
+    use super::{
+        classify_invocation_error, inject_activity_tools, inject_actor_kind, inject_agent_identity,
+        inject_proc_allowed_programs,
+    };
     use crate::context::{
         AGENT_INVOCATION_FAILED, AGENT_PROVIDER_OVERLOAD, AGENT_RATE_LIMIT,
-        AGENT_TRANSPORT_FAILURE,
+        AGENT_TRANSPORT_FAILURE, ExecutionContext, apply_env_set,
     };
+
+    fn sample_execution(agent_cli: &str) -> ExecutionContext {
+        ExecutionContext {
+            activity: Activity {
+                id: "activity-test".to_string(),
+                spec_type: "agent_invoke".to_string(),
+                description: "test activity".to_string(),
+                input_schema_json: json!({}),
+                output_schema_json: json!({}),
+                spec_config: json!({}),
+                tools: vec!["time.now".to_string()],
+                proc_allowed_programs: vec!["orbit".to_string()],
+                workspace_path: None,
+                created_by: None,
+                is_active: true,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            },
+            job: None,
+            agent_cli: agent_cli.to_string(),
+            model: Some("gpt-5.4".to_string()),
+            timeout_seconds: 30,
+            env_extra: vec![],
+            env_set: HashMap::new(),
+            input: json!({}),
+            debug: false,
+        }
+    }
+
+    fn pairs_from_mode(mode: EnvironmentMode) -> Vec<(String, String)> {
+        match mode {
+            EnvironmentMode::ClearAndSet(pairs) => pairs,
+            EnvironmentMode::Inherit => panic!("expected clear-and-set environment"),
+        }
+    }
+
+    fn assert_env_pair(pairs: &[(String, String)], key: &str, expected: &str) {
+        assert!(
+            pairs
+                .iter()
+                .any(|(found_key, found_value)| found_key == key && found_value == expected),
+            "expected {key}={expected}, got {pairs:?}"
+        );
+    }
 
     #[test]
     fn transport_failure_patterns_classify_correctly() {
@@ -524,6 +604,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn inject_actor_kind_adds_agent_actor_env_to_clear_and_set() {
+        let execution = sample_execution("/usr/local/bin/Codex");
+        let pairs = pairs_from_mode(inject_actor_kind(
+            EnvironmentMode::ClearAndSet(vec![]),
+            &execution,
+        ));
+
+        assert_env_pair(&pairs, "ORBIT_TASK_ACTOR_KIND", "agent");
+        assert_env_pair(&pairs, "ORBIT_TASK_ACTOR_LABEL", "codex");
+    }
+
+    #[test]
+    fn inject_actor_kind_converts_inherit_mode_to_clear_and_set() {
+        let execution = sample_execution("claude");
+        let pairs = pairs_from_mode(inject_actor_kind(EnvironmentMode::Inherit, &execution));
+
+        assert_env_pair(&pairs, "ORBIT_TASK_ACTOR_KIND", "agent");
+        assert_env_pair(&pairs, "ORBIT_TASK_ACTOR_LABEL", "claude");
+    }
+
+    #[test]
+    fn combined_agent_environment_includes_allowlists_and_actor_identity() {
+        let execution = sample_execution("/opt/homebrew/bin/Codex");
+        let pairs = pairs_from_mode(apply_env_set(
+            inject_proc_allowed_programs(
+                inject_actor_kind(
+                    inject_agent_identity(
+                        inject_activity_tools(
+                            EnvironmentMode::ClearAndSet(vec![]),
+                            &execution.activity.tools,
+                        ),
+                        &execution,
+                        Some("gpt-5.4"),
+                    ),
+                    &execution,
+                ),
+                &execution.activity.proc_allowed_programs,
+            ),
+            &execution.env_set,
+        ));
+
+        assert_env_pair(&pairs, "ORBIT_ACTIVITY_TOOLS", "time.now");
+        assert_env_pair(&pairs, "ORBIT_AGENT_NAME", "codex");
+        assert_env_pair(&pairs, "ORBIT_AGENT_MODEL", "gpt-5.4");
+        assert_env_pair(&pairs, "ORBIT_TASK_ACTOR_KIND", "agent");
+        assert_env_pair(&pairs, "ORBIT_TASK_ACTOR_LABEL", "codex");
+        assert_env_pair(&pairs, "ORBIT_PROC_ALLOWED_PROGRAMS", "orbit");
+    }
 }
 
 fn prepare_exec_args(

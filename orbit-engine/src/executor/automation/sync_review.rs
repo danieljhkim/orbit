@@ -98,15 +98,15 @@ fn sync_thread(
     if thread.github_thread_id.is_none() && !thread.messages.is_empty() {
         let first_msg = &thread.messages[0];
 
-        let github_id = if thread.path.is_some() && thread.line.is_some() {
+        let github_id = if let (Some(path), Some(line)) = (thread.path.as_deref(), thread.line) {
             // Inline review comment
             create_inline_review_comment(
                 repo_root,
                 owner_repo,
                 pr_number,
                 head_sha,
-                thread.path.as_deref().unwrap(),
-                thread.line.unwrap(),
+                path,
+                line,
                 &first_msg.body,
             )?
         } else {
@@ -278,10 +278,10 @@ fn create_general_comment(repo_root: &str, pr_number: &str, body: &str) -> Resul
     // For general comments via `gh pr comment`, the output is a URL.
     // Extract comment ID from the URL fragment.
     let output = result.stdout.trim();
-    if let Some(id_str) = output.rsplit("issuecomment-").nth(0) {
-        if let Ok(id) = id_str.trim().parse::<u64>() {
-            return Ok(id);
-        }
+    if let Some(id_str) = output.rsplit("issuecomment-").next()
+        && let Ok(id) = id_str.trim().parse::<u64>()
+    {
+        return Ok(id);
     }
 
     // If we can't parse the ID from the URL, return an error rather than silently losing it
