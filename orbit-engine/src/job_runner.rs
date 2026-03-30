@@ -488,6 +488,13 @@ fn execute_activity_with_retries<H: EngineHost>(
                         });
                     }
                     final_state = step_state;
+                } else if step_state == JobRunState::Success
+                    && final_state != JobRunState::Success
+                {
+                    // A successful step after a failure means recovery (e.g.
+                    // on_failure fallback fixed the issue). Reset final_state
+                    // so the pipeline is not marked as failed.
+                    final_state = JobRunState::Success;
                 }
 
                 // Check for loop_exit signal after each successful step, but
