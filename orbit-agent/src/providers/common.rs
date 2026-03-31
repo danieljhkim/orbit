@@ -9,7 +9,7 @@ pub(crate) fn render_prompt_with_embedded_envelope(envelope_json: &[u8]) -> Vec<
 Read the execution envelope JSON and perform the requested work.\n\
 Return exactly one JSON object and nothing else.\n\
 Required response schema:\n\
-{\"schemaVersion\":1,\"status\":\"success|failed|timeout\",\"result\":{...},\"error\":null,\"durationMs\":123}\n\
+{\"schemaVersion\":1,\"status\":\"success|failed|timeout\",\"result\":{...},\"error\":null}\n\
 Rules:\n\
 - Output valid JSON only. No markdown fences. No explanatory text.\n\
 - result MUST be a JSON object (never null, never omitted). It may be {} for side-effect-only activities.\n\

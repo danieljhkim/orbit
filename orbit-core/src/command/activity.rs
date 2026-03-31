@@ -13,71 +13,71 @@ use crate::paths::ORBIT_ROOT_TOKEN;
 pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "update_task",
-        include_str!("../../assets/activities/update_task.yaml"),
+        include_str!("../../assets/activities/automation/update_task.yaml"),
     ),
     (
         "dispatch_and_plan_batch",
-        include_str!("../../assets/activities/dispatch_and_plan_batch.yaml"),
+        include_str!("../../assets/activities/agent_invoke/dispatch_and_plan_batch.yaml"),
     ),
     (
         "finalize_tasks",
-        include_str!("../../assets/activities/finalize_tasks.yaml"),
+        include_str!("../../assets/activities/agent_invoke/finalize_tasks.yaml"),
     ),
     (
         "parallel_dispatch_tasks",
-        include_str!("../../assets/activities/parallel_dispatch_tasks.yaml"),
+        include_str!("../../assets/activities/automation/parallel_dispatch_tasks.yaml"),
     ),
     (
         "commit_and_open_batch_pr",
-        include_str!("../../assets/activities/commit_and_open_batch_pr.yaml"),
+        include_str!("../../assets/activities/automation/commit_and_open_batch_pr.yaml"),
     ),
     (
         "implement_change",
-        include_str!("../../assets/activities/implement_change.yaml"),
+        include_str!("../../assets/activities/agent_invoke/implement_change.yaml"),
     ),
     (
         "review_tasks",
-        include_str!("../../assets/activities/review_tasks.yaml"),
+        include_str!("../../assets/activities/agent_invoke/review_tasks.yaml"),
     ),
     (
         "run_tests",
-        include_str!("../../assets/activities/run_tests.yaml"),
+        include_str!("../../assets/activities/cli_command/run_tests.yaml"),
     ),
     (
         "snapshot_batch_state",
-        include_str!("../../assets/activities/snapshot_batch_state.yaml"),
+        include_str!("../../assets/activities/automation/snapshot_batch_state.yaml"),
     ),
     (
         "verify_batch",
-        include_str!("../../assets/activities/verify_batch.yaml"),
+        include_str!("../../assets/activities/automation/verify_batch.yaml"),
     ),
     (
         "implement_batch_fix",
-        include_str!("../../assets/activities/implement_batch_fix.yaml"),
+        include_str!("../../assets/activities/agent_invoke/implement_batch_fix.yaml"),
     ),
     (
         "merge_batch_pr",
-        include_str!("../../assets/activities/merge_batch_pr.yaml"),
+        include_str!("../../assets/activities/automation/merge_batch_pr.yaml"),
     ),
     (
         "review_batch_pr",
-        include_str!("../../assets/activities/review_batch_pr.yaml"),
+        include_str!("../../assets/activities/agent_invoke/review_batch_pr.yaml"),
     ),
     (
         "sync_batch_review_to_github",
-        include_str!("../../assets/activities/sync_batch_review_to_github.yaml"),
+        include_str!("../../assets/activities/automation/sync_batch_review_to_github.yaml"),
     ),
     (
         "commit_batch_changes",
-        include_str!("../../assets/activities/commit_batch_changes.yaml"),
+        include_str!("../../assets/activities/automation/commit_batch_changes.yaml"),
     ),
     (
         "push_batch_changes",
-        include_str!("../../assets/activities/push_batch_changes.yaml"),
+        include_str!("../../assets/activities/automation/push_batch_changes.yaml"),
     ),
     (
         "check_batch_review_decision",
-        include_str!("../../assets/activities/check_batch_review_decision.yaml"),
+        include_str!("../../assets/activities/automation/check_batch_review_decision.yaml"),
     ),
 ];
 

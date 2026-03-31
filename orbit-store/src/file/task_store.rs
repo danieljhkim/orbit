@@ -327,6 +327,9 @@ impl TaskFileStore {
         if let Some(value) = &fields.description {
             bundle.doc.description = value.clone();
         }
+        if let Some(value) = &fields.acceptance_criteria {
+            bundle.doc.acceptance_criteria = value.clone();
+        }
         if let Some(value) = &fields.plan {
             bundle.plan = value.clone();
         }

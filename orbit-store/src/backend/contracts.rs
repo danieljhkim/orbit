@@ -53,6 +53,7 @@ pub struct TaskUpdateParams {
     pub actor: String,
     pub title: Option<String>,
     pub description: Option<String>,
+    pub acceptance_criteria: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub context_files: Option<Vec<String>>,

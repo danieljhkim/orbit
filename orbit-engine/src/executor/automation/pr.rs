@@ -1,6 +1,6 @@
 use orbit_store::pr_scoreboard;
 use orbit_tools::ToolContext;
-use orbit_types::{OrbitError, Role, TaskStatus};
+use orbit_types::{OrbitError, Role, Task, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
@@ -169,29 +169,19 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         .filter(|line| !line.is_empty())
         .collect();
 
-    let mut task_lines = Vec::new();
-    let mut id_labels = Vec::new();
+    let mut completed_tasks = Vec::new();
     for task_id in &completed_task_ids {
         let task = host.get_task(task_id)?;
-        task_lines.push(format!("- {}: {}", task_id, task.title.trim()));
-        id_labels.push(task_id.clone());
+        completed_tasks.push(task);
     }
+    let id_labels: Vec<&str> = completed_tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect();
     let ids_joined = id_labels.join(", ");
 
     let title = format!("feat: parallel batch [{ids_joined}]");
-    let body = format!(
-        "## Tasks\n{}\n\n## Branch Freshness\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}\n\n## Files Changed\n{}",
-        task_lines.join("\n"),
-        freshness.base_ref,
-        freshness.head_ref,
-        freshness.commits_behind,
-        freshness.commits_ahead,
-        changed_files
-            .iter()
-            .map(|f| format!("- `{f}`"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+    let body = build_batch_pr_body(&completed_tasks, &freshness, &changed_files);
 
     let tool_context = ToolContext {
         cwd: Some(workspace_path.to_string_lossy().to_string()),
@@ -257,6 +247,59 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     Ok(json!({}))
 }
 
+fn build_batch_pr_body(
+    tasks: &[Task],
+    freshness: &super::freshness::BranchFreshness,
+    changed_files: &[&str],
+) -> String {
+    let task_sections = tasks
+        .iter()
+        .map(render_task_section)
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let changed_files_section = changed_files
+        .iter()
+        .map(|file| format!("- `{file}`"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut body = format!(
+        "## Tasks\n{}\n\n## Branch Freshness\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}\n\n## Files Changed\n{}",
+        task_sections,
+        freshness.base_ref,
+        freshness.head_ref,
+        freshness.commits_behind,
+        freshness.commits_ahead,
+        changed_files_section
+    );
+
+    if let Some(signature) = batch_pr_signature(tasks) {
+        body.push_str("\n\n");
+        body.push_str(&signature);
+    }
+
+    body
+}
+
+fn render_task_section(task: &Task) -> String {
+    let mut section = format!("### {}: {}", task.id, task.title.trim());
+    let summary = task.execution_summary.trim();
+    if !summary.is_empty() {
+        section.push_str(&format!(
+            "\n<details><summary>Execution Summary</summary>\n\n{}\n\n</details>",
+            summary
+        ));
+    }
+    section
+}
+
+fn batch_pr_signature(tasks: &[Task]) -> Option<String> {
+    tasks.iter().find_map(|task| {
+        let agent = task.actor_identity.agent_name()?;
+        let model = task.actor_identity.agent_model().unwrap_or("unknown");
+        Some(format!("*authored by: {agent} / {model}*"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -271,8 +314,9 @@ mod tests {
     };
     use serde_json::{Value, json};
 
-    use super::merge_batch_pr;
+    use super::{build_batch_pr_body, merge_batch_pr};
     use crate::context::{JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskHost};
+    use crate::executor::automation::freshness::BranchFreshness;
 
     struct TestHost {
         tasks: Vec<Task>,
@@ -539,5 +583,35 @@ mod tests {
             updated.as_slice(),
             &[("T20260330-063823".to_string(), Some(TaskStatus::Done))]
         );
+    }
+
+    #[test]
+    fn build_batch_pr_body_includes_execution_summaries_and_signature() {
+        let mut first = sample_task("T20260330-063823", "batch-1", "/tmp", "76");
+        first.execution_summary = "## Status\nsuccess".to_string();
+        first.actor_identity = ActorIdentity::agent("codex", "gpt-5.4");
+
+        let second = sample_task("T20260330-065846", "batch-1", "/tmp", "76");
+        let freshness = BranchFreshness {
+            base_ref: "origin/agent-main".to_string(),
+            head_ref: "orbit/parallel-batch".to_string(),
+            commits_behind: 0,
+            commits_ahead: 3,
+        };
+        let body = build_batch_pr_body(
+            &[first, second],
+            &freshness,
+            &["orbit-engine/src/executor/automation/pr.rs"],
+        );
+
+        assert!(body.contains("### T20260330-063823: Task T20260330-063823"));
+        assert!(body.contains("## Status\nsuccess"));
+        assert_eq!(
+            body.matches("<details><summary>Execution Summary</summary>")
+                .count(),
+            1
+        );
+        assert!(body.contains("### T20260330-065846: Task T20260330-065846"));
+        assert!(body.ends_with("*authored by: codex / gpt-5.4*"));
     }
 }

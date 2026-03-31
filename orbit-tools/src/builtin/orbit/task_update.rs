@@ -15,6 +15,33 @@ pub(super) fn build_exec_requests(
     let mut args = vec!["task".to_string(), "update".to_string(), id.clone()];
     let mut changed = false;
 
+    if let Some(title) = super::optional_string(input, "title")? {
+        args.push("--title".to_string());
+        args.push(title);
+        changed = true;
+    }
+    if let Some(description) = input.get("description") {
+        let raw = description.as_str().ok_or_else(|| {
+            OrbitError::InvalidInput("`description` must be a string".to_string())
+        })?;
+        args.push("--description".to_string());
+        args.push(raw.to_string());
+        changed = true;
+    }
+    if let Some(criteria) = super::optional_string_list_alias(
+        input,
+        &[
+            "acceptance_criteria",
+            "acceptanceCriteria",
+            "acceptance-criteria",
+        ],
+    )? {
+        for criterion in criteria {
+            args.push("--acceptance-criteria".to_string());
+            args.push(criterion);
+        }
+        changed = true;
+    }
     if let Some(status) = super::optional_string(input, "status")? {
         args.push("--status".to_string());
         args.push(status);
@@ -61,7 +88,7 @@ pub(super) fn build_exec_requests(
 
     if !changed {
         return Err(OrbitError::InvalidInput(
-            "orbit.task.update requires at least one of `status`, `plan`, `execution_summary`, `comment`, `pr_status`, `pr_number`, `batch_id`, or `context_files`"
+            "orbit.task.update requires at least one of `title`, `description`, `acceptance_criteria`, `status`, `plan`, `execution_summary`, `comment`, `pr_status`, `pr_number`, `batch_id`, or `context_files`"
                 .to_string(),
         ));
     }
@@ -86,6 +113,25 @@ impl Tool for OrbitTaskUpdateTool {
     fn schema(&self) -> ToolSchema {
         let mut parameters = super::orbit_id_params("task");
         parameters.extend([
+            ToolParam {
+                name: "title".to_string(),
+                description: "New task title".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "description".to_string(),
+                description: "New task description (empty string clears)".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "acceptance_criteria".to_string(),
+                description: "New acceptance criteria as an array of strings or a single string"
+                    .to_string(),
+                param_type: "array".to_string(),
+                required: false,
+            },
             ToolParam {
                 name: "plan".to_string(),
                 description: "Replacement task plan text (empty string clears)".to_string(),
@@ -255,7 +301,43 @@ mod tests {
             .expect_err("missing fields should fail");
         let message = err.to_string();
 
+        assert!(message.contains("title"));
+        assert!(message.contains("description"));
+        assert!(message.contains("acceptance_criteria"));
         assert!(message.contains("context_files"));
+    }
+
+    #[test]
+    fn build_exec_requests_supports_metadata_fields() {
+        let (update, _) = build_exec_requests(
+            &test_context(),
+            &json!({
+                "id": "T20260330-002312",
+                "title": "Updated title",
+                "description": "",
+                "acceptance_criteria": ["first", "second"]
+            }),
+        )
+        .expect("request should build");
+
+        assert!(update.args.contains(&"--title".to_string()));
+        assert!(update.args.contains(&"Updated title".to_string()));
+        let description_index = update
+            .args
+            .iter()
+            .position(|arg| arg == "--description")
+            .expect("expected `--description` in request");
+        assert_eq!(
+            update.args.get(description_index + 1).map(String::as_str),
+            Some("")
+        );
+
+        let criteria_flags = update
+            .args
+            .iter()
+            .filter(|arg| arg.as_str() == "--acceptance-criteria")
+            .count();
+        assert_eq!(criteria_flags, 2);
     }
 
     #[test]

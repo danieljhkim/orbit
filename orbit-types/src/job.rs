@@ -228,8 +228,9 @@ pub struct AgentResponseEnvelope {
     pub result: Option<Value>,
     #[serde(default)]
     pub error: Option<AgentRunError>,
+    #[serde(default)]
     #[serde(rename = "durationMs")]
-    pub duration_ms: u64,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

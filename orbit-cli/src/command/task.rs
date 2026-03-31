@@ -491,6 +491,9 @@ pub struct TaskUpdateArgs {
     /// New description (empty string clears)
     #[arg(long)]
     pub description: Option<String>,
+    /// Acceptance criteria. Repeat the flag for multiple criteria.
+    #[arg(long = "acceptance-criteria")]
+    pub acceptance_criteria: Vec<String>,
     /// New task plan (empty string clears)
     #[arg(long, alias = "instructions")]
     pub plan: Option<String>,
@@ -528,48 +531,68 @@ pub struct TaskUpdateArgs {
 
 impl Execute for TaskUpdateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let pr_number = self.pr_number.map(|value| {
+        let TaskUpdateArgs {
+            id,
+            title,
+            description,
+            acceptance_criteria,
+            plan,
+            execution_summary,
+            comment,
+            status,
+            pr_number,
+            pr_status,
+            batch_id,
+            context_files,
+            agent,
+            model,
+            json,
+        } = self;
+
+        let pr_number = pr_number.map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
                 Some(value)
             }
         });
-        let pr_status = self.pr_status.map(|value| {
+        let pr_status = pr_status.map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
                 Some(value)
             }
         });
-        let batch_id = self.batch_id.map(|value| {
+        let batch_id = batch_id.map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
                 Some(value)
             }
         });
+        let acceptance_criteria = (!acceptance_criteria.is_empty()).then_some(acceptance_criteria);
 
         let task = runtime.update_task_with_identity(
-            &self.id,
+            &id,
             TaskUpdateParams {
-                title: self.title,
-                description: self.description,
-                plan: self.plan,
-                execution_summary: self.execution_summary,
-                comment: self.comment,
-                status: self.status.map(Into::into),
+                title,
+                description,
+                acceptance_criteria,
+                plan,
+                execution_summary,
+                comment,
+                status: status.map(Into::into),
                 pr_number,
                 pr_status,
                 batch_id,
-                context_files: self.context_files.map(|c| parse_context_csv(&c)),
+                context_files: context_files.map(|c| parse_context_csv(&c)),
                 ..Default::default()
             },
-            self.agent,
-            self.model,
+            agent,
+            model,
         )?;
 
-        if self.json {
+        if json {
             crate::output::json::print_pretty(&task_to_json(&task))
         } else {
             println!("Updated task '{}'", task.id);

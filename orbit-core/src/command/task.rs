@@ -50,6 +50,7 @@ impl Default for TaskAddParams {
 pub struct TaskUpdateParams {
     pub title: Option<String>,
     pub description: Option<String>,
+    pub acceptance_criteria: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
@@ -66,6 +67,7 @@ impl From<TaskUpdateParams> for StoreTaskUpdateParams {
         Self {
             title: p.title,
             description: p.description,
+            acceptance_criteria: p.acceptance_criteria,
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,
@@ -217,16 +219,14 @@ impl OrbitRuntime {
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
-        let is_field_update = params.title.is_some()
-            || params.description.is_some()
-            || params.plan.is_some()
+        let locked_field_update = params.plan.is_some()
             || params.execution_summary.is_some()
             || params.comment.is_some()
             || params.pr_number.is_some()
             || params.pr_status.is_some()
             || params.batch_id.is_some();
 
-        if is_field_update && matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
+        if locked_field_update && matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
             return Err(OrbitError::InvalidInput(format!(
                 "task {id} is {} and cannot be modified; unarchive or reopen it first",
                 task.status
@@ -1102,6 +1102,63 @@ mod tests {
 
         let loaded = runtime.get_task(&task.id).expect("load");
         assert_eq!(loaded.acceptance_criteria, task.acceptance_criteria);
+    }
+
+    #[test]
+    fn update_task_updates_acceptance_criteria() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "criteria".to_string(),
+                description: "desc".to_string(),
+                acceptance_criteria: vec!["first outcome".to_string()],
+                ..Default::default()
+            })
+            .expect("task");
+
+        let updated = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    acceptance_criteria: Some(vec![
+                        "updated outcome".to_string(),
+                        "another outcome".to_string(),
+                    ]),
+                    ..Default::default()
+                },
+            )
+            .expect("update succeeds");
+
+        assert_eq!(
+            updated.acceptance_criteria,
+            vec!["updated outcome".to_string(), "another outcome".to_string()]
+        );
+    }
+
+    #[test]
+    fn done_tasks_allow_metadata_updates() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        for status in [TaskStatus::Done, TaskStatus::Archived] {
+            let task = runtime
+                .add_task_with_status("completed", status)
+                .expect("task");
+
+            let updated = runtime
+                .update_task(
+                    &task.id,
+                    TaskUpdateParams {
+                        title: Some("completed v2".to_string()),
+                        description: Some("clarified description".to_string()),
+                        acceptance_criteria: Some(vec!["documented".to_string()]),
+                        ..Default::default()
+                    },
+                )
+                .expect("metadata update succeeds");
+
+            assert_eq!(updated.title, "completed v2");
+            assert_eq!(updated.description, "clarified description");
+            assert_eq!(updated.acceptance_criteria, vec!["documented".to_string()]);
+        }
     }
 
     #[test]

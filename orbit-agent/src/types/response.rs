@@ -140,7 +140,7 @@ fn synthesize_response(
                     message: "agent timed out".to_string(),
                     details: Value::Null,
                 }),
-                duration_ms: exec_result.duration_ms,
+                duration_ms: Some(exec_result.duration_ms),
             },
             AgentResponseStatus::Timeout,
         );
@@ -153,7 +153,7 @@ fn synthesize_response(
                 status: "success".to_string(),
                 result: None,
                 error: None,
-                duration_ms: exec_result.duration_ms,
+                duration_ms: Some(exec_result.duration_ms),
             },
             AgentResponseStatus::Success,
         );
@@ -169,7 +169,7 @@ fn synthesize_response(
                 message: synthetic_error_message(exec_result),
                 details: Value::Null,
             }),
-            duration_ms: exec_result.duration_ms,
+            duration_ms: Some(exec_result.duration_ms),
         },
         AgentResponseStatus::Failed,
     )
@@ -185,4 +185,49 @@ fn synthetic_error_message(exec_result: &ExecutionResult) -> String {
         return stdout.to_string();
     }
     "agent execution failed".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentResponseStatus, parse_and_validate_response};
+    use orbit_types::ExecutionResult;
+    use serde_json::json;
+
+    fn exec_result(stdout: serde_json::Value) -> ExecutionResult {
+        ExecutionResult {
+            success: true,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+            exit_code: Some(0),
+            duration_ms: 42,
+            output: None,
+        }
+    }
+
+    #[test]
+    fn parses_envelope_without_duration_ms() {
+        let (envelope, status) = parse_and_validate_response(&exec_result(json!({
+            "schemaVersion": 1,
+            "status": "success",
+            "result": {}
+        })))
+        .expect("response without durationMs should parse");
+
+        assert_eq!(status, AgentResponseStatus::Success);
+        assert_eq!(envelope.duration_ms, None);
+    }
+
+    #[test]
+    fn parses_envelope_with_duration_ms_for_backwards_compatibility() {
+        let (envelope, status) = parse_and_validate_response(&exec_result(json!({
+            "schemaVersion": 1,
+            "status": "success",
+            "result": {},
+            "durationMs": 123
+        })))
+        .expect("response with durationMs should parse");
+
+        assert_eq!(status, AgentResponseStatus::Success);
+        assert_eq!(envelope.duration_ms, Some(123));
+    }
 }
