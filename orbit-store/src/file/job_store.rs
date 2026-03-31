@@ -814,11 +814,7 @@ fn validate_max_active_runs(max_active_runs: u32) -> Result<u32, OrbitError> {
 }
 
 fn format_timestamped_id(prefix: &str, now: DateTime<Utc>) -> String {
-    format!(
-        "{prefix}-{}-{:03}",
-        now.format("%Y%m%d-%H%M%S"),
-        now.timestamp_subsec_millis()
-    )
+    format!("{prefix}-{}", now.format("%Y%m%d-%H%M"))
 }
 
 fn id_generation_state() -> &'static Mutex<IdGenerationState> {
@@ -826,15 +822,23 @@ fn id_generation_state() -> &'static Mutex<IdGenerationState> {
     ID_GENERATION_STATE.get_or_init(|| Mutex::new(IdGenerationState::default()))
 }
 
-/// Derive a UTC timestamp from a job ID of the form `job-YYYYMMDD-HHMMSS[-mmm][-N]`.
-/// Falls back to `Utc::now()` for IDs that don't embed a parseable timestamp.
+/// Derive a UTC timestamp from a job ID of the form `job-YYYYMMDD-HHMM[-N]` (new)
+/// or `job-YYYYMMDD-HHMMSS[-mmm][-N]` (legacy). Falls back to `Utc::now()` for IDs
+/// that don't embed a parseable timestamp.
 fn parse_timestamp_from_job_id(job_id: &str) -> DateTime<Utc> {
     let rest = job_id.strip_prefix("job-").unwrap_or(job_id);
     let mut parts = rest.splitn(3, '-');
     let date = parts.next().unwrap_or("");
     let time = parts.next().unwrap_or("");
-    if date.len() == 8 && time.len() == 6 {
-        let s = format!("{date}{time}");
+    if date.len() == 8 {
+        let padded_time = if time.len() == 4 {
+            format!("{time}00")
+        } else if time.len() == 6 {
+            time.to_string()
+        } else {
+            return Utc::now();
+        };
+        let s = format!("{date}{padded_time}");
         if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(&s, "%Y%m%d%H%M%S") {
             return ndt.and_utc();
         }
@@ -891,18 +895,18 @@ mod tests {
         assert_eq!(job_ids.len(), 2);
         assert_ne!(job_ids[0], job_ids[1]);
         assert!(job_ids.iter().all(|id| id.starts_with("job-")));
-        assert!(
-            job_ids
-                .iter()
-                .all(|id| id.split('-').nth(3).is_some_and(|millis| millis.len() == 3))
-        );
+        // New format: job-YYYYMMDD-HHMM (optionally with -N dedup suffix)
+        assert!(job_ids.iter().all(|id| {
+            let parts: Vec<&str> = id.splitn(4, '-').collect();
+            parts.len() >= 3 && parts[1].len() == 8 && parts[2].len() == 4
+        }));
     }
 
     #[test]
     fn insert_job_run_generates_distinct_ids_for_parallel_threads() {
         let temp_dir = tempdir().expect("create tempdir");
         let store = Arc::new(JobFileStore::new(temp_dir.path().to_path_buf()));
-        let job_id = "job-20260330-060536-000".to_string();
+        let job_id = "job-20260330-0605".to_string();
 
         store
             .add_job(JobCreateParams {
@@ -948,12 +952,9 @@ mod tests {
                     .exists()
             );
             assert!(run_id.starts_with("jrun-"));
-            assert!(
-                run_id
-                    .split('-')
-                    .nth(3)
-                    .is_some_and(|millis| millis.len() == 3)
-            );
+            // New format: jrun-YYYYMMDD-HHMM (optionally with -N dedup suffix)
+            let parts: Vec<&str> = run_id.splitn(4, '-').collect();
+            assert!(parts.len() >= 3 && parts[1].len() == 8 && parts[2].len() == 4);
         }
     }
 }

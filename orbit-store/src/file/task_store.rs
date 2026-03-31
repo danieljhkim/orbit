@@ -445,7 +445,7 @@ impl TaskFileStore {
     }
 
     fn next_task_id(&self, now: DateTime<Utc>) -> Result<String, OrbitError> {
-        let base = format!("T{}", now.format("%Y%m%d-%H%M%S"));
+        let base = format!("T{}", now.format("%Y%m%d-%H%M"));
         if self.locate_task(&base)?.is_none() {
             return Ok(base);
         }
