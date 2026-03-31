@@ -17,10 +17,10 @@ job:
   steps:
     - target_type: activity
       target_id: implement_change
-      agent_cli: codex
-      model: gpt-5.4
+      agent_cli: claude
+      model: sonnet
       condition: on_success
-      timeout_seconds: 2000
+      timeout_seconds: 4000
 
     - target_type: activity
       target_id: update_task
