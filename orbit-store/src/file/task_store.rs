@@ -91,6 +91,13 @@ impl TaskStateDir {
             TaskStateDir::Rejected,
         ]
     }
+
+    fn is_partitioned(self) -> bool {
+        matches!(
+            self,
+            TaskStateDir::Done | TaskStateDir::Archived | TaskStateDir::Rejected
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,19 +246,7 @@ impl TaskFileStore {
     pub(crate) fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
         let mut tasks = Vec::new();
         for state in TaskStateDir::all() {
-            let dir = self.state_dir_path(state);
-            if !dir.exists() {
-                continue;
-            }
-            let mut task_dirs = fs::read_dir(&dir)
-                .map_err(|e| OrbitError::Io(e.to_string()))?
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|path| path.is_dir())
-                .collect::<Vec<_>>();
-            task_dirs.sort();
-
-            for task_dir in task_dirs {
+            for task_dir in self.task_dirs_for_state(state)? {
                 let bundle = self.read_bundle_at(&task_dir)?;
                 tasks.push(bundle_to_task(state, bundle));
             }
@@ -467,6 +462,29 @@ impl TaskFileStore {
 
     fn locate_task(&self, id: &str) -> Result<Option<(TaskStateDir, PathBuf)>, OrbitError> {
         for state in TaskStateDir::all() {
+            if state.is_partitioned() {
+                if let Some(partition) = partition_key(id) {
+                    let partitioned_dir = self.state_dir_path(state).join(partition).join(id);
+                    if partitioned_dir.is_dir() {
+                        return Ok(Some((state, partitioned_dir)));
+                    }
+                }
+
+                let legacy_dir = self.state_dir_path(state).join(id);
+                if legacy_dir.is_dir() {
+                    let migrated_dir = self.migrate_legacy_task_dir(state, legacy_dir)?;
+                    return Ok(Some((state, migrated_dir)));
+                }
+
+                for partition_dir in self.partition_dirs(state)? {
+                    let partitioned_dir = partition_dir.join(id);
+                    if partitioned_dir.is_dir() {
+                        return Ok(Some((state, partitioned_dir)));
+                    }
+                }
+                continue;
+            }
+
             let task_dir = self.task_dir(state, id);
             if task_dir.is_dir() {
                 return Ok(Some((state, task_dir)));
@@ -573,6 +591,11 @@ impl TaskFileStore {
     }
 
     fn task_dir(&self, state: TaskStateDir, id: &str) -> PathBuf {
+        if state.is_partitioned() {
+            if let Some(partition) = partition_key(id) {
+                return self.state_dir_path(state).join(partition).join(id);
+            }
+        }
         self.state_dir_path(state).join(id)
     }
 
@@ -591,6 +614,110 @@ impl TaskFileStore {
     fn artifacts_dir(&self, task_dir: &Path) -> PathBuf {
         task_dir.join(ARTIFACTS_DIR_NAME)
     }
+
+    fn task_dirs_for_state(&self, state: TaskStateDir) -> Result<Vec<PathBuf>, OrbitError> {
+        let state_dir = self.state_dir_path(state);
+        if !state_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        if !state.is_partitioned() {
+            return read_child_dirs(&state_dir);
+        }
+
+        let mut task_dirs = Vec::new();
+        for entry in read_child_dirs(&state_dir)? {
+            let Some(name) = entry.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+
+            if is_partition_dir_name(name) {
+                task_dirs.extend(read_child_dirs(&entry)?);
+                continue;
+            }
+
+            if self.task_doc_path(&entry).is_file() {
+                task_dirs.push(self.migrate_legacy_task_dir(state, entry)?);
+            }
+        }
+
+        Ok(task_dirs)
+    }
+
+    fn partition_dirs(&self, state: TaskStateDir) -> Result<Vec<PathBuf>, OrbitError> {
+        let state_dir = self.state_dir_path(state);
+        if !state_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        Ok(read_child_dirs(&state_dir)?
+            .into_iter()
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(is_partition_dir_name)
+            })
+            .collect())
+    }
+
+    fn migrate_legacy_task_dir(
+        &self,
+        state: TaskStateDir,
+        legacy_dir: PathBuf,
+    ) -> Result<PathBuf, OrbitError> {
+        let Some(task_id) = legacy_dir.file_name().and_then(|value| value.to_str()) else {
+            return Err(OrbitError::Store(format!(
+                "invalid task directory path {}",
+                legacy_dir.display()
+            )));
+        };
+        let target_dir = self.task_dir(state, task_id);
+        if target_dir == legacy_dir {
+            return Ok(legacy_dir);
+        }
+        if target_dir.exists() {
+            return Err(OrbitError::Store(format!(
+                "cannot migrate task directory {} because {} already exists",
+                legacy_dir.display(),
+                target_dir.display()
+            )));
+        }
+        self.move_task_dir(&legacy_dir, &target_dir)?;
+        Ok(target_dir)
+    }
+}
+
+fn partition_key(id: &str) -> Option<String> {
+    let raw = id.strip_prefix('T')?;
+    let year = raw.get(0..4)?;
+    let month = raw.get(4..6)?;
+    is_valid_year_month(year, month).then(|| format!("{year}-{month}"))
+}
+
+fn is_partition_dir_name(name: &str) -> bool {
+    let Some((year, month)) = name.split_once('-') else {
+        return false;
+    };
+    year.len() == 4 && month.len() == 2 && is_valid_year_month(year, month)
+}
+
+fn is_valid_year_month(year: &str, month: &str) -> bool {
+    year.as_bytes().iter().all(u8::is_ascii_digit)
+        && matches!(
+            month,
+            "01" | "02" | "03" | "04" | "05" | "06" | "07" | "08" | "09" | "10" | "11" | "12"
+        )
+}
+
+fn read_child_dirs(dir: &Path) -> Result<Vec<PathBuf>, OrbitError> {
+    let mut child_dirs = fs::read_dir(dir)
+        .map_err(|e| OrbitError::Io(e.to_string()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    child_dirs.sort();
+    Ok(child_dirs)
 }
 
 fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, OrbitError> {
@@ -740,5 +867,132 @@ fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         review_threads: bundle.doc.review_threads,
         created_at: bundle.doc.created_at,
         updated_at: bundle.doc.updated_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn list_tasks_migrates_legacy_done_directories_into_month_partitions() {
+        let temp_dir = tempdir().expect("create tempdir");
+        let store = TaskFileStore::new(temp_dir.path().to_path_buf());
+        store.ensure_layout().expect("create task layout");
+
+        let task_id = "T20260315-123456";
+        let legacy_dir = store.state_dir_path(TaskStateDir::Done).join(task_id);
+        store
+            .write_bundle_at(&legacy_dir, &sample_bundle(task_id, 15))
+            .expect("write legacy task bundle");
+
+        let tasks = store.list_tasks().expect("list tasks");
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, task_id);
+        assert_eq!(tasks[0].status, TaskStatus::Done);
+        assert!(!legacy_dir.exists());
+        assert!(
+            store.task_dir(TaskStateDir::Done, task_id).exists(),
+            "migrated task directory should exist under a yyyy-mm partition"
+        );
+    }
+
+    #[test]
+    fn get_task_migrates_legacy_archived_directories() {
+        let temp_dir = tempdir().expect("create tempdir");
+        let store = TaskFileStore::new(temp_dir.path().to_path_buf());
+        store.ensure_layout().expect("create task layout");
+
+        let task_id = "T20260401-091500";
+        let legacy_dir = store.state_dir_path(TaskStateDir::Archived).join(task_id);
+        store
+            .write_bundle_at(&legacy_dir, &sample_bundle(task_id, 1))
+            .expect("write legacy archived task bundle");
+
+        let task = store
+            .get_task(task_id)
+            .expect("load task")
+            .expect("task should exist");
+
+        assert_eq!(task.id, task_id);
+        assert_eq!(task.status, TaskStatus::Archived);
+        assert!(!legacy_dir.exists());
+        assert!(store.task_dir(TaskStateDir::Archived, task_id).exists());
+    }
+
+    #[test]
+    fn task_dir_only_partitions_terminal_states() {
+        let temp_dir = tempdir().expect("create tempdir");
+        let store = TaskFileStore::new(temp_dir.path().to_path_buf());
+        let task_id = "T20260331-005204";
+
+        assert_eq!(
+            store.task_dir(TaskStateDir::Done, task_id),
+            temp_dir.path().join("done").join("2026-03").join(task_id)
+        );
+        assert_eq!(
+            store.task_dir(TaskStateDir::Archived, task_id),
+            temp_dir
+                .path()
+                .join("archived")
+                .join("2026-03")
+                .join(task_id)
+        );
+        assert_eq!(
+            store.task_dir(TaskStateDir::Rejected, task_id),
+            temp_dir
+                .path()
+                .join("rejected")
+                .join("2026-03")
+                .join(task_id)
+        );
+        assert_eq!(
+            store.task_dir(TaskStateDir::Review, task_id),
+            temp_dir.path().join("review").join(task_id)
+        );
+    }
+
+    fn sample_bundle(task_id: &str, day: u32) -> TaskBundle {
+        let timestamp = Utc
+            .with_ymd_and_hms(2026, 3, day, 12, 34, 56)
+            .single()
+            .expect("valid timestamp");
+        TaskBundle {
+            doc: TaskFileDocument {
+                schema_version: TASK_SCHEMA_VERSION,
+                id: task_id.to_string(),
+                parent_id: None,
+                task_type: TaskType::Task,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                title: format!("Task {task_id}"),
+                description: "Sample task".to_string(),
+                acceptance_criteria: Vec::new(),
+                context_files: Vec::new(),
+                workspace_path: None,
+                repo_root: None,
+                created_by: None,
+                actor_identity: ActorIdentity::default(),
+                agent: None,
+                model: None,
+                assigned_to: None,
+                proposed_by: None,
+                pr_number: None,
+                pr_status: None,
+                source_task_id: None,
+                batch_id: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+                history: Vec::new(),
+                comments: Vec::new(),
+                review_threads: Vec::new(),
+            },
+            plan: "plan".to_string(),
+            execution_summary: String::new(),
+        }
     }
 }

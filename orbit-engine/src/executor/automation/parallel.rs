@@ -19,6 +19,7 @@ const SHARED_WORKTREE_BRANCH: &str = "orbit/parallel-batch";
 struct PendingTask {
     task_id: String,
     context_files: Vec<String>,
+    original_workspace_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -60,6 +61,7 @@ pub(super) fn run_parallel_task_pipeline<H: RuntimeHost + TaskHost + Sync + ?Siz
     let shared_worktree = resolve_shared_worktree_path(repo_root)?;
     ensure_shared_worktree(repo_root, &shared_worktree, &base)?;
     let shared_worktree_str = shared_worktree.to_string_lossy().to_string();
+    set_worker_workspace_path(host, &selected_tasks, &shared_worktree_str)?;
 
     let mut pending = VecDeque::from(selected_tasks.clone());
 
@@ -69,7 +71,7 @@ pub(super) fn run_parallel_task_pipeline<H: RuntimeHost + TaskHost + Sync + ?Siz
     let mut failures = Vec::new();
     let mut completed_task_ids = HashSet::new();
 
-    std::thread::scope(|scope| -> Result<(), OrbitError> {
+    let worker_result = std::thread::scope(|scope| -> Result<(), OrbitError> {
         let (tx, rx) = mpsc::channel::<WorkerOutcome>();
         let mut active = Vec::<PendingTask>::new();
 
@@ -191,7 +193,10 @@ pub(super) fn run_parallel_task_pipeline<H: RuntimeHost + TaskHost + Sync + ?Siz
         }
 
         Ok(())
-    })?;
+    });
+    let restore_result = restore_task_workspace_paths(host, &selected_tasks);
+    worker_result?;
+    restore_result?;
 
     let completed_task_ids = selected_tasks
         .into_iter()
@@ -289,8 +294,42 @@ impl From<Task> for PendingTask {
         Self {
             task_id: task.id,
             context_files: task.context_files,
+            original_workspace_path: task.workspace_path,
         }
     }
+}
+
+fn set_worker_workspace_path<H: TaskHost + ?Sized>(
+    host: &H,
+    tasks: &[PendingTask],
+    workspace_path: &str,
+) -> Result<(), OrbitError> {
+    for task in tasks {
+        host.apply_task_automation_update(
+            &task.task_id,
+            TaskAutomationUpdate {
+                workspace_path: Some(Some(workspace_path.to_string())),
+                ..TaskAutomationUpdate::default()
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn restore_task_workspace_paths<H: TaskHost + ?Sized>(
+    host: &H,
+    tasks: &[PendingTask],
+) -> Result<(), OrbitError> {
+    for task in tasks {
+        host.apply_task_automation_update(
+            &task.task_id,
+            TaskAutomationUpdate {
+                workspace_path: Some(task.original_workspace_path.clone()),
+                ..TaskAutomationUpdate::default()
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn load_selected_tasks<H: TaskHost + ?Sized>(
@@ -389,8 +428,76 @@ fn normalize_path(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{PendingTask, find_launchable_index, paths_conflict, validate_selected_group};
+    use super::{
+        PendingTask, find_launchable_index, paths_conflict, restore_task_workspace_paths,
+        set_worker_workspace_path, validate_selected_group,
+    };
+    use crate::context::{TaskAutomationUpdate, TaskHost};
+    use orbit_types::{OrbitError, Task, TaskPriority, TaskStatus};
     use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct WorkspaceUpdateHost {
+        updates: Mutex<Vec<(String, Option<Option<String>>)>>,
+    }
+
+    impl WorkspaceUpdateHost {
+        fn recorded_updates(&self) -> Vec<(String, Option<Option<String>>)> {
+            self.updates
+                .lock()
+                .expect("workspace updates lock")
+                .clone()
+        }
+    }
+
+    impl TaskHost for WorkspaceUpdateHost {
+        fn get_task(&self, _task_id: &str) -> Result<Task, OrbitError> {
+            unimplemented!("not needed for workspace update tests")
+        }
+
+        fn list_tasks_filtered(
+            &self,
+            _status: Option<TaskStatus>,
+            _priority: Option<TaskPriority>,
+            _parent_id: Option<&str>,
+            _batch_id: Option<&str>,
+        ) -> Result<Vec<Task>, OrbitError> {
+            unimplemented!("not needed for workspace update tests")
+        }
+
+        fn start_task(
+            &self,
+            _task_id: &str,
+            _note: Option<String>,
+            _comment: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!("not needed for workspace update tests")
+        }
+
+        fn update_task_from_activity(
+            &self,
+            _task_id: &str,
+            _status: TaskStatus,
+            _execution_summary: Option<String>,
+            _comment: Option<String>,
+            _note: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!("not needed for workspace update tests")
+        }
+
+        fn apply_task_automation_update(
+            &self,
+            task_id: &str,
+            update: TaskAutomationUpdate,
+        ) -> Result<(), OrbitError> {
+            self.updates
+                .lock()
+                .expect("workspace updates lock")
+                .push((task_id.to_string(), update.workspace_path));
+            Ok(())
+        }
+    }
 
     #[test]
     fn detects_prefix_path_conflicts() {
@@ -405,15 +512,18 @@ mod tests {
         let active = vec![PendingTask {
             task_id: "T-active".to_string(),
             context_files: vec!["src".to_string()],
+            original_workspace_path: None,
         }];
         let pending = VecDeque::from(vec![
             PendingTask {
                 task_id: "T-conflict".to_string(),
                 context_files: vec!["src/lib.rs".to_string()],
+                original_workspace_path: None,
             },
             PendingTask {
                 task_id: "T-safe".to_string(),
                 context_files: vec!["docs/readme.md".to_string()],
+                original_workspace_path: None,
             },
         ]);
 
@@ -426,13 +536,63 @@ mod tests {
             PendingTask {
                 task_id: "T-a".to_string(),
                 context_files: vec!["src".to_string()],
+                original_workspace_path: None,
             },
             PendingTask {
                 task_id: "T-b".to_string(),
                 context_files: vec!["src/lib.rs".to_string()],
+                original_workspace_path: None,
             },
         ];
 
         assert!(validate_selected_group(&selected).is_err());
+    }
+
+    #[test]
+    fn sets_task_workspace_to_shared_worktree_for_workers() {
+        let host = WorkspaceUpdateHost::default();
+        let tasks = vec![PendingTask {
+            task_id: "T-a".to_string(),
+            context_files: vec!["src/lib.rs".to_string()],
+            original_workspace_path: Some("/repo".to_string()),
+        }];
+
+        set_worker_workspace_path(&host, &tasks, "/repo/.orbit/worktrees/parallel-batch")
+            .expect("workspace path update succeeds");
+
+        assert_eq!(
+            host.recorded_updates(),
+            vec![(
+                "T-a".to_string(),
+                Some(Some("/repo/.orbit/worktrees/parallel-batch".to_string())),
+            )]
+        );
+    }
+
+    #[test]
+    fn restores_original_task_workspace_after_parallel_run() {
+        let host = WorkspaceUpdateHost::default();
+        let tasks = vec![
+            PendingTask {
+                task_id: "T-a".to_string(),
+                context_files: vec!["src/lib.rs".to_string()],
+                original_workspace_path: Some("/repo".to_string()),
+            },
+            PendingTask {
+                task_id: "T-b".to_string(),
+                context_files: vec!["docs/readme.md".to_string()],
+                original_workspace_path: None,
+            },
+        ];
+
+        restore_task_workspace_paths(&host, &tasks).expect("workspace restore succeeds");
+
+        assert_eq!(
+            host.recorded_updates(),
+            vec![
+                ("T-a".to_string(), Some(Some("/repo".to_string()))),
+                ("T-b".to_string(), Some(None)),
+            ]
+        );
     }
 }

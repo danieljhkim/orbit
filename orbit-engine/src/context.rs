@@ -110,7 +110,7 @@ pub struct JobRunResult {
 #[derive(Debug, Clone, Default)]
 pub struct TaskAutomationUpdate {
     pub status: Option<TaskStatus>,
-    pub workspace_path: Option<String>,
+    pub workspace_path: Option<Option<String>>,
     pub repo_root: Option<String>,
     pub pr_number: Option<String>,
     pub execution_summary: Option<String>,

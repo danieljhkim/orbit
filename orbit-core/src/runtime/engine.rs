@@ -439,7 +439,7 @@ impl TaskHost for OrbitRuntime {
                     actor: "agent".to_string(),
                     execution_summary: update.execution_summary.clone(),
                     status: update.status,
-                    workspace_path: update.workspace_path.clone().map(Some),
+                    workspace_path: update.workspace_path.clone(),
                     repo_root: update.repo_root.clone().map(Some),
                     pr_number: update.pr_number.clone().map(Some),
                     batch_id: update.batch_id.clone().map(Some),
