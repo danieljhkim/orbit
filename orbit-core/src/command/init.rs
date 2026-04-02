@@ -114,8 +114,12 @@ pub fn init_workspace_at_root(
 
     let overwrite = options.force || options.refresh_defaults;
     let refreshed_skill_files = seed_default_skills(&skills_root, &orbit_root, overwrite)?;
-    let config_path = orbit_root.join("config.toml");
-    let created_config = seed_default_config(&config_path)?;
+    let created_config = if options.global_only {
+        let config_path = orbit_root.join("config.toml");
+        seed_default_config(&config_path)?
+    } else {
+        false
+    };
 
     let skill_ids = default_skill_ids();
     let mut created_skills_symlink = false;

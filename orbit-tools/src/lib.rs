@@ -121,13 +121,20 @@ pub trait Tool: Send + Sync {
 /// Returns `Err(OrbitError::InvalidInput)` if the key is absent, not a string,
 /// or contains only whitespace. The returned string is trimmed.
 pub fn require_str(input: &Value, key: &str) -> Result<String, OrbitError> {
-    input
+    let value = input
         .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string)
-        .ok_or_else(|| OrbitError::InvalidInput(format!("missing `{key}`")))
+        .ok_or_else(|| OrbitError::InvalidInput(format!("missing `{key}`")))?;
+    // Accept both strings and numbers (agents often pass numeric IDs without quotes).
+    let raw = match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => return Err(OrbitError::InvalidInput(format!("missing `{key}`"))),
+    };
+    let trimmed = raw.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(OrbitError::InvalidInput(format!("missing `{key}`")));
+    }
+    Ok(trimmed)
 }
 
 /// Assert that a process result succeeded, returning a descriptive error if not.
@@ -155,4 +162,40 @@ pub fn map_input_from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -
         map.insert(key, Value::String(value));
     }
     Value::Object(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn require_str_accepts_numeric_value() {
+        let input = json!({"pr": 86});
+        assert_eq!(require_str(&input, "pr").unwrap(), "86");
+    }
+
+    #[test]
+    fn require_str_accepts_string_value() {
+        let input = json!({"pr": "86"});
+        assert_eq!(require_str(&input, "pr").unwrap(), "86");
+    }
+
+    #[test]
+    fn require_str_rejects_missing_key() {
+        let input = json!({});
+        assert!(require_str(&input, "pr").is_err());
+    }
+
+    #[test]
+    fn require_str_rejects_empty_string() {
+        let input = json!({"pr": ""});
+        assert!(require_str(&input, "pr").is_err());
+    }
+
+    #[test]
+    fn require_str_rejects_whitespace_only() {
+        let input = json!({"pr": "   "});
+        assert!(require_str(&input, "pr").is_err());
+    }
 }

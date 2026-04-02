@@ -103,7 +103,11 @@ impl WorkspaceInitArgs {
         };
 
         let mut registry = workspace_registry::load_registry_from(registry_path)?;
-        workspace_registry::register_workspace(&mut registry, ws)?;
+        if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
+            existing.updated_at = Utc::now();
+        } else {
+            workspace_registry::register_workspace(&mut registry, ws)?;
+        }
         workspace_registry::save_registry_to(&registry, registry_path)?;
 
         Ok(WorkspaceInitResult {
@@ -223,6 +227,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workspace_init_is_idempotent() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+
+        let registry_path = temp.path().join("home/.orbit/workspaces.json");
+
+        // First init
+        let init_args = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+        };
+        let result1 = init_args
+            .execute_at_path(&repo_root, &registry_path)
+            .expect("first init should succeed");
+        assert_eq!(result1.id, "ws_repo");
+
+        let registry = workspace_registry::load_registry_from(&registry_path).expect("registry");
+        assert_eq!(registry.workspaces.len(), 1);
+        let first_updated_at = registry.workspaces[0].updated_at;
+
+        // Small delay so updated_at differs
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Second init — should not error
+        let init_args2 = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+        };
+        let result2 = init_args2
+            .execute_at_path(&repo_root, &registry_path)
+            .expect("second init should succeed (idempotent)");
+        assert_eq!(result2.id, "ws_repo");
+
+        let registry = workspace_registry::load_registry_from(&registry_path).expect("registry");
+        assert_eq!(
+            registry.workspaces.len(),
+            1,
+            "should still have exactly 1 workspace"
+        );
+        assert!(
+            registry.workspaces[0].updated_at > first_updated_at,
+            "updated_at should be refreshed on re-init"
+        );
+    }
+
+    #[test]
     fn workspace_init_seeds_default_artifacts_and_registers_workspace() {
         let temp = tempfile::tempdir().expect("tempdir");
         let repo_root = temp.path().join("repo");
@@ -252,8 +303,8 @@ mod tests {
         );
         assert!(orbit_dir.join("jobs").is_dir(), "jobs dir should exist");
         assert!(
-            orbit_dir.join("config.toml").is_file(),
-            "config should be seeded"
+            !orbit_dir.join("config.toml").is_file(),
+            "workspace init should not seed config.toml"
         );
         // Scoreboards are only seeded when scoring.enabled = true in config.
         // The default config template sets scoring.enabled = false, so

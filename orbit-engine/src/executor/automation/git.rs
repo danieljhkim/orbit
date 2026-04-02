@@ -102,6 +102,29 @@ pub(super) fn fetch_remote_base(repo_root: &Path, base: &str) {
     );
 }
 
+pub(super) fn refresh_local_base_branch(repo_root: &Path, base: &str) {
+    // Best-effort: if pull fails (e.g. no remote, offline, fresh branch),
+    // we continue with whatever the local branch has. The push step will
+    // catch actual divergence later.
+    let _ = run_process(
+        &ExecRequest {
+            program: "git".to_string(),
+            args: vec![
+                "pull".to_string(),
+                "--rebase".to_string(),
+                "origin".to_string(),
+                base.to_string(),
+            ],
+            current_dir: Some(repo_root.to_string_lossy().to_string()),
+            timeout_ms: Some(60_000),
+            stdin_mode: StdinMode::Null,
+            environment_mode: EnvironmentMode::Inherit,
+            debug: false,
+        },
+        &NoSandbox,
+    );
+}
+
 pub(super) fn resolve_worktree_start_point(
     repo_root: &Path,
     base: &str,

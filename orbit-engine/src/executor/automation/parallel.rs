@@ -6,7 +6,9 @@ use std::time::Duration;
 use orbit_types::{JobRunState, OrbitError, Task, TaskStatus};
 use serde_json::{Value, json};
 
-use super::git::{git_output, git_success, resolve_worktree_start_point};
+use super::git::{
+    git_output, git_success, refresh_local_base_branch, resolve_worktree_start_point,
+};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 const DEFAULT_PARALLEL_BASE: &str = "agent-main";
@@ -58,6 +60,7 @@ pub(super) fn run_parallel_task_pipeline<H: RuntimeHost + TaskHost + Sync + ?Siz
     // Set up the shared worktree before spawning workers.
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
+    refresh_local_base_branch(repo_root, &base);
     let shared_worktree = resolve_shared_worktree_path(repo_root)?;
     ensure_shared_worktree(repo_root, &shared_worktree, &base)?;
     let shared_worktree_str = shared_worktree.to_string_lossy().to_string();
