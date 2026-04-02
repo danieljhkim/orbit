@@ -68,6 +68,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/automation/commit_batch_changes.yaml"),
     ),
     (
+        "pull_batch_changes",
+        include_str!("../../assets/activities/automation/pull_batch_changes.yaml"),
+    ),
+    (
         "push_batch_changes",
         include_str!("../../assets/activities/automation/push_batch_changes.yaml"),
     ),

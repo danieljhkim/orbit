@@ -56,6 +56,7 @@ orbit tool run orbit.task.add --input '{
   "description": "<what happened, where, and why it caused friction>",
   "type": "friction",
   "priority": "<low|medium|high|critical>",
+  "workspace": ".",
   "agent": "<agent>",
   "model": "<model>"
 }'

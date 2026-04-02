@@ -29,6 +29,11 @@ job:
     base: agent-main
   steps:
     - target_type: activity
+      target_id: pull_batch_changes
+      condition: always
+      timeout_seconds: 120
+
+    - target_type: activity
       target_id: implement_batch_fix
       agent_cli: claude
       model: opus

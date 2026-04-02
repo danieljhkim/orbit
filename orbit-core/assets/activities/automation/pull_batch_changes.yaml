@@ -1,0 +1,32 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- registration ----
+  id: pull_batch_changes
+  spec_type: automation
+
+  # ---- content ----
+  description: "Pull latest remote commits with rebase in the shared batch worktree."
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Batch run ID (batch_id). The shared worktree and branch are resolved from batch task metadata.
+      workspace_path:
+        type: string
+        description: Optional explicit workspace path. If omitted, resolved from batch task metadata.
+  output_schema_json:
+    type: object
+    properties: {}
+
+  # ---- execution ----
+  action: pull_batch_changes

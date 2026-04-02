@@ -6,6 +6,7 @@ mod git;
 mod input;
 mod parallel;
 mod pr;
+mod pull;
 mod push;
 pub(crate) mod review;
 mod snapshot;
@@ -30,6 +31,7 @@ const AUTOMATION_SNAPSHOT_BATCH_STATE: &str = "snapshot_batch_state";
 const AUTOMATION_MERGE_BATCH_PR: &str = "merge_batch_pr";
 const AUTOMATION_CHECK_BATCH_REVIEW_DECISION: &str = "check_batch_review_decision";
 const AUTOMATION_SYNC_BATCH_REVIEW_TO_GITHUB: &str = "sync_batch_review_to_github";
+const AUTOMATION_PULL_BATCH_CHANGES: &str = "pull_batch_changes";
 const AUTOMATION_PUSH_BATCH_CHANGES: &str = "push_batch_changes";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -99,6 +101,7 @@ pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync 
         AUTOMATION_SYNC_BATCH_REVIEW_TO_GITHUB => {
             sync_review::sync_batch_review_to_github(host, input)
         }
+        AUTOMATION_PULL_BATCH_CHANGES => pull::pull_batch_changes(host, input),
         AUTOMATION_PUSH_BATCH_CHANGES => push::push_batch_changes(host, input),
         other => Err(OrbitError::InvalidInput(format!(
             "unsupported automation action '{other}'"
