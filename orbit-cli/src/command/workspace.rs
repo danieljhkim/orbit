@@ -262,7 +262,11 @@ mod tests {
         assert_eq!(result2.id, "ws_repo");
 
         let registry = workspace_registry::load_registry_from(&registry_path).expect("registry");
-        assert_eq!(registry.workspaces.len(), 1, "should still have exactly 1 workspace");
+        assert_eq!(
+            registry.workspaces.len(),
+            1,
+            "should still have exactly 1 workspace"
+        );
         assert!(
             registry.workspaces[0].updated_at > first_updated_at,
             "updated_at should be refreshed on re-init"

@@ -6,7 +6,9 @@ use std::time::Duration;
 use orbit_types::{JobRunState, OrbitError, Task, TaskStatus};
 use serde_json::{Value, json};
 
-use super::git::{git_output, git_success, refresh_local_base_branch, resolve_worktree_start_point};
+use super::git::{
+    git_output, git_success, refresh_local_base_branch, resolve_worktree_start_point,
+};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 const DEFAULT_PARALLEL_BASE: &str = "agent-main";
