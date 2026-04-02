@@ -80,3 +80,33 @@ fn increment(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        record_friction_accepted, record_friction_rejected, record_friction_reported,
+    };
+    use std::fs;
+
+    use serde_json::Value;
+    use tempfile::tempdir;
+
+    #[test]
+    fn records_metrics_by_agent_and_model() {
+        let dir = tempdir().expect("tempdir");
+
+        record_friction_reported(dir.path(), "codex", "gpt-5.4").expect("reported");
+        record_friction_reported(dir.path(), "codex", "gpt-5.4").expect("reported again");
+        record_friction_accepted(dir.path(), "claude", "opus").expect("accepted");
+        record_friction_rejected(dir.path(), "codex", "gpt-5.4").expect("rejected");
+
+        let scoreboard: Value = serde_json::from_str(
+            &fs::read_to_string(dir.path().join("friction_bounty.json")).expect("scoreboard"),
+        )
+        .expect("valid json");
+
+        assert_eq!(scoreboard["issues-reported"]["codex"]["gpt-5.4"], 2);
+        assert_eq!(scoreboard["issues-accepted"]["claude"]["opus"], 1);
+        assert_eq!(scoreboard["issues-rejected"]["codex"]["gpt-5.4"], 1);
+    }
+}

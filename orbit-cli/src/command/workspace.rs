@@ -35,6 +35,9 @@ pub struct WorkspaceInitArgs {
     /// Base branch for this workspace (default: main)
     #[arg(long, default_value = "main")]
     pub base_branch: String,
+    /// Refresh default skills, activities, and jobs without wiping the workspace
+    #[arg(long)]
+    pub refresh_defaults: bool,
 }
 
 #[derive(Args)]
@@ -90,7 +93,13 @@ impl WorkspaceInitArgs {
         registry_path: &std::path::Path,
     ) -> Result<WorkspaceInitResult, OrbitError> {
         let orbit_dir = cwd.join(".orbit");
-        init_workspace_at_root(&orbit_dir, InitOptions::default())?;
+        init_workspace_at_root(
+            &orbit_dir,
+            InitOptions {
+                refresh_defaults: self.refresh_defaults,
+                ..Default::default()
+            },
+        )?;
 
         let tasks_dir = orbit_dir.join("tasks");
         std::fs::create_dir_all(&tasks_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
@@ -363,6 +372,7 @@ mod tests {
         let init_args = WorkspaceInitArgs {
             name: None,
             base_branch: "main".to_string(),
+            refresh_defaults: false,
         };
         let result1 = init_args
             .execute_at_path(&repo_root, &registry_path)
@@ -380,6 +390,7 @@ mod tests {
         let init_args2 = WorkspaceInitArgs {
             name: None,
             base_branch: "main".to_string(),
+            refresh_defaults: false,
         };
         let result2 = init_args2
             .execute_at_path(&repo_root, &registry_path)
@@ -408,6 +419,7 @@ mod tests {
         let init_args = WorkspaceInitArgs {
             name: None,
             base_branch: "main".to_string(),
+            refresh_defaults: false,
         };
         init_args
             .execute_at_path(&repo_root, &registry_path)
@@ -434,6 +446,7 @@ mod tests {
         let init_args = WorkspaceInitArgs {
             name: None,
             base_branch: "main".to_string(),
+            refresh_defaults: false,
         };
         init_args
             .execute_at_path(&repo_root, &registry_path)
@@ -475,6 +488,7 @@ mod tests {
         let init_args = WorkspaceInitArgs {
             name: None,
             base_branch: "main".to_string(),
+            refresh_defaults: false,
         };
 
         let init_result = init_args
@@ -546,5 +560,91 @@ mod tests {
         assert_eq!(workspace.name, "repo");
         assert_eq!(workspace.root, repo_root);
         assert_eq!(workspace.orbit_dir, orbit_dir);
+    }
+
+    #[test]
+    fn workspace_init_refresh_defaults_only_overwrites_default_artifacts_when_requested() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+
+        let registry_path = temp.path().join("home/.orbit/workspaces.json");
+        WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            refresh_defaults: false,
+        }
+        .execute_at_path(&repo_root, &registry_path)
+        .expect("workspace init should succeed");
+
+        let orbit_dir = repo_root.join(".orbit");
+        let skill_path = orbit_dir.join("skills/orbit/SKILL.md");
+        let activity_path = orbit_dir.join("activities/active/implement_change.yaml");
+        let job_path = orbit_dir.join("jobs/jobs/job_parallel_task_worker.yaml");
+        let custom_skill_path = orbit_dir.join("skills/custom/SKILL.md");
+
+        let original_skill = std::fs::read_to_string(&skill_path).expect("read default skill");
+        let original_activity =
+            std::fs::read_to_string(&activity_path).expect("read default activity");
+        let original_job = std::fs::read_to_string(&job_path).expect("read default job");
+        let stale_activity = format!("# stale activity\n{original_activity}");
+        let stale_job = format!("# stale job\n{original_job}");
+
+        std::fs::write(&skill_path, "stale skill\n").expect("write stale skill");
+        std::fs::write(&activity_path, &stale_activity).expect("write stale activity");
+        std::fs::write(&job_path, &stale_job).expect("write stale job");
+        std::fs::create_dir_all(custom_skill_path.parent().expect("custom skill parent"))
+            .expect("create custom skill dir");
+        std::fs::write(&custom_skill_path, "custom skill\n").expect("write custom skill");
+
+        WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            refresh_defaults: false,
+        }
+        .execute_at_path(&repo_root, &registry_path)
+        .expect("workspace init without refresh should succeed");
+
+        assert_eq!(
+            std::fs::read_to_string(&skill_path).expect("read stale skill"),
+            "stale skill\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&activity_path).expect("read stale activity"),
+            stale_activity
+        );
+        assert_eq!(
+            std::fs::read_to_string(&job_path).expect("read stale job"),
+            stale_job
+        );
+        assert_eq!(
+            std::fs::read_to_string(&custom_skill_path).expect("read custom skill"),
+            "custom skill\n"
+        );
+
+        WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            refresh_defaults: true,
+        }
+        .execute_at_path(&repo_root, &registry_path)
+        .expect("workspace init with refresh should succeed");
+
+        assert_eq!(
+            std::fs::read_to_string(&skill_path).expect("read refreshed skill"),
+            original_skill
+        );
+        assert_eq!(
+            std::fs::read_to_string(&activity_path).expect("read refreshed activity"),
+            original_activity
+        );
+        assert_eq!(
+            std::fs::read_to_string(&job_path).expect("read refreshed job"),
+            original_job
+        );
+        assert_eq!(
+            std::fs::read_to_string(&custom_skill_path).expect("read preserved custom skill"),
+            "custom skill\n"
+        );
     }
 }

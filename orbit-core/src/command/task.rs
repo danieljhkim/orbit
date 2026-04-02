@@ -105,7 +105,7 @@ impl OrbitRuntime {
         let (create_actor, create_identity, create_label) = if is_friction {
             (
                 "system".to_string(),
-                ActorIdentity::System,
+                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
                 "system".to_string(),
             )
         } else {
@@ -1054,8 +1054,10 @@ mod tests {
         TaskAddParams, TaskUpdateParams, UNAUTHORED_TASK_PLAN_PLACEHOLDER,
         ensure_task_has_execution_plan,
     };
+    use crate::context::ActorIdentity;
     use crate::{OrbitError, OrbitRuntime, TaskStatus, TaskType};
     use orbit_engine::{TaskAutomationUpdate, TaskHost};
+    use serde_json::Value;
     use std::fs;
     use std::path::Path;
 
@@ -1064,6 +1066,37 @@ mod tests {
             .expect("canonical path")
             .to_string_lossy()
             .into_owned()
+    }
+
+    fn scoring_runtime(
+        actor: ActorIdentity,
+        approval_required_for_agent: bool,
+    ) -> (tempfile::TempDir, OrbitRuntime) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let global_root = temp.path().join("global/.orbit");
+        let workspace_root = temp.path().join("workspace/.orbit");
+        fs::create_dir_all(&global_root).expect("global root");
+        fs::create_dir_all(&workspace_root).expect("workspace root");
+        fs::write(
+            workspace_root.join("config.toml"),
+            format!(
+                "[task.approval]\nrequired_for_agent = {approval_required_for_agent}\ndelegate_approval = false\n\n[scoring]\nenabled = true\n"
+            ),
+        )
+        .expect("config");
+
+        let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root)
+            .expect("runtime")
+            .with_actor(actor);
+        (temp, runtime)
+    }
+
+    fn read_friction_bounty(runtime: &OrbitRuntime) -> Value {
+        serde_json::from_str(
+            &fs::read_to_string(runtime.paths().scoreboard_dir.join("friction_bounty.json"))
+                .expect("scoreboard"),
+        )
+        .expect("valid scoreboard json")
     }
 
     #[test]
@@ -1359,6 +1392,45 @@ mod tests {
         assert_eq!(task.created_by, Some("system".to_string()));
         assert_eq!(task.proposed_by, Some("system".to_string()));
         assert_eq!(task.assigned_to, Some("system".to_string()));
+    }
+
+    #[test]
+    fn issue_task_lifecycle_updates_friction_bounty_scoreboard() {
+        let (_temp, runtime) = scoring_runtime(ActorIdentity::agent("executor"), true);
+        let task = runtime
+            .add_task_with_identity(
+                TaskAddParams {
+                    title: "issue report".to_string(),
+                    description: "friction in orbit".to_string(),
+                    task_type: TaskType::Issue,
+                    ..Default::default()
+                },
+                Some("codex".to_string()),
+                Some("gpt-5.4".to_string()),
+            )
+            .expect("issue task");
+
+        assert_eq!(task.status, TaskStatus::Proposed);
+
+        let scoreboard = read_friction_bounty(&runtime);
+        assert_eq!(scoreboard["issues-reported"]["codex"]["gpt-5.4"], 1);
+
+        runtime
+            .approve_task(&task.id, None, None)
+            .expect("approve proposed issue");
+
+        let scoreboard = read_friction_bounty(&runtime);
+        assert_eq!(scoreboard["issues-reported"]["codex"]["gpt-5.4"], 1);
+        assert_eq!(scoreboard["issues-accepted"]["codex"]["gpt-5.4"], 1);
+
+        runtime
+            .reject_task(&task.id, "not actionable".to_string(), None)
+            .expect("reject backlog issue");
+
+        let scoreboard = read_friction_bounty(&runtime);
+        assert_eq!(scoreboard["issues-reported"]["codex"]["gpt-5.4"], 1);
+        assert_eq!(scoreboard["issues-accepted"]["codex"]["gpt-5.4"], 1);
+        assert_eq!(scoreboard["issues-rejected"]["codex"]["gpt-5.4"], 1);
     }
 
     #[test]
