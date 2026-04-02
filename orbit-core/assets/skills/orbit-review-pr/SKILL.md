@@ -94,6 +94,29 @@ orbit tool run github.pr.comment --input '{
 - **REQUEST_CHANGES** — any P1 present, must be resolved before merge
 - **COMMENT** — P2/P3 observations only, no blockers
 
+## Verification
+
+Before submitting your review decision, verify the changes compile and pass tests. Use a temporary worktree so the main workspace is not modified.
+
+```bash
+# Create a temporary worktree at the PR commit
+git worktree add /tmp/orbit-pr<pr-number>-review <commit-sha>
+
+# cd into worktree
+cd /tmp/orbit-pr<pr-number>-review
+# Run Tests
+```
+
+### Cleanup
+
+Always clean up the temporary worktree after verification:
+
+```bash
+git worktree remove /tmp/orbit-pr<pr-number>-review
+# If the path is already gone:
+git worktree prune
+```
+
 ## What to Review
 
 1. **Spec compliance first.** Does the code meet the task requirements? Nothing more, nothing less? Missing features? Unnecessary additions?
