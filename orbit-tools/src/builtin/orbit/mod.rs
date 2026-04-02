@@ -8,6 +8,7 @@ pub mod review_thread_reply;
 pub mod review_thread_resolve;
 pub mod task_add;
 pub mod task_approve;
+pub mod task_delete;
 pub mod task_list;
 pub mod task_reject;
 pub mod task_show;
@@ -35,6 +36,7 @@ pub(super) struct OrbitIdentity {
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_add::OrbitTaskAddTool);
     registry.register(task_approve::OrbitTaskApproveTool);
+    registry.register(task_delete::OrbitTaskDeleteTool);
     registry.register(task_start::OrbitTaskStartTool);
     registry.register(task_reject::OrbitTaskRejectTool);
     registry.register(task_show::OrbitTaskShowTool);

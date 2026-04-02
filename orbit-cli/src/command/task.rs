@@ -921,10 +921,22 @@ pub struct TaskDeleteArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+    /// Force deletion without status guard (required for non-proposed/rejected tasks)
+    #[arg(long)]
+    pub force: bool,
 }
 
 impl Execute for TaskDeleteArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let task = runtime.get_task(&self.id)?;
+        if !self.force
+            && !matches!(task.status, TaskStatus::Proposed | TaskStatus::Rejected)
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "task '{}' is in status '{}'; use --force to delete tasks not in proposed or rejected status",
+                self.id, task.status
+            )));
+        }
         runtime.delete_task(&self.id)?;
         if self.json {
             crate::output::json::print_pretty(&json!({

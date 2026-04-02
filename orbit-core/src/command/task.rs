@@ -577,8 +577,48 @@ impl OrbitRuntime {
                     },
                 ))
             }),
+            TaskStatus::Backlog => self.with_mutation(|| {
+                let task = self.update_task_record(
+                    id,
+                    StoreTaskUpdateParams {
+                        actor: effective_label.clone(),
+                        status: Some(TaskStatus::Rejected),
+                        status_event: Some("backlog_rejected".to_string()),
+                        status_note: Some(reason.clone()),
+                        append_comments: append_comments.clone(),
+                        ..Default::default()
+                    },
+                )?;
+                Ok((
+                    task.clone(),
+                    OrbitEvent::TaskProposalRejected {
+                        id: id.to_string(),
+                        rejected_by: effective_label.clone(),
+                    },
+                ))
+            }),
+            TaskStatus::InProgress => self.with_mutation(|| {
+                let task = self.update_task_record(
+                    id,
+                    StoreTaskUpdateParams {
+                        actor: effective_label.clone(),
+                        status: Some(TaskStatus::Rejected),
+                        status_event: Some("in_progress_rejected".to_string()),
+                        status_note: Some(reason.clone()),
+                        append_comments: append_comments.clone(),
+                        ..Default::default()
+                    },
+                )?;
+                Ok((
+                    task.clone(),
+                    OrbitEvent::TaskProposalRejected {
+                        id: id.to_string(),
+                        rejected_by: effective_label.clone(),
+                    },
+                ))
+            }),
             other => Err(OrbitError::InvalidInput(format!(
-                "task '{id}' is in status '{other}'; reject requires 'proposed' or 'review'"
+                "task '{id}' is in status '{other}'; reject requires 'proposed', 'review', 'backlog', or 'in-progress'"
             ))),
         }?;
 
@@ -1216,5 +1256,60 @@ mod tests {
             .expect("task");
 
         assert_eq!(task.workspace_path, None);
+    }
+
+    #[test]
+    fn reject_from_backlog_succeeds() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("backlog task", TaskStatus::Backlog)
+            .expect("task");
+
+        let rejected = runtime
+            .reject_task(&task.id, "duplicate".to_string(), None)
+            .expect("reject from backlog should succeed");
+
+        assert_eq!(rejected.status, TaskStatus::Rejected);
+    }
+
+    #[test]
+    fn reject_from_in_progress_succeeds() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("wip task", TaskStatus::InProgress)
+            .expect("task");
+
+        let rejected = runtime
+            .reject_task(&task.id, "no longer needed".to_string(), None)
+            .expect("reject from in_progress should succeed");
+
+        assert_eq!(rejected.status, TaskStatus::Rejected);
+    }
+
+    #[test]
+    fn reject_from_done_is_disallowed() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("done task", TaskStatus::Done)
+            .expect("task");
+
+        let err = runtime
+            .reject_task(&task.id, "oops".to_string(), None)
+            .expect_err("reject from done should fail");
+
+        assert!(matches!(err, OrbitError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn delete_task_removes_it() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("to delete", TaskStatus::Proposed)
+            .expect("task");
+
+        runtime.delete_task(&task.id).expect("delete should succeed");
+
+        let err = runtime.get_task(&task.id).expect_err("task should be gone");
+        assert!(matches!(err, OrbitError::TaskNotFound(_)));
     }
 }
