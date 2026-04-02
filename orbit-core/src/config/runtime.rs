@@ -342,6 +342,7 @@ impl ExecutionEnvPolicy {
 
 fn default_pass_list() -> Vec<String> {
     // Cross-platform POSIX base: required by virtually all CLI tools.
+    #[allow(unused_mut)]
     let mut vars: Vec<&str> = vec!["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"];
 
     // macOS: SCDynamicStore / CoreFoundation requires this encoding var.
