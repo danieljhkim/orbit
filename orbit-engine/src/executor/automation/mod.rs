@@ -12,7 +12,6 @@ mod snapshot;
 mod sync_review;
 mod task;
 
-
 use orbit_types::{Activity, JobRunState, OrbitError};
 use serde::Deserialize;
 use serde_json::Value;
