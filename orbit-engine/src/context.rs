@@ -320,12 +320,15 @@ pub fn step_output_for_following_input<'a>(
     activity: &Activity,
     response_json: Option<&'a Value>,
 ) -> Option<&'a serde_json::Map<String, Value>> {
-    match activity.spec_type.as_str() {
-        // Agent output is not piped between steps — agents persist state via
-        // task artifacts (orbit.task.update).
-        "agent_invoke" => None,
-        _ => response_json.and_then(Value::as_object),
+    let output = response_json.and_then(Value::as_object)?;
+
+    if activity.spec_type == "agent_invoke" {
+        // Agent responses are wrapped in the standard envelope, so pipe the
+        // structured `result` payload into the following step's input.
+        return output.get("result").and_then(Value::as_object);
     }
+
+    Some(output)
 }
 
 pub fn input_workspace_path(input: &Value) -> Option<String> {
@@ -420,4 +423,71 @@ pub fn redact_attempt_outcome(mut outcome: AttemptOutcome) -> AttemptOutcome {
     outcome.response_json = outcome.response_json.map(redact_sensitive_env_json);
     outcome.error_message = redact_sensitive_env_option(outcome.error_message);
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step_output_for_following_input;
+    use orbit_types::Activity;
+    use serde_json::json;
+
+    fn activity(spec_type: &str) -> Activity {
+        let now = chrono::Utc::now();
+        Activity {
+            id: format!("activity-{spec_type}"),
+            spec_type: spec_type.to_string(),
+            description: "test activity".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({}),
+            tools: Vec::new(),
+            proc_allowed_programs: Vec::new(),
+            workspace_path: None,
+            created_by: None,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn step_output_for_following_input_pipes_agent_invoke_output() {
+        let activity = activity("agent_invoke");
+        let response = json!({
+            "schemaVersion": 1,
+            "status": "success",
+            "result": {
+                "status": "review",
+                "execution_summary": "persist me"
+            },
+            "error": null
+        });
+
+        let output = step_output_for_following_input(&activity, Some(&response))
+            .expect("agent_invoke output should be piped");
+
+        assert_eq!(output.get("status"), Some(&json!("review")));
+        assert_eq!(output.get("execution_summary"), Some(&json!("persist me")));
+    }
+
+    #[test]
+    fn step_output_for_following_input_still_ignores_non_object_output() {
+        let activity = activity("agent_invoke");
+        let response = json!("not-an-object");
+
+        assert!(step_output_for_following_input(&activity, Some(&response)).is_none());
+    }
+
+    #[test]
+    fn step_output_for_following_input_keeps_non_agent_output_unchanged() {
+        let activity = activity("automation");
+        let response = json!({
+            "status": "review"
+        });
+
+        let output = step_output_for_following_input(&activity, Some(&response))
+            .expect("automation output should be piped");
+
+        assert_eq!(output.get("status"), Some(&json!("review")));
+    }
 }

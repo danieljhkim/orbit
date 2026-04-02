@@ -315,13 +315,8 @@ impl Execute for TaskListArgs {
 
         let all_tasks = runtime.list_tasks()?;
         let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
-        let status_filter: &[TaskStatus] = if all {
-            &[]
-        } else if !status.is_empty() {
-            &status
-        } else {
-            &active_statuses
-        };
+        let status_filter =
+            default_task_list_status_filter(all, &status, batch_id.as_deref(), &active_statuses);
 
         let tasks: Vec<_> = all_tasks
             .into_iter()
@@ -349,6 +344,23 @@ impl Execute for TaskListArgs {
             print_task_table(&tasks);
             Ok(())
         }
+    }
+}
+
+fn default_task_list_status_filter<'a>(
+    all: bool,
+    status: &'a [TaskStatus],
+    batch_id: Option<&str>,
+    active_statuses: &'a [TaskStatus],
+) -> &'a [TaskStatus] {
+    if all {
+        &[]
+    } else if !status.is_empty() {
+        status
+    } else if batch_id.is_some() {
+        &[]
+    } else {
+        active_statuses
     }
 }
 
@@ -1229,7 +1241,8 @@ mod tests {
 
     use crate::command::{Cli, Commands};
 
-    use super::{TaskSubcommand, parse_context_csv};
+    use super::{TaskSubcommand, default_task_list_status_filter, parse_context_csv};
+    use orbit_core::TaskStatus;
 
     #[test]
     fn task_update_accepts_context_flag() {
@@ -1290,5 +1303,45 @@ mod tests {
                 "orbit-tools/src/builtin/orbit/task_update.rs".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn task_list_batch_queries_bypass_default_active_status_filter() {
+        let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
+
+        let status_filter = default_task_list_status_filter(
+            false,
+            &[],
+            Some("jrun-20260402-0145-2"),
+            &active_statuses,
+        );
+
+        assert!(status_filter.is_empty());
+    }
+
+    #[test]
+    fn task_list_keeps_explicit_status_filter_for_non_batch_queries() {
+        let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
+        let requested_statuses = [TaskStatus::Review];
+
+        let status_filter =
+            default_task_list_status_filter(false, &requested_statuses, None, &active_statuses);
+
+        assert_eq!(status_filter, requested_statuses);
+    }
+
+    #[test]
+    fn task_list_keeps_explicit_status_filter_for_batch_queries() {
+        let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
+        let requested_statuses = [TaskStatus::Review];
+
+        let status_filter = default_task_list_status_filter(
+            false,
+            &requested_statuses,
+            Some("jrun-20260402-0145-2"),
+            &active_statuses,
+        );
+
+        assert_eq!(status_filter, requested_statuses);
     }
 }
