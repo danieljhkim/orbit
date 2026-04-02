@@ -302,6 +302,8 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 SkillSubcommand::List(_) => ("list", None),
                 SkillSubcommand::Show(args) => ("show", Some(args.name.as_str())),
                 SkillSubcommand::Doctor(_) => ("doctor", None),
+                SkillSubcommand::Link(_) => ("link", None),
+                SkillSubcommand::Unlink(_) => ("unlink", None),
             };
             CommandMeta {
                 command: "skill".to_string(),
@@ -321,6 +323,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 WorkspaceSubcommand::List(_) => "list",
                 WorkspaceSubcommand::Show(_) => "show",
                 WorkspaceSubcommand::Remove(_) => "remove",
+                WorkspaceSubcommand::Teardown(_) => "teardown",
             };
             CommandMeta {
                 command: "workspace".to_string(),

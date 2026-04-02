@@ -171,7 +171,7 @@ fn resolve_init_target_from_root(orbit_root: &Path) -> InitTarget {
     }
 }
 
-fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
+pub(crate) fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
     [".agents", ".claude"]
         .into_iter()
         .map(|dir| base_root.join(dir).join("skills"))
@@ -292,4 +292,98 @@ fn ensure_skill_links(
     }
 
     Ok(changed)
+}
+
+// --- Public link/unlink API ---
+
+#[derive(Debug, Clone)]
+pub struct LinkResult {
+    pub linked_count: usize,
+    pub roots: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnlinkResult {
+    pub removed_count: usize,
+    pub cleaned_dirs: Vec<PathBuf>,
+}
+
+/// Re-create skill symlinks in `.agents/skills/` and `.claude/skills/`.
+pub fn link_skills(orbit_root: &Path) -> Result<LinkResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(orbit_root);
+    let skills_root = init_target.orbit_root.join("skills");
+
+    if !skills_root.exists() {
+        return Err(OrbitError::InvalidInput(format!(
+            "skills root does not exist: {}",
+            skills_root.display()
+        )));
+    }
+
+    let skill_ids = default_skill_ids();
+    let mut linked_count = 0usize;
+    let mut roots = Vec::new();
+
+    for skills_links_root in &init_target.skills_links_roots {
+        let changed = ensure_skill_links(&skills_root, &skill_ids, skills_links_root, false)?;
+        if changed {
+            linked_count += skill_ids.len();
+        }
+        roots.push(skills_links_root.clone());
+    }
+
+    Ok(LinkResult {
+        linked_count,
+        roots,
+    })
+}
+
+/// Remove skill symlinks from `.agents/skills/` and `.claude/skills/`.
+/// Only removes symlinks — regular files and directories are left intact.
+pub fn unlink_skills(orbit_root: &Path) -> Result<UnlinkResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(orbit_root);
+    let mut removed_count = 0usize;
+    let mut cleaned_dirs = Vec::new();
+
+    for skills_links_dir in &init_target.skills_links_roots {
+        if !skills_links_dir.exists() {
+            continue;
+        }
+
+        let entries =
+            fs::read_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+            let meta =
+                fs::symlink_metadata(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
+            if meta.file_type().is_symlink() {
+                fs::remove_file(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
+                removed_count += 1;
+            }
+        }
+
+        // Clean up empty skills dir, then empty parent (.agents/ or .claude/)
+        if skills_links_dir.exists() && dir_is_empty(skills_links_dir)? {
+            fs::remove_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+            cleaned_dirs.push(skills_links_dir.clone());
+
+            if let Some(parent) = skills_links_dir.parent() {
+                if parent.exists() && dir_is_empty(parent)? {
+                    fs::remove_dir(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+                    cleaned_dirs.push(parent.to_path_buf());
+                }
+            }
+        }
+    }
+
+    Ok(UnlinkResult {
+        removed_count,
+        cleaned_dirs,
+    })
+}
+
+fn dir_is_empty(path: &Path) -> Result<bool, OrbitError> {
+    let mut entries = fs::read_dir(path).map_err(|e| OrbitError::Io(e.to_string()))?;
+    Ok(entries.next().is_none())
 }

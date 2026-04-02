@@ -101,13 +101,27 @@ impl OrbitRuntime {
             } else {
                 TaskStatus::Backlog
             };
+        let is_friction = params.task_type.is_friction();
+        let (create_actor, create_identity, create_label) = if is_friction {
+            (
+                "system".to_string(),
+                ActorIdentity::System,
+                "system".to_string(),
+            )
+        } else {
+            (
+                effective_label.clone(),
+                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
+                effective_label.clone(),
+            )
+        };
         let comments = build_task_comments(params.comment.clone(), effective_label.as_str())?;
         let workspace_path =
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
 
         let task = self.with_mutation(|| {
             let task = self.create_task_record(StoreTaskCreateParams {
-                actor: effective_label.clone(),
+                actor: create_actor.clone(),
                 parent_id: params.parent_id.clone(),
                 title: params.title.clone(),
                 description: params.description.clone(),
@@ -117,15 +131,15 @@ impl OrbitRuntime {
                 context_files: params.context_files.clone(),
                 workspace_path: workspace_path.clone(),
                 repo_root: None,
-                created_by: Some(effective_label.clone()),
-                actor_identity: ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
-                assigned_to: Some(effective_label.clone()),
+                created_by: Some(create_label.clone()),
+                actor_identity: create_identity.clone(),
+                assigned_to: Some(create_label.clone()),
                 status: initial_status,
                 priority: params.priority,
                 complexity: params.complexity,
                 task_type: params.task_type,
                 pr_number: None,
-                proposed_by: Some(effective_label.clone()),
+                proposed_by: Some(create_label.clone()),
                 source_task_id: params.source_task_id.clone(),
                 comments: comments.clone(),
             })?;

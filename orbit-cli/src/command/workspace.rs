@@ -23,6 +23,8 @@ pub enum WorkspaceSubcommand {
     Show(WorkspaceShowArgs),
     /// Remove a workspace from the registry (does not delete .orbit)
     Remove(WorkspaceRemoveArgs),
+    /// Remove all Orbit artifacts from this workspace
+    Teardown(WorkspaceTeardownArgs),
 }
 
 #[derive(Args)]
@@ -47,6 +49,13 @@ pub struct WorkspaceRemoveArgs {
     pub workspace: String,
 }
 
+#[derive(Args)]
+pub struct WorkspaceTeardownArgs {
+    /// Required flag to confirm destructive operation
+    #[arg(long)]
+    pub confirm: bool,
+}
+
 impl Execute for WorkspaceCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self.command {
@@ -57,6 +66,7 @@ impl Execute for WorkspaceCommand {
             WorkspaceSubcommand::List(args) => args.execute(runtime),
             WorkspaceSubcommand::Show(args) => args.execute(runtime),
             WorkspaceSubcommand::Remove(args) => args.execute(runtime),
+            WorkspaceSubcommand::Teardown(args) => args.execute(runtime),
         }
     }
 }
@@ -200,6 +210,121 @@ impl Execute for WorkspaceRemoveArgs {
         println!("workspace '{}' removed from registry", removed.name);
         Ok(())
     }
+}
+
+impl Execute for WorkspaceTeardownArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if !self.confirm {
+            return Err(OrbitError::InvalidInput(
+                "teardown is destructive. Pass --confirm to proceed.".to_string(),
+            ));
+        }
+
+        let orbit_dir = runtime.data_root();
+        let global_dir =
+            workspace_registry::global_orbit_dir()?;
+
+        // Safety: never delete the global ~/.orbit/ directory
+        let orbit_canonical =
+            std::fs::canonicalize(&orbit_dir).unwrap_or_else(|_| orbit_dir.clone());
+        let global_canonical =
+            std::fs::canonicalize(&global_dir).unwrap_or_else(|_| global_dir.clone());
+        if orbit_canonical == global_canonical {
+            return Err(OrbitError::InvalidInput(
+                "refusing to teardown the global ~/.orbit/ directory".to_string(),
+            ));
+        }
+
+        // Safety: orbit_dir must end with ".orbit"
+        if orbit_dir.file_name().and_then(|n| n.to_str()) != Some(".orbit") {
+            return Err(OrbitError::InvalidInput(format!(
+                "data root '{}' does not end with .orbit — aborting teardown",
+                orbit_dir.display()
+            )));
+        }
+
+        let repo_root = orbit_dir
+            .parent()
+            .ok_or_else(|| OrbitError::InvalidInput("cannot determine repo root".to_string()))?;
+
+        let mut removed: Vec<String> = Vec::new();
+
+        // 1. Deregister from workspace registry (before deleting .orbit/)
+        let registry_path = workspace_registry::registry_path()?;
+        if registry_path.exists() {
+            let mut registry = workspace_registry::load_registry_from(&registry_path)?;
+            let ws = registry.workspaces.iter().find(|w| {
+                let ws_canonical =
+                    std::fs::canonicalize(&w.orbit_dir).unwrap_or_else(|_| w.orbit_dir.clone());
+                ws_canonical == orbit_canonical
+            });
+            if let Some(ws_id) = ws.map(|w| w.id.clone()) {
+                let ws = workspace_registry::remove_workspace(&mut registry, &ws_id)?;
+                workspace_registry::save_registry_to(&registry, &registry_path)?;
+                removed.push(format!("deregistered workspace '{}' from registry", ws.name));
+            }
+        }
+
+        // 2. Remove skill symlinks from .agents/skills/ and .claude/skills/
+        for dir_name in &[".agents", ".claude"] {
+            let skills_dir = repo_root.join(dir_name).join("skills");
+            if skills_dir.is_dir() {
+                remove_symlinks_in(&skills_dir)?;
+                removed.push(format!("removed symlinks from {}/skills/", dir_name));
+
+                // Remove skills dir if empty
+                if is_dir_empty(&skills_dir) {
+                    std::fs::remove_dir(&skills_dir)
+                        .map_err(|e| OrbitError::Io(e.to_string()))?;
+                }
+                // Remove parent dir if empty
+                let parent = repo_root.join(dir_name);
+                if parent.is_dir() && is_dir_empty(&parent) {
+                    std::fs::remove_dir(&parent)
+                        .map_err(|e| OrbitError::Io(e.to_string()))?;
+                    removed.push(format!("removed empty {}/", dir_name));
+                }
+            }
+        }
+
+        // 3. Delete .orbit/ directory
+        if orbit_dir.is_dir() {
+            std::fs::remove_dir_all(&orbit_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+            removed.push(format!("deleted {}", orbit_dir.display()));
+        }
+
+        // 4. Print summary
+        println!("teardown complete:");
+        for item in &removed {
+            println!("  - {item}");
+        }
+        if removed.is_empty() {
+            println!("  (nothing to remove)");
+        }
+
+        Ok(())
+    }
+}
+
+/// Remove all symlinks in a directory (non-recursive).
+fn remove_symlinks_in(dir: &std::path::Path) -> Result<(), OrbitError> {
+    let entries = std::fs::read_dir(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+        let meta =
+            std::fs::symlink_metadata(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
+        if meta.file_type().is_symlink() {
+            std::fs::remove_file(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Check if a directory is empty.
+fn is_dir_empty(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
 }
 
 fn dir_name_or_fallback(path: &std::path::Path) -> String {
