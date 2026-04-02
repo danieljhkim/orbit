@@ -171,7 +171,7 @@ fn resolve_init_target_from_root(orbit_root: &Path) -> InitTarget {
     }
 }
 
-fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
+pub(crate) fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
     [".agents", ".claude"]
         .into_iter()
         .map(|dir| base_root.join(dir).join("skills"))
@@ -292,4 +292,197 @@ fn ensure_skill_links(
     }
 
     Ok(changed)
+}
+
+// --- Public link/unlink API ---
+
+#[derive(Debug, Clone)]
+pub struct LinkResult {
+    pub linked_count: usize,
+    pub roots: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnlinkResult {
+    pub removed_count: usize,
+    pub cleaned_dirs: Vec<PathBuf>,
+}
+
+/// Re-create skill symlinks in `.agents/skills/` and `.claude/skills/`.
+pub fn link_skills(orbit_root: &Path) -> Result<LinkResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(orbit_root);
+    let skills_root = init_target.orbit_root.join("skills");
+
+    if !skills_root.exists() {
+        return Err(OrbitError::InvalidInput(format!(
+            "skills root does not exist: {}",
+            skills_root.display()
+        )));
+    }
+
+    let skill_ids = default_skill_ids();
+    let mut linked_count = 0usize;
+    let mut roots = Vec::new();
+
+    for skills_links_root in &init_target.skills_links_roots {
+        let changed = ensure_skill_links(&skills_root, &skill_ids, skills_links_root, false)?;
+        if changed {
+            linked_count += skill_ids.len();
+        }
+        roots.push(skills_links_root.clone());
+    }
+
+    Ok(LinkResult {
+        linked_count,
+        roots,
+    })
+}
+
+/// Remove skill symlinks from `.agents/skills/` and `.claude/skills/`.
+/// Only removes symlinks — regular files and directories are left intact.
+pub fn unlink_skills(orbit_root: &Path) -> Result<UnlinkResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(orbit_root);
+    let mut removed_count = 0usize;
+    let mut cleaned_dirs = Vec::new();
+
+    for skills_links_dir in &init_target.skills_links_roots {
+        if !skills_links_dir.exists() {
+            continue;
+        }
+
+        let entries = fs::read_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+            let meta =
+                fs::symlink_metadata(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
+            if meta.file_type().is_symlink() {
+                fs::remove_file(entry.path()).map_err(|e| OrbitError::Io(e.to_string()))?;
+                removed_count += 1;
+            }
+        }
+
+        // Clean up empty skills dir, then empty parent (.agents/ or .claude/)
+        if skills_links_dir.exists() && dir_is_empty(skills_links_dir)? {
+            fs::remove_dir(skills_links_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+            cleaned_dirs.push(skills_links_dir.clone());
+
+            if let Some(parent) = skills_links_dir.parent() {
+                if parent.exists() && dir_is_empty(parent)? {
+                    fs::remove_dir(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+                    cleaned_dirs.push(parent.to_path_buf());
+                }
+            }
+        }
+    }
+
+    Ok(UnlinkResult {
+        removed_count,
+        cleaned_dirs,
+    })
+}
+
+fn dir_is_empty(path: &Path) -> Result<bool, OrbitError> {
+    let mut entries = fs::read_dir(path).map_err(|e| OrbitError::Io(e.to_string()))?;
+    Ok(entries.next().is_none())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unlink_removes_only_symlinks() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git");
+
+        let orbit_root = repo_root.join(".orbit");
+        init_workspace_at_root(&orbit_root, InitOptions::default()).expect("init");
+
+        // Verify symlinks exist
+        let agents_skills = repo_root.join(".agents/skills");
+        let claude_skills = repo_root.join(".claude/skills");
+        assert!(
+            agents_skills.is_dir(),
+            ".agents/skills should exist after init"
+        );
+        assert!(
+            claude_skills.is_dir(),
+            ".claude/skills should exist after init"
+        );
+
+        // Place a regular file in .agents/skills/ (should NOT be removed)
+        fs::write(agents_skills.join("user_file.txt"), "keep me").expect("write user file");
+
+        let result = unlink_skills(&orbit_root).expect("unlink");
+        assert!(result.removed_count > 0, "should have removed symlinks");
+
+        // Regular file should still exist
+        assert!(
+            agents_skills.join("user_file.txt").exists(),
+            "non-symlink file should be preserved"
+        );
+        // .agents/skills/ should still exist (has a regular file)
+        assert!(
+            agents_skills.is_dir(),
+            ".agents/skills should remain (has non-symlink content)"
+        );
+        // .claude/skills/ was only symlinks so it should be cleaned up
+        assert!(
+            !claude_skills.exists(),
+            ".claude/skills should be removed (was empty after unlink)"
+        );
+    }
+
+    #[test]
+    fn link_restores_symlinks_after_unlink() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git");
+
+        let orbit_root = repo_root.join(".orbit");
+        init_workspace_at_root(&orbit_root, InitOptions::default()).expect("init");
+
+        // Count initial symlinks
+        let claude_skills = repo_root.join(".claude/skills");
+        let initial_count = fs::read_dir(&claude_skills)
+            .expect("read")
+            .filter(|e| {
+                e.as_ref()
+                    .ok()
+                    .and_then(|e| fs::symlink_metadata(e.path()).ok())
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+            })
+            .count();
+        assert!(initial_count > 0, "should have symlinks after init");
+
+        // Unlink
+        let unlink_result = unlink_skills(&orbit_root).expect("unlink");
+        assert!(unlink_result.removed_count > 0);
+
+        // Re-link
+        let link_result = link_skills(&orbit_root).expect("link");
+        assert!(
+            link_result.linked_count > 0,
+            "should have re-created symlinks"
+        );
+
+        // Verify symlinks are back
+        let restored_count = fs::read_dir(repo_root.join(".claude/skills"))
+            .expect("read")
+            .filter(|e| {
+                e.as_ref()
+                    .ok()
+                    .and_then(|e| fs::symlink_metadata(e.path()).ok())
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(
+            restored_count, initial_count,
+            "link should restore the same number of symlinks"
+        );
+    }
 }

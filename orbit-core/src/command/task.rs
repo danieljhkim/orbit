@@ -101,13 +101,27 @@ impl OrbitRuntime {
             } else {
                 TaskStatus::Backlog
             };
+        let is_friction = params.task_type.is_friction();
+        let (create_actor, create_identity, create_label) = if is_friction {
+            (
+                "system".to_string(),
+                ActorIdentity::System,
+                "system".to_string(),
+            )
+        } else {
+            (
+                effective_label.clone(),
+                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
+                effective_label.clone(),
+            )
+        };
         let comments = build_task_comments(params.comment.clone(), effective_label.as_str())?;
         let workspace_path =
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
 
         let task = self.with_mutation(|| {
             let task = self.create_task_record(StoreTaskCreateParams {
-                actor: effective_label.clone(),
+                actor: create_actor.clone(),
                 parent_id: params.parent_id.clone(),
                 title: params.title.clone(),
                 description: params.description.clone(),
@@ -117,15 +131,15 @@ impl OrbitRuntime {
                 context_files: params.context_files.clone(),
                 workspace_path: workspace_path.clone(),
                 repo_root: None,
-                created_by: Some(effective_label.clone()),
-                actor_identity: ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
-                assigned_to: Some(effective_label.clone()),
+                created_by: Some(create_label.clone()),
+                actor_identity: create_identity.clone(),
+                assigned_to: Some(create_label.clone()),
                 status: initial_status,
                 priority: params.priority,
                 complexity: params.complexity,
                 task_type: params.task_type,
                 pr_number: None,
-                proposed_by: Some(effective_label.clone()),
+                proposed_by: Some(create_label.clone()),
                 source_task_id: params.source_task_id.clone(),
                 comments: comments.clone(),
             })?;
@@ -1040,7 +1054,7 @@ mod tests {
         TaskAddParams, TaskUpdateParams, UNAUTHORED_TASK_PLAN_PLACEHOLDER,
         ensure_task_has_execution_plan,
     };
-    use crate::{OrbitError, OrbitRuntime, TaskStatus};
+    use crate::{OrbitError, OrbitRuntime, TaskStatus, TaskType};
     use orbit_engine::{TaskAutomationUpdate, TaskHost};
     use std::fs;
     use std::path::Path;
@@ -1298,6 +1312,80 @@ mod tests {
             .expect_err("reject from done should fail");
 
         assert!(matches!(err, OrbitError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn friction_task_attributes_to_system() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_identity(
+                TaskAddParams {
+                    title: "friction report".to_string(),
+                    description: "something is broken".to_string(),
+                    task_type: TaskType::Friction,
+                    ..Default::default()
+                },
+                Some("codex".to_string()),
+                Some("gpt-5.4".to_string()),
+            )
+            .expect("friction task");
+
+        assert_eq!(task.created_by, Some("system".to_string()));
+        assert_eq!(task.proposed_by, Some("system".to_string()));
+        assert_eq!(task.assigned_to, Some("system".to_string()));
+        assert_eq!(
+            task.history.first().map(|h| h.by.as_str()),
+            Some("system"),
+            "history actor should be system for friction tasks"
+        );
+    }
+
+    #[test]
+    fn issue_task_attributes_to_system() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_identity(
+                TaskAddParams {
+                    title: "issue report".to_string(),
+                    description: "also friction".to_string(),
+                    task_type: TaskType::Issue,
+                    ..Default::default()
+                },
+                Some("claude".to_string()),
+                Some("opus".to_string()),
+            )
+            .expect("issue task");
+
+        assert_eq!(task.created_by, Some("system".to_string()));
+        assert_eq!(task.proposed_by, Some("system".to_string()));
+        assert_eq!(task.assigned_to, Some("system".to_string()));
+    }
+
+    #[test]
+    fn non_friction_task_attributes_to_agent() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_identity(
+                TaskAddParams {
+                    title: "normal task".to_string(),
+                    description: "not friction".to_string(),
+                    task_type: TaskType::Feature,
+                    ..Default::default()
+                },
+                Some("codex".to_string()),
+                Some("gpt-5.4".to_string()),
+            )
+            .expect("non-friction task");
+
+        // Non-friction tasks should use the agent identity
+        assert_ne!(task.created_by, Some("system".to_string()));
+        assert_ne!(task.proposed_by, Some("system".to_string()));
+        assert_ne!(task.assigned_to, Some("system".to_string()));
+        assert_eq!(
+            task.created_by,
+            Some("codex / gpt-5.4".to_string()),
+            "non-friction tasks should use agent label"
+        );
     }
 
     #[test]

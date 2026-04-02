@@ -1,4 +1,5 @@
 use clap::{Args, Subcommand};
+use orbit_core::command::init::{LinkResult, UnlinkResult};
 use orbit_core::command::skill::{SkillDoctorResult, SkillDoctorStatus};
 use orbit_core::skill_catalog::LoadedSkill;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -23,6 +24,10 @@ pub enum SkillSubcommand {
     List(SkillListArgs),
     Show(SkillShowArgs),
     Doctor(SkillDoctorArgs),
+    /// Re-create skill symlinks in .agents/skills/ and .claude/skills/
+    Link(SkillLinkArgs),
+    /// Remove skill symlinks from .agents/skills/ and .claude/skills/
+    Unlink(SkillUnlinkArgs),
 }
 
 impl Execute for SkillSubcommand {
@@ -31,6 +36,8 @@ impl Execute for SkillSubcommand {
             SkillSubcommand::List(args) => args.execute(runtime),
             SkillSubcommand::Show(args) => args.execute(runtime),
             SkillSubcommand::Doctor(args) => args.execute(runtime),
+            SkillSubcommand::Link(args) => args.execute(runtime),
+            SkillSubcommand::Unlink(args) => args.execute(runtime),
         }
     }
 }
@@ -145,6 +152,73 @@ impl Execute for SkillDoctorArgs {
         }
         Ok(())
     }
+}
+
+#[derive(Args)]
+pub struct SkillLinkArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for SkillLinkArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let result = orbit_core::command::init::link_skills(&runtime.data_root())?;
+        if self.json {
+            crate::output::json::print_pretty(&link_result_json(&result))
+        } else {
+            if result.linked_count == 0 {
+                println!("Skill symlinks are already up to date.");
+            } else {
+                println!("Linked {} skill(s) in:", result.linked_count);
+                for root in &result.roots {
+                    println!("  {}", root.display());
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+#[derive(Args)]
+pub struct SkillUnlinkArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for SkillUnlinkArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let result = orbit_core::command::init::unlink_skills(&runtime.data_root())?;
+        if self.json {
+            crate::output::json::print_pretty(&unlink_result_json(&result))
+        } else {
+            if result.removed_count == 0 {
+                println!("No skill symlinks found to remove.");
+            } else {
+                println!("Removed {} skill symlink(s).", result.removed_count);
+            }
+            if !result.cleaned_dirs.is_empty() {
+                println!("Cleaned up empty directories:");
+                for dir in &result.cleaned_dirs {
+                    println!("  {}", dir.display());
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn link_result_json(result: &LinkResult) -> Value {
+    json!({
+        "linked_count": result.linked_count,
+        "roots": result.roots.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+    })
+}
+
+fn unlink_result_json(result: &UnlinkResult) -> Value {
+    json!({
+        "removed_count": result.removed_count,
+        "cleaned_dirs": result.cleaned_dirs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+    })
 }
 
 fn skill_summary_json(skill: &LoadedSkill) -> Value {
