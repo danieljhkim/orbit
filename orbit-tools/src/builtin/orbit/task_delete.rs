@@ -1,5 +1,5 @@
 use orbit_exec::ExecRequest;
-use orbit_types::{OrbitError, ToolParam, ToolSchema};
+use orbit_types::{OrbitError, ToolSchema};
 use serde_json::Value;
 
 use crate::{Tool, ToolContext};

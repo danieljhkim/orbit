@@ -1257,4 +1257,59 @@ mod tests {
 
         assert_eq!(task.workspace_path, None);
     }
+
+    #[test]
+    fn reject_from_backlog_succeeds() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("backlog task", TaskStatus::Backlog)
+            .expect("task");
+
+        let rejected = runtime
+            .reject_task(&task.id, "duplicate".to_string(), None)
+            .expect("reject from backlog should succeed");
+
+        assert_eq!(rejected.status, TaskStatus::Rejected);
+    }
+
+    #[test]
+    fn reject_from_in_progress_succeeds() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("wip task", TaskStatus::InProgress)
+            .expect("task");
+
+        let rejected = runtime
+            .reject_task(&task.id, "no longer needed".to_string(), None)
+            .expect("reject from in_progress should succeed");
+
+        assert_eq!(rejected.status, TaskStatus::Rejected);
+    }
+
+    #[test]
+    fn reject_from_done_is_disallowed() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("done task", TaskStatus::Done)
+            .expect("task");
+
+        let err = runtime
+            .reject_task(&task.id, "oops".to_string(), None)
+            .expect_err("reject from done should fail");
+
+        assert!(matches!(err, OrbitError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn delete_task_removes_it() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("to delete", TaskStatus::Proposed)
+            .expect("task");
+
+        runtime.delete_task(&task.id).expect("delete should succeed");
+
+        let err = runtime.get_task(&task.id).expect_err("task should be gone");
+        assert!(matches!(err, OrbitError::TaskNotFound(_)));
+    }
 }
