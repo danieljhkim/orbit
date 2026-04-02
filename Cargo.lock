@@ -1318,7 +1318,6 @@ dependencies = [
  "orbit-store",
  "orbit-tools",
  "orbit-types",
- "reqwest",
  "serde",
  "serde_json",
  "tempfile",

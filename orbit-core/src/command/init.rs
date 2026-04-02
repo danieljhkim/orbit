@@ -98,7 +98,7 @@ pub fn init_workspace_from_root_override(
     init_workspace_at_root(&data_root, options)
 }
 
-fn init_workspace_at_root(
+pub fn init_workspace_at_root(
     orbit_root: &Path,
     options: InitOptions,
 ) -> Result<InitResult, OrbitError> {

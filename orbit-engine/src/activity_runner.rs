@@ -202,10 +202,6 @@ fn unsupported_spec_type_outcome(spec_type: &str, supported_spec_types: &str) ->
     )
 }
 
-pub fn execution_template_context(execution: &ExecutionContext) -> TemplateContext {
-    execution_template_context_with_env(execution, std::env::vars().collect())
-}
-
 pub(crate) fn execution_template_context_with_env(
     execution: &ExecutionContext,
     env_pairs: Vec<(String, String)>,

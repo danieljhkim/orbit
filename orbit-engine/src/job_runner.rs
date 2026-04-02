@@ -1280,14 +1280,6 @@ fn command_label(execution: &crate::context::ExecutionContext) -> String {
             .and_then(Value::as_str)
             .unwrap_or(execution.activity.id.as_str())
             .to_string(),
-        "api" => {
-            let method = config
-                .get("method")
-                .and_then(Value::as_str)
-                .unwrap_or("API");
-            let url = config.get("url").and_then(Value::as_str).unwrap_or("");
-            format!("{method} {url}").trim().to_string()
-        }
         "agent_invoke" => normalize_agent_label(&execution.agent_cli),
         _ => execution.activity.id.to_string(),
     }

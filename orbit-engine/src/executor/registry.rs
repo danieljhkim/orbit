@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use super::agent::AgentExecutor;
-use super::api::ApiExecutor;
 use super::automation::AutomationExecutor;
 use super::cli_command::CliCommandExecutor;
 use super::traits::ActivityExecutor;
@@ -35,7 +34,6 @@ impl ActivityExecutorRegistry {
     pub fn register_builtins(&mut self) {
         let _ = self.register(AgentExecutor);
         let _ = self.register(CliCommandExecutor);
-        let _ = self.register(ApiExecutor);
         let _ = self.register(AutomationExecutor);
     }
 

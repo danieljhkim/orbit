@@ -81,7 +81,7 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     ),
 ];
 
-const VALID_ACTIVITY_SPEC_TYPES: &[&str] = &["agent_invoke", "cli_command", "api", "automation"];
+const VALID_ACTIVITY_SPEC_TYPES: &[&str] = &["agent_invoke", "cli_command", "automation"];
 
 #[derive(Debug, Clone)]
 pub struct ActivityAddParams {

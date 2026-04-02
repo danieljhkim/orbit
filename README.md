@@ -82,7 +82,7 @@ Orbit jobs are tightly coupled with orbit tasks. If you are working with other i
 Activities are atomic, reusable units of work:
 
 - Self-contained operations with defined schemas (input/output)
-- Each has a spec_type that determines how it's implemented (i.e. automation, agent_invoke, api, cli_command)
+- Each has a spec_type that determines how it's implemented (i.e. automation, agent_invoke, cli_command)
 - Can be run individually via CLI or as part of a job
 - Example activities: run_tests, review_batch_pr, review_tasks, implement_change
 

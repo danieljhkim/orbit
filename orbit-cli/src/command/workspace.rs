@@ -1,5 +1,6 @@
 use chrono::Utc;
 use clap::{Args, Subcommand};
+use orbit_core::command::init::{InitOptions, init_workspace_at_root};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_types::{Workspace, WorkspaceStatus};
@@ -63,20 +64,36 @@ impl Execute for WorkspaceCommand {
 impl WorkspaceInitArgs {
     pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
+        let registry_path = workspace_registry::registry_path()?;
+        let init_result = self.execute_at_path(&cwd, &registry_path)?;
+
+        println!("workspace '{}' initialized", init_result.name);
+        println!("  id:        {}", init_result.id);
+        println!("  root:      {}", init_result.root.display());
+        println!("  orbit_dir: {}", init_result.orbit_dir.display());
+        Ok(())
+    }
+
+    fn execute_at_path(
+        self,
+        cwd: &std::path::Path,
+        registry_path: &std::path::Path,
+    ) -> Result<WorkspaceInitResult, OrbitError> {
         let orbit_dir = cwd.join(".orbit");
-        // Workspace .orbit/ only contains tasks/ by default
+        init_workspace_at_root(&orbit_dir, InitOptions::default())?;
+
         let tasks_dir = orbit_dir.join("tasks");
         std::fs::create_dir_all(&tasks_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
 
-        let name = self.name.unwrap_or_else(|| dir_name_or_fallback(&cwd));
+        let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
 
         let id = format!("ws_{name}");
-        let git_remote = detect_git_remote(&cwd);
+        let git_remote = detect_git_remote(cwd);
 
         let ws = Workspace {
             id: id.clone(),
             name: name.clone(),
-            root: cwd.clone(),
+            root: cwd.to_path_buf(),
             orbit_dir: orbit_dir.clone(),
             git_remote,
             base_branch: self.base_branch,
@@ -85,17 +102,24 @@ impl WorkspaceInitArgs {
             updated_at: Utc::now(),
         };
 
-        let registry_path = workspace_registry::registry_path()?;
-        let mut registry = workspace_registry::load_registry_from(&registry_path)?;
+        let mut registry = workspace_registry::load_registry_from(registry_path)?;
         workspace_registry::register_workspace(&mut registry, ws)?;
-        workspace_registry::save_registry_to(&registry, &registry_path)?;
+        workspace_registry::save_registry_to(&registry, registry_path)?;
 
-        println!("workspace '{}' initialized", name);
-        println!("  id:        {}", id);
-        println!("  root:      {}", cwd.display());
-        println!("  orbit_dir: {}", orbit_dir.display());
-        Ok(())
+        Ok(WorkspaceInitResult {
+            id,
+            name,
+            root: cwd.to_path_buf(),
+            orbit_dir,
+        })
     }
+}
+
+struct WorkspaceInitResult {
+    id: String,
+    name: String,
+    root: std::path::PathBuf,
+    orbit_dir: std::path::PathBuf,
 }
 
 impl Execute for WorkspaceListArgs {
@@ -191,5 +215,93 @@ fn detect_git_remote(cwd: &std::path::Path) -> Option<String> {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_init_seeds_default_artifacts_and_registers_workspace() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+
+        let registry_path = temp.path().join("home/.orbit/workspaces.json");
+        let init_args = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+        };
+
+        let init_result = init_args
+            .execute_at_path(&repo_root, &registry_path)
+            .expect("workspace init should succeed");
+
+        assert_eq!(init_result.id, "ws_repo");
+        assert_eq!(init_result.name, "repo");
+        assert_eq!(init_result.root, repo_root);
+        assert_eq!(init_result.orbit_dir, repo_root.join(".orbit"));
+
+        let orbit_dir = repo_root.join(".orbit");
+        assert!(orbit_dir.join("tasks").is_dir(), "tasks dir should exist");
+        assert!(orbit_dir.join("skills").is_dir(), "skills dir should exist");
+        assert!(
+            orbit_dir.join("activities").is_dir(),
+            "activities dir should exist"
+        );
+        assert!(orbit_dir.join("jobs").is_dir(), "jobs dir should exist");
+        assert!(
+            orbit_dir.join("config.toml").is_file(),
+            "config should be seeded"
+        );
+        // Scoreboards are only seeded when scoring.enabled = true in config.
+        // The default config template sets scoring.enabled = false, so
+        // scoreboard files are not expected here.
+        assert!(
+            std::fs::read_dir(orbit_dir.join("activities"))
+                .expect("read activities")
+                .next()
+                .is_some(),
+            "activities dir should contain default files"
+        );
+        assert!(
+            std::fs::read_dir(orbit_dir.join("jobs"))
+                .expect("read jobs")
+                .next()
+                .is_some(),
+            "jobs dir should contain default files"
+        );
+
+        let default_skill = std::fs::read_dir(orbit_dir.join("skills"))
+            .expect("read skills")
+            .next()
+            .expect("at least one default skill")
+            .expect("skill entry")
+            .file_name();
+        let agents_skill_link = repo_root.join(".agents/skills").join(&default_skill);
+        let claude_skill_link = repo_root.join(".claude/skills").join(&default_skill);
+        assert!(
+            std::fs::symlink_metadata(&agents_skill_link)
+                .expect("agents skill link metadata")
+                .file_type()
+                .is_symlink(),
+            "agents skill link should be a symlink"
+        );
+        assert!(
+            std::fs::symlink_metadata(&claude_skill_link)
+                .expect("claude skill link metadata")
+                .file_type()
+                .is_symlink(),
+            "claude skill link should be a symlink"
+        );
+
+        let registry = workspace_registry::load_registry_from(&registry_path).expect("registry");
+        assert_eq!(registry.workspaces.len(), 1);
+        let workspace = &registry.workspaces[0];
+        assert_eq!(workspace.id, "ws_repo");
+        assert_eq!(workspace.name, "repo");
+        assert_eq!(workspace.root, repo_root);
+        assert_eq!(workspace.orbit_dir, orbit_dir);
     }
 }
