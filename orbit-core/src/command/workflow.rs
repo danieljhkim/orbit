@@ -97,10 +97,7 @@ pub fn build_workflow_input(input: &WorkflowInput) -> Result<Value, OrbitError> 
                 "--parallelism must be greater than 0".to_string(),
             ));
         }
-        map.insert(
-            "parallelism".to_string(),
-            Value::Number(parallelism.into()),
-        );
+        map.insert("parallelism".to_string(), Value::Number(parallelism.into()));
     }
 
     if let Some(base) = &input.base {
