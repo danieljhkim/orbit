@@ -8,9 +8,9 @@ from typing import get_args
 import click
 
 from orbit_agent.logging_utils import configure_logging
-from orbit_agent.pipeline import run_build
 from orbit_agent.pipeline.components import DEFAULT_COMPONENT_NAMES
 from orbit_agent.pipeline.config import PipelineConfig
+from orbit_agent.pipeline.engine import run_build
 from orbit_agent.pipeline.registry import build_default_registry
 from orbit_agent.schemas import NodeContextRef
 from orbit_agent.schemas.graph.contexts import NodeType

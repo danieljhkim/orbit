@@ -40,10 +40,17 @@ orbit_agent/
     openai.py
     anthropic.py
     ollama.py
+  graph/
+    languages.py
+    extraction/
+      base.py
+      registry.py
+      python.py
   pipeline/
     __init__.py
     config.py
     context.py
+    engine.py
     registry.py
     hash.py
     scan.py
@@ -192,7 +199,7 @@ Components are selected by name through a registry/config layer.
 
 - `pipeline.registry.ComponentRegistry` maps names to component classes
 - `pipeline.config.PipelineConfig` describes the ordered component list
-- `pipeline.run_build(...)` can accept explicit component instances, a `PipelineConfig`, or a custom registry
+- `pipeline.engine.run_build(...)` can accept explicit component instances, a `PipelineConfig`, or a custom registry
 
 That means you can swap implementations without changing the runner itself, as long as the components cooperate through the shared `PipelineContext`.
 
@@ -203,8 +210,8 @@ You can configure the pipeline from Python with a registry and a named component
 ```python
 from pathlib import Path
 
-from orbit_agent.pipeline import run_build
 from orbit_agent.pipeline.config import PipelineConfig
+from orbit_agent.pipeline.engine import run_build
 from orbit_agent.pipeline.registry import build_default_registry
 
 repo_path = Path(".").resolve()
@@ -242,6 +249,41 @@ registry.register(MyCustomSummarizeComponent)
 ```
 
 Then reference the custom component by its `name` field inside `PipelineConfig`.
+
+## Language Extractors
+
+Directory and file graph construction is language-agnostic. Leaf extraction is delegated to language-specific extractors through `graph.extraction.GraphExtractorRegistry`.
+
+The default extractor registry currently includes:
+
+- `python`: uses the Python stdlib `ast` module to extract imports, exports, classes, functions, methods, signatures, source snippets, and history entries
+
+Unsupported languages are still represented as `FileNode`s, but they do not get `LeafNode`s until an extractor is registered for their detected language.
+
+To add another language, implement the extractor protocol:
+
+```python
+from orbit_agent.graph.extraction import GraphExtractionInput, GraphExtractionResult
+
+
+class RustGraphExtractor:
+    language = "rust"
+
+    def extract(self, input_data: GraphExtractionInput) -> GraphExtractionResult:
+        ...
+```
+
+Then register it:
+
+```python
+from orbit_agent.graph.extraction import build_default_extractor_registry
+from orbit_agent.pipeline.components.graph import BuildGraphLeavesComponent
+
+extractor_registry = build_default_extractor_registry()
+extractor_registry.register(RustGraphExtractor())
+
+component = BuildGraphLeavesComponent(extractor_registry=extractor_registry)
+```
 
 ## Graph Context Service
 
@@ -286,4 +328,4 @@ Orbit is expected to validate and consume these artifacts separately.
 - alternate component implementations loaded from config files
 - stronger dependency validation between pipeline stages
 - richer retrieval artifacts
-- language-specific parsing and symbol extraction
+- more language extractors, starting with Rust
