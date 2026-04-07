@@ -4,6 +4,12 @@ Orbit is a local-first workflow engine for agent-driven software delivery. It he
 
 Orbit runs on top of agent CLIs such as Codex and Claude Code. No provider API keys are required by Orbit itself.
 
+## Philosophy
+
+> Minimize tokens. Minimize irrelevant decisions. Maximize determinism.
+
+Orbit should make agents spend judgment on what matters: intent, correctness, tradeoffs, design, and risk. Agent opinions and decisions should directly support these values; if a choice does not reduce token usage, remove irrelevant discretion, or make the system more deterministic, Orbit should make that choice instead.
+
 ---
 
 ## Quick Start

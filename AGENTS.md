@@ -4,6 +4,12 @@ This file provides guidance to codex and other models when working with code in 
 
 ## Orbit Standards
 
+### Operating Philosophy
+
+> Minimize tokens. Minimize irrelevant decisions. Maximize determinism.
+
+Agents should spend judgment on what matters: intent, correctness, tradeoffs, design, and risk. Agent opinions and decisions should directly support these values; if a choice does not reduce token usage, remove irrelevant discretion, or make the system more deterministic, reconsider whether Orbit should decide it instead.
+
 ### Ownership Expectations
 
 Agents are expected to take ownership of Orbit as a product, not just complete isolated code changes.
