@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from orbit_agent.agent import BaseAgent, get_agent
+from orbit_agent.graph.store import GraphObjectStore
 from orbit_agent.pipeline.context import PipelineContext
 from orbit_agent.schemas import (
     FileSummaryAnalysisV1,
@@ -155,9 +156,15 @@ def _parse_analysis(raw: str, file_path: str) -> FileSummaryAnalysisV1:
 class SummarizeFilesComponent(BaseComponent):
     name = "summarize_files"
 
-    def __init__(self, agent: BaseAgent | None = None, delay: float = 0.1) -> None:
+    def __init__(
+        self,
+        agent: BaseAgent | None = None,
+        delay: float = 0.0,
+        max_concurrency: int = 8,
+    ) -> None:
         self.agent = agent
         self.delay = delay
+        self.max_concurrency = max(1, max_concurrency)
 
     def _read(self, file_paths: list[str], repo_path: Path) -> SummarizeFilesInputV1:
         total = len(file_paths)
@@ -194,17 +201,97 @@ class SummarizeFilesComponent(BaseComponent):
 
         return SummarizeFilesInputV1(files=files)
 
+    def _read_missing_from_graph(
+        self, context: PipelineContext
+    ) -> SummarizeFilesInputV1:
+        store = GraphObjectStore(context.graph_dir)
+        if context.codebase_graph is None:
+            context.codebase_graph = store.read_graph()
+
+        files: list[SourceFileV1] = []
+        for file_node in context.codebase_graph.files:
+            if file_node.source_blob_hash is None:
+                logger.warning(
+                    "Skipping graph file without source blob hash: %s",
+                    file_node.location,
+                )
+                continue
+
+            summary_path = context.files_dir / f"{file_node.source_blob_hash}.json"
+            if summary_path.exists():
+                logger.debug(
+                    "Skipping existing summary for graph file: %s",
+                    file_node.location,
+                )
+                continue
+
+            source = store.read_blob(file_node.source_blob_hash)
+            abs_path = context.repo_path / file_node.location
+            metadata = {
+                "size_bytes": len(source.encode("utf-8")),
+                "last_modified": datetime.fromtimestamp(0, tz=timezone.utc),
+            }
+            if abs_path.exists():
+                metadata["last_modified"] = datetime.fromtimestamp(
+                    abs_path.stat().st_mtime, tz=timezone.utc
+                )
+
+            files.append(
+                SourceFileV1(
+                    path=file_node.location,
+                    hash=file_node.source_blob_hash,
+                    language=file_node.language,
+                    content=source,
+                    metadata=metadata,
+                )
+            )
+
+        logger.info("Selected %d graph file(s) for summarization", len(files))
+        return SummarizeFilesInputV1(files=files)
+
     def _transform(self, data: SummarizeFilesInputV1) -> SummarizeFilesResponseV1:
         agent = self.agent or get_agent()
-        total = len(data.files)
-        results: list[FileSummaryV1] = []
+        return asyncio.run(self._transform_async(data, agent))
 
-        for i, source_file in enumerate(data.files, 1):
-            logger.info("Summarizing file %d of %d: %s", i, total, source_file.path)
+    async def _transform_async(
+        self, data: SummarizeFilesInputV1, agent: BaseAgent
+    ) -> SummarizeFilesResponseV1:
+        total = len(data.files)
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+        logger.info(
+            "Summarizing %d file(s) with max concurrency %d",
+            total,
+            self.max_concurrency,
+        )
+
+        tasks = [
+            self._summarize_one(agent, source_file, i, total, semaphore)
+            for i, source_file in enumerate(data.files, 1)
+        ]
+        results = await asyncio.gather(*tasks)
+        return SummarizeFilesResponseV1(files=list(results))
+
+    async def _summarize_one(
+        self,
+        agent: BaseAgent,
+        source_file: SourceFileV1,
+        index: int,
+        total: int,
+        semaphore: asyncio.Semaphore,
+    ) -> FileSummaryV1:
+        if self.delay > 0 and index > 1:
+            await asyncio.sleep(self.delay * (index - 1))
+
+        async with semaphore:
+            logger.info(
+                "Summarizing file %d of %d: %s", index, total, source_file.path
+            )
             user_message = f"File: {source_file.path}\n\n{source_file.content}"
 
             try:
-                raw = agent.chat(SUMMARIZE_SYSTEM_PROMPT, user_message)
+                raw = await asyncio.to_thread(
+                    agent.chat, SUMMARIZE_SYSTEM_PROMPT, user_message
+                )
                 analysis = _parse_analysis(raw, source_file.path)
             except Exception:
                 logger.warning(
@@ -212,23 +299,16 @@ class SummarizeFilesComponent(BaseComponent):
                 )
                 analysis = FileSummaryAnalysisV1()
 
-            results.append(
-                FileSummaryV1(
-                    path=source_file.path,
-                    hash=source_file.hash,
-                    language=source_file.language,
-                    summary=analysis.summary,
-                    symbols=analysis.symbols,
-                    imports=analysis.imports,
-                    exports=analysis.exports,
-                    metadata=source_file.metadata,
-                )
+            return FileSummaryV1(
+                path=source_file.path,
+                hash=source_file.hash,
+                language=source_file.language,
+                summary=analysis.summary,
+                symbols=analysis.symbols,
+                imports=analysis.imports,
+                exports=analysis.exports,
+                metadata=source_file.metadata,
             )
-
-            if i < total:
-                time.sleep(self.delay)
-
-        return SummarizeFilesResponseV1(files=results)
 
     def _write(self, response: SummarizeFilesResponseV1, output_dir: Path) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -240,10 +320,17 @@ class SummarizeFilesComponent(BaseComponent):
             )
 
     def execute(self, context: PipelineContext) -> PipelineContext:
-        if self.agent is None:
-            self.agent = context.agent or get_agent()
-        data = self._read(context.changed_paths, context.repo_path)
-        response = self._transform(data)
+        data = (
+            self._read(context.changed_paths, context.repo_path)
+            if context.changed_paths
+            else self._read_missing_from_graph(context)
+        )
+        if not data.files:
+            response = SummarizeFilesResponseV1()
+        else:
+            if self.agent is None:
+                self.agent = context.agent or get_agent()
+            response = self._transform(data)
         self._write(response, context.files_dir)
         context.summarize_response = response
         return context

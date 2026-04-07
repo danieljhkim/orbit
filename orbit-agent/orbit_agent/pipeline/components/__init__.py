@@ -17,7 +17,7 @@ from .manifest import ManifestComponent
 from .scan import ScanRepoComponent
 from .summarize import SummarizeFilesComponent
 
-BUILTIN_COMPONENTS = [
+DEFAULT_COMPONENTS = [
     ScanRepoComponent,
     ComputeHashesComponent,
     BuildGraphDirsComponent,
@@ -28,7 +28,18 @@ BUILTIN_COMPONENTS = [
     SaveHashCacheComponent,
 ]
 
-DEFAULT_COMPONENT_NAMES = [component_cls.name for component_cls in BUILTIN_COMPONENTS]
+OPTIONAL_COMPONENTS = [
+    SelectChangedPathsComponent,
+    SummarizeFilesComponent,
+    GenerateArchitectureComponent,
+]
+
+BUILTIN_COMPONENTS = [
+    *DEFAULT_COMPONENTS,
+    *OPTIONAL_COMPONENTS,
+]
+
+DEFAULT_COMPONENT_NAMES = [component_cls.name for component_cls in DEFAULT_COMPONENTS]
 
 __all__ = [
     "BaseComponent",
@@ -37,9 +48,11 @@ __all__ = [
     "BuildGraphLeavesComponent",
     "BUILTIN_COMPONENTS",
     "ComputeHashesComponent",
+    "DEFAULT_COMPONENTS",
     "DEFAULT_COMPONENT_NAMES",
     "GenerateArchitectureComponent",
     "ManifestComponent",
+    "OPTIONAL_COMPONENTS",
     "PersistGraphComponent",
     "SaveHashCacheComponent",
     "ScanRepoComponent",

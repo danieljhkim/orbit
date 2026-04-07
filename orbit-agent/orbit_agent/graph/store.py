@@ -220,6 +220,9 @@ class GraphObjectStore:
             raise FileNotFoundError(f"Graph blob not found: {path}")
         return path.read_text(encoding="utf-8")
 
+    def read_blob(self, blob_hash: str) -> str:
+        return self._read_blob(blob_hash)
+
     def _write_json_file(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

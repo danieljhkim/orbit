@@ -8,10 +8,8 @@ from typing import get_args
 import click
 
 from orbit_agent.logging_utils import configure_logging
-from orbit_agent.pipeline.components import DEFAULT_COMPONENT_NAMES
 from orbit_agent.pipeline.config import PipelineConfig
 from orbit_agent.pipeline.engine import run_build
-from orbit_agent.pipeline.registry import build_default_registry
 from orbit_agent.schemas import NodeContextRef
 from orbit_agent.schemas.graph.contexts import NodeType
 from orbit_agent.schemas.graph.nodes import LeafKind
@@ -21,6 +19,32 @@ logger = logging.getLogger(__name__)
 
 NODE_TYPE_CHOICES = ("dir", "file", "leaf")
 LEAF_KIND_CHOICES = tuple(str(value) for value in get_args(LeafKind))
+BUILD_TARGET_CHOICES = ("graph", "knowledge")
+GRAPH_COMPONENT_NAMES = [
+    "scan_repo",
+    "compute_hashes",
+    "build_graph_dirs",
+    "build_graph_files",
+    "build_graph_leaves",
+    "persist_graph",
+    "manifest",
+    "save_hash_cache",
+]
+KNOWLEDGE_COMPONENT_NAMES = [
+    "summarize_files",
+    "manifest",
+]
+GRAPH_AND_KNOWLEDGE_COMPONENT_NAMES = [
+    "scan_repo",
+    "compute_hashes",
+    "build_graph_dirs",
+    "build_graph_files",
+    "build_graph_leaves",
+    "persist_graph",
+    "summarize_files",
+    "manifest",
+    "save_hash_cache",
+]
 
 
 @click.group()
@@ -34,54 +58,41 @@ def cli(ctx: click.Context, debug: bool) -> None:
 
 
 @cli.command()
+@click.argument("target", type=click.Choice(BUILD_TARGET_CHOICES))
 @click.option("--repo", default=".", help="Repository root path.")
 @click.option("--output", default=".orbit/knowledge", help="Output directory.")
-@click.option(
-    "--components",
-    default=",".join(DEFAULT_COMPONENT_NAMES),
-    help="Comma-separated ordered component names.",
-)
-def build(repo: str, output: str, components: str) -> None:
-    """Scan and build full knowledge base."""
+def build(target: str, repo: str, output: str) -> None:
+    """Build a knowledge artifact."""
     repo_path, output_dir = _resolve_paths(repo, output)
-    logger.info("Starting full knowledge build for %s", repo_path)
+    component_names = _build_component_names(target, output_dir)
+    target_label = _target_label(target)
+    logger.info("Starting %s build for %s", target_label, repo_path)
     run_build(
         repo_path,
         output_dir,
         incremental=False,
-        config=_parse_pipeline_config(components),
+        config=PipelineConfig.from_component_names(component_names),
     )
-    click.echo(f"Knowledge artifacts written to {output_dir}")
+    click.echo(f"{target_label.title()} artifacts written to {output_dir}")
 
 
 @cli.command()
+@click.argument("target", type=click.Choice(BUILD_TARGET_CHOICES))
 @click.option("--repo", default=".", help="Repository root path.")
 @click.option("--output", default=".orbit/knowledge", help="Output directory.")
-@click.option(
-    "--components",
-    default=",".join(DEFAULT_COMPONENT_NAMES),
-    help="Comma-separated ordered component names.",
-)
-def update(repo: str, output: str, components: str) -> None:
-    """Incrementally update knowledge base."""
+def update(target: str, repo: str, output: str) -> None:
+    """Update a knowledge artifact."""
     repo_path, output_dir = _resolve_paths(repo, output)
-    logger.info("Starting incremental knowledge update for %s", repo_path)
+    component_names = _build_component_names(target, output_dir)
+    target_label = _target_label(target)
+    logger.info("Starting %s update for %s", target_label, repo_path)
     run_build(
         repo_path,
         output_dir,
         incremental=True,
-        config=_parse_pipeline_config(components),
+        config=PipelineConfig.from_component_names(component_names),
     )
-    click.echo(f"Knowledge artifacts updated at {output_dir}")
-
-
-@cli.command("list-components")
-def list_components() -> None:
-    """List registered pipeline component names."""
-    registry = build_default_registry()
-    logger.debug("Listing %d registered components", len(registry.names()))
-    for name in registry.names():
-        click.echo(name)
+    click.echo(f"{target_label.title()} artifacts updated at {output_dir}")
 
 
 @cli.group("graph")
@@ -183,10 +194,18 @@ def _resolve_paths(repo: str, output: str) -> tuple[Path, Path]:
     return repo_path, output_dir
 
 
-def _parse_pipeline_config(components: str) -> PipelineConfig:
-    component_names = [name.strip() for name in components.split(",") if name.strip()]
-    logger.debug("Parsed component names: %s", component_names)
-    return PipelineConfig.from_component_names(component_names)
+def _build_component_names(target: str, output_dir: Path) -> list[str]:
+    if target == "graph":
+        return GRAPH_COMPONENT_NAMES
+    if target == "knowledge":
+        if (output_dir / "graph" / "refs" / "current.json").exists():
+            return KNOWLEDGE_COMPONENT_NAMES
+        return GRAPH_AND_KNOWLEDGE_COMPONENT_NAMES
+    raise ValueError(f"Unsupported build target: {target}")
+
+
+def _target_label(target: str) -> str:
+    return "knowledge" if target == "knowledge" else target
 
 
 def _load_graph_context_service(repo: str, output: str) -> GraphContextService:

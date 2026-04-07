@@ -107,34 +107,29 @@ That makes repo understanding a build artifact rather than an ephemeral side eff
 
 ## CLI
 
-Build a full knowledge snapshot:
+Build the graph artifact:
 
 ```bash
-orbit-agent build
+orbit-agent build graph
 ```
 
 Run an incremental update:
 
 ```bash
-orbit-agent update
+orbit-agent update graph
 ```
 
 Choose a repo and output directory:
 
 ```bash
-orbit-agent build --repo . --output .orbit/knowledge
+orbit-agent build graph --repo . --output .orbit/knowledge
+orbit-agent build knowledge --repo . --output .orbit/knowledge
 ```
 
 Enable verbose logging:
 
 ```bash
-orbit-agent --debug build
-```
-
-List registered pipeline components:
-
-```bash
-orbit-agent list-components
+orbit-agent --debug build graph
 ```
 
 Inspect the persisted graph:
@@ -146,12 +141,15 @@ orbit-agent graph lineage file:<stable-id-hash> --include-self
 orbit-agent graph children dir:<stable-id-hash>
 ```
 
-Select an ordered component pipeline by name:
+Build knowledge after the graph exists:
 
 ```bash
-orbit-agent build \
-  --components scan_repo,compute_hashes,build_graph_dirs,build_graph_files,build_graph_leaves,persist_graph,manifest,save_hash_cache
+orbit-agent build knowledge
 ```
+
+If the graph is missing, `build knowledge` creates the graph first, then writes only missing file summary artifacts for that graph snapshot.
+
+Today, selective knowledge updates are file-hash based from the graph snapshot. Function-level updates should key knowledge artifacts by `LeafNode.source_hash` or `source_blob_hash` so only changed leaves need to be regenerated.
 
 ## LLM Provider Selection
 
