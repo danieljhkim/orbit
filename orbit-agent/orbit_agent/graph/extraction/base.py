@@ -6,6 +6,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from orbit_agent.schemas import LeafNode
+from orbit_agent.schemas.graph.nodes import LeafKind
 
 
 class GraphExtractionInput(BaseModel):
@@ -25,13 +26,28 @@ class GraphExtractionResult(BaseModel):
 class GraphExtractor(Protocol):
     language: str
 
-    def extract(self, input_data: GraphExtractionInput) -> GraphExtractionResult:
-        ...
+    def extract(self, input_data: GraphExtractionInput) -> GraphExtractionResult: ...
 
 
-def leaf_id(path: str, qualified_name: str, start_line: int | None) -> str:
-    suffix = start_line if start_line is not None else "unknown"
-    return f"leaf:{path}:{qualified_name}:{suffix}"
+def identity_key(node_type: str, location: str, kind: str) -> str:
+    return f"{node_type}:{location}:{kind}"
+
+
+def node_id(node_type: str, location: str, kind: str) -> str:
+    digest = hashlib.sha256(identity_key(node_type, location, kind).encode("utf-8"))
+    return f"{node_type}:{digest.hexdigest()}"
+
+
+def leaf_location(path: str, qualified_name: str) -> str:
+    return f"{path}#{qualified_name}"
+
+
+def leaf_identity_key(path: str, qualified_name: str, kind: LeafKind) -> str:
+    return identity_key("leaf", leaf_location(path, qualified_name), kind)
+
+
+def leaf_id(path: str, qualified_name: str, kind: LeafKind) -> str:
+    return node_id("leaf", leaf_location(path, qualified_name), kind)
 
 
 def source_hash(source: str) -> str | None:

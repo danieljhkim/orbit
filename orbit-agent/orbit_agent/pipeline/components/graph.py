@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -10,6 +9,8 @@ from orbit_agent.graph.extraction import (
     GraphExtractorRegistry,
     build_default_extractor_registry,
 )
+from orbit_agent.graph.extraction.base import identity_key, node_id
+from orbit_agent.graph.store import GraphObjectStore
 from orbit_agent.pipeline.context import PipelineContext
 from orbit_agent.schemas import (
     CodebaseGraphV1,
@@ -24,11 +25,11 @@ logger = logging.getLogger(__name__)
 
 
 def _dir_id(path: str) -> str:
-    return f"dir:{path}"
+    return node_id("dir", path, "directory")
 
 
 def _file_id(path: str) -> str:
-    return f"file:{path}"
+    return node_id("file", path, "source")
 
 
 class BuildGraphDirsComponent(BaseComponent):
@@ -55,6 +56,7 @@ class BuildGraphDirsComponent(BaseComponent):
             parent_id = None if location == "." else _dir_id(str(path.parent))
             dirs[location] = DirNode(
                 id=_dir_id(location),
+                identity_key=identity_key("dir", location, "directory"),
                 name=context.repo_path.name if location == "." else path.name,
                 location=location,
                 language="mixed",
@@ -98,6 +100,7 @@ class BuildGraphFilesComponent(BaseComponent):
                 parent_location = "."
             file_node = FileNode(
                 id=_file_id(location),
+                identity_key=identity_key("file", location, "source"),
                 name=file_path.name,
                 location=location,
                 language=detect_language(location),
@@ -183,9 +186,13 @@ class PersistGraphComponent(BaseComponent):
                 "PersistGraphComponent requires codebase_graph in the pipeline context"
             )
 
-        logger.info("Persisting codebase graph to %s", context.graph_path)
-        context.output_dir.mkdir(parents=True, exist_ok=True)
-        context.graph_path.write_text(
-            json.dumps(context.codebase_graph.model_dump(mode="json"), indent=2) + "\n"
+        logger.info("Persisting codebase graph to %s", context.graph_dir)
+        legacy_graph_path = context.output_dir / "graph.json"
+        if legacy_graph_path.exists():
+            legacy_graph_path.unlink()
+        store = GraphObjectStore(context.graph_dir)
+        store.write_graph(
+            context.codebase_graph,
+            repo_path=context.repo_path,
         )
         return context

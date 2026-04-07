@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Iterable
 
+from orbit_agent.graph.store import GraphObjectStore
 from orbit_agent.schemas import (
     CodebaseGraphV1,
     DirContext,
@@ -22,18 +22,12 @@ class GraphContextService:
         self.navigator = GraphNavigator(graph)
 
     @classmethod
-    def from_graph_path(cls, graph_path: Path | str) -> GraphContextService:
-        path = Path(graph_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Graph artifact not found: {path}")
-        graph = CodebaseGraphV1.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
-        return cls(graph)
+    def from_graph_dir(cls, graph_dir: Path | str) -> GraphContextService:
+        return cls(GraphObjectStore(graph_dir).read_graph())
 
     @classmethod
     def from_knowledge_dir(cls, knowledge_dir: Path | str) -> GraphContextService:
-        return cls.from_graph_path(Path(knowledge_dir) / "graph.json")
+        return cls.from_graph_dir(Path(knowledge_dir) / "graph")
 
     def get_node(self, node_id: str) -> GraphNode:
         return self.navigator.get_node(node_id)

@@ -26,7 +26,7 @@ class ManifestComponent(BaseComponent):
             or ArtifactsRef(
                 architecture="architecture.json",
                 files_dir="files/",
-                graph="graph.json",
+                graph="graph/refs/current.json",
             ),
         )
 

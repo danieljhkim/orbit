@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import ast
 import logging
-from datetime import datetime, timezone
 
 from orbit_agent.graph.extraction.base import (
     GraphExtractionInput,
     GraphExtractionResult,
     leaf_id,
+    leaf_identity_key,
+    leaf_location,
     source_hash,
 )
-from orbit_agent.schemas import LeafHistoryEntry, LeafNode, SignatureField
+from orbit_agent.schemas import LeafNode, SignatureField
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,9 @@ class PythonGraphExtractor:
             if import_source:
                 imports.append(import_source)
             elif isinstance(node, ast.Import):
-                imports.append("import " + ", ".join(alias.name for alias in node.names))
+                imports.append(
+                    "import " + ", ".join(alias.name for alias in node.names)
+                )
             else:
                 module = "." * node.level + (node.module or "")
                 imports.append(
@@ -120,9 +123,10 @@ class PythonGraphExtractor:
         parent_id: str,
     ) -> LeafNode:
         return LeafNode(
-            id=leaf_id(input_data.path, qualified_name, getattr(node, "lineno", None)),
+            id=leaf_id(input_data.path, qualified_name, "class"),
+            identity_key=leaf_identity_key(input_data.path, qualified_name, "class"),
             name=node.name,
-            location=input_data.path,
+            location=leaf_location(input_data.path, qualified_name),
             language=self.language,
             description=ast.get_docstring(node) or "",
             parent_id=parent_id,
@@ -130,16 +134,6 @@ class PythonGraphExtractor:
             source=node_source,
             source_hash=source_hash(node_source),
             file_hash_at_capture=input_data.file_hash,
-            history=[
-                LeafHistoryEntry(
-                    timestamp=datetime.now(timezone.utc),
-                    actor="orbit-agent",
-                    reason="initial capture",
-                    source=node_source,
-                    source_hash=source_hash(node_source),
-                    file_hash_at_capture=input_data.file_hash,
-                )
-            ],
             start_line=getattr(node, "lineno", None),
             end_line=getattr(node, "end_lineno", None),
         )
@@ -154,9 +148,18 @@ class PythonGraphExtractor:
         inside_class: bool,
     ) -> LeafNode:
         return LeafNode(
-            id=leaf_id(input_data.path, qualified_name, getattr(node, "lineno", None)),
+            id=leaf_id(
+                input_data.path,
+                qualified_name,
+                "method" if inside_class else "function",
+            ),
+            identity_key=leaf_identity_key(
+                input_data.path,
+                qualified_name,
+                "method" if inside_class else "function",
+            ),
             name=node.name,
-            location=input_data.path,
+            location=leaf_location(input_data.path, qualified_name),
             language=self.language,
             description=ast.get_docstring(node) or "",
             parent_id=parent_id,
@@ -164,16 +167,6 @@ class PythonGraphExtractor:
             source=node_source,
             source_hash=source_hash(node_source),
             file_hash_at_capture=input_data.file_hash,
-            history=[
-                LeafHistoryEntry(
-                    timestamp=datetime.now(timezone.utc),
-                    actor="orbit-agent",
-                    reason="initial capture",
-                    source=node_source,
-                    source_hash=source_hash(node_source),
-                    file_hash_at_capture=input_data.file_hash,
-                )
-            ],
             input_signature=self._function_inputs(node, input_data.source),
             output_signature=self._function_outputs(node, input_data.source),
             start_line=getattr(node, "lineno", None),

@@ -31,5 +31,5 @@ class PipelineContext:
         return self.output_dir / "files"
 
     @property
-    def graph_path(self) -> Path:
-        return self.output_dir / "graph.json"
+    def graph_dir(self) -> Path:
+        return self.output_dir / "graph"

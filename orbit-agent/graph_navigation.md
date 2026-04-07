@@ -48,7 +48,7 @@ This graph is intentionally focused on structure first. Other relationships such
 
 ## What Agents Actually Need
 
-Agents should not be forced to read raw `graph.json` directly for every task.
+Agents should not be forced to read raw graph object files directly for every task.
 
 Instead, each node type should expose its own derived context view.
 

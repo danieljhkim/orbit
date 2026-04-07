@@ -13,7 +13,11 @@ It scans a repository, builds structural knowledge artifacts, and writes determi
 ```text
 .orbit/knowledge/
   manifest.json
-  graph.json
+  graph/
+    refs/current.json
+    index/by-id.json
+    objects/<prefix>/<sha256>.json
+    blobs/<prefix>/<sha256>.txt
   files/
     <sha256>.json
 ```
@@ -137,9 +141,9 @@ Inspect the persisted graph:
 
 ```bash
 orbit-agent graph search PipelineContext --limit 5
-orbit-agent graph context file:orbit-agent/orbit_agent/pipeline/context.py
-orbit-agent graph lineage file:orbit-agent/orbit_agent/pipeline/context.py --include-self
-orbit-agent graph children dir:orbit-agent/orbit_agent/pipeline
+orbit-agent graph context file:<stable-id-hash>
+orbit-agent graph lineage file:<stable-id-hash> --include-self
+orbit-agent graph children dir:<stable-id-hash>
 ```
 
 Select an ordered component pipeline by name:
@@ -256,7 +260,7 @@ Directory and file graph construction is language-agnostic. Leaf extraction is d
 
 The default extractor registry currently includes:
 
-- `python`: uses the Python stdlib `ast` module to extract imports, exports, classes, functions, methods, signatures, source snippets, and history entries
+- `python`: uses the Python stdlib `ast` module to extract imports, exports, classes, functions, methods, signatures, source snippets, and stable leaf identities
 
 Unsupported languages are still represented as `FileNode`s, but they do not get `LeafNode`s until an extractor is registered for their detected language.
 
@@ -287,7 +291,7 @@ component = BuildGraphLeavesComponent(extractor_registry=extractor_registry)
 
 ## Graph Context Service
 
-Agents should not need to read `graph.json` directly. The runtime-facing graph context service loads the persisted graph and exposes navigable agent views:
+Agents should not need to read graph object files directly. The runtime-facing graph context service loads the persisted Merkle graph store and exposes navigable agent views:
 
 ```python
 from orbit_agent.service import GraphContextService
@@ -310,7 +314,10 @@ The service is backed by `GraphNavigator`, which can build:
 Important artifact types include:
 
 - `manifest.json`: build metadata and artifact pointers
-- `graph.json`: directory/file/leaf graph of the repository
+- `graph/refs/current.json`: Merkle graph entrypoint
+- `graph/index/by-id.json`: stable node ID to graph object lookup
+- `graph/objects/**/*.json`: content-addressed graph node/root objects
+- `graph/blobs/**/*.txt`: content-addressed source blobs
 - `files/*.json`: optional file summaries when summary components are enabled
 
 Orbit is expected to validate and consume these artifacts separately.

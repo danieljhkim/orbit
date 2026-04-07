@@ -20,6 +20,8 @@ LeafKind = Literal[
 
 class BaseNode(BaseModel):
     id: str
+    identity_key: str = ""
+    object_hash: str | None = None
     name: str
     location: str
     language: str
@@ -42,6 +44,7 @@ class LeafHistoryEntry(BaseModel):
     actor: str
     reason: str = ""
     source: str = ""
+    source_blob_hash: str | None = None
     source_hash: str | None = None
     file_hash_at_capture: str | None = None
 
@@ -55,6 +58,7 @@ class DirNode(BaseNode):
 class FileNode(BaseNode):
     node_type: Literal["file"] = "file"
     extension: str | None = None
+    source_blob_hash: str | None = None
     imports: list[str] = Field(default_factory=list)
     exports: list[str] = Field(default_factory=list)
     leaf_children: list[str] = Field(default_factory=list)
@@ -64,6 +68,7 @@ class LeafNode(BaseNode):
     node_type: Literal["leaf"] = "leaf"
     kind: LeafKind
     source: str = ""
+    source_blob_hash: str | None = None
     source_hash: str | None = None
     file_hash_at_capture: str | None = None
     history: list[LeafHistoryEntry] = Field(default_factory=list)
