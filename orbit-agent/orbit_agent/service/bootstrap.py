@@ -46,20 +46,21 @@ def _build_report(
     service: GraphContextService, options: BootstrapRenderOptions
 ) -> dict[str, Any]:
     graph = service.graph
-    root_node = service.navigator.get_root()
     tree = _build_tree(service, graph.root_dir_id)
     files = [
         _build_file_report(service, file_node, options)
         for file_node in sorted(graph.files, key=lambda node: node.location)
     ]
-    summary_count = sum(1 for node in graph.files if node.source_blob_hash and node.source_blob_hash in service.file_summaries_by_hash)
+    summary_count = sum(
+        1
+        for node in graph.files
+        if node.source_blob_hash
+        and node.source_blob_hash in service.file_summaries_by_hash
+    )
 
     return {
         "repo": {
-            "root_name": root_node.name,
-            "root_location": root_node.location,
-            "root_selector": _selector_for_dir(root_node),
-            "root_dir_id": graph.root_dir_id,
+            "root_selector": _selector_for_dir(service.navigator.get_root()),
             "dir_count": len(graph.dirs),
             "file_count": len(graph.files),
             "leaf_count": len(graph.leaves),
@@ -81,8 +82,6 @@ def _build_tree(service: GraphContextService, dir_id: str) -> dict[str, Any]:
         key=lambda child: child.location,
     )
     return {
-        "name": node.name,
-        "location": node.location,
         "selector": _selector_for_dir(node),
         "children": [
             _build_tree(service, child_dir.id) for child_dir in child_dirs
@@ -93,8 +92,6 @@ def _build_tree(service: GraphContextService, dir_id: str) -> dict[str, Any]:
 
 def _build_tree_file_stub(file_node: FileNode) -> dict[str, Any]:
     return {
-        "name": file_node.name,
-        "location": file_node.location,
         "selector": _selector_for_file(file_node),
     }
 
@@ -112,8 +109,6 @@ def _build_file_report(
     ]
 
     return {
-        "name": file_node.name,
-        "location": file_node.location,
         "selector": _selector_for_file(file_node),
         "lineage": [
             _selector_for_dir(node) for node in _dir_lineage(service, file_node)
@@ -147,12 +142,11 @@ def _build_leaf_report(
         selector = _summary_selector(file_node.location, ref.name, ref.kind)
 
     leaf_report = {
-        "name": ref.name,
-        "kind": ref.kind,
         "selector": selector,
         "signature": signature,
-        "description": description,
     }
+    if description:
+        leaf_report["description"] = description
     if options.include_source and options.source_budget > 0 and source:
         leaf_report["source"] = source[: options.source_budget]
     return leaf_report
@@ -168,7 +162,6 @@ def _render_markdown(report: dict[str, Any], budget: int) -> str:
     writer.line()
     writer.line("## Repo Stats")
     writer.line(f"- root: `{repo['root_selector']}`")
-    writer.line(f"- root name: `{repo['root_name']}`")
     writer.line(f"- directories: {repo['dir_count']}")
     writer.line(f"- files: {repo['file_count']}")
     writer.line(f"- leaves: {repo['leaf_count']}")
@@ -179,9 +172,8 @@ def _render_markdown(report: dict[str, Any], budget: int) -> str:
     writer.line()
     writer.line("## Files")
     for file_report in files:
-        if not writer.line(f"### `{file_report['location']}`"):
+        if not writer.line(f"### `{file_report['selector']}`"):
             break
-        writer.line(f"- selector: `{file_report['selector']}`")
         writer.line(f"- lineage: {' -> '.join(f'`{item}`' for item in file_report['lineage'])}")
         writer.line(f"- summary: {_single_line(file_report['summary'])}")
         writer.line(f"- imports: {', '.join(file_report['imports']) or '(none)'}")
@@ -217,14 +209,12 @@ def _render_markdown(report: dict[str, Any], budget: int) -> str:
 
 def _render_tree(writer: "_MarkdownWriter", tree: dict[str, Any], indent: int) -> None:
     prefix = "  " * indent
-    writer.line(f"{prefix}- `{tree['name']}` (`{tree['selector']}`)")
+    writer.line(f"{prefix}- `{tree['selector']}`")
     for child in tree["children"]:
         if "children" in child:
             _render_tree(writer, child, indent + 1)
         else:
-            writer.line(
-                f"{prefix}  - `{child['name']}` (`{child['selector']}`)"
-            )
+            writer.line(f"{prefix}  - `{child['selector']}`")
 
 
 def _dir_lineage(service: GraphContextService, file_node: FileNode) -> list[DirNode]:
