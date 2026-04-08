@@ -148,7 +148,7 @@ Render a focused lineage pack from selected context nodes:
 ```bash
 orbit-map knowledge pack file:src/a.py file:src/b.py
 orbit-map knowledge pack leaf:src/a.py#a:function --depth 1 --siblings 2 --children 4
-orbit-map knowledge pack file:src/a.py file:src/b.py --format json
+orbit-map knowledge pack dir:orbit-map/orbit_map/schemas --format json
 ```
 
 Inspect the persisted graph:
