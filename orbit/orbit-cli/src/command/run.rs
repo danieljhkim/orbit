@@ -10,10 +10,10 @@ use crate::command::Execute;
 #[derive(Args)]
 #[command(
     about = "Run a first-class workflow",
-    after_help = "Examples:\n  orbit run ship\n  orbit run ship --tasks T123,T456 --parallelism 2\n  orbit run ship-local --base main\n  orbit run review\n  orbit run --list"
+    after_help = "Examples:\n  orbit run ship\n  orbit run ship --tasks T123,T456 --parallelism 2\n  orbit run ship-local --base main\n  orbit run review\n  orbit run review-pr --pr-number 42 --base main\n  orbit run --list"
 )]
 pub struct RunCommand {
-    /// Workflow name (e.g. ship, ship-local, review)
+    /// Workflow name (e.g. ship, ship-local, review, review-pr)
     pub workflow: Option<String>,
 
     /// Comma-separated task IDs to process (omit to auto-select from backlog)
@@ -27,6 +27,10 @@ pub struct RunCommand {
     /// Base branch for the pipeline
     #[arg(long)]
     pub base: Option<String>,
+
+    /// Pull request number for review-pr workflows
+    #[arg(long = "pr-number")]
+    pub pr_number: Option<String>,
 
     /// Stream agent stderr to the terminal for debugging
     #[arg(long)]
@@ -61,6 +65,7 @@ impl Execute for RunCommand {
             tasks: self.tasks.clone(),
             parallelism: self.parallelism,
             base: self.base.clone(),
+            pr_number: self.pr_number.clone(),
         };
         validate_workflow_flags(workflow, &wf_input)?;
         let input = build_workflow_input(&wf_input)?;

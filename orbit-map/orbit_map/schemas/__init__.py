@@ -7,6 +7,12 @@ from orbit_map.schemas.graph.contexts import (
     NodeContextRef,
     NodeLockState,
 )
+from orbit_map.schemas.graph.handoff import (
+    HandoffConstraint,
+    HandoffNodeRef,
+    HandoffRisk,
+    WorkerHandoffPacket,
+)
 from orbit_map.schemas.graph.locking import (
     build_node_index,
     iter_nodes,
@@ -81,6 +87,9 @@ __all__ = [
     "get_parent",
     "get_siblings",
     "GraphNavigator",
+    "HandoffConstraint",
+    "HandoffNodeRef",
+    "HandoffRisk",
     "HashCacheV1",
     "iter_nodes",
     "LeafHistoryEntry",
@@ -98,4 +107,5 @@ __all__ = [
     "SummarizeFilesInputV1",
     "SummarizeFilesResponseV1",
     "unlock_lineage",
+    "WorkerHandoffPacket",
 ]

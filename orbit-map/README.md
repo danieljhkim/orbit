@@ -151,6 +151,15 @@ orbit-map knowledge pack leaf:src/a.py#a:function --depth 1 --siblings 2 --child
 orbit-map knowledge pack dir:orbit-map/orbit_map/schemas --format json
 ```
 
+### Worker Handoff
+
+Planner agents can package lineage scope for worker agents with
+`WorkerHandoffPacket`, a pydantic schema that captures task intent, root and
+target selectors, write scope, read-only context, risks, constraints, and
+navigation handles. `GraphContextService.build_handoff_packet()` validates
+selectors against the graph, and `render_lineage_pack_from_handoff()` can render
+the packet's selector set into the existing lineage-pack format.
+
 Inspect the persisted graph:
 
 ```bash

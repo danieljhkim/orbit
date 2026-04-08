@@ -27,6 +27,7 @@ const AUTOMATION_COMMIT_BATCH_CHANGES: &str = "commit_batch_changes";
 const AUTOMATION_OPEN_BATCH_PR: &str = "open_batch_pr";
 const AUTOMATION_COMMIT_AND_OPEN_BATCH_PR: &str = "commit_and_open_batch_pr";
 const AUTOMATION_SNAPSHOT_BATCH_STATE: &str = "snapshot_batch_state";
+const AUTOMATION_BOOTSTRAP_BATCH_REVIEW: &str = "bootstrap_batch_review";
 
 const AUTOMATION_MERGE_BATCH_PR: &str = "merge_batch_pr";
 const AUTOMATION_CHECK_BATCH_REVIEW_DECISION: &str = "check_batch_review_decision";
@@ -93,6 +94,7 @@ pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync 
         AUTOMATION_OPEN_BATCH_PR => pr::open_batch_pr(host, input),
         AUTOMATION_COMMIT_AND_OPEN_BATCH_PR => commit_and_pr::commit_and_open_batch_pr(host, input),
         AUTOMATION_SNAPSHOT_BATCH_STATE => snapshot::snapshot_batch_state(host, input),
+        AUTOMATION_BOOTSTRAP_BATCH_REVIEW => pr::bootstrap_batch_review(host, input),
 
         AUTOMATION_MERGE_BATCH_PR => pr::merge_batch_pr(host, input),
         AUTOMATION_CHECK_BATCH_REVIEW_DECISION => {

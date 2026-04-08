@@ -48,6 +48,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/automation/snapshot_batch_state.yaml"),
     ),
     (
+        "bootstrap_batch_review",
+        include_str!("../../assets/activities/automation/bootstrap_batch_review.yaml"),
+    ),
+    (
         "implement_batch_fix",
         include_str!("../../assets/activities/agent_invoke/implement_batch_fix.yaml"),
     ),

@@ -118,6 +118,81 @@ The worker then expands only when necessary.
 
 ---
 
+## Planner-to-Worker Handoff
+
+Planners now have a structured packet for handing lineage scope to worker
+agents: `WorkerHandoffPacket`.
+
+The packet is designed to keep prompts deterministic while still giving workers
+enough navigation handles to continue exploring the code graph on demand.
+
+### Node Role Taxonomy
+
+Each referenced node is represented as a lightweight `HandoffNodeRef` with a
+stable graph node ID and selector. Roles are explicit:
+
+- `root`: the lineage root assigned to the worker
+- `target`: the main nodes the task is trying to change or inspect
+- `write`: nodes the worker is allowed to modify
+- `read_only`: supporting context the worker may read but should not edit
+- `locked`: nodes currently reserved elsewhere or otherwise blocked
+- `expansion`: optional nearby selectors a worker can expand into if needed
+
+### Packet Shape
+
+`WorkerHandoffPacket` includes:
+
+- task intent (`task_id`, `task_title`, `task_intent`)
+- graph scope buckets (`root_nodes`, `target_nodes`, `write_nodes`,
+  `read_only_nodes`, `locked_nodes`, `expansion_handles`)
+- planner warnings (`risks`, `constraints`)
+- navigation handles (`knowledge_dir`, `lineage_pack_selectors`)
+
+The packet intentionally references graph nodes by selector and ID instead of
+embedding raw graph objects.
+
+### Markdown Rendering
+
+Workers can receive the packet as structured JSON or as a rendered prompt
+snippet:
+
+```python
+packet = service.build_handoff_packet(
+    task_id="T20260406-0455-2",
+    task_title="Define planner-to-worker lineage handoff schema",
+    task_intent="Add a handoff schema and connect it to lineage pack rendering.",
+    root_selectors=["dir:orbit_map/service"],
+    target_selectors=["file:orbit_map/service/graph_context.py"],
+    write_selectors=["file:orbit_map/service/graph_context.py"],
+    read_only_selectors=["file:orbit_map/service/lineage_pack.py"],
+    knowledge_dir=".orbit/knowledge",
+)
+
+prompt_fragment = packet.to_markdown(budget=8000)
+```
+
+`to_markdown()` renders task details, graph scope, risks, constraints, and
+navigation selectors in a budget-aware format suitable for agent prompts.
+
+### GraphContextService API
+
+`GraphContextService.build_handoff_packet()` resolves selectors into typed
+handoff references and computes default `lineage_pack_selectors` when the
+planner does not provide them explicitly.
+
+This keeps selector validation in one place and guarantees that worker-facing
+handoff packets stay consistent with graph navigation semantics.
+
+### Example Flow
+
+1. planner identifies the relevant lineage
+2. planner calls `build_handoff_packet(...)`
+3. worker receives the structured packet or `packet.to_markdown()`
+4. worker expands additional context with `render_lineage_pack_from_handoff(...)`
+   using the packet's navigation handles
+
+---
+
 ## Navigation Model
 
 Agents need graph operations, not giant graph dumps.

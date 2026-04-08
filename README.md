@@ -110,12 +110,14 @@ These surfaces are intentionally distinct because Orbit records provenance and e
 | **ship** | `orbit run ship` | Select tasks, dispatch agents, verify results, open a PR, review, and merge; requires `gh` auth |
 | **ship-local** | `orbit run ship-local` | Select tasks, dispatch agents, and commit locally without a PR |
 | **review** | `orbit run review` | Review tasks in `proposed` or `review` state |
+| **review-pr** | `orbit run review-pr --pr-number 42` | Review, gate, fix-loop, and merge an existing batch PR by PR number |
 
-Optional flags for `ship` and `ship-local`:
+Optional flags:
 
 - `--tasks T1,T2` pin specific task IDs instead of auto-selecting from backlog
 - `--parallelism N` control the number of parallel workers
 - `--base BRANCH` override the base branch
+- `--pr-number N` identify the batch PR for `review-pr`
 
 Examples:
 
@@ -131,6 +133,9 @@ orbit run ship-local --base main
 
 # review queue
 orbit run review
+
+# review and complete an existing batch PR
+orbit run review-pr --pr-number 42 --base main
 ```
 
 For advanced cases, the lower-level job interface remains available:
@@ -255,6 +260,12 @@ Source: [`orbit/orbit-core/assets/jobs/job_local_task_pipeline.yaml`](orbit/orbi
 ### `job_batch_review_cycle`
 
 Reviews a batch PR against task acceptance criteria, syncs review threads to GitHub, and either merges on approval or enters the fix loop.
+
+```bash
+orbit run review-pr --pr-number 42 --base main
+```
+
+Underlying job:
 
 ```bash
 orbit job run job_batch_review_cycle --input '{"base":"main","pr_number":"42"}'

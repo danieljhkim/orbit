@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Sequence
 
 from orbit_map.graph.extraction.base import node_id
 from orbit_map.graph.store import GraphObjectStore
@@ -13,8 +13,12 @@ from orbit_map.schemas import (
     FileContext,
     FileSummaryV1,
     FileSymbolV1,
+    HandoffConstraint,
+    HandoffNodeRef,
+    HandoffRisk,
     LeafContext,
     NodeContextRef,
+    WorkerHandoffPacket,
 )
 from orbit_map.schemas.graph.contexts import NodeType
 from orbit_map.schemas.graph.navigation import GraphNavigator, GraphNode
@@ -150,10 +154,91 @@ class GraphContextService:
             limit=limit,
         )
 
+    def build_handoff_packet(
+        self,
+        *,
+        task_id: str,
+        task_intent: str,
+        task_title: str = "",
+        root_selectors: Sequence[str],
+        target_selectors: Sequence[str],
+        write_selectors: Sequence[str],
+        read_only_selectors: Sequence[str] = (),
+        locked_selectors: Sequence[str] = (),
+        expansion_selectors: Sequence[str] = (),
+        risks: Sequence[HandoffRisk | dict[str, Any]] = (),
+        constraints: Sequence[HandoffConstraint | dict[str, Any]] = (),
+        knowledge_dir: str | None = None,
+        lineage_pack_selectors: Sequence[str] | None = None,
+    ) -> WorkerHandoffPacket:
+        root_nodes = self._resolve_handoff_refs(root_selectors, role="root")
+        target_nodes = self._resolve_handoff_refs(target_selectors, role="target")
+        write_nodes = self._resolve_handoff_refs(write_selectors, role="write")
+        read_only_nodes = self._resolve_handoff_refs(
+            read_only_selectors,
+            role="read_only",
+        )
+        locked_nodes = self._resolve_handoff_refs(locked_selectors, role="locked")
+        expansion_handles = self._resolve_handoff_refs(
+            expansion_selectors,
+            role="expansion",
+        )
+        return WorkerHandoffPacket(
+            task_id=task_id,
+            task_title=task_title,
+            task_intent=task_intent,
+            root_nodes=root_nodes,
+            target_nodes=target_nodes,
+            write_nodes=write_nodes,
+            read_only_nodes=read_only_nodes,
+            locked_nodes=locked_nodes,
+            expansion_handles=expansion_handles,
+            risks=[HandoffRisk.model_validate(item) for item in risks],
+            constraints=[
+                HandoffConstraint.model_validate(item) for item in constraints
+            ],
+            knowledge_dir=knowledge_dir or "",
+            lineage_pack_selectors=list(
+                lineage_pack_selectors
+                if lineage_pack_selectors is not None
+                else _merge_unique_selectors(
+                    [ref.selector for ref in root_nodes],
+                    [ref.selector for ref in target_nodes],
+                    [ref.selector for ref in write_nodes],
+                    [ref.selector for ref in read_only_nodes],
+                    [ref.selector for ref in locked_nodes],
+                    [ref.selector for ref in expansion_handles],
+                )
+            ),
+        )
+
     def _summary_for_file(self, node: FileNode) -> FileSummaryV1 | None:
         if node.source_blob_hash is None:
             return None
         return self.file_summaries_by_hash.get(node.source_blob_hash)
+
+    def _resolve_handoff_refs(
+        self,
+        selectors: Sequence[str],
+        *,
+        role: str,
+    ) -> list[HandoffNodeRef]:
+        refs: list[HandoffNodeRef] = []
+        for selector in selectors:
+            node = self.resolve_selector(selector)
+            refs.append(
+                HandoffNodeRef(
+                    id=node.id,
+                    selector=self.selector_for_node(node),
+                    role=role,
+                    name=node.name,
+                    node_type=node.node_type,
+                    location=node.location,
+                    description=node.description,
+                    kind=node.kind if node.node_type == "leaf" else None,
+                )
+            )
+        return refs
 
 
 def load_graph_context_service(knowledge_dir: Path | str) -> GraphContextService:
@@ -210,3 +295,15 @@ def _parse_selector(selector: str) -> tuple[str, str, str | None]:
     raise ValueError(
         f"Unsupported selector format, expected dir:, file:, leaf:, or a node id: {selector}"
     )
+
+
+def _merge_unique_selectors(*selector_groups: Sequence[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for group in selector_groups:
+        for selector in group:
+            if selector in seen:
+                continue
+            seen.add(selector)
+            ordered.append(selector)
+    return ordered

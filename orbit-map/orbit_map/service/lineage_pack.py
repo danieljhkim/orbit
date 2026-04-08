@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any, Literal, Sequence
 
 from orbit_map.graph.extraction.base import leaf_location
-from orbit_map.schemas import FileSummaryV1, FileSymbolV1, LeafNode
+from orbit_map.schemas import (
+    FileSummaryV1,
+    FileSymbolV1,
+    LeafNode,
+    WorkerHandoffPacket,
+)
 from orbit_map.schemas.graph.nodes import DirNode, FileNode
 from orbit_map.service.graph_context import GraphContextService
 
@@ -57,6 +62,25 @@ def render_lineage_pack(
     if detail:
         return _render_verbose_markdown(report, budget=budget)
     return _render_compact_markdown(report, budget=budget)
+
+
+def render_lineage_pack_from_handoff(
+    packet: WorkerHandoffPacket | dict[str, Any],
+    **kwargs: Any,
+) -> str:
+    handoff = (
+        packet
+        if isinstance(packet, WorkerHandoffPacket)
+        else WorkerHandoffPacket.model_validate(packet)
+    )
+    if not handoff.knowledge_dir:
+        raise ValueError("Worker handoff packet requires knowledge_dir to render lineage pack")
+    selectors = handoff.navigation_selectors()
+    if not selectors:
+        raise ValueError(
+            "Worker handoff packet must include at least one lineage pack selector"
+        )
+    return render_lineage_pack(handoff.knowledge_dir, selectors, **kwargs)
 
 
 def _build_verbose_report(

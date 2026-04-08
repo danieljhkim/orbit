@@ -11,6 +11,50 @@ use super::input::{
     canonicalize_existing_dir, input_string_field, json_number_to_string, required_input_string,
 };
 
+pub(super) fn bootstrap_batch_review<H: TaskHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    let run_id = super::parallel::require_run_id(input, "bootstrap_batch_review")?;
+    let existing_batch_tasks = host.list_tasks_filtered(None, None, None, Some(run_id))?;
+    if !existing_batch_tasks.is_empty() {
+        return Ok(json!({
+            "batch_id": run_id,
+            "task_count": existing_batch_tasks.len(),
+            "tagged_count": 0,
+        }));
+    }
+
+    let pr_number = required_input_string(input, "pr_number")?;
+    let pr_tasks: Vec<Task> = host
+        .list_tasks_filtered(None, None, None, None)?
+        .into_iter()
+        .filter(|task| task.pr_number.as_deref() == Some(pr_number))
+        .collect();
+
+    if pr_tasks.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "bootstrap_batch_review: no tasks found for pr_number '{pr_number}'"
+        )));
+    }
+
+    for task in &pr_tasks {
+        host.apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                batch_id: Some(run_id.to_string()),
+                ..TaskAutomationUpdate::default()
+            },
+        )?;
+    }
+
+    Ok(json!({
+        "batch_id": run_id,
+        "task_count": pr_tasks.len(),
+        "tagged_count": pr_tasks.len(),
+    }))
+}
+
 pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
@@ -343,14 +387,16 @@ mod tests {
     };
     use serde_json::{Value, json};
 
-    use super::{build_batch_pr_body, merge_batch_pr, task_required_revision};
+    use super::{
+        bootstrap_batch_review, build_batch_pr_body, merge_batch_pr, task_required_revision,
+    };
     use crate::context::{JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskHost};
     use crate::executor::automation::freshness::BranchFreshness;
 
     struct TestHost {
         tasks: Vec<Task>,
         merge_inputs: Mutex<Vec<Value>>,
-        updated_statuses: Mutex<Vec<(String, Option<TaskStatus>)>>,
+        task_updates: Mutex<Vec<(String, TaskAutomationUpdate)>>,
         scoreboard_dir: PathBuf,
         scoring_enabled: bool,
     }
@@ -360,7 +406,7 @@ mod tests {
             Self {
                 tasks,
                 merge_inputs: Mutex::new(Vec::new()),
-                updated_statuses: Mutex::new(Vec::new()),
+                task_updates: Mutex::new(Vec::new()),
                 scoreboard_dir: PathBuf::from("."),
                 scoring_enabled: false,
             }
@@ -370,7 +416,7 @@ mod tests {
             Self {
                 tasks,
                 merge_inputs: Mutex::new(Vec::new()),
-                updated_statuses: Mutex::new(Vec::new()),
+                task_updates: Mutex::new(Vec::new()),
                 scoreboard_dir,
                 scoring_enabled: true,
             }
@@ -428,10 +474,10 @@ mod tests {
             task_id: &str,
             update: TaskAutomationUpdate,
         ) -> Result<(), OrbitError> {
-            self.updated_statuses
+            self.task_updates
                 .lock()
-                .expect("updated statuses lock")
-                .push((task_id.to_string(), update.status));
+                .expect("task updates lock")
+                .push((task_id.to_string(), update));
             Ok(())
         }
     }
@@ -557,6 +603,12 @@ mod tests {
         }
     }
 
+    fn sample_task_for_pr(id: &str, workspace_path: &str, pr_number: &str) -> Task {
+        let mut task = sample_task(id, "batch-1", workspace_path, pr_number);
+        task.batch_id = None;
+        task
+    }
+
     fn scoreboard_value(path: &Path) -> Value {
         serde_json::from_str(&std::fs::read_to_string(path.join("pr.json")).expect("pr.json"))
             .expect("valid scoreboard json")
@@ -624,10 +676,96 @@ mod tests {
             })
         );
 
-        let updated = host.updated_statuses.lock().expect("updated statuses");
+        let updated = host.task_updates.lock().expect("task updates");
         assert_eq!(
-            updated.as_slice(),
+            updated
+                .iter()
+                .map(|(task_id, update)| (task_id.clone(), update.status))
+                .collect::<Vec<_>>()
+                .as_slice(),
             &[("T20260330-063823".to_string(), Some(TaskStatus::Done))]
+        );
+    }
+
+    #[test]
+    fn bootstrap_batch_review_is_noop_when_batch_already_exists() {
+        let host = TestHost::new(vec![sample_task("T20260330-063823", "batch-9", "/tmp", "76")]);
+
+        let result = bootstrap_batch_review(
+            &host,
+            &json!({
+                "run_id": "batch-9",
+            }),
+        )
+        .expect("bootstrap succeeds");
+
+        assert_eq!(
+            result,
+            json!({
+                "batch_id": "batch-9",
+                "task_count": 1,
+                "tagged_count": 0,
+            })
+        );
+        assert!(host.task_updates.lock().expect("task updates").is_empty());
+    }
+
+    #[test]
+    fn bootstrap_batch_review_tags_tasks_by_pr_number() {
+        let host = TestHost::new(vec![
+            sample_task_for_pr("T20260330-063823", "/tmp", "76"),
+            sample_task_for_pr("T20260330-065846", "/tmp", "76"),
+            sample_task_for_pr("T20260330-071500", "/tmp", "77"),
+        ]);
+
+        let result = bootstrap_batch_review(
+            &host,
+            &json!({
+                "run_id": "batch-9",
+                "pr_number": "76",
+            }),
+        )
+        .expect("bootstrap succeeds");
+
+        assert_eq!(
+            result,
+            json!({
+                "batch_id": "batch-9",
+                "task_count": 2,
+                "tagged_count": 2,
+            })
+        );
+
+        let updated = host.task_updates.lock().expect("task updates");
+        assert_eq!(
+            updated
+                .iter()
+                .map(|(task_id, update)| (task_id.clone(), update.batch_id.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("T20260330-063823".to_string(), Some("batch-9".to_string())),
+                ("T20260330-065846".to_string(), Some("batch-9".to_string())),
+            ]
+        );
+    }
+
+    #[test]
+    fn bootstrap_batch_review_errors_when_no_tasks_match_pr() {
+        let host = TestHost::new(vec![sample_task_for_pr("T20260330-071500", "/tmp", "77")]);
+
+        let error = bootstrap_batch_review(
+            &host,
+            &json!({
+                "run_id": "batch-9",
+                "pr_number": "76",
+            }),
+        )
+        .expect_err("bootstrap should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("bootstrap_batch_review: no tasks found for pr_number '76'")
         );
     }
 

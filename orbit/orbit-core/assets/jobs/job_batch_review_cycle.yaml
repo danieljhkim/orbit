@@ -11,6 +11,7 @@ job:
   # Batch review cycle: review a batch PR and either merge it or enter the fix-and-review loop.
   #
   # Step flow:
+  #   bootstrap_batch_review     — resolve tasks for this review cycle by existing batch_id or supplied PR number
   #   review_batch_pr             — review the opened PR against all batch tasks' acceptance criteria
   #   sync_batch_review_to_github — publish review threads to GitHub
   #   check_batch_review_decision — gate: succeeds if all tasks APPROVED, fails if any REQUEST_CHANGES
@@ -21,6 +22,11 @@ job:
   default_input:
     base: main
   steps:
+    - target_type: activity
+      target_id: bootstrap_batch_review
+      condition: on_success
+      timeout_seconds: 30
+
     - target_type: activity
       target_id: review_batch_pr
       agent_cli: claude
