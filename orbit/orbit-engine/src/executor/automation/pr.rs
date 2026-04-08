@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
-use super::freshness::ensure_branch_fresh_against_base;
+use super::freshness::{ensure_branch_fresh_against_base, ensure_branch_rebased_onto_base};
 use super::git::git_output;
 use super::input::{
     canonicalize_existing_dir, input_string_field, json_number_to_string, required_input_string,
@@ -216,7 +216,9 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     let head = head.trim().to_string();
     let base = input_string_field(input, "base").unwrap_or_else(|| "main".to_string());
 
-    let freshness = ensure_branch_fresh_against_base(&workspace_path, &head, &base)?;
+    let rebase_outcome = ensure_branch_rebased_onto_base(&workspace_path, &head, &base)?;
+    let freshness = rebase_outcome.freshness;
+    let branch_was_rebased = rebase_outcome.rebased;
 
     let diff_output = git_output(
         &workspace_path,
@@ -253,6 +255,7 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         json!({
             "repo_root": workspace_path.to_string_lossy().to_string(),
             "branch": head,
+            "force_with_lease": branch_was_rebased,
         }),
         Role::Admin,
         tool_context.clone(),

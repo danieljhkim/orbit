@@ -31,6 +31,14 @@ impl Tool for GitPushTool {
                     param_type: "string".to_string(),
                     required: false,
                 },
+                ToolParam {
+                    name: "force_with_lease".to_string(),
+                    description:
+                        "If true, push with --force-with-lease (safer force push that refuses to clobber unexpected remote changes)"
+                            .to_string(),
+                    param_type: "boolean".to_string(),
+                    required: false,
+                },
             ],
             builtin: true,
         }
@@ -50,6 +58,10 @@ impl Tool for GitPushTool {
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .unwrap_or("origin");
+        let force_with_lease = input
+            .get("force_with_lease")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         if remote.starts_with('-') {
             return Err(OrbitError::InvalidInput(
@@ -62,17 +74,22 @@ impl Tool for GitPushTool {
             ));
         }
 
+        let mut args = vec![
+            "-C".to_string(),
+            repo_root.to_string_lossy().to_string(),
+            "push".to_string(),
+        ];
+        if force_with_lease {
+            args.push("--force-with-lease".to_string());
+        }
+        args.push("--".to_string());
+        args.push(remote.to_string());
+        args.push(branch.to_string());
+
         let result = run_process(
             &ExecRequest {
                 program: "git".to_string(),
-                args: vec![
-                    "-C".to_string(),
-                    repo_root.to_string_lossy().to_string(),
-                    "push".to_string(),
-                    "--".to_string(),
-                    remote.to_string(),
-                    branch.to_string(),
-                ],
+                args,
                 current_dir: None,
                 timeout_ms: Some(TIMEOUT_LONG_MS),
                 stdin_mode: StdinMode::Null,
