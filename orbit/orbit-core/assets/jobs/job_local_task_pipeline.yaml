@@ -37,8 +37,7 @@ job:
     # 4. Agent verifies and wraps up (runs always, even on worker failure).
     - target_type: activity
       target_id: finalize_tasks
-      agent_cli: claude
-      model: sonnet
+      agent_cli: gemini
       condition: always
       timeout_seconds: 3600
 
