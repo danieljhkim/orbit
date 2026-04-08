@@ -191,6 +191,31 @@ handoff packets stay consistent with graph navigation semantics.
 4. worker expands additional context with `render_lineage_pack_from_handoff(...)`
    using the packet's navigation handles
 
+## Lineage Brief
+
+Worker prompts often need a higher-signal artifact than raw handoff JSON or a
+generic lineage pack. `build_lineage_brief(...)` produces a markdown brief that
+combines:
+
+- task identity and intent
+- the assigned lineage map
+- full source for target leaves by default
+- compact summaries for surrounding lineage and read-only context
+- explicit edit boundaries, risks, constraints, and navigation handles
+
+The CLI entry point is:
+
+```bash
+orbit-map knowledge brief \
+  --task-id T20260406-0454-2 \
+  --task-intent "Build a lineage brief for worker bootstrap." \
+  --root dir:orbit-map/orbit_map/service \
+  --target file:orbit-map/orbit_map/service/graph_context.py
+```
+
+This is intended for planner-to-worker prompt bootstrapping where agents need
+the relevant lineage in markdown form without expanding the full repository.
+
 ---
 
 ## Navigation Model

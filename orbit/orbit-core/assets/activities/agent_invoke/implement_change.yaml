@@ -17,9 +17,11 @@ activity:
 
     Steps:
     1. Load task context:
-       - Call orbit.task.show with id: input.task_id to fetch the task's title, description,
-         acceptance_criteria, plan, context_files, workspace_path, and repo_root.
-       - The task's workspace_path is the authoritative implementation workspace.
+       - Read the injected `task` object from this execution envelope. When `input.task_id`
+         is present, Orbit preloads `task.id`, `task.title`, `task.description`,
+         `task.acceptance_criteria`, `task.plan`, `task.context_files`,
+         `task.workspace_path`, and `task.repo_root` for you.
+       - The injected task snapshot is the authoritative task context for implementation.
        - However, if input.workspace_path is provided (as in parallel batch execution),
          it takes precedence over the task's workspace_path. This ensures agents work
          in the correct worktree when running inside a batch pipeline.
@@ -109,7 +111,7 @@ activity:
     properties:
       task_id:
         type: string
-        description: Orbit task ID. The agent loads task metadata (workspace_path, repo_root, branch) via orbit.task.show.
+        description: Orbit task ID. When present, Orbit injects task metadata into the execution envelope's `task` field before invoking the agent.
       verification_mode:
         type: string
         description: Optional verification policy. Use `deferred` when this implementation is part of a parallel batch and verification must wait for `finalize_tasks`.
@@ -126,7 +128,6 @@ activity:
     - orbit
     - orbit-track-issues
   tools:
-    - orbit.task.show
     - orbit.task.update
     - orbit.task.add
     - fs.write

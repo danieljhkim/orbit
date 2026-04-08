@@ -151,6 +151,25 @@ orbit-map knowledge pack leaf:src/a.py#a:function --depth 1 --siblings 2 --child
 orbit-map knowledge pack dir:orbit-map/orbit_map/schemas --format json
 ```
 
+### Lineage Brief
+
+Render a worker-oriented markdown brief from task intent plus assigned lineage:
+
+```bash
+orbit-map knowledge brief \
+  --task-id T20260406-0454-2 \
+  --task-title "Add lineage brief builder" \
+  --task-intent "Build a markdown lineage brief for worker bootstrap." \
+  --root dir:orbit-map/orbit_map/service \
+  --target file:orbit-map/orbit_map/service/graph_context.py \
+  --write file:orbit-map/orbit_map/service/graph_context.py \
+  --read-only file:orbit-map/orbit_map/service/lineage_pack.py
+```
+
+The brief keeps full `LeafNode.source` for target leaves by default, summarizes
+related lineage context more compactly, and emits navigation handles that point
+back to `graph context`, `graph lineage`, and `knowledge pack`.
+
 ### Worker Handoff
 
 Planner agents can package lineage scope for worker agents with

@@ -7,13 +7,35 @@ description: Use this skill when creating pull requests and replying to comments
 
 ## Purpose
 
-Standardize how agents interact with pull requests — creating, commenting, and replying. 
+Standardize how agents interact with pull requests - creating, commenting, and replying.
 
-When this workflow needs Orbit task metadata, include `agent` and `model` on every `orbit tool run orbit.*` call so Orbit records precise provenance instead of the generic `agent` label.
+When this workflow needs Orbit task metadata, include `agent` and `model` so Orbit records precise provenance instead of the generic `agent` label.
 
 ## Signature
 
 The **agent-identity-signature** (defined in CLAUDE.md / AGENTS.md) must be appended to the end of your PR bodies and PR comment replies: `*authored by: <agent> / <model>*`
+
+## Provenance
+
+Use the provenance path that matches the tool family:
+
+- `orbit.*` tools: pass `agent` and `model` inside the `--input` JSON body
+- `github.*` tools: pass `--agent` and `--model` to `orbit tool run`, or set `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL`
+
+Examples:
+
+```bash
+orbit tool run orbit.task.show --input '{
+  "id": "<task-id>",
+  "agent": "<agent>",
+  "model": "<model>"
+}'
+
+orbit tool run github.pr.view \
+  --input '{"pr": <pr-number>}' \
+  --agent <agent> \
+  --model <model>
+```
 
 ## PR Tool Reference
 

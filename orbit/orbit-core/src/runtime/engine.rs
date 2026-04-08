@@ -24,6 +24,8 @@ struct ExecutionEnvelope {
     skills: Vec<ExecutionSkillEnvelope>,
     input: Value,
     memory: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,6 +43,7 @@ fn build_agent_stdin_envelope_payload(
 ) -> Result<Vec<u8>, OrbitError> {
     let skill_refs = activity_skill_refs_from_spec_config(&execution.activity.spec_config)?;
     let skills = runtime.resolve_activity_skill_refs(&skill_refs)?;
+    let task = task_detail_for_input(runtime, &execution.input)?;
     let envelope = ExecutionEnvelope {
         schema_version: 1,
         activity: activity_envelope_json(&execution.activity),
@@ -69,10 +72,47 @@ fn build_agent_stdin_envelope_payload(
             .collect(),
         input: execution.input.clone(),
         memory: json!({}),
+        task,
     };
 
     serde_json::to_vec(&envelope)
         .map_err(|e| OrbitError::Execution(format!("failed to serialize stdin envelope: {e}")))
+}
+
+fn task_detail_for_input<H: TaskHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Option<Value>, OrbitError> {
+    let Some(task_id) = input.get("task_id").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+
+    let task = host.get_task(task_id)?;
+    Ok(Some(task_detail_envelope_json(&task, input)))
+}
+
+fn task_detail_envelope_json(task: &Task, input: &Value) -> Value {
+    let workspace_path = input
+        .get("workspace_path")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| task.workspace_path.clone());
+    let repo_root = input
+        .get("repo_root")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| task.repo_root.clone());
+
+    json!({
+        "id": task.id.clone(),
+        "title": task.title.clone(),
+        "description": task.description.clone(),
+        "acceptance_criteria": task.acceptance_criteria.clone(),
+        "plan": task.plan.clone(),
+        "context_files": task.context_files.clone(),
+        "workspace_path": workspace_path,
+        "repo_root": repo_root,
+    })
 }
 
 fn execute_commit_request_if_present(
@@ -507,9 +547,126 @@ fn codex_workspace_write_writable_dirs(paths: &WorkspacePaths) -> Vec<String> {
 mod tests {
     use std::path::PathBuf;
 
-    use orbit_types::WorkspacePaths;
+    use chrono::Utc;
+    use orbit_engine::TaskAutomationUpdate;
+    use orbit_types::{
+        Activity, ActorIdentity, OrbitError, ReviewThread, Task, TaskPriority, TaskStatus,
+        TaskType, WorkspacePaths,
+    };
+    use serde_json::json;
 
-    use super::codex_workspace_write_writable_dirs;
+    use super::{
+        ExecutionEnvelope, ExecutionSkillEnvelope, activity_envelope_json,
+        codex_workspace_write_writable_dirs, task_detail_envelope_json, task_detail_for_input,
+    };
+
+    struct MockTaskHost {
+        task: Task,
+    }
+
+    impl orbit_engine::TaskHost for MockTaskHost {
+        fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+            if self.task.id == task_id {
+                Ok(self.task.clone())
+            } else {
+                Err(OrbitError::TaskNotFound(task_id.to_string()))
+            }
+        }
+
+        fn list_tasks_filtered(
+            &self,
+            _status: Option<TaskStatus>,
+            _priority: Option<TaskPriority>,
+            _parent_id: Option<&str>,
+            _batch_id: Option<&str>,
+        ) -> Result<Vec<Task>, OrbitError> {
+            unreachable!("not used in this test")
+        }
+
+        fn start_task(
+            &self,
+            _task_id: &str,
+            _note: Option<String>,
+            _comment: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unreachable!("not used in this test")
+        }
+
+        fn update_task_from_activity(
+            &self,
+            _task_id: &str,
+            _status: TaskStatus,
+            _execution_summary: Option<String>,
+            _comment: Option<String>,
+            _note: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unreachable!("not used in this test")
+        }
+
+        fn apply_task_automation_update(
+            &self,
+            _task_id: &str,
+            _update: TaskAutomationUpdate,
+        ) -> Result<(), OrbitError> {
+            unreachable!("not used in this test")
+        }
+    }
+
+    fn sample_task() -> Task {
+        let now = Utc::now();
+        Task {
+            id: "T20260408-0133".to_string(),
+            parent_id: None,
+            title: "Inject task details".to_string(),
+            description: "Populate task details in the agent envelope.".to_string(),
+            acceptance_criteria: vec!["task field is present".to_string()],
+            plan: "1. Inject task detail\n2. Update tests".to_string(),
+            execution_summary: String::new(),
+            context_files: vec![
+                "orbit/orbit-core/src/runtime/engine.rs".to_string(),
+                "orbit/orbit-core/assets/activities/agent_invoke/implement_change.yaml"
+                    .to_string(),
+            ],
+            workspace_path: Some("/task/worktree".to_string()),
+            repo_root: Some("/task/repo".to_string()),
+            assigned_to: None,
+            created_by: None,
+            actor_identity: ActorIdentity::default(),
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::High,
+            complexity: None,
+            task_type: TaskType::Feature,
+            pr_number: None,
+            pr_status: None,
+            proposed_by: None,
+            source_task_id: None,
+            batch_id: None,
+            comments: vec![],
+            history: vec![],
+            review_threads: Vec::<ReviewThread>::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn sample_activity() -> Activity {
+        let now = Utc::now();
+        Activity {
+            id: "implement_change".to_string(),
+            spec_type: "agent_invoke".to_string(),
+            description: "test activity".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({}),
+            tools: vec!["orbit.task.update".to_string()],
+            proc_allowed_programs: vec!["cargo".to_string()],
+            workspace_path: None,
+            created_by: None,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
     #[test]
     fn workspace_write_includes_workspace_and_global_orbit_dirs() {
@@ -537,5 +694,96 @@ mod tests {
             codex_workspace_write_writable_dirs(&paths),
             vec!["/repo/.orbit".to_string()]
         );
+    }
+
+    #[test]
+    fn task_detail_envelope_prefers_input_overrides() {
+        let detail = task_detail_envelope_json(
+            &sample_task(),
+            &json!({
+                "workspace_path": "/override/worktree",
+                "repo_root": "/override/repo",
+            }),
+        );
+
+        assert_eq!(detail.get("workspace_path"), Some(&json!("/override/worktree")));
+        assert_eq!(detail.get("repo_root"), Some(&json!("/override/repo")));
+    }
+
+    #[test]
+    fn task_detail_envelope_falls_back_to_task_paths() {
+        let detail = task_detail_envelope_json(&sample_task(), &json!({}));
+
+        assert_eq!(detail.get("id"), Some(&json!("T20260408-0133")));
+        assert_eq!(detail.get("workspace_path"), Some(&json!("/task/worktree")));
+        assert_eq!(detail.get("repo_root"), Some(&json!("/task/repo")));
+    }
+
+    #[test]
+    fn task_detail_for_input_returns_none_without_task_id() {
+        let host = MockTaskHost {
+            task: sample_task(),
+        };
+
+        let detail = task_detail_for_input(&host, &json!({})).expect("task detail");
+
+        assert!(detail.is_none());
+    }
+
+    #[test]
+    fn serialized_execution_envelope_includes_task_details_when_present() {
+        let host = MockTaskHost {
+            task: sample_task(),
+        };
+        let input = json!({
+            "task_id": "T20260408-0133",
+            "workspace_path": "/override/worktree",
+        });
+        let task = task_detail_for_input(&host, &input).expect("task detail");
+
+        let envelope = ExecutionEnvelope {
+            schema_version: 1,
+            activity: activity_envelope_json(&sample_activity()),
+            job: None,
+            skills: vec![ExecutionSkillEnvelope {
+                id: "orbit".to_string(),
+                content_hash: "hash".to_string(),
+                content: "content".to_string(),
+                meta: None,
+            }],
+            input,
+            memory: json!({}),
+            task,
+        };
+
+        let serialized = serde_json::to_value(&envelope).expect("serialized envelope");
+
+        assert_eq!(
+            serialized.get("task").and_then(|task| task.get("title")),
+            Some(&json!("Inject task details"))
+        );
+        assert_eq!(
+            serialized
+                .get("task")
+                .and_then(|task| task.get("workspace_path")),
+            Some(&json!("/override/worktree"))
+        );
+    }
+
+    #[test]
+    fn serialized_execution_envelope_omits_task_field_when_absent() {
+        let envelope = ExecutionEnvelope {
+            schema_version: 1,
+            activity: activity_envelope_json(&sample_activity()),
+            job: None,
+            skills: vec![],
+            input: json!({}),
+            memory: json!({}),
+            task: None,
+        };
+
+        let serialized = serde_json::to_value(&envelope).expect("serialized envelope");
+
+        assert!(serialized.get("task").is_none());
     }
 }

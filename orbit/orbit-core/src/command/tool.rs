@@ -32,9 +32,15 @@ pub struct DoctorResult {
 }
 
 impl OrbitRuntime {
-    pub fn execute_tool_command(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
+    pub fn execute_tool_command(
+        &self,
+        name: &str,
+        input: Value,
+        agent_override: Option<String>,
+        model_override: Option<String>,
+    ) -> Result<Value, OrbitError> {
         let allowed_tools = read_activity_tools_from_env();
-        let (agent_name, model_name) = read_agent_identity_from_env();
+        let (agent_name, model_name) = resolve_agent_identity(agent_override, model_override);
         let proc_allowed_programs = read_proc_allowed_programs_from_env();
         let cwd = std::env::current_dir()
             .ok()
@@ -60,6 +66,17 @@ fn read_agent_identity_from_env() -> (Option<String>, Option<String>) {
         .ok()
         .filter(|s| !s.is_empty());
     (agent, model)
+}
+
+fn resolve_agent_identity(
+    agent_override: Option<String>,
+    model_override: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let (env_agent_name, env_model_name) = read_agent_identity_from_env();
+    (
+        agent_override.or(env_agent_name),
+        model_override.or(env_model_name),
+    )
 }
 
 fn read_proc_allowed_programs_from_env() -> Vec<String> {
@@ -317,7 +334,7 @@ mod tests {
     use orbit_types::OrbitError;
     use serde_json::{Value, json};
 
-    use super::read_activity_tools_from_env;
+    use super::{read_activity_tools_from_env, resolve_agent_identity};
     use crate::OrbitRuntime;
 
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -414,6 +431,47 @@ mod tests {
     }
 
     #[test]
+    fn resolve_agent_identity_prefers_cli_overrides() {
+        with_test_env(
+            &[
+                ("ORBIT_AGENT_NAME", Some("env-agent")),
+                ("ORBIT_AGENT_MODEL", Some("env-model")),
+            ],
+            || {
+                assert_eq!(
+                    resolve_agent_identity(
+                        Some("cli-agent".to_string()),
+                        Some("cli-model".to_string())
+                    ),
+                    (
+                        Some("cli-agent".to_string()),
+                        Some("cli-model".to_string())
+                    )
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_agent_identity_falls_back_to_env_when_overrides_missing() {
+        with_test_env(
+            &[
+                ("ORBIT_AGENT_NAME", Some("env-agent")),
+                ("ORBIT_AGENT_MODEL", Some("env-model")),
+            ],
+            || {
+                assert_eq!(
+                    resolve_agent_identity(None, None),
+                    (
+                        Some("env-agent".to_string()),
+                        Some("env-model".to_string())
+                    )
+                );
+            },
+        );
+    }
+
+    #[test]
     fn execute_tool_command_allows_allowlisted_tool_for_agent_actor() {
         with_test_env(
             &[
@@ -426,7 +484,7 @@ mod tests {
             || {
                 let runtime = OrbitRuntime::in_memory().expect("runtime");
                 let output = runtime
-                    .execute_tool_command("time.now", json!({}))
+                    .execute_tool_command("time.now", json!({}), None, None)
                     .expect("allowlisted tool should run");
 
                 assert!(output.get("now").and_then(Value::as_str).is_some());
@@ -447,7 +505,7 @@ mod tests {
             || {
                 let runtime = OrbitRuntime::in_memory().expect("runtime");
                 let error = runtime
-                    .execute_tool_command("time.sleep", json!({"ms": 0}))
+                    .execute_tool_command("time.sleep", json!({"ms": 0}), None, None)
                     .expect_err("disallowed tool should be rejected");
 
                 assert!(matches!(

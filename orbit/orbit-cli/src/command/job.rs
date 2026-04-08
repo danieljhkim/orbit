@@ -210,6 +210,9 @@ impl Execute for JobShowArgs {
 }
 
 #[derive(Args)]
+#[command(
+    after_help = "Examples:\n  orbit job run my_job\n  orbit job run my_job --input base=main --input pr_number=42"
+)]
 pub struct JobRunArgs {
     pub job_id: String,
     /// Input key=value pairs passed to all job steps (repeatable).

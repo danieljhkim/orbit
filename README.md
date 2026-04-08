@@ -141,7 +141,7 @@ orbit run review-pr --pr-number 42 --base main
 For advanced cases, the lower-level job interface remains available:
 
 ```bash
-orbit job run <job_id> --input '{"base":"main"}'
+orbit job run <job_id> --input base=main
 ```
 
 ---
@@ -268,7 +268,7 @@ orbit run review-pr --pr-number 42 --base main
 Underlying job:
 
 ```bash
-orbit job run job_batch_review_cycle --input '{"base":"main","pr_number":"42"}'
+orbit job run job_batch_review_cycle --input base=main --input pr_number=42
 ```
 
 ### `job_review_tasks`
