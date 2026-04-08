@@ -19,6 +19,8 @@ Use targeted tests while iterating, then run the full workspace suite before lan
 
 ## Repository Shape
 
+Rust workspace crates live under `orbit/` (for example `orbit/orbit-cli`).
+
 - `orbit-cli`: CLI entrypoint
 - `orbit-core`: composition root, command handling, runtime wiring
 - `orbit-engine`: job and activity execution engine

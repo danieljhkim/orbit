@@ -1,15 +1,15 @@
 [workspace]
 members = [
-  "orbit-agent",
-  "orbit-cli",
-  "orbit-core",
-  "orbit-engine",
-  "orbit-lock",
-  "orbit-types",
-  "orbit-store",
-  "orbit-policy",
-  "orbit-exec",
-  "orbit-tools",
+  "orbit/orbit-agent",
+  "orbit/orbit-cli",
+  "orbit/orbit-core",
+  "orbit/orbit-engine",
+  "orbit/orbit-lock",
+  "orbit/orbit-types",
+  "orbit/orbit-store",
+  "orbit/orbit-policy",
+  "orbit/orbit-exec",
+  "orbit/orbit-tools",
 ]
 resolver = "2"
 

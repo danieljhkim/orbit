@@ -5,6 +5,8 @@
 # ------------------------------------------------------------
 BINARY := orbit
 BIN_CRATE := orbit-cli
+# Crate sources live under orbit/ (see root Cargo.toml workspace members).
+BIN_CRATE_PATH := orbit/$(BIN_CRATE)
 WORKSPACE := --workspace
 
 # Detect profile
@@ -89,7 +91,7 @@ ci: fmt clippy test
 # Install
 # ------------------------------------------------------------
 install:
-	cargo install --path $(BIN_CRATE) --force
+	cargo install --path $(BIN_CRATE_PATH) --force
 
 uninstall:
 	cargo uninstall $(BINARY) || true

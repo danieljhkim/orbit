@@ -1,0 +1,66 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- registration ----
+  id: parallel_dispatch_tasks
+  spec_type: automation
+
+  # ---- content ----
+  description: Execute an explicit, conflict-free task batch using the shared worktree parallel worker pipeline on main.
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Job run ID, used as batch_id to query tasks belonging to this batch.
+      base:
+        type: string
+        description: Base branch for the shared parallel worktree. Defaults to main.
+      parallelism:
+        type: integer
+        minimum: 1
+        description: Maximum number of worker pipelines to run concurrently.
+  output_schema_json:
+    type: object
+    required:
+      - launched
+      - succeeded
+      - failed
+      - skipped
+      - completed_task_ids
+    properties:
+      launched:
+        type: integer
+      succeeded:
+        type: integer
+      failed:
+        type: integer
+      skipped:
+        type: integer
+      completed_task_ids:
+        type: array
+        items:
+          type: string
+      failures:
+        type: array
+        items:
+          type: object
+          properties:
+            task_id:
+              type: string
+            error:
+              type: string
+          required:
+            - task_id
+            - error
+
+  # ---- execution ----
+  action: run_parallel_task_pipeline

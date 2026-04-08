@@ -4,6 +4,12 @@ Orbit is a local-first workflow engine for agent-driven software delivery. It he
 
 Orbit runs on top of agent CLIs such as Codex and Claude Code. No provider API keys are required by Orbit itself.
 
+## Philosophy
+
+> Minimize tokens. Minimize irrelevant decisions. Maximize determinism.
+
+Orbit should make agents spend judgment on what matters: intent, correctness, tradeoffs, design, and risk. Agent opinions and decisions should directly support these values; if a choice does not reduce token usage, remove irrelevant discretion, or make the system more deterministic, Orbit should make that choice instead.
+
 ---
 
 ## Quick Start
@@ -130,7 +136,7 @@ orbit run review
 For advanced cases, the lower-level job interface remains available:
 
 ```bash
-orbit job run <job_id> --input '{"base":"agent-main"}'
+orbit job run <job_id> --input '{"base":"main"}'
 ```
 
 ---
@@ -233,7 +239,7 @@ The main PR-based workflow. It selects a conflict-free batch of tasks, dispatche
 orbit run ship
 ```
 
-Source: [`orbit-core/assets/jobs/job_parallel_task_pipeline.yaml`](orbit-core/assets/jobs/job_parallel_task_pipeline.yaml)
+Source: [`orbit/orbit-core/assets/jobs/job_parallel_task_pipeline.yaml`](orbit/orbit-core/assets/jobs/job_parallel_task_pipeline.yaml)
 
 ### `job_local_task_pipeline`
 
@@ -243,7 +249,7 @@ A local-only workflow. It plans, implements, and commits directly without openin
 orbit run ship-local
 ```
 
-Source: [`orbit-core/assets/jobs/job_local_task_pipeline.yaml`](orbit-core/assets/jobs/job_local_task_pipeline.yaml)
+Source: [`orbit/orbit-core/assets/jobs/job_local_task_pipeline.yaml`](orbit/orbit-core/assets/jobs/job_local_task_pipeline.yaml)
 
 
 ### `job_batch_review_cycle`
@@ -251,7 +257,7 @@ Source: [`orbit-core/assets/jobs/job_local_task_pipeline.yaml`](orbit-core/asset
 Reviews a batch PR against task acceptance criteria, syncs review threads to GitHub, and either merges on approval or enters the fix loop.
 
 ```bash
-orbit job run job_batch_review_cycle --input '{"base":"agent-main","pr_number":"42"}'
+orbit job run job_batch_review_cycle --input '{"base":"main","pr_number":"42"}'
 ```
 
 ### `job_review_tasks`

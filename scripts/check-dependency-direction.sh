@@ -29,9 +29,9 @@ forbid_dep() {
   fi
 }
 
-core_manifest="$repo_root/orbit-core/Cargo.toml"
-cli_manifest="$repo_root/orbit-cli/Cargo.toml"
-types_manifest="$repo_root/orbit-types/Cargo.toml"
+core_manifest="$repo_root/orbit/orbit-core/Cargo.toml"
+cli_manifest="$repo_root/orbit/orbit-cli/Cargo.toml"
+types_manifest="$repo_root/orbit/orbit-types/Cargo.toml"
 
 # Required downward edges from core.
 for dep in orbit-policy orbit-exec orbit-tools orbit-store orbit-types; do
@@ -52,7 +52,7 @@ fi
 
 # Lower layers must not depend upward on core/cli.
 for crate in orbit-store orbit-policy orbit-exec orbit-tools; do
-  manifest="$repo_root/${crate}/Cargo.toml"
+  manifest="$repo_root/orbit/${crate}/Cargo.toml"
   forbid_dep "$manifest" "orbit-core"
   forbid_dep "$manifest" "orbit-cli"
 done

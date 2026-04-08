@@ -1,0 +1,28 @@
+schemaVersion: 1
+
+# ---- job ----
+job:
+  # ---- registration ----
+  job_id: job_parallel_task_worker
+  state: enabled
+
+  # ---- execution ----
+  # Workers share a single worktree on the main branch.
+  # File-level locking prevents conflicts between concurrent workers.
+  # No per-task branch creation — all changes land directly in the shared worktree.
+  max_active_runs: 16
+  default_input:
+    base: main
+    verification_mode: deferred
+  steps:
+    - target_type: activity
+      target_id: implement_change
+      agent_cli: codex
+      model: gpt-5.4
+      condition: on_success
+      timeout_seconds: 4000
+
+    - target_type: activity
+      target_id: update_task
+      condition: on_success
+      timeout_seconds: 15

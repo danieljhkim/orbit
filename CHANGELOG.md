@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+### Features
+
+- **Parallel batch execution**: dispatch and execute multiple tasks in parallel with file-level conflict detection and shared worktrees
+- **Auto-cleanup on merge**: ship workflow now deletes the remote branch after a successful PR merge
+
+### Fixes
+
+- **`--parallelism` flag**: serialized as JSON integer instead of string, fixing schema validation failure on `orbit run ship --parallelism N`
+- **Stale default artifacts**: `orbit workspace init` now always refreshes default skills, activities, and jobs to their latest embedded versions (custom artifacts are preserved)
+- **Clippy warning**: resolved unused-mut warning and removed clippy from CI
+
+### Chores
+
+- Default branch renamed from `agent-main` to `main`
+- Removed `orbit` label from PR creation
+- Agent configuration updates
+
 ## 0.1.0
 
 Initial release of Orbit.

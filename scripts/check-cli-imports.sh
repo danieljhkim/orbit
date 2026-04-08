@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-cli_src_dir="$repo_root/orbit-cli/src"
+cli_src_dir="$repo_root/orbit/orbit-cli/src"
 
 forbidden=(
   "orbit_store"

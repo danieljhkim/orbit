@@ -17,3 +17,16 @@ orbit.db-wal
 .orbit/
 docs
 .monodev
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+dist/
+build/
+schema.md
+.vscode
+critique.md
+uv.lock

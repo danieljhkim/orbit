@@ -1,0 +1,74 @@
+schemaVersion: 1
+
+# ---- job ----
+job:
+  # ---- registration ----
+  job_id: job_batch_review_loop
+  state: enabled
+
+  # ---- execution ----
+  #
+  # Batch review loop: iterates until the batch PR is approved or max_iterations is reached.
+  #
+  # Step flow per iteration:
+  #   implement_batch_fix             — agent fetches review comments across all batch tasks and addresses them in the shared worktree
+  #   sync_batch_review_to_github     — publish thread replies to GitHub
+  #   commit_batch_changes            — safety net: stage and commit if the agent left uncommitted changes
+  #   push_batch_changes              — push the shared branch so the GitHub PR reflects the latest changes
+  #   review_batch_pr                 — reviewer evaluates the fixes against all batch tasks' acceptance criteria
+  #   sync_batch_review_to_github     — publish final review threads to GitHub
+  #   check_batch_review_decision     — automation gate: reads pr_status from task artifacts, outputs loop_exit=true if approved
+  #
+  # The loop exits when:
+  #   - check_batch_review_decision outputs loop_exit=true (all tasks approved)
+  #   - max_iterations (5) is reached (safety cap to prevent infinite loops)
+  #   - any step fails
+  max_active_runs: 1
+  max_iterations: 5
+  default_input:
+    base: main
+  steps:
+    - target_type: activity
+      target_id: pull_batch_changes
+      condition: always
+      timeout_seconds: 120
+
+    - target_type: activity
+      target_id: implement_batch_fix
+      agent_cli: codex
+      model: gpt-5.4
+      condition: always
+      timeout_seconds: 2000
+
+    - target_type: activity
+      target_id: sync_batch_review_to_github
+      condition: on_success
+      timeout_seconds: 120
+
+    - target_type: activity
+      target_id: commit_batch_changes
+      condition: on_success
+      timeout_seconds: 60
+
+    - target_type: activity
+      target_id: push_batch_changes
+      condition: on_success
+      timeout_seconds: 120
+
+    - target_type: activity
+      target_id: review_batch_pr
+      agent_cli: claude
+      model: sonnet
+      condition: on_success
+      timeout_seconds: 1000
+
+    - target_type: activity
+      target_id: sync_batch_review_to_github
+      condition: on_success
+      timeout_seconds: 120
+
+    # 7. Automation gate: read pr_status from task artifacts, output loop_exit=true if approved
+    - target_type: activity
+      target_id: check_batch_review_decision
+      condition: on_success
+      timeout_seconds: 30

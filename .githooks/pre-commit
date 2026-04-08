@@ -6,3 +6,8 @@ if command -v cargo >/dev/null 2>&1; then
     cargo fmt --all
     git add -u
 fi
+
+if command -v ruff >/dev/null 2>&1; then
+    ruff format .
+    git add -u
+fi
