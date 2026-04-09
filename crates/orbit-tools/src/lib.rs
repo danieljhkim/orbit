@@ -29,6 +29,7 @@
 
 pub mod builtin;
 pub mod external;
+pub mod knowledge;
 pub mod registry;
 
 use std::path::PathBuf;

@@ -1375,8 +1375,10 @@ dependencies = [
  "orbit-lock",
  "orbit-types",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

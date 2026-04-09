@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "object_type": "graph_node",
+  "node_type": "file",
+  "node": {
+    "description": "Orbit tool registry facade.",
+    "exports": [
+      "ToolRegistry"
+    ],
+    "extension": "rs",
+    "id": "node-file-lib",
+    "identity_key": "file:crates/orbit-tools/src/lib.rs",
+    "imports": [
+      "orbit_lock::FileLockChecker",
+      "serde_json::Value"
+    ],
+    "is_locked": false,
+    "language": "rust",
+    "leaf_children": [
+      "node-leaf-register-builtins"
+    ],
+    "lineage_locked": false,
+    "location": "crates/orbit-tools/src/lib.rs",
+    "lock_owner": null,
+    "lock_reason": "",
+    "name": "lib.rs",
+    "parent_id": "node-dir-tools-src",
+    "source_blob_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "child_object_hashes": {
+    "node-leaf-register-builtins": "3333333333333333333333333333333333333333333333333333333333333333"
+  }
+}

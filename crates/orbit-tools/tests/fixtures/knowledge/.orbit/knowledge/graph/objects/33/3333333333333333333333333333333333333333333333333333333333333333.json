@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "object_type": "graph_node",
+  "node_type": "leaf",
+  "node": {
+    "children": [],
+    "description": "Registers the built-in orbit tools.",
+    "end_line": 22,
+    "file_hash_at_capture": "7777777777777777777777777777777777777777777777777777777777777777",
+    "history": [],
+    "id": "node-leaf-register-builtins",
+    "identity_key": "leaf:crates/orbit-tools/src/lib.rs#register_builtins:function",
+    "input_signature": [],
+    "is_locked": false,
+    "kind": "function",
+    "language": "rust",
+    "lineage_locked": false,
+    "location": "crates/orbit-tools/src/lib.rs#register_builtins",
+    "lock_owner": null,
+    "lock_reason": "",
+    "name": "register_builtins",
+    "output_signature": [],
+    "parent_id": "node-file-lib",
+    "source": "",
+    "source_blob_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+    "source_hash": "8888888888888888888888888888888888888888888888888888888888888888",
+    "start_line": 11
+  },
+  "child_object_hashes": {}
+}

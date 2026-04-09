@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "object_type": "graph_node",
+  "node_type": "dir",
+  "node": {
+    "description": "Orbit tools source directory.",
+    "dir_children": [],
+    "file_children": [
+      "node-file-lib"
+    ],
+    "id": "node-dir-tools-src",
+    "identity_key": "dir:crates/orbit-tools/src",
+    "is_locked": false,
+    "language": "rust",
+    "lineage_locked": false,
+    "location": "crates/orbit-tools/src",
+    "lock_owner": null,
+    "lock_reason": "",
+    "name": "src",
+    "parent_id": null
+  },
+  "child_object_hashes": {
+    "node-file-lib": "2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

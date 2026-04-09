@@ -1,0 +1,4 @@
+pub fn register_builtins(registry: &mut ToolRegistry) {
+    fs::register(registry);
+    git::register(registry);
+}

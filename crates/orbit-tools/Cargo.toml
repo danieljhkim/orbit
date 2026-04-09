@@ -9,7 +9,9 @@ chrono.workspace = true
 orbit-exec = { path = "../orbit-exec" }
 orbit-lock = { path = "../orbit-lock" }
 orbit-types = { path = "../orbit-types" }
+serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
