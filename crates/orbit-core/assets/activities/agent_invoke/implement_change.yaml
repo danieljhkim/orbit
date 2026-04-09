@@ -145,6 +145,8 @@ activity:
   tools:
     - orbit.task.update
     - orbit.task.add
+    - orbit.knowledge.pack
+    - orbit.knowledge.write
     - fs.write
     - fs.delete
     - proc.spawn

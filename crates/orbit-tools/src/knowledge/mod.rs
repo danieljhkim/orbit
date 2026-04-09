@@ -1,3 +1,6 @@
+pub mod extractor;
+pub mod working_graph;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -177,10 +180,36 @@ impl FromStr for Selector {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum SelectorLookupKey {
+pub(crate) enum SelectorLookupKey {
     Dir(String),
     File(String),
+    /// Leaf(location, kind) where location = "path#symbol".
     Leaf(String, String),
+}
+
+impl SelectorLookupKey {
+    pub fn to_selector_string(&self) -> String {
+        match self {
+            Self::Dir(path) => format!("dir:{path}"),
+            Self::File(path) => format!("file:{path}"),
+            Self::Leaf(location, kind) => format!("leaf:{location}:{kind}"),
+        }
+    }
+}
+
+/// Leaf data extracted from a graph object, used to initialize a WorkingGraph.
+#[derive(Debug, Clone)]
+pub struct LeafData {
+    pub file_path: String,
+    pub name: String,
+    pub qualified_name: String,
+    pub kind: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub source: String,
+    pub source_hash: String,
+    pub parent_qualified_name: Option<String>,
+    pub children_qualified_names: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +285,93 @@ impl KnowledgeStore {
 
     pub fn is_available(knowledge_dir: &Path) -> bool {
         Self::open(knowledge_dir).is_ok()
+    }
+
+    /// Iterate all leaf entries, loading graph objects to extract detailed data.
+    ///
+    /// Used by `WorkingGraph::from_store()` to populate the in-memory working graph.
+    pub(crate) fn leaf_data(&self) -> Vec<(SelectorLookupKey, LeafData)> {
+        let mut result = Vec::new();
+        let mut object_cache = HashMap::<String, Value>::new();
+        let mut blob_cache = HashMap::<String, String>::new();
+
+        for entry in self.graph_index.nodes.values() {
+            if entry.node_type != "leaf" {
+                continue;
+            }
+            let kind = match &entry.kind {
+                Some(k) => k.clone(),
+                None => continue,
+            };
+
+            let object =
+                match read_graph_object(&self.knowledge_dir, &entry.object_hash, &mut object_cache)
+                {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+            let node = match object.get("node") {
+                Some(n) => n,
+                None => continue,
+            };
+
+            let start_line = node.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let end_line = node.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let name = node
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let source_hash = node
+                .get("source_hash")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Resolve source from inline or blob
+            let source = extract_leaf_source(&self.knowledge_dir, &object, &mut blob_cache)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+
+            // Parse location "path#symbol" to get file path and qualified name
+            let (file_path, qualified_name) = if let Some((p, s)) = entry.location.split_once('#') {
+                (p.to_string(), s.to_string())
+            } else {
+                continue;
+            };
+
+            // Extract children qualified names
+            let children: Vec<String> = node
+                .get("children")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let key = SelectorLookupKey::Leaf(entry.location.clone(), kind.clone());
+            result.push((
+                key,
+                LeafData {
+                    file_path,
+                    name,
+                    qualified_name,
+                    kind,
+                    start_line,
+                    end_line,
+                    source,
+                    source_hash,
+                    parent_qualified_name: None, // Not tracked in persisted graph index
+                    children_qualified_names: children,
+                },
+            ));
+        }
+
+        result
     }
 
     pub fn pack(&self, selectors: &[Selector]) -> Result<KnowledgePack, KnowledgeError> {

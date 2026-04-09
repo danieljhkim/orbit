@@ -1374,9 +1374,11 @@ dependencies = [
  "orbit-exec",
  "orbit-lock",
  "orbit-types",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
 ]

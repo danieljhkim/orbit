@@ -9,8 +9,10 @@ chrono.workspace = true
 orbit-exec = { path = "../orbit-exec" }
 orbit-lock = { path = "../orbit-lock" }
 orbit-types = { path = "../orbit-types" }
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
