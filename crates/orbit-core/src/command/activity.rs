@@ -492,3 +492,46 @@ pub(crate) fn activity_skill_refs_from_spec_config(
         ))
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_ACTIVITY_FILES, load_default_activity_specs};
+
+    #[test]
+    fn default_implement_change_uses_knowledge_pack_and_read_tools() {
+        let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, None).expect("activities");
+        let implement_change = specs
+            .into_iter()
+            .find(|spec| spec.id == "implement_change")
+            .expect("implement_change activity");
+
+        let instruction = implement_change
+            .spec_config
+            .get("instruction")
+            .and_then(serde_json::Value::as_str)
+            .expect("instruction");
+        assert!(instruction.contains("Load scoped knowledge for context_files"));
+        assert!(instruction.contains("Call orbit.knowledge.pack with the selector list"));
+        assert!(instruction.contains("knowledge_unavailable"));
+        assert!(instruction.contains("unresolved_selectors"));
+        assert!(!instruction.contains("Explore the workspace"));
+
+        let tools = implement_change
+            .spec_config
+            .get("tools")
+            .and_then(serde_json::Value::as_array)
+            .expect("tools")
+            .iter()
+            .map(|value| value.as_str().expect("tool name"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .filter(|tool| **tool == "orbit.knowledge.pack")
+                .count(),
+            1
+        );
+        assert!(tools.contains(&"orbit.knowledge.write"));
+        assert!(tools.contains(&"fs.read"));
+    }
+}

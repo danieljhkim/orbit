@@ -205,8 +205,8 @@ mod tests {
                     raw_read_token_baseline: 90,
                     knowledge_pack_tokens: None,
                     compression_ratio: None,
-                    actual_fs_read_tokens_during_run: 95,
-                    double_read_rate: None,
+                    actual_fs_read_tokens_during_run: 18,
+                    double_read_rate: Some(0.2),
                     knowledge_pack_used: false,
                     knowledge_pack_unresolved_count: 0,
                     total_llm_input_tokens: 900,
@@ -218,8 +218,8 @@ mod tests {
                     raw_read_token_baseline: 80,
                     knowledge_pack_tokens: None,
                     compression_ratio: None,
-                    actual_fs_read_tokens_during_run: 88,
-                    double_read_rate: None,
+                    actual_fs_read_tokens_during_run: 24,
+                    double_read_rate: Some(0.3),
                     knowledge_pack_used: false,
                     knowledge_pack_unresolved_count: 0,
                     total_llm_input_tokens: 1100,
@@ -238,9 +238,11 @@ mod tests {
         assert!((compression.p50 - 3.0).abs() < f64::EPSILON);
         assert!((compression.p90 - 4.0).abs() < f64::EPSILON);
         assert!((compression.min - 2.0).abs() < f64::EPSILON);
-        assert!((summary.double_read.mean_rate - ((0.1 + 0.2 + 0.7) / 3.0)).abs() < 1e-9);
+        assert!(
+            (summary.double_read.mean_rate - ((0.1 + 0.2 + 0.7 + 0.2 + 0.3) / 5.0)).abs() < 1e-9
+        );
         assert_eq!(summary.double_read.runs_over_fifty_percent, 1);
-        assert_eq!(summary.double_read.measured_runs, 3);
+        assert_eq!(summary.double_read.measured_runs, 5);
         assert!(
             (summary.total_llm_input_tokens.with_pack_avg - ((400.0 + 500.0 + 700.0) / 3.0)).abs()
                 < 1e-9

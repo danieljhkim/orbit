@@ -246,11 +246,7 @@ fn deserialize_envelope(value: &Value) -> Option<AgentResponseEnvelope> {
 }
 
 fn extract_invocation_trace(documents: &[Value], duration_ms: u64) -> InvocationTrace {
-    let usage = documents
-        .iter()
-        .rev()
-        .find_map(find_usage)
-        .unwrap_or_default();
+    let usage = sum_usage(documents);
     let tool_calls = extract_tool_calls(documents);
     InvocationTrace {
         usage,
@@ -259,25 +255,66 @@ fn extract_invocation_trace(documents: &[Value], duration_ms: u64) -> Invocation
     }
 }
 
-fn find_usage(value: &Value) -> Option<TokenUsage> {
+fn sum_usage(documents: &[Value]) -> TokenUsage {
+    let mut usage = TokenUsage::default();
+    for document in documents {
+        collect_usage(document, &mut usage, true);
+    }
+    usage
+}
+
+fn collect_usage(value: &Value, usage: &mut TokenUsage, allow_direct_usage: bool) {
     match value {
         Value::Object(map) => {
-            if let Some(usage) = usage_from_map(map) {
-                return Some(usage);
-            }
-            for key in ["usage", "token_usage", "tokens", "result", "message"] {
-                if let Some(found) = map.get(key).and_then(find_usage) {
-                    return Some(found);
+            if allow_direct_usage {
+                if let Some(found) = usage_from_map(map) {
+                    add_usage(usage, found);
+                    return;
                 }
             }
-            map.values().find_map(find_usage)
+
+            if matches!(map.get("type").and_then(Value::as_str), Some("tool_result")) {
+                return;
+            }
+
+            for key in ["usage", "token_usage", "tokenUsage", "tokens"] {
+                if let Some(child) = map.get(key) {
+                    collect_usage(child, usage, true);
+                }
+            }
+
+            for (key, child) in map {
+                if key != "tool_calls"
+                    && key != "usage"
+                    && key != "token_usage"
+                    && key != "tokenUsage"
+                    && key != "tokens"
+                {
+                    collect_usage(child, usage, false);
+                }
+            }
         }
-        Value::Array(items) => items.iter().rev().find_map(find_usage),
-        Value::String(raw) => serde_json::from_str::<Value>(raw)
-            .ok()
-            .and_then(|nested| find_usage(&nested)),
-        _ => None,
+        Value::Array(items) => {
+            for item in items {
+                collect_usage(item, usage, allow_direct_usage);
+            }
+        }
+        Value::String(raw) => {
+            if allow_direct_usage {
+                if let Ok(nested) = serde_json::from_str::<Value>(raw) {
+                    collect_usage(&nested, usage, true);
+                }
+            }
+        }
+        _ => {}
     }
+}
+
+fn add_usage(usage: &mut TokenUsage, found: TokenUsage) {
+    usage.input = usage.input.saturating_add(found.input);
+    usage.cache_read = usage.cache_read.saturating_add(found.cache_read);
+    usage.cache_create = usage.cache_create.saturating_add(found.cache_create);
+    usage.output = usage.output.saturating_add(found.output);
 }
 
 fn usage_from_map(map: &serde_json::Map<String, Value>) -> Option<TokenUsage> {
@@ -613,6 +650,107 @@ mod tests {
             trace.tool_calls[0].result_payload,
             Some(json!({ "ok": true, "bytes": 12 }))
         );
+    }
+
+    #[test]
+    fn sums_usage_across_multiple_llm_calls() {
+        let stdout = [
+            json!({
+                "type": "result",
+                "usage": {
+                    "input_tokens": 100,
+                    "cache_read_input_tokens": 10,
+                    "output_tokens": 20
+                }
+            })
+            .to_string(),
+            json!({
+                "type": "result",
+                "usage": {
+                    "input_tokens": 30,
+                    "cache_creation_input_tokens": 5,
+                    "output_tokens": 7
+                }
+            })
+            .to_string(),
+            json!({
+                "schemaVersion": 1,
+                "status": "success",
+                "result": {}
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        let exec_result = ExecutionResult {
+            success: true,
+            stdout,
+            stderr: String::new(),
+            exit_code: Some(0),
+            duration_ms: 84,
+            output: None,
+        };
+
+        let (_envelope, _status, trace) =
+            parse_and_validate_response(&exec_result).expect("response should parse");
+
+        assert_eq!(trace.usage.input, 130);
+        assert_eq!(trace.usage.cache_read, 10);
+        assert_eq!(trace.usage.cache_create, 5);
+        assert_eq!(trace.usage.output, 27);
+    }
+
+    #[test]
+    fn ignores_token_usage_inside_tool_result_payloads() {
+        let stdout = [
+            json!({
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": {
+                                "input_tokens": 999,
+                                "usage": {
+                                    "input_tokens": 999,
+                                    "output_tokens": 999
+                                }
+                            }
+                        }
+                    ]
+                }
+            })
+            .to_string(),
+            json!({
+                "type": "result",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20
+                }
+            })
+            .to_string(),
+            json!({
+                "schemaVersion": 1,
+                "status": "success",
+                "result": {}
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        let exec_result = ExecutionResult {
+            success: true,
+            stdout,
+            stderr: String::new(),
+            exit_code: Some(0),
+            duration_ms: 84,
+            output: None,
+        };
+
+        let (_envelope, _status, trace) =
+            parse_and_validate_response(&exec_result).expect("response should parse");
+
+        assert_eq!(trace.usage.input, 100);
+        assert_eq!(trace.usage.output, 20);
     }
 
     #[test]

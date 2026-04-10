@@ -393,17 +393,17 @@ pub(super) fn build_knowledge_run_metrics(
         compression_ratio: knowledge_pack_tokens
             .and_then(|tokens| safe_ratio(prepared.raw_read_token_baseline, tokens)),
         actual_fs_read_tokens_during_run,
-        double_read_rate: knowledge_pack_used
-            .then(|| {
-                safe_ratio(
-                    actual_fs_read_tokens_during_run,
-                    prepared.raw_read_token_baseline,
-                )
-            })
-            .flatten(),
+        double_read_rate: safe_ratio(
+            actual_fs_read_tokens_during_run,
+            prepared.raw_read_token_baseline,
+        ),
         knowledge_pack_used,
         knowledge_pack_unresolved_count,
-        total_llm_input_tokens: trace.usage.input,
+        total_llm_input_tokens: trace
+            .usage
+            .input
+            .saturating_add(trace.usage.cache_read)
+            .saturating_add(trace.usage.cache_create),
     })
 }
 
@@ -790,6 +790,8 @@ mod knowledge_metrics_tests {
         let trace = InvocationTrace {
             usage: orbit_types::TokenUsage {
                 input: 900,
+                cache_read: 30,
+                cache_create: 20,
                 ..Default::default()
             },
             tool_calls: vec![
@@ -817,7 +819,7 @@ mod knowledge_metrics_tests {
         assert_eq!(metrics.raw_read_token_baseline, 120);
         assert!(metrics.knowledge_pack_used);
         assert_eq!(metrics.knowledge_pack_unresolved_count, 1);
-        assert_eq!(metrics.total_llm_input_tokens, 900);
+        assert_eq!(metrics.total_llm_input_tokens, 950);
         assert!(metrics.knowledge_pack_tokens.is_some());
         assert!(metrics.compression_ratio.is_some());
         assert!(metrics.double_read_rate.is_some());
@@ -859,7 +861,7 @@ mod knowledge_metrics_tests {
         assert!(!metrics.knowledge_pack_used);
         assert!(metrics.knowledge_pack_tokens.is_none());
         assert!(metrics.compression_ratio.is_none());
-        assert!(metrics.double_read_rate.is_none());
+        assert!(metrics.double_read_rate.is_some());
         assert_eq!(metrics.knowledge_pack_unresolved_count, 0);
         assert_eq!(metrics.total_llm_input_tokens, 700);
         assert!(metrics.actual_fs_read_tokens_during_run > 0);

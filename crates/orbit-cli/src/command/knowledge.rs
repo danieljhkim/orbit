@@ -214,8 +214,8 @@ mod tests {
                 raw_read_token_baseline: 80,
                 knowledge_pack_tokens: None,
                 compression_ratio: None,
-                actual_fs_read_tokens_during_run: 85,
-                double_read_rate: None,
+                actual_fs_read_tokens_during_run: 16,
+                double_read_rate: Some(0.2),
                 knowledge_pack_used: false,
                 knowledge_pack_unresolved_count: 0,
                 total_llm_input_tokens: 900,
@@ -228,8 +228,8 @@ mod tests {
                 raw_read_token_baseline: 70,
                 knowledge_pack_tokens: None,
                 compression_ratio: None,
-                actual_fs_read_tokens_during_run: 71,
-                double_read_rate: None,
+                actual_fs_read_tokens_during_run: 21,
+                double_read_rate: Some(0.3),
                 knowledge_pack_used: false,
                 knowledge_pack_unresolved_count: 0,
                 total_llm_input_tokens: 1000,
@@ -244,6 +244,7 @@ mod tests {
         assert_eq!(summary.fallback_runs, 2);
         assert!(summary.compression.is_some());
         assert_eq!(summary.double_read.runs_over_fifty_percent, 1);
+        assert_eq!(summary.double_read.measured_runs, 5);
         assert!(summary.total_llm_input_tokens.estimated_savings.is_some());
     }
 }
