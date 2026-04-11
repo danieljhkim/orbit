@@ -423,6 +423,7 @@ mod tests {
                 status: None,
                 since: None,
                 limit: Some(10),
+                full: false,
                 json: false,
             }),
         }));

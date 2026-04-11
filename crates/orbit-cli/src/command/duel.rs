@@ -220,6 +220,8 @@ pub struct DuelListArgs {
     #[arg(long)]
     pub limit: Option<usize>,
     #[arg(long)]
+    pub full: bool,
+    #[arg(long)]
     pub json: bool,
 }
 
@@ -241,7 +243,7 @@ impl Execute for DuelListArgs {
             ));
         }
 
-        print_job_run_list(&runs);
+        print_job_run_list(&runs, self.full);
         Ok(())
     }
 }
@@ -485,6 +487,20 @@ mod tests {
                 None,
             ),
         ]
+    }
+
+    #[test]
+    fn duel_list_accepts_full_flag() {
+        let cli =
+            Cli::try_parse_from(["orbit", "duel", "list", "--full"]).expect("duel list parses");
+
+        let Commands::Duel(duel) = cli.command else {
+            panic!("expected duel command");
+        };
+        let DuelSubcommand::List(args) = duel.command else {
+            panic!("expected duel list command");
+        };
+        assert!(args.full);
     }
 
     #[test]

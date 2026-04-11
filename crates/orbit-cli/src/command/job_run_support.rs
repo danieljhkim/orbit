@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
@@ -59,46 +59,52 @@ pub(crate) fn load_latest_job_run(
     .ok_or_else(|| OrbitError::InvalidInput(format!("no {label} runs found")))
 }
 
-pub(crate) fn print_job_run_list(runs: &[JobRun]) {
-    let mut table = crate::output::table::build_table(&[
-        "RUN_ID",
-        "JOB_ID",
-        "ATTEMPT",
-        "STATE",
-        "STARTED_AT",
-        "FINISHED_AT",
-        "ERROR_CODE",
-        "ERROR_MESSAGE",
-    ]);
+pub(crate) fn print_job_run_list(runs: &[JobRun], full: bool) {
+    let headers = if full {
+        vec![
+            "RUN_ID",
+            "JOB_ID",
+            "ATTEMPT",
+            "STATE",
+            "STARTED",
+            "FINISHED",
+            "DURATION",
+            "ERROR_CODE",
+            "ERROR_MESSAGE",
+        ]
+    } else {
+        vec!["RUN_ID", "STATE", "STARTED", "FINISHED", "DURATION"]
+    };
+    let mut table = crate::output::table::build_table(&headers);
     for run in runs {
         use comfy_table::Cell;
-        table.add_row(vec![
+        let mut row = vec![
             Cell::new(&run.run_id),
-            Cell::new(&run.job_id),
-            Cell::new(run.attempt.to_string()),
             crate::output::color::job_state_color_cell(&run.state.to_string()),
-            Cell::new(
-                run.started_at
-                    .map(|value| value.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-            ),
-            Cell::new(
-                run.finished_at
-                    .map(|value| value.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-            ),
-            Cell::new(
-                run.steps
-                    .last()
-                    .and_then(|step| step.error_code.clone())
-                    .unwrap_or_else(|| "-".to_string()),
-            ),
-            Cell::new(summarize_error_message(
-                run.steps
-                    .last()
-                    .and_then(|step| step.error_message.as_deref()),
-            )),
-        ]);
+            Cell::new(format_table_timestamp(run.started_at)),
+            Cell::new(format_table_timestamp(run.finished_at)),
+            Cell::new(format_run_duration(run)),
+        ];
+
+        if full {
+            row.insert(1, Cell::new(&run.job_id));
+            row.insert(2, Cell::new(run.attempt.to_string()));
+            row.extend([
+                Cell::new(
+                    run.steps
+                        .last()
+                        .and_then(|step| step.error_code.clone())
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                Cell::new(summarize_error_message(
+                    run.steps
+                        .last()
+                        .and_then(|step| step.error_message.as_deref()),
+                )),
+            ]);
+        }
+
+        crate::output::table::add_single_line_row(&mut table, row);
     }
     println!("{table}");
 }
@@ -147,6 +153,63 @@ pub(crate) fn summarize_error_message(raw: Option<&str>) -> String {
     }
     let truncated = value.chars().take(120).collect::<String>();
     format!("{truncated}...")
+}
+
+fn format_table_timestamp(value: Option<DateTime<Utc>>) -> String {
+    value
+        .map(|value| value.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn format_run_duration(run: &JobRun) -> String {
+    format_run_duration_values(run.started_at, run.finished_at)
+}
+
+fn format_run_duration_values(
+    started_at: Option<DateTime<Utc>>,
+    finished_at: Option<DateTime<Utc>>,
+) -> String {
+    match (started_at, finished_at) {
+        (Some(started_at), Some(finished_at)) if finished_at >= started_at => {
+            format_duration(finished_at - started_at)
+        }
+        _ => "-".to_string(),
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.num_seconds();
+    if seconds < 0 {
+        return "-".to_string();
+    }
+
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    let secs = seconds % 60;
+
+    if days > 0 {
+        if hours > 0 {
+            return format!("{days}d{hours}h");
+        }
+        return format!("{days}d");
+    }
+
+    if hours > 0 {
+        if minutes > 0 {
+            return format!("{hours}h{minutes}m");
+        }
+        return format!("{hours}h");
+    }
+
+    if minutes > 0 {
+        if secs > 0 {
+            return format!("{minutes}m{secs}s");
+        }
+        return format!("{minutes}m");
+    }
+
+    format!("{secs}s")
 }
 
 pub(crate) fn print_job_run(run: &JobRun) {
@@ -290,5 +353,36 @@ pub(crate) fn print_step_detail(step: &JobRunStep) {
         }
     } else {
         println!("{} -", bold("Agent Response:"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_duration, format_run_duration_values, format_table_timestamp};
+    use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn table_timestamp_is_shortened() {
+        let value = Utc.with_ymd_and_hms(2026, 4, 11, 18, 45, 12).unwrap();
+        assert_eq!(format_table_timestamp(Some(value)), "2026-04-11 18:45");
+    }
+
+    #[test]
+    fn human_duration_prefers_large_units() {
+        assert_eq!(format_duration(Duration::seconds(59)), "59s");
+        assert_eq!(format_duration(Duration::minutes(30)), "30m");
+        assert_eq!(format_duration(Duration::minutes(72)), "1h12m");
+        assert_eq!(format_duration(Duration::hours(27)), "1d3h");
+    }
+
+    #[test]
+    fn run_duration_uses_start_and_finish() {
+        let started_at = Utc.with_ymd_and_hms(2026, 4, 11, 18, 0, 0).unwrap();
+        let finished_at = Utc.with_ymd_and_hms(2026, 4, 11, 19, 12, 0).unwrap();
+
+        assert_eq!(
+            format_run_duration_values(Some(started_at), Some(finished_at)),
+            "1h12m"
+        );
     }
 }

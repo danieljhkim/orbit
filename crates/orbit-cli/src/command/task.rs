@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskPriority, TaskStatus, TaskType};
@@ -309,6 +310,9 @@ pub struct TaskListArgs {
     /// Output signal-tier JSON (id, title, type, status, priority only)
     #[arg(long)]
     pub ops: bool,
+    /// Show all table columns in text output
+    #[arg(long)]
+    pub full: bool,
 }
 
 impl Execute for TaskListArgs {
@@ -347,7 +351,7 @@ impl Execute for TaskListArgs {
             let json_tasks: Vec<Value> = tasks.iter().map(task_to_json).collect();
             crate::output::json::print_pretty(&Value::Array(json_tasks))
         } else {
-            print_task_table(&tasks);
+            print_task_table(&tasks, self.full);
             Ok(())
         }
     }
@@ -1095,7 +1099,7 @@ impl Execute for TaskSearchArgs {
             let json_tasks: Vec<Value> = tasks.iter().map(task_to_json).collect();
             crate::output::json::print_pretty(&Value::Array(json_tasks))
         } else {
-            print_task_table(&tasks);
+            print_task_table(&tasks, false);
             Ok(())
         }
     }
@@ -1288,19 +1292,45 @@ impl Execute for ReviewThreadResolveArgs {
 
 // --- Helpers ---
 
-fn print_task_table(tasks: &[orbit_core::Task]) {
+fn print_task_table(tasks: &[orbit_core::Task], full: bool) {
     use comfy_table::Cell;
-    let mut table = crate::output::table::build_table(&["ID", "STATUS", "PRI", "TYPE", "TITLE"]);
+    let headers = if full {
+        vec![
+            "ID",
+            "TITLE",
+            "STATUS",
+            "PRIORITY",
+            "TYPE",
+            "ASSIGNED_TO",
+            "CREATED_AT",
+            "UPDATED_AT",
+        ]
+    } else {
+        vec!["ID", "TITLE", "STATUS", "PRIORITY", "TYPE"]
+    };
+    let mut table = crate::output::table::build_table(&headers);
     for task in tasks {
-        table.add_row(vec![
+        let mut row = vec![
             Cell::new(&task.id),
+            Cell::new(&task.title),
             crate::output::color::status_color_cell(&task.status.to_string()),
             crate::output::color::priority_color_cell(&task.priority.to_string()),
             Cell::new(task.task_type.to_string()),
-            Cell::new(&task.title),
-        ]);
+        ];
+        if full {
+            row.extend([
+                Cell::new(task.assigned_to.as_deref().unwrap_or("-")),
+                Cell::new(format_task_table_timestamp(task.created_at)),
+                Cell::new(format_task_table_timestamp(task.updated_at)),
+            ]);
+        }
+        crate::output::table::add_single_line_row(&mut table, row);
     }
     println!("{table}");
+}
+
+fn format_task_table_timestamp(value: DateTime<Utc>) -> String {
+    value.format("%Y-%m-%d %H:%M").to_string()
 }
 
 fn task_to_signal_json(task: &orbit_core::Task) -> Value {
@@ -1585,5 +1615,19 @@ mod tests {
         );
 
         assert_eq!(status_filter, requested_statuses);
+    }
+
+    #[test]
+    fn task_list_accepts_full_flag() {
+        let cli =
+            Cli::try_parse_from(["orbit", "task", "list", "--full"]).expect("task list parses");
+
+        let Commands::Task(task_command) = cli.command else {
+            panic!("expected task command");
+        };
+        let TaskSubcommand::List(args) = task_command.command else {
+            panic!("expected task list command");
+        };
+        assert!(args.full);
     }
 }

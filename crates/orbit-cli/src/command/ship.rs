@@ -138,6 +138,8 @@ pub struct ShipListArgs {
     #[arg(long)]
     pub limit: Option<usize>,
     #[arg(long)]
+    pub full: bool,
+    #[arg(long)]
     pub json: bool,
 }
 
@@ -159,7 +161,7 @@ impl Execute for ShipListArgs {
             ));
         }
 
-        print_job_run_list(&runs);
+        print_job_run_list(&runs, self.full);
         Ok(())
     }
 }
@@ -411,5 +413,19 @@ mod tests {
             panic!("expected ship show command");
         };
         assert!(args.run_id.is_none());
+    }
+
+    #[test]
+    fn ship_list_accepts_full_flag() {
+        let cli =
+            Cli::try_parse_from(["orbit", "ship", "list", "--full"]).expect("ship list parses");
+
+        let Commands::Ship(ship) = cli.command else {
+            panic!("expected ship command");
+        };
+        let ShipSubcommand::List(args) = ship.command else {
+            panic!("expected ship list command");
+        };
+        assert!(args.full);
     }
 }
