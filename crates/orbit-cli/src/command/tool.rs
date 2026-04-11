@@ -450,13 +450,7 @@ mod tests {
             "entries": 4
         });
 
-        let shaped = shape_tool_output(
-            "orbit.knowledge.pack",
-            &json!({}),
-            output.clone(),
-            false,
-            &[],
-        );
+        let shaped = shape_tool_output("orbit.graph.pack", &json!({}), output.clone(), false, &[]);
 
         assert_eq!(shaped, output);
     }

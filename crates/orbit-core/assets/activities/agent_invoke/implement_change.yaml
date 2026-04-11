@@ -53,8 +53,8 @@ activity:
     3. Load scoped knowledge for context_files:
        - Build a selector list from task.context_files: each file becomes `file:<path>`.
          If the plan names specific symbols in the form `<path>#<symbol>`, add
-         `leaf:<path>#<symbol>:<kind>` selectors as well.
-       - Call orbit.knowledge.pack with the selector list.
+         `symbol:<path>#<symbol>:<kind>` selectors as well.
+       - Call orbit.graph.pack with the selector list.
        - If the response succeeds, use the pack entries as your primary context.
          Each entry includes the leaf source, imports, and immediate neighbors —
          you do NOT need to fs.read the full file.
@@ -155,8 +155,8 @@ activity:
     - orbit
     - orbit-track-issues
   tools:
-    - orbit.knowledge.pack
-    - orbit.knowledge.write
+    - orbit.graph.pack
+    - orbit.graph.write
     - orbit.task.update
     - orbit.task.add
     - fs.read

@@ -12,7 +12,7 @@ pub struct OrbitKnowledgeSearchTool;
 impl Tool for OrbitKnowledgeSearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
-            name: "orbit.knowledge.search".to_string(),
+            name: "orbit.graph.search".to_string(),
             description: "Search knowledge graph nodes by name or location".to_string(),
             parameters: vec![
                 ToolParam {

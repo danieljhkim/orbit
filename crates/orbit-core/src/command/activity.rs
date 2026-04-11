@@ -511,7 +511,7 @@ mod tests {
             .and_then(serde_json::Value::as_str)
             .expect("instruction");
         assert!(instruction.contains("Load scoped knowledge for context_files"));
-        assert!(instruction.contains("Call orbit.knowledge.pack with the selector list"));
+        assert!(instruction.contains("Call orbit.graph.pack with the selector list"));
         assert!(instruction.contains("knowledge_unavailable"));
         assert!(instruction.contains("unresolved_selectors"));
         assert!(!instruction.contains("Explore the workspace"));
@@ -527,11 +527,11 @@ mod tests {
         assert_eq!(
             tools
                 .iter()
-                .filter(|tool| **tool == "orbit.knowledge.pack")
+                .filter(|tool| **tool == "orbit.graph.pack")
                 .count(),
             1
         );
-        assert!(tools.contains(&"orbit.knowledge.write"));
+        assert!(tools.contains(&"orbit.graph.write"));
         assert!(tools.contains(&"fs.read"));
     }
 

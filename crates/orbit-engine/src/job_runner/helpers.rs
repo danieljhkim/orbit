@@ -363,7 +363,7 @@ pub(super) fn build_knowledge_run_metrics(
     let pack_payload = trace
         .tool_calls
         .iter()
-        .find(|call| call.tool_name == "orbit.knowledge.pack")
+        .find(|call| call.tool_name == "orbit.graph.pack")
         .and_then(|call| call.result_payload.as_ref());
 
     let knowledge_unavailable = pack_payload
@@ -797,7 +797,7 @@ mod knowledge_metrics_tests {
             tool_calls: vec![
                 ToolCallTrace {
                     seq: 1,
-                    tool_name: "orbit.knowledge.pack".to_string(),
+                    tool_name: "orbit.graph.pack".to_string(),
                     result_bytes: 0,
                     result_payload: Some(json!({
                         "entries": [{"selector": "file:src/lib.rs"}],
@@ -839,7 +839,7 @@ mod knowledge_metrics_tests {
             tool_calls: vec![
                 ToolCallTrace {
                     seq: 1,
-                    tool_name: "orbit.knowledge.pack".to_string(),
+                    tool_name: "orbit.graph.pack".to_string(),
                     result_bytes: 0,
                     result_payload: Some(json!({
                         "kind": "knowledge_unavailable",

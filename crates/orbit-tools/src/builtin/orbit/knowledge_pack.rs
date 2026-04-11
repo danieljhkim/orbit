@@ -14,7 +14,7 @@ pub struct OrbitKnowledgePackTool;
 impl Tool for OrbitKnowledgePackTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
-            name: "orbit.knowledge.pack".to_string(),
+            name: "orbit.graph.pack".to_string(),
             description:
                 "Resolve knowledge selectors into a scoped pack from `.orbit/knowledge` artifacts"
                     .to_string(),
@@ -189,7 +189,7 @@ mod tests {
 
         let result = registry
             .execute(
-                "orbit.knowledge.pack",
+                "orbit.graph.pack",
                 &ToolContext {
                     workspace_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
                     ..Default::default()

@@ -540,7 +540,7 @@ fn structured_result_payload(
 }
 
 fn should_capture_result_payload(tool_name: &str) -> bool {
-    matches!(tool_name, "fs.read" | "orbit.knowledge.pack")
+    matches!(tool_name, "fs.read" | "orbit.graph.pack")
 }
 
 fn serialized_size(value: &Value) -> u64 {
@@ -755,7 +755,7 @@ mod tests {
             "type": "assistant",
             "message": {
                 "content": [
-                    { "type": "tool_use", "id": "toolu_pack", "name": "orbit.knowledge.pack" },
+                    { "type": "tool_use", "id": "toolu_pack", "name": "orbit.graph.pack" },
                     {
                         "type": "tool_result",
                         "tool_use_id": "toolu_pack",
@@ -781,7 +781,7 @@ mod tests {
         let (_, _, trace) = parse_and_validate_response(&exec_result).expect("parse");
 
         assert_eq!(trace.tool_calls.len(), 1);
-        assert_eq!(trace.tool_calls[0].tool_name, "orbit.knowledge.pack");
+        assert_eq!(trace.tool_calls[0].tool_name, "orbit.graph.pack");
         assert_eq!(
             trace.tool_calls[0].result_payload,
             Some(json!({

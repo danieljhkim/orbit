@@ -14,7 +14,7 @@ pub struct OrbitKnowledgeShowTool;
 impl Tool for OrbitKnowledgeShowTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
-            name: "orbit.knowledge.show".to_string(),
+            name: "orbit.graph.show".to_string(),
             description: "Show a knowledge graph node with lineage, siblings, children, and source"
                 .to_string(),
             parameters: vec![

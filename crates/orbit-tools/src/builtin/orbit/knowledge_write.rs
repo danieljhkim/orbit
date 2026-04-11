@@ -15,7 +15,7 @@ pub struct OrbitKnowledgeWriteTool;
 impl Tool for OrbitKnowledgeWriteTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
-            name: "orbit.knowledge.write".to_string(),
+            name: "orbit.graph.write".to_string(),
             description: "Edit or insert a leaf in the knowledge graph, writing to disk and updating the working graph".to_string(),
             parameters: vec![
                 ToolParam {
@@ -268,7 +268,7 @@ mod tests {
     fn tool_is_registered_in_registry() {
         let mut registry = ToolRegistry::new();
         registry.register_builtins();
-        assert!(registry.has("orbit.knowledge.write"));
+        assert!(registry.has("orbit.graph.write"));
     }
 
     #[test]
