@@ -168,6 +168,12 @@ pub fn build_workflow_input_for(
                 task_ids.len()
             )));
         }
+        if let Some(workflow) = workflow
+            && workflow.max_tasks == Some(1)
+            && task_ids.len() == 1
+        {
+            map.insert("task_id".to_string(), task_ids[0].clone());
+        }
         map.insert("task_ids".to_string(), Value::Array(task_ids));
     }
 
@@ -276,7 +282,27 @@ mod tests {
         };
         let built = build_workflow_input_for(Some(duel), &input).unwrap();
         assert_eq!(built["task_ids"], json!(["T20260409-0310"]));
+        assert_eq!(built["task_id"], json!("T20260409-0310"));
         assert_eq!(built["base"], json!("main"));
+    }
+
+    #[test]
+    fn duel_single_task_input_includes_task_id_and_task_ids() {
+        let duel = find_workflow("duel").expect("duel workflow");
+        let input = WorkflowInput {
+            tasks: Some("T20260409-0310".to_string()),
+            parallelism: None,
+            base: None,
+            pr_number: None,
+        };
+        let built = build_workflow_input_for(Some(duel), &input).unwrap();
+        assert_eq!(
+            built,
+            json!({
+                "task_id": "T20260409-0310",
+                "task_ids": ["T20260409-0310"]
+            })
+        );
     }
 
     #[test]

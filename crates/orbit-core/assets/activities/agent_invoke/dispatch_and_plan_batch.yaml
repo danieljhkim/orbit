@@ -10,22 +10,36 @@ activity:
   spec_type: agent_invoke
 
   # ---- content ----
-  description: Select a conflict-free batch of backlog tasks, fan out plan authorship to parallel subagents, and refine context_files for parallel execution.
+  description: Select a conflict-free batch of backlog tasks, or honor explicit input.task_ids, then fan out plan authorship to parallel subagents and refine context_files for parallel execution.
   instruction: |
     Only use skills listed in this activity's skill_refs. Ignore all others.
-    Select a batch of backlog tasks for parallel execution, then fan out plan
-    authorship to parallel subagents via the Task tool and persist the refined
-    plans and context_files for each selected task.
+    Select a batch of backlog tasks for parallel execution, or honor explicit
+    input.task_ids when provided, then fan out plan authorship to parallel
+    subagents via the Task tool and persist the refined plans and context_files
+    for each selected task.
 
     Phase 1 — Dispatch
 
-    1. Call orbit.task.list with status: "backlog" to retrieve all backlog tasks.
-       If the list is empty, exit immediately.
+    1. If input.task_ids is present, treat it as authoritative. Load exactly
+       those tasks by calling orbit.task.show for each id in input.task_ids.
+       Do not call orbit.task.list to add, replace, or supplement any tasks.
+       If input.task_ids is absent, call orbit.task.list with status: "backlog"
+       to retrieve all backlog tasks. If the backlog list is empty, exit
+       immediately.
 
-    2. For the strongest candidates, call orbit.task.show with the task id and read:
-       description, acceptance_criteria, context_files, priority, parent_id, and task type.
+    2. For each selected task, call orbit.task.show with the task id and read:
+       description, acceptance_criteria, context_files, priority, parent_id, task type,
+       and status.
 
     3. Build a single batch that satisfies ALL of these rules:
+       - If input.task_ids is present, the batch must contain exactly those
+         tasks. Do not add any extra tasks, and do not auto-select from backlog
+         to fill unused parallelism.
+       - If input.task_ids is present and the explicit set contains more task
+         ids than input.parallelism allows, fail loudly and stop instead of
+         truncating the batch.
+       - Every explicitly selected task must still be backlog-eligible. If any
+         task is not in backlog, fail loudly and stop instead of replacing it.
        - No two selected tasks may conflict on context_files.
        - A conflict exists when any path exactly matches, or is a path prefix of, another path.
        - Prefer tasks that belong together logically: same area, same parent, same initiative, or
@@ -95,6 +109,12 @@ activity:
         type: integer
         minimum: 1
         description: Maximum number of tasks to include in the batch.
+      task_ids:
+        type: array
+        minItems: 1
+        items:
+          type: string
+        description: Explicit task IDs to load instead of auto-selecting from backlog.
   output_schema_json:
     type: object
     properties: {}

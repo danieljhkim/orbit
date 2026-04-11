@@ -117,9 +117,9 @@ Each duel run appends an entry to `.orbit/scoreboard/duel.json`. Inspect aggrega
 
 Optional flags:
 
-- `--tasks T1,T2` pin specific task IDs instead of auto-selecting from backlog
-- `--parallelism N` control the number of parallel workers
-- `--base BRANCH` override the base branch
+- `orbit ship run --tasks T1,T2` pins a specific ship batch instead of auto-selecting from backlog
+- `orbit ship run --parallelism N` controls the number of parallel workers
+- `orbit ship run --base BRANCH` and `orbit duel run <task_id> --base BRANCH` override the base branch
 
 Examples:
 
@@ -133,8 +133,14 @@ orbit ship run --tasks T20260402-0352,T20260402-0406 --parallelism 2
 # local-only pipeline
 orbit ship run --local --base main
 
+# inspect the latest ship run
+orbit ship show
+
 # run a duel against a specific task
 orbit duel run T20260402-0352
+
+# inspect the latest duel run
+orbit duel show
 
 # inspect duel scoreboard aggregates
 orbit duel score --by scope
@@ -149,6 +155,11 @@ Orbit exposes a small set of top-level command groups:
 ```text
 orbit [OPTIONS] <COMMAND>
 
+Setup:
+  init       Initialize the global Orbit root (~/.orbit)
+  workspace  Initialize and manage workspaces
+  config     Show or update Orbit configuration
+
 Run workflows:
   ship       Ship tasks through the pipeline
   duel       Cross-agent scoring
@@ -158,15 +169,12 @@ Manage work:
   tool       Manage and run Orbit tools
   skill      Manage agent skill definitions
 
-Setup:
-  init       Initialize the global Orbit root (~/.orbit)
-  workspace  Initialize and manage workspaces
-  config     Show or update Orbit configuration
-
 Inspect:
   audit      Query the audit event log
   metrics    Inspect token, tool-call, and knowledge-pack metrics
 ```
+
+`orbit job ...` and `orbit activity ...` still work for compatibility, but they are intentionally omitted from `orbit --help` and are not the documented primary surface.
 
 ---
 
