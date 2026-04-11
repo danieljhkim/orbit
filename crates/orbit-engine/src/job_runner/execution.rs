@@ -7,7 +7,8 @@ use tracing::{error, info, info_span, warn};
 
 use crate::activity_runner::{build_execution_context_for_step, execute_with_retry};
 use crate::context::{
-    ACTIVITY_EXECUTION_FAILED, EngineHost, JobRunResult, step_output_for_following_input,
+    ACTIVITY_EXECUTION_FAILED, EngineHost, INPUT_VALIDATION_FAILED, JobRunResult,
+    step_output_for_following_input,
 };
 
 use super::friction::{append_failed_step_friction, append_step_metrics};
@@ -715,6 +716,7 @@ fn execute_activity_with_retries<H: EngineHost>(
         if create_failure_task
             && !matches!(final_state, JobRunState::Success | JobRunState::Cancelled)
             && let Some(ref failure) = last_failure
+            && failure.error_code != INPUT_VALIDATION_FAILED
         {
             let _ = host.maybe_create_failure_task(
                 &job.job_id,
@@ -764,12 +766,17 @@ fn execute_activity_with_retries<H: EngineHost>(
                     started_at,
                     &err,
                 )?;
-                if create_failure_task {
+                let error_code = if matches!(err, OrbitError::InvalidInput(_)) {
+                    INPUT_VALIDATION_FAILED
+                } else {
+                    ACTIVITY_EXECUTION_FAILED
+                };
+                if create_failure_task && error_code != INPUT_VALIDATION_FAILED {
                     let agent = failure_step.1.agent_cli.trim();
                     let _ = host.maybe_create_failure_task(
                         &job.job_id,
                         &run.run_id,
-                        ACTIVITY_EXECUTION_FAILED,
+                        error_code,
                         &err.to_string(),
                         (!agent.is_empty())
                             .then(|| normalize_agent_label(agent))
