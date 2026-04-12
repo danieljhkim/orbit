@@ -165,6 +165,7 @@ activity:
   skill_refs:
     - orbit
     - orbit-track-issues
+    - orbit-graph
   tools:
     - orbit.graph.pack
     - orbit.graph.search

@@ -71,11 +71,18 @@ activity:
     - orbit
     - orbit-track-issues
     - orbit-execute-task
+    - orbit-graph
   tools:
     - orbit.task.list
     - orbit.task.show
     - orbit.task.update
     - orbit.task.add
+    - orbit.graph.pack
+    - orbit.graph.search
+    - orbit.graph.show
+    - orbit.graph.overview
+    - orbit.graph.refs
+    - orbit.graph.write
     - fs.write
     - fs.delete
     - proc.spawn
