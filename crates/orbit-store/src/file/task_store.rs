@@ -1,10 +1,10 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    ActorIdentity, OrbitError, OrbitId, ReviewThread, Task, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    ActorIdentity, OrbitError, OrbitId, ReviewThread, Task, TaskArtifact, TaskComment,
+    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value as YamlValue};
@@ -285,6 +285,16 @@ impl TaskFileStore {
         Ok(Some(bundle_to_task(state, bundle)))
     }
 
+    pub(crate) fn get_task_artifacts(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
+        let Some((_, task_dir)) = self.locate_task(id)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.read_artifacts_at(&task_dir)?))
+    }
+
     pub(crate) fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         let lowered = query.to_lowercase();
         let tasks = self.list_tasks()?;
@@ -387,6 +397,7 @@ impl TaskFileStore {
                 fields.append_review_threads.clone(),
             );
         }
+        let upsert_artifacts = fields.upsert_artifacts.clone();
 
         let target_state = fields
             .status
@@ -425,12 +436,17 @@ impl TaskFileStore {
             });
         }
 
-        if target_state == current_state {
+        let final_dir = if target_state == current_state {
             self.write_bundle_at(&current_dir, &bundle)?;
+            current_dir.clone()
         } else {
             self.write_bundle_at(&current_dir, &bundle)?;
             let target_dir = self.task_dir(target_state, &bundle.doc.id);
             self.move_task_dir(&current_dir, &target_dir)?;
+            target_dir
+        };
+        if !upsert_artifacts.is_empty() {
+            self.write_artifacts_at(&final_dir, &upsert_artifacts)?;
         }
 
         Ok(bundle_to_task(target_state, bundle))
@@ -538,6 +554,36 @@ impl TaskFileStore {
         };
         self.validate_bundle(&bundle, Some(task_dir))?;
         Ok(bundle)
+    }
+
+    fn write_artifacts_at(
+        &self,
+        task_dir: &Path,
+        artifacts: &[TaskArtifact],
+    ) -> Result<(), OrbitError> {
+        let artifacts_dir = self.artifacts_dir(task_dir);
+        fs::create_dir_all(&artifacts_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+        for artifact in artifacts {
+            let relative_path = normalize_artifact_path(&artifact.path)?;
+            let destination = artifacts_dir.join(&relative_path);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+            }
+            write_atomic(&destination, &artifact.content)?;
+        }
+        Ok(())
+    }
+
+    fn read_artifacts_at(&self, task_dir: &Path) -> Result<Vec<TaskArtifact>, OrbitError> {
+        let artifacts_dir = self.artifacts_dir(task_dir);
+        if !artifacts_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut artifacts = Vec::new();
+        collect_artifacts(&artifacts_dir, &artifacts_dir, &mut artifacts)?;
+        artifacts.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(artifacts)
     }
 
     fn move_task_dir(&self, from: &Path, to: &Path) -> Result<(), OrbitError> {
@@ -813,6 +859,89 @@ fn bundle_read_error(path: &Path, label: &str, err: std::io::Error) -> OrbitErro
     }
 }
 
+fn normalize_artifact_path(raw: &str) -> Result<String, OrbitError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "task artifact path must not be empty".to_string(),
+        ));
+    }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(OrbitError::InvalidInput(format!(
+            "task artifact path must be relative: {trimmed}"
+        )));
+    }
+
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let part = part.to_str().ok_or_else(|| {
+                    OrbitError::InvalidInput(format!(
+                        "task artifact path must be valid UTF-8: {trimmed}"
+                    ))
+                })?;
+                if part.is_empty() {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "task artifact path must not contain empty segments: {trimmed}"
+                    )));
+                }
+                parts.push(part.to_string());
+            }
+            _ => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task artifact path must stay within the task artifacts directory: {trimmed}"
+                )));
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "task artifact path must contain a file name: {trimmed}"
+        )));
+    }
+
+    Ok(parts.join("/"))
+}
+
+fn collect_artifacts(
+    root: &Path,
+    dir: &Path,
+    artifacts: &mut Vec<TaskArtifact>,
+) -> Result<(), OrbitError> {
+    let mut entries = fs::read_dir(dir)
+        .map_err(|e| OrbitError::Io(e.to_string()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    entries.sort();
+
+    for entry in entries {
+        if entry.is_dir() {
+            collect_artifacts(root, &entry, artifacts)?;
+            continue;
+        }
+        if !entry.is_file() {
+            continue;
+        }
+        let relative = entry
+            .strip_prefix(root)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let relative = normalize_artifact_path(&relative.to_string_lossy())?;
+        let content = fs::read_to_string(&entry)
+            .map_err(|e| bundle_read_error(&entry, "task artifact", e))?;
+        artifacts.push(TaskArtifact {
+            path: relative,
+            content,
+        });
+    }
+
+    Ok(())
+}
+
 /// Merge incoming review threads into existing threads.
 ///
 /// If an incoming thread's `thread_id` matches an existing one, its messages
@@ -1020,6 +1149,130 @@ mod tests {
             fs::read_to_string(store.execution_summary_path(&task_dir))
                 .expect("read execution summary companion"),
             "repaired summary"
+        );
+    }
+
+    #[test]
+    fn task_artifacts_round_trip_through_update_and_load() {
+        let temp_dir = tempdir().expect("create tempdir");
+        let store = TaskFileStore::new(temp_dir.path().to_path_buf());
+        store.ensure_layout().expect("create task layout");
+
+        let task = store
+            .create_task(TaskCreateParams {
+                actor: "codex / gpt-5.4".to_string(),
+                parent_id: None,
+                title: "artifact task".to_string(),
+                description: String::new(),
+                acceptance_criteria: Vec::new(),
+                plan: String::new(),
+                execution_summary: String::new(),
+                context_files: Vec::new(),
+                workspace_path: None,
+                repo_root: None,
+                created_by: None,
+                actor_identity: ActorIdentity::default(),
+                assigned_to: None,
+                status: TaskStatus::Backlog,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Task,
+                pr_number: None,
+                proposed_by: None,
+                source_task_id: None,
+                comments: Vec::new(),
+            })
+            .expect("create task");
+
+        store
+            .update_task(
+                &task.id,
+                &TaskUpdateParams {
+                    actor: "codex / gpt-5.4".to_string(),
+                    upsert_artifacts: vec![
+                        TaskArtifact {
+                            path: "planning-duel/codex-gpt-5.4.md".to_string(),
+                            content: "*authored by: codex / gpt-5.4*\n## Plan\n- A".to_string(),
+                        },
+                        TaskArtifact {
+                            path: "planning-duel/claude-opus.md".to_string(),
+                            content: "*authored by: claude / opus*\n## Plan\n- B".to_string(),
+                        },
+                    ],
+                    ..Default::default()
+                },
+            )
+            .expect("write artifacts");
+
+        let artifacts = store
+            .get_task_artifacts(&task.id)
+            .expect("load artifacts")
+            .expect("task exists");
+
+        assert_eq!(
+            artifacts,
+            vec![
+                TaskArtifact {
+                    path: "planning-duel/claude-opus.md".to_string(),
+                    content: "*authored by: claude / opus*\n## Plan\n- B".to_string(),
+                },
+                TaskArtifact {
+                    path: "planning-duel/codex-gpt-5.4.md".to_string(),
+                    content: "*authored by: codex / gpt-5.4*\n## Plan\n- A".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn update_task_rejects_artifact_paths_outside_bundle() {
+        let temp_dir = tempdir().expect("create tempdir");
+        let store = TaskFileStore::new(temp_dir.path().to_path_buf());
+        store.ensure_layout().expect("create task layout");
+
+        let task = store
+            .create_task(TaskCreateParams {
+                actor: "codex / gpt-5.4".to_string(),
+                parent_id: None,
+                title: "artifact task".to_string(),
+                description: String::new(),
+                acceptance_criteria: Vec::new(),
+                plan: String::new(),
+                execution_summary: String::new(),
+                context_files: Vec::new(),
+                workspace_path: None,
+                repo_root: None,
+                created_by: None,
+                actor_identity: ActorIdentity::default(),
+                assigned_to: None,
+                status: TaskStatus::Backlog,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Task,
+                pr_number: None,
+                proposed_by: None,
+                source_task_id: None,
+                comments: Vec::new(),
+            })
+            .expect("create task");
+
+        let err = store
+            .update_task(
+                &task.id,
+                &TaskUpdateParams {
+                    actor: "codex / gpt-5.4".to_string(),
+                    upsert_artifacts: vec![TaskArtifact {
+                        path: "../escape.md".to_string(),
+                        content: "bad".to_string(),
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect_err("path traversal should fail");
+
+        assert!(
+            err.to_string()
+                .contains("task artifact path must stay within the task artifacts directory")
         );
     }
 

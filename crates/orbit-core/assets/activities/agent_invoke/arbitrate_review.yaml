@@ -133,7 +133,7 @@ activity:
   # ---- execution ----
   skill_refs:
     - orbit
-    - orbit-review-pr
+    - orbit-pr
     - orbit-track-issues
   tools:
     - orbit.task.show

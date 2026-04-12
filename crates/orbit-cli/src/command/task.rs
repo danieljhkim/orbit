@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{OrbitError, OrbitRuntime, TaskComplexity, TaskPriority, TaskStatus, TaskType};
+use orbit_types::TaskArtifact;
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -386,120 +387,26 @@ pub struct TaskShowArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
-    /// Print only the specified field. Valid values: comments, plan, execution_summary,
-    /// description, acceptance_criteria, history, context_files.
-    /// Combined with --json, outputs the field as JSON.
-    #[arg(long)]
-    pub field: Option<String>,
+    /// Print only the specified field projection(s). Valid values: comments, plan,
+    /// execution_summary, description, acceptance_criteria, history, context_files, artifacts.
+    /// Repeat the flag or use a comma-separated value list. Combined with --json,
+    /// a single field returns that field as JSON and multiple fields return a JSON object.
+    #[arg(long = "fields", alias = "field", value_delimiter = ',', num_args = 1..)]
+    pub fields: Vec<String>,
 }
 
 impl Execute for TaskShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let task = runtime.get_task(&self.id)?;
+        let fields = normalize_task_show_fields(&self.fields)?;
 
-        if let Some(ref field) = self.field {
-            match field.as_str() {
-                "comments" => {
-                    if self.json {
-                        let value = serde_json::to_value(&task.comments)
-                            .map_err(|e| OrbitError::Io(e.to_string()))?;
-                        return crate::output::json::print_pretty(&value);
-                    }
-                    use crate::output::color::dimmed;
-                    for comment in &task.comments {
-                        println!(
-                            "{} {}: {}",
-                            dimmed(&format!("[{}]", comment.at.to_rfc3339())),
-                            comment.by,
-                            comment.message
-                        );
-                    }
-                    return Ok(());
-                }
-                "plan" => {
-                    if self.json {
-                        return crate::output::json::print_pretty(&serde_json::Value::String(
-                            task.plan.clone(),
-                        ));
-                    }
-                    print!("{}", task.plan);
-                    return Ok(());
-                }
-                "execution_summary" => {
-                    if self.json {
-                        return crate::output::json::print_pretty(&serde_json::Value::String(
-                            task.execution_summary.clone(),
-                        ));
-                    }
-                    print!("{}", task.execution_summary);
-                    return Ok(());
-                }
-                "description" => {
-                    if self.json {
-                        return crate::output::json::print_pretty(&serde_json::Value::String(
-                            task.description.clone(),
-                        ));
-                    }
-                    print!("{}", task.description);
-                    return Ok(());
-                }
-                "acceptance_criteria" => {
-                    if self.json {
-                        let value = serde_json::to_value(&task.acceptance_criteria)
-                            .map_err(|e| OrbitError::Io(e.to_string()))?;
-                        return crate::output::json::print_pretty(&value);
-                    }
-                    for criterion in &task.acceptance_criteria {
-                        println!("- {}", criterion);
-                    }
-                    return Ok(());
-                }
-                "history" => {
-                    if self.json {
-                        let value = serde_json::to_value(&task.history)
-                            .map_err(|e| OrbitError::Io(e.to_string()))?;
-                        return crate::output::json::print_pretty(&value);
-                    }
-                    use crate::output::color::dimmed;
-                    for entry in &task.history {
-                        if let Some(note) = &entry.note {
-                            println!(
-                                "{} {}: {} ({})",
-                                dimmed(&format!("[{}]", entry.at.to_rfc3339())),
-                                entry.by,
-                                entry.event,
-                                note
-                            );
-                        } else {
-                            println!(
-                                "{} {}: {}",
-                                dimmed(&format!("[{}]", entry.at.to_rfc3339())),
-                                entry.by,
-                                entry.event
-                            );
-                        }
-                    }
-                    return Ok(());
-                }
-                "context_files" => {
-                    if self.json {
-                        let value = serde_json::to_value(&task.context_files)
-                            .map_err(|e| OrbitError::Io(e.to_string()))?;
-                        return crate::output::json::print_pretty(&value);
-                    }
-                    for f in &task.context_files {
-                        println!("{}", f);
-                    }
-                    return Ok(());
-                }
-                other => {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "unknown field selector `{other}`. Valid values: \
-                        comments, plan, execution_summary, description, \
-                        acceptance_criteria, history, context_files"
-                    )));
-                }
+        if !fields.is_empty() {
+            if self.json {
+                return crate::output::json::print_pretty(&task_fields_to_json(
+                    runtime, &task, &fields,
+                )?);
             }
+            return print_task_fields(runtime, &task, &fields);
         }
 
         if self.json {
@@ -697,6 +604,9 @@ pub struct TaskUpdateArgs {
     /// Comma-separated context file paths (empty string clears)
     #[arg(long = "context", alias = "context-files")]
     pub context_files: Option<String>,
+    /// Task artifact write in `path=content` form. Repeat for multiple artifacts.
+    #[arg(long = "artifact")]
+    pub artifacts: Vec<String>,
     /// Explicit agent name to persist on the task artifact
     #[arg(long)]
     pub agent: Option<String>,
@@ -723,6 +633,7 @@ impl Execute for TaskUpdateArgs {
             pr_status,
             batch_id,
             context_files,
+            artifacts,
             agent,
             model,
             json,
@@ -750,6 +661,7 @@ impl Execute for TaskUpdateArgs {
             }
         });
         let acceptance_criteria = (!acceptance_criteria.is_empty()).then_some(acceptance_criteria);
+        let upsert_artifacts = parse_artifact_args(&artifacts)?;
 
         let task = runtime.update_task_with_identity(
             &id,
@@ -765,6 +677,7 @@ impl Execute for TaskUpdateArgs {
                 pr_status,
                 batch_id,
                 context_files: context_files.map(|c| parse_context_csv(&c)),
+                upsert_artifacts,
                 ..Default::default()
             },
             agent,
@@ -1424,6 +1337,202 @@ fn task_to_json(task: &orbit_core::Task) -> Value {
     })
 }
 
+fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitError> {
+    let mut normalized = Vec::new();
+    for field in fields {
+        let trimmed = field.trim();
+        if trimmed.is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "task show field selectors must not be empty".to_string(),
+            ));
+        }
+        if !matches!(
+            trimmed,
+            "comments"
+                | "plan"
+                | "execution_summary"
+                | "description"
+                | "acceptance_criteria"
+                | "history"
+                | "context_files"
+                | "artifacts"
+        ) {
+            return Err(OrbitError::InvalidInput(format!(
+                "unknown field selector `{trimmed}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts"
+            )));
+        }
+        normalized.push(trimmed.to_string());
+    }
+    Ok(normalized)
+}
+
+fn task_field_to_json(
+    runtime: &OrbitRuntime,
+    task: &orbit_core::Task,
+    field: &str,
+) -> Result<Value, OrbitError> {
+    match field {
+        "comments" => {
+            serde_json::to_value(&task.comments).map_err(|e| OrbitError::Io(e.to_string()))
+        }
+        "plan" => Ok(Value::String(task.plan.clone())),
+        "execution_summary" => Ok(Value::String(task.execution_summary.clone())),
+        "description" => Ok(Value::String(task.description.clone())),
+        "acceptance_criteria" => serde_json::to_value(&task.acceptance_criteria)
+            .map_err(|e| OrbitError::Io(e.to_string())),
+        "history" => serde_json::to_value(&task.history).map_err(|e| OrbitError::Io(e.to_string())),
+        "context_files" => {
+            serde_json::to_value(&task.context_files).map_err(|e| OrbitError::Io(e.to_string()))
+        }
+        "artifacts" => serde_json::to_value(runtime.get_task_artifacts(&task.id)?)
+            .map_err(|e| OrbitError::Io(e.to_string())),
+        other => Err(OrbitError::InvalidInput(format!(
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts"
+        ))),
+    }
+}
+
+fn task_fields_to_json(
+    runtime: &OrbitRuntime,
+    task: &orbit_core::Task,
+    fields: &[String],
+) -> Result<Value, OrbitError> {
+    if fields.len() == 1 {
+        return task_field_to_json(runtime, task, &fields[0]);
+    }
+
+    let mut object = serde_json::Map::new();
+    for field in fields {
+        object.insert(field.clone(), task_field_to_json(runtime, task, field)?);
+    }
+    Ok(Value::Object(object))
+}
+
+fn print_task_fields(
+    runtime: &OrbitRuntime,
+    task: &orbit_core::Task,
+    fields: &[String],
+) -> Result<(), OrbitError> {
+    if fields.len() == 1 {
+        return print_single_task_field(runtime, task, &fields[0]);
+    }
+
+    use crate::output::color::bold;
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        println!("{} {}", bold("Field:"), field);
+        print_single_task_field(runtime, task, field)?;
+    }
+    Ok(())
+}
+
+fn print_single_task_field(
+    runtime: &OrbitRuntime,
+    task: &orbit_core::Task,
+    field: &str,
+) -> Result<(), OrbitError> {
+    match field {
+        "comments" => {
+            use crate::output::color::dimmed;
+            for comment in &task.comments {
+                println!(
+                    "{} {}: {}",
+                    dimmed(&format!("[{}]", comment.at.to_rfc3339())),
+                    comment.by,
+                    comment.message
+                );
+            }
+            Ok(())
+        }
+        "plan" => {
+            print!("{}", task.plan);
+            Ok(())
+        }
+        "execution_summary" => {
+            print!("{}", task.execution_summary);
+            Ok(())
+        }
+        "description" => {
+            print!("{}", task.description);
+            Ok(())
+        }
+        "acceptance_criteria" => {
+            for criterion in &task.acceptance_criteria {
+                println!("- {}", criterion);
+            }
+            Ok(())
+        }
+        "history" => {
+            use crate::output::color::dimmed;
+            for entry in &task.history {
+                if let Some(note) = &entry.note {
+                    println!(
+                        "{} {}: {} ({})",
+                        dimmed(&format!("[{}]", entry.at.to_rfc3339())),
+                        entry.by,
+                        entry.event,
+                        note
+                    );
+                } else {
+                    println!(
+                        "{} {}: {}",
+                        dimmed(&format!("[{}]", entry.at.to_rfc3339())),
+                        entry.by,
+                        entry.event
+                    );
+                }
+            }
+            Ok(())
+        }
+        "context_files" => {
+            for path in &task.context_files {
+                println!("{}", path);
+            }
+            Ok(())
+        }
+        "artifacts" => {
+            use crate::output::color::bold;
+            let artifacts = runtime.get_task_artifacts(&task.id)?;
+            for (index, artifact) in artifacts.iter().enumerate() {
+                if index > 0 {
+                    println!();
+                }
+                println!("{} {}", bold("Artifact:"), artifact.path);
+                print!("{}", artifact.content);
+            }
+            Ok(())
+        }
+        other => Err(OrbitError::InvalidInput(format!(
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts"
+        ))),
+    }
+}
+
+fn parse_artifact_args(raw_values: &[String]) -> Result<Vec<TaskArtifact>, OrbitError> {
+    raw_values
+        .iter()
+        .map(|raw| {
+            let Some((path, content)) = raw.split_once('=') else {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task artifact must use `path=content` form, got `{raw}`"
+                )));
+            };
+            let path = path.trim();
+            if path.is_empty() {
+                return Err(OrbitError::InvalidInput(
+                    "task artifact path must not be empty".to_string(),
+                ));
+            }
+            Ok(TaskArtifact {
+                path: path.to_string(),
+                content: content.to_string(),
+            })
+        })
+        .collect()
+}
+
 fn parse_context_csv(raw: &str) -> Vec<String> {
     crate::parse::csv_to_vec(raw)
 }
@@ -1558,8 +1667,13 @@ mod tests {
 
     use crate::command::{Cli, Commands};
 
-    use super::{TaskSubcommand, default_task_list_status_filter, parse_context_csv};
-    use orbit_core::TaskStatus;
+    use super::{
+        TaskSubcommand, default_task_list_status_filter, parse_artifact_args, parse_context_csv,
+        task_fields_to_json, task_to_json,
+    };
+    use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
+    use orbit_core::{OrbitRuntime, TaskPriority, TaskStatus, TaskType};
+    use orbit_types::TaskArtifact;
 
     #[test]
     fn task_update_accepts_context_flag() {
@@ -1608,6 +1722,167 @@ mod tests {
         assert_eq!(
             args.context_files.as_deref(),
             Some("crates/orbit-cli/src/command/task.rs")
+        );
+    }
+
+    #[test]
+    fn task_update_accepts_repeatable_artifact_flag() {
+        let cli = Cli::try_parse_from([
+            "orbit",
+            "task",
+            "update",
+            "T20260330-002312",
+            "--artifact",
+            "planning-duel/codex-gpt-5.4.md=*authored by: codex / gpt-5.4*",
+            "--artifact",
+            "planning-duel/claude-opus.md=*authored by: claude / opus*",
+        ])
+        .expect("`--artifact` should parse");
+
+        let Commands::Task(task_command) = cli.command else {
+            panic!("expected task command");
+        };
+        let TaskSubcommand::Update(args) = task_command.command else {
+            panic!("expected task update command");
+        };
+        assert_eq!(args.artifacts.len(), 2);
+    }
+
+    #[test]
+    fn parse_artifact_args_splits_on_first_equals() {
+        let artifacts = parse_artifact_args(&[
+            "planning-duel/codex-gpt-5.4.md=*authored by: codex / gpt-5.4*\n## Plan\n- A = still part of content"
+                .to_string(),
+        ])
+        .expect("artifact should parse");
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].path, "planning-duel/codex-gpt-5.4.md");
+        assert!(artifacts[0].content.contains("A = still part of content"));
+    }
+
+    #[test]
+    fn task_show_accepts_fields_flag() {
+        let cli = Cli::try_parse_from([
+            "orbit",
+            "task",
+            "show",
+            "T20260408-0503",
+            "--fields",
+            "artifacts,history",
+            "--json",
+        ])
+        .expect("task show parses");
+
+        let Commands::Task(task_command) = cli.command else {
+            panic!("expected task command");
+        };
+        let TaskSubcommand::Show(args) = task_command.command else {
+            panic!("expected task show command");
+        };
+        assert_eq!(
+            args.fields,
+            vec!["artifacts".to_string(), "history".to_string()]
+        );
+        assert!(args.json);
+    }
+
+    #[test]
+    fn task_show_accepts_field_alias() {
+        let cli = Cli::try_parse_from([
+            "orbit",
+            "task",
+            "show",
+            "T20260408-0503",
+            "--field",
+            "artifacts",
+        ])
+        .expect("task show parses");
+
+        let Commands::Task(task_command) = cli.command else {
+            panic!("expected task command");
+        };
+        let TaskSubcommand::Show(args) = task_command.command else {
+            panic!("expected task show command");
+        };
+        assert_eq!(args.fields, vec!["artifacts".to_string()]);
+    }
+
+    #[test]
+    fn task_show_full_json_omits_artifacts_by_default() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "artifact projection".to_string(),
+                description: String::new(),
+                acceptance_criteria: Vec::new(),
+                plan: String::new(),
+                comment: None,
+                context_files: Vec::new(),
+                workspace_path: None,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Task,
+                source_task_id: None,
+                ..Default::default()
+            })
+            .expect("task");
+        let task = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    upsert_artifacts: vec![TaskArtifact {
+                        path: "planning-duel/codex-gpt-5.4.md".to_string(),
+                        content: "*authored by: codex / gpt-5.4*".to_string(),
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect("artifact update");
+
+        let json = task_to_json(&task);
+        assert!(json.get("artifacts").is_none());
+    }
+
+    #[test]
+    fn task_show_artifacts_projection_is_explicit() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "artifact projection".to_string(),
+                description: String::new(),
+                acceptance_criteria: Vec::new(),
+                plan: String::new(),
+                comment: None,
+                context_files: Vec::new(),
+                workspace_path: None,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Task,
+                source_task_id: None,
+                ..Default::default()
+            })
+            .expect("task");
+        let task = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    upsert_artifacts: vec![TaskArtifact {
+                        path: "planning-duel/codex-gpt-5.4.md".to_string(),
+                        content: "*authored by: codex / gpt-5.4*".to_string(),
+                    }],
+                    ..Default::default()
+                },
+            )
+            .expect("artifact update");
+
+        let json = task_fields_to_json(&runtime, &task, &["artifacts".to_string()])
+            .expect("artifacts projection");
+        let artifacts = json.as_array().expect("artifacts array");
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(
+            artifacts[0].get("path").and_then(serde_json::Value::as_str),
+            Some("planning-duel/codex-gpt-5.4.md")
         );
     }
 

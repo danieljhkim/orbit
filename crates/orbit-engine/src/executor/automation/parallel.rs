@@ -544,6 +544,13 @@ mod tests {
             unimplemented!("not needed for workspace update tests")
         }
 
+        fn get_task_artifacts(
+            &self,
+            _task_id: &str,
+        ) -> Result<Vec<orbit_types::TaskArtifact>, OrbitError> {
+            Ok(Vec::new())
+        }
+
         fn list_tasks_filtered(
             &self,
             _status: Option<TaskStatus>,
@@ -626,6 +633,13 @@ mod tests {
                 .find(|task| task.id == task_id)
                 .cloned()
                 .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+        }
+
+        fn get_task_artifacts(
+            &self,
+            _task_id: &str,
+        ) -> Result<Vec<orbit_types::TaskArtifact>, OrbitError> {
+            Ok(Vec::new())
         }
 
         fn list_tasks_filtered(

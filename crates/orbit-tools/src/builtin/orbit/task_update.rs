@@ -85,10 +85,17 @@ pub(super) fn build_exec_requests(
         args.push(context_files.join(","));
         changed = true;
     }
+    if let Some(artifacts) = optional_artifacts(input)? {
+        for (path, content) in artifacts {
+            args.push("--artifact".to_string());
+            args.push(format!("{path}={content}"));
+        }
+        changed = true;
+    }
 
     if !changed {
         return Err(OrbitError::InvalidInput(
-            "orbit.task.update requires at least one of `title`, `description`, `acceptance_criteria`, `status`, `plan`, `execution_summary`, `comment`, `pr_status`, `pr_number`, `batch_id`, or `context_files`"
+            "orbit.task.update requires at least one of `title`, `description`, `acceptance_criteria`, `status`, `plan`, `execution_summary`, `comment`, `pr_status`, `pr_number`, `batch_id`, `context_files`, or `artifacts`"
                 .to_string(),
         ));
     }
@@ -182,6 +189,15 @@ impl Tool for OrbitTaskUpdateTool {
                 param_type: "array".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "artifacts".to_string(),
+                description:
+                    "Task artifacts to write under `artifacts/`. Accepts either an object \
+                    map of `path -> content` or an array of `{ path, content }` objects."
+                        .to_string(),
+                param_type: "object".to_string(),
+                required: false,
+            },
         ]);
         parameters.extend(super::identity_params());
 
@@ -210,6 +226,58 @@ impl Tool for OrbitTaskUpdateTool {
         }
 
         super::run_orbit_json_command(show_req, "orbit task show")
+    }
+}
+
+fn optional_artifacts(input: &Value) -> Result<Option<Vec<(String, String)>>, OrbitError> {
+    let Some(value) = input.get("artifacts").or_else(|| input.get("artifact")) else {
+        return Ok(None);
+    };
+
+    match value {
+        Value::Null => Ok(None),
+        Value::Object(map) => {
+            let mut artifacts = Vec::with_capacity(map.len());
+            for (path, content) in map {
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(OrbitError::InvalidInput(
+                        "`artifacts` keys must not be empty".to_string(),
+                    ));
+                }
+                let content = content.as_str().ok_or_else(|| {
+                    OrbitError::InvalidInput("`artifacts` values must be strings".to_string())
+                })?;
+                artifacts.push((path.to_string(), content.to_string()));
+            }
+            Ok(Some(artifacts))
+        }
+        Value::Array(items) => {
+            let mut artifacts = Vec::with_capacity(items.len());
+            for item in items {
+                let path = item.get("path").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput(
+                        "`artifacts` entries must include string `path` values".to_string(),
+                    )
+                })?;
+                let content = item.get("content").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput(
+                        "`artifacts` entries must include string `content` values".to_string(),
+                    )
+                })?;
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(OrbitError::InvalidInput(
+                        "`artifacts` entry paths must not be empty".to_string(),
+                    ));
+                }
+                artifacts.push((path.to_string(), content.to_string()));
+            }
+            Ok(Some(artifacts))
+        }
+        _ => Err(OrbitError::InvalidInput(
+            "`artifacts` must be an object or array".to_string(),
+        )),
     }
 }
 
@@ -307,6 +375,7 @@ mod tests {
         assert!(message.contains("description"));
         assert!(message.contains("acceptance_criteria"));
         assert!(message.contains("context_files"));
+        assert!(message.contains("artifacts"));
     }
 
     #[test]
@@ -354,5 +423,51 @@ mod tests {
         .expect_err("non-string entries should fail");
 
         assert!(err.to_string().contains("entries must be strings"));
+    }
+
+    #[test]
+    fn build_exec_requests_supports_artifact_map() {
+        let (update, _) = build_exec_requests(
+            &test_context(),
+            &json!({
+                "id": "T20260330-002312",
+                "artifacts": {
+                    "planning-duel/codex-gpt-5.4.md": "*authored by: codex / gpt-5.4*"
+                }
+            }),
+        )
+        .expect("request should build");
+
+        let artifact_index = update
+            .args
+            .iter()
+            .position(|arg| arg == "--artifact")
+            .expect("expected `--artifact` in request");
+        assert_eq!(
+            update.args.get(artifact_index + 1).map(String::as_str),
+            Some("planning-duel/codex-gpt-5.4.md=*authored by: codex / gpt-5.4*")
+        );
+    }
+
+    #[test]
+    fn build_exec_requests_supports_artifact_array() {
+        let (update, _) = build_exec_requests(
+            &test_context(),
+            &json!({
+                "id": "T20260330-002312",
+                "artifacts": [
+                    {
+                        "path": "planning-duel/codex-gpt-5.4.md",
+                        "content": "*authored by: codex / gpt-5.4*"
+                    }
+                ]
+            }),
+        )
+        .expect("request should build");
+
+        assert!(update.args.contains(&"--artifact".to_string()));
+        assert!(update.args.contains(
+            &"planning-duel/codex-gpt-5.4.md=*authored by: codex / gpt-5.4*".to_string()
+        ));
     }
 }

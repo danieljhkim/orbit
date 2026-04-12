@@ -357,6 +357,12 @@ pub struct TaskHistoryEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskArtifact {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Task {
     pub id: OrbitId,
     #[serde(default, skip_serializing_if = "Option::is_none")]

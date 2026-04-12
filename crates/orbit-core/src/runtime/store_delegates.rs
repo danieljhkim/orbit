@@ -5,7 +5,7 @@ use orbit_store::{
 };
 use orbit_types::{
     Activity, AuditEvent, Job, JobRun, JobRunState, KnowledgeRunMetrics, OrbitError, StoredTool,
-    Task, TaskPriority, TaskStatus,
+    Task, TaskArtifact, TaskPriority, TaskStatus,
 };
 
 use super::OrbitRuntime;
@@ -19,6 +19,13 @@ impl OrbitRuntime {
 
     pub(crate) fn get_task_record(&self, id: &str) -> Result<Option<Task>, OrbitError> {
         self.context.task_store().get_task(id)
+    }
+
+    pub(crate) fn get_task_artifacts_record(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
+        self.context.task_store().get_task_artifacts(id)
     }
 
     pub(crate) fn list_task_records(&self) -> Result<Vec<Task>, OrbitError> {

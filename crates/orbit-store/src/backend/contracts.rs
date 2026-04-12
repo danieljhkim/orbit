@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
     Activity, ActorIdentity, AuditEvent, Job, JobRun, JobRunState, JobScheduleState, JobStep,
-    KnowledgeRunMetrics, OrbitError, OrbitId, ReviewThread, StoredTool, Task, TaskComment,
-    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    KnowledgeRunMetrics, OrbitError, OrbitId, ReviewThread, StoredTool, Task, TaskArtifact,
+    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use serde_json::Value;
 
@@ -81,6 +81,9 @@ pub struct TaskUpdateParams {
     pub append_review_threads: Vec<ReviewThread>,
     /// When set, replaces the entire review_threads collection (used by sync).
     pub replace_review_threads: Option<Vec<ReviewThread>>,
+    /// Artifact files to write under the task bundle `artifacts/` directory.
+    /// Existing files at the same relative path are overwritten.
+    pub upsert_artifacts: Vec<TaskArtifact>,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +146,7 @@ pub trait TaskStoreBackend: Send + Sync {
         batch_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError>;
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError>;
+    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError>;
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError>;
     fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError>;
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;

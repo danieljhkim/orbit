@@ -1,4 +1,6 @@
 pub mod activity_show;
+pub mod duel_plan_add;
+pub mod duel_plan_winner;
 pub mod knowledge_add;
 pub mod knowledge_delete;
 pub mod knowledge_move;
@@ -50,6 +52,8 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_show::OrbitTaskShowTool);
     registry.register(task_list::OrbitTaskListTool);
     registry.register(task_update::OrbitTaskUpdateTool);
+    registry.register(duel_plan_add::OrbitDuelPlanAddTool);
+    registry.register(duel_plan_winner::OrbitDuelPlanWinnerTool);
     registry.register(knowledge_add::OrbitKnowledgeAddTool);
     registry.register(knowledge_delete::OrbitKnowledgeDeleteTool);
     registry.register(knowledge_move::OrbitKnowledgeMoveTool);
@@ -101,13 +105,15 @@ pub(super) fn identity_params() -> Vec<ToolParam> {
     vec![
         ToolParam {
             name: "agent".to_string(),
-            description: "Optional agent name for precise Orbit provenance".to_string(),
+            description: "Agent CLI family (codex, claude, or gemini).".to_string(),
             param_type: "string".to_string(),
             required: false,
         },
         ToolParam {
             name: "model".to_string(),
-            description: "Optional agent model for precise Orbit provenance".to_string(),
+            description:
+                "LLM model identifier (e.g. opus, gpt-5.4, gemini-3.1-pro-preview)."
+                    .to_string(),
             param_type: "string".to_string(),
             required: false,
         },

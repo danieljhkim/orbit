@@ -4,8 +4,9 @@ use orbit_store::{
     friction_bounty,
 };
 use orbit_types::{
-    ActorIdentity, OrbitError, OrbitEvent, OrbitId, Task, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, prune_missing_context_files,
+    ActorIdentity, OrbitError, OrbitEvent, OrbitId, Task, TaskArtifact, TaskComment,
+    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    prune_missing_context_files,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -62,6 +63,7 @@ pub struct TaskUpdateParams {
     pub pr_status: Option<Option<String>>,
     pub batch_id: Option<Option<String>>,
     pub context_files: Option<Vec<String>>,
+    pub upsert_artifacts: Vec<TaskArtifact>,
     pub append_review_threads: Vec<orbit_types::ReviewThread>,
 }
 
@@ -101,6 +103,7 @@ impl From<TaskUpdateParams> for StoreTaskUpdateParams {
             pr_status: p.pr_status,
             batch_id: p.batch_id,
             context_files: p.context_files,
+            upsert_artifacts: p.upsert_artifacts,
             append_review_threads: p.append_review_threads,
             ..Default::default()
         }
@@ -215,6 +218,11 @@ impl OrbitRuntime {
             .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
     }
 
+    pub fn get_task_artifacts(&self, id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
+        self.get_task_artifacts_record(id)?
+            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+    }
+
     pub fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
         self.list_task_records()
     }
@@ -315,7 +323,8 @@ impl OrbitRuntime {
             || params.comment.is_some()
             || params.pr_number.is_some()
             || params.pr_status.is_some()
-            || params.batch_id.is_some();
+            || params.batch_id.is_some()
+            || !params.upsert_artifacts.is_empty();
 
         if locked_field_update && matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
             return Err(OrbitError::InvalidInput(format!(

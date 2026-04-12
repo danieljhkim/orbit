@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Activity, Job, JobRun, JobScheduleState, KnowledgeRunMetrics, OrbitError, Task, TaskPriority,
-    TaskStatus,
+    Activity, Job, JobRun, JobScheduleState, KnowledgeRunMetrics, OrbitError, Task, TaskArtifact,
+    TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
@@ -34,6 +34,10 @@ impl TaskStoreBackend for TaskFileStore {
 
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
         self.get_task(id)
+    }
+
+    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
+        self.get_task_artifacts(id)
     }
 
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {

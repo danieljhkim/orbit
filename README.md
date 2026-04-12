@@ -173,22 +173,21 @@ Tasks are tightly coupled to Orbit jobs. If you already use Linear or Jira, Orbi
 
 Orbit is structured as a layered set of Rust crates. Lower layers have no knowledge of higher layers.
 
-```text
-orbit-types          (leaf: shared types, OrbitError, ID generation)
-    ↑
-orbit-policy         (RBAC policy evaluation)
-orbit-exec           (process spawning, sandboxing, timeouts)
-    ↑
-orbit-tools          (builtin tool registry: fs, git, github, orbit, proc, time, net)
-    ↑
-orbit-store          (file-based YAML + SQLite persistence, layered store)
-orbit-agent          (agent provider abstraction: Claude, Codex, mock)
-    ↑
-orbit-engine         (activity/job execution, template rendering, retry logic)
-    ↑
-orbit-core           (runtime bootstrap, config layering, command dispatch, asset seeding)
-    ↑
-orbit-cli            (CLI entry point, clap-based commands, JSON/table output)
+```mermaid
+flowchart LR
+  CLI["orbit-cli"] --> Core["orbit-core"]
+  Core --> Engine["orbit-engine"]
+  Core --> Store["orbit-store"]
+  Core --> Tools["orbit-tools"]
+  Core --> Policy["orbit-policy"]
+  Engine --> Agent["orbit-agent"]
+  Engine --> Store
+  Tools --> Exec["orbit-exec"]
+  Tools --> Knowledge["orbit-knowledge"]
+  Store --> Types["orbit-types"]
+  Agent --> Types
+  Core --> Types
+
 ```
 
 ### Model Strategy
