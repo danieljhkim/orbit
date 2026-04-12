@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use orbit_types::OrbitError;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::error::KnowledgeError;
 use crate::selector::{Selector, SelectorLookupKey};
@@ -22,11 +22,36 @@ pub enum KnowledgeEntryKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KnowledgePackEntry {
     pub selector: String,
-    pub resolved_id: Option<String>,
     pub kind: KnowledgeEntryKind,
-    pub content: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    // File fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imports: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exports: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<String>>,
+    // Leaf fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_signature: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_signature: Option<Vec<Value>>,
+    /// Internal — used to track resolution status, not serialized.
+    #[serde(skip)]
+    pub resolved: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -224,13 +249,7 @@ impl KnowledgeStore {
             let selector_string = selector.to_string();
             let Some(node_id) = self.selector_index.get(&selector.lookup_key()).cloned() else {
                 unresolved_selectors.push(selector_string.clone());
-                entries.push(KnowledgePackEntry {
-                    selector: selector_string,
-                    resolved_id: None,
-                    kind: KnowledgeEntryKind::Unresolved,
-                    content: None,
-                    source: None,
-                });
+                entries.push(unresolved_entry(selector_string));
                 continue;
             };
 
@@ -240,13 +259,14 @@ impl KnowledgeStore {
                 ))
             })?;
 
-            let content = read_graph_object(
+            let object = read_graph_object(
                 &self.knowledge_dir,
                 &index_entry.object_hash,
                 &mut object_cache,
             )?;
+            let node = object.get("node");
             let source = if index_entry.node_type == "leaf" {
-                extract_leaf_source(&self.knowledge_dir, &content, &mut blob_cache)?
+                extract_leaf_source(&self.knowledge_dir, &object, &mut blob_cache)?
             } else {
                 None
             };
@@ -261,19 +281,10 @@ impl KnowledgeStore {
                 }
             };
 
-            entries.push(KnowledgePackEntry {
-                selector: selector_string,
-                resolved_id: Some(node_id),
-                kind,
-                content: Some(content),
-                source,
-            });
+            entries.push(project_entry(selector_string, kind, node, source));
         }
 
-        let total_nodes = entries
-            .iter()
-            .filter(|entry| entry.resolved_id.is_some())
-            .count();
+        let total_nodes = entries.iter().filter(|e| e.resolved).count();
         Ok(KnowledgePack {
             knowledge_dir: self.knowledge_dir.display().to_string(),
             manifest_generated_at: self.manifest.generated_at.clone(),
@@ -367,33 +378,19 @@ pub fn overlay_pack_with_working_graph(
     graph: &WorkingGraph,
 ) -> KnowledgePack {
     for (entry, selector) in pack.entries.iter_mut().zip(selectors.iter()) {
-        let Some(working_leaf) = graph.resolve_leaf(selector) else {
+        let Some(leaf) = graph.resolve_leaf(selector) else {
             continue;
         };
-
-        entry.kind = KnowledgeEntryKind::Leaf;
-        entry.source = Some(working_leaf.source.clone());
-        entry.resolved_id = entry
-            .resolved_id
-            .clone()
-            .or_else(|| Some(selector.to_string()));
-        entry.content = Some(match entry.content.take() {
-            Some(content) => overlay_leaf_content(content, working_leaf),
-            None => build_working_leaf_content(working_leaf),
-        });
+        apply_working_leaf(entry, leaf);
     }
 
     pack.unresolved_selectors = pack
         .entries
         .iter()
-        .filter(|entry| entry.resolved_id.is_none())
-        .map(|entry| entry.selector.clone())
+        .filter(|e| !e.resolved)
+        .map(|e| e.selector.clone())
         .collect();
-    pack.total_nodes = pack
-        .entries
-        .iter()
-        .filter(|entry| entry.resolved_id.is_some())
-        .count();
+    pack.total_nodes = pack.entries.iter().filter(|e| e.resolved).count();
     pack
 }
 
@@ -406,34 +403,21 @@ pub fn pack_from_working_graph(
 
     for selector in selectors {
         let selector_string = selector.to_string();
-        if let Some(working_leaf) = graph.resolve_leaf(selector) {
-            entries.push(KnowledgePackEntry {
-                selector: selector_string.clone(),
-                resolved_id: Some(selector_string),
-                kind: KnowledgeEntryKind::Leaf,
-                content: Some(build_working_leaf_content(working_leaf)),
-                source: Some(working_leaf.source.clone()),
-            });
+        if let Some(leaf) = graph.resolve_leaf(selector) {
+            let mut entry = unresolved_entry(selector_string);
+            apply_working_leaf(&mut entry, leaf);
+            entries.push(entry);
         } else {
-            entries.push(KnowledgePackEntry {
-                selector: selector_string,
-                resolved_id: None,
-                kind: KnowledgeEntryKind::Unresolved,
-                content: None,
-                source: None,
-            });
+            entries.push(unresolved_entry(selector_string));
         }
     }
 
     let unresolved_selectors = entries
         .iter()
-        .filter(|entry| entry.resolved_id.is_none())
-        .map(|entry| entry.selector.clone())
+        .filter(|e| !e.resolved)
+        .map(|e| e.selector.clone())
         .collect();
-    let total_nodes = entries
-        .iter()
-        .filter(|entry| entry.resolved_id.is_some())
-        .count();
+    let total_nodes = entries.iter().filter(|e| e.resolved).count();
 
     KnowledgePack {
         knowledge_dir: knowledge_dir.display().to_string(),
@@ -444,53 +428,91 @@ pub fn pack_from_working_graph(
     }
 }
 
-fn overlay_leaf_content(mut content: Value, leaf: &WorkingLeaf) -> Value {
-    let Some(node) = content.get_mut("node").and_then(Value::as_object_mut) else {
-        return build_working_leaf_content(leaf);
-    };
-
-    node.insert("name".to_string(), Value::String(leaf.name.clone()));
-    node.insert("kind".to_string(), Value::String(leaf.kind.clone()));
-    node.insert(
-        "location".to_string(),
-        Value::String(format!("{}#{}", leaf.file_path, leaf.qualified_name)),
-    );
-    node.insert("start_line".to_string(), json!(leaf.start_line));
-    node.insert("end_line".to_string(), json!(leaf.end_line));
-    node.insert("source".to_string(), Value::String(leaf.source.clone()));
-    node.insert(
-        "source_hash".to_string(),
-        Value::String(leaf.source_hash.clone()),
-    );
-    node.insert("children".to_string(), json!(leaf.children_qualified_names));
-    if let Some(parent) = &leaf.parent_qualified_name {
-        node.insert("parent".to_string(), Value::String(parent.clone()));
-    } else {
-        node.remove("parent");
+fn unresolved_entry(selector: String) -> KnowledgePackEntry {
+    KnowledgePackEntry {
+        selector,
+        kind: KnowledgeEntryKind::Unresolved,
+        name: None,
+        language: None,
+        description: None,
+        extension: None,
+        imports: None,
+        exports: None,
+        children: None,
+        source: None,
+        start_line: None,
+        end_line: None,
+        input_signature: None,
+        output_signature: None,
+        resolved: false,
     }
-
-    content
 }
 
-fn build_working_leaf_content(leaf: &WorkingLeaf) -> Value {
-    json!({
-        "node": {
-            "name": leaf.name.clone(),
-            "qualified_name": leaf.qualified_name.clone(),
-            "kind": leaf.kind.clone(),
-            "location": format!("{}#{}", leaf.file_path, leaf.qualified_name),
-            "language": Path::new(&leaf.file_path)
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .unwrap_or_default(),
-            "start_line": leaf.start_line,
-            "end_line": leaf.end_line,
-            "source": leaf.source.clone(),
-            "source_hash": leaf.source_hash.clone(),
-            "parent": leaf.parent_qualified_name.clone(),
-            "children": leaf.children_qualified_names.clone(),
-        }
-    })
+/// Project only agent-relevant fields from a raw graph object.
+fn project_entry(
+    selector: String,
+    kind: KnowledgeEntryKind,
+    node: Option<&Value>,
+    source: Option<String>,
+) -> KnowledgePackEntry {
+    let str_field = |key| {
+        node.and_then(|n| n.get(key))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+    let str_vec_field = |key| -> Option<Vec<String>> {
+        node.and_then(|n| n.get(key))
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+    };
+    let val_vec_field = |key| -> Option<Vec<Value>> {
+        node.and_then(|n| n.get(key))
+            .and_then(Value::as_array)
+            .filter(|arr| !arr.is_empty())
+            .cloned()
+    };
+    let u32_field = |key| {
+        node.and_then(|n| n.get(key))
+            .and_then(Value::as_u64)
+            .map(|v| v as u32)
+    };
+
+    KnowledgePackEntry {
+        selector,
+        kind,
+        name: str_field("name"),
+        language: str_field("language"),
+        description: str_field("description"),
+        extension: str_field("extension"),
+        imports: str_vec_field("imports"),
+        exports: str_vec_field("exports"),
+        children: None, // child node IDs are internal; omit for now
+        source,
+        start_line: u32_field("start_line"),
+        end_line: u32_field("end_line"),
+        input_signature: val_vec_field("input_signature"),
+        output_signature: val_vec_field("output_signature"),
+        resolved: true,
+    }
+}
+
+/// Apply working leaf fields onto an existing entry (overlay or fresh).
+fn apply_working_leaf(entry: &mut KnowledgePackEntry, leaf: &WorkingLeaf) {
+    entry.kind = KnowledgeEntryKind::Leaf;
+    entry.resolved = true;
+    entry.name = Some(leaf.name.clone());
+    entry.source = Some(leaf.source.clone());
+    entry.start_line = Some(leaf.start_line as u32);
+    entry.end_line = Some(leaf.end_line as u32);
+    entry.language = Path::new(&leaf.file_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(String::from);
 }
 
 fn read_graph_object(
@@ -708,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn pack_returns_exact_fixture_output() {
+    fn pack_returns_projected_fields() {
         let store = KnowledgeStore::open(&fixture_knowledge_dir()).expect("store");
         let selectors = Selector::parse_many(&[
             "file:crates/orbit-tools/src/lib.rs".to_string(),
@@ -718,89 +740,58 @@ mod tests {
 
         let pack = store.pack(&selectors).expect("pack");
 
+        assert_eq!(pack.total_nodes, 2);
+        assert!(pack.unresolved_selectors.is_empty());
+
+        // File entry: has name, language, imports, exports — no internal IDs or hashes
+        let file_entry = &pack.entries[0];
+        assert_eq!(file_entry.selector, "file:crates/orbit-tools/src/lib.rs");
+        assert_eq!(file_entry.kind, KnowledgeEntryKind::File);
+        assert_eq!(file_entry.name.as_deref(), Some("lib.rs"));
+        assert_eq!(file_entry.language.as_deref(), Some("rust"));
         assert_eq!(
-            pack,
-            KnowledgePack {
-                knowledge_dir: fixture_knowledge_dir().display().to_string(),
-                manifest_generated_at: "2026-04-09T06:06:39Z".to_string(),
-                unresolved_selectors: vec![],
-                total_nodes: 2,
-                entries: vec![
-                    KnowledgePackEntry {
-                        selector: "file:crates/orbit-tools/src/lib.rs".to_string(),
-                        resolved_id: Some("node-file-lib".to_string()),
-                        kind: KnowledgeEntryKind::File,
-                        content: Some(json!({
-                            "schema_version": 1,
-                            "object_type": "graph_node",
-                            "node_type": "file",
-                            "node": {
-                                "description": "Orbit tool registry facade.",
-                                "exports": ["ToolRegistry"],
-                                "extension": "rs",
-                                "id": "node-file-lib",
-                                "identity_key": "file:crates/orbit-tools/src/lib.rs",
-                                "imports": ["serde_json::Value"],
-                                "is_locked": false,
-                                "language": "rust",
-                                "leaf_children": ["node-leaf-register-builtins"],
-                                "lineage_locked": false,
-                                "location": "crates/orbit-tools/src/lib.rs",
-                                "lock_owner": null,
-                                "lock_reason": "",
-                                "name": "lib.rs",
-                                "parent_id": "node-dir-tools-src",
-                                "source_blob_hash": "6666666666666666666666666666666666666666666666666666666666666666"
-                            },
-                            "child_object_hashes": {
-                                "node-leaf-register-builtins": "3333333333333333333333333333333333333333333333333333333333333333"
-                            }
-                        })),
-                        source: None,
-                    },
-                    KnowledgePackEntry {
-                        selector: "symbol:crates/orbit-tools/src/lib.rs#register_builtins:function"
-                            .to_string(),
-                        resolved_id: Some("node-leaf-register-builtins".to_string()),
-                        kind: KnowledgeEntryKind::Leaf,
-                        content: Some(json!({
-                            "schema_version": 1,
-                            "object_type": "graph_node",
-                            "node_type": "leaf",
-                            "node": {
-                                "children": [],
-                                "description": "Registers the built-in orbit tools.",
-                                "end_line": 22,
-                                "file_hash_at_capture": "7777777777777777777777777777777777777777777777777777777777777777",
-                                "history": [],
-                                "id": "node-leaf-register-builtins",
-                                "identity_key": "symbol:crates/orbit-tools/src/lib.rs#register_builtins:function",
-                                "input_signature": [],
-                                "is_locked": false,
-                                "kind": "function",
-                                "language": "rust",
-                                "lineage_locked": false,
-                                "location": "crates/orbit-tools/src/lib.rs#register_builtins",
-                                "lock_owner": null,
-                                "lock_reason": "",
-                                "name": "register_builtins",
-                                "output_signature": [],
-                                "parent_id": "node-file-lib",
-                                "source": "",
-                                "source_blob_hash": "5555555555555555555555555555555555555555555555555555555555555555",
-                                "source_hash": "8888888888888888888888888888888888888888888888888888888888888888",
-                                "start_line": 11
-                            },
-                            "child_object_hashes": {}
-                        })),
-                        source: Some(
-                            "pub fn register_builtins(registry: &mut ToolRegistry) {\n    fs::register(registry);\n    git::register(registry);\n}\n"
-                                .to_string()
-                        ),
-                    },
-                ],
-            }
+            file_entry.description.as_deref(),
+            Some("Orbit tool registry facade.")
         );
+        assert_eq!(file_entry.extension.as_deref(), Some("rs"));
+        assert_eq!(
+            file_entry.imports.as_deref(),
+            Some(["serde_json::Value".to_string()].as_slice())
+        );
+        assert_eq!(
+            file_entry.exports.as_deref(),
+            Some(["ToolRegistry".to_string()].as_slice())
+        );
+        assert!(file_entry.source.is_none());
+
+        // Leaf entry: has source, lines — no hashes or lock state
+        let leaf_entry = &pack.entries[1];
+        assert_eq!(
+            leaf_entry.selector,
+            "symbol:crates/orbit-tools/src/lib.rs#register_builtins:function"
+        );
+        assert_eq!(leaf_entry.kind, KnowledgeEntryKind::Leaf);
+        assert_eq!(leaf_entry.name.as_deref(), Some("register_builtins"));
+        assert_eq!(leaf_entry.language.as_deref(), Some("rust"));
+        assert_eq!(leaf_entry.start_line, Some(11));
+        assert_eq!(leaf_entry.end_line, Some(22));
+        assert!(leaf_entry.source.as_ref().is_some_and(|s| s.contains("register_builtins")));
+
+        // Verify internal fields are not present in JSON serialization
+        let json = serde_json::to_value(&pack).expect("serialize");
+        let entries = json["entries"].as_array().unwrap();
+        for entry in entries {
+            assert!(entry.get("id").is_none());
+            assert!(entry.get("identity_key").is_none());
+            assert!(entry.get("object_hash").is_none());
+            assert!(entry.get("parent_id").is_none());
+            assert!(entry.get("is_locked").is_none());
+            assert!(entry.get("child_object_hashes").is_none());
+            assert!(entry.get("schema_version").is_none());
+            assert!(entry.get("resolved_id").is_none());
+            assert!(entry.get("content").is_none());
+            assert!(entry.get("resolved").is_none());
+        }
     }
 
     #[test]
@@ -820,7 +811,6 @@ mod tests {
         );
         assert_eq!(pack.total_nodes, 1);
         assert_eq!(pack.entries[1].kind, KnowledgeEntryKind::Unresolved);
-        assert_eq!(pack.entries[1].resolved_id, None);
-        assert_eq!(pack.entries[1].content, None);
+        assert!(!pack.entries[1].resolved);
     }
 }
