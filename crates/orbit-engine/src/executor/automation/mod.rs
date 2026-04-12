@@ -13,6 +13,7 @@ mod push;
 mod record_duel_scores;
 pub(crate) mod review;
 mod select_duel_roles;
+mod setup_worktree;
 mod snapshot;
 mod sync_review;
 mod task;
@@ -44,6 +45,7 @@ const AUTOMATION_RECORD_DUEL_SCORES: &str = "record_duel_scores";
 const AUTOMATION_SYNC_BATCH_REVIEW_TO_GITHUB: &str = "sync_batch_review_to_github";
 const AUTOMATION_PULL_BATCH_CHANGES: &str = "pull_batch_changes";
 const AUTOMATION_PUSH_BATCH_CHANGES: &str = "push_batch_changes";
+const AUTOMATION_SETUP_WORKTREE: &str = "setup_worktree";
 
 #[derive(Debug, Clone, Deserialize)]
 struct AutomationSpec {
@@ -125,6 +127,7 @@ pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync 
         }
         AUTOMATION_PULL_BATCH_CHANGES => pull::pull_batch_changes(host, input),
         AUTOMATION_PUSH_BATCH_CHANGES => push::push_batch_changes(host, input),
+        AUTOMATION_SETUP_WORKTREE => setup_worktree::setup_worktree(host, input),
         AUTOMATION_SELECT_DUEL_ROLES => select_duel_roles::select_duel_roles(host, input),
         AUTOMATION_CHECK_DUEL_REVIEW_DECISION => {
             check_duel_review_decision::check_duel_review_decision(input)

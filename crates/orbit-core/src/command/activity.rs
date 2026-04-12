@@ -112,12 +112,12 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/automation/record_duel_scores.yaml"),
     ),
     (
-        "plan_task_duel",
-        include_str!("../../assets/activities/agent_invoke/plan_task_duel.yaml"),
+        "setup_worktree",
+        include_str!("../../assets/activities/automation/setup_worktree.yaml"),
     ),
     (
-        "implement_and_publish_duel",
-        include_str!("../../assets/activities/agent_invoke/implement_and_publish_duel.yaml"),
+        "open_batch_pr",
+        include_str!("../../assets/activities/automation/open_batch_pr.yaml"),
     ),
     (
         "review_duel_pr",
@@ -584,24 +584,5 @@ mod tests {
         assert!(tools.contains(&"fs.read"));
         assert!(tools.contains(&"fs.write"));
         assert!(!tools.iter().any(|t| t.starts_with("orbit.graph.")));
-    }
-
-    #[test]
-    fn duel_publish_activity_requires_duel_roles_footer() {
-        let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, None).expect("activities");
-        let publish_duel = specs
-            .into_iter()
-            .find(|spec| spec.id == "implement_and_publish_duel")
-            .expect("implement_and_publish_duel activity");
-
-        let instruction = publish_duel
-            .spec_config
-            .get("instruction")
-            .and_then(serde_json::Value::as_str)
-            .expect("instruction");
-        assert!(instruction.contains("## Duel roles"));
-        assert!(instruction.contains("- Implementer: {{agent_family}} / {{orchestrator_model}}"));
-        assert!(instruction.contains("- Reviewer: <will be filled in by the reviewer step>"));
-        assert!(instruction.contains("- Arbiter: <will be filled in by the arbiter step>"));
     }
 }

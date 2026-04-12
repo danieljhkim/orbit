@@ -13,20 +13,21 @@ job:
   # roles, then records structured scores into .orbit/scoreboard/duel.json.
   #
   # Step flow:
-  #   select_duel_roles            — assign families to roles, stamp implementer onto task.actor_identity
-  #   plan_task_duel               — implementer authors the inline plan
-  #   implement_and_publish_duel   — implementer codes, commits under its own identity, pushes, opens PR
+  #   select_duel_roles            — assign families to roles, stamp implementer onto task
+  #   setup_worktree               — create branch + worktree, stamp batch_id + workspace_path
+  #   implement_change             — implementer plans + implements + verifies in the worktree
+  #   commit_task_artifact_changes — stage and commit task-scoped changes
+  #   push_batch_changes           — push the branch to origin
+  #   open_batch_pr                — open PR against base, stamp task → review
   #   job_duel_review_cycle        — review, arbitrate, fix-loop, record scores, merge
   #
-  # This pipeline intentionally does NOT use commit_and_open_batch_pr or any
-  # other batch commit automation. Single-task duel runs publish directly from
-  # the implementer agent so commit attribution matches the real agent family
-  # and model. There is no create_branch activity either — branch creation
-  # happens inside implement_and_publish_duel.
+  # Automation steps are reused from the ship (parallel batch) pipeline.
+  # The agent only writes code; all git/PR operations are deterministic.
   max_active_runs: 1
   max_iterations: 1
   default_input:
     base: main
+    branch_prefix: duel
   steps:
     - target_type: activity
       target_id: select_duel_roles
@@ -34,18 +35,31 @@ job:
       timeout_seconds: 30
 
     - target_type: activity
-      target_id: plan_task_duel
-      agent_cli_from_input: implementer_agent_cli
-      model_from_input: implementer_model
+      target_id: setup_worktree
       condition: on_success
-      timeout_seconds: 1200
+      timeout_seconds: 60
 
     - target_type: activity
-      target_id: implement_and_publish_duel
+      target_id: implement_change
       agent_cli_from_input: implementer_agent_cli
       model_from_input: implementer_model
       condition: on_success
       timeout_seconds: 5400
+
+    - target_type: activity
+      target_id: commit_task_artifact_changes
+      condition: on_success
+      timeout_seconds: 120
+
+    - target_type: activity
+      target_id: push_batch_changes
+      condition: on_success
+      timeout_seconds: 120
+
+    - target_type: activity
+      target_id: open_batch_pr
+      condition: on_success
+      timeout_seconds: 120
 
     - target_type: job
       target_id: job_duel_review_cycle

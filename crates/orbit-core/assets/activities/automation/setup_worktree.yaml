@@ -1,0 +1,48 @@
+schema_version: 1
+
+# ---- metadata ----
+created_by: system
+
+# ---- activity ----
+activity:
+  # ---- registration ----
+  id: setup_worktree
+  spec_type: automation
+
+  # ---- content ----
+  description: "Create a git worktree and branch for a single task, stamp batch_id and workspace_path on the task, and move it to in_progress. Generic — any single-task pipeline can use this."
+
+  # ---- interface ----
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+      - run_id
+    properties:
+      task_id:
+        type: string
+        description: Orbit task ID.
+      run_id:
+        type: string
+        description: Job run ID, stamped as batch_id on the task.
+      base:
+        type: string
+        description: Base branch to branch from. Defaults to "main".
+      branch_prefix:
+        type: string
+        description: "Prefix for the branch and worktree directory name (e.g. 'duel' → branch duel/<task_id>-<ts>, worktree .orbit/worktrees/duel-<run_id>). Defaults to 'orbit'."
+  output_schema_json:
+    type: object
+    properties:
+      workspace_path:
+        type: string
+        description: Absolute path to the created worktree.
+      head_ref:
+        type: string
+        description: Name of the created branch.
+      base_ref:
+        type: string
+        description: Base branch used.
+
+  # ---- execution ----
+  action: setup_worktree
