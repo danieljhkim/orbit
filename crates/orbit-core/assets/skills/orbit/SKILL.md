@@ -56,16 +56,6 @@ orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "..."}'
 
 ```
 
-For workflow-run inspection, use the CLI surfaces that remain public:
-
-```bash
-orbit ship list --json
-orbit duel list --json
-orbit ship show [run-id] --json
-orbit duel show [run-id] --json
-```
-
-Never edit task files directly.
 
 ## Common Mistakes — DO NOT
 
@@ -73,7 +63,6 @@ Never edit task files directly.
 |---------|-------------|--------------|
 | `cargo run -- tool run ...` | Agents must use the installed `orbit` binary, not rebuild from source | `orbit tool run ...` |
 | `orbit task show <id>` | Direct CLI subcommands skip agent provenance tracking | `orbit tool run orbit.task.show --input '{"id":"<id>"}'` |
-| Inventing tool names (`orbit.task.transition`, `orbit.task.move`, `orbit.task.comment`) | These tools do not exist | Use only tools from the Command Reference above or run `orbit tool list` |
 
 **Rule:** If a tool name is not in the Command Reference, it does not exist. Never guess. Run `orbit tool list` to see all registered tools.
 
@@ -105,6 +94,7 @@ Task commands infer actor provenance automatically:
 - `orbit-raise-pr`: Creating PRs, leaving comments, replying to comment threads, and PR tool reference.
 - `orbit-review-pr`: Review a pull request with per-issue comments and scoring compliance.
 - `orbit-track-issues`: Capture agent-discovered, self-reported friction as tracked tasks.
+- `orbit-graph`: Navigate, inspect, or edit orbit-harnessed codebase via the knowledge graph
 
 ## Voice Your Opinion
 

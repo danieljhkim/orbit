@@ -1,6 +1,6 @@
 ---
 name: orbit-track-issues
-description: MUST use this skill when ANY issues, vagueness, confusion, or difficulties are encountered during Orbit-related work so the problem is captured as a task and improved for future agents.
+description: MUST use this skill when Orbit tooling or skill instructions cause operational friction (tool failures, wrong CLI behavior, misleading skill guidance). Not for task content issues like vague descriptions or incomplete plans.
 ---
 
 # Orbit Skill: Track Issues
@@ -34,19 +34,6 @@ Every self-reported friction task is tracked in `.orbit/scoreboard/friction_boun
 - **issues-rejected** — incremented when the issue is rejected as invalid
 
 Report real friction, not noise. Rejected reports count against you.
-
-## When To Use
-
-Use this skill whenever you encounter:
-
-- unclear Orbit command usage
-- missing automation capability
-- confusing workflow behavior
-- undocumented behavior
-- repetitive manual work
-- system limitations
-- unclear errors or logs
-
 Do **not ignore friction**. Always create a task.
 
 ## How to Create the Task
@@ -57,13 +44,11 @@ orbit tool run orbit.task.add --input '{
   "description": "<what happened, where, and why it caused friction>",
   "type": "friction",
   "priority": "<low|medium|high|critical>",
-  "workspace": ".",
-  "agent": "<agent>",
-  "model": "<model>"
+  "workspace": "."
 }'
 ```
 
-Always include your `agent` and `model` in the input. Keep the description concrete — name the command, file, or workflow that broke.
+Keep the description concrete — name the command, file, or workflow that broke.
 
 ## Important Rules
 
