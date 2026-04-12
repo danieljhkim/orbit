@@ -55,15 +55,18 @@ activity:
     Phase 2 — Plan (parallel fan-out)
 
     Because Phase 1 produced a conflict-free batch (disjoint context_files by
-    path-prefix), each task's plan can be authored independently. Fan out planning
-    to parallel subagents via the Task tool, then collate the results and persist.
+    path-prefix), each task's plan can be authored independently.
 
-    5. Fan out planners. In a SINGLE message, emit multiple Task tool calls in
-       parallel — one subagent per task in the batch. For each call use:
-       - subagent_type: "general-purpose"
-       - model: "sonnet" (save Opus budget; sonnet is sufficient for plan
-         authorship — but override to opus if you judge the task unusually complex)
-       - A self-contained prompt that includes:
+    Before fanning out, check each task's plan field from the orbit.task.show
+    response loaded in Phase 1. Partition the batch into two groups:
+    - needs_plan: tasks with empty, blank, or placeholder plan text (e.g.
+      "To be authored by executing agent at start time.")
+    - has_plan: tasks with a substantive existing plan
+
+    5. Fan out subagents. In a SINGLE message, emit multiple Task tool calls
+       in parallel — one subagent per task in the batch.
+
+       For needs_plan tasks, provide a self-contained prompt that includes:
          - The task id, title, description, and acceptance_criteria
          - The current context_files list
          - Working directory context: "you are in the Orbit repo at the current cwd"
@@ -74,7 +77,15 @@ activity:
            no cross-coordination is required
          - An explicit prohibition: do NOT modify any files — research and report only
 
-    6. Subagent output contract. Each subagent MUST return markdown with exactly
+       For has_plan tasks, provide a prompt that includes:
+         - The task id, title, description, acceptance_criteria, and existing plan
+         - Instructions to read the codebase and refine context_files only
+         - The output contract: return only ## Context Files and ## Risks sections
+         - An explicit note: do NOT rewrite the plan — it is already authored
+
+    6. Subagent output contract.
+
+       For needs_plan tasks, each subagent MUST return markdown with exactly
        these sections:
        - ## Plan — detailed, implementation-ready plan grounded in the current
          codebase, with concrete file paths, function names, and validation steps.
@@ -82,12 +93,23 @@ activity:
          one per line, that the implementing agent will need to read or modify.
        - ## Risks — short list of risks, unknowns, or assumptions.
 
+       For has_plan tasks, each subagent MUST return markdown with:
+       - ## Context Files — refined file paths based on the existing plan.
+       - ## Risks — short list of risks, unknowns, or assumptions.
+
     7. Collate and persist. After all subagents return, parse each report and,
-       for each task, call orbit.task.update with:
+       for each task, call orbit.task.update:
+
+       For needs_plan tasks:
        - id: the task id
        - plan: the full ## Plan section markdown
        - context_files: the parsed ## Context Files list
        - comment: "Batch plan authored by parallel subagent; context_files refined for parallel execution."
+
+       For has_plan tasks:
+       - id: the task id
+       - context_files: the parsed ## Context Files list
+       - comment: "Existing plan preserved; context_files refined for parallel execution."
 
     8. Conflict re-check. After collating (and BEFORE persisting if possible),
        verify the refined context_files across the batch are still disjoint under

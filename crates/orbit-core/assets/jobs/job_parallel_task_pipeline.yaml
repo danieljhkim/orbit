@@ -14,7 +14,7 @@ job:
   max_active_runs: 1
   default_input:
     base: main
-    parallelism: 4
+    parallelism: 3
   steps:
     # 0. Refresh knowledge graph so agents get fresh symbol data.
     - target_type: activity
@@ -26,7 +26,7 @@ job:
       target_id: dispatch_and_plan_batch
       agent_cli_from_input: plan_agent_cli
       model_from_input: plan_model
-      timeout_seconds: 2400
+      timeout_seconds: 3600
 
     # 2. Snapshot batch state for audit trail.
     - target_type: activity
