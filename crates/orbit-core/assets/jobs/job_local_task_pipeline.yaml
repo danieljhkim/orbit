@@ -23,8 +23,8 @@ job:
     # 1. Select a conflict-free batch, author plans, refine context_files.
     - target_type: activity
       target_id: dispatch_and_plan_batch
-      agent_cli: claude
-      model: opus
+      agent_cli_from_input: plan_agent_cli
+      model_from_input: plan_model
       timeout_seconds: 2400
 
     # 2. Snapshot batch state for audit trail.
@@ -48,7 +48,8 @@ job:
     # 5. Agent verifies and wraps up (runs always, even on worker failure).
     - target_type: activity
       target_id: finalize_tasks
-      agent_cli: gemini
+      agent_cli_from_input: finalize_agent_cli
+      model_from_input: finalize_model
       condition: always
       timeout_seconds: 3600
 

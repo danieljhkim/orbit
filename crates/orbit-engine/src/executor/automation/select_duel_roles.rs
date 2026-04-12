@@ -20,10 +20,10 @@ use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
-use orbit_types::{OrbitError, all_agent_families, resolve_agent_model_pair};
+use orbit_types::{OrbitError, all_agent_families};
 use serde_json::{Value, json};
 
-use crate::context::{TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 use super::input::required_input_string;
 
@@ -79,7 +79,10 @@ fn next_permutation() -> [usize; 3] {
 /// Downstream steps resolve their agent via `agent_cli_from_input`
 /// (referencing one of the `*_agent_cli` fields) and their model via
 /// `model_from_input` (referencing the matching `*_model` field).
-fn build_roles_output(perm: [usize; 3]) -> Result<Value, OrbitError> {
+fn build_roles_output<H: RuntimeHost + ?Sized>(
+    host: &H,
+    perm: [usize; 3],
+) -> Result<Value, OrbitError> {
     let families = all_agent_families();
     let implementer = families[perm[0]];
     let reviewer = families[perm[1]];
@@ -94,9 +97,9 @@ fn build_roles_output(perm: [usize; 3]) -> Result<Value, OrbitError> {
         )));
     }
 
-    let implementer_model = orchestrator_model_for(implementer)?;
-    let reviewer_model = orchestrator_model_for(reviewer)?;
-    let arbiter_model = orchestrator_model_for(arbiter)?;
+    let implementer_model = orchestrator_model_for(host, implementer)?;
+    let reviewer_model = orchestrator_model_for(host, reviewer)?;
+    let arbiter_model = orchestrator_model_for(host, arbiter)?;
 
     // Stamp wall-clock start time so `record_duel_scores` — which runs at
     // the very end of the pipeline — can compute `cost.wall_clock_seconds`
@@ -120,8 +123,11 @@ fn build_roles_output(perm: [usize; 3]) -> Result<Value, OrbitError> {
     }))
 }
 
-fn orchestrator_model_for(family: &str) -> Result<String, OrbitError> {
-    resolve_agent_model_pair(family)
+fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
+    host: &H,
+    family: &str,
+) -> Result<String, OrbitError> {
+    host.resolved_agent_model_pair(family)
         .map(|pair| pair.orchestrator)
         .ok_or_else(|| {
             OrbitError::Execution(format!(
@@ -131,14 +137,14 @@ fn orchestrator_model_for(family: &str) -> Result<String, OrbitError> {
         })
 }
 
-pub(super) fn select_duel_roles<H: TaskHost + ?Sized>(
+pub(super) fn select_duel_roles<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
 
     let perm = next_permutation();
-    let output = build_roles_output(perm)?;
+    let output = build_roles_output(host, perm)?;
 
     // Stamp the implementer onto the task's actor identity so that the
     // shared `implement_change` activity (which falls back to the task
@@ -167,8 +173,12 @@ pub(super) fn select_duel_roles<H: TaskHost + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_store::{InvocationQuery, InvocationRecord};
+    use orbit_tools::ToolContext;
+    use orbit_types::{Activity, Job, JobTargetType, OrbitEvent, Role};
     use orbit_types::{Task, TaskPriority, TaskStatus};
     use std::collections::BTreeSet;
+    use std::path::Path;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -223,6 +233,82 @@ mod tests {
                 .unwrap()
                 .push((task_id.to_string(), update));
             Ok(())
+        }
+    }
+
+    impl RuntimeHost for StubTaskHost {
+        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
+            unimplemented!("not used by select_duel_roles")
+        }
+
+        fn repo_root(&self) -> Result<String, OrbitError> {
+            unimplemented!("not used by select_duel_roles")
+        }
+
+        fn data_root(&self) -> &Path {
+            Path::new(".")
+        }
+
+        fn run_job_now_with_input_debug(
+            &self,
+            _job_id: &str,
+            _input: Value,
+            _debug: bool,
+        ) -> Result<crate::JobRunResult, OrbitError> {
+            unimplemented!("not used by select_duel_roles")
+        }
+
+        fn validate_activity_target_exists(
+            &self,
+            _target_type: JobTargetType,
+            _target_id: &str,
+        ) -> Result<Activity, OrbitError> {
+            unimplemented!("not used by select_duel_roles")
+        }
+
+        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
+            unimplemented!("not used by select_duel_roles")
+        }
+
+        fn invocation_records(
+            &self,
+            _query: InvocationQuery,
+        ) -> Result<Vec<InvocationRecord>, OrbitError> {
+            Ok(Vec::new())
+        }
+
+        fn run_tool_with_context_and_role(
+            &self,
+            _name: &str,
+            _input: Value,
+            _role: Role,
+            _tool_context: ToolContext,
+        ) -> Result<Value, OrbitError> {
+            unimplemented!("not used by select_duel_roles")
+        }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            false
+        }
+
+        fn graph_editing(&self) -> bool {
+            false
+        }
+
+        fn scoreboard_dir(&self) -> &Path {
+            Path::new(".")
         }
     }
 
@@ -291,7 +377,7 @@ mod tests {
         assert_eq!(updates.len(), 1);
         assert_eq!(updates[0].0, "T-duel-stamp");
         assert_eq!(updates[0].1.agent.as_deref(), Some("claude"));
-        assert_eq!(updates[0].1.model.as_deref(), Some("opus"));
+        assert_eq!(updates[0].1.model.as_deref(), Some("opus-4.6"));
     }
 
     #[test]
@@ -314,7 +400,7 @@ mod tests {
         assert_eq!(roles["implementer"]["agent"], json!("codex"));
         assert_eq!(roles["implementer"]["model"], json!("gpt-5.4"));
         assert_eq!(roles["reviewer"]["agent"], json!("claude"));
-        assert_eq!(roles["reviewer"]["model"], json!("opus"));
+        assert_eq!(roles["reviewer"]["model"], json!("opus-4.6"));
         assert_eq!(roles["arbiter"]["agent"], json!("gemini"));
         assert_eq!(roles["arbiter"]["model"], json!("gemini-3.1-pro-preview"));
     }

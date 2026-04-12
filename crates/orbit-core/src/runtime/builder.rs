@@ -88,6 +88,8 @@ pub(crate) fn build_context_from_roots(
     let actor = ActorIdentity::from_env();
     let task_approval_required_for_agent = runtime_config.task_approval.required_for_agent;
     let task_delegate_approval = runtime_config.task_approval.delegate_approval;
+    let agent_models = runtime_config.agent_models.clone();
+    let ship_workflow = runtime_config.workflow.ship.clone();
     let scoring_enabled = runtime_config.scoring_enabled;
     let graph_editing = runtime_config.graph_editing;
 
@@ -107,6 +109,8 @@ pub(crate) fn build_context_from_roots(
         actor,
         task_approval_required_for_agent,
         task_delegate_approval,
+        agent_models,
+        ship_workflow,
         scoring_enabled,
         graph_editing,
     ))

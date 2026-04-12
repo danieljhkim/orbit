@@ -288,9 +288,10 @@ pub(super) fn resolved_model_name<H: EngineHost>(
         .ok()?;
     let model_from_config = config.model.clone();
     let agent = Agent::new(&config).ok();
-    agent
+    let resolved = agent
         .and_then(|agent| agent.model_name().map(ToOwned::to_owned))
-        .or(model_from_config)
+        .or(model_from_config);
+    host.canonical_model_name(&execution.agent_cli, resolved.as_deref())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -58,7 +58,11 @@ fn build_agent_stdin_envelope_payload(
     )?;
     let envelope = ExecutionEnvelope {
         schema_version: 1,
-        activity: activity_envelope_json_for_execution(&execution.activity, &execution.agent_cli),
+        activity: activity_envelope_json_for_execution_with_pair(
+            &execution.activity,
+            &execution.agent_cli,
+            runtime.configured_agent_model_pair(&execution.agent_cli),
+        ),
         job: execution.job.as_ref().map(|job| {
             json!({
                 "id": job.job_id,
@@ -267,6 +271,46 @@ impl OrbitRuntime {
         open_invocation_store(self)?.list_tool_invocation_metrics()
     }
 
+    pub(crate) fn configured_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+        self.context
+            .agent_model_pair(agent_cli)
+            .or_else(|| resolve_agent_model_pair(agent_cli))
+    }
+
+    pub(crate) fn canonical_model_for_agent(
+        &self,
+        agent_cli: &str,
+        model: Option<&str>,
+    ) -> Option<String> {
+        self.context.canonical_model_name(agent_cli, model)
+    }
+
+    pub(crate) fn canonical_agent_model_identity(
+        &self,
+        agent_cli: Option<&str>,
+        model: Option<&str>,
+    ) -> (Option<String>, Option<String>) {
+        let agent = agent_cli
+            .map(normalize_agent_name)
+            .filter(|value| !value.trim().is_empty());
+        let model = agent
+            .as_deref()
+            .and_then(|agent| self.canonical_model_for_agent(agent, model))
+            .or_else(|| {
+                model
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+            });
+        (agent, model)
+    }
+
+    pub(crate) fn ship_role_assignment_for(&self, role: &str) -> Option<(String, String)> {
+        self.context
+            .ship_role_assignment(role)
+            .map(|assignment| (assignment.agent, assignment.model))
+    }
+
     pub fn generate_scoreboard_summary(
         &self,
     ) -> Result<orbit_store::scoreboard_summary::ScoreboardSummary, OrbitError> {
@@ -333,6 +377,18 @@ impl RuntimeHost for OrbitRuntime {
 
     fn get_job(&self, job_id: &str) -> Result<Option<orbit_types::Job>, OrbitError> {
         self.get_job_record(job_id)
+    }
+
+    fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+        self.configured_agent_model_pair(agent_cli)
+    }
+
+    fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {
+        self.canonical_model_for_agent(agent_cli, model)
+    }
+
+    fn ship_role_assignment(&self, role: &str) -> Option<(String, String)> {
+        self.ship_role_assignment_for(role)
     }
 
     fn invocation_records(
@@ -483,12 +539,14 @@ impl RuntimeHost for OrbitRuntime {
         execution: &ExecutionContext,
         trace: &InvocationTrace,
     ) -> Result<(), OrbitError> {
+        let (agent, model) = self
+            .canonical_agent_model_identity(Some(&execution.agent_cli), execution.model.as_deref());
         let store = open_invocation_store(self)?;
         store.insert_invocation_trace_record(&InvocationInsertParams {
             job_run_id: job_run_id.to_string(),
             activity_id: execution.activity.id.clone(),
-            agent: normalize_agent_name(&execution.agent_cli),
-            model: execution.model.clone(),
+            agent: agent.unwrap_or_else(|| normalize_agent_name(&execution.agent_cli)),
+            model,
             task_ids: associated_task_ids(&execution.input),
             trace: trace.clone(),
         })?;
@@ -689,6 +747,8 @@ impl TaskHost for OrbitRuntime {
             }
         }
         let _ = self.with_mutation(|| {
+            let (agent, model) = self
+                .canonical_agent_model_identity(update.agent.as_deref(), update.model.as_deref());
             let task = self.update_task_record(
                 task_id,
                 StoreTaskUpdateParams {
@@ -704,8 +764,8 @@ impl TaskHost for OrbitRuntime {
                     status_note: update.status_note.clone(),
                     append_comments: update.append_comments.clone(),
                     actor_identity: Some(ActorIdentity::from_legacy(
-                        update.agent.as_deref(),
-                        update.model.as_deref(),
+                        agent.as_deref(),
+                        model.as_deref(),
                     ))
                     .filter(|id| !id.is_system()),
                     replace_review_threads: update.review_threads.clone(),
@@ -728,11 +788,16 @@ fn activity_envelope_json(activity: &Activity) -> Value {
     activity_envelope_json_for_execution(activity, "")
 }
 
-/// Build the activity envelope JSON, embedding the orchestrator/helper model
-/// pair resolved from `agent_cli` and substituting `{{orchestrator_model}}`,
-/// `{{helper_model}}`, and `{{agent_family}}` placeholders inside the
-/// activity's `instruction` text.
-fn activity_envelope_json_for_execution(activity: &Activity, agent_cli: &str) -> Value {
+fn activity_envelope_json_for_execution_with_pair(
+    activity: &Activity,
+    agent_cli: &str,
+    pair: Option<AgentModelPair>,
+) -> Value {
+    let pair = pair.or_else(|| resolve_agent_model_pair(agent_cli));
+    let family = agent_family_from_cli(agent_cli);
+    let orchestrator = pair.as_ref().map(|p| p.orchestrator.as_str()).unwrap_or("");
+    let helper = pair.as_ref().map(|p| p.helper.as_str()).unwrap_or("");
+
     let mut envelope = json!({
         "id": activity.id,
         "type": activity.spec_type,
@@ -749,11 +814,6 @@ fn activity_envelope_json_for_execution(activity: &Activity, agent_cli: &str) ->
         }
     }
 
-    let family = agent_family_from_cli(agent_cli);
-    let pair = resolve_agent_model_pair(agent_cli);
-    let orchestrator = pair.as_ref().map(|p| p.orchestrator.as_str()).unwrap_or("");
-    let helper = pair.as_ref().map(|p| p.helper.as_str()).unwrap_or("");
-
     if let Some(activity_map) = envelope.as_object_mut() {
         activity_map.insert("agent_family".to_string(), json!(family));
         activity_map.insert("orchestrator_model".to_string(), json!(orchestrator));
@@ -768,6 +828,15 @@ fn activity_envelope_json_for_execution(activity: &Activity, agent_cli: &str) ->
     }
 
     envelope
+}
+
+/// Build the activity envelope JSON, embedding the orchestrator/helper model
+/// pair resolved from `agent_cli` and substituting `{{orchestrator_model}}`,
+/// `{{helper_model}}`, and `{{agent_family}}` placeholders inside the
+/// activity's `instruction` text.
+#[cfg(test)]
+fn activity_envelope_json_for_execution(activity: &Activity, agent_cli: &str) -> Value {
+    activity_envelope_json_for_execution_with_pair(activity, agent_cli, None)
 }
 
 /// Substitute the orchestrator/helper placeholders inside an instruction
@@ -820,6 +889,7 @@ fn codex_workspace_write_writable_dirs(paths: &WorkspacePaths) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
 
     use chrono::Utc;
@@ -833,11 +903,24 @@ mod tests {
 
     use super::{
         ExecutionEnvelope, ExecutionSkillEnvelope, activity_envelope_json,
-        activity_envelope_json_for_execution, codex_workspace_write_writable_dirs,
-        task_detail_envelope_json, task_detail_for_input,
+        activity_envelope_json_for_execution, build_agent_stdin_envelope_payload,
+        codex_workspace_write_writable_dirs, task_detail_envelope_json, task_detail_for_input,
     };
     use crate::OrbitRuntime;
     use crate::command::{activity::ActivityAddParams, job::JobAddParams, task::TaskAddParams};
+
+    fn runtime_from_config(config_toml: &str) -> (tempfile::TempDir, OrbitRuntime) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let global_root = tmp.path().join("global/.orbit");
+        let workspace_root = tmp.path().join("workspace/.orbit");
+        fs::create_dir_all(&global_root).expect("global root");
+        fs::create_dir_all(&workspace_root).expect("workspace root");
+        fs::write(workspace_root.join("config.toml"), config_toml).expect("config");
+        (
+            tmp,
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("runtime"),
+        )
+    }
 
     struct MockTaskHost {
         task: Task,
@@ -1184,15 +1267,47 @@ mod tests {
             "/usr/local/bin/claude",
         );
         assert_eq!(envelope.get("agent_family"), Some(&json!("claude")));
-        assert_eq!(envelope.get("orchestrator_model"), Some(&json!("opus")));
-        assert_eq!(envelope.get("helper_model"), Some(&json!("sonnet")));
+        assert_eq!(envelope.get("orchestrator_model"), Some(&json!("opus-4.6")));
+        assert_eq!(envelope.get("helper_model"), Some(&json!("sonnet-4.6")));
         let instruction = envelope
             .get("instruction")
             .and_then(serde_json::Value::as_str)
             .expect("instruction");
-        assert!(instruction.contains("orchestrator=opus"));
-        assert!(instruction.contains("helper=sonnet"));
+        assert!(instruction.contains("orchestrator=opus-4.6"));
+        assert!(instruction.contains("helper=sonnet-4.6"));
         assert!(instruction.contains("family=claude"));
+    }
+
+    #[test]
+    fn agent_stdin_envelope_uses_configured_agent_pair_placeholders() {
+        let (_tmp, runtime) = runtime_from_config(
+            r#"
+[agents.claude]
+strong = "opus-4.7"
+weak = "sonnet-4.7"
+"#,
+        );
+        let execution = orbit_engine::ExecutionContext {
+            activity: implement_change_sample_activity(),
+            job: None,
+            agent_cli: "claude".to_string(),
+            model: Some("opus".to_string()),
+            timeout_seconds: 30,
+            env_extra: vec![],
+            env_set: std::collections::HashMap::new(),
+            input: json!({}),
+            debug: false,
+        };
+
+        let payload = build_agent_stdin_envelope_payload(&runtime, &execution).expect("payload");
+        let envelope: serde_json::Value = serde_json::from_slice(&payload).expect("envelope json");
+        let activity = &envelope["activity"];
+
+        assert_eq!(activity["orchestrator_model"], json!("opus-4.7"));
+        assert_eq!(activity["helper_model"], json!("sonnet-4.7"));
+        let instruction = activity["instruction"].as_str().expect("instruction");
+        assert!(instruction.contains("orchestrator=opus-4.7"));
+        assert!(instruction.contains("helper=sonnet-4.7"));
     }
 
     #[test]
@@ -1467,6 +1582,71 @@ mod tests {
         assert_eq!(records[0].tool_call_count, 1);
         assert_eq!(records[0].total_tokens, 17);
         assert_eq!(records[0].tool_calls[0].result_bytes, 42);
+    }
+
+    #[test]
+    fn summary_uses_one_canonical_key_across_friction_and_token_sources() {
+        let (_tmp, runtime) = runtime_from_config(
+            r#"
+[agents.claude]
+strong = "opus-4.7"
+weak = "sonnet-4.7"
+
+[scoring]
+enabled = true
+"#,
+        );
+
+        runtime
+            .add_task_with_identity(
+                TaskAddParams {
+                    title: "friction".to_string(),
+                    description: "track canonical identity".to_string(),
+                    acceptance_criteria: vec!["scoreboard writes normalize".to_string()],
+                    plan: "## Plan\n- record".to_string(),
+                    task_type: TaskType::Friction,
+                    ..Default::default()
+                },
+                Some("claude".to_string()),
+                Some("opus".to_string()),
+            )
+            .expect("task");
+
+        let execution = orbit_engine::ExecutionContext {
+            activity: sample_activity(),
+            job: None,
+            agent_cli: "claude".to_string(),
+            model: Some("opus".to_string()),
+            timeout_seconds: 30,
+            env_extra: vec![],
+            env_set: std::collections::HashMap::new(),
+            input: json!({ "task_id": "T1" }),
+            debug: false,
+        };
+        let trace = InvocationTrace {
+            usage: TokenUsage {
+                input: 12,
+                cache_read: 0,
+                cache_create: 0,
+                output: 5,
+            },
+            tool_calls: vec![ToolCallTrace {
+                seq: 1,
+                tool_name: "orbit.graph.search".to_string(),
+                result_bytes: 42,
+                result_payload: None,
+            }],
+            duration_ms: 88,
+        };
+        runtime
+            .persist_invocation_trace("run-123", &execution, &trace)
+            .expect("persist trace");
+
+        let summary = runtime.generate_scoreboard_summary().expect("summary");
+        assert!(summary.agents.contains_key("claude/opus-4.7"));
+        assert!(!summary.agents.contains_key("claude/opus"));
+        assert_eq!(summary.agents["claude/opus-4.7"].friction.reported, 1);
+        assert_eq!(summary.agents["claude/opus-4.7"].tokens.total, 17);
     }
 
     #[test]

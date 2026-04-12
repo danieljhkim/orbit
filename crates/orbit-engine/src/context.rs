@@ -4,9 +4,10 @@ use orbit_store::JobRunStepParams;
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
 use orbit_types::{
-    Activity, InvocationTrace, Job, JobRun, JobRunState, JobTargetType, KnowledgeRunMetrics,
-    OrbitError, OrbitEvent, ReviewThread, Role, Task, TaskArtifact, TaskComment, TaskPriority,
-    TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
+    Activity, AgentModelPair, InvocationTrace, Job, JobRun, JobRunState, JobTargetType,
+    KnowledgeRunMetrics, OrbitError, OrbitEvent, ReviewThread, Role, Task, TaskArtifact,
+    TaskComment, TaskPriority, TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
+    resolve_agent_model_pair,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -382,6 +383,18 @@ pub trait RuntimeHost {
         agent: Option<&str>,
         model: Option<&str>,
     ) -> Result<(), OrbitError>;
+    fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+        resolve_agent_model_pair(agent_cli)
+    }
+    fn canonical_model_name(&self, _agent_cli: &str, model: Option<&str>) -> Option<String> {
+        model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    }
+    fn ship_role_assignment(&self, _role: &str) -> Option<(String, String)> {
+        None
+    }
     fn scoring_enabled(&self) -> bool;
     fn graph_editing(&self) -> bool;
     fn scoreboard_dir(&self) -> &Path;

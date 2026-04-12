@@ -64,10 +64,27 @@ pub fn agent_family_from_cli(agent_cli: &str) -> String {
 /// (for example, the runtime envelope renderer) decide what placeholder text
 /// to inject when no mapping is registered.
 pub fn resolve_agent_model_pair(agent_cli: &str) -> Option<AgentModelPair> {
+    resolve_agent_model_pair_or(agent_cli, None)
+}
+
+/// Resolve the orchestrator/helper model pair for an `agent_cli`, allowing a
+/// caller-supplied override to replace the built-in defaults.
+///
+/// This is the config-aware hook used by upstream crates that have access to
+/// runtime configuration. `orbit-types` remains the fallback source of truth
+/// for default model pairs.
+pub fn resolve_agent_model_pair_or(
+    agent_cli: &str,
+    config_override: Option<&AgentModelPair>,
+) -> Option<AgentModelPair> {
+    if let Some(override_pair) = config_override {
+        return Some(override_pair.clone());
+    }
+
     let family = agent_family_from_cli(agent_cli);
     match family.as_str() {
         "codex" => Some(AgentModelPair::new("gpt-5.4", "gpt-5.4-mini")),
-        "claude" => Some(AgentModelPair::new("opus", "sonnet")),
+        "claude" => Some(AgentModelPair::new("opus-4.6", "sonnet-4.6")),
         "gemini" => Some(AgentModelPair::new(
             "gemini-3.1-pro-preview",
             "gemini-3-flash-preview",
@@ -97,8 +114,8 @@ mod tests {
     #[test]
     fn resolves_claude_pair() {
         let pair = resolve_agent_model_pair("claude").expect("claude pair");
-        assert_eq!(pair.orchestrator, "opus");
-        assert_eq!(pair.helper, "sonnet");
+        assert_eq!(pair.orchestrator, "opus-4.6");
+        assert_eq!(pair.helper, "sonnet-4.6");
     }
 
     #[test]
@@ -114,6 +131,14 @@ mod tests {
             resolve_agent_model_pair("/usr/local/bin/codex").expect("path-prefixed codex pair");
         assert_eq!(pair.orchestrator, "gpt-5.4");
         assert_eq!(pair.helper, "gpt-5.4-mini");
+    }
+
+    #[test]
+    fn override_pair_takes_precedence_over_defaults() {
+        let override_pair = AgentModelPair::new("opus-4.7", "sonnet-4.7");
+        let pair =
+            resolve_agent_model_pair_or("claude", Some(&override_pair)).expect("override pair");
+        assert_eq!(pair, override_pair);
     }
 
     #[test]

@@ -121,6 +121,8 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        let (canonical_agent, canonical_model) =
+            self.canonical_agent_model_identity(agent.as_deref(), model.as_deref());
         let actor = self.actor().clone();
         let effective_label =
             effective_actor_label(&actor.label, agent.as_deref(), model.as_deref());
@@ -134,13 +136,13 @@ impl OrbitRuntime {
         let (create_actor, create_identity, create_label) = if uses_system_identity {
             (
                 "system".to_string(),
-                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
+                ActorIdentity::from_legacy(canonical_agent.as_deref(), canonical_model.as_deref()),
                 "system".to_string(),
             )
         } else {
             (
                 effective_label.clone(),
-                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref()),
+                ActorIdentity::from_legacy(canonical_agent.as_deref(), canonical_model.as_deref()),
                 effective_label.clone(),
             )
         };
@@ -187,7 +189,7 @@ impl OrbitRuntime {
         // Friction bounty: record self-reported friction on creation when agent+model present.
         if self.scoring_enabled()
             && params.task_type.counts_toward_friction_bounty()
-            && let (Some(a), Some(m)) = (&agent, &model)
+            && let (Some(a), Some(m)) = (&canonical_agent, &canonical_model)
         {
             let _ = friction_bounty::record_friction_reported(&self.paths().scoreboard_dir, a, m);
         }
@@ -303,6 +305,8 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        let (canonical_agent, canonical_model) =
+            self.canonical_agent_model_identity(agent.as_deref(), model.as_deref());
         let task = self.get_task(id)?;
 
         // Prune non-existent context_files entries before forwarding to the store.
@@ -399,9 +403,12 @@ impl OrbitRuntime {
                     actor: effective_label.clone(),
                     assigned_to,
                     status_note,
-                    actor_identity: agent
-                        .as_ref()
-                        .map(|_| ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())),
+                    actor_identity: canonical_agent.as_ref().map(|_| {
+                        ActorIdentity::from_legacy(
+                            canonical_agent.as_deref(),
+                            canonical_model.as_deref(),
+                        )
+                    }),
                     append_comments: append_comments.clone(),
                     append_history: append_history.clone(),
                     ..StoreTaskUpdateParams::from(params)
@@ -436,6 +443,8 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        let (canonical_agent, canonical_model) =
+            self.canonical_agent_model_identity(agent.as_deref(), model.as_deref());
         let task = self.get_task(id)?;
         let actor = self.actor().clone();
         let effective_label =
@@ -452,8 +461,11 @@ impl OrbitRuntime {
                         status_event: Some("proposal_approved".to_string()),
                         status_note: note.clone(),
                         assigned_to: Some(Some(effective_label.clone())),
-                        actor_identity: agent.as_ref().map(|_| {
-                            ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())
+                        actor_identity: canonical_agent.as_ref().map(|_| {
+                            ActorIdentity::from_legacy(
+                                canonical_agent.as_deref(),
+                                canonical_model.as_deref(),
+                            )
                         }),
                         append_comments: append_comments.clone(),
                         ..Default::default()
@@ -475,8 +487,11 @@ impl OrbitRuntime {
                         status: Some(TaskStatus::Done),
                         status_event: Some("review_approved".to_string()),
                         status_note: note.clone(),
-                        actor_identity: agent.as_ref().map(|_| {
-                            ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())
+                        actor_identity: canonical_agent.as_ref().map(|_| {
+                            ActorIdentity::from_legacy(
+                                canonical_agent.as_deref(),
+                                canonical_model.as_deref(),
+                            )
                         }),
                         append_comments: append_comments.clone(),
                         ..Default::default()
@@ -525,6 +540,8 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        let (canonical_agent, canonical_model) =
+            self.canonical_agent_model_identity(agent.as_deref(), model.as_deref());
         let task = self.get_task(id)?;
         if in_progress_transition_requires_plan(task.status) {
             ensure_task_has_execution_plan(id, task.plan.as_str())?;
@@ -545,8 +562,11 @@ impl OrbitRuntime {
                             status: Some(TaskStatus::InProgress),
                             status_event: Some("started".to_string()),
                             assigned_to: Some(Some(effective_label.clone())),
-                            actor_identity: agent.as_ref().map(|_| {
-                                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())
+                            actor_identity: canonical_agent.as_ref().map(|_| {
+                                ActorIdentity::from_legacy(
+                                    canonical_agent.as_deref(),
+                                    canonical_model.as_deref(),
+                                )
                             }),
                             append_history: vec![TaskHistoryEntry {
                                 at,
@@ -586,8 +606,11 @@ impl OrbitRuntime {
                             status_event: Some("started".to_string()),
                             status_note: note.clone(),
                             assigned_to: Some(Some(effective_label.clone())),
-                            actor_identity: agent.as_ref().map(|_| {
-                                ActorIdentity::from_legacy(agent.as_deref(), model.as_deref())
+                            actor_identity: canonical_agent.as_ref().map(|_| {
+                                ActorIdentity::from_legacy(
+                                    canonical_agent.as_deref(),
+                                    canonical_model.as_deref(),
+                                )
                             }),
                             append_comments: append_comments.clone(),
                             ..Default::default()

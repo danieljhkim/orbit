@@ -202,10 +202,13 @@ fn sync_task_review_to_github_with_client<
         if host.scoring_enabled() {
             for label in pending_labels {
                 if let Some((agent, model)) = parse_agent_model_label(&label) {
+                    let model = host
+                        .canonical_model_name(agent, Some(model))
+                        .unwrap_or_else(|| model.to_string());
                     let _ = pr_scoreboard::record_pr_review_comment(
                         host.scoreboard_dir(),
                         agent,
-                        model,
+                        &model,
                     );
                 }
             }

@@ -15,10 +15,46 @@ use super::friction::{append_failed_step_friction, append_step_metrics};
 use super::helpers::{
     build_knowledge_run_metrics, check_loop_exit, extract_task_id, log_step_completion,
     merge_job_input, normalize_agent_label, prepare_implement_change_metrics,
-    record_task_agent_context, resolve_step_agent, resolved_model_name, run_was_cancelled,
-    should_run_step, step_state_records_incident,
+    record_task_agent_context, resolve_step_agent, resolve_step_agent_from_input,
+    resolved_model_name, run_was_cancelled, should_run_step, step_state_records_incident,
 };
 use super::stale_recovery::{finalize_failed_started_run, recover_stale_active_run_for_job};
+
+const SHIP_WORKFLOW_JOB_IDS: &[&str] = &[
+    "job_local_task_pipeline",
+    "job_parallel_task_pipeline",
+    "job_parallel_task_worker",
+    "job_batch_review_cycle",
+];
+
+fn inject_ship_role_assignments<H: crate::context::RuntimeHost + ?Sized>(
+    host: &H,
+    job_id: &str,
+    input: &mut Value,
+) {
+    if !SHIP_WORKFLOW_JOB_IDS.contains(&job_id) {
+        return;
+    }
+
+    let Some(map) = input.as_object_mut() else {
+        return;
+    };
+
+    for (role, agent_key, model_key) in [
+        ("plan", "plan_agent_cli", "plan_model"),
+        ("implement", "implement_agent_cli", "implement_model"),
+        ("review", "review_agent_cli", "review_model"),
+        ("finalize", "finalize_agent_cli", "finalize_model"),
+    ] {
+        let Some((agent, model)) = host.ship_role_assignment(role) else {
+            continue;
+        };
+        map.entry(agent_key.to_string())
+            .or_insert_with(|| Value::String(agent));
+        map.entry(model_key.to_string())
+            .or_insert_with(|| Value::String(model));
+    }
+}
 
 pub fn run_job_with_input<H: EngineHost>(
     host: &H,
@@ -273,6 +309,7 @@ fn execute_activity_with_retries<H: EngineHost>(
         let mut total_duration_ms: u64 = 0;
         let mut last_protocol_violation = false;
         let mut current_input = merge_job_input(job.default_input.as_ref(), input.clone())?;
+        inject_ship_role_assignments(host, &job.job_id, &mut current_input);
         // Inject run_id so all steps can reference it (e.g. as batch_id for
         // parallel task pipelines).
         if let Value::Object(ref mut map) = current_input {
@@ -491,6 +528,7 @@ fn execute_activity_with_retries<H: EngineHost>(
                 // precedence chain: agent_cli_from_input (job input) first,
                 // then task actor identity. See `resolve_step_agent` docs.
                 let resolved_step = resolve_step_agent(host, step, &current_input);
+                let resolved_from_input = resolve_step_agent_from_input(step, &current_input);
                 let effective_step = resolved_step.as_ref().unwrap_or(step);
                 let execution = build_execution_context_for_step(
                     host,
@@ -499,9 +537,9 @@ fn execute_activity_with_retries<H: EngineHost>(
                     current_input.clone(),
                     debug,
                 )?;
-                // Only record agent context when the step explicitly specifies
-                // agent_cli — skip when resolved from the task to avoid overwriting.
-                if !step.agent_cli.trim().is_empty() {
+                // Record agent context for explicit steps and input-driven
+                // assignments, but not task-actor fallback.
+                if !step.agent_cli.trim().is_empty() || resolved_from_input.is_some() {
                     record_task_agent_context(host, &execution)?;
                 }
                 let prepared_knowledge_metrics =
@@ -883,9 +921,101 @@ fn execute_job_step<H: EngineHost>(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_loop_outcome_metadata;
-    use orbit_types::JobRunState;
+    use super::{apply_loop_outcome_metadata, inject_ship_role_assignments};
+    use orbit_store::{InvocationQuery, InvocationRecord};
+    use orbit_types::{Activity, Job, JobRunState, JobTargetType, OrbitError, OrbitEvent, Role};
     use serde_json::json;
+    use std::path::Path;
+
+    use crate::context::{JobRunResult, RuntimeHost};
+
+    struct ShipConfigHost;
+
+    impl RuntimeHost for ShipConfigHost {
+        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn repo_root(&self) -> Result<String, OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn data_root(&self) -> &Path {
+            Path::new(".")
+        }
+
+        fn run_job_now_with_input_debug(
+            &self,
+            _job_id: &str,
+            _input: serde_json::Value,
+            _debug: bool,
+        ) -> Result<JobRunResult, OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn validate_activity_target_exists(
+            &self,
+            _target_type: JobTargetType,
+            _target_id: &str,
+        ) -> Result<Activity, OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn invocation_records(
+            &self,
+            _query: InvocationQuery,
+        ) -> Result<Vec<InvocationRecord>, OrbitError> {
+            Ok(Vec::new())
+        }
+
+        fn run_tool_with_context_and_role(
+            &self,
+            _name: &str,
+            _input: serde_json::Value,
+            _role: Role,
+            _tool_context: orbit_tools::ToolContext,
+        ) -> Result<serde_json::Value, OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<(), OrbitError> {
+            unimplemented!("not used in execution tests")
+        }
+
+        fn ship_role_assignment(&self, role: &str) -> Option<(String, String)> {
+            match role {
+                "plan" => Some(("claude".to_string(), "opus-4.7".to_string())),
+                "implement" => Some(("codex".to_string(), "gpt-5.4".to_string())),
+                "review" => Some(("claude".to_string(), "sonnet-4.7".to_string())),
+                "finalize" => Some(("gemini".to_string(), "gemini-3.1-pro-preview".to_string())),
+                _ => None,
+            }
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            false
+        }
+
+        fn graph_editing(&self) -> bool {
+            false
+        }
+
+        fn scoreboard_dir(&self) -> &Path {
+            Path::new(".")
+        }
+    }
 
     #[test]
     fn loop_metadata_marks_exhaustion_as_failed() {
@@ -918,5 +1048,34 @@ mod tests {
         assert!(!exhausted);
         assert_eq!(input["fix_loop_iterations"], json!(1));
         assert_eq!(input["fix_loop_exhausted"], json!(false));
+    }
+
+    #[test]
+    fn inject_ship_role_assignments_sets_missing_role_inputs() {
+        let host = ShipConfigHost;
+        let mut input = json!({
+            "task_id": "T1",
+            "implement_agent_cli": "codex",
+        });
+
+        inject_ship_role_assignments(&host, "job_parallel_task_pipeline", &mut input);
+
+        assert_eq!(input["plan_agent_cli"], json!("claude"));
+        assert_eq!(input["plan_model"], json!("opus-4.7"));
+        assert_eq!(input["implement_agent_cli"], json!("codex"));
+        assert_eq!(input["implement_model"], json!("gpt-5.4"));
+        assert_eq!(input["review_model"], json!("sonnet-4.7"));
+        assert_eq!(input["finalize_model"], json!("gemini-3.1-pro-preview"));
+    }
+
+    #[test]
+    fn inject_ship_role_assignments_skips_non_ship_jobs() {
+        let host = ShipConfigHost;
+        let mut input = json!({ "task_id": "T1" });
+
+        inject_ship_role_assignments(&host, "job_duel_pipeline", &mut input);
+
+        assert!(input.get("plan_agent_cli").is_none());
+        assert!(input.get("finalize_agent_cli").is_none());
     }
 }

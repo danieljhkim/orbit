@@ -29,8 +29,8 @@ job:
 
     - target_type: activity
       target_id: review_batch_pr
-      agent_cli: claude
-      model: sonnet
+      agent_cli_from_input: review_agent_cli
+      model_from_input: review_model
       condition: on_success
       timeout_seconds: 600
 

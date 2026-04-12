@@ -15,7 +15,7 @@ use orbit_store::{InvocationRecord, planning_duel_scoreboard};
 use orbit_types::{
     Activity, EfficiencyMetrics, OrbitError, PlannerSlot, PlanningDuelRun, PlanningEfficiency,
     PlanningOutcome, PlanningRoleAssignment, PlanningRoles, TaskArtifact, TaskComment, TaskStatus,
-    TokenUsage, all_agent_families, resolve_agent_model_pair,
+    TokenUsage, all_agent_families,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -195,8 +195,11 @@ fn next_permutation() -> [usize; 3] {
     PERMUTATIONS[(nanos as usize) % PERMUTATIONS.len()]
 }
 
-fn orchestrator_model_for(family: &str) -> Result<String, OrbitError> {
-    resolve_agent_model_pair(family)
+fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
+    host: &H,
+    family: &str,
+) -> Result<String, OrbitError> {
+    host.resolved_agent_model_pair(family)
         .map(|pair| pair.orchestrator)
         .ok_or_else(|| {
             OrbitError::Execution(format!(
@@ -205,14 +208,20 @@ fn orchestrator_model_for(family: &str) -> Result<String, OrbitError> {
         })
 }
 
-fn build_role_assignment(family: &str) -> Result<PlanningRoleAssignment, OrbitError> {
+fn build_role_assignment<H: RuntimeHost + ?Sized>(
+    host: &H,
+    family: &str,
+) -> Result<PlanningRoleAssignment, OrbitError> {
     Ok(PlanningRoleAssignment {
         agent: family.to_string(),
-        model: orchestrator_model_for(family)?,
+        model: orchestrator_model_for(host, family)?,
     })
 }
 
-fn build_roles_output(perm: [usize; 3]) -> Result<Value, OrbitError> {
+fn build_roles_output<H: RuntimeHost + ?Sized>(
+    host: &H,
+    perm: [usize; 3],
+) -> Result<Value, OrbitError> {
     let families = all_agent_families();
     let planner_a = families[perm[0]];
     let planner_b = families[perm[1]];
@@ -229,16 +238,16 @@ fn build_roles_output(perm: [usize; 3]) -> Result<Value, OrbitError> {
 
     Ok(json!({
         "planner_a_agent_cli": planner_a,
-        "planner_a_model": orchestrator_model_for(planner_a)?,
+        "planner_a_model": orchestrator_model_for(host, planner_a)?,
         "planner_b_agent_cli": planner_b,
-        "planner_b_model": orchestrator_model_for(planner_b)?,
+        "planner_b_model": orchestrator_model_for(host, planner_b)?,
         "arbiter_agent_cli": arbiter,
-        "arbiter_model": orchestrator_model_for(arbiter)?,
+        "arbiter_model": orchestrator_model_for(host, arbiter)?,
         "planning_duel_started_at": started_at,
         "planning_duel_roles": {
-            "planner_a": build_role_assignment(planner_a)?,
-            "planner_b": build_role_assignment(planner_b)?,
-            "arbiter": build_role_assignment(arbiter)?,
+            "planner_a": build_role_assignment(host, planner_a)?,
+            "planner_b": build_role_assignment(host, planner_b)?,
+            "arbiter": build_role_assignment(host, arbiter)?,
         }
     }))
 }
@@ -624,10 +633,13 @@ fn role_metrics_for_activity<H: RuntimeHost + ?Sized>(
     })
 }
 
-pub(super) fn select_planning_duel_roles(input: &Value) -> Result<Value, OrbitError> {
+pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
     let perm = next_permutation();
-    let output = build_roles_output(perm)?;
+    let output = build_roles_output(host, perm)?;
 
     Ok(json!({
         "task_id": task_id,
@@ -652,7 +664,7 @@ pub(super) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         .or_else(|| input_string_field(input, "run_id"))
         .ok_or_else(|| OrbitError::InvalidInput("missing required input.run_id".to_string()))?;
 
-    let roles_output = select_planning_duel_roles(&json!({ "task_id": task_id }))?;
+    let roles_output = select_planning_duel_roles(host, &json!({ "task_id": task_id }))?;
     let planning_roles = parse_planning_duel_roles(&roles_output)?;
 
     let planner_activity = planner_activity();
@@ -1058,7 +1070,10 @@ mod tests {
     use orbit_store::{
         InvocationQuery, InvocationRecord, InvocationToolCallRecord, planning_duel_scoreboard,
     };
-    use orbit_types::{OrbitError, PlanningRoleAssignment, TaskStatus, TokenUsage, ToolCallTrace};
+    use orbit_types::{
+        AgentModelPair, OrbitError, PlanningRoleAssignment, TaskStatus, TokenUsage, ToolCallTrace,
+        resolve_agent_model_pair,
+    };
     use serde_json::Value;
     use serde_json::json;
     use tempfile::tempdir;
@@ -1140,6 +1155,7 @@ mod tests {
 
     struct StubRuntimeHost {
         scoreboard_dir: tempfile::TempDir,
+        pair_overrides: HashMap<String, AgentModelPair>,
         queries: Mutex<Vec<(String, String)>>,
         records: Mutex<HashMap<(String, String), Vec<InvocationRecord>>>,
         artifacts: Mutex<HashMap<String, Vec<orbit_types::TaskArtifact>>>,
@@ -1153,6 +1169,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 scoreboard_dir: tempdir().expect("tempdir"),
+                pair_overrides: HashMap::new(),
                 queries: Mutex::new(Vec::new()),
                 records: Mutex::new(HashMap::new()),
                 artifacts: Mutex::new(HashMap::new()),
@@ -1161,6 +1178,14 @@ mod tests {
                 active_planners: AtomicUsize::new(0),
                 max_active_planners: AtomicUsize::new(0),
             }
+        }
+
+        fn with_pair_override(mut self, family: &str, orchestrator: &str, helper: &str) -> Self {
+            self.pair_overrides.insert(
+                family.to_string(),
+                AgentModelPair::new(orchestrator, helper),
+            );
+            self
         }
     }
 
@@ -1384,6 +1409,13 @@ mod tests {
             unimplemented!()
         }
 
+        fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+            self.pair_overrides
+                .get(agent_cli)
+                .cloned()
+                .or_else(|| resolve_agent_model_pair(agent_cli))
+        }
+
         fn scoring_enabled(&self) -> bool {
             false
         }
@@ -1471,7 +1503,7 @@ mod tests {
             },
             "planner_b": {
                 "agent": "claude",
-                "model": "opus"
+                "model": "opus-4.6"
             },
             "arbiter": {
                 "agent": "gemini",
@@ -1487,8 +1519,8 @@ mod tests {
                 content: "*authored by: codex / gpt-5.4*\n## Plan\n- planner a".to_string(),
             },
             orbit_types::TaskArtifact {
-                path: "planning-duel/claude-opus.md".to_string(),
-                content: "*authored by: claude / opus*\n## Plan\n- planner b".to_string(),
+                path: "planning-duel/claude-opus-4.6.md".to_string(),
+                content: "*authored by: claude / opus-4.6*\n## Plan\n- planner b".to_string(),
             },
         ]
     }
@@ -1498,8 +1530,8 @@ mod tests {
             path: super::WINNER_ARTIFACT_PATH.to_string(),
             content: serde_json::to_string(&json!({
                 "winner_agent_cli": "claude",
-                "winner_model": "opus",
-                "artifact_path": "planning-duel/claude-opus.md",
+                "winner_model": "opus-4.6",
+                "artifact_path": "planning-duel/claude-opus-4.6.md",
                 "arbiter_agent_cli": "gemini",
                 "arbiter_model": "gemini-3.1-pro-preview",
                 "arbiter_rationale": "planner_b grounded the writeback path more clearly"
@@ -1513,7 +1545,8 @@ mod tests {
         clear_test_permutations();
         push_test_permutations([[0, 1, 2]]);
 
-        let out = select_planning_duel_roles(&json!({ "task_id": "T1" })).unwrap();
+        let host = StubRuntimeHost::new();
+        let out = select_planning_duel_roles(&host, &json!({ "task_id": "T1" })).unwrap();
         assert_eq!(out["planner_a_agent_cli"], json!("codex"));
         assert_eq!(out["planner_b_agent_cli"], json!("claude"));
         assert_eq!(out["arbiter_agent_cli"], json!("gemini"));
@@ -1524,6 +1557,22 @@ mod tests {
         assert_eq!(
             out["planning_duel_roles"]["arbiter"]["agent"],
             json!("gemini")
+        );
+    }
+
+    #[test]
+    fn select_planning_duel_roles_prefers_host_resolved_model_pairs() {
+        clear_test_permutations();
+        push_test_permutations([[1, 0, 2]]);
+
+        let host = StubRuntimeHost::new().with_pair_override("claude", "opus-4.7", "sonnet-4.7");
+        let out = select_planning_duel_roles(&host, &json!({ "task_id": "T1" })).unwrap();
+
+        assert_eq!(out["planner_a_agent_cli"], json!("claude"));
+        assert_eq!(out["planner_a_model"], json!("opus-4.7"));
+        assert_eq!(
+            out["planning_duel_roles"]["planner_a"]["model"],
+            json!("opus-4.7")
         );
     }
 
@@ -1577,7 +1626,7 @@ mod tests {
 
         assert_eq!(out["run_id"], json!("run-42"));
         assert_eq!(out["winner_agent_cli"], json!("claude"));
-        assert_eq!(out["winner_model"], json!("opus"));
+        assert_eq!(out["winner_model"], json!("opus-4.6"));
 
         let invocations = host.invocations.lock().unwrap().clone();
         assert_eq!(invocations.len(), 3);
@@ -1669,7 +1718,7 @@ mod tests {
                 "run-1",
                 "activity-b",
                 "claude",
-                "opus",
+                "opus-4.6",
                 60,
                 12,
                 8,
@@ -1766,7 +1815,7 @@ mod tests {
                     },
                     "planner_b": {
                         "agent": "claude",
-                        "model": "opus",
+                        "model": "opus-4.6",
                         "activity_id": "propose_duel_plan",
                         "efficiency": {
                             "invocation_count": 1,
@@ -1810,7 +1859,7 @@ mod tests {
         assert_eq!(runs[0].roles.planner_b.agent, "claude");
         assert_eq!(
             runs[0].planner_b_artifact_path,
-            "planning-duel/claude-opus.md"
+            "planning-duel/claude-opus-4.6.md"
         );
         assert_eq!(runs[0].efficiency.planner_a.token_total(), Some(30));
         assert_eq!(runs[0].efficiency.planner_b.byte_proxy_total(), Some(4096));
@@ -1840,7 +1889,7 @@ mod tests {
                     "run-1",
                     "shared-activity",
                     "claude",
-                    "opus",
+                    "opus-4.6",
                     45,
                     0,
                     0,
@@ -1882,7 +1931,7 @@ mod tests {
                 "run-1",
                 "activity-a",
                 "claude",
-                "opus",
+                "opus-4.6",
                 25,
                 10,
                 3,

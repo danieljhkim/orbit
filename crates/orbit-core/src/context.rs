@@ -7,9 +7,12 @@ use orbit_store::{
     ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
-use orbit_types::WorkspacePaths;
+use orbit_types::{AgentModelPair, WorkspacePaths};
 
-use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
+use crate::config::{
+    AgentAssignment, AgentModelsConfig, CodexExecutionPolicy, ExecutionEnvPolicy,
+    PersistenceConfig, ShipWorkflowConfig,
+};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
@@ -84,6 +87,8 @@ pub struct OrbitContext {
     actor: ActorIdentity,
     task_approval_required_for_agent: bool,
     task_delegate_approval: bool,
+    agent_models: AgentModelsConfig,
+    ship_workflow: ShipWorkflowConfig,
     scoring_enabled: bool,
     graph_editing: bool,
 }
@@ -106,6 +111,8 @@ impl OrbitContext {
         actor: ActorIdentity,
         task_approval_required_for_agent: bool,
         task_delegate_approval: bool,
+        agent_models: AgentModelsConfig,
+        ship_workflow: ShipWorkflowConfig,
         scoring_enabled: bool,
         graph_editing: bool,
     ) -> Self {
@@ -125,6 +132,8 @@ impl OrbitContext {
             actor,
             task_approval_required_for_agent,
             task_delegate_approval,
+            agent_models,
+            ship_workflow,
             scoring_enabled,
             graph_editing,
         }
@@ -205,6 +214,22 @@ impl OrbitContext {
 
     pub(crate) fn task_delegate_approval(&self) -> bool {
         self.task_delegate_approval
+    }
+
+    pub(crate) fn agent_model_pair(&self, family: &str) -> Option<AgentModelPair> {
+        self.agent_models.pair_for(family)
+    }
+
+    pub(crate) fn canonical_model_name(
+        &self,
+        agent_cli: &str,
+        model: Option<&str>,
+    ) -> Option<String> {
+        self.agent_models.canonical_model_name(agent_cli, model)
+    }
+
+    pub(crate) fn ship_role_assignment(&self, role: &str) -> Option<AgentAssignment> {
+        self.ship_workflow.role(role).cloned()
     }
 
     pub(crate) fn scoring_enabled(&self) -> bool {
