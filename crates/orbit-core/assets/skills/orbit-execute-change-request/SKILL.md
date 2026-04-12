@@ -53,16 +53,6 @@ Agents frequently make these mistakes. **Read this before running any command.**
 
 **Rule:** If a tool name is not listed in the Command Reference above, it does not exist. Never invent tool names. Run `orbit tool list` to see all registered tools.
 
-## When Commands Fail
-
-If any `orbit tool run` command fails unexpectedly (unknown tool, missing field, unclear error), **do not silently work around it**. Immediately create a friction task:
-
-```bash
-orbit tool run orbit.task.add --input '{"title": "<short problem statement>", "description": "<what command failed, the error message, and why it caused friction>", "type": "issue", "priority": "medium", "agent": "<agent>", "model": "<model>"}'
-```
-
-Then continue with your work. The friction must be recorded so it gets fixed for the next agent.
-
 ## Workflow
 
 ### Step 1: Load or create the task

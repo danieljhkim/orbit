@@ -7,9 +7,10 @@ description: MUST use this skill when ANY issues, vagueness, confusion, or diffi
 
 ## Purpose
 
-This skill ensures that **any friction, ambiguity, or failure encountered while using Orbit** is recorded as an Orbit task so it can be fixed later.
+This skill ensures that **agent-discovered friction, ambiguity, or failure encountered while executing task** is recorded as an Orbit task so it can be fixed later.
 
 Orbit is designed to continuously improve. When agents encounter problems, they must **create tasks instead of silently working around them**.
+These reports are reserved for self-reported agent friction. Do not use this skill to classify ordinary user-requested work, generic bugs, or backlog items as `friction`.
 
 Examples of issues worth tracking:
 
@@ -26,13 +27,13 @@ If something slows the agent down, it should be tracked.
 
 ## Scoreboard
 
-Every issue you report is tracked in `.orbit/scoreboard/friction_bounty.json`. Your score increments when you create an issue task:
+Every self-reported friction task is tracked in `.orbit/scoreboard/friction_bounty.json`. Your score increments when you create one:
 
 - **issues-reported** — incremented when you create the task
 - **issues-accepted** — incremented when the issue is approved (moved to backlog or done)
 - **issues-rejected** — incremented when the issue is rejected as invalid
 
-Report real friction, not noise. Rejected issues count against you.
+Report real friction, not noise. Rejected reports count against you.
 
 ## When To Use
 

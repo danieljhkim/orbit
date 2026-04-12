@@ -2,21 +2,14 @@
 
 Project instructions for agents working on Orbit.
 
-## Disagreement is valid
-
-If a task spec contradicts the code, acceptance criteria are ambiguous, or you see a simpler approach: stop and flag it before implementing. Executing a broken spec to the letter is worse than asking.
-
-Before any non-trivial task, name the single assumption you're making that, if wrong, would break the implementation.
-
 ## Project Don'ts
 
 - Don't commit until the Orbit task has been explicitly approved by the human.
-- Don't modify files outside the task's scope or `context_files` list.
 - Don't invent task IDs — get them from `orbit.task.add`.
 - Don't edit task files directly — use `orbit.task.update`.
 - Don't add cross-crate dependencies without checking the architecture diagram below.
-- When adding a store module, match the atomic-write pattern of `orbit/orbit-store/src/file/pr_scoreboard.rs` — do not invent a new one.
-- When you hit friction, ambiguity, naming drift, or duplicated sources of truth: file a friction task via the `orbit-track-issues` skill instead of working around it.
+- When you hit friction, ambiguity, naming drift, or duplicated sources of truth: file a self-reported friction task via the `orbit-track-issues` skill instead of working around it.
+- Reserve task type `friction` for agent self-reports only. Do not use `friction` for normal user-requested work, backlog shaping, or generic bug tracking.
 
 ## Project Do's
 
@@ -27,19 +20,18 @@ Before any non-trivial task, name the single assumption you're making that, if w
 
 - Build: `make build`
 - Test:  `make test`
-- Lint:  `make clippy`
 - Fmt:   `make fmt`
-- CI:    `make ci` (runs fmt + clippy + test)
 
 All must pass before a task moves to `review`.
 
 ## Crate Architecture
 
 ```
-orbit-types → orbit-policy, orbit-exec → orbit-tools → orbit-store, orbit-agent → orbit-engine → orbit-core → orbit-cli
+orbit-types → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → orbit-store, orbit-agent → orbit-engine → orbit-core → orbit-cli
 ```
 
 - **orbit-types**: leaf — no internal deps. Shared types, `OrbitError`, ID generation.
+- **orbit-knowledge**: knowledge/graph parsing and storage helpers. Depends on `orbit-types`; consumed by `orbit-tools` and `orbit-cli`.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones.
 - **orbit-agent**: `AgentRuntime` trait. New agent families go here, not elsewhere.
 - **orbit-engine**: activity/job execution, template rendering, retry logic.
@@ -78,4 +70,4 @@ Follow the `## Task Quality Standards` section in `orbit-create-task` skill: det
 ## Scoreboards
 
 - `.orbit/scoreboard/pr.json` — PR merge rates, revision counts, review comment validity per agent/model.
-- `.orbit/scoreboard/friction_bounty.json` — friction reports (issues-reported, issues-accepted, issues-rejected) per agent/model. Rejected reports count against the reporter; quality over quantity.
+- `.orbit/scoreboard/friction_bounty.json` — self-reported agent friction reports (issues-reported, issues-accepted, issues-rejected) per agent/model. Rejected reports count against the reporter; quality over quantity.

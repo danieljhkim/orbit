@@ -27,6 +27,7 @@ Create an Orbit task another engineer or agent can execute without guessing. Foc
 - Strongly prefer supplying `acceptance_criteria`.
 - Blank or missing task companion files (`plan.md`, `execution-summary.md`) are treated as blank task fields. Repair them through `orbit.task.update` (`plan` or `execution_summary`), not manual file edits.
 - Orbit fills `created_by`, `assigned_to`, and `proposed_by` automatically from execution context.
+- Reserve task type `friction` for agent self-reports via `orbit-track-issues`. Do not use `friction` for normal task authoring. Avoid task type `issue` for generic work too; it currently feeds the same scoreboard path.
 
 ## Task Quality Standards
 
@@ -71,7 +72,7 @@ orbit tool run orbit.task.add --input '{
   "context": "<comma,separated,paths>",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
-  "type": "<task|feature|issue|chore|refactor>"
+  "type": "<task|feature|bug|chore|refactor>"
 }'
 ```
 
