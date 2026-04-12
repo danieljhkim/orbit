@@ -91,7 +91,7 @@ orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this 
 
 - `task start` moves `backlog -> in-progress`
 - `task start` also handles `proposed -> in-progress` and records `proposal_approved` before `started`
-- `task start` will fail if the task still lacks a real plan
+- `task start` still requires a real plan when jumping directly from `proposed -> in-progress`; backlog tasks may start with an empty plan
 - Keep using explicit `approve` plus later status updates when approval and execution should stay separate
 
 ### Step 4: Implement and validate

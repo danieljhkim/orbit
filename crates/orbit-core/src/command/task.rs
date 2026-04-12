@@ -334,7 +334,10 @@ impl OrbitRuntime {
             task.status
                 .validate_transition(target_status)
                 .map_err(OrbitError::TaskStatusTransition)?;
-            if target_status == TaskStatus::InProgress && task.status != TaskStatus::InProgress {
+            if target_status == TaskStatus::InProgress
+                && task.status != TaskStatus::InProgress
+                && in_progress_transition_requires_plan(task.status)
+            {
                 let effective_plan = params.plan.as_deref().unwrap_or(task.plan.as_str());
                 ensure_task_has_execution_plan(id, effective_plan)?;
             }
@@ -514,7 +517,9 @@ impl OrbitRuntime {
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
-        ensure_task_has_execution_plan(id, task.plan.as_str())?;
+        if in_progress_transition_requires_plan(task.status) {
+            ensure_task_has_execution_plan(id, task.plan.as_str())?;
+        }
         let actor = self.actor().clone();
         let effective_label =
             effective_actor_label(&actor.label, agent.as_deref(), model.as_deref());
@@ -1399,6 +1404,10 @@ pub(crate) fn ensure_task_has_execution_plan(id: &str, plan: &str) -> Result<(),
     Ok(())
 }
 
+pub(crate) fn in_progress_transition_requires_plan(from_status: TaskStatus) -> bool {
+    from_status != TaskStatus::Backlog
+}
+
 fn effective_actor_label(default_label: &str, agent: Option<&str>, model: Option<&str>) -> String {
     match (agent, model) {
         (Some(agent), Some(model)) => format!("{agent} / {model}"),
@@ -1509,10 +1518,25 @@ mod tests {
     }
 
     #[test]
-    fn starting_task_requires_plan() {
+    fn starting_backlog_task_allows_empty_plan() {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
         let task = runtime
             .add_task_with_status("needs plan", TaskStatus::Backlog)
+            .expect("task");
+
+        let started = runtime
+            .start_task(&task.id, None, None)
+            .expect("start should succeed");
+
+        assert_eq!(started.status, TaskStatus::InProgress);
+        assert!(started.plan.is_empty());
+    }
+
+    #[test]
+    fn starting_proposed_task_requires_plan() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("needs plan", TaskStatus::Proposed)
             .expect("task");
 
         let err = runtime
@@ -1523,6 +1547,47 @@ mod tests {
             err.to_string()
                 .contains("requires a non-empty execution plan")
         );
+    }
+
+    #[test]
+    fn transition_from_backlog_to_in_progress_allows_empty_plan() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("needs plan", TaskStatus::Backlog)
+            .expect("task");
+
+        let updated = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .expect("update succeeds");
+
+        assert_eq!(updated.status, TaskStatus::InProgress);
+        assert!(updated.plan.is_empty());
+    }
+
+    #[test]
+    fn transition_from_proposed_to_in_progress_requires_plan() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("needs plan", TaskStatus::Proposed)
+            .expect("task");
+
+        let err = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .expect_err("update should fail");
+
+        assert!(matches!(err, OrbitError::InvalidInput(_)));
     }
 
     #[test]
@@ -1548,10 +1613,31 @@ mod tests {
     }
 
     #[test]
-    fn automation_transition_to_in_progress_requires_plan() {
+    fn automation_transition_from_backlog_to_in_progress_allows_empty_plan() {
         let runtime = OrbitRuntime::in_memory().expect("runtime");
         let task = runtime
             .add_task_with_status("needs plan", TaskStatus::Backlog)
+            .expect("task");
+
+        <OrbitRuntime as TaskHost>::apply_task_automation_update(
+            &runtime,
+            &task.id,
+            TaskAutomationUpdate {
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .expect("automation update should succeed");
+
+        let updated = runtime.get_task(&task.id).expect("updated task");
+        assert_eq!(updated.status, TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn automation_transition_from_proposed_to_in_progress_requires_plan() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task = runtime
+            .add_task_with_status("needs plan", TaskStatus::Proposed)
             .expect("task");
 
         let err = <OrbitRuntime as TaskHost>::apply_task_automation_update(

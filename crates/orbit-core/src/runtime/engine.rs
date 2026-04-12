@@ -588,7 +588,9 @@ impl TaskHost for OrbitRuntime {
     ) -> Result<(), OrbitError> {
         if update.status == Some(TaskStatus::InProgress) {
             let task = self.get_task(task_id)?;
-            crate::command::task::ensure_task_has_execution_plan(task_id, task.plan.as_str())?;
+            if crate::command::task::in_progress_transition_requires_plan(task.status) {
+                crate::command::task::ensure_task_has_execution_plan(task_id, task.plan.as_str())?;
+            }
         }
         let _ = self.with_mutation(|| {
             let task = self.update_task_record(
