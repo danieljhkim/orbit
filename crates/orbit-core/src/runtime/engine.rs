@@ -513,6 +513,7 @@ impl RuntimeHost for OrbitRuntime {
                 priority: TaskPriority::High,
                 complexity: None,
                 task_type: TaskType::Issue,
+                system_created: true,
                 source_task_id: None,
             },
             agent.map(ToOwned::to_owned),
@@ -1443,6 +1444,11 @@ weak = "sonnet-4.7"
 
         assert_eq!(task.task_type, TaskType::Issue);
         assert!(!task.task_type.counts_toward_friction_bounty());
+        assert_eq!(task.created_by, Some("system".to_string()));
+        assert_eq!(task.proposed_by, Some("system".to_string()));
+        assert_eq!(task.assigned_to, Some("system".to_string()));
+        assert_eq!(task.actor_identity.agent_name(), Some("codex"));
+        assert_eq!(task.actor_identity.agent_model(), Some("gpt-5.4"));
     }
 
     #[test]

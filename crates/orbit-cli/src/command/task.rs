@@ -190,6 +190,7 @@ impl Execute for TaskAddArgs {
                 priority,
                 complexity: self.complexity,
                 task_type,
+                system_created: false,
                 source_task_id: self.source_task.clone(),
             },
             self.agent,
