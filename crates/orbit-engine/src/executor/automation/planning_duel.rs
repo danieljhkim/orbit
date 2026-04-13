@@ -8,13 +8,16 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
 use orbit_store::{InvocationRecord, planning_duel_scoreboard};
+use orbit_tools::ToolContext;
 use orbit_types::{
     Activity, EfficiencyMetrics, OrbitError, PlannerSlot, PlanningDuelRun, PlanningEfficiency,
-    PlanningOutcome, PlanningRoleAssignment, PlanningRoles, TaskArtifact, TaskComment, TaskStatus,
+    PlanningOutcome, PlanningRoleAssignment, PlanningRoles, Role, TaskArtifact, TaskComment,
     TokenUsage, all_agent_families,
 };
 use serde::{Deserialize, Serialize};
@@ -35,6 +38,8 @@ const PERMUTATIONS: [[usize; 3]; 6] = [
 const PLANNING_DUEL_ARTIFACT_PREFIX: &str = "planning-duel/";
 const PLANNING_DUEL_PLAN_EXTENSION: &str = ".md";
 const WINNER_ARTIFACT_PATH: &str = "planning-duel/winner.json";
+const TASKS_DIR_NAME: &str = "tasks";
+const TASK_ARTIFACTS_DIR_NAME: &str = "artifacts";
 const AUTHOR_SIGNATURE_PREFIX: &str = "*authored by: ";
 const AUTHOR_SIGNATURE_SEPARATOR: &str = " / ";
 const PLANNER_ACTIVITY_ID: &str = "propose_duel_plan";
@@ -566,6 +571,92 @@ fn normalize_winning_plan_for_task(content: &str) -> String {
     content.trim().to_string()
 }
 
+fn find_task_dir(tasks_root: &Path, task_id: &str) -> Result<Option<PathBuf>, OrbitError> {
+    if !tasks_root.exists() {
+        return Ok(None);
+    }
+
+    let mut pending = vec![tasks_root.to_path_buf()];
+    let mut matches = Vec::new();
+
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).map_err(|err| OrbitError::Io(err.to_string()))? {
+            let entry = entry.map_err(|err| OrbitError::Io(err.to_string()))?;
+            let path = entry.path();
+            if !entry
+                .file_type()
+                .map_err(|err| OrbitError::Io(err.to_string()))?
+                .is_dir()
+            {
+                continue;
+            }
+
+            if path.file_name().and_then(|name| name.to_str()) == Some(task_id) {
+                matches.push(path);
+                continue;
+            }
+
+            pending.push(path);
+        }
+    }
+
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.pop()),
+        _ => Err(OrbitError::Execution(format!(
+            "found multiple task directories for '{task_id}' while cleaning planning duel artifacts"
+        ))),
+    }
+}
+
+fn cleanup_stale_planning_duel_artifacts<H: RuntimeHost + TaskHost + ?Sized>(
+    host: &H,
+    task_id: &str,
+) -> Result<(), OrbitError> {
+    let stale_artifacts = host
+        .get_task_artifacts(task_id)?
+        .into_iter()
+        .filter(|artifact| artifact.path.starts_with(PLANNING_DUEL_ARTIFACT_PREFIX))
+        .collect::<Vec<_>>();
+    if stale_artifacts.is_empty() {
+        return Ok(());
+    }
+
+    let tasks_root = host.data_root().join(TASKS_DIR_NAME);
+    let task_dir = find_task_dir(&tasks_root, task_id)?.ok_or_else(|| {
+        OrbitError::Execution(format!(
+            "could not locate task directory for '{task_id}' while cleaning stale planning duel artifacts"
+        ))
+    })?;
+    let artifacts_root = task_dir.join(TASK_ARTIFACTS_DIR_NAME);
+    let tool_context = ToolContext {
+        cwd: Some(host.data_root().display().to_string()),
+        allowed_tools: vec!["fs.delete".to_string()],
+        workspace_root: Some(host.data_root().to_path_buf()),
+        orbit_root: Some(host.data_root().to_path_buf()),
+        task_id: Some(task_id.to_string()),
+        ..ToolContext::default()
+    };
+
+    for artifact in stale_artifacts {
+        let artifact_path = artifacts_root.join(&artifact.path);
+        if !artifact_path.exists() {
+            return Err(OrbitError::Execution(format!(
+                "stale planning duel artifact '{}' is missing on disk for task '{}'",
+                artifact.path, task_id
+            )));
+        }
+        let _ = host.run_tool_with_context_and_role(
+            "fs.delete",
+            json!({ "path": artifact_path.display().to_string() }),
+            Role::Admin,
+            tool_context.clone(),
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn summarize_role_metrics(records: &[InvocationRecord]) -> PlanningDuelEfficiency {
     let mut efficiency = PlanningDuelEfficiency {
@@ -663,6 +754,8 @@ pub(super) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     let job_run_id = input_string_field(input, "job_run_id")
         .or_else(|| input_string_field(input, "run_id"))
         .ok_or_else(|| OrbitError::InvalidInput("missing required input.run_id".to_string()))?;
+
+    cleanup_stale_planning_duel_artifacts(host, task_id)?;
 
     let roles_output = select_planning_duel_roles(host, &json!({ "task_id": task_id }))?;
     let planning_roles = parse_planning_duel_roles(&roles_output)?;
@@ -822,7 +915,7 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
         winner_assignment.agent, winner_assignment.model
     );
     let comment_message = format!(
-        "Planning duel resolved.\n\nWinner: {winner_label} ({}/{})\n\nRationale: {}\n\nWinning plan persisted to task.plan.",
+        "Planning duel resolved.\n\nWinner: {winner_label} ({}/{})\n\nRationale: {}\n\nWinning plan persisted to task.plan. Task status was left unchanged.",
         winner_assignment.agent, winner_assignment.model, winner.arbiter_rationale
     );
 
@@ -830,7 +923,6 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
         task_id,
         TaskAutomationUpdate {
             plan: Some(winning_plan),
-            status: Some(TaskStatus::Backlog),
             status_event: Some("planning_duel_resolved".to_string()),
             status_note: Some(format!(
                 "{status_note}; rationale={}",
@@ -849,7 +941,7 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
 
     Ok(json!({
         "task_id": task_id,
-        "status": "backlog",
+        "status_unchanged": true,
         "winner_agent_cli": winner_assignment.agent,
         "winner_model": winner_assignment.model,
     }))
@@ -1060,6 +1152,7 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::fs;
     use std::sync::{
         Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -1071,7 +1164,7 @@ mod tests {
         InvocationQuery, InvocationRecord, InvocationToolCallRecord, planning_duel_scoreboard,
     };
     use orbit_types::{
-        AgentModelPair, OrbitError, PlanningRoleAssignment, TaskStatus, TokenUsage, ToolCallTrace,
+        AgentModelPair, OrbitError, PlanningRoleAssignment, TokenUsage, ToolCallTrace,
         resolve_agent_model_pair,
     };
     use serde_json::Value;
@@ -1154,6 +1247,7 @@ mod tests {
     }
 
     struct StubRuntimeHost {
+        data_root: tempfile::TempDir,
         scoreboard_dir: tempfile::TempDir,
         pair_overrides: HashMap<String, AgentModelPair>,
         queries: Mutex<Vec<(String, String)>>,
@@ -1161,6 +1255,7 @@ mod tests {
         artifacts: Mutex<HashMap<String, Vec<orbit_types::TaskArtifact>>>,
         updates: Mutex<Vec<(String, TaskAutomationUpdate)>>,
         invocations: Mutex<Vec<(String, String)>>,
+        operations: Mutex<Vec<String>>,
         active_planners: AtomicUsize,
         max_active_planners: AtomicUsize,
     }
@@ -1168,6 +1263,7 @@ mod tests {
     impl StubRuntimeHost {
         fn new() -> Self {
             Self {
+                data_root: tempdir().expect("tempdir"),
                 scoreboard_dir: tempdir().expect("tempdir"),
                 pair_overrides: HashMap::new(),
                 queries: Mutex::new(Vec::new()),
@@ -1175,6 +1271,7 @@ mod tests {
                 artifacts: Mutex::new(HashMap::new()),
                 updates: Mutex::new(Vec::new()),
                 invocations: Mutex::new(Vec::new()),
+                operations: Mutex::new(Vec::new()),
                 active_planners: AtomicUsize::new(0),
                 max_active_planners: AtomicUsize::new(0),
             }
@@ -1186,6 +1283,26 @@ mod tests {
                 AgentModelPair::new(orchestrator, helper),
             );
             self
+        }
+
+        fn write_task_artifacts(
+            &self,
+            task_dir_relative: &str,
+            artifacts: &[orbit_types::TaskArtifact],
+        ) {
+            let artifacts_root = self
+                .data_root
+                .path()
+                .join(task_dir_relative)
+                .join(super::TASK_ARTIFACTS_DIR_NAME);
+            fs::create_dir_all(&artifacts_root).expect("create artifacts root");
+            for artifact in artifacts {
+                let destination = artifacts_root.join(&artifact.path);
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent).expect("create artifact parent");
+                }
+                fs::write(&destination, &artifact.content).expect("write artifact");
+            }
         }
     }
 
@@ -1260,7 +1377,7 @@ mod tests {
         }
 
         fn data_root(&self) -> &std::path::Path {
-            unimplemented!()
+            self.data_root.path()
         }
 
         fn run_job_now_with_input_debug(
@@ -1305,12 +1422,51 @@ mod tests {
 
         fn run_tool_with_context_and_role(
             &self,
-            _name: &str,
-            _input: Value,
-            _role: orbit_types::Role,
-            _tool_context: orbit_tools::ToolContext,
+            name: &str,
+            input: Value,
+            role: orbit_types::Role,
+            tool_context: orbit_tools::ToolContext,
         ) -> Result<Value, OrbitError> {
-            unimplemented!()
+            self.operations
+                .lock()
+                .unwrap()
+                .push(format!("tool:{name}"));
+
+            match name {
+                "fs.delete" => {
+                    assert_eq!(role, orbit_types::Role::Admin);
+                    assert_eq!(tool_context.allowed_tools, vec!["fs.delete".to_string()]);
+                    assert_eq!(
+                        tool_context.workspace_root.as_deref(),
+                        Some(self.data_root.path())
+                    );
+
+                    let path = input
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            OrbitError::InvalidInput("missing required input.path".to_string())
+                        })?;
+                    let path = std::path::PathBuf::from(path);
+                    fs::remove_file(&path).map_err(|err| OrbitError::Io(err.to_string()))?;
+
+                    let suffix = std::path::Path::new(super::TASK_ARTIFACTS_DIR_NAME);
+                    let mut artifacts = self.artifacts.lock().unwrap();
+                    for task_artifacts in artifacts.values_mut() {
+                        task_artifacts.retain(|artifact| {
+                            !path.ends_with(suffix.join(&artifact.path))
+                        });
+                    }
+
+                    Ok(json!({
+                        "deleted": true,
+                        "path": path.display().to_string(),
+                    }))
+                }
+                other => Err(OrbitError::Execution(format!(
+                    "unexpected tool invocation '{other}'"
+                ))),
+            }
         }
 
         fn invoke_activity(
@@ -1333,6 +1489,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((activity.id.clone(), agent_cli.to_string()));
+            self.operations
+                .lock()
+                .unwrap()
+                .push(format!("activity:{}:{agent_cli}", activity.id));
 
             match activity.id.as_str() {
                 super::PLANNER_ACTIVITY_ID => {
@@ -1577,7 +1737,7 @@ mod tests {
     }
 
     #[test]
-    fn writeback_planning_duel_task_persists_plan_backlog_and_commentary() {
+    fn writeback_planning_duel_task_preserves_status_and_records_history() {
         let host = StubTaskHost::default();
         host.artifacts.lock().unwrap().insert("T1".to_string(), {
             let mut artifacts = planner_artifacts();
@@ -1593,19 +1753,29 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(out["status"], json!("backlog"));
+        assert_eq!(out["status_unchanged"], json!(true));
         let updates = host.updates.lock().unwrap();
         assert_eq!(updates.len(), 1);
         let update = &updates[0].1;
         assert_eq!(update.plan.as_deref(), Some("## Plan\n- planner b"));
-        assert_eq!(update.status, Some(TaskStatus::Backlog));
+        assert_eq!(update.status, None);
         assert_eq!(
             update.status_event.as_deref(),
             Some("planning_duel_resolved")
         );
+        assert!(
+            matches!(
+                update.status_note.as_deref(),
+                Some(note)
+                    if note.contains("rationale=planner_b grounded the writeback path more clearly")
+            )
+        );
         assert_eq!(update.agent.as_deref(), Some("claude"));
         assert_eq!(update.append_comments.len(), 1);
         assert_eq!(update.append_comments[0].by, "gemini");
+        assert!(update.append_comments[0]
+            .message
+            .contains("Task status was left unchanged."));
     }
 
     #[test]
@@ -1641,7 +1811,7 @@ mod tests {
         let updates = host.updates.lock().unwrap();
         assert_eq!(updates.len(), 1);
         let update = &updates[0].1;
-        assert_eq!(update.status, Some(TaskStatus::Backlog));
+        assert_eq!(update.status, None);
         assert_eq!(
             update.plan.as_deref(),
             Some("## Plan\n- planner from claude")
@@ -1675,6 +1845,65 @@ mod tests {
             artifacts
                 .iter()
                 .any(|artifact| artifact.path == super::WINNER_ARTIFACT_PATH)
+        );
+    }
+
+    #[test]
+    fn run_planning_duel_cleans_stale_artifacts_before_new_planners() {
+        clear_test_permutations();
+        push_test_permutations([[0, 1, 2]]);
+
+        let task_id = "T20260412-2240";
+        let host = StubRuntimeHost::new();
+        let stale_artifacts = vec![
+            orbit_types::TaskArtifact {
+                path: "planning-duel/gemini-gemini-3.1-pro-preview.md".to_string(),
+                content: "*authored by: gemini / gemini-3.1-pro-preview*\n## Plan\n- stale planner".to_string(),
+            },
+            winner_artifact(),
+        ];
+        host.artifacts
+            .lock()
+            .unwrap()
+            .insert(task_id.to_string(), stale_artifacts.clone());
+        host.write_task_artifacts(
+            &format!("tasks/done/2026-04/{task_id}"),
+            &stale_artifacts,
+        );
+
+        let out = run_planning_duel(
+            &host,
+            &json!({
+                "task_id": task_id,
+                "run_id": "run-clean",
+            }),
+            false,
+        )
+        .expect("planning duel succeeds after stale cleanup");
+
+        assert_eq!(out["winner_agent_cli"], json!("claude"));
+        let operations = host.operations.lock().unwrap().clone();
+        assert_eq!(operations.len(), 5);
+        assert!(operations[0].starts_with("tool:fs.delete"));
+        assert!(operations[1].starts_with("tool:fs.delete"));
+        assert!(operations[2].starts_with("activity:propose_duel_plan:"));
+        assert!(operations[3].starts_with("activity:propose_duel_plan:"));
+        assert_eq!(operations[4], "activity:arbitrate_duel_plan:gemini");
+
+        let artifacts = host.get_task_artifacts(task_id).expect("artifacts after duel");
+        assert_eq!(artifacts.len(), 3);
+        assert!(
+            artifacts
+                .iter()
+                .all(|artifact| artifact.path != "planning-duel/gemini-gemini-3.1-pro-preview.md")
+        );
+        assert!(
+            !host.data_root
+                .path()
+                .join(format!(
+                    "tasks/done/2026-04/{task_id}/artifacts/planning-duel/gemini-gemini-3.1-pro-preview.md"
+                ))
+                .exists()
         );
     }
 
