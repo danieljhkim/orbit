@@ -196,7 +196,7 @@ fn build_agent_invocation<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
     host: &H,
     execution: &ExecutionContext,
     resolved: &ResolvedAgentExecution,
-) -> Result<orbit_agent::AgentResponse, Box<AttemptOutcome>> {
+) -> Result<orbit_agent::AgentInvocationSpec, Box<AttemptOutcome>> {
     let config = host
         .agent_config_for(&resolved.command, resolved.model.as_deref())
         .map_err(|error| Box::new(invocation_failed_outcome(error)))?;
@@ -238,7 +238,7 @@ configure .orbit/config.toml [execution.env].pass and set these variables in the
 fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
     host: &H,
     execution: &ExecutionContext,
-    invocation: orbit_agent::AgentResponse,
+    invocation: orbit_agent::AgentInvocationSpec,
     working_dir: Option<String>,
     resolved: &ResolvedAgentExecution,
 ) -> Result<orbit_types::ExecutionResult, Box<AttemptOutcome>> {
@@ -285,7 +285,7 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
 }
 
 fn prepare_exec_args(
-    invocation: &orbit_agent::AgentResponse,
+    invocation: &orbit_agent::AgentInvocationSpec,
     executor_args: &[String],
 ) -> Result<(Vec<String>, Option<NamedTempFile>), OrbitError> {
     let mut args = executor_args.to_vec();

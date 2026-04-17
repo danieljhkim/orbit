@@ -5,9 +5,9 @@
 //! that the engine will pass to `orbit-exec`. Providers are detected by inspecting
 //! the `agent_cli` basename (e.g., `"claude"` → [`AgentProvider::Claude`]).
 //!
-//! The `common` module contains the shared `build_agent_response` helper used by
-//! all providers so that the CLI transport shape stays consistent regardless
-//! of which AI backend is selected.
+//! The `common` module contains the shared invocation helper used by all
+//! providers so that the CLI transport shape stays consistent regardless of
+//! which AI backend is selected.
 
 mod claude;
 mod codex;
@@ -26,17 +26,17 @@ pub(crate) use gemini::GeminiRuntime;
 pub(crate) use mock_agent::MockAgentRuntime;
 pub(crate) use ollama::OllamaRuntime;
 
-use crate::types::AgentResponse;
+use crate::types::AgentInvocationSpec;
 
-/// Builds the `AgentResponse` for a provider, combining CLI args and stdin.
+/// Builds the `AgentInvocationSpec` for a provider, combining CLI args and stdin.
 /// All three runtimes share this same structure; only the provider differs.
-pub(crate) fn build_agent_response(
+pub(crate) fn build_invocation_spec(
     provider: AgentProvider,
     command: String,
     args: Vec<String>,
     stdin: Vec<u8>,
-) -> AgentResponse {
-    AgentResponse {
+) -> AgentInvocationSpec {
+    AgentInvocationSpec {
         runtime_key: provider.key(),
         program: command,
         args,

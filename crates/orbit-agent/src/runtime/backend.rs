@@ -4,7 +4,7 @@ use crate::providers::{
     ClaudeRuntime, CodexRuntime, GeminiRuntime, MockAgentRuntime, OllamaRuntime,
 };
 use crate::runtime::AgentRuntime;
-use crate::types::{AgentRequest, AgentResponse};
+use crate::types::{AgentInvocationSpec, AgentRequest};
 
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum RuntimeBackend {
@@ -16,7 +16,10 @@ pub(crate) enum RuntimeBackend {
 }
 
 impl AgentRuntime for RuntimeBackend {
-    fn invoke(&self, req: AgentRequest) -> Result<(AgentResponse, InvocationTrace), OrbitError> {
+    fn invoke(
+        &self,
+        req: AgentRequest,
+    ) -> Result<(AgentInvocationSpec, InvocationTrace), OrbitError> {
         match self {
             RuntimeBackend::CodexCli(runtime) => runtime.invoke(req),
             RuntimeBackend::ClaudeCli(runtime) => runtime.invoke(req),
