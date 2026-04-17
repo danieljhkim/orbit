@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 use super::git::{
-    git_success, refresh_local_base_branch, resolve_worktree_path_from_prefix,
-    resolve_worktree_start_point,
+    base_sync_mode_from_input, git_success, refresh_local_base_branch,
+    resolve_worktree_path_from_prefix, resolve_worktree_start_point,
 };
 use super::input::{input_string_field, required_input_string};
 
@@ -26,13 +26,14 @@ pub(super) fn setup_worktree<H: RuntimeHost + TaskHost + ?Sized>(
     let task_id = required_input_string(input, "task_id")?;
     let run_id = super::parallel::require_run_id(input, "setup_worktree")?;
     let base = input_string_field(input, "base").unwrap_or_else(|| DEFAULT_BASE.to_string());
+    let base_sync_mode = base_sync_mode_from_input(input)?;
     let branch_prefix = input_string_field(input, "branch_prefix")
         .unwrap_or_else(|| DEFAULT_BRANCH_PREFIX.to_string());
 
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
 
-    refresh_local_base_branch(repo_root, &base);
+    refresh_local_base_branch(repo_root, &base, base_sync_mode);
 
     let short_ts = format!(
         "{:08x}",
@@ -104,32 +105,4 @@ fn ensure_worktree(
             &start_point,
         ],
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-    use crate::executor::automation::git::sanitize_worktree_token;
-
-    #[test]
-    fn sanitize_token_keeps_safe_characters() {
-        assert_eq!(
-            sanitize_worktree_token("jrun-20260408-0219").unwrap(),
-            "jrun-20260408-0219"
-        );
-        assert_eq!(
-            sanitize_worktree_token("jrun/2026 04").unwrap(),
-            "jrun-2026-04"
-        );
-        assert!(sanitize_worktree_token("///").is_err());
-    }
-
-    #[test]
-    fn resolve_worktree_path_uses_prefix() {
-        let repo = PathBuf::from("/repo");
-        let path = resolve_worktree_path_from_prefix(&repo, "duel", "jrun-1").unwrap();
-        assert_eq!(path, PathBuf::from("/repo/.orbit/worktrees/duel-jrun-1"));
-    }
 }

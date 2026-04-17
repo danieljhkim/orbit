@@ -1,82 +1,68 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_duel_review_loop
+kind: Job
+metadata:
+  name: job_duel_review_loop
+spec:
   state: enabled
-
-  # ---- execution ----
-  #
-  # Duel review loop: iterates until the arbiter approves or max_iterations
-  # is reached. Tighter than the batch loop (3 iterations vs 5) because a
-  # single-task duel should converge faster.
-  #
-  # Step flow per iteration:
-  #   pull_batch_changes          — refresh the local branch
-  #   implement_batch_fix         — implementer addresses blocking comments (agent resolved from task actor identity)
-  #   sync_batch_review_to_github — publish any thread replies
-  #   commit_batch_changes        — safety net: commit any leftover edits
-  #   push_batch_changes          — push updates to the PR branch
-  #   review_duel_pr              — reviewer re-evaluates the fix
-  #   sync_batch_review_to_github — publish the new review threads
-  #   arbitrate_review            — arbiter re-adjudicates
-  #   check_duel_review_decision  — loop_exit=true when the arbiter approves
-  #
-  # The loop exits when:
-  #   - check_duel_review_decision outputs loop_exit=true (arbiter APPROVED)
-  #   - max_iterations (3) is reached
-  #   - any step fails
-  max_active_runs: 1
-  max_iterations: 3
   default_input:
     base: main
+  max_active_runs: 1
+  max_iterations: 3
   steps:
-    - target_type: activity
-      target_id: pull_batch_changes
+    - id: pull
+      target_type: activity
+      target_id: git_pull
       condition: always
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: implement_batch_fix
+    - id: fix
+      target_type: activity
+      target_id: agent_implement_fix
       condition: always
       timeout_seconds: 2000
-
-    - target_type: activity
-      target_id: sync_batch_review_to_github
+    - id: sync_reviews_pre
+      target_type: activity
+      target_id: pr_sync_reviews
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: commit_batch_changes
+    - id: commit
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: all
       condition: on_success
       timeout_seconds: 60
-
-    - target_type: activity
-      target_id: push_batch_changes
+    - id: push
+      target_type: activity
+      target_id: git_push
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: review_duel_pr
-      agent_cli_from_input: reviewer_agent_cli
-      model_from_input: reviewer_model
+    - id: review
+      target_type: activity
+      target_id: agent_review
+      default_input:
+        agent_cli_from_input: reviewer_agent_cli
+        model_from_input: reviewer_model
       condition: on_success
       timeout_seconds: 1000
-
-    - target_type: activity
-      target_id: sync_batch_review_to_github
+    - id: sync_reviews_post
+      target_type: activity
+      target_id: pr_sync_reviews
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: arbitrate_review
-      agent_cli_from_input: arbiter_agent_cli
-      model_from_input: arbiter_model
+    - id: arbitrate
+      target_type: activity
+      target_id: agent_arbitrate
+      default_input:
+        agent_cli_from_input: arbiter_agent_cli
+        model_from_input: arbiter_model
       condition: on_success
       timeout_seconds: 900
-
-    - target_type: activity
-      target_id: check_duel_review_decision
+    - id: gate
+      target_type: activity
+      target_id: check_task_value
+      default_input:
+        field: decision
+        expected: APPROVED
+        scope: input
       condition: on_success
       timeout_seconds: 30

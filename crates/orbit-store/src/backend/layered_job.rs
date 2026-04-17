@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use orbit_types::{Job, JobRun, JobRunState, JobScheduleState, KnowledgeRunMetrics, OrbitError};
+use orbit_types::{
+    Job, JobRun, JobRunState, JobScheduleState, KnowledgeRunMetrics, OrbitError, PipelineState,
+};
 
 use super::contracts::{
     JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams,
@@ -81,6 +83,10 @@ impl JobStoreBackend for LayeredJobStore {
         self.workspace.list_pending_or_running_job_runs(job_id)
     }
 
+    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
+        self.workspace.list_all_pending_or_running_runs()
+    }
+
     fn set_job_state(&self, job_id: &str, state: JobScheduleState) -> Result<bool, OrbitError> {
         self.owning_store(job_id)?.set_job_state(job_id, state)
     }
@@ -110,6 +116,23 @@ impl JobStoreBackend for LayeredJobStore {
         pid: u32,
     ) -> Result<bool, OrbitError> {
         self.workspace.mark_job_run_running(run_id, started_at, pid)
+    }
+
+    fn take_over_running_job_run(
+        &self,
+        run_id: &str,
+        expected_pid: Option<u32>,
+        expected_pid_start_time: Option<String>,
+        started_at: DateTime<Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError> {
+        self.workspace.take_over_running_job_run(
+            run_id,
+            expected_pid,
+            expected_pid_start_time,
+            started_at,
+            pid,
+        )
     }
 
     fn abandon_job_run(
@@ -154,5 +177,13 @@ impl JobStoreBackend for LayeredJobStore {
 
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
         self.workspace.delete_job_run(run_id)
+    }
+
+    fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError> {
+        self.workspace.read_run_state(run_id)
+    }
+
+    fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError> {
+        self.workspace.write_run_state(run_id, state)
     }
 }

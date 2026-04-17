@@ -31,6 +31,7 @@ pub mod runtime;
 pub mod workspace_registry;
 
 pub use orbit_engine::JobRunResult;
+pub use orbit_engine::ReconcileOutcome;
 pub use orbit_store::duel_scoreboard;
 pub use orbit_store::knowledge_stats;
 pub use orbit_store::scoreboard_summary;
@@ -49,9 +50,10 @@ pub use context::{ActorIdentity, ActorKind, OrbitContext};
 pub use orbit_store::AuditEventInsertParams;
 pub use orbit_types::OrbitError;
 pub use orbit_types::{
-    Activity, AuditEvent, AuditEventStatus, AuditStats, Job, JobRun, JobRunState, JobRunStep,
-    JobScheduleState, JobStep, JobTargetType, ReviewMessage, ReviewThread, ReviewThreadStatus,
-    Role, Skill, Task, TaskComment, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    Activity, AuditEvent, AuditEventStatus, AuditStats, ExecutorDef, Job, JobRun, JobRunState,
+    JobRunStep, JobScheduleState, JobStep, JobTargetType, ReviewMessage, ReviewThread,
+    ReviewThreadStatus, Role, Skill, Task, TaskComment, TaskComplexity, TaskPriority, TaskStatus,
+    TaskType,
 };
 pub use orbit_types::{
     redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,

@@ -1,0 +1,190 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: agent_implement
+spec:
+  spec_type: agent_invoke
+  description: Implement an Orbit task from plan to code, using knowledge graph tools when available, and persist execution details to the task record.
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: Orbit task ID. When present, Orbit injects task metadata into the execution envelope's `task` field before invoking the agent.
+      verification_mode:
+        type: string
+        description: Optional verification policy. Use `deferred` when this implementation is part of a parallel batch and verification must wait for finalization.
+      workspace_path:
+        type: string
+        description: Override workspace path. When provided (e.g., in parallel batch execution), use this instead of the task's workspace_path.
+      repo_root:
+        type: string
+        description: Override repo root path. When provided, use this instead of the task's repo_root.
+  output_schema_json: {}
+  instruction: |
+    Only use skills listed in this activity's skill_refs. Ignore all others.
+    You are implementing an Orbit task from plan to validated code.
+
+    Execution roles for this run:
+      - Agent family: {{agent_family}}
+      - Orchestrator model: {{orchestrator_model}}
+          Owns plan review, scope decisions, integration of helper output,
+          verification, and the final execution summary. Do not delegate
+          these responsibilities — they require the orchestrator's judgment.
+      - Helper model: {{helper_model}}
+          Performs the bounded code-change work the orchestrator hands off:
+          targeted file edits inside the task scope, mechanical refactors,
+          and small implementation steps that the orchestrator has already
+          framed. The helper must not make scope or design decisions.
+    These names are resolved by Orbit from the configured agent family;
+    they are the authoritative duo for this execution. Do not substitute
+    other models on your own.
+
+    Steps:
+    1. Load task context:
+       - Read the injected `task` object from this execution envelope. When `input.task_id`
+         is present, Orbit preloads `task.id`, `task.title`, `task.description`,
+         `task.acceptance_criteria`, `task.plan`, `task.context_files`,
+         `task.workspace_path`, and `task.repo_root` for you.
+       - The injected task snapshot is the authoritative task context for implementation.
+       - However, if input.workspace_path is provided (as in parallel batch execution),
+         it takes precedence over the task's workspace_path. This ensures agents work
+         in the correct worktree when running inside a batch pipeline.
+       - Similarly, if input.repo_root is provided, use it over the task's repo_root.
+       - The task's plan should already have been authored by the planning phase before
+         execution began.
+
+    2. Confirm the task lifecycle state:
+       - In the standard pipeline, a preceding activity automatically moves the task
+         to `in-progress` before this activity runs.
+       - If you are invoked outside that standard pipeline and the task is not already
+         `in-progress`, it is the caller's responsibility to transition it first.
+
+    3. Load scoped knowledge for context_files:
+       - Build a selector list from task.context_files: each file becomes `file:<path>`.
+         If the plan names specific symbols in the form `<path>#<symbol>`, add
+         `symbol:<path>#<symbol>:<kind>` selectors as well.
+       - Call orbit.graph.pack with the selector list.
+       - If the response succeeds, use the pack entries as your primary context.
+         Each entry includes the leaf source, imports, and immediate neighbors —
+         you do NOT need to fs.read the full file. File entries include
+         symbol_summary listing child symbols; dir entries include children
+         listing child files and subdirs.
+       - If the response error kind is "knowledge_unavailable", fall back to
+         fs.read on each context_file. This keeps the activity working
+         when orbit-map has not been run yet.
+       - If specific selectors come back in unresolved_selectors, fs.read those
+         specific files as a fallback. Do NOT fall back to raw reads for
+         selectors that resolved cleanly.
+       - Use orbit.graph.search to discover related symbols when the plan
+         references names not in context_files. Omit query to browse all nodes;
+         use kind filter (function, struct, trait, etc.) to narrow results.
+       - Use orbit.graph.show to inspect a specific node's lineage, siblings,
+         and source.
+       - Use orbit.graph.overview with a prefix to get an aggregate summary
+         of a module: file counts, symbol kinds, per-file symbol listings.
+       - Use orbit.graph.refs to find references to a symbol across the graph
+         when you need to understand who calls or uses a given function/type.
+       - If graph tools are unavailable or return errors, fall back to fs.read
+         for all context_files. The implementation must proceed regardless.
+       - All relative file and process work should happen inside the effective workspace_path
+         (input.workspace_path if provided, otherwise the task's workspace_path).
+       - If the plan is missing or still placeholder text, persist an execution_summary
+         explaining that the planning phase must be completed first, then return a failed
+         activity result. Do not fabricate implementation work.
+
+    4. Implement the task:
+       - Follow the task's plan steps in order.
+       - Write code with fs.write. Keep changes minimal and focused on the task scope.
+       - Do not refactor unrelated code or add unrequested features.
+       - Only modify files that are within the task scope: files listed in the task's context_files
+         or files the plan explicitly names. If a build or test failure can only be resolved
+         by modifying a file outside that scope, do NOT silently make the change — persist
+         the conflict in execution_summary and return a failed activity result so the
+         workflow can block or reroute the task.
+
+    5. Verify the implementation appropriately for this execution mode:
+       - If input.verification_mode is the string "deferred", do NOT run build, test,
+         lint, or similar validation commands in this activity.
+       - In deferred mode, focus on the code changes only and rely on the later
+         batch finalization phase to run verification commands.
+       - Otherwise, use proc.spawn to run the repo-approved verification commands from
+         the task's workspace_path.
+       - Respect repo instructions. If the repo explicitly forbids tests, do not run them;
+         prefer the allowed build, lint, or targeted validation commands instead.
+       - If non-deferred verification fails and the issue is fixable within scope, fix it
+         before continuing. Otherwise persist the failure in execution_summary and return
+         a failed activity result.
+
+    6. Prepare output for task persistence:
+       - Construct an execution summary markdown with this structure:
+           ## Status
+           success
+
+           ## 1. Summary of Changes
+           <what changed and why>
+
+           ## 2. Strategic Decisions
+           - <decision> | Rationale: <why> | Trade-offs: <trade-offs>
+
+           ## 3. Assumptions Made
+           - <assumption> | Impact if incorrect: <impact>
+
+           ## 4. Design Weaknesses / Risks
+           - <risk> | Severity: Low/Medium/High | Mitigation: <mitigation>
+
+           ## 5. Deviations from Original Plan
+           - <deviation> | Justification: <why>
+           (or "None" if the plan was followed exactly)
+
+           ## 6. Technical Debt Introduced
+           - <item> | Recommended resolution: <next step>
+           (or "None")
+
+           ## 7. Recommended Follow-Ups
+           - <next step>
+       - Do not rely on the agent response payload to move the task through lifecycle stages.
+         The surrounding workflow owns task status transitions.
+       - Do not stage files, create commits, or open pull requests. The job pipeline will handle persistence and those steps after this activity succeeds.
+
+    7. Persist execution details to the task:
+       - Call orbit.task.update with id: input.task_id and:
+         - execution_summary: the full markdown summary
+       - Example: orbit.task.update with input:
+         {"id": "<task_id>", "execution_summary": "## Status\nsuccess\n\n## 1. Summary of Changes\nAdded retry logic to API client..."}
+       - This writes the execution summary directly to the task so downstream steps can load it.
+
+    If any step fails unrecoverably (verification cannot be satisfied within scope,
+    plan is ambiguous, required files are missing), call orbit.task.update with
+    execution_summary documenting the failure reason, then return a failed activity result
+    so the pipeline can handle it.
+  skill_refs:
+    - orbit
+    - orbit-track-issues
+    - orbit-graph
+  tools:
+    - orbit.graph.pack
+    - orbit.graph.search
+    - orbit.graph.show
+    - orbit.graph.overview
+    - orbit.graph.refs
+    - orbit.task.update
+    - orbit.task.add
+    - fs.read
+    - fs.write
+    - fs.delete
+    - proc.spawn
+    - proc.which
+  proc_allowed_programs:
+    - cargo
+    - make
+    - npm
+    - npx
+    - node
+    - sh
+    - bash
+    - git
+    - orbit
+  created_by: system

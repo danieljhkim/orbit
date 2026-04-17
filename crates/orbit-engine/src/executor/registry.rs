@@ -1,9 +1,12 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+
+use orbit_types::ExecutorDef;
+use tracing::warn;
 
 use super::agent::AgentExecutor;
 use super::automation::AutomationExecutor;
 use super::cli_command::CliCommandExecutor;
+use super::direct_agent::DirectAgentExecutor;
 use super::traits::ActivityExecutor;
 
 pub struct ActivityExecutorRegistry {
@@ -31,10 +34,61 @@ impl ActivityExecutorRegistry {
             .insert(executor.spec_type().to_string(), Box::new(executor))
     }
 
+    /// Register a named executor, keyed by the given name rather than spec_type.
+    pub fn register_named(
+        &mut self,
+        name: String,
+        executor: Box<dyn ActivityExecutor>,
+    ) -> Option<Box<dyn ActivityExecutor>> {
+        self.executors.insert(name, executor)
+    }
+
     pub fn register_builtins(&mut self) {
-        let _ = self.register(AgentExecutor);
+        let _ = self.register(AgentExecutor::new());
         let _ = self.register(CliCommandExecutor);
         let _ = self.register(AutomationExecutor);
+    }
+
+    /// Load executor definitions from YAML resources. Entries override builtins by name.
+    /// Supported types: `agent_cli`, `direct_agent`, `cli_command`.
+    /// Unknown types are logged and skipped.
+    pub fn load_from_defs(&mut self, defs: &[ExecutorDef]) {
+        for def in defs {
+            match def.executor_type.as_str() {
+                "agent_cli" => {
+                    if def.command.is_some() {
+                        let executor = AgentExecutor::from_executor_def(def.clone());
+                        self.register_named(def.name.clone(), Box::new(executor));
+                    } else {
+                        warn!(
+                            executor_name = %def.name,
+                            "agent_cli executor def missing 'command' field, skipping"
+                        );
+                    }
+                }
+                "direct_agent" => {
+                    if def.command.is_some() {
+                        let executor = DirectAgentExecutor::from_executor_def(def.clone());
+                        self.register_named(def.name.clone(), Box::new(executor));
+                    } else {
+                        warn!(
+                            executor_name = %def.name,
+                            "direct_agent executor def missing 'command' field, skipping"
+                        );
+                    }
+                }
+                "cli_command" => {
+                    self.register_named(def.name.clone(), Box::new(CliCommandExecutor));
+                }
+                other => {
+                    warn!(
+                        executor_name = %def.name,
+                        executor_type = other,
+                        "unknown executor type, skipping"
+                    );
+                }
+            }
+        }
     }
 
     pub fn get(&self, spec_type: &str) -> Option<&dyn ActivityExecutor> {
@@ -56,9 +110,4 @@ impl Default for ActivityExecutorRegistry {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub fn builtin_activity_executor_registry() -> &'static ActivityExecutorRegistry {
-    static BUILTIN_EXECUTORS: OnceLock<ActivityExecutorRegistry> = OnceLock::new();
-    BUILTIN_EXECUTORS.get_or_init(ActivityExecutorRegistry::with_builtins)
 }

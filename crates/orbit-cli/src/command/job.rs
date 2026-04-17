@@ -32,6 +32,8 @@ pub enum JobSubcommand {
     History(JobHistoryArgs),
     /// Delete a job definition
     Delete(JobDeleteArgs),
+    /// Inspect the pipeline state (state.json) of a job run
+    RunState(JobRunStateArgs),
 }
 
 impl Execute for JobSubcommand {
@@ -43,6 +45,7 @@ impl Execute for JobSubcommand {
             JobSubcommand::Run(args) => args.execute(runtime),
             JobSubcommand::History(args) => args.execute(runtime),
             JobSubcommand::Delete(args) => args.execute(runtime),
+            JobSubcommand::RunState(args) => args.execute(runtime),
         }
     }
 }
@@ -85,6 +88,7 @@ impl Execute for JobAddArgs {
                 env_extra: crate::parse::csv_to_vec(&self.env_extra),
                 ..Default::default()
             }],
+            policy: None,
             initial_state_override: None,
         })?;
 
@@ -446,6 +450,26 @@ pub(crate) fn summarize_error_message(raw: Option<&str>) -> String {
     }
     let truncated = value.chars().take(120).collect::<String>();
     format!("{truncated}...")
+}
+
+#[derive(Args)]
+pub struct JobRunStateArgs {
+    /// The run ID to inspect
+    pub run_id: String,
+}
+
+impl Execute for JobRunStateArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match runtime.read_run_state(&self.run_id)? {
+            Some(state) => crate::output::json::print_pretty(
+                &serde_json::to_value(&state).map_err(|e| OrbitError::Store(e.to_string()))?,
+            ),
+            None => {
+                println!("No pipeline state found for run '{}'", self.run_id);
+                Ok(())
+            }
+        }
+    }
 }
 
 fn build_job_run_input(pairs: &[String]) -> Result<Value, OrbitError> {

@@ -1,0 +1,17 @@
+schemaVersion: 1
+kind: Executor
+metadata:
+  name: gemini
+spec:
+  executor_type: agent_cli
+  command: gemini
+  args:
+    - --approval-mode
+    - yolo
+    - -o
+    - text
+  stdout_format: envelope
+  models:
+    strong: gemini-2.5-pro
+    weak: gemini-2.5-flash
+  env: {}

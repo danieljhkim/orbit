@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    LayeredActivityStore, LayeredJobStore, Store, activity_store_file, audit_event_store_sqlite,
-    job_store_file, task_store_file, tool_store_sqlite,
+    ResolvedScope, Store, activity_store_resolved, audit_event_store_sqlite,
+    executor_def_store_resolved, job_store_resolved, policy_def_store_resolved, task_store_file,
+    tool_store_sqlite,
 };
 
 use orbit_tools::ToolRegistry;
@@ -14,7 +15,9 @@ use orbit_types::{OrbitError, WorkspacePaths};
 
 use crate::OrbitContext;
 use crate::config::RuntimeConfig;
-use crate::context::ActorIdentity;
+use crate::context::{
+    ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
+};
 use crate::skill_catalog::SkillCatalog;
 
 /// Legacy single-root builder. Treats data_root as both global and workspace root.
@@ -22,9 +25,8 @@ pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitCont
     build_context_from_roots(data_root, data_root)
 }
 
-/// Two-root builder. Global root provides activities, jobs, skills, config, SQLite.
-/// Workspace root provides tasks. Workspace can optionally override activities, jobs,
-/// skills, and config.
+/// Two-root builder. Global root provides activities, jobs, executors, policies,
+/// config, and SQLite. Workspace root provides tasks, skills, and runtime state.
 pub(crate) fn build_context_from_roots(
     global_root: &Path,
     workspace_root: &Path,
@@ -37,23 +39,10 @@ pub(crate) fn build_context_from_roots(
     // Build task store (workspace only).
     let task_store = task_store_file(persistence.task_dir.clone());
 
-    // Build activity store — layered if workspace differs from global.
-    let activity_store = if persistence.activity_dir != persistence.global_activity_dir {
-        let ws = activity_store_file(persistence.activity_dir.clone());
-        let gl = activity_store_file(persistence.global_activity_dir.clone());
-        Arc::new(LayeredActivityStore::new(ws, gl)) as Arc<dyn orbit_store::ActivityStoreBackend>
-    } else {
-        activity_store_file(persistence.activity_dir.clone())
-    };
-
-    // Build job store — layered if workspace differs from global.
-    let job_store = if persistence.job_dir != persistence.global_job_dir {
-        let ws = job_store_file(persistence.job_dir.clone());
-        let gl = job_store_file(persistence.global_job_dir.clone());
-        Arc::new(LayeredJobStore::new(ws, gl)) as Arc<dyn orbit_store::JobStoreBackend>
-    } else {
-        job_store_file(persistence.job_dir.clone())
-    };
+    // Activities and jobs are globally scoped resources.
+    let activity_store =
+        activity_store_resolved(ResolvedScope::Single(persistence.activity_dir.clone()))?;
+    let job_store = job_store_resolved(ResolvedScope::Single(persistence.job_dir.clone()))?;
 
     // workspace_root IS the .orbit dir; repo_root is its parent.
     let repo_root = workspace_root
@@ -67,15 +56,12 @@ pub(crate) fn build_context_from_roots(
     );
     let tool_store = tool_store_sqlite(store.clone());
     let audit_event_store = audit_event_store_sqlite(store.clone());
+    let executor_def_store =
+        executor_def_store_resolved(ResolvedScope::Single(persistence.executor_dir.clone()))?;
+    let policy_def_store =
+        policy_def_store_resolved(ResolvedScope::Single(persistence.policy_dir.clone()))?;
 
-    let skill_catalog = if persistence.skill_dir != persistence.global_skill_dir {
-        SkillCatalog::layered(
-            persistence.skill_dir.clone(),
-            persistence.global_skill_dir.clone(),
-        )
-    } else {
-        SkillCatalog::new(persistence.skill_dir.clone())
-    };
+    let skill_catalog = SkillCatalog::new(persistence.skill_dir.clone());
     skill_catalog.ensure_layout()?;
 
     let mut registry = ToolRegistry::new();
@@ -88,31 +74,34 @@ pub(crate) fn build_context_from_roots(
     let actor = ActorIdentity::from_env();
     let task_approval_required_for_agent = runtime_config.task_approval.required_for_agent;
     let task_delegate_approval = runtime_config.task_approval.delegate_approval;
-    let agent_models = runtime_config.agent_models.clone();
-    let ship_workflow = runtime_config.workflow.ship.clone();
     let scoring_enabled = runtime_config.scoring_enabled;
     let graph_editing = runtime_config.graph_editing;
 
     Ok(OrbitContext::new(
         paths,
-        task_store,
-        activity_store,
-        job_store,
-        tool_store,
-        audit_event_store,
-        PolicyEngine::new_local_default_allow(),
-        Arc::new(registry),
-        skill_catalog,
-        execution_env_policy,
-        codex_execution_policy,
-        persistence,
-        actor,
-        task_approval_required_for_agent,
-        task_delegate_approval,
-        agent_models,
-        ship_workflow,
-        scoring_enabled,
-        graph_editing,
+        OrbitStores::new(
+            task_store,
+            activity_store,
+            job_store,
+            tool_store,
+            audit_event_store,
+            executor_def_store,
+            policy_def_store,
+        ),
+        OrbitExecutionAssets::new(Arc::new(registry), skill_catalog),
+        OrbitPolicyContext::new(
+            PolicyEngine::new_local_default_allow(),
+            execution_env_policy,
+            codex_execution_policy,
+        ),
+        OrbitRuntimeSettings::new(
+            persistence,
+            actor,
+            task_approval_required_for_agent,
+            task_delegate_approval,
+            scoring_enabled,
+            graph_editing,
+        ),
     ))
 }
 

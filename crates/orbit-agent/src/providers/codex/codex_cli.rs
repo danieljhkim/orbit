@@ -22,16 +22,14 @@ impl CodexCliTransport {
         }
     }
 
-    // Codex is prompt-in-stdin; operation metadata is embedded in the envelope,
-    // so CLI args are identical for all operation types.
+    // Static Codex CLI flags live in the executor definition; this transport
+    // only adds per-request toggles.
     pub(crate) fn args(&self) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(approval_policy) = &self.approval_policy {
             args.push("--ask-for-approval".to_string());
             args.push(approval_policy.clone());
         }
-        args.push("exec".to_string());
-        args.push("--json".to_string());
         if let Some(model) = &self.model {
             args.push("--model".to_string());
             args.push(model.clone());

@@ -1,5 +1,4 @@
 use orbit_knowledge::Selector;
-use orbit_knowledge::graph::object_store::GraphObjectStore;
 use orbit_knowledge::service::GraphContextService;
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
@@ -46,8 +45,16 @@ impl Tool for OrbitKnowledgeRefsTool {
             .map_err(|e| OrbitError::InvalidInput(format!("{e}")))?;
 
         // Extract symbol name from selector
-        let symbol_name = match &selector {
-            Selector::Symbol { symbol, .. } => symbol.clone(),
+        let (symbol_name, search_terms) = match &selector {
+            Selector::Symbol { symbol, .. } => {
+                let mut search_terms = vec![symbol.clone()];
+                if let Some(simple_name) = symbol.rsplit("::").next()
+                    && simple_name != symbol
+                {
+                    search_terms.push(simple_name.to_string());
+                }
+                (symbol.clone(), search_terms)
+            }
             _ => {
                 return Err(OrbitError::InvalidInput(
                     "refs requires a symbol selector (e.g. symbol:path#name:kind)".to_string(),
@@ -56,19 +63,9 @@ impl Tool for OrbitKnowledgeRefsTool {
         };
 
         // Extract the defining file to exclude self-references
-        let defining_file = match &selector {
-            Selector::Symbol { path, .. } => Some(path.as_str()),
-            _ => None,
-        };
-
-        let knowledge_dir = super::knowledge_write::resolve_knowledge_dir(ctx, &input)?;
-        let graph_dir = knowledge_dir.join("graph");
-        let graph = GraphObjectStore::new(graph_dir)
-            .read_graph()
-            .map_err(|e| OrbitError::Execution(format!("failed to load knowledge graph: {e}")))?;
-
+        let graph = super::load_graph_for_read(ctx, &input)?;
         let svc = GraphContextService::new(&graph);
-        let all_hits = svc.find_references(&symbol_name, defining_file);
+        let all_hits = svc.find_references(&search_terms, Some(selector_str.as_str()));
         let hits: Vec<&_> = all_hits.iter().take(limit).collect();
 
         let references: Vec<Value> = hits

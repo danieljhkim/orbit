@@ -1,18 +1,10 @@
-schema_version: 1
-
-# ---- metadata ----
-created_by: system
-
-# ---- activity ----
-activity:
-  # ---- registration ----
-  id: update_task
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: update_task
+spec:
   spec_type: automation
-
-  # ---- content ----
-  description: "Safety net: persist task status if the task is not already at the target status. Skips silently when the task status already matches."
-
-  # ---- interface ----
+  description: 'Safety net: persist task status if the task is not already at the target status. Skips silently when the task status already matches.'
   input_schema_json:
     type: object
     required:
@@ -23,10 +15,9 @@ activity:
         description: The Orbit task ID to mutate.
       status:
         type: string
-        description: "The target task status to apply using Orbit's normal transition rules. When absent, the step is a no-op (the agent already persisted status directly)."
+        description: The target task status to apply using Orbit's normal transition rules. When absent, the step is a no-op (the agent already persisted status directly).
   output_schema_json:
     type: object
     properties: {}
-
-  # ---- execution ----
   action: update_task
+  created_by: system

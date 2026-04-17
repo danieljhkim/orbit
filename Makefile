@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt clippy clean install uninstall dev watch audit tree ci
+.PHONY: help build build-ts-agent release run check test fmt clippy clean install uninstall dev watch audit tree ci
 
 # ------------------------------------------------------------
 # Config
@@ -37,6 +37,7 @@ help:
 	@echo "Orbit Workspace Make Targets"
 	@echo ""
 	@echo "  make build        Build workspace (PROFILE=release optional)"
+	@echo "  make build-ts-agent Build packages/orbit-agent"
 	@echo "  make release      Build optimized release binary"
 	@echo "  make run ARGS=... Run CLI binary"
 	@echo "  make dev ARGS=... Run debug binary directly"
@@ -57,6 +58,9 @@ help:
 # ------------------------------------------------------------
 build:
 	$(CARGO) build $(WORKSPACE) $(CARGO_PROFILE)
+
+build-ts-agent:
+	npm --prefix packages/orbit-agent run build
 
 release:
 	$(CARGO) build -p $(BIN_CRATE) --release

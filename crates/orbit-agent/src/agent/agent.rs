@@ -15,6 +15,7 @@ pub enum ProviderOptions {
         writable_dirs: Vec<String>,
     },
     Gemini,
+    Ollama,
     Mock,
 }
 
@@ -57,6 +58,7 @@ impl ProviderOptions {
             }
             AgentProvider::Claude => Ok(Self::Claude),
             AgentProvider::Gemini => Ok(Self::Gemini),
+            AgentProvider::Ollama => Ok(Self::Ollama),
             AgentProvider::MockAgent => Ok(Self::Mock),
         }
     }

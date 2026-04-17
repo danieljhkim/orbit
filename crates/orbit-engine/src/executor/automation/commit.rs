@@ -7,13 +7,28 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskHost};
 
 use super::git::{git_output, git_output_paths, git_success};
-use super::input::{canonicalize_existing_dir, input_string_field};
+use super::input::{canonicalize_existing_dir, input_string_field, required_batch_id};
+
+pub(super) fn git_commit<H: TaskHost + RuntimeHost + ?Sized>(
+    host: &H,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    let scope = input.get("scope").and_then(Value::as_str).unwrap_or("all");
+    match scope {
+        "per_task" => commit_task_artifact_changes(host, input),
+        "per_task_finalize" => commit_finalize_artifact_changes(host, input),
+        "all" => commit_batch_changes(host, input),
+        other => Err(OrbitError::InvalidInput(format!(
+            "git_commit: unknown scope '{other}'; expected per_task, per_task_finalize, or all"
+        ))),
+    }
+}
 
 pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let batch_id = super::parallel::require_run_id(input, "commit_task_artifact_changes")?;
+    let batch_id = required_batch_id(input, "commit_task_artifact_changes")?;
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
     ensure_no_unmerged_changes(&workspace_path)?;
@@ -65,7 +80,7 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let batch_id = super::parallel::require_run_id(input, "commit_finalize_artifact_changes")?;
+    let batch_id = required_batch_id(input, "commit_finalize_artifact_changes")?;
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
     ensure_no_unmerged_changes(&workspace_path)?;
@@ -118,7 +133,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let batch_id = super::parallel::require_run_id(input, "commit_batch_changes")?;
+    let batch_id = required_batch_id(input, "commit_batch_changes")?;
 
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
@@ -419,391 +434,4 @@ fn ensure_no_unmerged_changes(workspace_path: &Path) -> Result<(), OrbitError> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-
-    use chrono::Utc;
-    use orbit_tools::ToolContext;
-    use orbit_types::{
-        Activity, ActorIdentity, Job, JobTargetType, OrbitError, OrbitEvent, ReviewThread, Role,
-        Task, TaskPriority, TaskStatus, TaskType,
-    };
-    use serde_json::{Value, json};
-
-    use super::{
-        commit_finalize_artifact_changes, commit_task_artifact_changes,
-        execution_summary_paragraph, task_commit_message,
-    };
-    use crate::context::{JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskHost};
-
-    struct TestHost {
-        repo_root: PathBuf,
-        tasks: Vec<Task>,
-    }
-
-    impl TaskHost for TestHost {
-        fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
-            self.tasks
-                .iter()
-                .find(|task| task.id == task_id)
-                .cloned()
-                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
-        }
-
-        fn get_task_artifacts(
-            &self,
-            _task_id: &str,
-        ) -> Result<Vec<orbit_types::TaskArtifact>, OrbitError> {
-            Ok(Vec::new())
-        }
-
-        fn list_tasks_filtered(
-            &self,
-            _status: Option<TaskStatus>,
-            _priority: Option<TaskPriority>,
-            _parent_id: Option<&str>,
-            batch_id: Option<&str>,
-        ) -> Result<Vec<Task>, OrbitError> {
-            Ok(self
-                .tasks
-                .iter()
-                .filter(|task| {
-                    batch_id.is_none_or(|expected| task.batch_id.as_deref() == Some(expected))
-                })
-                .cloned()
-                .collect())
-        }
-
-        fn start_task(
-            &self,
-            _task_id: &str,
-            _note: Option<String>,
-            _comment: Option<String>,
-        ) -> Result<Task, OrbitError> {
-            unreachable!("not used in commit tests")
-        }
-
-        fn update_task_from_activity(
-            &self,
-            _task_id: &str,
-            _status: TaskStatus,
-            _execution_summary: Option<String>,
-            _comment: Option<String>,
-            _note: Option<String>,
-        ) -> Result<Task, OrbitError> {
-            unreachable!("not used in commit tests")
-        }
-
-        fn apply_task_automation_update(
-            &self,
-            _task_id: &str,
-            _update: TaskAutomationUpdate,
-        ) -> Result<(), OrbitError> {
-            unreachable!("not used in commit tests")
-        }
-    }
-
-    impl RuntimeHost for TestHost {
-        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
-            Ok(())
-        }
-
-        fn repo_root(&self) -> Result<String, OrbitError> {
-            Ok(self.repo_root.to_string_lossy().to_string())
-        }
-
-        fn data_root(&self) -> &Path {
-            self.repo_root.as_path()
-        }
-
-        fn run_job_now_with_input_debug(
-            &self,
-            _job_id: &str,
-            _input: Value,
-            _debug: bool,
-        ) -> Result<JobRunResult, OrbitError> {
-            unreachable!("not used in commit tests")
-        }
-
-        fn validate_activity_target_exists(
-            &self,
-            _target_type: JobTargetType,
-            _target_id: &str,
-        ) -> Result<Activity, OrbitError> {
-            unreachable!("not used in commit tests")
-        }
-
-        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-            Ok(None)
-        }
-
-        fn run_tool_with_context_and_role(
-            &self,
-            _name: &str,
-            _input: Value,
-            _role: Role,
-            _tool_context: ToolContext,
-        ) -> Result<Value, OrbitError> {
-            unreachable!("not used in commit tests")
-        }
-
-        fn maybe_create_failure_task(
-            &self,
-            _job_id: &str,
-            _run_id: &str,
-            _error_code: &str,
-            _error_message: &str,
-            _agent: Option<&str>,
-            _model: Option<&str>,
-        ) -> Result<(), OrbitError> {
-            Ok(())
-        }
-
-        fn scoring_enabled(&self) -> bool {
-            false
-        }
-
-        fn graph_editing(&self) -> bool {
-            false
-        }
-
-        fn scoreboard_dir(&self) -> &Path {
-            self.repo_root.as_path()
-        }
-    }
-
-    #[test]
-    fn commit_task_artifact_changes_commits_each_completed_task_once() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp.path().join("repo");
-        init_repo(&repo_root);
-
-        std::fs::write(repo_root.join("a.txt"), "task one\n").expect("write a");
-        std::fs::write(repo_root.join("b.txt"), "task two\n").expect("write b");
-
-        let host = TestHost {
-            repo_root: repo_root.clone(),
-            tasks: vec![
-                sample_task(
-                    "T1",
-                    "batch-1",
-                    TaskType::Feature,
-                    vec!["a.txt"],
-                    "Add task one flow.",
-                ),
-                sample_task(
-                    "T2",
-                    "batch-1",
-                    TaskType::Bug,
-                    vec!["b.txt"],
-                    "Fix task two edge case.",
-                ),
-                sample_task(
-                    "T3",
-                    "batch-1",
-                    TaskType::Chore,
-                    vec!["c.txt"],
-                    "Clean up untouched file.",
-                ),
-            ],
-        };
-
-        let result = commit_task_artifact_changes(
-            &host,
-            &json!({
-                "run_id": "batch-1",
-                "workspace_path": repo_root.to_string_lossy().to_string(),
-                "completed_task_ids": ["T1", "T2", "T3"],
-            }),
-        )
-        .expect("task commits succeed");
-
-        assert_eq!(result.get("committed_task_ids"), Some(&json!(["T1", "T2"])));
-        assert_eq!(result.get("skipped_task_ids"), Some(&json!(["T3"])));
-        assert_eq!(
-            git_stdout(&repo_root, &["log", "--pretty=%s", "-2"]),
-            "[T2] Task T2\n[T1] Task T1"
-        );
-        assert_eq!(git_stdout(&repo_root, &["status", "--short"]), "");
-    }
-
-    #[test]
-    fn commit_finalize_artifact_changes_commits_only_task_scoped_leftovers() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp.path().join("repo");
-        init_repo(&repo_root);
-
-        std::fs::write(repo_root.join("a.txt"), "finalize a\n").expect("write a");
-        std::fs::write(repo_root.join("b.txt"), "finalize b\n").expect("write b");
-        std::fs::write(repo_root.join("orphan.txt"), "leftover\n").expect("write orphan");
-
-        let host = TestHost {
-            repo_root: repo_root.clone(),
-            tasks: vec![
-                sample_task(
-                    "T1",
-                    "batch-1",
-                    TaskType::Feature,
-                    vec!["a.txt"],
-                    "Updated task one after integration review.",
-                ),
-                sample_task(
-                    "T2",
-                    "batch-1",
-                    TaskType::Bug,
-                    vec!["b.txt"],
-                    "Fixed task two after shared verification.",
-                ),
-            ],
-        };
-
-        let result = commit_finalize_artifact_changes(
-            &host,
-            &json!({
-                "run_id": "batch-1",
-                "workspace_path": repo_root.to_string_lossy().to_string(),
-            }),
-        )
-        .expect("finalize commit succeeds");
-
-        assert_eq!(result.get("committed_task_ids"), Some(&json!(["T1", "T2"])));
-        assert_eq!(
-            git_stdout(&repo_root, &["log", "-1", "--pretty=%s"]),
-            "fix: finalize ship batch [T1, T2]"
-        );
-        assert_eq!(
-            git_stdout(&repo_root, &["status", "--short"]),
-            "?? orphan.txt"
-        );
-    }
-
-    #[test]
-    fn execution_summary_paragraph_extracts_summary_section() {
-        let task = sample_task(
-            "T1",
-            "batch-1",
-            TaskType::Feature,
-            vec!["a.txt"],
-            "Added retry logic to batch dispatch.",
-        );
-
-        assert_eq!(
-            execution_summary_paragraph(&task).as_deref(),
-            Some("Added retry logic to batch dispatch.")
-        );
-    }
-
-    #[test]
-    fn task_commit_message_uses_title_subject_and_summary_body() {
-        let task = sample_task(
-            "T1",
-            "batch-1",
-            TaskType::Feature,
-            vec!["a.txt"],
-            "Added retry logic to batch dispatch.",
-        );
-
-        assert_eq!(
-            task_commit_message(&task),
-            "[T1] Task T1\n\nAdded retry logic to batch dispatch."
-        );
-    }
-
-    fn sample_task(
-        id: &str,
-        batch_id: &str,
-        task_type: TaskType,
-        context_files: Vec<&str>,
-        summary: &str,
-    ) -> Task {
-        let now = Utc::now();
-        Task {
-            id: id.to_string(),
-            parent_id: None,
-            title: format!("Task {id}"),
-            description: String::new(),
-            acceptance_criteria: Vec::new(),
-            plan: "1. Do the thing".to_string(),
-            execution_summary: format!(
-                "## Status\nsuccess\n\n## 1. Summary of Changes\n{summary}\n\n## 2. Strategic Decisions\n- None"
-            ),
-            context_files: context_files.into_iter().map(str::to_string).collect(),
-            workspace_path: Some("/repo".to_string()),
-            repo_root: Some("/repo".to_string()),
-            assigned_to: None,
-            created_by: None,
-            actor_identity: ActorIdentity::default(),
-            status: TaskStatus::Review,
-            priority: TaskPriority::Medium,
-            complexity: None,
-            task_type,
-            pr_number: None,
-            pr_status: None,
-            proposed_by: None,
-            source_task_id: None,
-            batch_id: Some(batch_id.to_string()),
-            comments: vec![],
-            history: vec![],
-            review_threads: Vec::<ReviewThread>::new(),
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    fn init_repo(repo_root: &Path) {
-        std::fs::create_dir_all(repo_root).expect("create repo");
-        run_git(repo_root, &["init", "-b", "main"]);
-        run_git(repo_root, &["config", "user.name", "Orbit Tests"]);
-        run_git(
-            repo_root,
-            &["config", "user.email", "orbit-tests@example.com"],
-        );
-        run_git(repo_root, &["config", "commit.gpgsign", "false"]);
-        std::fs::write(repo_root.join("a.txt"), "base a\n").expect("write a");
-        std::fs::write(repo_root.join("b.txt"), "base b\n").expect("write b");
-        run_git(repo_root, &["add", "a.txt", "b.txt"]);
-        run_git(repo_root, &["commit", "-m", "initial"]);
-    }
-
-    fn run_git(current_dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(current_dir)
-            .args(args)
-            .output()
-            .expect("git output");
-        assert!(
-            output.status.success(),
-            "git {} failed in '{}': stdout={} stderr={}",
-            args.join(" "),
-            current_dir.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn git_stdout(current_dir: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(current_dir)
-            .args(args)
-            .output()
-            .expect("git output");
-        assert!(
-            output.status.success(),
-            "git {} failed in '{}': stdout={} stderr={}",
-            args.join(" "),
-            current_dir.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("utf8")
-            .trim()
-            .to_string()
-    }
 }

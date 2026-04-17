@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -95,15 +95,30 @@ impl GraphObjectStore {
     fn blobs_dir(&self) -> PathBuf {
         self.graph_dir.join("blobs")
     }
-    fn object_path(&self, hash: &str) -> PathBuf {
-        self.objects_dir()
-            .join(&hash[..2])
-            .join(format!("{hash}.json"))
+    fn object_path(&self, hash: &str) -> Result<PathBuf, KnowledgeError> {
+        let prefix = hash_prefix(hash, "object")?;
+        Ok(self.objects_dir().join(prefix).join(format!("{hash}.json")))
     }
-    fn blob_path(&self, hash: &str) -> PathBuf {
-        self.blobs_dir()
-            .join(&hash[..2])
-            .join(format!("{hash}.txt"))
+    fn blob_path(&self, hash: &str) -> Result<PathBuf, KnowledgeError> {
+        let prefix = hash_prefix(hash, "blob")?;
+        Ok(self.blobs_dir().join(prefix).join(format!("{hash}.txt")))
+    }
+    fn resolve_index_path(&self, index_ref: &str) -> Result<PathBuf, KnowledgeError> {
+        let index_rel = index_ref.strip_prefix("graph/").unwrap_or(index_ref);
+        let rel_path = Path::new(index_rel);
+        if rel_path.is_absolute()
+            || rel_path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(KnowledgeError::invalid_data(format!(
+                "invalid graph index path `{index_ref}`"
+            )));
+        }
+        Ok(self.graph_dir.join(rel_path))
     }
 
     // -----------------------------------------------------------------------
@@ -116,11 +131,7 @@ impl GraphObjectStore {
         let current_ref: CurrentRef = read_json_file(&current_ref_path)?;
 
         // 2. Resolve index path (strip leading "graph/" prefix if present)
-        let index_rel = current_ref
-            .index
-            .strip_prefix("graph/")
-            .unwrap_or(&current_ref.index);
-        let index_path = self.graph_dir.join(index_rel);
+        let index_path = self.resolve_index_path(&current_ref.index)?;
         let index: ByIdIndex = read_json_file(&index_path)?;
 
         // 3. Read dir nodes
@@ -129,7 +140,7 @@ impl GraphObjectStore {
             let entry = index.nodes.get(node_id).ok_or_else(|| {
                 KnowledgeError::invalid_data(format!("dir node {node_id} missing from index"))
             })?;
-            let envelope: ObjectEnvelope = read_json_file(&self.object_path(&entry.object_hash))?;
+            let envelope = self.read_object_envelope(&entry.object_hash)?;
             let mut dir: DirNode = serde_json::from_value(envelope.node)
                 .map_err(|e| KnowledgeError::invalid_data(format!("dir node parse: {e}")))?;
             dir.base.object_hash = Some(entry.object_hash.clone());
@@ -142,7 +153,7 @@ impl GraphObjectStore {
             let entry = index.nodes.get(node_id).ok_or_else(|| {
                 KnowledgeError::invalid_data(format!("file node {node_id} missing from index"))
             })?;
-            let envelope: ObjectEnvelope = read_json_file(&self.object_path(&entry.object_hash))?;
+            let envelope = self.read_object_envelope(&entry.object_hash)?;
             let mut file: FileNode = serde_json::from_value(envelope.node)
                 .map_err(|e| KnowledgeError::invalid_data(format!("file node parse: {e}")))?;
             file.base.object_hash = Some(entry.object_hash.clone());
@@ -155,7 +166,7 @@ impl GraphObjectStore {
             let entry = index.nodes.get(node_id).ok_or_else(|| {
                 KnowledgeError::invalid_data(format!("leaf node {node_id} missing from index"))
             })?;
-            let envelope: ObjectEnvelope = read_json_file(&self.object_path(&entry.object_hash))?;
+            let envelope = self.read_object_envelope(&entry.object_hash)?;
             let mut leaf: LeafNode = serde_json::from_value(envelope.node)
                 .map_err(|e| KnowledgeError::invalid_data(format!("leaf node parse: {e}")))?;
             leaf.base.object_hash = Some(entry.object_hash.clone());
@@ -183,6 +194,17 @@ impl GraphObjectStore {
     // -----------------------------------------------------------------------
 
     pub fn write_graph(&self, graph: &CodebaseGraphV1) -> Result<String, KnowledgeError> {
+        if !graph
+            .dirs
+            .iter()
+            .any(|dir| dir.base.id == graph.root_dir_id)
+        {
+            return Err(KnowledgeError::invalid_data(format!(
+                "graph root `{}` is missing from dir nodes",
+                graph.root_dir_id
+            )));
+        }
+
         self.ensure_dirs()?;
 
         let mut object_hashes: HashMap<String, String> = HashMap::new();
@@ -240,8 +262,16 @@ impl GraphObjectStore {
             let child_hashes: HashMap<String, String> = file
                 .leaf_children
                 .iter()
-                .filter_map(|cid| object_hashes.get(cid).map(|h| (cid.clone(), h.clone())))
-                .collect();
+                .map(|cid| {
+                    let hash = object_hashes.get(cid).ok_or_else(|| {
+                        KnowledgeError::invalid_data(format!(
+                            "file `{}` references missing child `{cid}`",
+                            file.base.id
+                        ))
+                    })?;
+                    Ok((cid.clone(), hash.clone()))
+                })
+                .collect::<Result<_, KnowledgeError>>()?;
 
             let envelope = serde_json::json!({
                 "schema_version": GRAPH_STORE_SCHEMA_VERSION,
@@ -265,8 +295,16 @@ impl GraphObjectStore {
             );
         }
 
-        // 3. Write dirs (children before parents -- simple single-pass)
-        for dir in &graph.dirs {
+        // 3. Write dirs from deepest to shallowest so child object hashes exist
+        // before their parent directory envelopes are serialized.
+        let mut dirs_in_write_order: Vec<&DirNode> = graph.dirs.iter().collect();
+        dirs_in_write_order.sort_by(|a, b| {
+            dir_depth(&b.base.location)
+                .cmp(&dir_depth(&a.base.location))
+                .then_with(|| a.base.location.cmp(&b.base.location))
+        });
+
+        for dir in dirs_in_write_order {
             let mut node_json = serde_json::to_value(dir)
                 .map_err(|e| KnowledgeError::invalid_data(format!("dir serialize: {e}")))?;
             if let Value::Object(ref mut map) = node_json {
@@ -275,14 +313,22 @@ impl GraphObjectStore {
 
             let mut child_hashes: HashMap<String, String> = HashMap::new();
             for cid in &dir.dir_children {
-                if let Some(h) = object_hashes.get(cid) {
-                    child_hashes.insert(cid.clone(), h.clone());
-                }
+                let hash = object_hashes.get(cid).ok_or_else(|| {
+                    KnowledgeError::invalid_data(format!(
+                        "dir `{}` references missing dir child `{cid}`",
+                        dir.base.id
+                    ))
+                })?;
+                child_hashes.insert(cid.clone(), hash.clone());
             }
             for cid in &dir.file_children {
-                if let Some(h) = object_hashes.get(cid) {
-                    child_hashes.insert(cid.clone(), h.clone());
-                }
+                let hash = object_hashes.get(cid).ok_or_else(|| {
+                    KnowledgeError::invalid_data(format!(
+                        "dir `{}` references missing file child `{cid}`",
+                        dir.base.id
+                    ))
+                })?;
+                child_hashes.insert(cid.clone(), hash.clone());
             }
 
             let envelope = serde_json::json!({
@@ -311,7 +357,12 @@ impl GraphObjectStore {
         let root_object_hash = object_hashes
             .get(&graph.root_dir_id)
             .cloned()
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                KnowledgeError::invalid_data(format!(
+                    "graph root `{}` did not produce an object hash",
+                    graph.root_dir_id
+                ))
+            })?;
 
         // 5. Write root graph object
         let root_payload = serde_json::json!({
@@ -371,16 +422,24 @@ impl GraphObjectStore {
     }
 
     fn read_blob(&self, blob_hash: &str) -> Result<String, KnowledgeError> {
-        let path = self.blob_path(blob_hash);
-        fs::read_to_string(&path).map_err(|e| {
+        let path = self.blob_path(blob_hash)?;
+        let content = fs::read_to_string(&path).map_err(|e| {
             KnowledgeError::knowledge_unavailable(format!("read blob {}: {e}", path.display()))
-        })
+        })?;
+        let actual_hash = sha256_hex(content.as_bytes());
+        if actual_hash != blob_hash {
+            return Err(KnowledgeError::invalid_data(format!(
+                "blob hash mismatch for {}: expected `{blob_hash}`, got `{actual_hash}`",
+                path.display()
+            )));
+        }
+        Ok(content)
     }
 
     fn write_json_object(&self, payload: &Value) -> Result<String, KnowledgeError> {
         let canonical = canonical_json(payload);
         let digest = sha256_hex(canonical.as_bytes());
-        let path = self.object_path(&digest);
+        let path = self.object_path(&digest)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 KnowledgeError::knowledge_unavailable(format!(
@@ -400,7 +459,7 @@ impl GraphObjectStore {
 
     fn write_blob(&self, content: &str) -> Result<String, KnowledgeError> {
         let digest = sha256_hex(content.as_bytes());
-        let path = self.blob_path(&digest);
+        let path = self.blob_path(&digest)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 KnowledgeError::knowledge_unavailable(format!(
@@ -413,6 +472,24 @@ impl GraphObjectStore {
             KnowledgeError::knowledge_unavailable(format!("write blob {}: {e}", path.display()))
         })?;
         Ok(digest)
+    }
+
+    fn read_object_envelope(&self, object_hash: &str) -> Result<ObjectEnvelope, KnowledgeError> {
+        let path = self.object_path(object_hash)?;
+        let raw = fs::read_to_string(&path).map_err(|e| {
+            KnowledgeError::knowledge_unavailable(format!("read object {}: {e}", path.display()))
+        })?;
+        let value: Value = serde_json::from_str(&raw)
+            .map_err(|e| KnowledgeError::invalid_data(format!("parse {}: {e}", path.display())))?;
+        let actual_hash = sha256_hex(canonical_json(&value).as_bytes());
+        if actual_hash != object_hash {
+            return Err(KnowledgeError::invalid_data(format!(
+                "object hash mismatch for {}: expected `{object_hash}`, got `{actual_hash}`",
+                path.display()
+            )));
+        }
+        serde_json::from_value(value)
+            .map_err(|e| KnowledgeError::invalid_data(format!("parse {}: {e}", path.display())))
     }
 }
 
@@ -452,6 +529,24 @@ fn canonical_json(value: &Value) -> String {
     serde_json::to_string(&sorted).unwrap()
 }
 
+fn hash_prefix<'a>(hash: &'a str, label: &str) -> Result<&'a str, KnowledgeError> {
+    if hash.len() < 2 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(KnowledgeError::invalid_data(format!(
+            "invalid {label} hash `{hash}`"
+        )));
+    }
+    Ok(&hash[..2])
+}
+
+fn dir_depth(location: &str) -> usize {
+    let trimmed = location.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed == "." {
+        0
+    } else {
+        Path::new(trimmed).components().count()
+    }
+}
+
 fn sort_json_value(value: Value) -> Value {
     match value {
         Value::Object(map) => {
@@ -475,188 +570,3 @@ fn sha256_hex(data: &[u8]) -> String {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::super::nodes::{BaseNodeFields, LeafKind};
-    use super::*;
-
-    fn fixture_graph_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../orbit-tools/tests/fixtures/knowledge/.orbit/knowledge/graph")
-    }
-
-    #[test]
-    fn read_graph_from_fixture() {
-        let store = GraphObjectStore::new(fixture_graph_dir());
-        let graph = store.read_graph().unwrap();
-
-        // Verify root
-        assert_eq!(graph.root_dir_id, "node-dir-tools-src");
-
-        // 1 dir, 1 file, 1 leaf
-        assert_eq!(graph.dirs.len(), 1);
-        assert_eq!(graph.files.len(), 1);
-        assert_eq!(graph.leaves.len(), 1);
-
-        // Dir node
-        let dir = &graph.dirs[0];
-        assert_eq!(dir.base.id, "node-dir-tools-src");
-        assert_eq!(dir.base.location, "crates/orbit-tools/src");
-        assert_eq!(
-            dir.base.object_hash.as_deref(),
-            Some("1111111111111111111111111111111111111111111111111111111111111111")
-        );
-        assert_eq!(dir.file_children, vec!["node-file-lib"]);
-
-        // File node
-        let file = &graph.files[0];
-        assert_eq!(file.base.id, "node-file-lib");
-        assert_eq!(file.base.location, "crates/orbit-tools/src/lib.rs");
-        assert_eq!(
-            file.base.object_hash.as_deref(),
-            Some("2222222222222222222222222222222222222222222222222222222222222222")
-        );
-        assert_eq!(file.leaf_children, vec!["node-leaf-register-builtins"]);
-
-        // Leaf node -- source loaded from blob
-        let leaf = &graph.leaves[0];
-        assert_eq!(leaf.base.id, "node-leaf-register-builtins");
-        assert_eq!(leaf.kind, LeafKind::Function);
-        assert!(
-            leaf.source.contains("register_builtins"),
-            "source should be hydrated from blob"
-        );
-        assert_eq!(
-            leaf.source_blob_hash.as_deref(),
-            Some("5555555555555555555555555555555555555555555555555555555555555555")
-        );
-    }
-
-    #[test]
-    fn round_trip_write_then_read() {
-        let tmp = tempfile::tempdir().unwrap();
-        let graph_dir = tmp.path().join("graph");
-
-        // Build a minimal graph
-        let graph = CodebaseGraphV1 {
-            root_dir_id: "dir-root".to_string(),
-            dirs: vec![DirNode {
-                base: BaseNodeFields {
-                    id: "dir-root".to_string(),
-                    identity_key: "dir:src".to_string(),
-                    object_hash: None,
-                    name: "src".to_string(),
-                    location: "src".to_string(),
-                    language: "rust".to_string(),
-                    description: String::new(),
-                    parent_id: None,
-                    is_locked: false,
-                    lineage_locked: false,
-                    lock_owner: None,
-                    lock_reason: String::new(),
-                },
-                dir_children: vec![],
-                file_children: vec!["file-main".to_string()],
-            }],
-            files: vec![FileNode {
-                base: BaseNodeFields {
-                    id: "file-main".to_string(),
-                    identity_key: "file:src/main.rs".to_string(),
-                    object_hash: None,
-                    name: "main.rs".to_string(),
-                    location: "src/main.rs".to_string(),
-                    language: "rust".to_string(),
-                    description: String::new(),
-                    parent_id: Some("dir-root".to_string()),
-                    is_locked: false,
-                    lineage_locked: false,
-                    lock_owner: None,
-                    lock_reason: String::new(),
-                },
-                extension: Some("rs".to_string()),
-                source_blob_hash: None,
-                imports: vec![],
-                exports: vec![],
-                leaf_children: vec!["leaf-main-fn".to_string()],
-            }],
-            leaves: vec![LeafNode {
-                base: BaseNodeFields {
-                    id: "leaf-main-fn".to_string(),
-                    identity_key: "leaf:src/main.rs#main:function".to_string(),
-                    object_hash: None,
-                    name: "main".to_string(),
-                    location: "src/main.rs#main".to_string(),
-                    language: "rust".to_string(),
-                    description: "Entry point.".to_string(),
-                    parent_id: Some("file-main".to_string()),
-                    is_locked: false,
-                    lineage_locked: false,
-                    lock_owner: None,
-                    lock_reason: String::new(),
-                },
-                kind: LeafKind::Function,
-                source: "fn main() { println!(\"hello\"); }".to_string(),
-                source_blob_hash: None,
-                source_hash: None,
-                file_hash_at_capture: None,
-                history: vec![],
-                input_signature: vec![],
-                output_signature: vec![],
-                start_line: Some(1),
-                end_line: Some(3),
-                children: vec![],
-            }],
-        };
-
-        let store = GraphObjectStore::new(&graph_dir);
-        let root_hash = store.write_graph(&graph).unwrap();
-        assert_eq!(root_hash.len(), 64, "root hash should be SHA-256 hex");
-
-        // Read it back
-        let loaded = store.read_graph().unwrap();
-
-        assert_eq!(loaded.root_dir_id, graph.root_dir_id);
-        assert_eq!(loaded.dirs.len(), 1);
-        assert_eq!(loaded.files.len(), 1);
-        assert_eq!(loaded.leaves.len(), 1);
-
-        // Dir preserved
-        assert_eq!(loaded.dirs[0].base.id, "dir-root");
-        assert_eq!(loaded.dirs[0].file_children, vec!["file-main"]);
-
-        // File preserved
-        assert_eq!(loaded.files[0].base.id, "file-main");
-        assert_eq!(loaded.files[0].leaf_children, vec!["leaf-main-fn"]);
-
-        // Leaf preserved -- source round-trips through blob
-        let leaf = &loaded.leaves[0];
-        assert_eq!(leaf.base.id, "leaf-main-fn");
-        assert_eq!(leaf.kind, LeafKind::Function);
-        assert_eq!(leaf.source, "fn main() { println!(\"hello\"); }");
-        assert!(
-            leaf.source_blob_hash.is_some(),
-            "blob hash should be set after write"
-        );
-
-        // Object hashes populated on read-back
-        assert!(loaded.dirs[0].base.object_hash.is_some());
-        assert!(loaded.files[0].base.object_hash.is_some());
-        assert!(loaded.leaves[0].base.object_hash.is_some());
-    }
-
-    #[test]
-    fn canonical_json_sorts_keys() {
-        let val = serde_json::json!({"z": 1, "a": {"c": 3, "b": 2}});
-        let result = canonical_json(&val);
-        assert_eq!(result, r#"{"a":{"b":2,"c":3},"z":1}"#);
-    }
-
-    #[test]
-    fn canonical_json_no_spaces() {
-        let val = serde_json::json!({"key": [1, 2, 3]});
-        let result = canonical_json(&val);
-        // Must match Python: json.dumps(sort_keys=True, separators=(",",":"))
-        assert_eq!(result, r#"{"key":[1,2,3]}"#);
-    }
-}

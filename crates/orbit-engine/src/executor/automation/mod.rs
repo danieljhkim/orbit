@@ -1,12 +1,10 @@
-mod check_duel_review_decision;
 mod check_review;
 mod cleanup_worktree;
 mod commit;
-mod commit_and_pr;
+mod dispatch_batch;
 mod freshness;
 mod git;
 mod input;
-mod knowledge;
 mod merge_worktree;
 mod parallel;
 mod planning_duel;
@@ -15,43 +13,43 @@ mod pull;
 mod push;
 mod record_duel_scores;
 pub(crate) mod review;
+mod run_command;
 mod select_duel_roles;
 mod setup_worktree;
-mod snapshot;
 mod sync_review;
 mod task;
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use orbit_store::state_io;
 use orbit_types::{Activity, InvocationTrace, JobRunState, OrbitError};
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::ActivityExecutor;
 use crate::activity_runner::validate_activity_output_schema;
-use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, EngineHost, ExecutionContext};
+use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, ExecutionContext, ExecutorHost};
 
-const AUTOMATION_UPDATE_TASK: &str = "update_task";
-const AUTOMATION_RUN_PARALLEL_TASK_PIPELINE: &str = "run_parallel_task_pipeline";
-const AUTOMATION_COMMIT_TASK_ARTIFACT_CHANGES: &str = "commit_task_artifact_changes";
-const AUTOMATION_COMMIT_FINALIZE_ARTIFACT_CHANGES: &str = "commit_finalize_artifact_changes";
-const AUTOMATION_COMMIT_BATCH_CHANGES: &str = "commit_batch_changes";
-const AUTOMATION_OPEN_BATCH_PR: &str = "open_batch_pr";
-const AUTOMATION_COMMIT_AND_OPEN_BATCH_PR: &str = "commit_and_open_batch_pr";
-const AUTOMATION_CLEANUP_WORKTREE: &str = "cleanup_worktree";
-const AUTOMATION_MERGE_BATCH_WORKTREE_INTO_BASE: &str = "merge_batch_worktree_into_base";
-const AUTOMATION_SNAPSHOT_BATCH_STATE: &str = "snapshot_batch_state";
-const AUTOMATION_BOOTSTRAP_BATCH_REVIEW: &str = "bootstrap_batch_review";
+// ---- retained internal actions (still referenced by duel/worker jobs) ----
+const UPDATE_TASK_ACTION: &str = "update_task";
+const RUN_PARALLEL_TASK_PIPELINE_ACTION: &str = "run_parallel_task_pipeline";
+const SELECT_DUEL_ROLES_ACTION: &str = "select_duel_roles";
+const RECORD_DUEL_SCORES_ACTION: &str = "record_duel_scores";
+const RUN_PLANNING_DUEL_ACTION: &str = "run_planning_duel";
 
-const AUTOMATION_MERGE_BATCH_PR: &str = "merge_batch_pr";
-const AUTOMATION_CHECK_BATCH_REVIEW_DECISION: &str = "check_batch_review_decision";
-const AUTOMATION_SELECT_DUEL_ROLES: &str = "select_duel_roles";
-const AUTOMATION_CHECK_DUEL_REVIEW_DECISION: &str = "check_duel_review_decision";
-const AUTOMATION_RECORD_DUEL_SCORES: &str = "record_duel_scores";
-const AUTOMATION_RUN_PLANNING_DUEL: &str = "run_planning_duel";
-const AUTOMATION_SYNC_BATCH_REVIEW_TO_GITHUB: &str = "sync_batch_review_to_github";
-const AUTOMATION_PULL_BATCH_CHANGES: &str = "pull_batch_changes";
-const AUTOMATION_PUSH_BATCH_CHANGES: &str = "push_batch_changes";
-const AUTOMATION_SETUP_WORKTREE: &str = "setup_worktree";
-const AUTOMATION_UPDATE_KNOWLEDGE_GRAPH: &str = "update_knowledge_graph";
+// ---- generic built-in automation actions ----
+const GIT_COMMIT_ACTION: &str = "git_commit";
+const GIT_PUSH_ACTION: &str = "git_push";
+const GIT_PULL_ACTION: &str = "git_pull";
+const GIT_MERGE_ACTION: &str = "git_merge";
+const WORKTREE_SETUP_ACTION: &str = "worktree_setup";
+const WORKTREE_CLEANUP_ACTION: &str = "worktree_cleanup";
+const PR_OPEN_ACTION: &str = "pr_open";
+const PR_SYNC_REVIEWS_ACTION: &str = "pr_sync_reviews";
+const CHECK_TASK_VALUE_ACTION: &str = "check_task_value";
+const DISPATCH_BATCH_ACTION: &str = "dispatch_batch";
+const RUN_COMMAND_ACTION: &str = "run_command";
 
 #[derive(Debug, Clone, Deserialize)]
 struct AutomationSpec {
@@ -60,13 +58,32 @@ struct AutomationSpec {
 
 pub struct AutomationExecutor;
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StateExecutionContext {
+    pub run_id: Option<String>,
+    pub step_index: Option<u32>,
+    pub state_dir: Option<PathBuf>,
+}
+
 impl ActivityExecutor for AutomationExecutor {
     fn spec_type(&self) -> &str {
         "automation"
     }
 
-    fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome {
-        match execute(host, &execution.activity, &execution.input, execution.debug) {
+    fn execute(&self, host: ExecutorHost<'_>, execution: &ExecutionContext) -> AttemptOutcome {
+        let automation_host = host.automation();
+        match execute(
+            &automation_host,
+            &execution.activity,
+            &execution.input,
+            execution.debug,
+            &execution.steps_outputs,
+            Some(&StateExecutionContext {
+                run_id: execution.run_id.clone(),
+                step_index: execution.step_index,
+                state_dir: execution.state_dir.clone(),
+            }),
+        ) {
             Ok(result) => {
                 if let Err(err) = validate_activity_output_schema(&execution.activity, &result) {
                     return AttemptOutcome {
@@ -74,6 +91,21 @@ impl ActivityExecutor for AutomationExecutor {
                         response_json: Some(result),
                         ..AttemptOutcome::failed(ACTIVITY_EXECUTION_FAILED, err.to_string())
                     };
+                }
+                if let (Some(state_dir), Some(step_index)) =
+                    (execution.state_dir.as_deref(), execution.step_index)
+                {
+                    if let Err(error) = state_io::write_step_output(state_dir, step_index, &result)
+                    {
+                        return AttemptOutcome {
+                            exit_code: Some(1),
+                            response_json: Some(result),
+                            ..AttemptOutcome::failed(
+                                ACTIVITY_EXECUTION_FAILED,
+                                format!("failed to persist automation step output: {error}"),
+                            )
+                        };
+                    }
                 }
                 AttemptOutcome {
                     state: JobRunState::Success,
@@ -93,11 +125,19 @@ impl ActivityExecutor for AutomationExecutor {
 }
 
 /// Shared test utilities for automation sub-modules.
-pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync + ?Sized>(
+pub fn execute<
+    H: crate::context::RuntimeHost
+        + crate::context::TaskHost
+        + crate::context::EnvironmentHost
+        + Sync
+        + ?Sized,
+>(
     host: &H,
     activity: &Activity,
     input: &Value,
     debug: bool,
+    steps_outputs: &HashMap<String, Value>,
+    state_context: Option<&StateExecutionContext>,
 ) -> Result<Value, OrbitError> {
     let spec: AutomationSpec =
         serde_json::from_value(activity.spec_config.clone()).map_err(|error| {
@@ -105,43 +145,28 @@ pub fn execute<H: crate::context::RuntimeHost + crate::context::TaskHost + Sync 
         })?;
 
     match spec.action.as_str() {
-        AUTOMATION_UPDATE_TASK => task::update_task(host, input),
-        AUTOMATION_RUN_PARALLEL_TASK_PIPELINE => {
+        // ---- retained internal actions ----
+        UPDATE_TASK_ACTION => task::update_task(host, input),
+        RUN_PARALLEL_TASK_PIPELINE_ACTION => {
             parallel::run_parallel_task_pipeline(host, input, debug)
         }
-        AUTOMATION_COMMIT_TASK_ARTIFACT_CHANGES => {
-            commit::commit_task_artifact_changes(host, input)
-        }
-        AUTOMATION_COMMIT_FINALIZE_ARTIFACT_CHANGES => {
-            commit::commit_finalize_artifact_changes(host, input)
-        }
-        AUTOMATION_COMMIT_BATCH_CHANGES => commit::commit_batch_changes(host, input),
-        AUTOMATION_OPEN_BATCH_PR => pr::open_batch_pr(host, input),
-        AUTOMATION_COMMIT_AND_OPEN_BATCH_PR => commit_and_pr::commit_and_open_batch_pr(host, input),
-        AUTOMATION_CLEANUP_WORKTREE => cleanup_worktree::cleanup_worktree(host, input),
-        AUTOMATION_MERGE_BATCH_WORKTREE_INTO_BASE => {
-            merge_worktree::merge_batch_worktree_into_base(host, input)
-        }
-        AUTOMATION_SNAPSHOT_BATCH_STATE => snapshot::snapshot_batch_state(host, input),
-        AUTOMATION_BOOTSTRAP_BATCH_REVIEW => pr::bootstrap_batch_review(host, input),
+        SELECT_DUEL_ROLES_ACTION => select_duel_roles::select_duel_roles(host, input),
+        RECORD_DUEL_SCORES_ACTION => record_duel_scores::record_duel_scores(host, input),
+        RUN_PLANNING_DUEL_ACTION => planning_duel::run_planning_duel(host, input, debug),
 
-        AUTOMATION_MERGE_BATCH_PR => pr::merge_batch_pr(host, input),
-        AUTOMATION_CHECK_BATCH_REVIEW_DECISION => {
-            check_review::check_batch_review_decision(host, input)
-        }
-        AUTOMATION_SYNC_BATCH_REVIEW_TO_GITHUB => {
-            sync_review::sync_batch_review_to_github(host, input)
-        }
-        AUTOMATION_PULL_BATCH_CHANGES => pull::pull_batch_changes(host, input),
-        AUTOMATION_PUSH_BATCH_CHANGES => push::push_batch_changes(host, input),
-        AUTOMATION_SETUP_WORKTREE => setup_worktree::setup_worktree(host, input),
-        AUTOMATION_SELECT_DUEL_ROLES => select_duel_roles::select_duel_roles(host, input),
-        AUTOMATION_CHECK_DUEL_REVIEW_DECISION => {
-            check_duel_review_decision::check_duel_review_decision(input)
-        }
-        AUTOMATION_RECORD_DUEL_SCORES => record_duel_scores::record_duel_scores(host, input),
-        AUTOMATION_RUN_PLANNING_DUEL => planning_duel::run_planning_duel(host, input, debug),
-        AUTOMATION_UPDATE_KNOWLEDGE_GRAPH => knowledge::update_knowledge_graph(host, input),
+        // ---- generic built-in actions ----
+        GIT_COMMIT_ACTION => commit::git_commit(host, input),
+        GIT_PUSH_ACTION => push::push_batch_changes(host, input),
+        GIT_PULL_ACTION => pull::pull_batch_changes(host, input),
+        GIT_MERGE_ACTION => pr::git_merge(host, input),
+        WORKTREE_SETUP_ACTION => setup_worktree::setup_worktree(host, input),
+        WORKTREE_CLEANUP_ACTION => cleanup_worktree::cleanup_worktree(host, input),
+        PR_OPEN_ACTION => pr::pr_open(host, input),
+        PR_SYNC_REVIEWS_ACTION => sync_review::sync_batch_review_to_github(host, input),
+        CHECK_TASK_VALUE_ACTION => check_review::check_task_value(host, input),
+        DISPATCH_BATCH_ACTION => dispatch_batch::dispatch_batch(host, input),
+        RUN_COMMAND_ACTION => run_command::run_command(host, input, steps_outputs, state_context),
+
         other => Err(OrbitError::InvalidInput(format!(
             "unsupported automation action '{other}'"
         ))),

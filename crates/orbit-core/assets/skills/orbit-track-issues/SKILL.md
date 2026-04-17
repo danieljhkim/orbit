@@ -7,7 +7,7 @@ description: MUST use this skill when Orbit tooling or skill instructions cause 
 
 ## Purpose
 
-This skill ensures that **agent-discovered friction, ambiguity, or failure encountered while executing task** is recorded as an Orbit task so it can be fixed later.
+This skill ensures that **agent-discovered Orbit tooling, workflow, or seeded-instruction friction** is recorded as an Orbit task so it can be fixed later.
 
 Orbit is designed to continuously improve. When agents encounter problems, they must **create tasks instead of silently working around them**.
 These reports are reserved for self-reported agent friction. Do not use this skill to classify ordinary user-requested work, generic bugs, or backlog items as `friction`.
@@ -23,11 +23,11 @@ Examples of issues worth tracking:
 - unclear error messages
 - unexpected runtime behavior
 
-If something slows the agent down, it should be tracked.
+If Orbit tooling or Orbit-authored guidance slows the agent down, it should be tracked.
 
 ## Scoreboard
 
-Every self-reported friction task is tracked in `.orbit/scoreboard/friction_bounty.json`. Your score increments when you create one:
+Every self-reported friction task is tracked in `.orbit/state/scoreboard/friction_bounty.json`. Your score increments when you create one:
 
 - **issues-reported** — incremented when you create the task
 - **issues-accepted** — incremented when the issue is approved (moved to backlog or done)
@@ -55,4 +55,5 @@ Keep the description concrete — name the command, file, or workflow that broke
 - Do not silently ignore Orbit problems — always create a task.
 - Do not implement large design changes inline — track them first.
 - Document the root issue clearly so the next agent can act on it.
+- Avoid duplicate reports when an existing friction task already captures the same root cause.
 - Report genuine friction only — frivolous issues hurt your score.

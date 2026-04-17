@@ -1,12 +1,21 @@
 pub mod activity;
+pub mod apply;
+pub mod artifacts;
 pub mod audit;
 pub mod config;
+pub mod describe;
 pub mod duel;
+pub mod executor;
+pub mod get;
 pub mod graph;
 pub mod init;
 pub mod job;
 pub(crate) mod job_run_support;
+pub mod logs;
 pub mod metrics;
+pub mod policy;
+pub mod reconcile;
+pub mod run;
 pub mod scoreboard;
 pub mod ship;
 pub mod skill;
@@ -38,15 +47,13 @@ Setup:
   workspace  Initialize and manage workspaces
   config     Show or update Orbit configuration
 
-Run workflows:
-  ship       Ship tasks through the pipeline
-  duel       Cross-agent scoring
+Run:
+  reconcile  Reconcile pending/running job runs
+  ship       Ship tasks through the pipeline (legacy)
+  duel       Cross-agent scoring (legacy)
 
 Manage work:
   task       Create, update, and manage tasks
-  tool       Manage and run Orbit tools
-  skill      Manage agent skill definitions
-  graph      Build and query the knowledge graph
 
 Inspect:
   audit      Query the audit event log
@@ -72,7 +79,8 @@ pub enum Commands {
     Workspace(workspace::WorkspaceCommand),
     Config(config::ConfigCommand),
 
-    // ── run workflows ──
+    // ── run ──
+    Run(run::RunCommand),
     Ship(ship::ShipCommand),
     Duel(duel::DuelCommand),
 
@@ -82,9 +90,21 @@ pub enum Commands {
     Job(job::JobCommand),
     Tool(tool::ToolCommand),
     Skill(skill::SkillCommand),
+    Executor(executor::ExecutorCommand),
+    Policy(policy::PolicyCommand),
     Graph(graph::GraphCommand),
 
+    // ── resource management ──
+    Apply(apply::ApplyCommand),
+    Get(get::GetCommand),
+    Describe(describe::DescribeCommand),
+
+    // ── operate ──
+    Reconcile(reconcile::ReconcileCommand),
+
     // ── inspect ──
+    Logs(logs::LogsCommand),
+    Artifacts(artifacts::ArtifactsCommand),
     Audit(audit::AuditCommand),
     Metrics(metrics::MetricsCommand),
     Scoreboard(scoreboard::ScoreboardCommand),
@@ -96,14 +116,23 @@ impl Execute for Commands {
             Commands::Init(cmd) => cmd.execute(runtime),
             Commands::Workspace(cmd) => cmd.execute(runtime),
             Commands::Config(cmd) => cmd.execute(runtime),
+            Commands::Run(cmd) => cmd.execute(runtime),
             Commands::Ship(cmd) => cmd.execute(runtime),
             Commands::Duel(cmd) => cmd.execute(runtime),
+            Commands::Reconcile(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),
             Commands::Skill(cmd) => cmd.execute(runtime),
+            Commands::Executor(cmd) => cmd.execute(runtime),
+            Commands::Policy(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),
+            Commands::Apply(cmd) => cmd.execute(runtime),
+            Commands::Get(cmd) => cmd.execute(runtime),
+            Commands::Describe(cmd) => cmd.execute(runtime),
+            Commands::Logs(cmd) => cmd.execute(runtime),
+            Commands::Artifacts(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Metrics(cmd) => cmd.execute(runtime),
             Commands::Scoreboard(cmd) => cmd.execute(runtime),

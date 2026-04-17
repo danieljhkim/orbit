@@ -1,18 +1,10 @@
-schema_version: 1
-
-# ---- metadata ----
-created_by: system
-
-# ---- activity ----
-activity:
-  # ---- registration ----
-  id: run_planning_duel
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: run_planning_duel
+spec:
   spec_type: automation
-
-  # ---- content ----
-  description: "Run the full planning duel as a single automation step."
-
-  # ---- interface ----
+  description: Run the full planning duel as a single automation step.
   input_schema_json:
     type: object
     required:
@@ -25,6 +17,5 @@ activity:
         type: string
         description: Base branch used to resolve the task context. Defaults to main.
   output_schema_json: {}
-
-  # ---- execution ----
   action: run_planning_duel
+  created_by: system

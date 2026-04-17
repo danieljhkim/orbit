@@ -1,0 +1,50 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: check_task_value
+spec:
+  spec_type: automation
+  description: Generic gate — check a field value across batch tasks or from input.
+  input_schema_json:
+    type: object
+    required:
+      - field
+      - expected
+    properties:
+      field:
+        type: string
+        description: Task field name to check (e.g. "pr_status", "status").
+      expected:
+        type: string
+        description: Expected value to match against.
+      scope:
+        type: string
+        enum:
+          - all
+          - any
+          - input
+        default: all
+        description: 'Check mode: all requires every batch task to match, any requires at least one, input checks a value from step input.'
+      normalize:
+        type: boolean
+        description: When true, normalize both field value and expected to lowercase before comparison.
+      fail_on_mismatch:
+        type: boolean
+        description: When true, return an execution error instead of a successful `match=false` payload.
+      run_id:
+        type: string
+        description: Job run ID (batch_id). Required when scope is all or any.
+      batch_id:
+        type: string
+        description: Original batch identifier when this step runs inside a nested review or fix-loop job.
+  output_schema_json:
+    type: object
+    properties:
+      match:
+        type: boolean
+        description: Whether the check passed.
+      loop_exit:
+        type: boolean
+        description: Whether the pipeline loop should exit based on the check result.
+  action: check_task_value
+  created_by: system

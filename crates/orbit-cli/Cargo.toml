@@ -17,7 +17,9 @@ csv = "1"
 orbit-core = { path = "../orbit-core", features = ["clap"] }
 orbit-knowledge = { path = "../orbit-knowledge" }
 orbit-types = { path = "../orbit-types" }
+serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]

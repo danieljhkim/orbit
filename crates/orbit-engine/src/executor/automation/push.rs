@@ -6,19 +6,19 @@ use serde_json::{Value, json};
 use crate::context::RuntimeHost;
 
 use super::git::{git_output, git_success};
-use super::input::{canonicalize_existing_dir, input_string_field};
+use super::input::{canonicalize_existing_dir, input_string_field, required_batch_id};
 
 pub(super) fn push_batch_changes<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let run_id = super::parallel::require_run_id(input, "push_batch_changes")?;
+    let batch_id = required_batch_id(input, "push_batch_changes")?;
     let workspace_path = match input_string_field(input, "workspace_path") {
         Some(ws) => canonicalize_existing_dir(&ws, "workspace_path")?,
         None => {
             let repo_root_str = host.repo_root()?;
             let repo_root = Path::new(&repo_root_str);
-            super::parallel::resolve_shared_worktree_path(repo_root, run_id)?
+            super::parallel::resolve_shared_worktree_path(repo_root, batch_id)?
         }
     };
 

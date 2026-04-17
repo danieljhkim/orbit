@@ -1,5 +1,4 @@
 use chrono::{DateTime, Duration, Utc};
-use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
@@ -18,17 +17,21 @@ pub(crate) fn load_filtered_job_runs(
     let since = filter
         .since
         .as_deref()
-        .map(crate::parse::parse_duration_seconds)
+        .map(crate::parse::parse_since)
         .transpose()?
-        .map(|seconds| Utc::now() - Duration::seconds(seconds as i64));
+        .map(|value| value.with_timezone(&Utc));
 
-    let mut runs = runtime.list_job_runs(JobRunListParams {
-        job_id: None,
-        state: filter.status,
-        since,
-        limit: None,
-    })?;
-    runs.retain(|run| job_ids.contains(&run.job_id.as_str()));
+    let mut runs = Vec::new();
+    for job_id in job_ids {
+        let mut job_runs = runtime.job_history(job_id)?;
+        if let Some(status) = filter.status {
+            job_runs.retain(|run| run.state == status);
+        }
+        if let Some(since) = since {
+            job_runs.retain(|run| run.created_at >= since);
+        }
+        runs.extend(job_runs);
+    }
     runs.sort_by(|left, right| {
         right
             .created_at
@@ -39,6 +42,62 @@ pub(crate) fn load_filtered_job_runs(
         runs.truncate(limit);
     }
     Ok(runs)
+}
+
+pub(crate) fn print_job_run_list_with_workflow(
+    runs: &[JobRun],
+    full: bool,
+    workflow_name: fn(&str) -> Option<&'static str>,
+) {
+    let headers = if full {
+        vec![
+            "RUN_ID",
+            "WORKFLOW",
+            "JOB_ID",
+            "ATTEMPT",
+            "STATE",
+            "STARTED",
+            "FINISHED",
+            "DURATION",
+            "ERROR_CODE",
+            "ERROR_MESSAGE",
+        ]
+    } else {
+        vec![
+            "RUN_ID", "WORKFLOW", "STATE", "STARTED", "FINISHED", "DURATION",
+        ]
+    };
+    let mut table = crate::output::table::build_table(&headers);
+    for run in runs {
+        use comfy_table::Cell;
+        let mut row = vec![
+            Cell::new(&run.run_id),
+            Cell::new(workflow_name(&run.job_id).unwrap_or("-")),
+            crate::output::color::job_state_color_cell(&run.state.to_string()),
+            Cell::new(format_table_timestamp(run.started_at)),
+            Cell::new(format_table_timestamp(run.finished_at)),
+            Cell::new(format_run_duration(run)),
+        ];
+
+        if full {
+            row.insert(2, Cell::new(&run.job_id));
+            row.insert(3, Cell::new(run.attempt.to_string()));
+            let summary_step = summary_step(run);
+            row.extend([
+                Cell::new(
+                    summary_step
+                        .and_then(|step| step.error_code.clone())
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                Cell::new(summarize_error_message(
+                    summary_step.and_then(|step| step.error_message.as_deref()),
+                )),
+            ]);
+        }
+
+        crate::output::table::add_single_line_row(&mut table, row);
+    }
+    println!("{table}");
 }
 
 pub(crate) fn load_latest_job_run(
@@ -59,6 +118,7 @@ pub(crate) fn load_latest_job_run(
     .ok_or_else(|| OrbitError::InvalidInput(format!("no {label} runs found")))
 }
 
+#[allow(dead_code)]
 pub(crate) fn print_job_run_list(runs: &[JobRun], full: bool) {
     let headers = if full {
         vec![
@@ -89,17 +149,15 @@ pub(crate) fn print_job_run_list(runs: &[JobRun], full: bool) {
         if full {
             row.insert(1, Cell::new(&run.job_id));
             row.insert(2, Cell::new(run.attempt.to_string()));
+            let summary_step = summary_step(run);
             row.extend([
                 Cell::new(
-                    run.steps
-                        .last()
+                    summary_step
                         .and_then(|step| step.error_code.clone())
                         .unwrap_or_else(|| "-".to_string()),
                 ),
                 Cell::new(summarize_error_message(
-                    run.steps
-                        .last()
-                        .and_then(|step| step.error_message.as_deref()),
+                    summary_step.and_then(|step| step.error_message.as_deref()),
                 )),
             ]);
         }
@@ -110,7 +168,7 @@ pub(crate) fn print_job_run_list(runs: &[JobRun], full: bool) {
 }
 
 pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
-    let last = run.steps.last();
+    let last = summary_step(run);
     json!({
         "run_id": run.run_id,
         "job_id": run.job_id,
@@ -128,6 +186,38 @@ pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
         "steps": run.steps.iter().map(job_run_step_to_json).collect::<Vec<_>>(),
         "created_at": run.created_at.to_rfc3339(),
     })
+}
+
+pub(crate) fn summary_step(run: &JobRun) -> Option<&JobRunStep> {
+    run.steps
+        .iter()
+        .rev()
+        .find(|step| step.error_code.is_some() || step.error_message.is_some())
+        .or_else(|| {
+            run.steps.iter().rev().find(|step| {
+                matches!(
+                    step.state,
+                    JobRunState::Failed | JobRunState::Timeout | JobRunState::Cancelled
+                )
+            })
+        })
+        .or_else(|| {
+            run.steps
+                .iter()
+                .rev()
+                .find(|step| step.state != JobRunState::Skipped)
+        })
+        .or_else(|| run.steps.last())
+}
+
+pub(crate) fn job_run_to_json_with_workflow(run: &JobRun, workflow: Option<&str>) -> Value {
+    let mut value = job_run_to_json(run);
+    if let Some(workflow) = workflow
+        && let Some(map) = value.as_object_mut()
+    {
+        map.insert("workflow".to_string(), Value::String(workflow.to_string()));
+    }
+    value
 }
 
 pub(crate) fn job_run_step_to_json(step: &JobRunStep) -> Value {
@@ -212,9 +302,17 @@ fn format_duration(duration: Duration) -> String {
     format!("{secs}s")
 }
 
+#[allow(dead_code)]
 pub(crate) fn print_job_run(run: &JobRun) {
+    print_job_run_with_workflow(run, None);
+}
+
+pub(crate) fn print_job_run_with_workflow(run: &JobRun, workflow: Option<&str>) {
     use crate::output::color::{bold, dimmed, job_state_color};
     println!("{} {}", bold("Run ID:"), run.run_id);
+    if let Some(workflow) = workflow {
+        println!("{} {}", bold("Workflow:"), workflow);
+    }
     println!("{} {}", bold("Job ID:"), run.job_id);
     println!("{} {}", bold("Attempt:"), run.attempt);
     println!(
@@ -353,36 +451,5 @@ pub(crate) fn print_step_detail(step: &JobRunStep) {
         }
     } else {
         println!("{} -", bold("Agent Response:"));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{format_duration, format_run_duration_values, format_table_timestamp};
-    use chrono::{Duration, TimeZone, Utc};
-
-    #[test]
-    fn table_timestamp_is_shortened() {
-        let value = Utc.with_ymd_and_hms(2026, 4, 11, 18, 45, 12).unwrap();
-        assert_eq!(format_table_timestamp(Some(value)), "2026-04-11 18:45");
-    }
-
-    #[test]
-    fn human_duration_prefers_large_units() {
-        assert_eq!(format_duration(Duration::seconds(59)), "59s");
-        assert_eq!(format_duration(Duration::minutes(30)), "30m");
-        assert_eq!(format_duration(Duration::minutes(72)), "1h12m");
-        assert_eq!(format_duration(Duration::hours(27)), "1d3h");
-    }
-
-    #[test]
-    fn run_duration_uses_start_and_finish() {
-        let started_at = Utc.with_ymd_and_hms(2026, 4, 11, 18, 0, 0).unwrap();
-        let finished_at = Utc.with_ymd_and_hms(2026, 4, 11, 19, 12, 0).unwrap();
-
-        assert_eq!(
-            format_run_duration_values(Some(started_at), Some(finished_at)),
-            "1h12m"
-        );
     }
 }

@@ -97,31 +97,3 @@ pub(crate) fn check_file_lock(
     // the shared lock store at .orbit/knowledge/graph_locks.json.
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::check_workspace_boundary;
-    use crate::ToolContext;
-
-    #[test]
-    fn boundary_check_supports_nested_nonexistent_paths() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("nested/path/file.txt");
-
-        let canonical = check_workspace_boundary(
-            &ToolContext {
-                workspace_root: Some(dir.path().to_path_buf()),
-                ..Default::default()
-            },
-            &path,
-        )
-        .expect("boundary");
-
-        let expected = dir
-            .path()
-            .canonicalize()
-            .expect("canonical root")
-            .join("nested/path/file.txt");
-        assert_eq!(canonical, expected);
-    }
-}

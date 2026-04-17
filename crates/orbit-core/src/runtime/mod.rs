@@ -2,9 +2,9 @@
 //!
 //! `OrbitRuntime` is initialized by locating two roots:
 //! 1. **Global root** — `~/.orbit/` (or `ORBIT_ROOT`): houses global config,
-//!    the audit SQLite database, and globally-scoped artifacts.
+//!    the audit SQLite database, and globally-scoped resources.
 //! 2. **Workspace root** — the nearest ancestor `.orbit/` directory from cwd:
-//!    houses workspace-local tasks, jobs, activities, and skills.
+//!    houses workspace-local tasks, knowledge, skills, and runtime state.
 //!
 //! The `resolve` sub-module implements root discovery. The `builder` sub-module
 //! wires together stores, policy, tool registry, and event bus into a complete
@@ -24,18 +24,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
+use orbit_engine::ActivityExecutorRegistry;
 use orbit_types::{Audit, OrbitError, OrbitEvent, WorkspacePaths};
 use serde_json::Value;
 
 use crate::OrbitContext;
 use crate::command::init::ensure_orbit_root_initialized;
 use crate::context::ActorIdentity;
+use crate::context::OrbitStores;
 
 pub(crate) use resolve::{resolve_global_root, resolve_initialize_data_root};
 
 #[derive(Clone)]
 pub struct OrbitRuntime {
     context: OrbitContext,
+    activity_executors: Arc<ActivityExecutorRegistry>,
     pub event_log: event_bus::EventLog,
     _temp_dir: Option<Arc<builder::TempDir>>,
 }
@@ -54,16 +57,20 @@ impl OrbitRuntime {
     }
 
     pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
+        let context = builder::build_context_from_data_root(data_root)?;
         Ok(Self {
-            context: builder::build_context_from_data_root(data_root)?,
+            activity_executors: build_activity_executor_registry(&context)?,
+            context,
             event_log: event_bus::EventLog::default(),
             _temp_dir: None,
         })
     }
 
     pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
+        let context = builder::build_context_from_roots(global_root, workspace_root)?;
         Ok(Self {
-            context: builder::build_context_from_roots(global_root, workspace_root)?,
+            activity_executors: build_activity_executor_registry(&context)?,
+            context,
             event_log: event_bus::EventLog::default(),
             _temp_dir: None,
         })
@@ -72,6 +79,7 @@ impl OrbitRuntime {
     pub fn in_memory() -> Result<Self, OrbitError> {
         let (context, temp_dir) = builder::build_context_in_memory()?;
         Ok(Self {
+            activity_executors: build_activity_executor_registry(&context)?,
             context,
             event_log: event_bus::EventLog::default(),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -104,7 +112,7 @@ impl OrbitRuntime {
     }
 
     pub fn get_job(&self, job_id: &str) -> Result<Option<orbit_types::Job>, OrbitError> {
-        self.get_job_record(job_id)
+        self.stores().jobs().get(job_id)
     }
 
     pub fn execution_env_config(&self) -> (bool, Vec<String>) {
@@ -179,6 +187,10 @@ impl OrbitRuntime {
         self.context.registry()
     }
 
+    pub(crate) fn stores(&self) -> &OrbitStores {
+        self.context.stores()
+    }
+
     pub(crate) fn skill_catalog(&self) -> &crate::skill_catalog::SkillCatalog {
         self.context.skill_catalog()
     }
@@ -198,6 +210,46 @@ impl OrbitRuntime {
     pub(crate) fn codex_execution_policy(&self) -> &crate::config::CodexExecutionPolicy {
         self.context.codex_execution_policy()
     }
+
+    pub(crate) fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
+        self.activity_executors.as_ref()
+    }
+
+    pub fn list_executor_defs(&self) -> Result<Vec<orbit_types::ExecutorDef>, OrbitError> {
+        self.stores().executors().list()
+    }
+
+    pub fn get_executor_def(
+        &self,
+        name: &str,
+    ) -> Result<Option<orbit_types::ExecutorDef>, OrbitError> {
+        self.stores().executors().get(name)
+    }
+
+    pub fn upsert_executor_def(&self, def: &orbit_types::ExecutorDef) -> Result<(), OrbitError> {
+        self.stores().executors().upsert(def)
+    }
+
+    pub fn list_policy_defs(&self) -> Result<Vec<orbit_types::PolicyDef>, OrbitError> {
+        self.stores().policies().list()
+    }
+
+    pub fn get_policy_def(&self, name: &str) -> Result<Option<orbit_types::PolicyDef>, OrbitError> {
+        self.stores().policies().get(name)
+    }
+
+    pub fn upsert_policy_def(&self, def: &orbit_types::PolicyDef) -> Result<(), OrbitError> {
+        self.stores().policies().upsert(def)
+    }
+}
+
+fn build_activity_executor_registry(
+    context: &OrbitContext,
+) -> Result<Arc<ActivityExecutorRegistry>, OrbitError> {
+    let mut registry = ActivityExecutorRegistry::with_builtins();
+    let defs = context.stores().executors().list()?;
+    registry.load_from_defs(&defs);
+    Ok(Arc::new(registry))
 }
 
 fn orbit_event_to_audit(id: i64, event: OrbitEvent) -> Audit {

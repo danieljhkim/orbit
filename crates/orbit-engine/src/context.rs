@@ -1,17 +1,18 @@
+use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_agent::AgentConfig;
 use orbit_exec::EnvironmentMode;
 use orbit_store::JobRunStepParams;
 use orbit_store::{InvocationQuery, InvocationRecord};
 use orbit_tools::ToolContext;
 use orbit_types::{
-    Activity, AgentModelPair, InvocationTrace, Job, JobRun, JobRunState, JobTargetType,
-    KnowledgeRunMetrics, OrbitError, OrbitEvent, ReviewThread, Role, Task, TaskArtifact,
-    TaskComment, TaskPriority, TaskStatus, redact_sensitive_env_json, redact_sensitive_env_option,
-    resolve_agent_model_pair,
+    Activity, AgentModelPair, ExecutorDef, InvocationTrace, Job, JobRun, JobRunState,
+    JobTargetType, KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, ReviewThread, Role,
+    Task, TaskArtifact, TaskComment, TaskPriority, TaskStatus, redact_sensitive_env_json,
+    redact_sensitive_env_option, resolve_agent_model_pair,
 };
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const AGENT_PROTOCOL_VIOLATION: &str = "AGENT_PROTOCOL_VIOLATION";
 pub const AGENT_INVOCATION_FAILED: &str = "AGENT_INVOCATION_FAILED";
@@ -84,6 +85,7 @@ pub struct ExecutionContext {
     pub job: Option<Job>,
     pub agent_cli: String,
     pub model: Option<String>,
+    pub model_tier: Option<String>,
     pub timeout_seconds: u64,
     pub env_extra: Vec<String>,
     /// Explicit env var key-value pairs that override same-named vars from
@@ -92,6 +94,12 @@ pub struct ExecutionContext {
     pub input: Value,
     /// When `true`, stream agent stderr to the terminal and tee stdout live.
     pub debug: bool,
+    /// Accumulated outputs from completed steps, keyed by step id (or target_id).
+    /// Used to populate the `steps` namespace in TemplateContext.
+    pub steps_outputs: std::collections::HashMap<String, Value>,
+    pub run_id: Option<String>,
+    pub step_index: Option<u32>,
+    pub state_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +193,7 @@ pub struct TaskAutomationUpdate {
 }
 
 pub trait JobRunHost {
+    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError>;
     fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
     fn insert_job_run(
         &self,
@@ -197,6 +206,14 @@ pub trait JobRunHost {
     fn mark_job_run_running(
         &self,
         run_id: &str,
+        started_at: chrono::DateTime<chrono::Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError>;
+    fn take_over_running_job_run(
+        &self,
+        run_id: &str,
+        expected_pid: Option<u32>,
+        expected_pid_start_time: Option<String>,
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError>;
@@ -223,9 +240,11 @@ pub trait JobRunHost {
         duration_ms: Option<u64>,
     ) -> Result<bool, OrbitError>;
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError>;
+    fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError>;
+    fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError>;
 }
 
-pub trait TaskHost {
+pub trait TaskReadHost {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError>;
     fn get_task_artifacts(&self, task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError>;
     fn list_tasks_filtered(
@@ -235,6 +254,9 @@ pub trait TaskHost {
         parent_id: Option<&str>,
         batch_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError>;
+}
+
+pub trait TaskWriteHost {
     fn start_task(
         &self,
         task_id: &str,
@@ -255,6 +277,10 @@ pub trait TaskHost {
         update: TaskAutomationUpdate,
     ) -> Result<(), OrbitError>;
 }
+
+pub trait TaskHost: TaskReadHost + TaskWriteHost {}
+
+impl<T> TaskHost for T where T: TaskReadHost + TaskWriteHost + ?Sized {}
 
 pub trait AgentProtocolHost {
     fn build_agent_stdin_envelope_payload(
@@ -316,10 +342,15 @@ pub trait EnvironmentHost {
     }
 }
 
+pub trait ExecutorLookupHost {
+    fn get_executor_def(&self, name: &str) -> Result<Option<ExecutorDef>, OrbitError>;
+}
+
 pub trait RuntimeHost {
     fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError>;
     fn repo_root(&self) -> Result<String, OrbitError>;
     fn data_root(&self) -> &Path;
+    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry;
     fn run_job_now_with_input_debug(
         &self,
         job_id: &str,
@@ -392,9 +423,6 @@ pub trait RuntimeHost {
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
     }
-    fn ship_role_assignment(&self, _role: &str) -> Option<(String, String)> {
-        None
-    }
     fn scoring_enabled(&self) -> bool;
     fn graph_editing(&self) -> bool;
     fn scoreboard_dir(&self) -> &Path;
@@ -408,18 +436,9 @@ pub trait RuntimeHost {
     }
 }
 
-/// Aggregates all five sub-traits required at the top-level engine boundary.
-///
-/// All five sub-traits are always needed together because:
-/// - `ActivityExecutor::execute` takes `&dyn EngineHost` as a single dispatch target,
-///   allowing each executor implementation to use whatever sub-traits it needs.
-/// - `run_job_with_input` and `execute_single_attempt` call `executor.execute(host, ...)`,
-///   which requires the full `EngineHost` bound on the host value passed in.
-///
-/// Individual free functions (e.g. `automation::execute`, `agent::execute`) use narrower
-/// bounds where possible — `RuntimeHost + TaskHost`, `EnvironmentHost + AgentProtocolHost` —
-/// but the trait object boundary at `ActivityExecutor::execute` forces `EngineHost` at the
-/// top level.
+/// Aggregates the store/runtime traits needed by the top-level engine flows
+/// (job orchestration, reconciliation, stale recovery). Executor dispatch uses
+/// [`ExecutorHost`] instead of taking this full boundary directly.
 pub trait EngineHost:
     JobRunHost + TaskHost + AgentProtocolHost + EnvironmentHost + RuntimeHost + Sync
 {
@@ -430,19 +449,400 @@ impl<T> EngineHost for T where
 {
 }
 
-pub fn step_output_for_following_input<'a>(
-    activity: &Activity,
-    response_json: Option<&'a Value>,
-) -> Option<&'a serde_json::Map<String, Value>> {
-    let output = response_json.and_then(Value::as_object)?;
+#[derive(Clone, Copy)]
+pub struct ExecutorHost<'a> {
+    runtime: &'a (dyn RuntimeHost + Sync),
+    task_reader: &'a (dyn TaskReadHost + Sync),
+    task_writer: &'a (dyn TaskWriteHost + Sync),
+    environment: &'a (dyn EnvironmentHost + Sync),
+    agent_protocol: &'a (dyn AgentProtocolHost + Sync),
+    executor_lookup: &'a (dyn ExecutorLookupHost + Sync),
+}
 
-    if activity.spec_type == "agent_invoke" {
-        // Agent responses are wrapped in the standard envelope, so pipe the
-        // structured `result` payload into the following step's input.
-        return output.get("result").and_then(Value::as_object);
+impl<'a> ExecutorHost<'a> {
+    pub fn new<H>(host: &'a H) -> Self
+    where
+        H: RuntimeHost + TaskHost + EnvironmentHost + AgentProtocolHost + ExecutorLookupHost + Sync,
+    {
+        Self {
+            runtime: host,
+            task_reader: host,
+            task_writer: host,
+            environment: host,
+            agent_protocol: host,
+            executor_lookup: host,
+        }
     }
 
-    Some(output)
+    pub fn agent(self) -> AgentExecutorHost<'a> {
+        AgentExecutorHost {
+            task_reader: self.task_reader,
+            environment: self.environment,
+            agent_protocol: self.agent_protocol,
+            executor_lookup: self.executor_lookup,
+        }
+    }
+
+    pub fn cli(self) -> CliCommandExecutorHost<'a> {
+        CliCommandExecutorHost {
+            task_reader: self.task_reader,
+            environment: self.environment,
+        }
+    }
+
+    pub fn automation(self) -> AutomationExecutorHost<'a> {
+        AutomationExecutorHost {
+            runtime: self.runtime,
+            task_reader: self.task_reader,
+            task_writer: self.task_writer,
+            environment: self.environment,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct AgentExecutorHost<'a> {
+    task_reader: &'a (dyn TaskReadHost + Sync),
+    environment: &'a (dyn EnvironmentHost + Sync),
+    agent_protocol: &'a (dyn AgentProtocolHost + Sync),
+    executor_lookup: &'a (dyn ExecutorLookupHost + Sync),
+}
+
+impl TaskReadHost for AgentExecutorHost<'_> {
+    fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+        self.task_reader.get_task(task_id)
+    }
+
+    fn get_task_artifacts(&self, task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
+        self.task_reader.get_task_artifacts(task_id)
+    }
+
+    fn list_tasks_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
+        batch_id: Option<&str>,
+    ) -> Result<Vec<Task>, OrbitError> {
+        self.task_reader
+            .list_tasks_filtered(status, priority, parent_id, batch_id)
+    }
+}
+
+impl EnvironmentHost for AgentExecutorHost<'_> {
+    fn agent_provider_config(&self) -> HashMap<String, String> {
+        self.environment.agent_provider_config()
+    }
+
+    fn execution_env_inherit(&self) -> bool {
+        self.environment.execution_env_inherit()
+    }
+
+    fn hydrated_env_allowlist(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.environment.hydrated_env_allowlist(env_extra)
+    }
+
+    fn orbit_root(&self) -> Option<String> {
+        self.environment.orbit_root()
+    }
+
+    fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.environment.cli_command_environment(env_extra)
+    }
+
+    fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
+        self.environment
+            .missing_required_environment_vars(required_env_vars)
+    }
+}
+
+impl AgentProtocolHost for AgentExecutorHost<'_> {
+    fn build_agent_stdin_envelope_payload(
+        &self,
+        execution: &ExecutionContext,
+    ) -> Result<Vec<u8>, OrbitError> {
+        self.agent_protocol
+            .build_agent_stdin_envelope_payload(execution)
+    }
+
+    fn execute_commit_request_if_present(&self, result: &Value) -> Result<(), OrbitError> {
+        self.agent_protocol
+            .execute_commit_request_if_present(result)
+    }
+}
+
+impl ExecutorLookupHost for AgentExecutorHost<'_> {
+    fn get_executor_def(&self, name: &str) -> Result<Option<ExecutorDef>, OrbitError> {
+        self.executor_lookup.get_executor_def(name)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CliCommandExecutorHost<'a> {
+    task_reader: &'a (dyn TaskReadHost + Sync),
+    environment: &'a (dyn EnvironmentHost + Sync),
+}
+
+impl TaskReadHost for CliCommandExecutorHost<'_> {
+    fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+        self.task_reader.get_task(task_id)
+    }
+
+    fn get_task_artifacts(&self, task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
+        self.task_reader.get_task_artifacts(task_id)
+    }
+
+    fn list_tasks_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
+        batch_id: Option<&str>,
+    ) -> Result<Vec<Task>, OrbitError> {
+        self.task_reader
+            .list_tasks_filtered(status, priority, parent_id, batch_id)
+    }
+}
+
+impl EnvironmentHost for CliCommandExecutorHost<'_> {
+    fn agent_provider_config(&self) -> HashMap<String, String> {
+        self.environment.agent_provider_config()
+    }
+
+    fn execution_env_inherit(&self) -> bool {
+        self.environment.execution_env_inherit()
+    }
+
+    fn hydrated_env_allowlist(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.environment.hydrated_env_allowlist(env_extra)
+    }
+
+    fn orbit_root(&self) -> Option<String> {
+        self.environment.orbit_root()
+    }
+
+    fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.environment.cli_command_environment(env_extra)
+    }
+
+    fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
+        self.environment
+            .missing_required_environment_vars(required_env_vars)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct AutomationExecutorHost<'a> {
+    runtime: &'a (dyn RuntimeHost + Sync),
+    task_reader: &'a (dyn TaskReadHost + Sync),
+    task_writer: &'a (dyn TaskWriteHost + Sync),
+    environment: &'a (dyn EnvironmentHost + Sync),
+}
+
+impl TaskReadHost for AutomationExecutorHost<'_> {
+    fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+        self.task_reader.get_task(task_id)
+    }
+
+    fn get_task_artifacts(&self, task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
+        self.task_reader.get_task_artifacts(task_id)
+    }
+
+    fn list_tasks_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
+        batch_id: Option<&str>,
+    ) -> Result<Vec<Task>, OrbitError> {
+        self.task_reader
+            .list_tasks_filtered(status, priority, parent_id, batch_id)
+    }
+}
+
+impl TaskWriteHost for AutomationExecutorHost<'_> {
+    fn start_task(
+        &self,
+        task_id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        self.task_writer.start_task(task_id, note, comment)
+    }
+
+    fn update_task_from_activity(
+        &self,
+        task_id: &str,
+        status: TaskStatus,
+        execution_summary: Option<String>,
+        comment: Option<String>,
+        note: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        self.task_writer.update_task_from_activity(
+            task_id,
+            status,
+            execution_summary,
+            comment,
+            note,
+        )
+    }
+
+    fn apply_task_automation_update(
+        &self,
+        task_id: &str,
+        update: TaskAutomationUpdate,
+    ) -> Result<(), OrbitError> {
+        self.task_writer
+            .apply_task_automation_update(task_id, update)
+    }
+}
+
+impl EnvironmentHost for AutomationExecutorHost<'_> {
+    fn agent_provider_config(&self) -> HashMap<String, String> {
+        self.environment.agent_provider_config()
+    }
+
+    fn execution_env_inherit(&self) -> bool {
+        self.environment.execution_env_inherit()
+    }
+
+    fn hydrated_env_allowlist(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.environment.hydrated_env_allowlist(env_extra)
+    }
+
+    fn orbit_root(&self) -> Option<String> {
+        self.environment.orbit_root()
+    }
+
+    fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)> {
+        self.environment.cli_command_environment(env_extra)
+    }
+
+    fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
+        self.environment
+            .missing_required_environment_vars(required_env_vars)
+    }
+}
+
+impl RuntimeHost for AutomationExecutorHost<'_> {
+    fn record_event(&self, event: OrbitEvent) -> Result<(), OrbitError> {
+        self.runtime.record_event(event)
+    }
+
+    fn repo_root(&self) -> Result<String, OrbitError> {
+        self.runtime.repo_root()
+    }
+
+    fn data_root(&self) -> &Path {
+        self.runtime.data_root()
+    }
+
+    fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
+        self.runtime.activity_executor_registry()
+    }
+
+    fn run_job_now_with_input_debug(
+        &self,
+        job_id: &str,
+        input: Value,
+        debug: bool,
+    ) -> Result<JobRunResult, OrbitError> {
+        self.runtime
+            .run_job_now_with_input_debug(job_id, input, debug)
+    }
+
+    fn validate_activity_target_exists(
+        &self,
+        target_type: JobTargetType,
+        target_id: &str,
+    ) -> Result<Activity, OrbitError> {
+        self.runtime
+            .validate_activity_target_exists(target_type, target_id)
+    }
+
+    fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
+        self.runtime.get_job(job_id)
+    }
+
+    fn invocation_records(
+        &self,
+        query: InvocationQuery,
+    ) -> Result<Vec<InvocationRecord>, OrbitError> {
+        self.runtime.invocation_records(query)
+    }
+
+    fn run_tool_with_context_and_role(
+        &self,
+        name: &str,
+        input: Value,
+        role: Role,
+        tool_context: ToolContext,
+    ) -> Result<Value, OrbitError> {
+        self.runtime
+            .run_tool_with_context_and_role(name, input, role, tool_context)
+    }
+
+    fn invoke_activity(
+        &self,
+        activity: Activity,
+        agent_cli: &str,
+        model: Option<&str>,
+        input: Value,
+        timeout_seconds: u64,
+        debug: bool,
+    ) -> Result<ActivityInvocationResult, OrbitError> {
+        self.runtime
+            .invoke_activity(activity, agent_cli, model, input, timeout_seconds, debug)
+    }
+
+    fn maybe_create_failure_task(
+        &self,
+        job_id: &str,
+        run_id: &str,
+        error_code: &str,
+        error_message: &str,
+        agent: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        self.runtime.maybe_create_failure_task(
+            job_id,
+            run_id,
+            error_code,
+            error_message,
+            agent,
+            model,
+        )
+    }
+
+    fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+        self.runtime.resolved_agent_model_pair(agent_cli)
+    }
+
+    fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {
+        self.runtime.canonical_model_name(agent_cli, model)
+    }
+
+    fn scoring_enabled(&self) -> bool {
+        self.runtime.scoring_enabled()
+    }
+
+    fn graph_editing(&self) -> bool {
+        self.runtime.graph_editing()
+    }
+
+    fn scoreboard_dir(&self) -> &Path {
+        self.runtime.scoreboard_dir()
+    }
+
+    fn persist_invocation_trace(
+        &self,
+        job_run_id: &str,
+        execution: &ExecutionContext,
+        trace: &InvocationTrace,
+    ) -> Result<(), OrbitError> {
+        self.runtime
+            .persist_invocation_trace(job_run_id, execution, trace)
+    }
 }
 
 pub fn input_workspace_path(input: &Value) -> Option<String> {
@@ -465,7 +865,7 @@ pub fn execution_working_directory(execution: &ExecutionContext) -> Option<Strin
 /// task's workspace_path when neither the activity nor input provides one.
 /// This is the preferred variant for agent_invoke and cli_command executors
 /// where a [`TaskHost`] is available.
-pub fn execution_working_directory_with_task<H: TaskHost + ?Sized>(
+pub fn execution_working_directory_with_task<H: TaskReadHost + ?Sized>(
     host: &H,
     execution: &ExecutionContext,
 ) -> Option<String> {
@@ -533,75 +933,58 @@ pub fn apply_env_set(
     }
 }
 
+pub fn state_env_vars(execution: &ExecutionContext) -> Vec<(String, String)> {
+    let Some(run_id) = execution.run_id.as_ref() else {
+        return Vec::new();
+    };
+    let Some(step_index) = execution.step_index else {
+        return Vec::new();
+    };
+    let Some(state_dir) = execution.state_dir.as_ref() else {
+        return Vec::new();
+    };
+    vec![
+        ("ORBIT_RUN_ID".to_string(), run_id.clone()),
+        ("ORBIT_STEP_INDEX".to_string(), step_index.to_string()),
+        (
+            "ORBIT_STATE_DIR".to_string(),
+            state_dir.to_string_lossy().into_owned(),
+        ),
+    ]
+}
+
+pub fn inject_state_env(mode: EnvironmentMode, execution: &ExecutionContext) -> EnvironmentMode {
+    let state_env = state_env_vars(execution);
+    if state_env.is_empty() {
+        return mode;
+    }
+    let apply = |pairs: &mut Vec<(String, String)>| {
+        for (key, value) in &state_env {
+            if let Some(existing) = pairs
+                .iter_mut()
+                .find(|(existing_key, _)| existing_key == key)
+            {
+                existing.1 = value.clone();
+            } else {
+                pairs.push((key.clone(), value.clone()));
+            }
+        }
+    };
+    match mode {
+        EnvironmentMode::ClearAndSet(mut pairs) => {
+            apply(&mut pairs);
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+        EnvironmentMode::Inherit => {
+            let mut pairs: Vec<(String, String)> = std::env::vars().collect();
+            apply(&mut pairs);
+            EnvironmentMode::ClearAndSet(pairs)
+        }
+    }
+}
+
 pub fn redact_attempt_outcome(mut outcome: AttemptOutcome) -> AttemptOutcome {
     outcome.response_json = outcome.response_json.map(redact_sensitive_env_json);
     outcome.error_message = redact_sensitive_env_option(outcome.error_message);
     outcome
-}
-
-#[cfg(test)]
-mod tests {
-    use super::step_output_for_following_input;
-    use orbit_types::Activity;
-    use serde_json::json;
-
-    fn activity(spec_type: &str) -> Activity {
-        let now = chrono::Utc::now();
-        Activity {
-            id: format!("activity-{spec_type}"),
-            spec_type: spec_type.to_string(),
-            description: "test activity".to_string(),
-            input_schema_json: json!({}),
-            output_schema_json: json!({}),
-            spec_config: json!({}),
-            tools: Vec::new(),
-            proc_allowed_programs: Vec::new(),
-            workspace_path: None,
-            created_by: None,
-            is_active: true,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    #[test]
-    fn step_output_for_following_input_pipes_agent_invoke_output() {
-        let activity = activity("agent_invoke");
-        let response = json!({
-            "schemaVersion": 1,
-            "status": "success",
-            "result": {
-                "status": "review",
-                "execution_summary": "persist me"
-            },
-            "error": null
-        });
-
-        let output = step_output_for_following_input(&activity, Some(&response))
-            .expect("agent_invoke output should be piped");
-
-        assert_eq!(output.get("status"), Some(&json!("review")));
-        assert_eq!(output.get("execution_summary"), Some(&json!("persist me")));
-    }
-
-    #[test]
-    fn step_output_for_following_input_still_ignores_non_object_output() {
-        let activity = activity("agent_invoke");
-        let response = json!("not-an-object");
-
-        assert!(step_output_for_following_input(&activity, Some(&response)).is_none());
-    }
-
-    #[test]
-    fn step_output_for_following_input_keeps_non_agent_output_unchanged() {
-        let activity = activity("automation");
-        let response = json!({
-            "status": "review"
-        });
-
-        let output = step_output_for_following_input(&activity, Some(&response))
-            .expect("automation output should be piped");
-
-        assert_eq!(output.get("status"), Some(&json!("review")));
-    }
 }

@@ -1,21 +1,16 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_duel_plan_pipeline
+kind: Job
+metadata:
+  name: job_duel_plan_pipeline
+spec:
   state: enabled
-
-  # ---- execution ----
-  #
-  # Planning duel pipeline: run the entire duel as one automation activity so
-  # the planners can run in parallel and the arbiter can finish the workflow.
-  max_active_runs: 1
-  max_iterations: 1
   default_input:
     base: main
+  max_active_runs: 1
+  max_iterations: 1
   steps:
-    - target_type: activity
+    - id: planning_duel
+      target_type: activity
       target_id: run_planning_duel
       condition: on_success
       timeout_seconds: 3600

@@ -1,4 +1,4 @@
-//! Agent provider abstraction for driving AI agents (Claude, Codex, mock) via CLI.
+//! Agent provider abstraction for driving AI agents (Claude, Codex, Gemini, Ollama, mock) via CLI.
 //!
 //! Defines the [`AgentRuntime`] trait and provider implementations that translate
 //! an [`AgentRequest`] (skill, input, tools) into a concrete CLI command and stdin

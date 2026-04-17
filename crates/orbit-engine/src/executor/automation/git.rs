@@ -2,6 +2,29 @@ use std::path::{Path, PathBuf};
 
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 use orbit_types::OrbitError;
+use serde_json::Value;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum BaseSyncMode {
+    Local,
+    Remote,
+}
+
+pub(super) fn base_sync_mode_from_input(input: &Value) -> Result<BaseSyncMode, OrbitError> {
+    match input
+        .as_object()
+        .and_then(|map| map.get("base_sync"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None | Some("remote") => Ok(BaseSyncMode::Remote),
+        Some("local") => Ok(BaseSyncMode::Local),
+        Some(other) => Err(OrbitError::InvalidInput(format!(
+            "input.base_sync must be 'local' or 'remote', got '{other}'"
+        ))),
+    }
+}
 
 pub(super) fn git_output_paths(
     current_dir: &Path,
@@ -102,27 +125,32 @@ pub(super) fn fetch_remote_base(repo_root: &Path, base: &str) {
     );
 }
 
-pub(super) fn refresh_local_base_branch(repo_root: &Path, base: &str) {
-    // Best-effort: if pull fails (e.g. no remote, offline, fresh branch),
-    // we continue with whatever the local branch has. The push step will
-    // catch actual divergence later.
-    let _ = run_process(
-        &ExecRequest {
-            program: "git".to_string(),
-            args: vec![
-                "pull".to_string(),
-                "--rebase".to_string(),
-                "origin".to_string(),
-                base.to_string(),
-            ],
-            current_dir: Some(repo_root.to_string_lossy().to_string()),
-            timeout_ms: Some(60_000),
-            stdin_mode: StdinMode::Null,
-            environment_mode: EnvironmentMode::Inherit,
-            debug: false,
-        },
-        &NoSandbox,
-    );
+pub(super) fn refresh_local_base_branch(repo_root: &Path, base: &str, sync_mode: BaseSyncMode) {
+    match sync_mode {
+        BaseSyncMode::Local => {}
+        BaseSyncMode::Remote => {
+            // Best-effort: if pull fails (e.g. no remote, offline, fresh branch),
+            // we continue with whatever the local branch has. The push step will
+            // catch actual divergence later.
+            let _ = run_process(
+                &ExecRequest {
+                    program: "git".to_string(),
+                    args: vec![
+                        "pull".to_string(),
+                        "--rebase".to_string(),
+                        "origin".to_string(),
+                        base.to_string(),
+                    ],
+                    current_dir: Some(repo_root.to_string_lossy().to_string()),
+                    timeout_ms: Some(60_000),
+                    stdin_mode: StdinMode::Null,
+                    environment_mode: EnvironmentMode::Inherit,
+                    debug: false,
+                },
+                &NoSandbox,
+            );
+        }
+    }
 }
 
 pub(super) fn resolve_worktree_start_point(
@@ -203,6 +231,10 @@ pub(super) fn resolve_worktree_path_from_prefix(
                 })?;
             Ok(PathBuf::from(root).join(repo_name).join(dir_name))
         }
-        None => Ok(repo_root.join(".orbit").join("worktrees").join(dir_name)),
+        None => Ok(repo_root
+            .join(".orbit")
+            .join("state")
+            .join("worktrees")
+            .join(dir_name)),
     }
 }

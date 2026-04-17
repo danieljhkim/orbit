@@ -12,9 +12,12 @@
 
 pub mod activity;
 pub mod audit_event;
+pub mod executor;
 pub mod init;
 pub mod job;
 pub mod job_run;
+pub mod policy;
+pub mod reconcile;
 pub mod skill;
 pub mod task;
 pub mod task_template;

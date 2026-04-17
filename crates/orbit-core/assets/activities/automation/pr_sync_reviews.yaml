@@ -1,0 +1,26 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: pr_sync_reviews
+spec:
+  spec_type: automation
+  description: Publish pending review threads from batch tasks to their GitHub PR.
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Job run ID (batch_id) to identify the batch whose review threads should be synced.
+      batch_id:
+        type: string
+        description: Original batch identifier when this step runs inside a nested review or fix-loop job.
+  output_schema_json:
+    type: object
+    properties:
+      synced_count:
+        type: integer
+        description: Number of review threads published to GitHub.
+  action: pr_sync_reviews
+  created_by: system

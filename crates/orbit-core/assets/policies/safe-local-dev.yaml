@@ -1,0 +1,29 @@
+schemaVersion: 1
+kind: Policy
+metadata:
+  name: safe-local-dev
+spec:
+  description: Safe defaults for local development
+  filesystem:
+    allow_write:
+      - ./
+    deny_write:
+      - ~/.ssh
+      - ~/.aws
+  network:
+    mode: deny_by_default
+    allow_hosts: []
+  process:
+    allow_commands:
+      - make
+      - cargo
+      - go
+      - npm
+      - git
+  approval:
+    require_for:
+      - git push
+      - gh pr create
+  tools:
+    allow: []
+    deny: []

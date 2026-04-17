@@ -14,19 +14,26 @@ pub mod review_thread_add;
 pub mod review_thread_list;
 pub mod review_thread_reply;
 pub mod review_thread_resolve;
+pub mod state_get;
+pub mod state_set;
 pub mod task_add;
 pub mod task_approve;
 pub mod task_delete;
 pub mod task_lint;
 pub mod task_list;
+pub mod task_locks;
 pub mod task_reject;
 pub mod task_show;
 pub mod task_start;
 pub mod task_update;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_knowledge::graph::nodes::CodebaseGraphV1;
+use orbit_knowledge::graph::object_store::GraphObjectStore;
+use orbit_store::state_io;
 use orbit_types::{OrbitError, ToolParam};
 use serde_json::Value;
 
@@ -47,6 +54,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_approve::OrbitTaskApproveTool);
     registry.register(task_delete::OrbitTaskDeleteTool);
     registry.register(task_lint::OrbitTaskLintTool);
+    registry.register(task_locks::OrbitTaskLocksTool);
     registry.register(task_start::OrbitTaskStartTool);
     registry.register(task_reject::OrbitTaskRejectTool);
     registry.register(task_show::OrbitTaskShowTool);
@@ -68,6 +76,8 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(review_thread_list::OrbitReviewThreadListTool);
     registry.register(review_thread_reply::OrbitReviewThreadReplyTool);
     registry.register(review_thread_resolve::OrbitReviewThreadResolveTool);
+    registry.register(state_get::OrbitStateGetTool);
+    registry.register(state_set::OrbitStateSetTool);
 }
 
 fn build_actor_label(agent: Option<&str>, model: Option<&str>) -> Option<String> {
@@ -230,6 +240,98 @@ pub(super) fn optional_string(input: &Value, key: &str) -> Result<Option<String>
     }
 }
 
+pub(super) fn has_explicit_knowledge_dir(input: &Value) -> bool {
+    input
+        .get("knowledge_dir")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty())
+}
+
+pub(super) fn maybe_refresh_knowledge_graph(
+    ctx: &ToolContext,
+    input: &Value,
+    knowledge_dir: &Path,
+) {
+    if has_explicit_knowledge_dir(input) {
+        return;
+    }
+
+    let Some(workspace_root) = ctx.workspace_root.as_deref() else {
+        return;
+    };
+
+    let _ = orbit_knowledge::pipeline::ensure_fresh(knowledge_dir, workspace_root);
+}
+
+pub(super) fn load_graph_for_read(
+    ctx: &ToolContext,
+    input: &Value,
+) -> Result<CodebaseGraphV1, OrbitError> {
+    let knowledge_dir = knowledge_write::resolve_knowledge_dir(ctx, input)?;
+    maybe_refresh_knowledge_graph(ctx, input, &knowledge_dir);
+
+    GraphObjectStore::new(knowledge_dir.join("graph"))
+        .read_graph()
+        .map_err(|e| OrbitError::Execution(format!("failed to load knowledge graph: {e}")))
+}
+
+pub(super) fn resolve_state_dir(ctx: &ToolContext, input: &Value) -> Result<PathBuf, OrbitError> {
+    if let Some(state_dir) = optional_string_alias(input, &["state_dir", "stateDir", "state-dir"])?
+    {
+        return Ok(PathBuf::from(state_dir));
+    }
+    if let Ok(state_dir) = std::env::var("ORBIT_STATE_DIR") {
+        let trimmed = state_dir.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
+    let run_id = optional_string_alias(input, &["run_id", "runId", "run-id"])?.or_else(|| {
+        std::env::var("ORBIT_RUN_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
+    let run_id = run_id.ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "missing `state_dir`; provide `state_dir` or `run_id`, or set ORBIT_STATE_DIR/ORBIT_RUN_ID"
+                .to_string(),
+        )
+    })?;
+
+    let orbit_root = ctx
+        .orbit_root
+        .clone()
+        .or_else(|| std::env::var("ORBIT_ROOT").ok().map(PathBuf::from))
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "cannot resolve active run path without orbit_root; pass `state_dir` explicitly"
+                    .to_string(),
+            )
+        })?;
+
+    state_io::resolve_active_run_state_dir(&orbit_root, &run_id)?
+        .ok_or(OrbitError::JobRunNotFound(run_id))
+}
+
+pub(super) fn resolve_step_index(input: &Value) -> Result<u32, OrbitError> {
+    if let Some(step_index) = optional_u32_alias(input, &["step_index", "stepIndex", "step-index"])?
+    {
+        return Ok(step_index);
+    }
+    let raw = std::env::var("ORBIT_STEP_INDEX").map_err(|_| {
+        OrbitError::InvalidInput(
+            "missing `step_index`; provide `step_index` or set ORBIT_STEP_INDEX".to_string(),
+        )
+    })?;
+    raw.trim().parse::<u32>().map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "ORBIT_STEP_INDEX must be an unsigned integer: {error}"
+        ))
+    })
+}
+
 /// Extract an optional string from the first matching key in `keys`.
 ///
 /// Tools accept multiple key names for the same logical field to stay
@@ -256,6 +358,31 @@ pub(super) fn optional_string_alias(
         }
     }
 
+    Ok(None)
+}
+
+pub(super) fn optional_u32_alias(input: &Value, keys: &[&str]) -> Result<Option<u32>, OrbitError> {
+    for key in keys {
+        if let Some(value) = input.get(*key) {
+            let raw = match value {
+                Value::String(value) => value.trim().to_string(),
+                Value::Number(value) => value.to_string(),
+                _ => {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "`{key}` must be a string or integer"
+                    )));
+                }
+            };
+            if raw.is_empty() {
+                return Err(OrbitError::InvalidInput(format!(
+                    "`{key}` must not be empty"
+                )));
+            }
+            return raw.parse::<u32>().map(Some).map_err(|error| {
+                OrbitError::InvalidInput(format!("`{key}` must be an unsigned integer: {error}"))
+            });
+        }
+    }
     Ok(None)
 }
 

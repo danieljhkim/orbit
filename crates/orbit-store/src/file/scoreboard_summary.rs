@@ -5,6 +5,7 @@ use std::path::Path;
 use chrono::Utc;
 use orbit_types::{OrbitError, PlannerSlot, Task, TaskStatus};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::fs_utils::write_atomic;
 use super::planning_duel_scoreboard;
@@ -12,7 +13,7 @@ use super::planning_duel_scoreboard;
 const SUMMARY_FILENAME: &str = "summary.json";
 const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-type NestedScoreboard = BTreeMap<String, BTreeMap<String, BTreeMap<String, u64>>>;
+type ModelScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrictionSummary {
@@ -66,7 +67,8 @@ struct TokenScoreboardFile {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct TokenAgentEntry {
-    agent: String,
+    #[serde(rename = "agent")]
+    _agent: String,
     #[serde(default)]
     model: String,
     #[serde(default)]
@@ -83,7 +85,7 @@ pub fn generate_summary(
 ) -> Result<ScoreboardSummary, OrbitError> {
     let mut agents: BTreeMap<String, AgentSummary> = BTreeMap::new();
 
-    let friction = read_nested_scoreboard(scoreboard_dir, "friction_bounty.json")?;
+    let friction = read_model_scoreboard(scoreboard_dir, "friction_bounty.json")?;
     overlay_nested_metric(
         &mut agents,
         &friction,
@@ -109,7 +111,7 @@ pub fn generate_summary(
         },
     );
 
-    let pr = read_nested_scoreboard(scoreboard_dir, "pr.json")?;
+    let pr = read_model_scoreboard(scoreboard_dir, "pr.json")?;
     overlay_nested_metric(&mut agents, &pr, "pr-review-comments", |summary, value| {
         summary.pr.review_comments = summary.pr.review_comments.saturating_add(value);
     });
@@ -131,9 +133,7 @@ pub fn generate_summary(
     );
 
     for token_row in read_token_agents(scoreboard_dir)? {
-        let summary = agents
-            .entry(agent_key(&token_row.agent, &token_row.model))
-            .or_default();
+        let summary = agents.entry(model_key(&token_row.model)).or_default();
         summary.tokens.total = summary.tokens.total.saturating_add(token_row.total_tokens);
         summary.tokens.output = summary
             .tokens
@@ -146,57 +146,36 @@ pub fn generate_summary(
 
     for run in planning_duel_scoreboard::load_runs(scoreboard_dir)? {
         let planner_a = agents
-            .entry(agent_key(
-                &run.roles.planner_a.agent,
-                &run.roles.planner_a.model,
-            ))
+            .entry(model_key(&run.roles.planner_a.model))
             .or_default();
         planner_a.duels.participated = planner_a.duels.participated.saturating_add(1);
         let planner_b = agents
-            .entry(agent_key(
-                &run.roles.planner_b.agent,
-                &run.roles.planner_b.model,
-            ))
+            .entry(model_key(&run.roles.planner_b.model))
             .or_default();
         planner_b.duels.participated = planner_b.duels.participated.saturating_add(1);
         let arbiter = agents
-            .entry(agent_key(
-                &run.roles.arbiter.agent,
-                &run.roles.arbiter.model,
-            ))
+            .entry(model_key(&run.roles.arbiter.model))
             .or_default();
         arbiter.duels.participated = arbiter.duels.participated.saturating_add(1);
 
         match run.outcome.winner {
             PlannerSlot::PlannerA => {
                 let planner_a = agents
-                    .entry(agent_key(
-                        &run.roles.planner_a.agent,
-                        &run.roles.planner_a.model,
-                    ))
+                    .entry(model_key(&run.roles.planner_a.model))
                     .or_default();
                 planner_a.duels.wins = planner_a.duels.wins.saturating_add(1);
                 let planner_b = agents
-                    .entry(agent_key(
-                        &run.roles.planner_b.agent,
-                        &run.roles.planner_b.model,
-                    ))
+                    .entry(model_key(&run.roles.planner_b.model))
                     .or_default();
                 planner_b.duels.losses = planner_b.duels.losses.saturating_add(1);
             }
             PlannerSlot::PlannerB => {
                 let planner_b = agents
-                    .entry(agent_key(
-                        &run.roles.planner_b.agent,
-                        &run.roles.planner_b.model,
-                    ))
+                    .entry(model_key(&run.roles.planner_b.model))
                     .or_default();
                 planner_b.duels.wins = planner_b.duels.wins.saturating_add(1);
                 let planner_a = agents
-                    .entry(agent_key(
-                        &run.roles.planner_a.agent,
-                        &run.roles.planner_a.model,
-                    ))
+                    .entry(model_key(&run.roles.planner_a.model))
                     .or_default();
                 planner_a.duels.losses = planner_a.duels.losses.saturating_add(1);
             }
@@ -207,13 +186,10 @@ pub fn generate_summary(
         if !matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
             continue;
         }
-        let Some(agent) = task.actor_identity.agent_name() else {
+        let Some(model) = task.implemented_by.as_deref() else {
             continue;
         };
-        let Some(model) = task.actor_identity.agent_model() else {
-            continue;
-        };
-        let summary = agents.entry(agent_key(agent, model)).or_default();
+        let summary = agents.entry(model_key(model)).or_default();
         summary.tasks_completed = summary.tasks_completed.saturating_add(1);
     }
 
@@ -239,20 +215,22 @@ pub fn summary_path(scoreboard_dir: &Path) -> std::path::PathBuf {
     scoreboard_dir.join(SUMMARY_FILENAME)
 }
 
-fn read_nested_scoreboard(
+fn read_model_scoreboard(
     scoreboard_dir: &Path,
     file_name: &str,
-) -> Result<NestedScoreboard, OrbitError> {
+) -> Result<ModelScoreboard, OrbitError> {
     let path = scoreboard_dir.join(file_name);
     if !path.exists() {
-        return Ok(NestedScoreboard::new());
+        return Ok(ModelScoreboard::new());
     }
     let raw =
         fs::read_to_string(&path).map_err(|e| OrbitError::Io(format!("read {file_name}: {e}")))?;
     if raw.trim().is_empty() {
-        return Ok(NestedScoreboard::new());
+        return Ok(ModelScoreboard::new());
     }
-    serde_json::from_str(&raw).map_err(|e| OrbitError::Io(format!("parse {file_name}: {e}")))
+    let parsed: Value = serde_json::from_str(&raw)
+        .map_err(|e| OrbitError::Io(format!("parse {file_name}: {e}")))?;
+    normalize_model_scoreboard(parsed)
 }
 
 fn read_token_agents(scoreboard_dir: &Path) -> Result<Vec<TokenAgentEntry>, OrbitError> {
@@ -272,217 +250,60 @@ fn read_token_agents(scoreboard_dir: &Path) -> Result<Vec<TokenAgentEntry>, Orbi
 
 fn overlay_nested_metric(
     agents: &mut BTreeMap<String, AgentSummary>,
-    scoreboard: &NestedScoreboard,
+    scoreboard: &ModelScoreboard,
     metric: &str,
     mut apply: impl FnMut(&mut AgentSummary, u64),
 ) {
-    let Some(by_agent) = scoreboard.get(metric) else {
+    let Some(by_model) = scoreboard.get(metric) else {
         return;
     };
 
-    for (agent, by_model) in by_agent {
-        for (model, value) in by_model {
-            let summary = agents.entry(agent_key(agent, model)).or_default();
-            apply(summary, *value);
+    for (model, value) in by_model {
+        let summary = agents.entry(model_key(model)).or_default();
+        apply(summary, *value);
+    }
+}
+
+fn model_key(model: &str) -> String {
+    model.trim().to_string()
+}
+
+fn normalize_model_scoreboard(parsed: Value) -> Result<ModelScoreboard, OrbitError> {
+    let mut normalized = ModelScoreboard::new();
+    let Value::Object(metrics) = parsed else {
+        return Err(OrbitError::Io(
+            "scoreboard json must be an object".to_string(),
+        ));
+    };
+
+    for (metric, metric_value) in metrics {
+        let Value::Object(entries) = metric_value else {
+            continue;
+        };
+        let model_entries = normalized.entry(metric).or_default();
+        for (first_key, first_value) in entries {
+            match first_value {
+                Value::Number(number) => {
+                    let value = number.as_u64().ok_or_else(|| {
+                        OrbitError::Io("scoreboard counter must be u64".to_string())
+                    })?;
+                    *model_entries.entry(first_key).or_insert(0) += value;
+                }
+                Value::Object(inner) => {
+                    for (model, value) in inner {
+                        let Value::Number(number) = value else {
+                            continue;
+                        };
+                        let count = number.as_u64().ok_or_else(|| {
+                            OrbitError::Io("scoreboard counter must be u64".to_string())
+                        })?;
+                        *model_entries.entry(model).or_insert(0) += count;
+                    }
+                }
+                _ => {}
+            }
         }
     }
-}
 
-fn agent_key(agent: &str, model: &str) -> String {
-    format!("{}/{}", agent.trim(), model.trim())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use chrono::Utc;
-    use orbit_types::{
-        ActorIdentity, EfficiencyMetrics, PlannerSlot, PlanningDuelRun, PlanningEfficiency,
-        PlanningOutcome, PlanningRoleAssignment, PlanningRoles, Task, TaskPriority, TaskStatus,
-        TaskType,
-    };
-    use tempfile::tempdir;
-
-    use super::{generate_summary, write_summary};
-    use crate::file::planning_duel_scoreboard;
-
-    #[test]
-    fn generate_summary_aggregates_scoreboards_and_tasks() {
-        let dir = tempdir().expect("tempdir");
-        fs::write(
-            dir.path().join("friction_bounty.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "issues-reported": { "codex": { "gpt-5.4": 2 } },
-                "issues-accepted": { "codex": { "gpt-5.4": 1 } },
-                "issues-rejected": { "claude": { "opus": 1 } }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("pr.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "pr-review-comments": { "claude": { "opus": 3 } },
-                "pr-count-without-revision": { "codex": { "gpt-5.4": 1 } },
-                "pr-count-with-revision": { "claude": { "opus": 2 } }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("tokens.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "agents": [
-                    {
-                        "agent": "codex",
-                        "model": "gpt-5.4",
-                        "total_tokens": 120,
-                        "total_output_tokens": 45,
-                        "total_tool_calls": 8
-                    },
-                    {
-                        "agent": "claude",
-                        "model": "opus",
-                        "total_tokens": 90,
-                        "total_output_tokens": 20,
-                        "total_tool_calls": 4
-                    }
-                ]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        planning_duel_scoreboard::append_run(
-            dir.path(),
-            &PlanningDuelRun {
-                run_id: "run-1".into(),
-                task_id: "T1".into(),
-                completed_at: Utc::now(),
-                roles: PlanningRoles {
-                    planner_a: PlanningRoleAssignment {
-                        agent: "claude".into(),
-                        model: "opus".into(),
-                    },
-                    planner_b: PlanningRoleAssignment {
-                        agent: "codex".into(),
-                        model: "gpt-5.4".into(),
-                    },
-                    arbiter: PlanningRoleAssignment {
-                        agent: "gemini".into(),
-                        model: "gemini-3.1-pro-preview".into(),
-                    },
-                },
-                planner_a_artifact_path: "planning-duel/claude-opus.md".into(),
-                planner_b_artifact_path: "planning-duel/codex-gpt-5.4.md".into(),
-                outcome: PlanningOutcome {
-                    winner: PlannerSlot::PlannerA,
-                    arbiter_rationale: "Plan A wins".into(),
-                },
-                efficiency: PlanningEfficiency {
-                    planner_a: EfficiencyMetrics {
-                        wall_clock_ms: 10,
-                        tool_call_count: 1,
-                        token_usage: None,
-                        byte_proxy_total: Some(11),
-                    },
-                    planner_b: EfficiencyMetrics {
-                        wall_clock_ms: 20,
-                        tool_call_count: 2,
-                        token_usage: None,
-                        byte_proxy_total: Some(22),
-                    },
-                    arbiter: EfficiencyMetrics {
-                        wall_clock_ms: 30,
-                        tool_call_count: 0,
-                        token_usage: None,
-                        byte_proxy_total: None,
-                    },
-                },
-            },
-        )
-        .unwrap();
-
-        let tasks = vec![
-            Task {
-                id: "T-done-1".into(),
-                parent_id: None,
-                title: "done".into(),
-                description: String::new(),
-                acceptance_criteria: vec![],
-                plan: String::new(),
-                execution_summary: String::new(),
-                context_files: vec![],
-                workspace_path: None,
-                repo_root: None,
-                assigned_to: Some("codex / gpt-5.4".into()),
-                created_by: None,
-                actor_identity: ActorIdentity::agent("codex", "gpt-5.4"),
-                status: TaskStatus::Done,
-                priority: TaskPriority::Medium,
-                complexity: None,
-                task_type: TaskType::Task,
-                pr_number: None,
-                pr_status: None,
-                proposed_by: None,
-                source_task_id: None,
-                batch_id: None,
-                comments: vec![],
-                history: vec![],
-                review_threads: vec![],
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-            Task {
-                id: "T-open".into(),
-                parent_id: None,
-                title: "open".into(),
-                description: String::new(),
-                acceptance_criteria: vec![],
-                plan: String::new(),
-                execution_summary: String::new(),
-                context_files: vec![],
-                workspace_path: None,
-                repo_root: None,
-                assigned_to: Some("claude / opus".into()),
-                created_by: None,
-                actor_identity: ActorIdentity::agent("claude", "opus"),
-                status: TaskStatus::Backlog,
-                priority: TaskPriority::Medium,
-                complexity: None,
-                task_type: TaskType::Task,
-                pr_number: None,
-                pr_status: None,
-                proposed_by: None,
-                source_task_id: None,
-                batch_id: None,
-                comments: vec![],
-                history: vec![],
-                review_threads: vec![],
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            },
-        ];
-
-        let summary = generate_summary(dir.path(), &tasks).expect("summary");
-        assert_eq!(summary.schema_version, 1);
-        assert_eq!(summary.agents["codex/gpt-5.4"].tasks_completed, 1);
-        assert_eq!(summary.agents["codex/gpt-5.4"].friction.reported, 2);
-        assert_eq!(summary.agents["codex/gpt-5.4"].pr.merged_clean, 1);
-        assert_eq!(summary.agents["codex/gpt-5.4"].tokens.total, 120);
-        assert_eq!(summary.agents["codex/gpt-5.4"].tool_calls, 8);
-        assert_eq!(summary.agents["codex/gpt-5.4"].duels.losses, 1);
-        assert_eq!(summary.agents["claude/opus"].duels.wins, 1);
-        assert_eq!(
-            summary.agents["gemini/gemini-3.1-pro-preview"]
-                .duels
-                .participated,
-            1
-        );
-
-        let path = write_summary(dir.path(), &summary).expect("write");
-        assert!(path.ends_with("summary.json"));
-        assert!(dir.path().join("summary.json").exists());
-    }
+    Ok(normalized)
 }

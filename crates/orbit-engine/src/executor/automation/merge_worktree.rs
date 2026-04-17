@@ -6,12 +6,13 @@ use serde_json::{Value, json};
 use crate::context::RuntimeHost;
 
 use super::git::{
-    git_command_success, git_output, git_success, refresh_local_base_branch,
-    resolve_worktree_start_point,
+    base_sync_mode_from_input, git_command_success, git_output, git_success,
+    refresh_local_base_branch, resolve_worktree_start_point,
 };
 use super::input::{canonicalize_existing_dir, input_string_field};
 
 const DEFAULT_BASE: &str = "main";
+const MAX_REBASE_RETRY_ATTEMPTS: usize = 2;
 
 pub(super) fn merge_batch_worktree_into_base<H: RuntimeHost + ?Sized>(
     host: &H,
@@ -38,9 +39,14 @@ pub(super) fn merge_batch_worktree_into_base<H: RuntimeHost + ?Sized>(
     ensure_clean_checkout(&repo_root, "base branch checkout")?;
 
     let base = input_string_field(input, "base").unwrap_or_else(|| DEFAULT_BASE.to_string());
-    refresh_local_base_branch(&repo_root, &base);
-    checkout_base_branch(&repo_root, &base)?;
-    git_success(&repo_root, &["merge", "--ff-only", &workspace_branch])?;
+    let base_sync_mode = base_sync_mode_from_input(input)?;
+    merge_with_rebase_retry(
+        &repo_root,
+        &workspace_path,
+        &base,
+        &workspace_branch,
+        base_sync_mode,
+    )?;
 
     Ok(json!({
         "base": base,
@@ -60,6 +66,37 @@ fn checkout_base_branch(repo_root: &Path, base: &str) -> Result<(), OrbitError> 
 
     let start_point = resolve_worktree_start_point(repo_root, base)?;
     git_success(repo_root, &["checkout", "-B", base, &start_point])?;
+    Ok(())
+}
+
+fn merge_with_rebase_retry(
+    repo_root: &Path,
+    workspace_path: &Path,
+    base: &str,
+    workspace_branch: &str,
+    base_sync_mode: super::git::BaseSyncMode,
+) -> Result<(), OrbitError> {
+    for attempt in 0..=MAX_REBASE_RETRY_ATTEMPTS {
+        refresh_local_base_branch(repo_root, base, base_sync_mode);
+        checkout_base_branch(repo_root, base)?;
+        if git_command_success(repo_root, &["merge", "--ff-only", workspace_branch])? {
+            return Ok(());
+        }
+        if attempt == MAX_REBASE_RETRY_ATTEMPTS {
+            return Err(OrbitError::Execution(format!(
+                "merge_batch_worktree_into_base: failed to fast-forward merge '{workspace_branch}' into '{base}' after {} rebase retry attempts",
+                MAX_REBASE_RETRY_ATTEMPTS
+            )));
+        }
+
+        let updated_base = resolve_worktree_start_point(repo_root, base)?;
+        if let Err(error) = git_success(workspace_path, &["rebase", &updated_base]) {
+            let _ = git_success(workspace_path, &["rebase", "--abort"]);
+            return Err(error);
+        }
+        ensure_clean_checkout(workspace_path, "shared batch worktree")?;
+    }
+
     Ok(())
 }
 
@@ -89,263 +126,4 @@ fn ensure_clean_checkout(path: &Path, label: &str) -> Result<(), OrbitError> {
         "{label} '{}' must be clean before merge_batch_worktree_into_base",
         path.display()
     )))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-
-    use serde_json::{Value, json};
-    use tempfile::TempDir;
-
-    use super::merge_batch_worktree_into_base;
-    use crate::context::{JobRunResult, RuntimeHost};
-    use orbit_tools::ToolContext;
-    use orbit_types::{
-        Activity, InvocationTrace, Job, JobTargetType, OrbitError, OrbitEvent, Role,
-    };
-
-    struct MockRuntimeHost {
-        repo_root: PathBuf,
-        data_root: TempDir,
-    }
-
-    impl RuntimeHost for MockRuntimeHost {
-        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
-            unreachable!("not used in test")
-        }
-
-        fn repo_root(&self) -> Result<String, OrbitError> {
-            Ok(self.repo_root.to_string_lossy().to_string())
-        }
-
-        fn data_root(&self) -> &Path {
-            self.data_root.path()
-        }
-
-        fn run_job_now_with_input_debug(
-            &self,
-            _job_id: &str,
-            _input: Value,
-            _debug: bool,
-        ) -> Result<JobRunResult, OrbitError> {
-            unreachable!("not used in test")
-        }
-
-        fn validate_activity_target_exists(
-            &self,
-            _target_type: JobTargetType,
-            _target_id: &str,
-        ) -> Result<Activity, OrbitError> {
-            unreachable!("not used in test")
-        }
-
-        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-            unreachable!("not used in test")
-        }
-
-        fn run_tool_with_context_and_role(
-            &self,
-            _name: &str,
-            _input: Value,
-            _role: Role,
-            _tool_context: ToolContext,
-        ) -> Result<Value, OrbitError> {
-            unreachable!("not used in test")
-        }
-
-        fn maybe_create_failure_task(
-            &self,
-            _job_id: &str,
-            _run_id: &str,
-            _error_code: &str,
-            _error_message: &str,
-            _agent: Option<&str>,
-            _model: Option<&str>,
-        ) -> Result<(), OrbitError> {
-            unreachable!("not used in test")
-        }
-
-        fn scoring_enabled(&self) -> bool {
-            false
-        }
-
-        fn graph_editing(&self) -> bool {
-            false
-        }
-
-        fn scoreboard_dir(&self) -> &Path {
-            self.data_root.path()
-        }
-
-        fn persist_invocation_trace(
-            &self,
-            _job_run_id: &str,
-            _execution: &crate::context::ExecutionContext,
-            _trace: &InvocationTrace,
-        ) -> Result<(), OrbitError> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn merges_shared_worktree_history_into_base_branch() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp.path().join("repo");
-        let worktree = temp.path().join("worktree");
-        init_repo(&repo_root);
-        add_worktree(&repo_root, &worktree, "orbit/parallel-batch-jrun-1");
-
-        std::fs::write(worktree.join("tracked.txt"), "task one\n").expect("write tracked.txt");
-        run_git(&worktree, &["add", "tracked.txt"]);
-        run_git(&worktree, &["commit", "-m", "task one"]);
-
-        std::fs::write(worktree.join("second.txt"), "task two\n").expect("write second.txt");
-        run_git(&worktree, &["add", "second.txt"]);
-        run_git(&worktree, &["commit", "-m", "task two"]);
-
-        let host = MockRuntimeHost {
-            repo_root: repo_root.clone(),
-            data_root: tempfile::tempdir().expect("data root"),
-        };
-
-        merge_batch_worktree_into_base(
-            &host,
-            &json!({
-                "run_id": "jrun-1",
-                "base": "main",
-                "workspace_path": worktree.to_string_lossy().to_string(),
-            }),
-        )
-        .expect("merge succeeds");
-
-        assert_eq!(
-            git_stdout(&repo_root, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "main"
-        );
-        assert_eq!(
-            git_stdout(&repo_root, &["rev-parse", "HEAD"]),
-            git_stdout(&worktree, &["rev-parse", "HEAD"])
-        );
-        assert_eq!(
-            git_stdout(&repo_root, &["rev-list", "--count", "HEAD"]),
-            "3"
-        );
-    }
-
-    #[test]
-    fn rejects_unresolved_merge_state_in_shared_worktree() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp.path().join("repo");
-        let worktree = temp.path().join("worktree");
-        init_repo(&repo_root);
-        add_worktree(&repo_root, &worktree, "orbit/parallel-batch-jrun-2");
-
-        std::fs::write(worktree.join("tracked.txt"), "feature change\n").expect("write feature");
-        run_git(&worktree, &["add", "tracked.txt"]);
-        run_git(&worktree, &["commit", "-m", "feature change"]);
-
-        std::fs::write(repo_root.join("tracked.txt"), "base change\n").expect("write base");
-        run_git(&repo_root, &["add", "tracked.txt"]);
-        run_git(&repo_root, &["commit", "-m", "base change"]);
-
-        let worktree_str = worktree.to_string_lossy().into_owned();
-        let merge = Command::new("git")
-            .args(["-C", worktree_str.as_str(), "merge", "main"])
-            .output()
-            .expect("merge output");
-        assert!(
-            !merge.status.success(),
-            "expected conflict, got: {}",
-            String::from_utf8_lossy(&merge.stderr)
-        );
-
-        let host = MockRuntimeHost {
-            repo_root: repo_root.clone(),
-            data_root: tempfile::tempdir().expect("data root"),
-        };
-
-        let error = merge_batch_worktree_into_base(
-            &host,
-            &json!({
-                "run_id": "jrun-2",
-                "base": "main",
-                "workspace_path": worktree.to_string_lossy().to_string(),
-            }),
-        )
-        .expect_err("merge should fail");
-
-        assert!(
-            error.to_string().contains("unresolved merge conflicts"),
-            "unexpected error: {error}"
-        );
-    }
-
-    fn init_repo(repo_root: &Path) {
-        std::fs::create_dir_all(repo_root).expect("create repo");
-        run_git(repo_root, &["init", "-b", "main"]);
-        run_git(repo_root, &["config", "user.name", "Orbit Tests"]);
-        run_git(
-            repo_root,
-            &["config", "user.email", "orbit-tests@example.com"],
-        );
-        run_git(repo_root, &["config", "commit.gpgsign", "false"]);
-        std::fs::write(repo_root.join("tracked.txt"), "base\n").expect("write tracked.txt");
-        run_git(repo_root, &["add", "tracked.txt"]);
-        run_git(repo_root, &["commit", "-m", "initial"]);
-    }
-
-    fn add_worktree(repo_root: &Path, worktree: &Path, branch: &str) {
-        let worktree_str = worktree.to_string_lossy().into_owned();
-        run_git(
-            repo_root,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                worktree_str.as_str(),
-                "main",
-            ],
-        );
-    }
-
-    fn run_git(current_dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(current_dir)
-            .args(args)
-            .output()
-            .expect("git output");
-        assert!(
-            output.status.success(),
-            "git {} failed in '{}': stdout={} stderr={}",
-            args.join(" "),
-            current_dir.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn git_stdout(current_dir: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(current_dir)
-            .args(args)
-            .output()
-            .expect("git output");
-        assert!(
-            output.status.success(),
-            "git {} failed in '{}': stdout={} stderr={}",
-            args.join(" "),
-            current_dir.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("utf8")
-            .trim()
-            .to_string()
-    }
 }

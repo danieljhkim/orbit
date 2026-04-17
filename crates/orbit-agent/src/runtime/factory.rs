@@ -1,7 +1,9 @@
 use orbit_types::OrbitError;
 
 use crate::agent::{AgentConfig, ProviderOptions};
-use crate::providers::{ClaudeRuntime, CodexRuntime, GeminiRuntime, MockAgentRuntime};
+use crate::providers::{
+    ClaudeRuntime, CodexRuntime, GeminiRuntime, MockAgentRuntime, OllamaRuntime,
+};
 use crate::runtime::RuntimeBackend;
 
 pub(crate) fn resolve_runtime(cfg: &AgentConfig) -> Result<RuntimeBackend, OrbitError> {
@@ -25,6 +27,10 @@ pub(crate) fn resolve_runtime(cfg: &AgentConfig) -> Result<RuntimeBackend, Orbit
             cfg.command.clone(),
             cfg.model.clone(),
         ))),
+        ProviderOptions::Ollama => Ok(RuntimeBackend::OllamaCli(OllamaRuntime::new(
+            cfg.command.clone(),
+            cfg.model.clone(),
+        )?)),
         ProviderOptions::Mock => Ok(RuntimeBackend::MockAgentCli(MockAgentRuntime::new(
             cfg.command.clone(),
         ))),

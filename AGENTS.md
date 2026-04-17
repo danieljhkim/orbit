@@ -10,16 +10,15 @@ Project instructions for agents working on Orbit.
 - Don't add cross-crate dependencies without checking the architecture diagram below.
 - When you hit friction, ambiguity, naming drift, or duplicated sources of truth: file a self-reported friction task via the `orbit-track-issues` skill instead of working around it.
 - Reserve task type `friction` for agent self-reports only. Do not use `friction` for normal user-requested work, backlog shaping, or generic bug tracking.
+- DO NOT WRITE UNIT TESTS or RUN TESTS
 
 ## Project Do's
 
 - Use subagents to support you through large tasks and keep your context window clean.
-- Use terse/succinct prose in all agent-written text: tasks, docs, comments, commit messages.
 
-## Build / Test / Lint
+## Build / Lint
 
 - Build: `make build`
-- Test:  `make test`
 - Fmt:   `make fmt`
 
 All must pass before a task moves to `review`.
@@ -43,7 +42,10 @@ orbit-types → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → or
 | Artifact        | Strategy           | Rationale                                        |
 |-----------------|--------------------|--------------------------------------------------|
 | Tasks           | WorkspaceOnly      | Per-repo backlog, no cross-project leaking       |
-| Activities/Jobs | MergeByKey         | Global defaults + workspace overrides            |
+| Activities      | GlobalOnly         | Single authoritative activity catalog            |
+| Jobs            | GlobalOnly         | Single authoritative job catalog                 |
+| Executors       | GlobalOnly         | Single authoritative executor catalog            |
+| Policies        | GlobalOnly         | Single authoritative policy catalog              |
 | Job Runs        | WorkspaceOnly      | Execution artifacts are workspace-local          |
 | Skills          | WorkspaceReplaces  | Workspace has full control over available skills |
 | Audit           | GlobalOnly         | Single authoritative event trail                 |
@@ -52,15 +54,10 @@ orbit-types → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → or
 
 For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs), invoke the relevant `orbit-*` skill. The `orbit` skill is the entry point and router.
 
+
 ## Task Authoring Quality
 
-Follow the `## Task Quality Standards` section in `orbit-create-task` skill: deterministic mock-based testing, explicit observable definitions for summary fields (`purpose`, etc.), and testability-preserving implementation patterns.
-
-## Agent Identity
-
-**Signature** (used in PR bodies, comments, commit messages, review summaries):
-
-> *authored by: codex / gpt-5.4*
+Follow the `## Task Quality Standards` section in `orbit-create-task` skill: explicit observable definitions for summary fields (`purpose`, etc.), and testability-preserving implementation patterns.
 
 **Commits**:
 

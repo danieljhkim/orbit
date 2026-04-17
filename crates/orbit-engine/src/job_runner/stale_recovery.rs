@@ -12,6 +12,21 @@ use crate::context::{
 
 use super::friction::{FrictionContext, append_failed_step_friction_without_execution};
 
+fn stale_failure_step_index<H: JobRunHost>(host: &H, run: &JobRun) -> usize {
+    host.read_run_state(&run.run_id)
+        .ok()
+        .flatten()
+        .map(|state| state.next_step_index as usize)
+        .or_else(|| {
+            run.steps
+                .iter()
+                .map(|step| step.step_index as usize)
+                .max()
+                .map(|index| index.saturating_add(1))
+        })
+        .unwrap_or(0)
+}
+
 pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
     host: &H,
     data_root: &Path,
@@ -37,13 +52,16 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
             let duration_ms = active_run
                 .started_at
                 .map(|started| now.signed_duration_since(started).num_milliseconds().max(0) as u64);
-            if let Some(first_step) = job.steps.first() {
+            let failure_step_index = stale_failure_step_index(host, &active_run);
+            if !job.steps.is_empty()
+                && let Some(step) = job.steps.get(failure_step_index % job.steps.len())
+            {
                 let _ = host.complete_job_run_step(
                     &active_run.run_id,
                     &JobRunStepParams {
-                        step_index: 0,
-                        target_type: first_step.target_type,
-                        target_id: first_step.target_id.clone(),
+                        step_index: failure_step_index,
+                        target_type: step.target_type,
+                        target_id: step.target_id.clone(),
                         started_at: active_run.started_at.unwrap_or(active_run.created_at),
                         finished_at: now,
                         duration_ms,
@@ -57,7 +75,7 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
                 append_failed_step_friction_without_execution(
                     data_root,
                     &active_run.run_id,
-                    &first_step.target_id,
+                    &step.target_id,
                     FrictionContext::default(),
                     Some(1),
                     &error_message,
@@ -99,13 +117,16 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
             STALE_RUN_GRACE_SECONDS
         );
 
-        if let Some(first_step) = job.steps.first() {
+        let failure_step_index = stale_failure_step_index(host, &active_run);
+        if !job.steps.is_empty()
+            && let Some(step) = job.steps.get(failure_step_index % job.steps.len())
+        {
             let _ = host.complete_job_run_step(
                 &active_run.run_id,
                 &JobRunStepParams {
-                    step_index: 0,
-                    target_type: first_step.target_type,
-                    target_id: first_step.target_id.clone(),
+                    step_index: failure_step_index,
+                    target_type: step.target_type,
+                    target_id: step.target_id.clone(),
                     started_at: active_run.started_at.unwrap_or(active_run.created_at),
                     finished_at: now,
                     duration_ms,
@@ -119,7 +140,7 @@ pub fn recover_stale_active_run_for_job<H: JobRunHost + RuntimeHost>(
             append_failed_step_friction_without_execution(
                 data_root,
                 &active_run.run_id,
-                &first_step.target_id,
+                &step.target_id,
                 FrictionContext::default(),
                 Some(1),
                 &message,
@@ -158,7 +179,7 @@ fn pid_is_alive(_pid: u32) -> bool {
 }
 
 #[cfg(unix)]
-fn owner_process_missing_or_reused(run: &JobRun) -> bool {
+pub(crate) fn owner_process_missing_or_reused(run: &JobRun) -> bool {
     let Some(pid) = run.pid else {
         return false;
     };
@@ -179,7 +200,7 @@ fn owner_process_missing_or_reused(_run: &JobRun) -> bool {
 }
 
 #[cfg(unix)]
-fn abandoned_run_message(run: &JobRun, pid: u32) -> String {
+pub(crate) fn abandoned_run_message(run: &JobRun, pid: u32) -> String {
     if let Some(expected) = run.pid_start_time.as_deref()
         && process_start_time_token(pid)
             .as_deref()

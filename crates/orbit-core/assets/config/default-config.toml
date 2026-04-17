@@ -20,26 +20,8 @@ sandbox = "workspace-write"
 required_for_agent = true
 delegate_approval = true
 
-[agents.claude]
-strong = "opus-4.6"
-weak = "sonnet-4.6"
-
-[agents.codex]
-strong = "gpt-5.4"
-weak = "gpt-5.4-mini"
-
-[agents.gemini]
-strong = "gemini-3.1-pro-preview"
-weak = "gemini-3-flash-preview"
-
-[workflow.ship]
-plan = { agent = "claude", model = "opus-4.6" }
-implement = { agent = "codex", model = "gpt-5.4" }
-review = { agent = "claude", model = "sonnet-4.6" }
-finalize = { agent = "gemini", model = "gemini-3.1-pro-preview" }
-
 [scoring]
-enabled = false
+enabled = true
 
 [graph]
 editing = false

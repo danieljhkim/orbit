@@ -3,16 +3,13 @@ use std::sync::Arc;
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    ActivityStoreBackend, AuditEventStoreBackend, JobStoreBackend, TaskStoreBackend,
-    ToolStoreBackend,
+    ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobStoreBackend,
+    PolicyDefStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
-use orbit_types::{AgentModelPair, WorkspacePaths};
+use orbit_types::WorkspacePaths;
 
-use crate::config::{
-    AgentAssignment, AgentModelsConfig, CodexExecutionPolicy, ExecutionEnvPolicy,
-    PersistenceConfig, ShipWorkflowConfig,
-};
+use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
@@ -73,69 +70,125 @@ impl Default for ActorIdentity {
 #[derive(Clone)]
 pub struct OrbitContext {
     paths: WorkspacePaths,
-    task_store: Arc<dyn TaskStoreBackend>,
-    activity_store: Arc<dyn ActivityStoreBackend>,
-    job_store: Arc<dyn JobStoreBackend>,
-    tool_store: Arc<dyn ToolStoreBackend>,
-    audit_event_store: Arc<dyn AuditEventStoreBackend>,
-    policy: PolicyEngine,
+    stores: OrbitStores,
+    execution: OrbitExecutionAssets,
+    policy: OrbitPolicyContext,
+    runtime: OrbitRuntimeSettings,
+}
+
+#[derive(Clone)]
+pub(crate) struct OrbitStores {
+    pub(crate) task: Arc<dyn TaskStoreBackend>,
+    pub(crate) activity: Arc<dyn ActivityStoreBackend>,
+    pub(crate) job: Arc<dyn JobStoreBackend>,
+    pub(crate) tool: Arc<dyn ToolStoreBackend>,
+    pub(crate) audit_event: Arc<dyn AuditEventStoreBackend>,
+    pub(crate) executor_def: Arc<dyn ExecutorDefStoreBackend>,
+    pub(crate) policy_def: Arc<dyn PolicyDefStoreBackend>,
+}
+
+impl OrbitStores {
+    pub(crate) fn new(
+        task: Arc<dyn TaskStoreBackend>,
+        activity: Arc<dyn ActivityStoreBackend>,
+        job: Arc<dyn JobStoreBackend>,
+        tool: Arc<dyn ToolStoreBackend>,
+        audit_event: Arc<dyn AuditEventStoreBackend>,
+        executor_def: Arc<dyn ExecutorDefStoreBackend>,
+        policy_def: Arc<dyn PolicyDefStoreBackend>,
+    ) -> Self {
+        Self {
+            task,
+            activity,
+            job,
+            tool,
+            audit_event,
+            executor_def,
+            policy_def,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct OrbitExecutionAssets {
     registry: Arc<ToolRegistry>,
     skill_catalog: SkillCatalog,
+}
+
+impl OrbitExecutionAssets {
+    pub(crate) fn new(registry: Arc<ToolRegistry>, skill_catalog: SkillCatalog) -> Self {
+        Self {
+            registry,
+            skill_catalog,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct OrbitPolicyContext {
+    policy: PolicyEngine,
     execution_env_policy: ExecutionEnvPolicy,
     codex_execution_policy: CodexExecutionPolicy,
+}
+
+impl OrbitPolicyContext {
+    pub(crate) fn new(
+        policy: PolicyEngine,
+        execution_env_policy: ExecutionEnvPolicy,
+        codex_execution_policy: CodexExecutionPolicy,
+    ) -> Self {
+        Self {
+            policy,
+            execution_env_policy,
+            codex_execution_policy,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct OrbitRuntimeSettings {
     persistence: PersistenceConfig,
     actor: ActorIdentity,
     task_approval_required_for_agent: bool,
     task_delegate_approval: bool,
-    agent_models: AgentModelsConfig,
-    ship_workflow: ShipWorkflowConfig,
     scoring_enabled: bool,
     graph_editing: bool,
 }
 
-impl OrbitContext {
-    #[allow(clippy::too_many_arguments)]
+impl OrbitRuntimeSettings {
     pub(crate) fn new(
-        paths: WorkspacePaths,
-        task_store: Arc<dyn TaskStoreBackend>,
-        activity_store: Arc<dyn ActivityStoreBackend>,
-        job_store: Arc<dyn JobStoreBackend>,
-        tool_store: Arc<dyn ToolStoreBackend>,
-        audit_event_store: Arc<dyn AuditEventStoreBackend>,
-        policy: PolicyEngine,
-        registry: Arc<ToolRegistry>,
-        skill_catalog: SkillCatalog,
-        execution_env_policy: ExecutionEnvPolicy,
-        codex_execution_policy: CodexExecutionPolicy,
         persistence: PersistenceConfig,
         actor: ActorIdentity,
         task_approval_required_for_agent: bool,
         task_delegate_approval: bool,
-        agent_models: AgentModelsConfig,
-        ship_workflow: ShipWorkflowConfig,
         scoring_enabled: bool,
         graph_editing: bool,
     ) -> Self {
         Self {
-            paths,
-            task_store,
-            activity_store,
-            job_store,
-            tool_store,
-            audit_event_store,
-            policy,
-            registry,
-            skill_catalog,
-            execution_env_policy,
-            codex_execution_policy,
             persistence,
             actor,
             task_approval_required_for_agent,
             task_delegate_approval,
-            agent_models,
-            ship_workflow,
             scoring_enabled,
             graph_editing,
+        }
+    }
+}
+
+impl OrbitContext {
+    pub(crate) fn new(
+        paths: WorkspacePaths,
+        stores: OrbitStores,
+        execution: OrbitExecutionAssets,
+        policy: OrbitPolicyContext,
+        runtime: OrbitRuntimeSettings,
+    ) -> Self {
+        Self {
+            paths,
+            stores,
+            execution,
+            policy,
+            runtime,
         }
     }
 
@@ -152,92 +205,60 @@ impl OrbitContext {
         &self.paths
     }
 
-    pub(crate) fn task_store(&self) -> &Arc<dyn TaskStoreBackend> {
-        &self.task_store
-    }
-
-    pub(crate) fn activity_store(&self) -> &Arc<dyn ActivityStoreBackend> {
-        &self.activity_store
-    }
-
-    pub(crate) fn job_store(&self) -> &Arc<dyn JobStoreBackend> {
-        &self.job_store
-    }
-
-    pub(crate) fn tool_store(&self) -> &Arc<dyn ToolStoreBackend> {
-        &self.tool_store
-    }
-
-    pub(crate) fn audit_event_store(&self) -> &Arc<dyn AuditEventStoreBackend> {
-        &self.audit_event_store
+    pub(crate) fn stores(&self) -> &OrbitStores {
+        &self.stores
     }
 
     pub(crate) fn policy(&self) -> &PolicyEngine {
-        &self.policy
+        &self.policy.policy
     }
 
     pub(crate) fn set_policy(&mut self, policy: PolicyEngine) {
-        self.policy = policy;
+        self.policy.policy = policy;
     }
 
     pub(crate) fn registry(&self) -> &ToolRegistry {
-        self.registry.as_ref()
+        self.execution.registry.as_ref()
     }
 
     pub(crate) fn skill_catalog(&self) -> &SkillCatalog {
-        &self.skill_catalog
+        &self.execution.skill_catalog
     }
 
     pub(crate) fn execution_env_policy(&self) -> &ExecutionEnvPolicy {
-        &self.execution_env_policy
+        &self.policy.execution_env_policy
     }
 
     pub(crate) fn codex_execution_policy(&self) -> &CodexExecutionPolicy {
-        &self.codex_execution_policy
+        &self.policy.codex_execution_policy
     }
 
     pub(crate) fn persistence(&self) -> &PersistenceConfig {
-        &self.persistence
+        &self.runtime.persistence
     }
 
     pub(crate) fn actor(&self) -> &ActorIdentity {
-        &self.actor
+        &self.runtime.actor
     }
 
     pub(crate) fn set_actor(&mut self, actor: ActorIdentity) {
-        self.actor = actor;
+        self.runtime.actor = actor;
     }
 
     pub(crate) fn task_approval_required_for_agent(&self) -> bool {
-        self.task_approval_required_for_agent
+        self.runtime.task_approval_required_for_agent
     }
 
     pub(crate) fn task_delegate_approval(&self) -> bool {
-        self.task_delegate_approval
-    }
-
-    pub(crate) fn agent_model_pair(&self, family: &str) -> Option<AgentModelPair> {
-        self.agent_models.pair_for(family)
-    }
-
-    pub(crate) fn canonical_model_name(
-        &self,
-        agent_cli: &str,
-        model: Option<&str>,
-    ) -> Option<String> {
-        self.agent_models.canonical_model_name(agent_cli, model)
-    }
-
-    pub(crate) fn ship_role_assignment(&self, role: &str) -> Option<AgentAssignment> {
-        self.ship_workflow.role(role).cloned()
+        self.runtime.task_delegate_approval
     }
 
     pub(crate) fn scoring_enabled(&self) -> bool {
-        self.scoring_enabled
+        self.runtime.scoring_enabled
     }
 
     pub(crate) fn graph_editing(&self) -> bool {
-        self.graph_editing
+        self.runtime.graph_editing
     }
 }
 

@@ -26,6 +26,7 @@ mod activity_runner;
 mod context;
 mod executor;
 mod job_runner;
+pub mod reconciler;
 mod template;
 
 pub use activity_runner::{
@@ -36,10 +37,12 @@ pub use context::{
     ACTIVITY_EXECUTION_FAILED, AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED,
     AGENT_PROTOCOL_VIOLATION, AGENT_TIMEOUT, ActivityInvocationResult, AgentProtocolHost,
     AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost, ExecutionContext,
-    JobRunHost, JobRunResult, RuntimeHost, STALE_RUN_GRACE_SECONDS, TaskAutomationUpdate, TaskHost,
-    execution_working_directory, execution_working_directory_with_task, input_workspace_path,
-    redact_attempt_outcome, step_output_for_following_input,
+    ExecutorLookupHost, JobRunHost, JobRunResult, RuntimeHost, STALE_RUN_GRACE_SECONDS,
+    TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost, execution_working_directory,
+    execution_working_directory_with_task, input_workspace_path, redact_attempt_outcome,
 };
+pub use executor::registry::ActivityExecutorRegistry;
 pub use job_runner::{
     recover_stale_active_run_for_job, retry_job_run_from_step, run_job_with_input,
 };
+pub use reconciler::{ReconcileOutcome, reconcile_once};

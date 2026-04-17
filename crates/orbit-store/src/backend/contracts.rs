@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Activity, ActorIdentity, AuditEvent, Job, JobRun, JobRunState, JobScheduleState, JobStep,
-    KnowledgeRunMetrics, OrbitError, OrbitId, ReviewThread, StoredTool, Task, TaskArtifact,
-    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    Activity, AuditEvent, ExecutorDef, Job, JobRun, JobRunState, JobScheduleState, JobStep,
+    KnowledgeRunMetrics, OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool,
+    Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
+    TaskType,
 };
 use serde_json::Value;
 
@@ -28,15 +29,15 @@ pub struct TaskCreateParams {
     /// sub-directory of a monorepo and git operations must run from the root.
     pub repo_root: Option<String>,
     pub created_by: Option<String>,
-    /// Typed identity for attribution.
-    pub actor_identity: ActorIdentity,
-    pub assigned_to: Option<String>,
+    pub planned_by: Option<String>,
+    pub implemented_by: Option<String>,
+    pub agent: Option<String>,
+    pub model: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub complexity: Option<TaskComplexity>,
     pub task_type: TaskType,
     pub pr_number: Option<String>,
-    pub proposed_by: Option<String>,
     pub source_task_id: Option<String>,
     pub comments: Vec<TaskComment>,
 }
@@ -59,17 +60,17 @@ pub struct TaskUpdateParams {
     pub context_files: Option<Vec<String>>,
     pub workspace_path: Option<Option<String>>,
     pub repo_root: Option<Option<String>>,
-    pub assigned_to: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
-    /// Typed identity update. When `Some`, overwrites `actor_identity`.
-    pub actor_identity: Option<ActorIdentity>,
+    pub planned_by: Option<Option<String>>,
+    pub implemented_by: Option<Option<String>>,
+    pub agent: Option<Option<String>>,
+    pub model: Option<Option<String>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
     pub complexity: Option<TaskComplexity>,
     pub task_type: Option<TaskType>,
     pub pr_number: Option<Option<String>>,
     pub pr_status: Option<Option<String>>,
-    pub proposed_by: Option<Option<String>>,
     pub source_task_id: Option<Option<String>>,
     pub batch_id: Option<Option<String>>,
     pub status_event: Option<String>,
@@ -94,6 +95,7 @@ pub struct ActivityCreateParams {
     pub input_schema_json: Value,
     pub output_schema_json: Value,
     pub spec_config: Value,
+    pub executor: Option<String>,
     pub workspace_path: Option<String>,
     pub created_by: Option<String>,
 }
@@ -104,6 +106,7 @@ pub struct ActivityUpdateParams {
     pub input_schema_json: Option<Value>,
     pub output_schema_json: Option<Value>,
     pub spec_config: Option<Value>,
+    pub executor: Option<Option<String>>,
     pub workspace_path: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
     pub is_active: Option<bool>,
@@ -116,6 +119,7 @@ pub struct JobCreateParams {
     pub max_active_runs: u32,
     pub max_iterations: u32,
     pub steps: Vec<JobStep>,
+    pub policy: Option<String>,
     pub initial_state: JobScheduleState,
 }
 
@@ -123,7 +127,9 @@ pub struct JobCreateParams {
 pub struct JobUpdateParams {
     pub default_input: Option<Option<Value>>,
     pub max_active_runs: Option<u32>,
+    pub max_iterations: Option<u32>,
     pub steps: Option<Vec<JobStep>>,
+    pub policy: Option<Option<String>>,
     pub state: Option<JobScheduleState>,
 }
 
@@ -189,6 +195,14 @@ pub trait JobStoreBackend: Send + Sync {
         started_at: DateTime<Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError>;
+    fn take_over_running_job_run(
+        &self,
+        run_id: &str,
+        expected_pid: Option<u32>,
+        expected_pid_start_time: Option<String>,
+        started_at: DateTime<Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError>;
     fn abandon_job_run(&self, run_id: &str, finished_at: DateTime<Utc>)
     -> Result<bool, OrbitError>;
     fn complete_job_run_step(
@@ -208,8 +222,11 @@ pub trait JobStoreBackend: Send + Sync {
         finished_at: DateTime<Utc>,
         duration_ms: Option<u64>,
     ) -> Result<bool, OrbitError>;
+    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError>;
     fn archive_job_run(&self, run_id: &str) -> Result<String, OrbitError>;
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError>;
+    fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError>;
+    fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError>;
 }
 
 #[derive(Debug, Clone)]
@@ -250,4 +267,16 @@ pub trait AuditEventStoreBackend: Send + Sync {
         tool: Option<&str>,
     ) -> Result<Vec<i64>, OrbitError>;
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError>;
+}
+
+pub trait ExecutorDefStoreBackend: Send + Sync {
+    fn list_executor_defs(&self) -> Result<Vec<ExecutorDef>, OrbitError>;
+    fn get_executor_def(&self, name: &str) -> Result<Option<ExecutorDef>, OrbitError>;
+    fn upsert_executor_def(&self, def: &ExecutorDef) -> Result<(), OrbitError>;
+}
+
+pub trait PolicyDefStoreBackend: Send + Sync {
+    fn list_policy_defs(&self) -> Result<Vec<PolicyDef>, OrbitError>;
+    fn get_policy_def(&self, name: &str) -> Result<Option<PolicyDef>, OrbitError>;
+    fn upsert_policy_def(&self, def: &PolicyDef) -> Result<(), OrbitError>;
 }

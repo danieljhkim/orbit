@@ -26,16 +26,16 @@ Create an Orbit task another engineer or agent can execute without guessing. Foc
 - Required fields: `title`, `description`, and `workspace`.
 - Strongly prefer supplying `acceptance_criteria`.
 - Blank or missing task companion files (`plan.md`, `execution-summary.md`) are treated as blank task fields. Repair them through `orbit.task.update` (`plan` or `execution_summary`), not manual file edits.
-- Orbit fills `created_by`, `assigned_to`, and `proposed_by` automatically from execution context.
+- Orbit fills `created_by`, `planned_by`, and `implemented_by` automatically from execution context when those roles are authored during the task lifecycle.
 - Reserve task type `friction` for agent self-reports via `orbit-track-issues`. Do not use `friction` for normal task authoring.
 
 ## Task Quality Standards
 
-### Environment Independence checklist
+### Validation Environment checklist
 
-- Tests must not assume the presence of `.orbit/knowledge/`, local config files, or filesystem artifacts that are neither committed nor created by the test itself.
-- File I/O tests must use temp directories or in-memory fakes.
-- Acceptance criteria must state filesystem independence explicitly when behavior touches persisted state.
+- Validation must not assume the presence of `.orbit/knowledge/`, local config files, or filesystem artifacts that are neither committed nor created by the task itself.
+- When automated tests are in scope, file I/O checks must use temp directories or in-memory fakes.
+- Acceptance criteria should state filesystem expectations explicitly when behavior touches persisted state.
 
 ### Explicit Definitions checklist
 
@@ -45,9 +45,9 @@ Create an Orbit task another engineer or agent can execute without guessing. Foc
 
 ### Mock-Based, Deterministic Testing
 
-- Tasks that modify behavior involving external services, filesystem I/O, or time-dependent state must require mock or fake coverage in acceptance criteria.
-- Prefer `node_type` attribute dispatch over `isinstance` checks when task code must remain compatible with mocks or fakes.
-- Acceptance criteria must specify expected return types or output shapes when functions change.
+- When repo policy allows automated coverage, tasks that modify behavior involving external services, filesystem I/O, or time-dependent state should call for deterministic mock or fake coverage in acceptance criteria.
+- Prefer implementation patterns that remain compatible with mocks or fakes instead of hard-coding runtime type checks that block test doubles.
+- Acceptance criteria should specify expected return types or output shapes when functions change.
 
 ### Per-Node Purpose checklist
 
@@ -55,8 +55,8 @@ Create an Orbit task another engineer or agent can execute without guessing. Foc
 
 ### AC Format Rule
 
-- Each acceptance criterion must be independently verifiable and name a command, test, or observable output.
-- Include at least one acceptance criterion that specifies the validation command.
+- Each acceptance criterion must be independently verifiable and name a command, inspection step, or observable output.
+- When a safe validation command exists, include at least one acceptance criterion that names it explicitly.
 
 ## Command
 
@@ -72,7 +72,7 @@ orbit tool run orbit.task.add --input '{
   "context": "<comma,separated,paths>",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
-  "type": "<task|feature|bug|chore|refactor>"
+  "type": "<task|feature|issue|bug|chore|refactor>"
 }'
 ```
 

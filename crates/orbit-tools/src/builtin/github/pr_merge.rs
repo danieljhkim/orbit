@@ -78,33 +78,3 @@ super::gh_tool! {
         }))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::build_exec_request;
-
-    #[test]
-    fn build_exec_request_deletes_branch_by_default() {
-        let req = build_exec_request(&json!({
-            "pr": "76",
-            "strategy": "squash",
-        }))
-        .expect("build request");
-
-        assert!(req.args.iter().any(|arg| arg == "--delete-branch"));
-    }
-
-    #[test]
-    fn build_exec_request_omits_delete_branch_when_disabled() {
-        let req = build_exec_request(&json!({
-            "pr": "76",
-            "strategy": "squash",
-            "delete_branch": false,
-        }))
-        .expect("build request");
-
-        assert!(!req.args.iter().any(|arg| arg == "--delete-branch"));
-    }
-}

@@ -8,14 +8,19 @@ Orbit runs on top of agent CLIs such as Codex and Claude Code. No provider API k
 
 ## Quick Start
 
-**Prerequisites**: Rust, Codex CLI, Gemini CLI, and Claude Code
+**Prerequisites**: Codex CLI, Gemini CLI, or Claude Code
+
+Orbit itself can be installed without Rust. Only source builds require a Rust toolchain.
 
 Suggestion: Get cheapest tier subscriptions for above 3, and milk every dollar out of it.
 
 For the PR-based workflow (`orbit ship run`), you also need the GitHub CLI (`gh`) installed and authenticated. If you do not want to use GitHub or open pull requests, use `orbit ship run --local` instead.
 
 ```bash
-# install via Homebrew (macOS)
+# install via curl | sh (macOS and Linux)
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
+
+# or install via Homebrew (macOS)
 brew install danieljhkim/tap/orbit
 
 # or build from source
@@ -49,6 +54,13 @@ If you already know which tasks you want to run, pin them explicitly:
 
 ```bash
 orbit ship run --tasks T123,T456 --parallelism 2 --base main
+```
+
+Pinned installs and custom install directories are supported:
+
+```bash
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_VERSION=v0.1.0 sh
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ---
@@ -189,6 +201,16 @@ flowchart LR
   Core --> Types
 
 ```
+
+### TypeScript Bridge
+
+`packages/orbit-agent` is not the default task runtime today. The standard `ship` and `duel`
+flows still use the Rust `crates/orbit-agent` bridge through the built-in `codex`, `claude`,
+and `gemini` executors.
+
+The TypeScript package and CLI bridge still live in-repo, but Orbit does not currently seed
+a built-in executor or smoke activity for that path. Wiring it back into the default
+resources remains separate future work.
 
 ### Model Strategy
 

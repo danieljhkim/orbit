@@ -27,14 +27,18 @@ pub mod audit_event;
 pub mod duel;
 pub mod error;
 pub mod event;
+pub mod executor_def;
 pub mod friction;
 pub mod id;
 pub mod invocation;
 pub mod job;
 pub mod metrics;
 pub mod policy_decision;
+pub mod policy_def;
 pub mod redaction;
+pub mod resource;
 pub mod role;
+pub mod run_state;
 pub mod skill;
 pub mod task;
 pub mod tool;
@@ -43,7 +47,8 @@ pub mod workspace;
 pub use activity::Activity;
 pub use actor::ActorIdentity;
 pub use agent_pair::{
-    AgentModelPair, agent_family_from_cli, all_agent_families, resolve_agent_model_pair,
+    AgentModelPair, agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
+    resolve_agent_model_pair,
 };
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats};
@@ -55,6 +60,7 @@ pub use duel::{
 };
 pub use error::OrbitError;
 pub use event::OrbitEvent;
+pub use executor_def::ExecutorDef;
 pub use friction::FrictionEntry;
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
@@ -65,11 +71,21 @@ pub use job::{
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;
+pub use policy_def::{
+    ApprovalPolicy, FilesystemPolicy, NetworkMode, NetworkPolicy, PolicyDef, ProcessPolicy,
+    ToolPolicy,
+};
 pub use redaction::{
     is_sensitive_env_name, redact_sensitive_env_error, redact_sensitive_env_json,
     redact_sensitive_env_option, redact_sensitive_env_text,
 };
+pub use resource::{
+    ActivityResource, ActivityResourceSpec, ExecutorResource, ExecutorResourceSpec, JobResource,
+    JobResourceSpec, PolicyResource, PolicyResourceSpec, RESOURCE_SCHEMA_VERSION, ResourceEnvelope,
+    ResourceHeader, ResourceKind, ResourceMetadata,
+};
 pub use role::Role;
+pub use run_state::PipelineState;
 pub use skill::Skill;
 pub use task::{
     ReviewMessage, ReviewThread, ReviewThreadStatus, Task, TaskArtifact, TaskComment,

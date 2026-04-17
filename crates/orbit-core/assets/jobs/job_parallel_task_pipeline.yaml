@@ -1,73 +1,64 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_parallel_task_pipeline
+kind: Job
+metadata:
+  name: job_parallel_task_pipeline
+spec:
   state: enabled
-
-  # ---- execution ----
-  # Orchestrates one agent-selected batch using a shared worktree on main.
-  # Workers implement changes directly in the shared directory with file-level locking.
-  # After all workers finish, an agent-based finalize step verifies, diagnoses, and
-  # fixes any issues. On success, a single commit and PR are created from main.
-  max_active_runs: 1
   default_input:
     base: main
     parallelism: 3
+  max_active_runs: 3
   steps:
-    # 0. Refresh knowledge graph so agents get fresh symbol data.
-    - target_type: activity
-      target_id: update_knowledge_graph
+    - id: graph_update
+      target_type: activity
+      target_id: run_command
+      default_input:
+        command: orbit graph update
       timeout_seconds: 120
-
-    # 1. Select a conflict-free batch, author plans, refine context_files.
-    - target_type: activity
-      target_id: dispatch_and_plan_batch
-      agent_cli_from_input: plan_agent_cli
-      model_from_input: plan_model
-      timeout_seconds: 3600
-
-    # 2. Snapshot batch state for audit trail.
-    - target_type: activity
-      target_id: snapshot_batch_state
+    - id: dispatch
+      target_type: activity
+      target_id: dispatch_batch
+      timeout_seconds: 120
+    - id: plan
+      target_type: activity
+      target_id: agent_plan
+      executor: claude
+      model_tier: strong
       condition: on_success
-      timeout_seconds: 15
-
-    # 3. Launch parallel workers in the shared worktree.
-    - target_type: activity
+      timeout_seconds: 1800
+    - id: workers
+      target_type: activity
       target_id: parallel_dispatch_tasks
       condition: on_success
       timeout_seconds: 7200
-
-    # 4. Commit each completed task separately from stored task artifacts.
-    - target_type: activity
-      target_id: commit_task_artifact_changes
+    - id: commit_per_task
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: per_task
       condition: on_success
       timeout_seconds: 300
-
-    # 5. Finalize: agent verifies, diagnoses, and fixes any issues.
-    - target_type: activity
+    - id: finalize
+      target_type: activity
       target_id: finalize_tasks
-      agent_cli_from_input: finalize_agent_cli
-      model_from_input: finalize_model
-      condition: always
+      executor: gemini
+      model_tier: strong
+      condition: on_success
       timeout_seconds: 3600
-
-    # 6. Commit finalize-only follow-up edits that still map cleanly to task artifacts.
-    - target_type: activity
-      target_id: commit_finalize_artifact_changes
+    - id: commit_finalize
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: per_task_finalize
       condition: on_success
       timeout_seconds: 300
-
-    # 7. Catch-all leftover edits, then open a single PR from the shared worktree branch.
-    - target_type: activity
-      target_id: commit_and_open_batch_pr
+    - id: open_pr
+      target_type: activity
+      target_id: pr_open
       condition: on_success
       timeout_seconds: 300
-
-    # 8. Review cycle: review, gate, fix loop, merge.
-    - target_type: job
+    - id: review_cycle
+      target_type: job
       target_id: job_batch_review_cycle
       condition: on_success
       timeout_seconds: 7200

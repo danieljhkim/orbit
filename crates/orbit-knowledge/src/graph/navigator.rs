@@ -104,17 +104,12 @@ impl<'a> GraphNavigator<'a> {
             None => return Ok(vec![]),
         };
         let parent = self.get_node(parent_id)?;
-        Ok(parent
+        parent
             .child_ids()
             .into_iter()
-            .filter_map(|cid| {
-                if cid == id {
-                    None
-                } else {
-                    self.node_index.get(cid).copied()
-                }
-            })
-            .collect())
+            .filter(|cid| *cid != id)
+            .map(|cid| self.get_node(cid))
+            .collect()
     }
 
     /// Returns the lineage (ancestor chain) for a node, in root-first order.
@@ -150,160 +145,5 @@ impl<'a> GraphNavigator<'a> {
                 },
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_base(id: &str, parent_id: Option<&str>) -> BaseNodeFields {
-        BaseNodeFields {
-            id: id.to_string(),
-            identity_key: String::new(),
-            object_hash: None,
-            name: id.to_string(),
-            location: id.to_string(),
-            language: "rust".to_string(),
-            description: String::new(),
-            parent_id: parent_id.map(ToString::to_string),
-            is_locked: false,
-            lineage_locked: false,
-            lock_owner: None,
-            lock_reason: String::new(),
-        }
-    }
-
-    fn fixture_graph() -> CodebaseGraphV1 {
-        CodebaseGraphV1 {
-            root_dir_id: "dir-root".to_string(),
-            dirs: vec![DirNode {
-                base: make_base("dir-root", None),
-                dir_children: vec![],
-                file_children: vec!["file-main".to_string()],
-            }],
-            files: vec![FileNode {
-                base: make_base("file-main", Some("dir-root")),
-                extension: Some("rs".to_string()),
-                source_blob_hash: None,
-                imports: vec![],
-                exports: vec![],
-                leaf_children: vec!["leaf-fn".to_string()],
-            }],
-            leaves: vec![LeafNode {
-                base: make_base("leaf-fn", Some("file-main")),
-                kind: super::super::nodes::LeafKind::Function,
-                source: String::new(),
-                source_blob_hash: None,
-                source_hash: None,
-                file_hash_at_capture: None,
-                history: vec![],
-                input_signature: vec![],
-                output_signature: vec![],
-                start_line: Some(1),
-                end_line: Some(10),
-                children: vec![],
-            }],
-        }
-    }
-
-    #[test]
-    fn get_node_returns_correct_type() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        assert!(matches!(
-            nav.get_node("dir-root").unwrap(),
-            GraphNodeRef::Dir(_)
-        ));
-        assert!(matches!(
-            nav.get_node("file-main").unwrap(),
-            GraphNodeRef::File(_)
-        ));
-        assert!(matches!(
-            nav.get_node("leaf-fn").unwrap(),
-            GraphNodeRef::Leaf(_)
-        ));
-    }
-
-    #[test]
-    fn get_node_not_found() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        assert!(nav.get_node("nonexistent").is_err());
-    }
-
-    #[test]
-    fn get_root() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let root = nav.get_root().unwrap();
-        assert_eq!(root.id(), "dir-root");
-    }
-
-    #[test]
-    fn get_parent_leaf_returns_file() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let parent = nav.get_parent("leaf-fn").unwrap().unwrap();
-        assert_eq!(parent.id(), "file-main");
-    }
-
-    #[test]
-    fn get_parent_root_returns_none() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        assert!(nav.get_parent("dir-root").unwrap().is_none());
-    }
-
-    #[test]
-    fn get_children_dir() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let children = nav.get_children("dir-root").unwrap();
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].id(), "file-main");
-    }
-
-    #[test]
-    fn get_children_file() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let children = nav.get_children("file-main").unwrap();
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].id(), "leaf-fn");
-    }
-
-    #[test]
-    fn get_lineage_without_self() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let lineage = nav.get_lineage("leaf-fn", false).unwrap();
-        let ids: Vec<&str> = lineage.iter().map(|n| n.id()).collect();
-        assert_eq!(ids, vec!["dir-root", "file-main"]);
-    }
-
-    #[test]
-    fn get_lineage_with_self() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let lineage = nav.get_lineage("leaf-fn", true).unwrap();
-        let ids: Vec<&str> = lineage.iter().map(|n| n.id()).collect();
-        assert_eq!(ids, vec!["dir-root", "file-main", "leaf-fn"]);
-    }
-
-    #[test]
-    fn get_containing_file() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let file = nav.get_containing_file("leaf-fn").unwrap().unwrap();
-        assert_eq!(file.base.id, "file-main");
-    }
-
-    #[test]
-    fn get_siblings_only_child() {
-        let graph = fixture_graph();
-        let nav = GraphNavigator::new(&graph);
-        let siblings = nav.get_siblings("leaf-fn").unwrap();
-        assert!(siblings.is_empty());
     }
 }

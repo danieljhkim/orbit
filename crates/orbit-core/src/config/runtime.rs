@@ -2,16 +2,14 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
+use orbit_types::OrbitError;
 use orbit_types::redaction::redact_home_dir;
-use orbit_types::{AgentModelPair, OrbitError, agent_family_from_cli, resolve_agent_model_pair};
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
-    RawAgentAssignment, RawAgentModelEntry, RawAgentModelsConfig, RawCodexExecutionConfig,
-    RawExecutionEnvConfig, RawRuntimeConfig, RawShipWorkflowConfig, RawTaskSection,
-    RawWorkflowConfig,
+    RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig, RawTaskSection,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -20,196 +18,12 @@ const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
 const DEFAULT_SCORING_ENABLED: bool = false;
 const DEFAULT_GRAPH_EDITING: bool = false;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentModelEntry {
-    pub(crate) strong: String,
-    pub(crate) weak: String,
-}
-
-impl AgentModelEntry {
-    fn new(strong: impl Into<String>, weak: impl Into<String>) -> Self {
-        Self {
-            strong: strong.into(),
-            weak: weak.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentAssignment {
-    pub(crate) agent: String,
-    pub(crate) model: String,
-}
-
-impl AgentAssignment {
-    fn new(agent: impl Into<String>, model: impl Into<String>) -> Self {
-        Self {
-            agent: agent.into(),
-            model: model.into(),
-        }
-    }
-
-    fn from_raw(raw: RawAgentAssignment) -> Result<Self, OrbitError> {
-        let agent = raw.agent.trim();
-        let model = raw.model.trim();
-        if agent.is_empty() || model.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "workflow.ship role assignments require non-empty agent and model".to_string(),
-            ));
-        }
-        Ok(Self::new(agent, model))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ShipWorkflowConfig {
-    pub(crate) plan: AgentAssignment,
-    pub(crate) implement: AgentAssignment,
-    pub(crate) review: AgentAssignment,
-    pub(crate) finalize: AgentAssignment,
-}
-
-impl Default for ShipWorkflowConfig {
-    fn default() -> Self {
-        Self {
-            plan: AgentAssignment::new("claude", "opus-4.6"),
-            implement: AgentAssignment::new("codex", "gpt-5.4"),
-            review: AgentAssignment::new("claude", "sonnet-4.6"),
-            finalize: AgentAssignment::new("gemini", "gemini-3.1-pro-preview"),
-        }
-    }
-}
-
-impl ShipWorkflowConfig {
-    fn from_raw(raw: Option<RawShipWorkflowConfig>) -> Result<Self, OrbitError> {
-        let defaults = Self::default();
-        let Some(raw) = raw else {
-            return Ok(defaults);
-        };
-
-        Ok(Self {
-            plan: raw
-                .plan
-                .map(AgentAssignment::from_raw)
-                .transpose()?
-                .unwrap_or(defaults.plan),
-            implement: raw
-                .implement
-                .map(AgentAssignment::from_raw)
-                .transpose()?
-                .unwrap_or(defaults.implement),
-            review: raw
-                .review
-                .map(AgentAssignment::from_raw)
-                .transpose()?
-                .unwrap_or(defaults.review),
-            finalize: raw
-                .finalize
-                .map(AgentAssignment::from_raw)
-                .transpose()?
-                .unwrap_or(defaults.finalize),
-        })
-    }
-
-    pub(crate) fn role(&self, role: &str) -> Option<&AgentAssignment> {
-        match role {
-            "plan" => Some(&self.plan),
-            "implement" => Some(&self.implement),
-            "review" => Some(&self.review),
-            "finalize" => Some(&self.finalize),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct WorkflowConfig {
-    pub(crate) ship: ShipWorkflowConfig,
-}
-
-impl WorkflowConfig {
-    fn from_raw(raw: Option<RawWorkflowConfig>) -> Result<Self, OrbitError> {
-        Ok(Self {
-            ship: ShipWorkflowConfig::from_raw(raw.and_then(|workflow| workflow.ship))?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentModelsConfig {
-    pub(crate) claude: AgentModelEntry,
-    pub(crate) codex: AgentModelEntry,
-    pub(crate) gemini: AgentModelEntry,
-}
-
-impl Default for AgentModelsConfig {
-    fn default() -> Self {
-        Self {
-            claude: AgentModelEntry::new("opus-4.6", "sonnet-4.6"),
-            codex: AgentModelEntry::new("gpt-5.4", "gpt-5.4-mini"),
-            gemini: AgentModelEntry::new("gemini-3.1-pro-preview", "gemini-3-flash-preview"),
-        }
-    }
-}
-
-impl AgentModelsConfig {
-    fn from_raw(raw: Option<RawAgentModelsConfig>) -> Result<Self, OrbitError> {
-        let defaults = Self::default();
-        let Some(raw) = raw else {
-            return Ok(defaults);
-        };
-
-        Ok(Self {
-            claude: merge_agent_model_entry(defaults.claude, raw.claude)?,
-            codex: merge_agent_model_entry(defaults.codex, raw.codex)?,
-            gemini: merge_agent_model_entry(defaults.gemini, raw.gemini)?,
-        })
-    }
-
-    pub(crate) fn pair_for(&self, family: &str) -> Option<AgentModelPair> {
-        self.entry(family)
-            .map(|entry| AgentModelPair::new(entry.strong.clone(), entry.weak.clone()))
-    }
-
-    pub(crate) fn canonical_model_name(
-        &self,
-        agent_cli: &str,
-        model: Option<&str>,
-    ) -> Option<String> {
-        let requested = model.map(str::trim).filter(|value| !value.is_empty())?;
-        let family = agent_family_from_cli(agent_cli);
-        let Some(entry) = self.entry(&family) else {
-            return Some(requested.to_string());
-        };
-
-        if matches_model_alias(&family, requested, &entry.strong, true) {
-            return Some(entry.strong.clone());
-        }
-        if matches_model_alias(&family, requested, &entry.weak, false) {
-            return Some(entry.weak.clone());
-        }
-
-        Some(requested.to_string())
-    }
-
-    fn entry(&self, family: &str) -> Option<&AgentModelEntry> {
-        match family {
-            "claude" => Some(&self.claude),
-            "codex" => Some(&self.codex),
-            "gemini" => Some(&self.gemini),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
     pub(crate) execution_env: ExecutionEnvPolicy,
     pub(crate) codex_execution: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,
     pub(crate) task_approval: TaskApprovalConfig,
-    pub(crate) agent_models: AgentModelsConfig,
-    pub(crate) workflow: WorkflowConfig,
     pub(crate) scoring_enabled: bool,
     pub(crate) graph_editing: bool,
 }
@@ -227,30 +41,9 @@ impl RuntimeConfig {
             codex_execution: CodexExecutionPolicy::default(),
             persistence: PersistenceConfig::default_for_data_root(data_root),
             task_approval: TaskApprovalConfig::default(),
-            agent_models: AgentModelsConfig::default(),
-            workflow: WorkflowConfig::default(),
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn agent_model_pair(&self, family: &str) -> Option<AgentModelPair> {
-        self.agent_models.pair_for(&agent_family_from_cli(family))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn canonical_model_name(
-        &self,
-        agent_cli: &str,
-        model: Option<&str>,
-    ) -> Option<String> {
-        self.agent_models.canonical_model_name(agent_cli, model)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn ship_role_assignment(&self, role: &str) -> Option<AgentAssignment> {
-        self.workflow.ship.role(role).cloned()
     }
 
     /// Load config with workspace-replaces-global semantics for execution/approval/user.
@@ -327,75 +120,10 @@ impl RuntimeConfig {
             )?,
             persistence,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
-            agent_models: AgentModelsConfig::from_raw(parsed.agents)?,
-            workflow: WorkflowConfig::from_raw(parsed.workflow)?,
             scoring_enabled,
             graph_editing,
         })
     }
-}
-
-fn merge_agent_model_entry(
-    default: AgentModelEntry,
-    raw: Option<RawAgentModelEntry>,
-) -> Result<AgentModelEntry, OrbitError> {
-    let Some(raw) = raw else {
-        return Ok(default);
-    };
-
-    let strong = raw.strong.trim();
-    let weak = raw.weak.trim();
-    if strong.is_empty() || weak.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "agents.<family> entries require non-empty strong and weak model names".to_string(),
-        ));
-    }
-
-    Ok(AgentModelEntry::new(strong, weak))
-}
-
-fn matches_model_alias(family: &str, requested: &str, configured: &str, strong: bool) -> bool {
-    if requested.eq_ignore_ascii_case(configured) {
-        return true;
-    }
-
-    if let Some(default_pair) = resolve_agent_model_pair(family) {
-        let fallback = if strong {
-            default_pair.orchestrator
-        } else {
-            default_pair.helper
-        };
-        if requested.eq_ignore_ascii_case(&fallback) {
-            return true;
-        }
-    }
-
-    match (family, strong) {
-        ("claude", true) => {
-            requested.eq_ignore_ascii_case("opus")
-                || claude_cli_full_model_name(configured)
-                    .is_some_and(|value| requested.eq_ignore_ascii_case(&value))
-        }
-        ("claude", false) => {
-            requested.eq_ignore_ascii_case("sonnet")
-                || claude_cli_full_model_name(configured)
-                    .is_some_and(|value| requested.eq_ignore_ascii_case(&value))
-        }
-        ("gemini", true) => requested.eq_ignore_ascii_case("gemini-3.1-pro"),
-        ("gemini", false) => requested.eq_ignore_ascii_case("gemini-3-flash"),
-        _ => false,
-    }
-}
-
-fn claude_cli_full_model_name(model: &str) -> Option<String> {
-    let trimmed = model.trim();
-    if let Some(version) = trimmed.strip_prefix("opus-") {
-        return Some(format!("claude-opus-{}", version.replace('.', "-")));
-    }
-    if let Some(version) = trimmed.strip_prefix("sonnet-") {
-        return Some(format!("claude-sonnet-{}", version.replace('.', "-")));
-    }
-    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -673,71 +401,4 @@ fn is_valid_env_var_name(value: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use tempfile::tempdir;
-
-    use super::RuntimeConfig;
-
-    #[test]
-    fn load_layered_parses_agent_models_and_ship_roles() {
-        let global = tempdir().expect("global tempdir");
-        let workspace = tempdir().expect("workspace tempdir");
-        fs::write(
-            workspace.path().join("config.toml"),
-            r#"
-[agents.claude]
-strong = "opus-4.7"
-weak = "sonnet-4.7"
-
-[workflow.ship]
-plan = { agent = "codex", model = "gpt-5.4" }
-review = { agent = "gemini", model = "gemini-3.1-pro-preview" }
-"#,
-        )
-        .expect("write config");
-
-        let config = RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config");
-        let claude = config.agent_model_pair("claude").expect("claude pair");
-        assert_eq!(claude.orchestrator, "opus-4.7");
-        assert_eq!(claude.helper, "sonnet-4.7");
-
-        let plan = config.ship_role_assignment("plan").expect("plan role");
-        assert_eq!(plan.agent, "codex");
-        assert_eq!(plan.model, "gpt-5.4");
-
-        let review = config.ship_role_assignment("review").expect("review role");
-        assert_eq!(review.agent, "gemini");
-        assert_eq!(review.model, "gemini-3.1-pro-preview");
-
-        let implement = config
-            .ship_role_assignment("implement")
-            .expect("implement role");
-        assert_eq!(implement.agent, "codex");
-        assert_eq!(implement.model, "gpt-5.4");
-    }
-
-    #[test]
-    fn canonical_model_name_maps_shorthand_to_configured_value() {
-        let mut config = RuntimeConfig::default_for_data_root(tempdir().unwrap().path());
-        config.agent_models.claude.strong = "opus-4.7".to_string();
-        config.agent_models.claude.weak = "sonnet-4.7".to_string();
-
-        assert_eq!(
-            config.canonical_model_name("claude", Some("opus")),
-            Some("opus-4.7".to_string())
-        );
-        assert_eq!(
-            config.canonical_model_name("claude", Some("sonnet-4.7")),
-            Some("sonnet-4.7".to_string())
-        );
-        assert_eq!(
-            config.canonical_model_name("claude", Some("claude-opus-4-7")),
-            Some("opus-4.7".to_string())
-        );
-    }
 }

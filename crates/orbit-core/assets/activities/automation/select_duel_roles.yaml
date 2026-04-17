@@ -1,18 +1,10 @@
-schema_version: 1
-
-# ---- metadata ----
-created_by: system
-
-# ---- activity ----
-activity:
-  # ---- registration ----
-  id: select_duel_roles
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: select_duel_roles
+spec:
   spec_type: automation
-
-  # ---- content ----
-  description: "Select a random permutation of agent families across the three duel roles (implementer, reviewer, arbiter) and stamp the implementer onto the task's actor identity."
-
-  # ---- interface ----
+  description: Select a random permutation of agent families across the three duel roles (implementer, reviewer, arbiter) and stamp the implementer onto the task's actor identity.
   input_schema_json:
     type: object
     required:
@@ -20,7 +12,7 @@ activity:
     properties:
       task_id:
         type: string
-        description: Orbit task ID whose actor_identity will be stamped with the selected implementer.
+        description: Orbit task ID whose internal implementer routing fields will be stamped with the selected implementer.
   output_schema_json:
     type: object
     required:
@@ -57,6 +49,5 @@ activity:
       duel_roles:
         type: object
         description: Structured view of the three role assignments, mirroring the flat *_agent_cli / *_model fields.
-
-  # ---- execution ----
   action: select_duel_roles
+  created_by: system

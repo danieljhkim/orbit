@@ -28,7 +28,9 @@ impl OrbitRuntime {
             .map(|s| now.signed_duration_since(s).num_milliseconds().max(0) as u64);
         let should_signal_owner = run_owner_identity_matches(&run);
         let owner_pid = run.pid;
-        self.finalize_job_run_record(run_id, JobRunState::Cancelled, now, duration_ms)?;
+        self.stores()
+            .jobs()
+            .finalize_run(run_id, JobRunState::Cancelled, now, duration_ms)?;
         self.record_event(OrbitEvent::JobRunCancelled {
             job_id: run.job_id,
             run_id: run_id.to_string(),
@@ -49,7 +51,7 @@ impl OrbitRuntime {
                 run_id
             )));
         }
-        let job_id = self.archive_job_run_record(run_id)?;
+        let job_id = self.stores().jobs().archive_run(run_id)?;
         self.record_event(OrbitEvent::JobRunArchived {
             job_id,
             run_id: run_id.to_string(),
@@ -65,7 +67,7 @@ impl OrbitRuntime {
                 run_id
             )));
         }
-        let job_id = self.delete_job_run_record(run_id)?;
+        let job_id = self.stores().jobs().delete_run(run_id)?;
         self.record_event(OrbitEvent::JobRunDeleted {
             job_id,
             run_id: run_id.to_string(),
@@ -101,6 +103,13 @@ impl OrbitRuntime {
             step_target_id,
             debug,
         )
+    }
+
+    pub fn read_run_state(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<orbit_types::PipelineState>, OrbitError> {
+        self.stores().jobs().read_run_state(run_id)
     }
 
     pub fn job_history(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
@@ -146,18 +155,18 @@ impl OrbitRuntime {
     }
 
     fn list_job_history_backend(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_job_run_records(job_id)
+        self.stores().jobs().list_runs(job_id)
     }
 
     fn list_job_runs_filtered_backend(
         &self,
         query: &JobRunQuery,
     ) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_job_runs_filtered_record(query)
+        self.stores().jobs().list_runs_filtered(query)
     }
 
     fn get_job_run_backend(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
-        self.get_job_run_record(run_id)
+        self.stores().jobs().get_run(run_id)
     }
 }
 

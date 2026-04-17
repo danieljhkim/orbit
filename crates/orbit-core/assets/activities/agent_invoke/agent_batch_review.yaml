@@ -1,0 +1,114 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: agent_batch_review
+spec:
+  spec_type: agent_invoke
+  description: Review a batch of tasks and their shared PR, then aggregate the per-task findings into one PR-level decision.
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Batch run ID (batch_id). Used to fetch all tasks in the batch.
+      batch_id:
+        type: string
+        description: Original batch identifier when this activity runs inside a nested review job.
+  output_schema_json: {}
+  instruction: |
+    Only use skills listed in this activity's skill_refs. Ignore all others.
+    You are the batch review coordinator. Your job is to review a shared PR
+    covering multiple batch tasks, reason through each task's slice, then
+    aggregate the results into a single PR-level decision.
+
+    ═══════════════════════════════════════════════════════════
+    PHASE 1 — Gather context
+    ═══════════════════════════════════════════════════════════
+
+    1. Load all batch tasks:
+       - Use input.batch_id when it is present; otherwise use input.run_id.
+       - Call orbit.task.list with input: {"batch_id": "<that batch id>"}
+         to fetch every task belonging to this batch.
+       - For each task, call orbit.task.show with input: {"id": "<task_id>"}
+         to fetch the task's title, description, plan, acceptance_criteria,
+         context_files, workspace_path, repo_root, and pr_number.
+
+    2. Determine the PR identifier:
+       - Use any batch task's `pr_number` field (they all share the same PR).
+       - If no task has `pr_number`, return a clear error instead of guessing.
+
+    3. Call github.pr.view with pr: <identifier>.
+       - Gather the PR title, body, changed files list, and commit history.
+       - Use proc.spawn to run `gh pr diff <pr_number>` from a batch task's
+         workspace_path when available, otherwise its repo_root, so you inspect
+         the actual patch before writing findings.
+
+    ═══════════════════════════════════════════════════════════
+    PHASE 2 — Review each task's slice
+    ═══════════════════════════════════════════════════════════
+
+    Review each task independently against the shared diff.
+    - Do not assume proc.spawn can create subagents; it is for local commands such as `gh pr diff`.
+    - If your runtime clearly supports native parallel helpers you may use them, but the
+      activity must also work correctly when you review tasks serially in one session.
+    - For each task, evaluate ONLY that task's acceptance criteria against the diff.
+    - Check for:
+      * Acceptance criteria met or not
+      * Correctness or logic errors in the task's owned files
+      * Scope violations: files changed outside the task's context_files that
+        alter behavior (logic, tests, config) — these are BLOCKING
+      * Regressions: out-of-scope changes that revert or weaken prior fixes — BLOCKING
+      * Missing validation evidence for changed behavior when the task or repo
+        instructions require it — BLOCKING. If repo instructions forbid tests,
+        do not block solely because tests were not added.
+    - Produce a per-task verdict of "approve" or "request-changes" plus a list of
+      specific issues found (each with file path, line if applicable, and description).
+
+    ═══════════════════════════════════════════════════════════
+    PHASE 3 — Aggregate and decide
+    ═══════════════════════════════════════════════════════════
+
+    1. Collect all per-task review results.
+
+    2. Aggregate the overall decision:
+       - If ANY task review returned "request-changes", the overall decision is
+         "request-changes".
+       - Only if ALL task reviews returned "approve" is the overall decision "approve".
+
+    3. Post review feedback:
+       - For each issue from each task review, post a review thread on the specific
+         task it relates to using orbit.task.review_thread.add with that task's id.
+         Set path and line when tied to a specific file and diff line.
+         - Leave exactly one issue per thread. Never bundle multiple findings.
+       - After all issue-specific threads are posted, call orbit.task.review_thread.add
+         on each task with a short overall summary of the decision and blocking themes.
+
+    4. Update ALL batch tasks with the review decision:
+       - For each task, call orbit.task.update with input:
+         {"id": "<task_id>", "pr_status": "<pr_status>"}
+       - pr_status must be either "APPROVED" or "CHANGES_REQUESTED".
+       - This is the CRITICAL step. The engine reads pr_status from the task
+         artifacts to gate the review loop and merge decision. You MUST update
+         every batch task.
+
+    If no tasks are found for the batch, or the PR cannot be located, return a clear error.
+  skill_refs:
+    - orbit
+    - orbit-pr
+    - orbit-approve-task
+    - orbit-track-issues
+  tools:
+    - orbit.task.show
+    - orbit.task.list
+    - orbit.task.update
+    - orbit.task.add
+    - orbit.state.set
+    - orbit.task.review_thread.add
+    - github.pr.view
+    - proc.spawn
+  proc_allowed_programs:
+    - gh
+    - git
+  created_by: system

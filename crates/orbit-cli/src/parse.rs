@@ -25,31 +25,22 @@ pub fn parse_since(raw: &str) -> Result<DateTime<Utc>, orbit_core::OrbitError> {
         return Ok(naive.and_utc());
     }
 
-    let (num_raw, unit_raw) = split_duration_components(value)?;
-    let num: i64 = num_raw.parse().map_err(|_| {
-        orbit_core::OrbitError::InvalidInput(format!("invalid duration number: {num_raw}"))
+    let seconds = parse_duration_seconds(value)?;
+    let seconds = i64::try_from(seconds).map_err(|_| {
+        orbit_core::OrbitError::InvalidInput(format!(
+            "duration '{raw}' is too large to convert into a timestamp"
+        ))
     })?;
-
-    if num <= 0 {
-        return Err(orbit_core::OrbitError::InvalidInput(
-            "duration must be positive".to_string(),
-        ));
-    }
-
-    let seconds = match unit_raw {
-        "s" => num,
-        "m" => num * 60,
-        "h" => num * 3600,
-        "d" => num * 86400,
-        "w" => num * 604800,
-        other => {
-            return Err(orbit_core::OrbitError::InvalidInput(format!(
-                "unknown duration suffix: {other} (use s/m/h/d/w)"
-            )));
-        }
-    };
-
-    Ok(Utc::now() - chrono::Duration::seconds(seconds))
+    let duration = chrono::Duration::try_seconds(seconds).ok_or_else(|| {
+        orbit_core::OrbitError::InvalidInput(format!(
+            "duration '{raw}' is too large to convert into a timestamp"
+        ))
+    })?;
+    Utc::now().checked_sub_signed(duration).ok_or_else(|| {
+        orbit_core::OrbitError::InvalidInput(format!(
+            "duration '{raw}' is too large to convert into a timestamp"
+        ))
+    })
 }
 
 pub fn parse_duration_seconds(raw: &str) -> Result<u64, orbit_core::OrbitError> {
@@ -70,32 +61,20 @@ pub fn parse_duration_seconds(raw: &str) -> Result<u64, orbit_core::OrbitError> 
     })?;
 
     let seconds = match unit_raw {
-        "s" => num,
-        "m" => num.saturating_mul(60),
-        "h" => num.saturating_mul(3600),
-        "d" => num.saturating_mul(86400),
-        "w" => num.saturating_mul(604800),
+        "s" => Some(num),
+        "m" => num.checked_mul(60),
+        "h" => num.checked_mul(3600),
+        "d" => num.checked_mul(86400),
+        "w" => num.checked_mul(604800),
         _ => {
             return Err(orbit_core::OrbitError::InvalidInput(format!(
                 "invalid duration unit: {unit_raw} (expected s/m/h/d/w)"
             )));
         }
-    };
-
-    Ok(seconds)
-}
-
-fn split_duration_components(input: &str) -> Result<(&str, &str), orbit_core::OrbitError> {
-    let split_at = input.find(|c: char| c.is_alphabetic()).ok_or_else(|| {
-        orbit_core::OrbitError::InvalidInput(format!("invalid duration format: {input}"))
+    }
+    .ok_or_else(|| {
+        orbit_core::OrbitError::InvalidInput(format!("duration '{raw}' is too large to represent"))
     })?;
 
-    let (num, suffix) = input.split_at(split_at);
-    if num.is_empty() {
-        return Err(orbit_core::OrbitError::InvalidInput(format!(
-            "missing number in duration: {input}"
-        )));
-    }
-
-    Ok((num, suffix))
+    Ok(seconds)
 }

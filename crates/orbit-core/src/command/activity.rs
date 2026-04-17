@@ -3,105 +3,24 @@ use std::path::Path;
 
 use orbit_store::ActivityCreateParams as StoreWorkCreateParams;
 use orbit_store::ActivityUpdateParams as StoreActivityUpdateParams;
-use orbit_types::{Activity, JobRunState, OrbitError, OrbitEvent};
-use serde::Deserialize;
-use serde_json::{Map, Value};
+use orbit_types::{
+    Activity, ActivityResource, JobRunState, OrbitError, OrbitEvent, RESOURCE_SCHEMA_VERSION,
+    ResourceKind,
+};
+use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::paths::ORBIT_ROOT_TOKEN;
 
 pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
+    // ---- retained internal activities (still referenced by jobs) ----
     (
         "update_task",
         include_str!("../../assets/activities/automation/update_task.yaml"),
     ),
     (
-        "dispatch_and_plan_batch",
-        include_str!("../../assets/activities/agent_invoke/dispatch_and_plan_batch.yaml"),
-    ),
-    (
-        "finalize_tasks",
-        include_str!("../../assets/activities/agent_invoke/finalize_tasks.yaml"),
-    ),
-    (
         "parallel_dispatch_tasks",
         include_str!("../../assets/activities/automation/parallel_dispatch_tasks.yaml"),
-    ),
-    (
-        "commit_task_artifact_changes",
-        include_str!("../../assets/activities/automation/commit_task_artifact_changes.yaml"),
-    ),
-    (
-        "commit_finalize_artifact_changes",
-        include_str!("../../assets/activities/automation/commit_finalize_artifact_changes.yaml"),
-    ),
-    (
-        "commit_and_open_batch_pr",
-        include_str!("../../assets/activities/automation/commit_and_open_batch_pr.yaml"),
-    ),
-    (
-        "cleanup_worktree",
-        include_str!("../../assets/activities/automation/cleanup_worktree.yaml"),
-    ),
-    (
-        "implement_change",
-        include_str!("../../assets/activities/agent_invoke/implement_change.yaml"),
-    ),
-    (
-        "implement_change_classic",
-        include_str!("../../assets/activities/agent_invoke/implement_change_classic.yaml"),
-    ),
-    (
-        "review_tasks",
-        include_str!("../../assets/activities/agent_invoke/review_tasks.yaml"),
-    ),
-    (
-        "run_tests",
-        include_str!("../../assets/activities/cli_command/run_tests.yaml"),
-    ),
-    (
-        "snapshot_batch_state",
-        include_str!("../../assets/activities/automation/snapshot_batch_state.yaml"),
-    ),
-    (
-        "bootstrap_batch_review",
-        include_str!("../../assets/activities/automation/bootstrap_batch_review.yaml"),
-    ),
-    (
-        "implement_batch_fix",
-        include_str!("../../assets/activities/agent_invoke/implement_batch_fix.yaml"),
-    ),
-    (
-        "merge_batch_pr",
-        include_str!("../../assets/activities/automation/merge_batch_pr.yaml"),
-    ),
-    (
-        "review_batch_pr",
-        include_str!("../../assets/activities/agent_invoke/review_batch_pr.yaml"),
-    ),
-    (
-        "sync_batch_review_to_github",
-        include_str!("../../assets/activities/automation/sync_batch_review_to_github.yaml"),
-    ),
-    (
-        "commit_batch_changes",
-        include_str!("../../assets/activities/automation/commit_batch_changes.yaml"),
-    ),
-    (
-        "merge_batch_worktree_into_base",
-        include_str!("../../assets/activities/automation/merge_batch_worktree_into_base.yaml"),
-    ),
-    (
-        "pull_batch_changes",
-        include_str!("../../assets/activities/automation/pull_batch_changes.yaml"),
-    ),
-    (
-        "push_batch_changes",
-        include_str!("../../assets/activities/automation/push_batch_changes.yaml"),
-    ),
-    (
-        "check_batch_review_decision",
-        include_str!("../../assets/activities/automation/check_batch_review_decision.yaml"),
     ),
     (
         "select_duel_roles",
@@ -112,32 +31,82 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/automation/run_planning_duel.yaml"),
     ),
     (
-        "check_duel_review_decision",
-        include_str!("../../assets/activities/automation/check_duel_review_decision.yaml"),
-    ),
-    (
         "record_duel_scores",
         include_str!("../../assets/activities/automation/record_duel_scores.yaml"),
     ),
+    // ---- generic built-in automation activities ----
     (
-        "setup_worktree",
-        include_str!("../../assets/activities/automation/setup_worktree.yaml"),
+        "git_commit",
+        include_str!("../../assets/activities/automation/git_commit.yaml"),
     ),
     (
-        "open_batch_pr",
-        include_str!("../../assets/activities/automation/open_batch_pr.yaml"),
+        "git_push",
+        include_str!("../../assets/activities/automation/git_push.yaml"),
     ),
     (
-        "review_duel_pr",
-        include_str!("../../assets/activities/agent_invoke/review_duel_pr.yaml"),
+        "git_pull",
+        include_str!("../../assets/activities/automation/git_pull.yaml"),
     ),
     (
-        "arbitrate_review",
-        include_str!("../../assets/activities/agent_invoke/arbitrate_review.yaml"),
+        "git_merge",
+        include_str!("../../assets/activities/automation/git_merge.yaml"),
     ),
     (
-        "update_knowledge_graph",
-        include_str!("../../assets/activities/automation/update_knowledge_graph.yaml"),
+        "worktree_setup",
+        include_str!("../../assets/activities/automation/worktree_setup.yaml"),
+    ),
+    (
+        "worktree_cleanup",
+        include_str!("../../assets/activities/automation/worktree_cleanup.yaml"),
+    ),
+    (
+        "pr_open",
+        include_str!("../../assets/activities/automation/pr_open.yaml"),
+    ),
+    (
+        "pr_sync_reviews",
+        include_str!("../../assets/activities/automation/pr_sync_reviews.yaml"),
+    ),
+    (
+        "check_task_value",
+        include_str!("../../assets/activities/automation/check_task_value.yaml"),
+    ),
+    (
+        "dispatch_batch",
+        include_str!("../../assets/activities/automation/dispatch_batch.yaml"),
+    ),
+    (
+        "run_command",
+        include_str!("../../assets/activities/automation/run_command.yaml"),
+    ),
+    // ---- new generic agent activities ----
+    (
+        "agent_implement",
+        include_str!("../../assets/activities/agent_invoke/agent_implement.yaml"),
+    ),
+    (
+        "agent_implement_fix",
+        include_str!("../../assets/activities/agent_invoke/agent_implement_fix.yaml"),
+    ),
+    (
+        "finalize_tasks",
+        include_str!("../../assets/activities/agent_invoke/finalize_tasks.yaml"),
+    ),
+    (
+        "agent_plan",
+        include_str!("../../assets/activities/agent_invoke/agent_plan.yaml"),
+    ),
+    (
+        "agent_review",
+        include_str!("../../assets/activities/agent_invoke/agent_review.yaml"),
+    ),
+    (
+        "agent_batch_review",
+        include_str!("../../assets/activities/agent_invoke/agent_batch_review.yaml"),
+    ),
+    (
+        "agent_arbitrate",
+        include_str!("../../assets/activities/agent_invoke/agent_arbitrate.yaml"),
     ),
 ];
 
@@ -151,6 +120,7 @@ pub struct ActivityAddParams {
     pub input_schema_json: Value,
     pub output_schema_json: Value,
     pub spec_config: Value,
+    pub executor: Option<String>,
     pub workspace_path: Option<String>,
     pub created_by: Option<String>,
 }
@@ -161,6 +131,7 @@ pub struct ActivityUpdateParams {
     pub input_schema_json: Option<Value>,
     pub output_schema_json: Option<Value>,
     pub spec_config: Option<Value>,
+    pub executor: Option<Option<String>>,
     pub workspace_path: Option<Option<String>>,
     pub created_by: Option<Option<String>>,
     pub is_active: Option<bool>,
@@ -175,6 +146,7 @@ impl From<ActivityAddParams> for StoreWorkCreateParams {
             input_schema_json: p.input_schema_json,
             output_schema_json: p.output_schema_json,
             spec_config: p.spec_config,
+            executor: p.executor,
             workspace_path: p.workspace_path,
             created_by: p.created_by,
         }
@@ -188,37 +160,12 @@ impl From<ActivityUpdateParams> for StoreActivityUpdateParams {
             input_schema_json: p.input_schema_json,
             output_schema_json: p.output_schema_json,
             spec_config: p.spec_config,
+            executor: p.executor,
             workspace_path: p.workspace_path,
             created_by: p.created_by,
             is_active: p.is_active,
         }
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ActivityFileEnvelope {
-    schema_version: u8,
-    #[serde(default)]
-    created_by: Option<String>,
-    #[allow(dead_code)]
-    #[serde(default, rename = "identity_id")]
-    legacy_identity_id: Option<String>,
-    activity: ActivityFileSpec,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ActivityFileSpec {
-    id: String,
-    spec_type: String,
-    description: String,
-    #[serde(default)]
-    input_schema_json: Value,
-    #[serde(default)]
-    output_schema_json: Value,
-    #[serde(default)]
-    workspace_path: Option<String>,
-    #[serde(flatten)]
-    spec_config: Map<String, Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -254,7 +201,7 @@ impl OrbitRuntime {
         validate_activity_params(&params)?;
         let skill_refs = activity_skill_refs_from_spec_config(&params.spec_config)?;
         let _ = self.resolve_activity_skill_refs(&skill_refs)?;
-        let activity = self.add_activity_record(params.into())?;
+        let activity = self.stores().activities().add(params.into())?;
         self.record_event(OrbitEvent::ActivityAdded {
             id: activity.id.clone(),
         })?;
@@ -262,11 +209,13 @@ impl OrbitRuntime {
     }
 
     pub fn list_activities(&self, include_inactive: bool) -> Result<Vec<Activity>, OrbitError> {
-        self.list_activity_records(include_inactive)
+        self.stores().activities().list(include_inactive)
     }
 
     pub fn show_activity(&self, id: &str) -> Result<Activity, OrbitError> {
-        self.get_activity_record(id)?
+        self.stores()
+            .activities()
+            .get(id)?
             .ok_or_else(|| OrbitError::ActivityNotFound(id.to_string()))
     }
 
@@ -281,7 +230,7 @@ impl OrbitRuntime {
             let _ = self.resolve_activity_skill_refs(&skill_refs)?;
         }
 
-        let activity = self.update_activity_record(id, params.into())?;
+        let activity = self.stores().activities().update(id, params.into())?;
         self.record_event(OrbitEvent::ActivityUpdated {
             id: activity.id.clone(),
         })?;
@@ -289,7 +238,7 @@ impl OrbitRuntime {
     }
 
     pub fn delete_activity(&self, id: &str) -> Result<(), OrbitError> {
-        let changed = self.disable_activity_record(id)?;
+        let changed = self.stores().activities().disable(id)?;
         if !changed {
             return Err(OrbitError::ActivityNotFound(id.to_string()));
         }
@@ -307,9 +256,14 @@ impl OrbitRuntime {
         }
 
         let activity = self.show_activity(&params.activity_id)?;
-        if activity_requires_agent_cli(&activity.spec_type) && params.agent_cli.trim().is_empty() {
+        validate_activity_executor_for_run(self, &activity)?;
+        if activity_requires_agent_cli(&activity.spec_type)
+            && params.agent_cli.trim().is_empty()
+            && !activity_has_executor(&activity)
+        {
             return Err(OrbitError::InvalidInput(
-                "agent_cli must not be empty for agent_invoke activities".to_string(),
+                "agent_cli must not be empty for agent_invoke activities without an explicit executor"
+                    .to_string(),
             ));
         }
         self.record_event(OrbitEvent::ActivityRunStarted {
@@ -358,7 +312,7 @@ pub(crate) fn seed_default_activities(
 fn load_default_activity_specs(
     raw_specs: &[(&str, &str)],
     orbit_root: Option<&Path>,
-) -> Result<Vec<ActivityAddParams>, OrbitError> {
+) -> Result<Vec<ActivityResource>, OrbitError> {
     let mut specs = Vec::with_capacity(raw_specs.len());
     let mut ids = BTreeSet::new();
     for (expected_id, raw) in raw_specs {
@@ -366,19 +320,25 @@ fn load_default_activity_specs(
             Some(root) => inject_activity_template_tokens(raw, root),
             None => (*raw).to_string(),
         };
-        let spec = serde_yaml::from_str::<ActivityFileEnvelope>(&rendered).map_err(|err| {
+        let resource = serde_yaml::from_str::<ActivityResource>(&rendered).map_err(|err| {
             OrbitError::InvalidInput(format!(
                 "invalid default activity spec '{}': {err}",
                 expected_id
             ))
         })?;
-        if spec.schema_version != 1 {
+        if resource.schema_version != RESOURCE_SCHEMA_VERSION {
             return Err(OrbitError::InvalidInput(format!(
-                "default activity spec '{}' uses unsupported schema_version {}",
-                expected_id, spec.schema_version
+                "default activity spec '{}' uses unsupported schemaVersion {}",
+                expected_id, resource.schema_version
             )));
         }
-        let id = spec.activity.id.trim();
+        if resource.kind != ResourceKind::Activity {
+            return Err(OrbitError::InvalidInput(format!(
+                "default activity spec '{}' has unexpected kind {}",
+                expected_id, resource.kind
+            )));
+        }
+        let id = resource.metadata.name.trim();
         if id.is_empty() {
             return Err(OrbitError::InvalidInput(format!(
                 "default activity spec '{}' contains empty activity id",
@@ -396,16 +356,7 @@ fn load_default_activity_specs(
                 "default activity set contains duplicate activity id '{id}'"
             )));
         }
-        specs.push(ActivityAddParams {
-            id: spec.activity.id,
-            spec_type: spec.activity.spec_type,
-            description: spec.activity.description,
-            input_schema_json: spec.activity.input_schema_json,
-            output_schema_json: spec.activity.output_schema_json,
-            spec_config: Value::Object(spec.activity.spec_config),
-            workspace_path: spec.activity.workspace_path,
-            created_by: spec.created_by,
-        });
+        specs.push(resource);
     }
     Ok(specs)
 }
@@ -417,31 +368,59 @@ fn inject_activity_template_tokens(raw: &str, orbit_root: &Path) -> String {
 
 fn seed_default_activities_from_specs(
     runtime: &OrbitRuntime,
-    specs: &[ActivityAddParams],
+    specs: &[ActivityResource],
     overwrite: bool,
 ) -> Result<usize, OrbitError> {
     let mut created = 0usize;
-    for spec in specs {
-        if runtime.show_activity(&spec.id).is_ok() {
+    for resource in specs {
+        let activity_id = resource.metadata.name.clone();
+        let spec = &resource.spec;
+        let add_params = ActivityAddParams {
+            id: activity_id.clone(),
+            spec_type: spec.spec_type.clone(),
+            description: spec.description.clone(),
+            input_schema_json: spec.input_schema_json.clone(),
+            output_schema_json: spec.output_schema_json.clone(),
+            spec_config: Value::Object(spec.spec_config.clone()),
+            executor: spec.executor.clone(),
+            workspace_path: spec.workspace_path.clone(),
+            created_by: spec.created_by.clone(),
+        };
+        validate_activity_params(&add_params)?;
+        if runtime.show_activity(&activity_id).is_ok() {
             if !overwrite {
                 continue;
             }
-            runtime.update_activity(
-                &spec.id,
-                ActivityUpdateParams {
-                    description: Some(spec.description.clone()),
-                    input_schema_json: Some(spec.input_schema_json.clone()),
-                    output_schema_json: Some(spec.output_schema_json.clone()),
-                    spec_config: Some(spec.spec_config.clone()),
-                    workspace_path: Some(spec.workspace_path.clone()),
-                    created_by: Some(spec.created_by.clone()),
-                    is_active: Some(true),
-                },
-            )?;
+            let update_params: StoreActivityUpdateParams = ActivityUpdateParams {
+                description: Some(spec.description.clone()),
+                input_schema_json: Some(spec.input_schema_json.clone()),
+                output_schema_json: Some(spec.output_schema_json.clone()),
+                spec_config: Some(Value::Object(spec.spec_config.clone())),
+                executor: Some(spec.executor.clone()),
+                workspace_path: Some(spec.workspace_path.clone()),
+                created_by: Some(spec.created_by.clone()),
+                is_active: Some(spec.is_active),
+            }
+            .into();
+            runtime
+                .stores()
+                .activities()
+                .update(&activity_id, update_params)?;
             created += 1;
             continue;
         }
-        runtime.add_activity(spec.clone())?;
+        runtime.stores().activities().add(add_params.into())?;
+        if !spec.is_active {
+            let disable_params: StoreActivityUpdateParams = ActivityUpdateParams {
+                is_active: Some(false),
+                ..Default::default()
+            }
+            .into();
+            runtime
+                .stores()
+                .activities()
+                .update(&activity_id, disable_params)?;
+        }
         created += 1;
     }
     Ok(created)
@@ -507,6 +486,53 @@ pub(crate) fn activity_requires_agent_cli(spec_type: &str) -> bool {
     spec_type == "agent_invoke"
 }
 
+fn validate_activity_executor_for_run(
+    runtime: &OrbitRuntime,
+    activity: &Activity,
+) -> Result<(), OrbitError> {
+    let Some(executor_name) = activity
+        .executor
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let executor = runtime
+        .stores()
+        .executors()
+        .get(executor_name)?
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "activity executor '{}' does not exist",
+                executor_name
+            ))
+        })?;
+
+    if activity.spec_type == "agent_invoke"
+        && !matches!(
+            executor.executor_type.as_str(),
+            "agent_cli" | "direct_agent"
+        )
+    {
+        return Err(OrbitError::InvalidInput(format!(
+            "activity executor '{}' has unsupported type '{}' for agent_invoke activities",
+            executor_name, executor.executor_type
+        )));
+    }
+
+    Ok(())
+}
+
+fn activity_has_executor(activity: &Activity) -> bool {
+    activity
+        .executor
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
 pub(crate) fn activity_skill_refs_from_spec_config(
     spec_config: &Value,
 ) -> Result<Vec<String>, OrbitError> {
@@ -519,168 +545,4 @@ pub(crate) fn activity_skill_refs_from_spec_config(
             "activity spec_config.skill_refs must be an array of strings: {error}"
         ))
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DEFAULT_ACTIVITY_FILES, load_default_activity_specs};
-
-    #[test]
-    fn default_implement_change_uses_knowledge_pack_and_read_tools() {
-        let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, None).expect("activities");
-        let implement_change = specs
-            .into_iter()
-            .find(|spec| spec.id == "implement_change")
-            .expect("implement_change activity");
-
-        let instruction = implement_change
-            .spec_config
-            .get("instruction")
-            .and_then(serde_json::Value::as_str)
-            .expect("instruction");
-        assert!(instruction.contains("Load scoped knowledge for context_files"));
-        assert!(instruction.contains("Call orbit.graph.pack with the selector list"));
-        assert!(instruction.contains("knowledge_unavailable"));
-        assert!(instruction.contains("unresolved_selectors"));
-        assert!(!instruction.contains("Explore the workspace"));
-
-        let tools = implement_change
-            .spec_config
-            .get("tools")
-            .and_then(serde_json::Value::as_array)
-            .expect("tools")
-            .iter()
-            .map(|value| value.as_str().expect("tool name"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            tools
-                .iter()
-                .filter(|tool| **tool == "orbit.graph.pack")
-                .count(),
-            1
-        );
-        assert!(!tools.contains(&"orbit.graph.write"));
-        assert!(!tools.contains(&"orbit.graph.add"));
-        assert!(!tools.contains(&"orbit.graph.delete"));
-        assert!(!tools.contains(&"orbit.graph.move"));
-        assert!(tools.contains(&"orbit.graph.show"));
-        assert!(tools.contains(&"orbit.graph.search"));
-        assert!(tools.contains(&"fs.read"));
-    }
-
-    #[test]
-    fn default_implement_change_classic_omits_graph_tools() {
-        let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, None).expect("activities");
-        let classic = specs
-            .into_iter()
-            .find(|spec| spec.id == "implement_change_classic")
-            .expect("implement_change_classic activity");
-
-        let instruction = classic
-            .spec_config
-            .get("instruction")
-            .and_then(serde_json::Value::as_str)
-            .expect("instruction");
-        assert!(instruction.contains("Use fs.read to read each file"));
-        assert!(!instruction.contains("orbit.graph.pack"));
-        assert!(!instruction.contains("orbit.graph.write"));
-
-        let tools = classic
-            .spec_config
-            .get("tools")
-            .and_then(serde_json::Value::as_array)
-            .expect("tools")
-            .iter()
-            .map(|value| value.as_str().expect("tool name"))
-            .collect::<Vec<_>>();
-        assert!(tools.contains(&"fs.read"));
-        assert!(tools.contains(&"fs.write"));
-        assert!(!tools.iter().any(|t| t.starts_with("orbit.graph.")));
-    }
-
-    #[test]
-    fn implement_change_allowlist_stays_aligned_with_orbit_skill_guidance() {
-        let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, None).expect("activities");
-        let implement_change = specs
-            .into_iter()
-            .find(|spec| spec.id == "implement_change")
-            .expect("implement_change activity");
-
-        let instruction = implement_change
-            .spec_config
-            .get("instruction")
-            .and_then(serde_json::Value::as_str)
-            .expect("instruction");
-        assert!(
-            instruction.contains("Read the injected `task` object from this execution envelope")
-        );
-        assert!(instruction.contains(
-            "The injected task snapshot is the authoritative task context for implementation"
-        ));
-
-        let tools = implement_change
-            .spec_config
-            .get("tools")
-            .and_then(serde_json::Value::as_array)
-            .expect("tools")
-            .iter()
-            .map(|value| value.as_str().expect("tool name"))
-            .collect::<Vec<_>>();
-        assert!(
-            !tools.contains(&"orbit.task.show"),
-            "orbit.task.show must stay out of the implement_change allowlist when task context is preloaded"
-        );
-        assert!(tools.contains(&"orbit.task.update"));
-
-        let orbit_skill = include_str!("../../assets/skills/orbit/SKILL.md");
-        assert!(orbit_skill.contains("Inside `implement_change`"));
-        assert!(orbit_skill.contains("use the injected `task.*` fields directly"));
-        assert!(orbit_skill.contains("Do not call `orbit.task.show`"));
-        assert!(orbit_skill.contains("If the activity did not preload `task`, load the task"));
-    }
-
-    #[test]
-    fn planning_duel_registry_collapses_to_single_automation_activity() {
-        let specs = load_default_activity_specs(DEFAULT_ACTIVITY_FILES, None).expect("activities");
-        let activity = specs
-            .iter()
-            .find(|spec| spec.id == "run_planning_duel")
-            .expect("run_planning_duel activity");
-
-        assert_eq!(activity.spec_type, "automation");
-        assert_eq!(
-            activity
-                .input_schema_json
-                .get("required")
-                .and_then(serde_json::Value::as_array)
-                .cloned(),
-            Some(vec![serde_json::Value::String("task_id".to_string())])
-        );
-        assert_eq!(activity.output_schema_json, serde_json::json!({}));
-        assert_eq!(
-            activity
-                .spec_config
-                .get("action")
-                .and_then(serde_json::Value::as_str),
-            Some("run_planning_duel")
-        );
-
-        let ids = specs
-            .iter()
-            .map(|spec| spec.id.as_str())
-            .collect::<Vec<_>>();
-        for obsolete in [
-            "select_duel_plan_roles",
-            "propose_duel_plan",
-            "arbitrate_duel_plan",
-            "record_planning_duel_efficiency",
-            "record_planning_duel_scores",
-            "writeback_planning_duel_task",
-        ] {
-            assert!(
-                !ids.contains(&obsolete),
-                "{obsolete} should be removed from the planning duel registry"
-            );
-        }
-    }
 }

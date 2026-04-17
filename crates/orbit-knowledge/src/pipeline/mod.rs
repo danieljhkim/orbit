@@ -36,20 +36,20 @@ pub fn run_build(config: BuildConfig) -> Result<PipelineContext, KnowledgeError>
     Ok(ctx)
 }
 
-/// Ensure the knowledge graph is up-to-date with the current HEAD commit.
+/// Ensure the knowledge graph is up-to-date with the current checkout.
 ///
-/// Compares the manifest's `generated_at` timestamp against `git log -1 --format=%cI`.
-/// If HEAD is newer (or the manifest is missing), runs an incremental build.
+/// Rebuilds when the checkout is dirty, or when the manifest's `generated_at`
+/// timestamp lags behind `git log -1 --format=%cI`. If the manifest is missing,
+/// runs an incremental build as the first refresh.
 /// Returns `true` if a rebuild was triggered, `false` if already fresh.
 pub fn ensure_fresh(knowledge_dir: &Path, repo_path: &Path) -> Result<bool, KnowledgeError> {
     let manifest_path = knowledge_dir.join("manifest.json");
+    let worktree_dirty = git_worktree_dirty(repo_path).unwrap_or(false);
+    let head_ts = git_head_timestamp(repo_path);
 
-    let head_ts = match git_head_timestamp(repo_path) {
-        Some(ts) => ts,
-        None => return Ok(false), // not a git repo or git unavailable
-    };
-
-    let needs_rebuild = if manifest_path.is_file() {
+    let needs_rebuild = if worktree_dirty {
+        true
+    } else if manifest_path.is_file() {
         let raw = std::fs::read_to_string(&manifest_path)
             .map_err(|e| KnowledgeError::knowledge_unavailable(format!("read manifest: {e}")))?;
         let manifest: serde_json::Value = serde_json::from_str(&raw)
@@ -58,9 +58,10 @@ pub fn ensure_fresh(knowledge_dir: &Path, repo_path: &Path) -> Result<bool, Know
             .get("generated_at")
             .and_then(|v| v.as_str())
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
-        match generated_at {
-            Some(generated) => head_ts > generated,
-            None => true, // corrupt or missing timestamp
+        match (generated_at, head_ts) {
+            (Some(generated), Some(head_ts)) => head_ts > generated,
+            (None, _) => true,  // corrupt or missing timestamp
+            (_, None) => false, // not a git repo or git unavailable
         }
     } else {
         true // no manifest → first build
@@ -93,4 +94,16 @@ fn git_head_timestamp(repo_path: &Path) -> Option<chrono::DateTime<chrono::Fixed
     }
     let ts_str = String::from_utf8_lossy(&output.stdout);
     chrono::DateTime::parse_from_rfc3339(ts_str.trim()).ok()
+}
+
+fn git_worktree_dirty(repo_path: &Path) -> Option<bool> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .current_dir(repo_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(!output.stdout.is_empty())
 }

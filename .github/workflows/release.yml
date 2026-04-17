@@ -6,23 +6,37 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build-release:
-    runs-on: macos-latest
-    outputs:
-      version: ${{ steps.meta.outputs.version }}
-      sha256: ${{ steps.sha.outputs.sha256 }}
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runs_on }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runs_on: macos-15
+          - target: x86_64-apple-darwin
+            runs_on: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            runs_on: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runs_on: ubuntu-22.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: actions/cache@v4
         with:
@@ -30,50 +44,99 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-cargo-release-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-release-
 
-      - name: Compute version
-        id: meta
+      - name: Build release binary
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "asset=orbit_${VERSION}_darwin_arm64.tar.gz" >> "$GITHUB_OUTPUT"
-
-      - name: Build binary (darwin/arm64)
-        shell: bash
-        run: |
-          cargo build -p orbit-cli --release
-          ./target/release/orbit --version
+          cargo build -p orbit-cli --release --locked --target "${{ matrix.target }}"
+          "./target/${{ matrix.target }}/release/orbit" --version
 
       - name: Package tarball
         shell: bash
         run: |
-          VERSION="${{ steps.meta.outputs.version }}"
-          ASSET="orbit_${VERSION}_darwin_arm64.tar.gz"
-          tar -czf "$ASSET" -C target/release orbit
+          ASSET="orbit-${{ matrix.target }}.tar.gz"
+          tar -czf "$ASSET" -C "target/${{ matrix.target }}/release" orbit
           ls -lh "$ASSET"
 
-      - name: Compute sha256
-        id: sha
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: orbit-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      darwin_arm_asset: ${{ steps.metadata.outputs.darwin_arm_asset }}
+      darwin_arm_sha: ${{ steps.metadata.outputs.darwin_arm_sha }}
+      darwin_intel_asset: ${{ steps.metadata.outputs.darwin_intel_asset }}
+      darwin_intel_sha: ${{ steps.metadata.outputs.darwin_intel_sha }}
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
         shell: bash
         run: |
-          ASSET="${{ steps.meta.outputs.asset }}"
-          SHA="$(shasum -a 256 "$ASSET" | awk '{print $1}')"
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256=$SHA"
+          ls -lh dist
+          (
+            cd dist
+            sha256sum orbit-*.tar.gz | sort > orbit-checksums.txt
+          )
+          cat dist/orbit-checksums.txt
 
-      - name: Create GitHub Release + upload asset
+      - name: Capture release metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          DARWIN_ARM_ASSET="orbit-aarch64-apple-darwin.tar.gz"
+          DARWIN_INTEL_ASSET="orbit-x86_64-apple-darwin.tar.gz"
+          DARWIN_ARM_SHA="$(awk '$2 == "'"$DARWIN_ARM_ASSET"'" { print $1 }' dist/orbit-checksums.txt)"
+          DARWIN_INTEL_SHA="$(awk '$2 == "'"$DARWIN_INTEL_ASSET"'" { print $1 }' dist/orbit-checksums.txt)"
+
+          [ -n "$DARWIN_ARM_SHA" ]
+          [ -n "$DARWIN_INTEL_SHA" ]
+
+          {
+            echo "version=$VERSION"
+            echo "darwin_arm_asset=$DARWIN_ARM_ASSET"
+            echo "darwin_arm_sha=$DARWIN_ARM_SHA"
+            echo "darwin_intel_asset=$DARWIN_INTEL_ASSET"
+            echo "darwin_intel_sha=$DARWIN_INTEL_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: v${{ steps.meta.outputs.version }}
-          files: ${{ steps.meta.outputs.asset }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            dist/orbit-aarch64-apple-darwin.tar.gz
+            dist/orbit-aarch64-unknown-linux-gnu.tar.gz
+            dist/orbit-x86_64-apple-darwin.tar.gz
+            dist/orbit-x86_64-unknown-linux-gnu.tar.gz
+            dist/orbit-checksums.txt
           generate_release_notes: true
 
   bump-homebrew-tap:
-    needs: build-release
+    name: Update Homebrew tap
+    needs: publish-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -88,43 +151,45 @@ jobs:
       - name: Update formula
         shell: bash
         run: |
-          VERSION="${{ needs.build-release.outputs.version }}"
-          SHA="${{ needs.build-release.outputs.sha256 }}"
-          URL="https://github.com/danieljhkim/orbit/releases/download/v${VERSION}/orbit_${VERSION}_darwin_arm64.tar.gz"
-
+          VERSION="${{ needs.publish-release.outputs.version }}"
+          ARM_ASSET="${{ needs.publish-release.outputs.darwin_arm_asset }}"
+          ARM_SHA="${{ needs.publish-release.outputs.darwin_arm_sha }}"
+          INTEL_ASSET="${{ needs.publish-release.outputs.darwin_intel_asset }}"
+          INTEL_SHA="${{ needs.publish-release.outputs.darwin_intel_sha }}"
+          BASE_URL="https://github.com/danieljhkim/orbit/releases/download/v${VERSION}"
           FORMULA="tap/Formula/orbit.rb"
 
-          if [ -f "$FORMULA" ]; then
-            perl -0777 -i -pe "s|^\s*url\s+\".*?\"|  url \"${URL}\"|m" "$FORMULA"
-            perl -0777 -i -pe "s|^\s*sha256\s+\".*?\"|  sha256 \"${SHA}\"|m" "$FORMULA"
-            perl -0777 -i -pe "s|^\s*version\s+\".*?\"|  version \"${VERSION}\"|m" "$FORMULA"
-          else
-            mkdir -p tap/Formula
-            cat > "$FORMULA" << 'RUBY'
+          mkdir -p tap/Formula
+          cat > "$FORMULA" <<RUBY
           class Orbit < Formula
             desc "Local-first agentic workflow engine for agent-driven software delivery"
             homepage "https://github.com/danieljhkim/orbit"
-          RUBY
-            cat >> "$FORMULA" << RUBY
-            url "${URL}"
-            sha256 "${SHA}"
             version "${VERSION}"
-          RUBY
-            cat >> "$FORMULA" << 'RUBY'
             license "MIT"
 
+            on_macos do
+              on_arm do
+                url "${BASE_URL}/${ARM_ASSET}"
+                sha256 "${ARM_SHA}"
+              end
+
+              on_intel do
+                url "${BASE_URL}/${INTEL_ASSET}"
+                sha256 "${INTEL_SHA}"
+              end
+            end
+
             def install
+              odie "Orbit Homebrew releases currently support macOS only. Use install.sh on Linux." if OS.linux?
               bin.install "orbit"
             end
 
             test do
-              assert_match "orbit", shell_output("#{bin}/orbit --version")
+              assert_match version.to_s, shell_output("#{bin}/orbit --version")
             end
           end
           RUBY
-          fi
 
-          echo "Updated formula:"
           cat "$FORMULA"
 
       - name: Commit and push tap update
@@ -135,5 +200,51 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add Formula/orbit.rb
-          git commit -m "orbit v${{ needs.build-release.outputs.version }}"
+
+          if git diff --cached --quiet; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+
+          git commit -m "orbit v${{ needs.publish-release.outputs.version }}"
           git push
+
+  smoke-install-macos:
+    name: Smoke test installer on macOS arm64
+    needs: publish-release
+    runs-on: macos-15
+    steps:
+      - name: Run installer
+        shell: bash
+        env:
+          INSTALL_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$RUNNER_TEMP/orbit/bin"
+          curl -sSfL "$INSTALL_URL" | ORBIT_INSTALL_DIR="$INSTALL_DIR" ORBIT_VERSION="${GITHUB_REF_NAME}" sh
+          export PATH="$INSTALL_DIR:$PATH"
+          orbit --version
+
+  smoke-install-ubuntu:
+    name: Smoke test installer on Ubuntu 22.04
+    needs: publish-release
+    runs-on: ubuntu-22.04
+    container:
+      image: ubuntu:22.04
+    steps:
+      - name: Install prerequisites
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar
+
+      - name: Run installer
+        shell: bash
+        env:
+          INSTALL_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="/tmp/orbit/bin"
+          curl -sSfL "$INSTALL_URL" | ORBIT_INSTALL_DIR="$INSTALL_DIR" ORBIT_VERSION="${GITHUB_REF_NAME}" sh
+          export PATH="$INSTALL_DIR:$PATH"
+          orbit --version

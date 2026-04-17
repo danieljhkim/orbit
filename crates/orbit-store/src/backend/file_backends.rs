@@ -1,16 +1,18 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{
-    Activity, Job, JobRun, JobScheduleState, KnowledgeRunMetrics, OrbitError, Task, TaskArtifact,
-    TaskPriority, TaskStatus,
+    Activity, ExecutorDef, Job, JobRun, JobScheduleState, KnowledgeRunMetrics, OrbitError,
+    PipelineState, PolicyDef, Task, TaskArtifact, TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
-    ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, JobCreateParams, JobRunQuery,
-    JobRunStepParams, JobStoreBackend, JobUpdateParams, TaskCreateParams, TaskStoreBackend,
-    TaskUpdateParams,
+    ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, ExecutorDefStoreBackend,
+    JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams,
+    PolicyDefStoreBackend, TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
 };
 use crate::file::activity_store::ActivityFileStore;
+use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::job_store::JobFileStore;
+use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskFileStore;
 
 impl TaskStoreBackend for TaskFileStore {
@@ -112,6 +114,10 @@ impl JobStoreBackend for JobFileStore {
         self.list_pending_or_running_job_runs(job_id)
     }
 
+    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
+        self.list_all_pending_or_running_runs()
+    }
+
     fn set_job_state(&self, job_id: &str, state: JobScheduleState) -> Result<bool, OrbitError> {
         self.set_job_state(job_id, state)
     }
@@ -138,6 +144,23 @@ impl JobStoreBackend for JobFileStore {
         pid: u32,
     ) -> Result<bool, OrbitError> {
         self.mark_job_run_running(run_id, started_at, pid)
+    }
+
+    fn take_over_running_job_run(
+        &self,
+        run_id: &str,
+        expected_pid: Option<u32>,
+        expected_pid_start_time: Option<String>,
+        started_at: DateTime<Utc>,
+        pid: u32,
+    ) -> Result<bool, OrbitError> {
+        self.take_over_running_job_run(
+            run_id,
+            expected_pid,
+            expected_pid_start_time,
+            started_at,
+            pid,
+        )
     }
 
     fn abandon_job_run(
@@ -180,5 +203,41 @@ impl JobStoreBackend for JobFileStore {
 
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
         self.delete_run(run_id)
+    }
+
+    fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError> {
+        self.read_run_state(run_id)
+    }
+
+    fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError> {
+        self.write_run_state(run_id, state)
+    }
+}
+
+impl ExecutorDefStoreBackend for ExecutorDefFileStore {
+    fn list_executor_defs(&self) -> Result<Vec<ExecutorDef>, OrbitError> {
+        self.list_executor_defs()
+    }
+
+    fn get_executor_def(&self, name: &str) -> Result<Option<ExecutorDef>, OrbitError> {
+        self.get_executor_def(name)
+    }
+
+    fn upsert_executor_def(&self, def: &ExecutorDef) -> Result<(), OrbitError> {
+        self.upsert_executor_def(def)
+    }
+}
+
+impl PolicyDefStoreBackend for PolicyDefFileStore {
+    fn list_policy_defs(&self) -> Result<Vec<PolicyDef>, OrbitError> {
+        self.list_policy_defs()
+    }
+
+    fn get_policy_def(&self, name: &str) -> Result<Option<PolicyDef>, OrbitError> {
+        self.get_policy_def(name)
+    }
+
+    fn upsert_policy_def(&self, def: &PolicyDef) -> Result<(), OrbitError> {
+        self.upsert_policy_def(def)
     }
 }

@@ -8,6 +8,8 @@ pub struct TemplateContext {
     pub input: Value,
     pub env: HashMap<String, String>,
     pub workspace_path: Option<String>,
+    /// Accumulated outputs from completed steps, keyed by step id (or target_id).
+    pub steps: HashMap<String, Value>,
 }
 
 pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, OrbitError> {
@@ -59,6 +61,38 @@ fn resolve_token(token: &str, ctx: &TemplateContext) -> Result<String, OrbitErro
             ctx.env.get(path[0]).cloned().ok_or_else(|| {
                 OrbitError::InvalidInput(format!("missing environment variable '{}'", path[0]))
             })
+        }
+        "steps" => {
+            // steps.<step_id>.<namespace>.<field>...
+            // where <namespace> is "state" or "output".
+            if path.len() < 2 {
+                return Err(OrbitError::InvalidInput(format!(
+                    "steps template token '{token}' must be steps.<id>.state.<field> or steps.<id>.output.<field>"
+                )));
+            }
+            let step_id = path[0];
+            let step_value = ctx.steps.get(step_id).ok_or_else(|| {
+                OrbitError::InvalidInput(format!("no data recorded for step '{step_id}'"))
+            })?;
+            let sub_namespace = path[1];
+            match sub_namespace {
+                "state" | "output" => {
+                    let sub_value = step_value.get(sub_namespace).ok_or_else(|| {
+                        OrbitError::InvalidInput(format!(
+                            "step '{step_id}' has no '{sub_namespace}' data"
+                        ))
+                    })?;
+                    if path.len() == 2 {
+                        // steps.<id>.state or steps.<id>.output — return the whole sub-object
+                        resolve_input_path(Some(sub_value), &[])
+                    } else {
+                        resolve_input_path(Some(sub_value), &path[2..])
+                    }
+                }
+                other => Err(OrbitError::InvalidInput(format!(
+                    "unknown steps sub-namespace '{other}' in '{token}'; expected 'state' or 'output'"
+                ))),
+            }
         }
         "secrets" => Err(OrbitError::InvalidInput(
             "secrets namespace is not yet supported".to_string(),

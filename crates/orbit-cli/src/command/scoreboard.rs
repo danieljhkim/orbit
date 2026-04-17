@@ -18,7 +18,7 @@ impl Execute for ScoreboardCommand {
 
 #[derive(Subcommand)]
 pub enum ScoreboardSubcommand {
-    /// Generate `.orbit/scoreboard/summary.json` on demand
+    /// Generate `.orbit/state/scoreboard/summary.json` on demand
     Summary(ScoreboardSummaryArgs),
 }
 

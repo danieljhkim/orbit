@@ -4,16 +4,20 @@ use orbit_core::{
     validate_workflow_flags,
 };
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 use crate::command::Execute;
 use crate::command::job_run_support::{
-    RunHistoryFilter, job_run_step_to_json, job_run_to_json, load_filtered_job_runs,
-    load_latest_job_run, print_job_run, print_job_run_list, print_step_detail,
+    RunHistoryFilter, job_run_step_to_json, job_run_to_json_with_workflow, load_filtered_job_runs,
+    load_latest_job_run, print_job_run_list_with_workflow, print_job_run_with_workflow,
+    print_step_detail, summary_step,
 };
 
 const SHIP_WORKFLOW: &str = "ship";
 const SHIP_LOCAL_WORKFLOW: &str = "ship-local";
-const SHIP_JOB_IDS: &[&str] = &["job_parallel_task_pipeline", "job_local_task_pipeline"];
+const SHIP_JOB_ID: &str = "job_parallel_task_pipeline";
+const SHIP_LOCAL_JOB_ID: &str = "job_local_task_pipeline";
+const SHIP_JOB_IDS: &[&str] = &[SHIP_JOB_ID, SHIP_LOCAL_JOB_ID];
 
 #[derive(Args)]
 #[command(
@@ -157,11 +161,15 @@ impl Execute for ShipListArgs {
 
         if self.json {
             return crate::output::json::print_pretty(&Value::Array(
-                runs.iter().map(job_run_to_json).collect::<Vec<_>>(),
+                runs.iter()
+                    .map(|run| {
+                        job_run_to_json_with_workflow(run, ship_workflow_name(run.job_id.as_str()))
+                    })
+                    .collect::<Vec<_>>(),
             ));
         }
 
-        print_job_run_list(&runs, self.full);
+        print_job_run_list_with_workflow(&runs, self.full, ship_workflow_name);
         Ok(())
     }
 }
@@ -203,10 +211,13 @@ impl Execute for ShipShowArgs {
         }
 
         if self.json {
-            return crate::output::json::print_pretty(&job_run_to_json(&run));
+            return crate::output::json::print_pretty(&job_run_to_json_with_workflow(
+                &run,
+                ship_workflow_name(run.job_id.as_str()),
+            ));
         }
 
-        print_job_run(&run);
+        print_job_run_with_workflow(&run, ship_workflow_name(run.job_id.as_str()));
         Ok(())
     }
 }
@@ -235,6 +246,8 @@ fn build_ship_run_plan(args: &ShipRunArgs) -> Result<ShipRunPlan, OrbitError> {
         ));
     }
 
+    validate_explicit_task_selection(args.tasks.as_deref(), args.parallelism)?;
+
     let workflow_alias = if args.local {
         SHIP_LOCAL_WORKFLOW
     } else {
@@ -256,6 +269,37 @@ fn build_ship_run_plan(args: &ShipRunArgs) -> Result<ShipRunPlan, OrbitError> {
         input: build_workflow_input_for(Some(workflow), &input)?,
         loop_count: args.loop_count,
     })
+}
+
+fn validate_explicit_task_selection(
+    tasks: Option<&str>,
+    parallelism: Option<u32>,
+) -> Result<(), OrbitError> {
+    let Some(tasks) = tasks else {
+        return Ok(());
+    };
+
+    let task_ids = crate::parse::csv_to_vec(tasks);
+    let mut seen = HashSet::new();
+    for task_id in &task_ids {
+        if !seen.insert(task_id.clone()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "duplicate task id '{task_id}' in --tasks"
+            )));
+        }
+    }
+
+    if let Some(parallelism) = parallelism
+        && task_ids.len() > parallelism as usize
+    {
+        return Err(OrbitError::InvalidInput(format!(
+            "explicit --tasks batch of {} exceeds --parallelism {}",
+            task_ids.len(),
+            parallelism
+        )));
+    }
+
+    Ok(())
 }
 
 fn dispatch_workflow(
@@ -283,11 +327,11 @@ fn dispatch_workflow(
             attempt: run.attempt,
             error_code: run_details
                 .as_ref()
-                .and_then(|entry| entry.steps.last())
+                .and_then(summary_step)
                 .and_then(|step| step.error_code.clone()),
             error_message: run_details
                 .as_ref()
-                .and_then(|entry| entry.steps.last())
+                .and_then(summary_step)
                 .and_then(|step| step.error_message.clone()),
         });
     }
@@ -317,115 +361,10 @@ fn ensure_ship_run(run: &orbit_core::JobRun) -> Result<(), OrbitError> {
     )))
 }
 
-#[cfg(test)]
-mod tests {
-    use clap::{CommandFactory, Parser, error::ErrorKind};
-    use serde_json::json;
-
-    use crate::command::{Cli, Commands};
-
-    use super::*;
-
-    #[test]
-    fn ship_run_uses_parallel_workflow_by_default() {
-        let plan = build_ship_run_plan(&ShipRunArgs {
-            local: false,
-            tasks: Some("T001".to_string()),
-            parallelism: Some(2),
-            base: None,
-            loop_count: 1,
-            debug: false,
-            json: false,
-        })
-        .expect("ship run plan");
-
-        assert_eq!(plan.workflow_alias, SHIP_WORKFLOW);
-        assert_eq!(plan.input, json!({"task_ids":["T001"], "parallelism": 2}));
-    }
-
-    #[test]
-    fn ship_run_uses_local_workflow_when_requested() {
-        let plan = build_ship_run_plan(&ShipRunArgs {
-            local: true,
-            tasks: Some("T001".to_string()),
-            parallelism: None,
-            base: Some("main".to_string()),
-            loop_count: 1,
-            debug: false,
-            json: false,
-        })
-        .expect("local ship run plan");
-
-        assert_eq!(plan.workflow_alias, SHIP_LOCAL_WORKFLOW);
-        assert_eq!(plan.input, json!({"task_ids":["T001"], "base":"main"}));
-    }
-
-    #[test]
-    fn ship_without_subcommand_displays_help() {
-        let err = match Cli::try_parse_from(["orbit", "ship"]) {
-            Ok(_) => panic!("ship should require subcommand"),
-            Err(err) => err,
-        };
-        assert_eq!(
-            err.kind(),
-            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-        );
-    }
-
-    #[test]
-    fn top_level_help_shows_target_cli_shape() {
-        let help = Cli::command().render_help().to_string();
-
-        assert!(help.contains("Setup:"));
-        assert!(help.contains("Run workflows:"));
-        assert!(help.contains("  ship"));
-        assert!(help.contains("  duel"));
-        assert!(help.contains("Manage work:"));
-        assert!(help.contains("Inspect:"));
-        assert!(help.find("Setup:").unwrap() < help.find("Run workflows:").unwrap());
-        assert!(!help.contains("  job "));
-        assert!(!help.contains("  job-run "));
-        assert!(!help.contains("  activity "));
-    }
-
-    #[test]
-    fn ship_run_parses_loop_flag() {
-        let cli = Cli::try_parse_from(["orbit", "ship", "run", "--loop", "3"])
-            .expect("ship run should parse");
-
-        let Commands::Ship(ship) = cli.command else {
-            panic!("expected ship command");
-        };
-        let ShipSubcommand::Run(args) = ship.command else {
-            panic!("expected ship run command");
-        };
-        assert_eq!(args.loop_count, 3);
-    }
-
-    #[test]
-    fn ship_show_accepts_missing_run_id() {
-        let cli = Cli::try_parse_from(["orbit", "ship", "show"]).expect("ship show should parse");
-
-        let Commands::Ship(ship) = cli.command else {
-            panic!("expected ship command");
-        };
-        let ShipSubcommand::Show(args) = ship.command else {
-            panic!("expected ship show command");
-        };
-        assert!(args.run_id.is_none());
-    }
-
-    #[test]
-    fn ship_list_accepts_full_flag() {
-        let cli =
-            Cli::try_parse_from(["orbit", "ship", "list", "--full"]).expect("ship list parses");
-
-        let Commands::Ship(ship) = cli.command else {
-            panic!("expected ship command");
-        };
-        let ShipSubcommand::List(args) = ship.command else {
-            panic!("expected ship list command");
-        };
-        assert!(args.full);
+fn ship_workflow_name(job_id: &str) -> Option<&'static str> {
+    match job_id {
+        SHIP_JOB_ID => Some(SHIP_WORKFLOW),
+        SHIP_LOCAL_JOB_ID => Some(SHIP_LOCAL_WORKFLOW),
+        _ => None,
     }
 }

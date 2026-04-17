@@ -84,6 +84,7 @@ impl Execute for ActivityAddArgs {
             input_schema_json,
             output_schema_json,
             spec_config,
+            executor: None,
             workspace_path: self.workspace_path,
             created_by: self.created_by,
         })?;
@@ -244,6 +245,7 @@ impl Execute for ActivityUpdateArgs {
                 input_schema_json,
                 output_schema_json,
                 spec_config,
+                executor: None,
                 workspace_path,
                 created_by: None,
                 is_active,

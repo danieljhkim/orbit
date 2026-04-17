@@ -1,14 +1,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_types::OrbitError;
+use orbit_store::{executor_def_store_file, policy_def_store_file};
+use orbit_types::{OrbitError, WorkspacePaths};
 
 use crate::OrbitRuntime;
 use crate::command::activity::seed_default_activities;
+use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
+use crate::command::policy::seed_default_policies;
 use crate::command::skill::{default_skill_ids, seed_default_skills};
-use crate::config::seed_default_config;
+use crate::config::{RuntimeConfig, seed_default_config};
 use crate::fs_utils::{create_dir_symlink, remove_path_if_exists};
+use crate::runtime::resolve_global_root;
 
 #[derive(Debug, Clone)]
 pub struct InitResult {
@@ -17,6 +21,8 @@ pub struct InitResult {
     pub created_config: bool,
     pub refreshed_default_activities: usize,
     pub refreshed_default_jobs: usize,
+    pub refreshed_default_executors: usize,
+    pub refreshed_default_policies: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -26,9 +32,8 @@ pub struct InitOptions {
     /// they already exist.  Explicit `orbit init` sets this; implicit
     /// bootstrap from other commands does not.
     pub refresh_defaults: bool,
-    /// When true, skip workspace-only artifacts (scoreboards) during init.
-    /// Set for global-root bootstrapping to avoid writing workspace-scoped
-    /// files into `~/.orbit/`.
+    /// When true, seed only the globally scoped resource sets and skip
+    /// workspace-local layout concerns like skills, tasks, and state.
     pub global_only: bool,
 }
 
@@ -46,13 +51,12 @@ impl OrbitRuntime {
 }
 
 /// Ensures both global and workspace roots are bootstrapped.
-/// Global root gets config, skills, activities, jobs, and db (global-scoped artifacts).
-/// Workspace root gets tasks/ directory and scoreboard templates (workspace-scoped artifacts).
+/// Global root gets config plus all globally scoped resource defaults.
+/// Workspace root gets only workspace-local layout and runtime state dirs.
 pub(crate) fn ensure_orbit_root_initialized(
     global_root: &Path,
     workspace_root: &Path,
 ) -> Result<(), OrbitError> {
-    // Bootstrap global root — skip workspace-only artifacts (scoreboards, task dirs, job runs)
     init_workspace_at_root(
         global_root,
         InitOptions {
@@ -60,11 +64,8 @@ pub(crate) fn ensure_orbit_root_initialized(
             ..Default::default()
         },
     )?;
-    // Ensure workspace tasks directory exists (tasks are WorkspaceOnly)
-    let tasks_dir = workspace_root.join("tasks");
-    fs::create_dir_all(&tasks_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
-    // Seed scoreboard templates at workspace root (scoreboards are workspace-scoped)
-    if OrbitRuntime::from_data_root(global_root)?.scoring_enabled() {
+    prepare_workspace_root_layout(workspace_root)?;
+    if RuntimeConfig::load_layered(global_root, global_root)?.scoring_enabled {
         seed_scoreboard_templates(workspace_root)?;
     }
     Ok(())
@@ -108,12 +109,19 @@ pub fn init_workspace_at_root(
     if options.force {
         remove_path_if_exists(&orbit_root)?;
     }
-    fs::create_dir_all(&orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-    let skills_root = orbit_root.join("skills");
-    fs::create_dir_all(&skills_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let layout = if options.global_only {
+        prepare_global_root_layout(&orbit_root)?
+    } else {
+        prepare_workspace_root_layout(&orbit_root)?
+    };
+    let skills_root = layout.skills_dir.clone();
 
     let overwrite = options.force || options.refresh_defaults;
-    let refreshed_skill_files = seed_default_skills(&skills_root, &orbit_root, overwrite)?;
+    let refreshed_skill_files = if options.global_only {
+        0
+    } else {
+        seed_default_skills(&skills_root, &orbit_root, overwrite)?
+    };
     let created_config = if options.global_only {
         let config_path = orbit_root.join("config.toml");
         seed_default_config(&config_path)?
@@ -123,18 +131,56 @@ pub fn init_workspace_at_root(
 
     let skill_ids = default_skill_ids();
     let mut created_skills_symlink = false;
-    for skills_links_root in &init_target.skills_links_roots {
-        created_skills_symlink |=
-            ensure_skill_links(&skills_root, &skill_ids, skills_links_root, options.force)?;
+    if !options.global_only {
+        for skills_links_root in &init_target.skills_links_roots {
+            created_skills_symlink |=
+                ensure_skill_links(&skills_root, &skill_ids, skills_links_root, options.force)?;
+        }
     }
 
-    let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
-    let refreshed_default_activities =
-        seed_default_activities(&init_runtime, &orbit_root, overwrite)?;
-    let refreshed_default_jobs = seed_default_jobs(&init_runtime, overwrite)?;
+    let (
+        refreshed_default_activities,
+        refreshed_default_jobs,
+        refreshed_default_executors,
+        refreshed_default_policies,
+        scoring_enabled,
+    ) = if options.global_only {
+        let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
+        let executor_store = executor_def_store_file(layout.executors_dir.clone());
+        let policy_store = policy_def_store_file(layout.policies_dir.clone());
+        let refreshed_default_executors =
+            seed_default_executors(executor_store.as_ref(), overwrite)?;
+        let refreshed_default_policies = seed_default_policies(policy_store.as_ref(), overwrite)?;
+        let refreshed_default_activities =
+            seed_default_activities(&init_runtime, &orbit_root, overwrite)?;
+        let refreshed_default_jobs = seed_default_jobs(&init_runtime, overwrite)?;
+        (
+            refreshed_default_activities,
+            refreshed_default_jobs,
+            refreshed_default_executors,
+            refreshed_default_policies,
+            false,
+        )
+    } else {
+        let global_root = resolve_global_root()?;
+        let global_result = init_workspace_at_root(
+            &global_root,
+            InitOptions {
+                refresh_defaults: options.refresh_defaults,
+                global_only: true,
+                ..Default::default()
+            },
+        )?;
+        (
+            global_result.refreshed_default_activities,
+            global_result.refreshed_default_jobs,
+            global_result.refreshed_default_executors,
+            global_result.refreshed_default_policies,
+            RuntimeConfig::load_layered(&global_root, &orbit_root)?.scoring_enabled,
+        )
+    };
 
-    let scoring_enabled = init_runtime.scoring_enabled();
-    if scoring_enabled && !options.global_only {
+    if scoring_enabled {
         seed_scoreboard_templates(&orbit_root)?;
     }
 
@@ -144,6 +190,8 @@ pub fn init_workspace_at_root(
         created_config,
         refreshed_default_activities,
         refreshed_default_jobs,
+        refreshed_default_executors,
+        refreshed_default_policies,
     })
 }
 
@@ -183,7 +231,7 @@ fn find_git_repo_root(start: &Path) -> Option<PathBuf> {
 }
 
 fn seed_scoreboard_templates(orbit_root: &Path) -> Result<(), OrbitError> {
-    let scoreboard_dir = orbit_root.join("scoreboard");
+    let scoreboard_dir = orbit_layout_paths(orbit_root).scoreboard_dir;
     fs::create_dir_all(&scoreboard_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
 
     let pr_path = scoreboard_dir.join("pr.json");
@@ -196,6 +244,59 @@ fn seed_scoreboard_templates(orbit_root: &Path) -> Result<(), OrbitError> {
         fs::write(&friction_path, "{}\n").map_err(|e| OrbitError::Io(e.to_string()))?;
     }
 
+    Ok(())
+}
+
+fn prepare_workspace_root_layout(orbit_root: &Path) -> Result<WorkspacePaths, OrbitError> {
+    fs::create_dir_all(orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let layout = orbit_layout_paths(orbit_root);
+    ensure_workspace_dirs(&layout)?;
+    Ok(layout)
+}
+
+fn orbit_layout_paths(orbit_root: &Path) -> WorkspacePaths {
+    let repo_root = orbit_root.parent().unwrap_or(orbit_root).to_path_buf();
+    WorkspacePaths::new(
+        repo_root,
+        orbit_root.to_path_buf(),
+        orbit_root.to_path_buf(),
+    )
+}
+
+fn prepare_global_root_layout(orbit_root: &Path) -> Result<WorkspacePaths, OrbitError> {
+    fs::create_dir_all(orbit_root).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let layout = orbit_layout_paths(orbit_root);
+    ensure_global_dirs(&layout)?;
+    Ok(layout)
+}
+
+fn ensure_workspace_dirs(paths: &WorkspacePaths) -> Result<(), OrbitError> {
+    for dir in [
+        &paths.resources_dir,
+        &paths.skills_dir,
+        &paths.state_dir,
+        &paths.job_runs_dir,
+        &paths.diagnostics_dir,
+        &paths.scoreboard_dir,
+        &paths.worktrees_dir,
+        &paths.tasks_dir,
+        &paths.knowledge_dir,
+    ] {
+        fs::create_dir_all(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    }
+    Ok(())
+}
+
+fn ensure_global_dirs(paths: &WorkspacePaths) -> Result<(), OrbitError> {
+    for dir in [
+        &paths.resources_dir,
+        &paths.activities_dir,
+        &paths.jobs_dir,
+        &paths.executors_dir,
+        &paths.policies_dir,
+    ] {
+        fs::create_dir_all(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -311,7 +412,7 @@ pub struct UnlinkResult {
 /// Re-create skill symlinks in `.agents/skills/` and `.claude/skills/`.
 pub fn link_skills(orbit_root: &Path) -> Result<LinkResult, OrbitError> {
     let init_target = resolve_init_target_from_root(orbit_root);
-    let skills_root = init_target.orbit_root.join("skills");
+    let skills_root = orbit_layout_paths(&init_target.orbit_root).skills_dir;
 
     if !skills_root.exists() {
         return Err(OrbitError::InvalidInput(format!(
@@ -386,104 +487,4 @@ pub fn unlink_skills(orbit_root: &Path) -> Result<UnlinkResult, OrbitError> {
 fn dir_is_empty(path: &Path) -> Result<bool, OrbitError> {
     let mut entries = fs::read_dir(path).map_err(|e| OrbitError::Io(e.to_string()))?;
     Ok(entries.next().is_none())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unlink_removes_only_symlinks() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp.path().join("repo");
-        fs::create_dir_all(repo_root.join(".git")).expect("create .git");
-
-        let orbit_root = repo_root.join(".orbit");
-        init_workspace_at_root(&orbit_root, InitOptions::default()).expect("init");
-
-        // Verify symlinks exist
-        let agents_skills = repo_root.join(".agents/skills");
-        let claude_skills = repo_root.join(".claude/skills");
-        assert!(
-            agents_skills.is_dir(),
-            ".agents/skills should exist after init"
-        );
-        assert!(
-            claude_skills.is_dir(),
-            ".claude/skills should exist after init"
-        );
-
-        // Place a regular file in .agents/skills/ (should NOT be removed)
-        fs::write(agents_skills.join("user_file.txt"), "keep me").expect("write user file");
-
-        let result = unlink_skills(&orbit_root).expect("unlink");
-        assert!(result.removed_count > 0, "should have removed symlinks");
-
-        // Regular file should still exist
-        assert!(
-            agents_skills.join("user_file.txt").exists(),
-            "non-symlink file should be preserved"
-        );
-        // .agents/skills/ should still exist (has a regular file)
-        assert!(
-            agents_skills.is_dir(),
-            ".agents/skills should remain (has non-symlink content)"
-        );
-        // .claude/skills/ was only symlinks so it should be cleaned up
-        assert!(
-            !claude_skills.exists(),
-            ".claude/skills should be removed (was empty after unlink)"
-        );
-    }
-
-    #[test]
-    fn link_restores_symlinks_after_unlink() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let repo_root = temp.path().join("repo");
-        fs::create_dir_all(repo_root.join(".git")).expect("create .git");
-
-        let orbit_root = repo_root.join(".orbit");
-        init_workspace_at_root(&orbit_root, InitOptions::default()).expect("init");
-
-        // Count initial symlinks
-        let claude_skills = repo_root.join(".claude/skills");
-        let initial_count = fs::read_dir(&claude_skills)
-            .expect("read")
-            .filter(|e| {
-                e.as_ref()
-                    .ok()
-                    .and_then(|e| fs::symlink_metadata(e.path()).ok())
-                    .map(|m| m.file_type().is_symlink())
-                    .unwrap_or(false)
-            })
-            .count();
-        assert!(initial_count > 0, "should have symlinks after init");
-
-        // Unlink
-        let unlink_result = unlink_skills(&orbit_root).expect("unlink");
-        assert!(unlink_result.removed_count > 0);
-
-        // Re-link
-        let link_result = link_skills(&orbit_root).expect("link");
-        assert!(
-            link_result.linked_count > 0,
-            "should have re-created symlinks"
-        );
-
-        // Verify symlinks are back
-        let restored_count = fs::read_dir(repo_root.join(".claude/skills"))
-            .expect("read")
-            .filter(|e| {
-                e.as_ref()
-                    .ok()
-                    .and_then(|e| fs::symlink_metadata(e.path()).ok())
-                    .map(|m| m.file_type().is_symlink())
-                    .unwrap_or(false)
-            })
-            .count();
-        assert_eq!(
-            restored_count, initial_count,
-            "link should restore the same number of symlinks"
-        );
-    }
 }

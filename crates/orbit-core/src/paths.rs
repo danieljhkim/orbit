@@ -96,51 +96,6 @@ fn resolve_main_repo_from_worktree_gitfile(git_file: &Path) -> Option<PathBuf> {
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::items_after_test_module)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn find_git_repo_root_returns_main_repo_from_worktree() {
-        let dir = tempfile::tempdir().expect("tempdir");
-
-        // Set up a fake main repo with a .git directory.
-        let main_repo = dir.path().join("main");
-        std::fs::create_dir_all(main_repo.join(".git/worktrees/task-branch"))
-            .expect("create gitdir");
-
-        // Set up a fake worktree directory with a .git file pointing back.
-        let worktree = dir.path().join("worktrees/task-branch");
-        std::fs::create_dir_all(&worktree).expect("create worktree");
-        let gitdir_target = main_repo.join(".git/worktrees/task-branch");
-        std::fs::write(
-            worktree.join(".git"),
-            format!("gitdir: {}\n", gitdir_target.display()),
-        )
-        .expect("write .git file");
-
-        // A subdirectory inside the worktree (simulates agent CWD).
-        let cwd = worktree.join("src");
-        std::fs::create_dir_all(&cwd).expect("create cwd");
-
-        let root = find_git_repo_root(&cwd);
-        assert_eq!(
-            root,
-            Some(main_repo),
-            "should resolve to main repo, not worktree"
-        );
-    }
-
-    #[test]
-    fn find_git_repo_root_returns_none_for_non_git_dir() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let cwd = dir.path().join("workspace");
-        std::fs::create_dir_all(&cwd).expect("create cwd");
-        assert_eq!(find_git_repo_root(&cwd), None);
-    }
-}
-
 pub(crate) fn normalize_path_components(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {

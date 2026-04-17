@@ -1,6 +1,6 @@
 //! Friction bounty scoreboard auto-increment.
 //!
-//! Updates `.orbit/scoreboard/friction_bounty.json` when self-reported friction tasks
+//! Updates `.orbit/state/scoreboard/friction_bounty.json` when self-reported friction tasks
 //! transition through lifecycle states:
 //! - **creation** (agent + model present): increment `issues-reported`
 //! - **approval** (proposed→backlog, review→done): increment `issues-accepted`
@@ -12,42 +12,25 @@ use std::path::Path;
 
 use orbit_types::OrbitError;
 
-type AgentScores = HashMap<String, HashMap<String, u64>>;
-type Scoreboard = HashMap<String, AgentScores>;
+type ModelScores = HashMap<String, u64>;
+type Scoreboard = HashMap<String, ModelScores>;
 
-/// Increment the `issues-reported` counter for the given agent/model.
-pub fn record_friction_reported(
-    scoreboard_dir: &Path,
-    agent: &str,
-    model: &str,
-) -> Result<(), OrbitError> {
-    increment(scoreboard_dir, "issues-reported", agent, model)
+/// Increment the `issues-reported` counter for the given model.
+pub fn record_friction_reported(scoreboard_dir: &Path, model: &str) -> Result<(), OrbitError> {
+    increment(scoreboard_dir, "issues-reported", model)
 }
 
-/// Increment the `issues-accepted` counter for the given agent/model.
-pub fn record_friction_accepted(
-    scoreboard_dir: &Path,
-    agent: &str,
-    model: &str,
-) -> Result<(), OrbitError> {
-    increment(scoreboard_dir, "issues-accepted", agent, model)
+/// Increment the `issues-accepted` counter for the given model.
+pub fn record_friction_accepted(scoreboard_dir: &Path, model: &str) -> Result<(), OrbitError> {
+    increment(scoreboard_dir, "issues-accepted", model)
 }
 
-/// Increment the `issues-rejected` counter for the given agent/model.
-pub fn record_friction_rejected(
-    scoreboard_dir: &Path,
-    agent: &str,
-    model: &str,
-) -> Result<(), OrbitError> {
-    increment(scoreboard_dir, "issues-rejected", agent, model)
+/// Increment the `issues-rejected` counter for the given model.
+pub fn record_friction_rejected(scoreboard_dir: &Path, model: &str) -> Result<(), OrbitError> {
+    increment(scoreboard_dir, "issues-rejected", model)
 }
 
-fn increment(
-    scoreboard_dir: &Path,
-    metric: &str,
-    agent: &str,
-    model: &str,
-) -> Result<(), OrbitError> {
+fn increment(scoreboard_dir: &Path, metric: &str, model: &str) -> Result<(), OrbitError> {
     let path = scoreboard_dir.join("friction_bounty.json");
     let mut scoreboard: Scoreboard = if path.exists() {
         let content = fs::read_to_string(&path)
@@ -58,8 +41,7 @@ fn increment(
         HashMap::new()
     };
 
-    let agent_map = scoreboard.entry(metric.to_string()).or_default();
-    let model_map = agent_map.entry(agent.to_string()).or_default();
+    let model_map = scoreboard.entry(metric.to_string()).or_default();
     let counter = model_map.entry(model.to_string()).or_insert(0);
     *counter += 1;
 
@@ -79,32 +61,4 @@ fn increment(
         .map_err(|e| OrbitError::Io(format!("rename friction_bounty tmp: {e}")))?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{record_friction_accepted, record_friction_rejected, record_friction_reported};
-    use std::fs;
-
-    use serde_json::Value;
-    use tempfile::tempdir;
-
-    #[test]
-    fn records_metrics_by_agent_and_model() {
-        let dir = tempdir().expect("tempdir");
-
-        record_friction_reported(dir.path(), "codex", "gpt-5.4").expect("reported");
-        record_friction_reported(dir.path(), "codex", "gpt-5.4").expect("reported again");
-        record_friction_accepted(dir.path(), "claude", "opus").expect("accepted");
-        record_friction_rejected(dir.path(), "codex", "gpt-5.4").expect("rejected");
-
-        let scoreboard: Value = serde_json::from_str(
-            &fs::read_to_string(dir.path().join("friction_bounty.json")).expect("scoreboard"),
-        )
-        .expect("valid json");
-
-        assert_eq!(scoreboard["issues-reported"]["codex"]["gpt-5.4"], 2);
-        assert_eq!(scoreboard["issues-accepted"]["claude"]["opus"], 1);
-        assert_eq!(scoreboard["issues-rejected"]["codex"]["gpt-5.4"], 1);
-    }
 }

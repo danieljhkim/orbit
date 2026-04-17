@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 use comfy_table::Cell;
@@ -126,7 +126,7 @@ impl Execute for GraphShowArgs {
 
         let node = svc
             .resolve_selector(&selector)
-            .map_err(|e| OrbitError::Execution(e.to_string()))?;
+            .map_err(|e| OrbitError::InvalidInput(e.to_string()))?;
 
         let ctx = svc
             .bounded_context(node.id(), self.depth, self.siblings, self.children)
@@ -185,8 +185,11 @@ impl Execute for GraphSearchArgs {
 // ---------------------------------------------------------------------------
 
 fn load_graph(runtime: &OrbitRuntime) -> Result<CodebaseGraphV1, OrbitError> {
-    let graph_dir = runtime.data_root().join("knowledge/graph");
-    let store = GraphObjectStore::new(graph_dir);
+    let data_root = runtime.data_root();
+    let knowledge_dir = data_root.join("knowledge");
+    let repo_path = data_root.parent().unwrap_or_else(|| Path::new("."));
+    let _ = orbit_knowledge::pipeline::ensure_fresh(&knowledge_dir, repo_path);
+    let store = GraphObjectStore::new(knowledge_dir.join("graph"));
     store
         .read_graph()
         .map_err(|e| OrbitError::Execution(format!("failed to load knowledge graph: {e}")))

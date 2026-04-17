@@ -1,28 +1,23 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_parallel_task_worker
+kind: Job
+metadata:
+  name: job_parallel_task_worker
+spec:
   state: enabled
-
-  # ---- execution ----
-  # Workers share a single worktree on the main branch.
-  # File-level locking prevents conflicts between concurrent workers.
-  # No per-task branch creation — all changes land directly in the shared worktree.
-  max_active_runs: 16
   default_input:
     base: main
     verification_mode: deferred
+  max_active_runs: 16
   steps:
-    - target_type: activity
-      target_id: implement_change
-      agent_cli_from_input: implement_agent_cli
-      model_from_input: implement_model
+    - id: implement
+      target_type: activity
+      target_id: agent_implement
+      executor: codex
+      model_tier: strong
       condition: on_success
       timeout_seconds: 4000
-
-    - target_type: activity
+    - id: update_task
+      target_type: activity
       target_id: update_task
       default_input:
         status: review

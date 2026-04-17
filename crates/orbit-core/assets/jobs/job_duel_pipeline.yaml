@@ -1,67 +1,52 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_duel_pipeline
+kind: Job
+metadata:
+  name: job_duel_pipeline
+spec:
   state: enabled
-
-  # ---- execution ----
-  #
-  # Duel evaluation pipeline: runs a single Orbit task end-to-end with three
-  # distinct agent families assigned to the implementer, reviewer, and arbiter
-  # roles, then records structured scores into .orbit/scoreboard/duel.json.
-  #
-  # Step flow:
-  #   select_duel_roles            — assign families to roles, stamp implementer onto task
-  #   setup_worktree               — create branch + worktree, stamp batch_id + workspace_path
-  #   implement_change             — implementer plans + implements + verifies in the worktree
-  #   commit_task_artifact_changes — stage and commit task-scoped changes
-  #   push_batch_changes           — push the branch to origin
-  #   open_batch_pr                — open PR against base, stamp task → review
-  #   job_duel_review_cycle        — review, arbitrate, fix-loop, record scores, merge
-  #
-  # Automation steps are reused from the ship (parallel batch) pipeline.
-  # The agent only writes code; all git/PR operations are deterministic.
-  max_active_runs: 1
-  max_iterations: 1
   default_input:
     base: main
     branch_prefix: duel
+  max_active_runs: 1
+  max_iterations: 1
   steps:
-    - target_type: activity
+    - id: select_roles
+      target_type: activity
       target_id: select_duel_roles
       condition: on_success
       timeout_seconds: 30
-
-    - target_type: activity
-      target_id: setup_worktree
+    - id: worktree_setup
+      target_type: activity
+      target_id: worktree_setup
       condition: on_success
       timeout_seconds: 60
-
-    - target_type: activity
-      target_id: implement_change
-      agent_cli_from_input: implementer_agent_cli
-      model_from_input: implementer_model
+    - id: implement
+      target_type: activity
+      target_id: agent_implement
+      default_input:
+        agent_cli_from_input: implementer_agent_cli
+        model_from_input: implementer_model
       condition: on_success
       timeout_seconds: 5400
-
-    - target_type: activity
-      target_id: commit_task_artifact_changes
+    - id: commit
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: per_task
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: push_batch_changes
+    - id: push
+      target_type: activity
+      target_id: git_push
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: open_batch_pr
+    - id: open_pr
+      target_type: activity
+      target_id: pr_open
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: job
+    - id: review_cycle
+      target_type: job
       target_id: job_duel_review_cycle
       condition: on_success
       timeout_seconds: 7200

@@ -1,6 +1,6 @@
 ---
 name: orbit-execute-task
-description: Use this when executing human-initiated code change or existing orbit task in order to manage the full lifecycle in Orbit tasks (create, update, archive). Use this when the user specifically instructs you to use "orbit skill".
+description: Use this when executing an existing Orbit task or carrying a human request through the Orbit task lifecycle with explicit status tracking.
 ---
 
 # Orbit Execute Task
@@ -19,9 +19,9 @@ orbit tool run orbit.task.show --input '{"id": "<task-id>"}'
 
 # Load a specific field only
 orbit tool run orbit.task.show --input '{"id": "<task-id>", "field": "plan"}'
-# Valid fields: comments, plan, execution_summary, description, acceptance_criteria, history, context_files
+# Valid fields: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts
 
-# Start a task (backlog/proposed -> in-progress)
+# Start a task (proposed/backlog/someday/blocked -> in-progress)
 orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why>"}'
 
 # Update plan, status, or add a comment
@@ -72,7 +72,7 @@ orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this 
 
 ### Step 4: Implement and validate
 
-Follow the task's `plan` step by step. Read `context_files` before touching code. Run any verification commands from the plan.
+Follow the task's `plan` step by step. Read `context_files` before touching code. Run the repo-approved verification commands from the plan. If repo instructions forbid tests, honor that and use the allowed validation path instead.
 
 ### Step 5: Move to review and summarize
 
@@ -123,6 +123,7 @@ Include when relevant (omit if N/A):
 - If material ambiguity remains, ask clarifying questions before implementation.
 - If approval cannot be obtained for `proposed` work, stop after recording that state.
 - Do not skip lifecycle updates.
+- Moving `in-progress -> review` requires a non-empty `execution_summary`, so persist the summary before or together with the review transition.
 
 ## Exit Criteria
 

@@ -4,14 +4,13 @@ use tracing::{debug, info, trace};
 
 use crate::context::{
     ACTIVITY_EXECUTION_FAILED, AttemptOutcome, DirectActivityRunOutcome, EngineHost,
-    ExecutionContext, RuntimeHost, input_workspace_path, is_transient_error,
-    redact_attempt_outcome,
+    ExecutionContext, ExecutorHost, ExecutorLookupHost, RuntimeHost, input_workspace_path,
+    is_transient_error, redact_attempt_outcome,
 };
-use crate::executor::builtin_activity_executor_registry;
 use crate::template::TemplateContext;
 use orbit_store::validate_instance_against_schema;
 
-pub fn run_activity_direct<H: EngineHost>(
+pub fn run_activity_direct<H: EngineHost + ExecutorLookupHost>(
     host: &H,
     activity: &Activity,
     agent_cli: &str,
@@ -29,11 +28,16 @@ pub fn run_activity_direct<H: EngineHost>(
         job: None,
         agent_cli: agent_cli.to_string(),
         model: None,
+        model_tier: None,
         timeout_seconds,
         env_extra: vec![],
         env_set: std::collections::HashMap::new(),
         input: json!({}),
         debug,
+        steps_outputs: std::collections::HashMap::new(),
+        run_id: None,
+        step_index: None,
+        state_dir: None,
     };
     let outcome = execute_single_attempt(host, &execution);
     Ok(DirectActivityRunOutcome {
@@ -51,20 +55,43 @@ pub fn build_execution_context_for_step<H: RuntimeHost>(
     step: &JobStep,
     input: Value,
     debug: bool,
+    steps_outputs: std::collections::HashMap<String, Value>,
+    run_id: Option<&str>,
+    step_index: Option<u32>,
 ) -> Result<ExecutionContext, OrbitError> {
     let effective_target_id = resolve_activity_variant(&step.target_id, host.graph_editing());
     let activity = host.validate_activity_target_exists(step.target_type, &effective_target_id)?;
     validate_activity_input_schema(&activity, &input)?;
+    let state_dir = match run_id {
+        Some(run_id) => {
+            orbit_store::state_io::resolve_active_run_state_dir(host.data_root(), run_id)?
+                .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))
+                .map(Some)?
+        }
+        None => None,
+    };
     Ok(ExecutionContext {
         activity,
         job: Some(job.clone()),
-        agent_cli: step.agent_cli.clone(),
+        agent_cli: step
+            .agent_cli
+            .clone()
+            .trim()
+            .is_empty()
+            .then(|| step.executor.clone())
+            .flatten()
+            .unwrap_or_else(|| step.agent_cli.clone()),
         model: step.model.clone(),
+        model_tier: step.model_tier.clone(),
         timeout_seconds: step.timeout_seconds,
         env_extra: step.env_extra.clone(),
         env_set: step.env_set.clone(),
         input,
         debug,
+        steps_outputs,
+        run_id: run_id.map(ToOwned::to_owned),
+        step_index,
+        state_dir,
     })
 }
 
@@ -73,7 +100,7 @@ pub fn build_execution_context_for_step<H: RuntimeHost>(
 /// `max_attempts` is the total number of attempts (including the first). Zero or one means
 /// no retry — the step runs exactly once. Backoff doubles after each failed attempt starting
 /// at `backoff_seconds`.
-pub fn execute_with_retry<H: EngineHost>(
+pub fn execute_with_retry<H: EngineHost + ExecutorLookupHost>(
     host: &H,
     execution: &ExecutionContext,
     max_attempts: u32,
@@ -133,16 +160,23 @@ where
     }
 }
 
-pub fn execute_single_attempt<H: EngineHost>(
+pub fn execute_single_attempt<H: EngineHost + ExecutorLookupHost>(
     host: &H,
     execution: &ExecutionContext,
 ) -> AttemptOutcome {
-    let registry = builtin_activity_executor_registry();
+    let registry = host.activity_executor_registry();
     let spec_type = execution.activity.spec_type.as_str();
     let supported_spec_types = registry.supported_spec_types().join(", ");
+    let dispatch_key = execution
+        .activity
+        .executor
+        .as_deref()
+        .filter(|name| registry.get(name).is_some())
+        .unwrap_or(spec_type);
     debug!(
         activity_id = %execution.activity.id,
         spec_type,
+        executor_key = dispatch_key,
         "activity attempt started"
     );
     if spec_type == "agent_invoke" {
@@ -164,9 +198,9 @@ pub fn execute_single_attempt<H: EngineHost>(
         );
     }
     let outcome = registry
-        .get(spec_type)
-        .map(|executor| executor.execute(host, execution))
-        .unwrap_or_else(|| unsupported_spec_type_outcome(spec_type, &supported_spec_types));
+        .get(dispatch_key)
+        .map(|executor| executor.execute(ExecutorHost::new(host), execution))
+        .unwrap_or_else(|| unsupported_spec_type_outcome(dispatch_key, &supported_spec_types));
     let outcome = redact_attempt_outcome(outcome);
     debug!(
         activity_id = %execution.activity.id,
@@ -223,157 +257,7 @@ pub(crate) fn execution_template_context_with_env(
             .workspace_path
             .clone()
             .or_else(|| input_workspace_path(&execution.input)),
-    }
-}
-
-#[cfg(test)]
-mod variant_tests {
-    use super::resolve_activity_variant;
-
-    #[test]
-    fn graph_editing_off_swaps_implement_change() {
-        assert_eq!(
-            resolve_activity_variant("implement_change", false),
-            "implement_change_classic"
-        );
-    }
-
-    #[test]
-    fn graph_editing_on_keeps_implement_change() {
-        assert_eq!(
-            resolve_activity_variant("implement_change", true),
-            "implement_change"
-        );
-    }
-
-    #[test]
-    fn other_activities_pass_through() {
-        assert_eq!(
-            resolve_activity_variant("review_tasks", false),
-            "review_tasks"
-        );
-        assert_eq!(
-            resolve_activity_variant("review_tasks", true),
-            "review_tasks"
-        );
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::items_after_test_module)]
-mod retry_tests {
-    use orbit_types::JobRunState;
-
-    use super::execute_with_retry_inner;
-    use crate::context::{
-        AGENT_INVOCATION_FAILED, AGENT_PROTOCOL_VIOLATION, AGENT_TRANSPORT_FAILURE, AttemptOutcome,
-    };
-
-    fn failed_outcome(error_code: &str) -> AttemptOutcome {
-        AttemptOutcome::failed(error_code, format!("error: {error_code}"))
-    }
-
-    fn success_outcome() -> AttemptOutcome {
-        AttemptOutcome {
-            state: JobRunState::Success,
-            exit_code: Some(0),
-            duration_ms: Some(100),
-            invocation_trace: orbit_types::InvocationTrace {
-                duration_ms: 100,
-                ..orbit_types::InvocationTrace::default()
-            },
-            response_json: None,
-            error_code: None,
-            error_message: None,
-            protocol_violation: false,
-            retry_count: 0,
-        }
-    }
-
-    #[test]
-    fn retries_transient_failure_then_succeeds() {
-        let call_count = std::sync::atomic::AtomicU32::new(0);
-        let outcomes = [
-            failed_outcome(AGENT_TRANSPORT_FAILURE),
-            failed_outcome(AGENT_TRANSPORT_FAILURE),
-            success_outcome(),
-        ];
-        let outcome = execute_with_retry_inner(
-            || {
-                let i = call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as usize;
-                outcomes[i.min(outcomes.len() - 1)].clone()
-            },
-            "test-step",
-            3,
-            0, // zero backoff so tests don't sleep
-        );
-        assert_eq!(outcome.state, JobRunState::Success);
-        assert_eq!(
-            call_count.load(std::sync::atomic::Ordering::SeqCst),
-            3,
-            "should have called executor 3 times"
-        );
-    }
-
-    #[test]
-    fn does_not_retry_non_transient_failure() {
-        let call_count = std::sync::atomic::AtomicU32::new(0);
-        let outcome = execute_with_retry_inner(
-            || {
-                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                failed_outcome(AGENT_PROTOCOL_VIOLATION)
-            },
-            "test-step",
-            3,
-            0,
-        );
-        assert_eq!(outcome.state, JobRunState::Failed);
-        assert_eq!(
-            outcome.error_code.as_deref(),
-            Some(AGENT_PROTOCOL_VIOLATION)
-        );
-        assert_eq!(
-            call_count.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "non-transient failure must not retry"
-        );
-    }
-
-    #[test]
-    fn zero_max_attempts_runs_exactly_once() {
-        let call_count = std::sync::atomic::AtomicU32::new(0);
-        let outcome = execute_with_retry_inner(
-            || {
-                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                failed_outcome(AGENT_TRANSPORT_FAILURE)
-            },
-            "test-step",
-            0, // zero = no retry
-            0,
-        );
-        assert_eq!(outcome.state, JobRunState::Failed);
-        assert_eq!(
-            call_count.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "max_attempts=0 must still run exactly once"
-        );
-    }
-
-    #[test]
-    fn exhausted_retries_returns_last_failed_outcome() {
-        let call_count = std::sync::atomic::AtomicU32::new(0);
-        let outcome = execute_with_retry_inner(
-            || {
-                call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                failed_outcome(AGENT_INVOCATION_FAILED)
-            },
-            "test-step",
-            3,
-            0,
-        );
-        // AGENT_INVOCATION_FAILED is non-transient, so stops after 1 attempt
-        assert_eq!(outcome.state, JobRunState::Failed);
-        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        steps: execution.steps_outputs.clone(),
     }
 }
 

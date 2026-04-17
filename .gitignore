@@ -31,3 +31,5 @@ schema.md
 critique.md
 uv.lock
 tmp
+node_modules
+package-lock.json

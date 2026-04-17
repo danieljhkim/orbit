@@ -1,0 +1,43 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: dispatch_batch
+spec:
+  spec_type: automation
+  description: Select, claim, and batch-tag a conflict-free set of tasks for a pipeline run.
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Job run ID, used as batch_id when tagging selected tasks.
+      base:
+        type: string
+        description: Pass-through pipeline base branch input for downstream steps. This activity does not read it.
+      parallelism:
+        type: integer
+        minimum: 1
+        description: Maximum number of tasks to include in the batch.
+      task_ids:
+        type: array
+        items:
+          type: string
+        description: Explicit task IDs to load instead of auto-selecting from backlog.
+  output_schema_json:
+    type: object
+    properties:
+      batch_id:
+        type: string
+        description: Original batch identifier for downstream nested jobs.
+      task_ids:
+        type: array
+        items:
+          type: string
+        description: IDs of the selected tasks.
+      batch_size:
+        type: integer
+        description: Number of tasks tagged with the current run_id.
+  action: dispatch_batch
+  created_by: system

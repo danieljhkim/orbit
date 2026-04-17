@@ -4,6 +4,9 @@
 //! from source files using tree-sitter grammars.
 
 mod common;
+mod go;
+mod java;
+mod javascript;
 mod language;
 mod python;
 mod rust;
@@ -13,6 +16,9 @@ pub use common::{
 };
 pub use language::Language;
 
+use go::GoExtractor;
+use java::JavaExtractor;
+use javascript::JavaScriptExtractor;
 use python::PythonExtractor;
 use rust::RustExtractor;
 
@@ -30,7 +36,13 @@ pub struct ExtractorRegistry {
 impl ExtractorRegistry {
     pub fn new() -> Self {
         Self {
-            extractors: vec![Box::new(RustExtractor), Box::new(PythonExtractor)],
+            extractors: vec![
+                Box::new(RustExtractor),
+                Box::new(PythonExtractor),
+                Box::new(GoExtractor),
+                Box::new(JavaExtractor),
+                Box::new(JavaScriptExtractor),
+            ],
         }
     }
 

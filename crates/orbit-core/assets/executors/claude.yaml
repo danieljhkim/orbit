@@ -1,0 +1,19 @@
+schemaVersion: 1
+kind: Executor
+metadata:
+  name: claude
+spec:
+  executor_type: agent_cli
+  command: claude
+  args:
+    - -p
+    - --permission-mode
+    - bypassPermissions
+    - --output-format
+    - json
+    - --no-session-persistence
+  stdout_format: envelope
+  models:
+    strong: claude-opus-4-6
+    weak: claude-sonnet-4-6
+  env: {}

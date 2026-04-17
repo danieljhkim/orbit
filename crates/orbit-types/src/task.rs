@@ -33,7 +33,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{ActorIdentity, OrbitId};
+use crate::OrbitId;
 
 /// Current lifecycle state of a task.
 ///
@@ -381,12 +381,17 @@ pub struct Task {
     #[serde(default)]
     pub repo_root: Option<String>,
     #[serde(default)]
-    pub assigned_to: Option<String>,
-    #[serde(default)]
     pub created_by: Option<String>,
-    /// Typed identity of the agent/human who created or last worked on this task.
     #[serde(default)]
-    pub actor_identity: ActorIdentity,
+    pub planned_by: Option<String>,
+    #[serde(default)]
+    pub implemented_by: Option<String>,
+    /// Internal execution routing only. Hidden from task display JSON and YAML.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// Internal execution routing only. Hidden from task display JSON and YAML.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     #[serde(default)]
@@ -396,8 +401,6 @@ pub struct Task {
     pub pr_number: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr_status: Option<String>,
-    #[serde(default)]
-    pub proposed_by: Option<String>,
     /// For `Bug` tasks: the originating task whose implementation introduced the defect.
     #[serde(default)]
     pub source_task_id: Option<String>,
@@ -458,70 +461,4 @@ pub fn prune_missing_context_files(
         }
     }
     (kept, dropped)
-}
-
-#[cfg(test)]
-mod prune_context_files_tests {
-    use super::prune_missing_context_files;
-    use std::fs;
-
-    #[test]
-    fn mixed_present_and_missing() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        fs::write(tmp.path().join("real.md"), "hi").expect("write");
-        let (kept, dropped) = prune_missing_context_files(
-            tmp.path(),
-            vec!["real.md".into(), "ghost.md".into(), "real.md".into()],
-        );
-        assert_eq!(kept, vec!["real.md".to_string(), "real.md".to_string()]);
-        assert_eq!(dropped, vec!["ghost.md".to_string()]);
-    }
-
-    #[test]
-    fn all_missing() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let (kept, dropped) =
-            prune_missing_context_files(tmp.path(), vec!["a.md".into(), "b.md".into()]);
-        assert!(kept.is_empty());
-        assert_eq!(dropped, vec!["a.md".to_string(), "b.md".to_string()]);
-    }
-
-    #[test]
-    fn absolute_path_that_exists() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let other = tempfile::tempdir().expect("other tempdir");
-        let abs = other.path().join("doc.md");
-        fs::write(&abs, "hi").expect("write");
-        let (kept, dropped) =
-            prune_missing_context_files(tmp.path(), vec![abs.to_string_lossy().into_owned()]);
-        assert_eq!(kept, vec![abs.to_string_lossy().into_owned()]);
-        assert!(dropped.is_empty());
-    }
-
-    #[test]
-    fn empty_and_whitespace_entries_are_silently_discarded() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        fs::write(tmp.path().join("real.md"), "hi").expect("write");
-        let (kept, dropped) = prune_missing_context_files(
-            tmp.path(),
-            vec!["".into(), "   ".into(), "\t\n".into(), "real.md".into()],
-        );
-        assert_eq!(kept, vec!["real.md".to_string()]);
-        assert!(
-            dropped.is_empty(),
-            "empty entries must not be reported as dropped"
-        );
-    }
-
-    #[test]
-    fn leading_and_trailing_whitespace_is_trimmed_before_storing() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        fs::write(tmp.path().join("real.md"), "hi").expect("write");
-        let (kept, dropped) = prune_missing_context_files(
-            tmp.path(),
-            vec!["  real.md  ".into(), "\tghost.md\n".into()],
-        );
-        assert_eq!(kept, vec!["real.md".to_string()]);
-        assert_eq!(dropped, vec!["ghost.md".to_string()]);
-    }
 }

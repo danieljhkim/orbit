@@ -1,4 +1,3 @@
-use orbit_knowledge::graph::object_store::GraphObjectStore;
 use orbit_knowledge::service::GraphContextService;
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
@@ -63,12 +62,7 @@ impl Tool for OrbitKnowledgeSearchTool {
         let format = super::optional_string(&input, "format")?;
         let use_selectors = format.as_deref() == Some("selectors");
 
-        let knowledge_dir = super::knowledge_write::resolve_knowledge_dir(ctx, &input)?;
-        let graph_dir = knowledge_dir.join("graph");
-        let graph = GraphObjectStore::new(graph_dir)
-            .read_graph()
-            .map_err(|e| OrbitError::Execution(format!("failed to load knowledge graph: {e}")))?;
-
+        let graph = super::load_graph_for_read(ctx, &input)?;
         let svc = GraphContextService::new(&graph);
 
         let type_strs: Vec<&str> = node_type.iter().map(String::as_str).collect();
@@ -77,6 +71,13 @@ impl Tool for OrbitKnowledgeSearchTool {
         } else {
             Some(type_strs.as_slice())
         };
+
+        let total = svc.search_total(
+            &query,
+            node_types,
+            prefix.as_deref(),
+            kind_filter.as_deref(),
+        );
 
         if use_selectors {
             let results = svc.search(
@@ -112,7 +113,7 @@ impl Tool for OrbitKnowledgeSearchTool {
                 })
                 .collect();
             Ok(json!({
-                "total": items.len(),
+                "total": total,
                 "results": items,
             }))
         }

@@ -30,6 +30,12 @@ orbit tool run github.pr.view --input '{"pr": <pr-number>}'
 # List PR conversation (general comments + inline review comments)
 orbit tool run github.pr.comments --input '{"pr": <pr-number>}'
 
+# Leave a general PR comment
+orbit tool run github.pr.comment --input '{
+  "pr": <pr-number>,
+  "body": "<summary or non-blocking note>"
+}'
+
 # Leave an inline review comment on a specific line
 orbit tool run github.pr.review.comment --input '{
   "repo": "<owner>/<repo>",
@@ -39,16 +45,17 @@ orbit tool run github.pr.review.comment --input '{
   "body": "<category>: <what is wrong, why, and suggested fix>"
 }'
 
-# Submit a review decision (APPROVE, REQUEST_CHANGES, COMMENT)
+# Submit a formal review decision
 orbit tool run github.pr.review --input '{
   "repo": "<owner>/<repo>",
   "pr": <pr-number>,
-  "action": "APPROVE|REQUEST_CHANGES|COMMENT",
+  "action": "approve|request-changes",
   "body": "<summary of review>"
 }'
 
 # Reply to an existing comment thread
 orbit tool run github.pr.comment.reply --input '{
+  "repo": "<owner>/<repo>",
   "pr": <pr-number>,
   "comment_id": <comment-id>,
   "body": "<your response>"
@@ -70,7 +77,7 @@ orbit tool run github.pr.comment.reply --input '{
 ### What to review
 
 1. **Spec compliance first.** Does the code meet the task requirements? Nothing more, nothing less? Missing features? Unnecessary additions?
-2. **Code quality second.** Only after spec compliance passes: maintainability, patterns, performance, test coverage.
+2. **Code quality second.** Only after spec compliance passes: maintainability, patterns, performance, and validation coverage consistent with repo instructions.
 3. **Do not review code that fails spec compliance.** Flag the spec gap and request changes.
 
 ### Load context
@@ -94,18 +101,18 @@ Read the task plan, description, and acceptance criteria. Review against **these
 
 ### Review decision
 
-- **APPROVE** — no P1s, code meets task requirements
-- **REQUEST_CHANGES** — any P1 present, must be resolved before merge
-- **COMMENT** — P2/P3 observations only, no blockers
+- **approve** — no P1s, code meets task requirements
+- **request-changes** — any P1 present, must be resolved before merge
+- For non-blocking notes only, leave comments or threads without escalating to a blocking review.
 
 ### Verification
 
-Before submitting your review decision, verify the changes compile and pass tests in a temporary worktree:
+Before submitting your review decision, verify the change with repo-approved commands. If the repo forbids tests, do not add or run them just for review.
 
 ```bash
 git worktree add /tmp/orbit-pr<pr-number>-review <commit-sha>
 cd /tmp/orbit-pr<pr-number>-review
-# Run tests
+# Run the allowed verification commands for this repo
 git worktree remove /tmp/orbit-pr<pr-number>-review
 ```
 
@@ -114,11 +121,6 @@ git worktree remove /tmp/orbit-pr<pr-number>-review
 - **One reply per thread.** Address the specific point raised.
 - Whether you are the reviewer or the implementer, the same rules apply.
 
-## Scoring
+## Scoreboard
 
-All PR comment threads are scored via **last-comment-wins**:
-- The last agent to comment on a thread with "I win" claims the point.
-- Reviewer flags an issue, author fixes it — reviewer claims the point
-- Reviewer flags an issue, author pushes back with valid reasoning, reviewer has nothing to counter — author claims the point
-- Reviewer flags an issue, author pushes back, reviewer insists, author fixes — reviewer claims the point
-- Only one winner per thread. If you believe you are right, claim it. Silence is forfeit.
+Orbit currently tracks PR review comment sync counts and merge-with/without-revision counts. It does not automatically adjudicate per-thread winners, so do not rely on slogan-based "thread winning" claims.

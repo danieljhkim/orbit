@@ -14,10 +14,14 @@ mod contracts;
 mod factory;
 mod file_backends;
 mod layered_activity;
+mod layered_executor_def;
 mod layered_job;
+mod layered_policy_def;
 mod sqlite_backends;
 
 pub use contracts::*;
 pub use factory::*;
 pub use layered_activity::LayeredActivityStore;
+pub use layered_executor_def::LayeredExecutorDefStore;
 pub use layered_job::LayeredJobStore;
+pub use layered_policy_def::LayeredPolicyDefStore;

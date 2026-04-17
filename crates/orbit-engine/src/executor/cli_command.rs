@@ -5,7 +5,6 @@ use orbit_types::JobRunState;
 use orbit_types::OrbitError;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tempfile::tempdir;
 
 use serde_json::Value as JsonValue;
 
@@ -13,7 +12,10 @@ use super::ActivityExecutor;
 use crate::activity_runner::{
     execution_template_context_with_env, validate_activity_output_schema,
 };
-use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, EngineHost, ExecutionContext};
+use crate::context::{
+    ACTIVITY_EXECUTION_FAILED, AttemptOutcome, EnvironmentHost, ExecutionContext, ExecutorHost,
+    TaskReadHost, state_env_vars,
+};
 use crate::template::{TemplateContext, render};
 use orbit_types::InvocationTrace;
 
@@ -41,8 +43,9 @@ impl ActivityExecutor for CliCommandExecutor {
         "cli_command"
     }
 
-    fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome {
-        let mut cli_env = host.cli_command_environment(&execution.env_extra);
+    fn execute(&self, host: ExecutorHost<'_>, execution: &ExecutionContext) -> AttemptOutcome {
+        let cli_host = host.cli();
+        let mut cli_env = cli_host.cli_command_environment(&execution.env_extra);
         // Apply explicit env_set overrides on top of the resolved environment.
         for (key, value) in &execution.env_set {
             if let Some(existing) = cli_env.iter_mut().find(|(k, _)| k == key) {
@@ -57,11 +60,12 @@ impl ActivityExecutor for CliCommandExecutor {
         // resolves from the task without explicit pipeline input.
         if template_context.workspace_path.is_none()
             && let Some(task_id) = execution.input.get("task_id").and_then(JsonValue::as_str)
-            && let Ok(task) = host.get_task(task_id)
+            && let Ok(task) = cli_host.get_task(task_id)
         {
             template_context.workspace_path = task.workspace_path;
         }
         match execute(
+            execution,
             &execution.activity.spec_config,
             &template_context,
             execution.timeout_seconds,
@@ -96,6 +100,7 @@ impl ActivityExecutor for CliCommandExecutor {
 }
 
 pub fn execute(
+    execution: &ExecutionContext,
     spec_config: &Value,
     template_context: &TemplateContext,
     timeout_seconds: u64,
@@ -116,19 +121,13 @@ pub fn execute(
         .map(|value| render(value, template_context))
         .transpose()?;
 
-    let temp_dir = tempdir().map_err(|error| {
-        OrbitError::Execution(format!("failed to create cli_command temp dir: {error}"))
-    })?;
-    let output_path = temp_dir.path().join("orbit-output.json");
-
     let mut env = template_context.env.clone();
     for (key, value) in &spec.env {
         env.insert(key.clone(), render(value, template_context)?);
     }
-    env.insert(
-        "ORBIT_OUTPUT_FILE".to_string(),
-        output_path.to_string_lossy().into_owned(),
-    );
+    for (key, value) in state_env_vars(execution) {
+        env.insert(key, value);
+    }
 
     let exec_result = run_process(
         &ExecRequest {
@@ -156,24 +155,9 @@ pub fn execute(
         )));
     }
 
-    let output = match std::fs::read_to_string(&output_path) {
-        Ok(raw) if !raw.trim().is_empty() => {
-            serde_json::from_str::<Value>(&raw).map_err(|error| {
-                OrbitError::Execution(format!(
-                    "cli_command wrote invalid JSON to ORBIT_OUTPUT_FILE: {error}"
-                ))
-            })?
-        }
-        Ok(_) => json!({ "exit_code": exit_code }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            json!({ "exit_code": exit_code })
-        }
-        Err(error) => {
-            return Err(OrbitError::Execution(format!(
-                "failed to read ORBIT_OUTPUT_FILE: {error}"
-            )));
-        }
-    };
-
-    Ok((output, exec_result.duration_ms, exec_result.exit_code))
+    Ok((
+        json!({ "exit_code": exit_code }),
+        exec_result.duration_ms,
+        exec_result.exit_code,
+    ))
 }

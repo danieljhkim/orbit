@@ -1,10 +1,10 @@
-use crate::context::{AttemptOutcome, EngineHost, ExecutionContext};
+use crate::context::{AttemptOutcome, ExecutionContext, ExecutorHost};
 
 /// Pluggable executor for a single activity `spec_type`.
 ///
 /// Each implementation handles one kind of activity (e.g. `"agent_invoke"`,
-/// `"cli_command"`). Executors are registered at startup via
-/// [`super::builtin_activity_executor_registry`] and looked up by
+/// `"cli_command"`). Executors are registered into the runtime's
+/// [`super::registry::ActivityExecutorRegistry`] during bootstrap and looked up by
 /// [`ExecutionContext::activity.spec_type`] at run time.
 ///
 /// ## Contract
@@ -23,5 +23,5 @@ pub trait ActivityExecutor: Send + Sync {
     /// The outcome is recorded by the engine regardless of success or failure.
     /// Sensitive values (env vars, tokens) are redacted after this returns —
     /// do not pre-redact them inside the implementation.
-    fn execute(&self, host: &dyn EngineHost, execution: &ExecutionContext) -> AttemptOutcome;
+    fn execute(&self, host: ExecutorHost<'_>, execution: &ExecutionContext) -> AttemptOutcome;
 }

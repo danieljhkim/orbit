@@ -10,16 +10,15 @@ Project instructions for agents working on Orbit.
 - Don't add cross-crate dependencies without checking the architecture diagram below.
 - When you hit friction, ambiguity, naming drift, or duplicated sources of truth: file a self-reported friction task via the `orbit-track-issues` skill instead of working around it.
 - Reserve task type `friction` for agent self-reports only. Do not use `friction` for normal user-requested work, backlog shaping, or generic bug tracking.
+- DO NOT WRITE UNIT TESTS or RUN TESTS
 
 ## Project Do's
 
 - Use subagents to support you through large tasks and keep your context window clean.
-- Use terse/succinct prose in all agent-written text: tasks, docs, comments, commit messages.
 
-## Build / Test / Lint
+## Build / Lint
 
 - Build: `make build`
-- Test:  `make test`
 - Fmt:   `make fmt`
 
 All must pass before a task moves to `review`.
@@ -54,13 +53,7 @@ For any Orbit lifecycle work (creating tasks, executing, reviewing, raising PRs)
 
 ## Task Authoring Quality
 
-Follow the `## Task Quality Standards` section in `orbit-create-task` skill: deterministic mock-based testing, explicit observable definitions for summary fields (`purpose`, etc.), and testability-preserving implementation patterns.
-
-## Agent Identity
-
-**Signature** (used in PR bodies, comments, commit messages, review summaries):
-
-> *authored by: claude / opus*
+Follow the `## Task Quality Standards` section in `orbit-create-task` skill: explicit observable definitions for summary fields (`purpose`, etc.), and testability-preserving implementation patterns.
 
 **Commits**:
 

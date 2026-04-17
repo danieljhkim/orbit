@@ -2,7 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_types::{Activity, OrbitError};
+use orbit_types::{
+    Activity, ActivityResource, ActivityResourceSpec, OrbitError, RESOURCE_SCHEMA_VERSION,
+    ResourceKind,
+};
 
 use crate::backend::{ActivityCreateParams, ActivityUpdateParams};
 use crate::file::fs_utils::write_atomic;
@@ -14,12 +17,14 @@ pub(crate) struct ActivityFileStore {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ActivitySpecDocument {
+struct LegacyActivitySpecDocument {
     id: String,
     spec_type: String,
     description: String,
     input_schema_json: Value,
     output_schema_json: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    executor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace_path: Option<String>,
     #[serde(flatten)]
@@ -27,14 +32,14 @@ struct ActivitySpecDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ActivityFileDocument {
+struct LegacyActivityFileDocument {
     schema_version: u8,
     #[serde(default)]
     created_by: Option<String>,
     #[allow(dead_code)]
     #[serde(default, rename = "identity_id", skip_serializing)]
     legacy_identity_id: Option<String>,
-    activity: ActivitySpecDocument,
+    activity: LegacyActivitySpecDocument,
 }
 
 impl ActivityFileStore {
@@ -60,11 +65,11 @@ impl ActivityFileStore {
             )));
         }
 
-        let doc = ActivityFileDocument {
+        let doc = LegacyActivityFileDocument {
             schema_version: 1,
             created_by: params.created_by.clone(),
             legacy_identity_id: None,
-            activity: ActivitySpecDocument {
+            activity: LegacyActivitySpecDocument {
                 id: params.id.clone(),
                 spec_type: params.spec_type.clone(),
                 description: params.description.clone(),
@@ -74,6 +79,7 @@ impl ActivityFileStore {
                 output_schema_json: normalize_json_schema_for_storage(
                     params.output_schema_json.clone(),
                 ),
+                executor: params.executor.clone(),
                 workspace_path: params.workspace_path.clone(),
                 spec_config: params.spec_config.as_object().cloned().unwrap_or_default(),
             },
@@ -139,6 +145,9 @@ impl ActivityFileStore {
         if let Some(v) = params.spec_config.clone() {
             doc.activity.spec_config = v.as_object().cloned().unwrap_or_default();
         }
+        if let Some(v) = params.executor.clone() {
+            doc.activity.executor = v;
+        }
         if let Some(v) = params.workspace_path.clone() {
             doc.activity.workspace_path = v;
         }
@@ -201,11 +210,12 @@ impl ActivityFileStore {
         Ok(activities)
     }
 
-    fn read_doc_at(&self, path: &Path) -> Result<ActivityFileDocument, OrbitError> {
+    fn read_doc_at(&self, path: &Path) -> Result<LegacyActivityFileDocument, OrbitError> {
         let raw = fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-        serde_yaml::from_str::<ActivityFileDocument>(&raw).map_err(|e| {
+        let doc = serde_yaml::from_str::<ActivityResource>(&raw).map_err(|e| {
             OrbitError::Store(format!("invalid activity file '{}': {e}", path.display()))
-        })
+        })?;
+        legacy_doc_from_resource(doc, path)
     }
 
     fn read_activity_at(&self, path: &Path, is_active: bool) -> Result<Activity, OrbitError> {
@@ -214,8 +224,14 @@ impl ActivityFileStore {
         Ok(doc_to_work(doc, is_active, created_at, updated_at))
     }
 
-    fn write_doc_at(&self, path: &Path, doc: &ActivityFileDocument) -> Result<(), OrbitError> {
-        let yaml = serde_yaml::to_string(doc).map_err(|e| OrbitError::Store(e.to_string()))?;
+    fn write_doc_at(
+        &self,
+        path: &Path,
+        doc: &LegacyActivityFileDocument,
+    ) -> Result<(), OrbitError> {
+        let is_active = path.starts_with(self.active_dir());
+        let yaml = serde_yaml::to_string(&resource_from_legacy_doc(doc, is_active))
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
         write_atomic(path, &yaml)
     }
 
@@ -237,7 +253,7 @@ impl ActivityFileStore {
 }
 
 fn doc_to_work(
-    doc: ActivityFileDocument,
+    doc: LegacyActivityFileDocument,
     is_active: bool,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -275,12 +291,67 @@ fn doc_to_work(
         spec_config: Value::Object(doc.activity.spec_config),
         tools,
         proc_allowed_programs,
+        executor: doc.activity.executor,
         workspace_path: doc.activity.workspace_path,
         created_by: doc.created_by,
         is_active,
         created_at,
         updated_at,
     }
+}
+
+fn legacy_doc_from_resource(
+    doc: ActivityResource,
+    path: &Path,
+) -> Result<LegacyActivityFileDocument, OrbitError> {
+    if doc.kind != ResourceKind::Activity {
+        return Err(OrbitError::Store(format!(
+            "invalid activity file '{}': expected kind Activity, found {}",
+            path.display(),
+            doc.kind
+        )));
+    }
+    if doc.schema_version != RESOURCE_SCHEMA_VERSION {
+        return Err(OrbitError::Store(format!(
+            "invalid activity file '{}': unsupported schemaVersion {}",
+            path.display(),
+            doc.schema_version
+        )));
+    }
+
+    Ok(LegacyActivityFileDocument {
+        schema_version: 1,
+        created_by: doc.spec.created_by,
+        legacy_identity_id: None,
+        activity: LegacyActivitySpecDocument {
+            id: doc.metadata.name,
+            spec_type: doc.spec.spec_type,
+            description: doc.spec.description,
+            input_schema_json: normalize_json_schema_for_storage(doc.spec.input_schema_json),
+            output_schema_json: normalize_json_schema_for_storage(doc.spec.output_schema_json),
+            executor: doc.spec.executor,
+            workspace_path: doc.spec.workspace_path,
+            spec_config: doc.spec.spec_config,
+        },
+    })
+}
+
+fn resource_from_legacy_doc(doc: &LegacyActivityFileDocument, is_active: bool) -> ActivityResource {
+    ActivityResource::new(
+        ResourceKind::Activity,
+        doc.activity.id.clone(),
+        ActivityResourceSpec {
+            spec_type: doc.activity.spec_type.clone(),
+            description: doc.activity.description.clone(),
+            input_schema_json: doc.activity.input_schema_json.clone(),
+            output_schema_json: doc.activity.output_schema_json.clone(),
+            executor: doc.activity.executor.clone(),
+            workspace_path: doc.activity.workspace_path.clone(),
+            created_by: doc.created_by.clone(),
+            is_active,
+            spec_config: doc.activity.spec_config.clone(),
+        },
+    )
 }
 
 fn file_timestamps(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), OrbitError> {

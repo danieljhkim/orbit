@@ -14,6 +14,7 @@
 //!   [`AuditEventStoreBackend`], [`ToolStoreBackend`]
 //! - Factory functions: `task_store_file`, `task_store_resolved`, `job_store_file`,
 //!   `job_store_resolved`, `activity_store_file`, `activity_store_resolved`,
+//!   `executor_def_store_resolved`, `policy_def_store_resolved`,
 //!   `audit_event_store_sqlite`, `tool_store_sqlite`
 //! - [`ResolvedScope`] — scoping strategies (Single, Layered)
 //! - [`Store`] / [`StoreTx`] — SQLite connection handle and transaction wrapper
@@ -28,6 +29,7 @@ mod file;
 mod invocation_store_impl;
 pub mod json_schema;
 pub mod sqlite;
+pub mod state_io;
 #[path = "file/token_scoreboard.rs"]
 mod token_scoreboard_impl;
 
@@ -89,11 +91,13 @@ use chrono::{DateTime, Utc};
 
 pub use backend::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, AuditEventStoreBackend,
-    JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams,
-    LayeredActivityStore, LayeredJobStore, ResolvedScope, TaskCreateParams, TaskStoreBackend,
-    TaskUpdateParams, ToolStoreBackend, activity_store_file, activity_store_resolved,
-    audit_event_store_sqlite, job_store_file, job_store_resolved, task_store_file,
-    task_store_resolved, tool_store_sqlite,
+    ExecutorDefStoreBackend, JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend,
+    JobUpdateParams, LayeredActivityStore, LayeredExecutorDefStore, LayeredJobStore,
+    LayeredPolicyDefStore, PolicyDefStoreBackend, ResolvedScope, TaskCreateParams,
+    TaskStoreBackend, TaskUpdateParams, ToolStoreBackend, activity_store_file,
+    activity_store_resolved, audit_event_store_sqlite, executor_def_store_file,
+    executor_def_store_resolved, job_store_file, job_store_resolved, policy_def_store_file,
+    policy_def_store_resolved, task_store_file, task_store_resolved, tool_store_sqlite,
 };
 pub use invocation_store_impl::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,

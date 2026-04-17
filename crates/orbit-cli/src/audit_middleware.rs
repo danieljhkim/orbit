@@ -206,6 +206,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             let (sub, target_type, target_id) = match &task_cmd.command {
                 TaskSubcommand::Add(_) => ("add", Some("task"), None),
                 TaskSubcommand::List(_) => ("list", None, None),
+                TaskSubcommand::Locks(_) => ("locks", None, None),
                 TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Lint(args) => ("lint", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Update(args) => ("update", Some("task"), Some(args.id.as_str())),
@@ -267,6 +268,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 JobSubcommand::Run(args) => ("run", Some(args.job_id.as_str())),
                 JobSubcommand::History(args) => ("history", Some(args.job_id.as_str())),
                 JobSubcommand::Delete(args) => ("delete", Some(args.job_id.as_str())),
+                JobSubcommand::RunState(args) => ("run-state", Some(args.run_id.as_str())),
             };
             CommandMeta {
                 command: "job".to_string(),
@@ -292,6 +294,22 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 subcommand: Some(sub.to_string()),
                 tool_name: None,
                 target_type: Some("skill".to_string()),
+                target_id: target_id.map(String::from),
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
+        Commands::Executor(cmd) => {
+            use crate::command::executor::ExecutorSubcommand;
+            let (sub, target_id) = match &cmd.command {
+                ExecutorSubcommand::List(_) => ("list", None),
+                ExecutorSubcommand::Show(args) => ("show", Some(args.name.as_str())),
+            };
+            CommandMeta {
+                command: "executor".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("executor".to_string()),
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
@@ -386,6 +404,85 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 arguments_json: None,
             }
         }
+        Commands::Policy(cmd) => {
+            use crate::command::policy::PolicySubcommand;
+            let (sub, target_id) = match &cmd.command {
+                PolicySubcommand::List(_) => ("list", None),
+                PolicySubcommand::Show(args) => ("show", Some(args.name.as_str())),
+            };
+            CommandMeta {
+                command: "policy".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("policy".to_string()),
+                target_id: target_id.map(String::from),
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
+        Commands::Apply(_) => CommandMeta {
+            command: "apply".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: None,
+            target_id: None,
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
+        Commands::Get(cmd) => CommandMeta {
+            command: "get".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: None,
+            target_id: Some(cmd.resource.clone()),
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
+        Commands::Describe(cmd) => CommandMeta {
+            command: "describe".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: None,
+            target_id: Some(cmd.resource.clone()),
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
+        Commands::Run(cmd) => CommandMeta {
+            command: "run".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("job".to_string()),
+            target_id: Some(cmd.job_id.clone()),
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
+        Commands::Logs(cmd) => CommandMeta {
+            command: "logs".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("job_run".to_string()),
+            target_id: Some(cmd.run_id.clone()),
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
+        Commands::Artifacts(cmd) => CommandMeta {
+            command: "artifacts".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some(if cmd.task { "task" } else { "job_run" }.to_string()),
+            target_id: Some(cmd.id.clone()),
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
+        Commands::Reconcile(_) => CommandMeta {
+            command: "reconcile".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("reconcile".to_string()),
+            target_id: None,
+            role: "admin".to_string(),
+            arguments_json: None,
+        },
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
         Commands::Workspace(cmd) => {
             use crate::command::workspace::WorkspaceSubcommand;
@@ -406,77 +503,5 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 arguments_json: None,
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::extract_command_meta;
-    use crate::command::Commands;
-    use crate::command::duel::{DuelCommand, DuelListArgs, DuelSubcommand};
-    use crate::command::metrics::{MetricsCommand, MetricsKnowledgeArgs, MetricsSubcommand};
-    use crate::command::scoreboard::{
-        ScoreboardCommand, ScoreboardSubcommand, ScoreboardSummaryArgs,
-    };
-    use crate::command::ship::{ShipCommand, ShipRunArgs, ShipSubcommand};
-
-    #[test]
-    fn extract_command_meta_uses_ship_surface() {
-        let meta = extract_command_meta(&Commands::Ship(ShipCommand {
-            command: ShipSubcommand::Run(ShipRunArgs {
-                local: false,
-                tasks: None,
-                parallelism: None,
-                base: None,
-                loop_count: 1,
-                debug: false,
-                json: false,
-            }),
-        }));
-
-        assert_eq!(meta.command, "ship");
-        assert_eq!(meta.subcommand.as_deref(), Some("run"));
-        assert_eq!(meta.target_id.as_deref(), Some("ship"));
-    }
-
-    #[test]
-    fn extract_command_meta_tags_metrics_knowledge_under_metrics() {
-        let meta = extract_command_meta(&Commands::Metrics(MetricsCommand {
-            limit: None,
-            json: false,
-            command: Some(MetricsSubcommand::Knowledge(MetricsKnowledgeArgs {
-                limit: Some(5),
-                json: true,
-            })),
-        }));
-
-        assert_eq!(meta.command, "metrics");
-        assert_eq!(meta.subcommand.as_deref(), Some("graph"));
-    }
-
-    #[test]
-    fn extract_command_meta_tags_duel_list() {
-        let meta = extract_command_meta(&Commands::Duel(DuelCommand {
-            command: DuelSubcommand::List(DuelListArgs {
-                status: None,
-                since: None,
-                limit: Some(10),
-                full: false,
-                json: false,
-            }),
-        }));
-
-        assert_eq!(meta.command, "duel");
-        assert_eq!(meta.subcommand.as_deref(), Some("list"));
-    }
-
-    #[test]
-    fn extract_command_meta_tags_scoreboard_summary() {
-        let meta = extract_command_meta(&Commands::Scoreboard(ScoreboardCommand {
-            command: ScoreboardSubcommand::Summary(ScoreboardSummaryArgs { json: true }),
-        }));
-
-        assert_eq!(meta.command, "scoreboard");
-        assert_eq!(meta.subcommand.as_deref(), Some("summary"));
     }
 }

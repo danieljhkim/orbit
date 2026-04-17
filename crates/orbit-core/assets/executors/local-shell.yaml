@@ -1,0 +1,8 @@
+schemaVersion: 1
+kind: Executor
+metadata:
+  name: local-shell
+spec:
+  executor_type: cli_command
+  args: []
+  env: {}

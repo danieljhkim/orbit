@@ -1,71 +1,78 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_duel_review_cycle
+kind: Job
+metadata:
+  name: job_duel_review_cycle
+spec:
   state: enabled
-
-  # ---- execution ----
-  #
-  # Duel review cycle: review a single-task PR, arbitrate the reviewer's
-  # verdict, fix if needed, record scores, and merge on success.
-  #
-  # Step flow:
-  #   review_duel_pr                — reviewer posts threads and emits per-thread JSON
-  #   sync_batch_review_to_github   — publish threads to GitHub
-  #   arbitrate_review              — arbiter classifies every comment and emits the authoritative decision
-  #   check_duel_review_decision    — gate on the arbiter's decision (loop_exit = arbiter APPROVED)
-  #   job_duel_review_loop          — iterative fix-and-re-review loop; no-ops when already approved
-  #   merge_batch_pr                — merge the approved PR when the loop converged
-  #   cleanup_worktree             — remove the local duel worktree and branch after a successful merge
-  #   record_duel_scores            — append one DuelRun entry to .orbit/scoreboard/duel.json
-  #
-  max_active_runs: 1
-  max_iterations: 1
   default_input:
     base: main
+  max_active_runs: 1
+  max_iterations: 1
   steps:
-    - target_type: activity
-      target_id: review_duel_pr
-      agent_cli_from_input: reviewer_agent_cli
-      model_from_input: reviewer_model
+    - id: review
+      target_type: activity
+      target_id: agent_review
+      default_input:
+        agent_cli_from_input: reviewer_agent_cli
+        model_from_input: reviewer_model
       condition: on_success
       timeout_seconds: 1000
-
-    - target_type: activity
-      target_id: sync_batch_review_to_github
+    - id: sync_reviews
+      target_type: activity
+      target_id: pr_sync_reviews
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: arbitrate_review
-      agent_cli_from_input: arbiter_agent_cli
-      model_from_input: arbiter_model
+      upstream:
+        - review
+    - id: arbitrate
+      target_type: activity
+      target_id: agent_arbitrate
+      default_input:
+        agent_cli_from_input: arbiter_agent_cli
+        model_from_input: arbiter_model
       condition: on_success
       timeout_seconds: 900
-
-    - target_type: activity
-      target_id: check_duel_review_decision
+      upstream:
+        - sync_reviews
+    - id: gate
+      target_type: activity
+      target_id: check_task_value
+      default_input:
+        field: decision
+        expected: APPROVED
+        scope: input
       condition: on_success
       timeout_seconds: 30
-
-    - target_type: job
+      upstream:
+        - arbitrate
+    - id: fix_loop
+      target_type: job
       target_id: job_duel_review_loop
-      condition: on_success
+      condition: "{{steps.gate.output.match}} == false"
       timeout_seconds: 7200
-
-    - target_type: activity
-      target_id: merge_batch_pr
-      condition: on_success
+      upstream:
+        - gate
+    - id: merge
+      target_type: activity
+      target_id: git_merge
+      default_input:
+        strategy: pr_merge
+      condition: "{{steps.gate.output.match}} == true || {{steps.fix_loop.state.status}} == success"
       timeout_seconds: 60
-
-    - target_type: activity
-      target_id: cleanup_worktree
+      upstream:
+        - fix_loop
+    - id: cleanup
+      target_type: activity
+      target_id: worktree_cleanup
       condition: on_success
       timeout_seconds: 30
-
-    - target_type: activity
+      upstream:
+        - merge
+        - record_scores
+    - id: record_scores
+      target_type: activity
       target_id: record_duel_scores
       condition: always
       timeout_seconds: 60
+      upstream:
+        - merge

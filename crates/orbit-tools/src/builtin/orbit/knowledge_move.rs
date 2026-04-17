@@ -5,7 +5,8 @@ use serde_json::Value;
 use crate::{Tool, ToolContext};
 
 use super::knowledge_write::{
-    initialize_working_graph, resolve_knowledge_dir, resolve_workspace_root_with_override,
+    initialize_working_graph, lock_targets_for_mutation, resolve_knowledge_dir,
+    resolve_workspace_root_with_override, with_graph_locks, write_err_to_orbit,
 };
 
 pub struct OrbitKnowledgeMoveTool;
@@ -85,50 +86,38 @@ impl Tool for OrbitKnowledgeMoveTool {
                 None => initialize_working_graph(&knowledge_dir, &selector, workspace_root)?,
             };
 
-        // Acquire locks on both source selector and target file
         let lock_owner = ctx
             .agent_name
             .as_deref()
             .or(ctx.task_id.as_deref())
             .unwrap_or("unknown");
-        let lock_path = orbit_knowledge::lock::lock_store_path(&knowledge_dir);
-        orbit_knowledge::lock::with_lock_store(&lock_path, |store| {
-            store.lock(
-                &selector_str,
-                lock_owner,
-                ctx.task_id.as_deref(),
-                reason.as_deref().unwrap_or("moving (source)"),
-            )?;
-            store.lock(
-                &format!("file:{target_file}"),
-                lock_owner,
-                ctx.task_id.as_deref(),
-                reason.as_deref().unwrap_or("moving (target)"),
-            )
-        })
-        .map_err(|e| OrbitError::Execution(format!("lock failed: {e}")))?;
-
-        // Parse optional position selector
         let position_selector = parse_position(position_str.as_deref())?;
+        let lock_targets = lock_targets_for_mutation(&selector, &[target_file.as_str()]);
 
-        let result = working_graph
-            .move_leaf(
-                &selector,
-                &target_file,
-                position_selector.as_ref(),
-                reason.as_deref(),
-                workspace_root,
-            )
-            .map_err(|e| {
-                serde_json::to_value(&e)
-                    .map(|v| OrbitError::Execution(v.to_string()))
-                    .unwrap_or_else(|_| OrbitError::Execution(format!("{e:?}")))
-            })?;
-
-        save_task_working_graph(
-            ctx.orbit_root.as_deref(),
+        let result = with_graph_locks(
+            &knowledge_dir,
+            lock_owner,
             ctx.task_id.as_deref(),
-            &working_graph,
+            reason.as_deref().unwrap_or("moving"),
+            &lock_targets,
+            || {
+                let result = working_graph
+                    .move_leaf(
+                        &selector,
+                        &target_file,
+                        position_selector.as_ref(),
+                        reason.as_deref(),
+                        workspace_root,
+                    )
+                    .map_err(write_err_to_orbit)?;
+
+                save_task_working_graph(
+                    ctx.orbit_root.as_deref(),
+                    ctx.task_id.as_deref(),
+                    &working_graph,
+                )?;
+                Ok(result)
+            },
         )?;
 
         serde_json::to_value(result)

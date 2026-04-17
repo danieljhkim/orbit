@@ -1,78 +1,74 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_local_task_pipeline
+kind: Job
+metadata:
+  name: job_local_task_pipeline
+spec:
   state: enabled
-
-  # ---- execution ----
-  # Lightweight local-only pipeline. Plans, implements, and commits without
-  # requiring gh or any GitHub operations. Users review diffs locally and
-  # push when ready.
-  max_active_runs: 1
   default_input:
     base: main
+    base_sync: local
     parallelism: 3
+  max_active_runs: 3
   steps:
-    # 0. Refresh knowledge graph so agents get fresh symbol data.
-    - target_type: activity
-      target_id: update_knowledge_graph
+    - id: graph_update
+      target_type: activity
+      target_id: run_command
+      default_input:
+        command: orbit graph update
       timeout_seconds: 120
-
-    # 1. Select a conflict-free batch, author plans, refine context_files.
-    - target_type: activity
-      target_id: dispatch_and_plan_batch
-      agent_cli_from_input: plan_agent_cli
-      model_from_input: plan_model
-      timeout_seconds: 3600
-
-    # 2. Snapshot batch state for audit trail.
-    - target_type: activity
-      target_id: snapshot_batch_state
+    - id: dispatch
+      target_type: activity
+      target_id: dispatch_batch
+      timeout_seconds: 120
+    - id: plan
+      target_type: activity
+      target_id: agent_plan
+      executor: claude
+      model_tier: strong
       condition: on_success
-      timeout_seconds: 15
-
-    # 3. Launch parallel workers in the shared worktree.
-    - target_type: activity
+      timeout_seconds: 1800
+    - id: workers
+      target_type: activity
       target_id: parallel_dispatch_tasks
       condition: on_success
       timeout_seconds: 7200
-
-    # 4. Commit each completed task separately from stored task artifacts.
-    - target_type: activity
-      target_id: commit_task_artifact_changes
+    - id: commit_per_task
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: per_task
       condition: on_success
       timeout_seconds: 300
-
-    # 5. Agent verifies and wraps up (runs always, even on worker failure).
-    - target_type: activity
+    - id: finalize
+      target_type: activity
       target_id: finalize_tasks
-      agent_cli_from_input: finalize_agent_cli
-      model_from_input: finalize_model
-      condition: always
+      executor: gemini
+      model_tier: strong
+      condition: on_success
       timeout_seconds: 3600
-
-    # 6. Commit finalize-only follow-up edits that still map cleanly to task artifacts.
-    - target_type: activity
-      target_id: commit_finalize_artifact_changes
+    - id: commit_finalize
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: per_task_finalize
       condition: on_success
       timeout_seconds: 300
-
-    # 7. Catch-all safety net: commit any leftover shared-worktree changes.
-    - target_type: activity
-      target_id: commit_batch_changes
+    - id: commit_all
+      target_type: activity
+      target_id: git_commit
+      default_input:
+        scope: all
       condition: on_success
       timeout_seconds: 300
-
-    # 8. Fast-forward the requested base branch to include the shared worktree history.
-    - target_type: activity
-      target_id: merge_batch_worktree_into_base
+    - id: merge
+      target_type: activity
+      target_id: git_merge
+      default_input:
+        strategy: fast_forward
       condition: on_success
       timeout_seconds: 120
-
-    # 9. Remove the shared worktree and local branch after a successful merge.
-    - target_type: activity
-      target_id: cleanup_worktree
+    - id: cleanup
+      target_type: activity
+      target_id: worktree_cleanup
       condition: on_success
       timeout_seconds: 30

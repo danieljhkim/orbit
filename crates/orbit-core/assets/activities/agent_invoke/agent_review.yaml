@@ -1,0 +1,117 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: agent_review
+spec:
+  spec_type: agent_invoke
+  description: Review a single task's PR against its acceptance criteria and scope.
+  input_schema_json:
+    type: object
+    required:
+      - task_id
+    properties:
+      task_id:
+        type: string
+        description: Orbit task ID to review.
+  output_schema_json: {}
+  instruction: |
+    Only use skills listed in this activity's skill_refs. Ignore all others.
+    You are reviewing a single Orbit task's pull request.
+
+    Steps:
+    1. Read the injected `task` object from the activity envelope first.
+       - Treat it as the normal source of task title, description, plan,
+         acceptance_criteria, context_files, workspace_path, repo_root, and pr_number.
+       - Use `task.acceptance_criteria` and `task.context_files` directly when
+         reviewing scope and correctness.
+
+    2. Fallback only if the injected task context is missing or malformed.
+       - If the envelope has no usable `task` object, or `task.pr_number` is
+         null/missing, or both `task.workspace_path` and `task.repo_root` are
+         absent, call orbit.task.show with input: {"id": "<task_id>"} to
+         recover the canonical task record.
+
+    3. Locate the PR:
+       - Use `task.pr_number`. If it is still missing after the fallback step,
+         return a clear error — do not guess the PR identifier.
+
+    4. Call github.pr.view with pr: <pr_number>.
+       - Inspect the PR title, body, changed files, and commits.
+       - Use proc.spawn to run `gh pr diff <pr_number>` from task.workspace_path when
+         available, otherwise task.repo_root, so you inspect the actual patch before
+         writing findings.
+
+    5. Evaluate the PR against the task:
+       - Check each acceptance criterion against the diff.
+       - Are there correctness, logic, or safety issues?
+       - Scope check: compare the PR's changed files against the task's
+         context_files. Any file modified outside declared scope that alters
+         behavior (logic, tests, config) is a BLOCKING issue.
+       - Regression check: for any out-of-scope file that was modified,
+         verify the change does not revert or weaken a prior fix. Regressions
+         are always BLOCKING.
+       - Missing validation evidence for changed behavior is BLOCKING when the task
+         or repo instructions require it. If repo instructions explicitly forbid tests,
+         do not block solely because tests were not added.
+
+    6. Choose an action — apply strictly in order:
+       - "request-changes" — ANY of the following apply:
+             * an acceptance criterion is not met
+             * correctness or logic error
+             * out-of-scope behavioral change
+             * regression to a prior fix
+             * missing required validation evidence for changed behavior
+       - "approve" — all criteria met AND no blocking issues found.
+
+    7. Post review feedback:
+       - For each issue, call orbit.task.review_thread.add with the task's id.
+         Set path and line when the issue is tied to a specific diff line.
+       - Exactly one issue per thread. Never bundle findings.
+       - After all issue threads are posted, call orbit.task.review_thread.add
+         once more with a short overall summary of the decision and blocking
+         themes.
+
+    8. Update the task with the review decision:
+       - Call orbit.task.update with input:
+         {"id": "<task_id>", "pr_status": "<pr_status>"}
+       - Use canonical values: `APPROVED` or `CHANGES_REQUESTED`.
+       - This is the CRITICAL step. Downstream automation reads pr_status
+         from the task artifacts to gate the fix loop.
+
+    9. Persist the downstream handoff explicitly:
+       - After constructing the review result, call orbit.state.set with:
+         {
+           "data": {
+             "decision": "approve" | "request-changes",
+             "threads": [
+               {"id": "<thread_id>", "path": "<file_or_null>", "line": <int_or_null>, "body": "<thread body>"}
+             ],
+             "summary": "<one-paragraph summary of the review>"
+           }
+         }
+       - This persisted state is the supported handoff for downstream duel arbitration.
+         Do not rely on the final response payload alone.
+
+    10. No structured response payload is required after state is persisted.
+        - If you return a result at all, treat it as incidental observability only.
+        - Downstream steps must rely on `orbit.state` and task-side effects, not the
+          final activity response body.
+
+    If the task or PR cannot be located, return a clear error.
+  skill_refs:
+    - orbit
+    - orbit-pr
+    - orbit-approve-task
+    - orbit-track-issues
+  tools:
+    - orbit.task.show
+    - orbit.task.update
+    - orbit.task.add
+    - orbit.state.set
+    - orbit.task.review_thread.add
+    - github.pr.view
+    - proc.spawn
+  proc_allowed_programs:
+    - gh
+    - git
+  created_by: system

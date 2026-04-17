@@ -1,0 +1,127 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: agent_implement_fix
+spec:
+  spec_type: agent_invoke
+  description: Address unresolved PR review comments and verify batch integration across all batch tasks in the shared worktree.
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Batch run ID (batch_id). The agent loads all batch tasks via orbit.task.list.
+      batch_id:
+        type: string
+        description: Original batch identifier when this activity runs inside a nested review-loop job.
+  output_schema_json:
+    type: object
+    properties: {}
+  instruction: |
+    Only use skills listed in this activity's skill_refs. Ignore all others.
+    You are fixing issues identified during PR review and verifying batch integration
+    for a set of Orbit tasks that share a single worktree and PR.
+
+    This activity covers two concerns:
+    A) Implementing fixes for unresolved review comments.
+    B) Verifying batch integration — checking for cross-task conflicts, stale
+       assumptions, and build/validation regressions.
+
+    Steps:
+    1. Load all batch tasks:
+       - Use input.batch_id when it is present; otherwise use input.run_id.
+       - Call orbit.task.list with input: {"batch_id": "<that batch id>"}
+         to fetch every task belonging to this batch.
+       - If the list is empty, exit immediately.
+       - For each task, call orbit.task.show with input: {"id": "<task_id>"}
+         to fetch the task's title, description, plan, context_files, workspace_path,
+         repo_root, execution_summary, and pr_number.
+       - The shared worktree path is available from any task's workspace_path field.
+
+    2. Fetch review threads for all tasks:
+       - For each task, call orbit.task.review_thread.list with id: <task_id>
+         and status: "open" to fetch all unresolved review threads.
+       - Read each thread's messages carefully. Understand what the reviewer is asking for.
+       - If a thread is a question or nit that doesn't require code changes, note it for
+         the review response but do not modify code unnecessarily.
+
+    3. Implement fixes:
+       - Address each actionable comment by modifying the relevant files.
+       - All file operations should happen inside the shared worktree (workspace_path).
+       - Keep changes minimal and focused on addressing the review feedback.
+       - Do not refactor unrelated code or add unrequested features.
+
+    4. Reply to review threads and resolve:
+       - After implementing fixes, reply to each review thread using
+         orbit.task.review_thread.reply with the task `id` and the thread's `thread_id`.
+         Briefly describe what was fixed.
+       - Then resolve the thread using orbit.task.review_thread.resolve
+         with the same task `id` and `thread_id`.
+       - If a thread could not be addressed, reply explaining why but do NOT resolve it.
+
+    5. Review the batch as a whole (integration verification):
+       - Inspect the combined diff in the shared worktree.
+       - Look for integration issues, stale assumptions, duplicated fixes, or places
+         where one task now needs a small follow-up because of another task in the batch.
+       - Check for "agent-isms": stale file paths (e.g., from renames), temporary debug
+         code, commented-out logic, or leaking mock configurations.
+       - Audit the execution_summary for every task: it must be a high-signal, concise
+         technical rationale (no conversational filler).
+       - You may revise code directly in the shared worktree as needed to meet the
+         acceptance criteria of the tasks.
+
+    6. Verify the fixes:
+       - Use proc.spawn to run the repo-approved verification commands from the shared worktree.
+       - Respect repo instructions. If the repo forbids tests, do not run them; choose the
+         smallest allowed commands that give real confidence for the batch.
+       - If verification fails, fix the issue before continuing when it is safely in scope.
+
+    7. Update task records:
+       - For each task that was modified, call orbit.task.update with execution_summary
+         documenting the fixes and integration changes applied.
+       - Example: orbit.task.update with input:
+         {"id": "<task_id>", "execution_summary": "Fixed null check in validate() per review feedback. Resolved integration conflict with batch task T123."}
+
+    If a comment cannot be addressed (ambiguous, out of scope, or would require
+    breaking changes), document the reason in the task's execution_summary so the reviewer
+    can make a decision.
+  skill_refs:
+    - orbit
+    - orbit-execute-task
+    - orbit-track-issues
+    - orbit-graph
+  tools:
+    - orbit.task.show
+    - orbit.task.list
+    - orbit.task.update
+    - orbit.task.add
+    - orbit.task.review_thread.list
+    - orbit.task.review_thread.reply
+    - orbit.task.review_thread.resolve
+    - orbit.graph.pack
+    - orbit.graph.search
+    - orbit.graph.show
+    - orbit.graph.overview
+    - orbit.graph.refs
+    - fs.copy
+    - fs.move
+    - fs.mkdir
+    - fs.patch
+    - fs.read
+    - fs.write
+    - fs.delete
+    - proc.spawn
+    - proc.which
+  proc_allowed_programs:
+    - cargo
+    - make
+    - npm
+    - npx
+    - node
+    - sh
+    - bash
+    - git
+    - orbit
+  created_by: system

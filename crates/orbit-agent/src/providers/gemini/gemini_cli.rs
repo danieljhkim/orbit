@@ -9,13 +9,10 @@ impl GeminiCliTransport {
         Self { model }
     }
 
+    // Static Gemini CLI flags live in the executor definition; this transport
+    // only adds per-request toggles.
     pub(crate) fn args(&self, verbose: bool) -> Vec<String> {
-        let mut args = vec![
-            "--approval-mode".to_string(),
-            "yolo".to_string(),
-            "-o".to_string(),
-            "text".to_string(),
-        ];
+        let mut args = Vec::new();
 
         if verbose {
             args.push("-d".to_string());

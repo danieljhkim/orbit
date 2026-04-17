@@ -5,10 +5,8 @@ use serde_json::{Value, json};
 
 /// Holds the resolved paths for all persistent artifact stores.
 ///
-/// Each resource has at most a workspace path and a global path.
-/// - Tasks: workspace only
-/// - Activities/Jobs: workspace + global (layered reads merge both)
-/// - Skills: workspace + global (workspace replaces global when present)
+/// - Tasks/Skills: workspace only
+/// - Activities/Jobs/Executors/Policies: global only
 /// - Audit: global only (single SQLite database)
 #[derive(Debug, Clone)]
 pub(crate) struct PersistenceConfig {
@@ -16,10 +14,9 @@ pub(crate) struct PersistenceConfig {
     pub(crate) activity_dir: PathBuf,
     pub(crate) job_dir: PathBuf,
     pub(crate) skill_dir: PathBuf,
+    pub(crate) executor_dir: PathBuf,
     pub(crate) audit_db: PathBuf,
-    pub(crate) global_activity_dir: PathBuf,
-    pub(crate) global_job_dir: PathBuf,
-    pub(crate) global_skill_dir: PathBuf,
+    pub(crate) policy_dir: PathBuf,
 }
 
 impl PersistenceConfig {
@@ -44,44 +41,27 @@ impl PersistenceConfig {
     /// Build persistence config from [`WorkspacePaths`]. This is the **single
     /// source of truth** for artifact path resolution.
     pub(crate) fn from_workspace_paths(paths: &WorkspacePaths) -> Self {
-        let has_workspace = paths.global_dir != paths.orbit_dir;
+        let global_resources_dir = paths.global_dir.join("resources");
 
-        let global_activity_dir = paths.global_dir.join("activities");
-        let global_job_dir = paths.global_dir.join("jobs");
-        let global_skill_dir = paths.global_dir.join("skills");
-
-        if has_workspace {
-            Self {
-                task_dir: paths.tasks_dir.clone(),
-                activity_dir: paths.activities_dir.clone(),
-                job_dir: paths.jobs_dir.clone(),
-                skill_dir: paths.skills_dir.clone(),
-                audit_db: paths.global_dir.join("orbit.db"),
-                global_activity_dir,
-                global_job_dir,
-                global_skill_dir,
-            }
-        } else {
-            // Single-root mode: workspace paths equal global paths.
-            Self {
-                task_dir: paths.global_dir.join("tasks"),
-                activity_dir: global_activity_dir.clone(),
-                job_dir: global_job_dir.clone(),
-                skill_dir: global_skill_dir.clone(),
-                audit_db: paths.global_dir.join("orbit.db"),
-                global_activity_dir,
-                global_job_dir,
-                global_skill_dir,
-            }
+        Self {
+            task_dir: paths.tasks_dir.clone(),
+            activity_dir: global_resources_dir.join("activities"),
+            job_dir: global_resources_dir.join("jobs"),
+            skill_dir: paths.skills_dir.clone(),
+            executor_dir: global_resources_dir.join("executors"),
+            policy_dir: global_resources_dir.join("policies"),
+            audit_db: paths.global_dir.join("orbit.db"),
         }
     }
 
     pub(crate) fn as_json_value(&self) -> Value {
         json!({
             "task": { "path": self.task_dir.to_string_lossy() },
-            "activity": { "path": self.activity_dir.to_string_lossy(), "global_path": self.global_activity_dir.to_string_lossy() },
-            "job": { "path": self.job_dir.to_string_lossy(), "global_path": self.global_job_dir.to_string_lossy() },
+            "activity": { "path": self.activity_dir.to_string_lossy() },
+            "job": { "path": self.job_dir.to_string_lossy() },
             "skill": { "path": self.skill_dir.to_string_lossy() },
+            "executor": { "path": self.executor_dir.to_string_lossy() },
+            "policy": { "path": self.policy_dir.to_string_lossy() },
             "audit": { "path": self.audit_db.to_string_lossy() },
         })
     }

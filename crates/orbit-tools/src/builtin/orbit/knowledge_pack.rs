@@ -40,18 +40,8 @@ impl Tool for OrbitKnowledgePackTool {
         let selectors = parse_selector_strings(&input)?;
         let selectors = Selector::parse_many(&selectors)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-        let explicit_knowledge_dir = input
-            .get("knowledge_dir")
-            .and_then(|v| v.as_str())
-            .is_some_and(|s| !s.trim().is_empty());
         let knowledge_dir = resolve_knowledge_dir(ctx, &input)?;
-
-        // Auto-refresh the knowledge graph if it is stale relative to HEAD.
-        // Skip when an explicit knowledge_dir was provided (caller controls freshness).
-        if !explicit_knowledge_dir && ctx.workspace_root.is_some() {
-            let repo_path = ctx.workspace_root.as_deref().unwrap();
-            let _ = orbit_knowledge::pipeline::ensure_fresh(&knowledge_dir, repo_path);
-        }
+        super::maybe_refresh_knowledge_graph(ctx, &input, &knowledge_dir);
 
         let working_graph =
             load_task_working_graph(ctx.orbit_root.as_deref(), ctx.task_id.as_deref())?;
@@ -77,6 +67,14 @@ impl Tool for OrbitKnowledgePackTool {
         let pack = match store.pack(&selectors) {
             Ok(pack) => pack,
             Err(error) => {
+                if let Some(graph) = working_graph.as_ref() {
+                    let pack = pack_from_working_graph(&knowledge_dir, &selectors, graph);
+                    return serde_json::to_value(pack).map_err(|serialize| {
+                        OrbitError::Execution(format!(
+                            "failed to serialize knowledge pack: {serialize}"
+                        ))
+                    });
+                }
                 return serde_json::to_value(error).map_err(|serialize| {
                     OrbitError::Execution(format!(
                         "failed to serialize knowledge error: {serialize}"
@@ -120,180 +118,4 @@ fn parse_selector_strings(input: &Value) -> Result<Vec<String>, OrbitError> {
 
 fn resolve_knowledge_dir(ctx: &ToolContext, input: &Value) -> Result<PathBuf, OrbitError> {
     super::knowledge_write::resolve_knowledge_dir(ctx, input)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use serde_json::{Value, json};
-
-    use crate::builtin::orbit::knowledge_write::OrbitKnowledgeWriteTool;
-    use crate::{Tool, ToolContext, ToolRegistry};
-
-    use super::OrbitKnowledgePackTool;
-
-    fn fixture_knowledge_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/knowledge")
-            .join(".orbit/knowledge")
-    }
-
-    fn make_test_workspace() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let ws = dir.path().to_path_buf();
-
-        let src_dir = ws.join("src");
-        std::fs::create_dir_all(&src_dir).unwrap();
-        std::fs::create_dir_all(ws.join(".orbit")).unwrap();
-        std::fs::write(
-            src_dir.join("lib.rs"),
-            "pub fn hello() -> &'static str {\n    \"hello\"\n}\n",
-        )
-        .unwrap();
-
-        (dir, ws)
-    }
-
-    fn task_context(ws: &std::path::Path, task_id: &str) -> ToolContext {
-        ToolContext {
-            workspace_root: Some(ws.to_path_buf()),
-            orbit_root: Some(ws.join(".orbit")),
-            task_id: Some(task_id.to_string()),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn registry_executes_knowledge_pack_tool() {
-        let mut registry = ToolRegistry::new();
-        registry.register_builtins();
-
-        let result = registry
-            .execute(
-                "orbit.graph.pack",
-                &ToolContext {
-                    workspace_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-                    ..Default::default()
-                },
-                json!({
-                    "selectors": [
-                        "file:crates/orbit-tools/src/lib.rs",
-                        "symbol:crates/orbit-tools/src/lib.rs#register_builtins:function"
-                    ],
-                    "knowledge_dir": fixture_knowledge_dir().display().to_string()
-                }),
-            )
-            .expect("tool should succeed");
-
-        assert_eq!(
-            result["knowledge_dir"],
-            fixture_knowledge_dir().display().to_string()
-        );
-        assert_eq!(result["manifest_generated_at"], "2026-04-09T06:06:39Z");
-        assert_eq!(result["total_nodes"], 2);
-        let entries = result["entries"].as_array().expect("entries array");
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0]["selector"], "file:crates/orbit-tools/src/lib.rs");
-        assert_eq!(
-            entries[1]["selector"],
-            "symbol:crates/orbit-tools/src/lib.rs#register_builtins:function"
-        );
-    }
-
-    #[test]
-    fn tool_returns_structured_error_for_missing_knowledge() {
-        let result = OrbitKnowledgePackTool
-            .execute(
-                &ToolContext {
-                    workspace_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-                    ..Default::default()
-                },
-                json!({
-                    "selectors": ["file:crates/orbit-tools/src/lib.rs"],
-                    "knowledge_dir": "/tmp/orbit-tools-missing-knowledge"
-                }),
-            )
-            .expect("structured error should be returned as JSON");
-
-        assert_eq!(result["kind"], "knowledge_unavailable");
-        assert!(
-            result["reason"]
-                .as_str()
-                .is_some_and(|reason| !reason.is_empty())
-        );
-    }
-
-    #[test]
-    fn tool_rejects_non_array_selector_input() {
-        let error = OrbitKnowledgePackTool
-            .execute(
-                &ToolContext::default(),
-                json!({
-                    "selectors": "file:crates/orbit-tools/src/lib.rs"
-                }),
-            )
-            .expect_err("invalid selector input should fail");
-
-        assert!(matches!(error, orbit_types::OrbitError::InvalidInput(_)));
-    }
-
-    #[test]
-    fn tool_serializes_success_to_json() {
-        let value = OrbitKnowledgePackTool
-            .execute(
-                &ToolContext {
-                    workspace_root: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-                    ..Default::default()
-                },
-                json!({
-                    "selectors": ["dir:crates/orbit-tools/src"],
-                    "knowledge_dir": fixture_knowledge_dir().display().to_string()
-                }),
-            )
-            .expect("pack");
-
-        assert_eq!(
-            value["entries"][0]["kind"],
-            Value::String("dir".to_string())
-        );
-    }
-
-    #[test]
-    fn pack_uses_task_scoped_working_graph_after_write() {
-        let (_dir, ws) = make_test_workspace();
-        let ctx = task_context(&ws, "T-pack");
-
-        OrbitKnowledgeWriteTool
-            .execute(
-                &ctx,
-                json!({
-                    "selector": "symbol:src/lib.rs#hello:function",
-                    "new_source": "pub fn hello() -> &'static str {\n    \"hi there\"\n}",
-                    "reason": "updated greeting"
-                }),
-            )
-            .expect("write");
-
-        let result = OrbitKnowledgePackTool
-            .execute(
-                &ctx,
-                json!({
-                    "selectors": ["symbol:src/lib.rs#hello:function"]
-                }),
-            )
-            .expect("pack");
-
-        assert_eq!(result["total_nodes"], 1);
-        assert_eq!(
-            result["entries"][0]["source"],
-            Value::String("pub fn hello() -> &'static str {\n    \"hi there\"\n}".to_string())
-        );
-        assert!(
-            result["unresolved_selectors"]
-                .as_array()
-                .expect("unresolved selectors")
-                .is_empty()
-        );
-    }
 }

@@ -1,12 +1,12 @@
 //! Concrete agent provider implementations and CLI transport helpers.
 //!
-//! Each provider (`claude`, `codex`, `mock_agent`) translates an [`AgentRequest`]
+//! Each provider (`claude`, `codex`, `gemini`, `ollama`, `mock_agent`) translates an [`AgentRequest`]
 //! into a CLI command invocation: a program path, argument list, and stdin bytes
 //! that the engine will pass to `orbit-exec`. Providers are detected by inspecting
 //! the `agent_cli` basename (e.g., `"claude"` → [`AgentProvider::Claude`]).
 //!
 //! The `common` module contains the shared `build_agent_response` helper used by
-//! all three providers so that the CLI transport shape stays consistent regardless
+//! all providers so that the CLI transport shape stays consistent regardless
 //! of which AI backend is selected.
 
 mod claude;
@@ -14,6 +14,7 @@ mod codex;
 mod common;
 mod gemini;
 mod mock_agent;
+mod ollama;
 
 use std::path::Path;
 
@@ -23,6 +24,7 @@ pub(crate) use claude::ClaudeRuntime;
 pub(crate) use codex::CodexRuntime;
 pub(crate) use gemini::GeminiRuntime;
 pub(crate) use mock_agent::MockAgentRuntime;
+pub(crate) use ollama::OllamaRuntime;
 
 use crate::types::AgentResponse;
 
@@ -50,6 +52,7 @@ pub(crate) enum AgentProvider {
     Codex,
     Claude,
     Gemini,
+    Ollama,
 }
 
 impl AgentProvider {
@@ -59,6 +62,7 @@ impl AgentProvider {
             AgentProvider::Codex => "codex",
             AgentProvider::Claude => "claude",
             AgentProvider::Gemini => "gemini",
+            AgentProvider::Ollama => "ollama",
         }
     }
 
@@ -68,6 +72,7 @@ impl AgentProvider {
             AgentProvider::Codex => &["HOME", "PATH"],
             AgentProvider::Claude => &["HOME", "PATH"],
             AgentProvider::Gemini => &["HOME", "PATH"],
+            AgentProvider::Ollama => &["HOME", "PATH"],
         }
     }
 
@@ -77,6 +82,7 @@ impl AgentProvider {
             "codex" => Ok(AgentProvider::Codex),
             "claude" => Ok(AgentProvider::Claude),
             "gemini" => Ok(AgentProvider::Gemini),
+            "ollama" => Ok(AgentProvider::Ollama),
             other => Err(OrbitError::UnsupportedAgentProvider(other.to_string())),
         }
     }

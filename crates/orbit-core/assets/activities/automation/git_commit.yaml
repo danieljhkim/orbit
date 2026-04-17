@@ -1,0 +1,52 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: git_commit
+spec:
+  spec_type: automation
+  description: Stage and commit changes in a worktree, scoped per-task or all.
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+    properties:
+      run_id:
+        type: string
+        description: Job run ID for this pipeline execution.
+      batch_id:
+        type: string
+        description: Original batch identifier to use when committing inside a nested review or fix-loop job.
+      scope:
+        type: string
+        enum:
+          - per_task
+          - per_task_finalize
+          - all
+        default: all
+        description: 'Commit scope: per_task commits each task separately, per_task_finalize commits finalization changes, all commits everything at once.'
+      workspace_path:
+        type: string
+        description: Override worktree path. Resolved from run context when omitted.
+      completed_task_ids:
+        type: array
+        items:
+          type: string
+        description: Task IDs to commit for. Used with per_task and per_task_finalize scopes.
+  output_schema_json:
+    type: object
+    properties:
+      workspace_path:
+        type: string
+        description: Absolute path to the worktree where commits were made.
+      committed_task_ids:
+        type: array
+        items:
+          type: string
+        description: Task IDs that had changes committed.
+      skipped_task_ids:
+        type: array
+        items:
+          type: string
+        description: Task IDs that had no changes to commit.
+  action: git_commit
+  created_by: system

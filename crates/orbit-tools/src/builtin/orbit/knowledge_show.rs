@@ -1,6 +1,5 @@
 use orbit_knowledge::Selector;
 use orbit_knowledge::graph::navigator::GraphNodeRef;
-use orbit_knowledge::graph::object_store::GraphObjectStore;
 use orbit_knowledge::service::GraphContextService;
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::{Value, json};
@@ -57,12 +56,12 @@ impl Tool for OrbitKnowledgeShowTool {
         let max_siblings = input.get("siblings").and_then(Value::as_u64).unwrap_or(3) as usize;
         let max_children = input.get("children").and_then(Value::as_u64).unwrap_or(5) as usize;
 
-        let graph = load_graph(ctx)?;
+        let graph = super::load_graph_for_read(ctx, &input)?;
         let svc = GraphContextService::new(&graph);
 
         let node = svc
             .resolve_selector(&selector)
-            .map_err(|e| OrbitError::Execution(e.to_string()))?;
+            .map_err(|e| OrbitError::InvalidInput(e.to_string()))?;
 
         let node_ctx = svc
             .bounded_context(node.id(), depth, max_siblings, max_children)
@@ -70,17 +69,6 @@ impl Tool for OrbitKnowledgeShowTool {
 
         Ok(build_json(&svc, &node_ctx))
     }
-}
-
-fn load_graph(
-    ctx: &ToolContext,
-) -> Result<orbit_knowledge::graph::nodes::CodebaseGraphV1, OrbitError> {
-    let knowledge_dir =
-        super::knowledge_write::resolve_knowledge_dir(ctx, &serde_json::Value::Null)?;
-    let graph_dir = knowledge_dir.join("graph");
-    GraphObjectStore::new(graph_dir)
-        .read_graph()
-        .map_err(|e| OrbitError::Execution(format!("failed to load knowledge graph: {e}")))
 }
 
 fn build_json(

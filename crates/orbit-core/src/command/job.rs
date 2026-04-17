@@ -3,10 +3,9 @@ use orbit_engine::EnvironmentHost;
 use orbit_store::JobCreateParams as StoreActivityCreateParams;
 use orbit_store::JobUpdateParams as StoreJobUpdateParams;
 use orbit_types::{
-    Job, JobRun, JobScheduleState, JobStep, JobTargetType, OrbitError, OrbitEvent, StepCondition,
-    default_job_max_active_runs,
+    Job, JobResource, JobRun, JobScheduleState, JobStep, JobTargetType, OrbitError, OrbitEvent,
+    RESOURCE_SCHEMA_VERSION, ResourceKind, default_job_max_active_runs, resolve_agent_model_pair,
 };
-use serde::Deserialize;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -14,12 +13,7 @@ use crate::command::activity::activity_requires_agent_cli;
 
 const JOB_PARALLEL_TASK_PIPELINE: &str = "job_parallel_task_pipeline";
 const JOB_LOCAL_TASK_PIPELINE: &str = "job_local_task_pipeline";
-const JOB_PARALLEL_TASK_WORKER: &str = "job_parallel_task_worker";
 const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
-    (
-        "job_review_tasks",
-        include_str!("../../assets/jobs/job_review_tasks.yaml"),
-    ),
     (
         "job_parallel_task_worker",
         include_str!("../../assets/jobs/job_parallel_task_worker.yaml"),
@@ -58,53 +52,6 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
     ),
 ];
 
-#[derive(Debug, Clone, Deserialize)]
-struct DefaultJobFileSpec {
-    job: DefaultJobEntry,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct DefaultJobEntry {
-    job_id: String,
-    state: String,
-    #[serde(default)]
-    default_input: Option<Value>,
-    #[serde(default = "default_job_max_active_runs")]
-    max_active_runs: u32,
-    #[serde(default = "orbit_types::default_max_iterations")]
-    max_iterations: u32,
-    steps: Vec<DefaultJobStep>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct DefaultJobStep {
-    target_type: String,
-    target_id: String,
-    #[serde(default)]
-    default_input: Option<Value>,
-    #[serde(default)]
-    agent_cli: String,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    agent_cli_from_input: Option<String>,
-    #[serde(default)]
-    model_from_input: Option<String>,
-    timeout_seconds: u64,
-    #[serde(default)]
-    env_extra: Vec<String>,
-    #[serde(default)]
-    env_set: std::collections::HashMap<String, String>,
-    #[serde(default)]
-    retry_max_attempts: u32,
-    #[serde(default = "orbit_types::default_retry_backoff_seconds")]
-    retry_backoff_seconds: u64,
-    #[serde(default)]
-    condition: StepCondition,
-    #[serde(default)]
-    output_map: std::collections::HashMap<String, String>,
-}
-
 #[derive(Debug, Clone)]
 pub struct JobAddParams {
     pub job_id: Option<String>,
@@ -112,6 +59,7 @@ pub struct JobAddParams {
     pub max_active_runs: Option<u32>,
     pub max_iterations: Option<u32>,
     pub steps: Vec<JobStep>,
+    pub policy: Option<String>,
     pub initial_state_override: Option<JobScheduleState>,
 }
 
@@ -140,33 +88,13 @@ impl OrbitRuntime {
     }
 
     fn ensure_pipeline_mode_is_exclusive(&self, job_id: &str) -> Result<(), OrbitError> {
-        let conflicting_job_ids: &[&str] = match job_id {
-            JOB_PARALLEL_TASK_PIPELINE | JOB_LOCAL_TASK_PIPELINE => &[
-                JOB_PARALLEL_TASK_PIPELINE,
-                JOB_LOCAL_TASK_PIPELINE,
-                JOB_PARALLEL_TASK_WORKER,
-            ],
-            _ => return Ok(()),
-        };
-
-        let mut conflicting_runs = Vec::new();
-        for conflicting_job_id in conflicting_job_ids {
-            let runs = self.list_pending_or_running_job_runs_record(conflicting_job_id)?;
-            conflicting_runs.extend(
-                runs.into_iter()
-                    .map(|run| format!("{conflicting_job_id}:{}", run.run_id)),
-            );
+        match job_id {
+            // Task pipelines now rely on per-job `max_active_runs`, `dispatch_batch`
+            // conflict exclusion, and merge retry logic instead of a global
+            // single-flight gate.
+            JOB_PARALLEL_TASK_PIPELINE | JOB_LOCAL_TASK_PIPELINE => Ok(()),
+            _ => Ok(()),
         }
-
-        if conflicting_runs.is_empty() {
-            return Ok(());
-        }
-
-        Err(OrbitError::JobValidation(format!(
-            "job '{}' cannot start while conflicting pipeline runs are active: {}",
-            job_id,
-            conflicting_runs.join(", ")
-        )))
     }
 
     pub(crate) fn recover_stale_active_run_for_job(
@@ -185,36 +113,66 @@ impl OrbitRuntime {
         }
         let max_active_runs = validate_job_max_active_runs(params.max_active_runs)?;
         let default_input = normalize_job_default_input(params.default_input)?;
+        if let Some(ref policy_name) = params.policy {
+            self.stores().policies().get(policy_name)?.ok_or_else(|| {
+                OrbitError::JobValidation(format!("policy '{}' does not exist", policy_name))
+            })?;
+        }
+        self.validate_job_steps(params.job_id.as_deref(), &params.steps, true)?;
 
-        for step in &params.steps {
+        let initial_state = params
+            .initial_state_override
+            .unwrap_or(JobScheduleState::Enabled);
+
+        let steps = normalize_job_steps(params.steps)?;
+
+        let max_iterations = params.max_iterations.unwrap_or(1);
+        let job = self.stores().jobs().add(StoreActivityCreateParams {
+            job_id: params.job_id,
+            default_input,
+            max_active_runs,
+            max_iterations,
+            steps,
+            policy: params.policy,
+            initial_state,
+        })?;
+        self.record_event(OrbitEvent::JobAdded {
+            job_id: job.job_id.clone(),
+        })?;
+        Ok(job)
+    }
+
+    fn validate_job_steps(
+        &self,
+        job_id: Option<&str>,
+        steps: &[JobStep],
+        resolve_activity_skills: bool,
+    ) -> Result<(), OrbitError> {
+        for step in steps {
             if step.target_id.trim().is_empty() {
                 return Err(OrbitError::JobValidation(
                     "step target_id must not be empty".to_string(),
                 ));
             }
             if step.target_type == JobTargetType::Job {
-                // Reject self-references.
-                if let Some(ref job_id) = params.job_id
-                    && step.target_id == *job_id
+                if let Some(job_id) = job_id
+                    && step.target_id == job_id
                 {
                     return Err(OrbitError::JobValidation(format!(
                         "job '{}' cannot reference itself as a step",
                         job_id
                     )));
                 }
-                // Validate that the referenced job exists.
                 let referenced_job = self.get_job_backend(&step.target_id)?.ok_or_else(|| {
                     OrbitError::JobValidation(format!(
                         "step references job '{}' which does not exist",
                         step.target_id
                     ))
                 })?;
-                // Detect one-level cycles: if the referenced job has a step
-                // pointing back to this job, reject it.
-                if let Some(ref job_id) = params.job_id {
+                if let Some(job_id) = job_id {
                     for sub_step in &referenced_job.steps {
                         if sub_step.target_type == JobTargetType::Job
-                            && sub_step.target_id == *job_id
+                            && sub_step.target_id == job_id
                         {
                             return Err(OrbitError::JobValidation(format!(
                                 "cycle detected: job '{}' references '{}' which references back",
@@ -225,53 +183,70 @@ impl OrbitRuntime {
                 }
                 continue;
             }
-            let activity =
-                self.validate_activity_target_exists(step.target_type, &step.target_id)?;
-            // When agent_cli is specified, validate it eagerly. When empty,
-            // the runner resolves it from the task's agent field at runtime
-            // (e.g. review loop steps that route back to the original implementer).
-            if activity_requires_agent_cli(&activity.spec_type) && !step.agent_cli.trim().is_empty()
-            {
-                self.validate_agent_cli(&step.agent_cli, step.model.as_deref())?;
+            let activity = if resolve_activity_skills {
+                self.validate_activity_target_exists(step.target_type, &step.target_id)?
+            } else {
+                self.show_activity(&step.target_id)?
+            };
+            if activity_requires_agent_cli(&activity.spec_type) {
+                if !step.agent_cli.trim().is_empty() {
+                    self.validate_agent_cli(&step.agent_cli, step.model.as_deref())?;
+                } else if let Some(executor_name) = step
+                    .executor
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    let executor_def =
+                        self.stores()
+                            .executors()
+                            .get(executor_name)?
+                            .ok_or_else(|| {
+                                OrbitError::JobValidation(format!(
+                                    "step references executor '{}' which does not exist",
+                                    executor_name
+                                ))
+                            })?;
+                    let command = executor_def
+                        .command
+                        .clone()
+                        .unwrap_or_else(|| executor_name.to_string());
+                    let model = step
+                        .model
+                        .clone()
+                        .or_else(|| resolve_executor_tier_model(&command, &executor_def, step));
+                    self.validate_agent_cli(&command, model.as_deref())?;
+                }
             }
         }
 
-        let initial_state = params
-            .initial_state_override
-            .unwrap_or(JobScheduleState::Enabled);
-
-        let steps = normalize_job_steps(params.steps)?;
-
-        let max_iterations = params.max_iterations.unwrap_or(1);
-        let job = self.add_job_record(StoreActivityCreateParams {
-            job_id: params.job_id,
-            default_input,
-            max_active_runs,
-            max_iterations,
-            steps,
-            initial_state,
-        })?;
-        self.record_event(OrbitEvent::JobAdded {
-            job_id: job.job_id.clone(),
-        })?;
-        Ok(job)
+        Ok(())
     }
 
-    pub(crate) fn update_job_definition(
+    pub fn update_job_definition(
         &self,
         job_id: &str,
         default_input: Option<Value>,
         max_active_runs: u32,
+        max_iterations: u32,
         steps: Vec<JobStep>,
+        policy: Option<String>,
         state: JobScheduleState,
     ) -> Result<Job, OrbitError> {
+        if let Some(ref policy_name) = policy {
+            self.stores().policies().get(policy_name)?.ok_or_else(|| {
+                OrbitError::JobValidation(format!("policy '{}' does not exist", policy_name))
+            })?;
+        }
         let steps = normalize_job_steps(steps)?;
-        let job = self.update_job_record(
+        let job = self.stores().jobs().update(
             job_id,
             StoreJobUpdateParams {
                 default_input: Some(normalize_job_default_input(default_input)?),
                 max_active_runs: Some(validate_job_max_active_runs(Some(max_active_runs))?),
+                max_iterations: Some(max_iterations),
                 steps: Some(steps),
+                policy: Some(policy),
                 state: Some(state),
             },
         )?;
@@ -297,7 +272,9 @@ impl OrbitRuntime {
         for job in jobs {
             let _ = self.recover_stale_active_run_for_job(&job, now);
             let last_run = self
-                .list_job_runs_filtered_record(&JobRunQuery {
+                .stores()
+                .jobs()
+                .list_runs_filtered(&JobRunQuery {
                     job_id: Some(job.job_id.clone()),
                     state: None,
                     created_since: None,
@@ -316,7 +293,7 @@ impl OrbitRuntime {
     }
 
     pub fn delete_job(&self, job_id: &str) -> Result<(), OrbitError> {
-        let changed = self.mark_job_disabled_record(job_id)?;
+        let changed = self.stores().jobs().mark_disabled(job_id)?;
         if !changed {
             return Err(OrbitError::JobNotFound(job_id.to_string()));
         }
@@ -326,11 +303,31 @@ impl OrbitRuntime {
     }
 
     fn list_jobs_backend(&self, include_disabled: bool) -> Result<Vec<Job>, OrbitError> {
-        self.list_job_records(include_disabled)
+        self.stores().jobs().list(include_disabled)
     }
 
     fn get_job_backend(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
-        self.get_job_record(job_id)
+        self.stores().jobs().get(job_id)
+    }
+}
+
+fn resolve_executor_tier_model(
+    agent_cli: &str,
+    executor_def: &orbit_types::ExecutorDef,
+    step: &JobStep,
+) -> Option<String> {
+    let tier = step
+        .model_tier
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if let Some(model) = executor_def.model_for_tier(tier) {
+        return Some(model.to_string());
+    }
+    match tier {
+        "strong" => resolve_agent_model_pair(agent_cli).map(|pair| pair.orchestrator),
+        "weak" => resolve_agent_model_pair(agent_cli).map(|pair| pair.helper),
+        _ => None,
     }
 }
 
@@ -372,21 +369,32 @@ fn json_value_type_name(value: &Value) -> &'static str {
     }
 }
 
-fn load_default_job_specs(raw_specs: &[(&str, &str)]) -> Result<Vec<DefaultJobEntry>, OrbitError> {
+fn load_default_job_specs(raw_specs: &[(&str, &str)]) -> Result<Vec<JobResource>, OrbitError> {
     let mut specs = Vec::with_capacity(raw_specs.len());
     for (expected_id, raw) in raw_specs {
-        let file_spec = serde_yaml::from_str::<DefaultJobFileSpec>(raw).map_err(|err| {
+        let resource = serde_yaml::from_str::<JobResource>(raw).map_err(|err| {
             OrbitError::InvalidInput(format!("invalid default job spec '{}': {err}", expected_id))
         })?;
-        let entry = file_spec.job;
-        let id = entry.job_id.trim();
+        if resource.schema_version != RESOURCE_SCHEMA_VERSION {
+            return Err(OrbitError::InvalidInput(format!(
+                "default job '{}' uses unsupported schemaVersion {}",
+                expected_id, resource.schema_version
+            )));
+        }
+        if resource.kind != ResourceKind::Job {
+            return Err(OrbitError::InvalidInput(format!(
+                "default job '{}' has unexpected kind {}",
+                expected_id, resource.kind
+            )));
+        }
+        let id = resource.metadata.name.trim();
         if id != *expected_id {
             return Err(OrbitError::InvalidInput(format!(
                 "default job file key '{}' does not match spec job_id '{}'",
                 expected_id, id
             )));
         }
-        specs.push(entry);
+        specs.push(resource);
     }
     Ok(specs)
 }
@@ -397,82 +405,51 @@ pub(crate) fn seed_default_jobs(
 ) -> Result<usize, OrbitError> {
     let specs = load_default_job_specs(DEFAULT_JOB_FILES)?;
     let mut created = 0usize;
-    for entry in specs {
-        if runtime.show_job(&entry.job_id).is_ok() {
+    for resource in specs {
+        let job_id = resource.metadata.name.clone();
+        let spec = resource.spec;
+        if runtime.show_job(&job_id).is_ok() {
             if !overwrite {
                 continue;
             }
-            let initial_state = parse_default_job_state(&entry.state, &entry.job_id)?;
-            let steps = default_job_steps(&entry)?;
+            runtime.validate_job_steps(Some(&job_id), &spec.steps, false)?;
             runtime.update_job_definition(
-                &entry.job_id,
-                entry.default_input.clone(),
-                entry.max_active_runs,
-                steps,
-                initial_state,
+                &job_id,
+                spec.default_input,
+                spec.max_active_runs,
+                spec.max_iterations,
+                spec.steps,
+                spec.policy,
+                spec.state,
             )?;
             created += 1;
             continue;
         }
-        let initial_state = parse_default_job_state(&entry.state, &entry.job_id)?;
-        let steps = default_job_steps(&entry)?;
-        runtime.add_job(JobAddParams {
-            job_id: Some(entry.job_id),
-            default_input: entry.default_input,
-            max_active_runs: Some(entry.max_active_runs),
-            max_iterations: Some(entry.max_iterations),
+        if let Some(ref policy_name) = spec.policy {
+            runtime
+                .stores()
+                .policies()
+                .get(policy_name)?
+                .ok_or_else(|| {
+                    OrbitError::JobValidation(format!("policy '{}' does not exist", policy_name))
+                })?;
+        }
+        runtime.validate_job_steps(Some(&job_id), &spec.steps, false)?;
+        let default_input = normalize_job_default_input(spec.default_input)?;
+        let max_active_runs = validate_job_max_active_runs(Some(spec.max_active_runs))?;
+        let steps = normalize_job_steps(spec.steps)?;
+        runtime.stores().jobs().add(StoreActivityCreateParams {
+            job_id: Some(job_id),
+            default_input,
+            max_active_runs,
+            max_iterations: spec.max_iterations,
             steps,
-            initial_state_override: Some(initial_state),
+            policy: spec.policy,
+            initial_state: spec.state,
         })?;
         created += 1;
     }
     Ok(created)
-}
-
-fn parse_default_job_state(state: &str, job_id: &str) -> Result<JobScheduleState, OrbitError> {
-    match state {
-        "enabled" => Ok(JobScheduleState::Enabled),
-        "disabled" => Ok(JobScheduleState::Disabled),
-        other => Err(OrbitError::InvalidInput(format!(
-            "unsupported state '{}' in default job '{}'",
-            other, job_id
-        ))),
-    }
-}
-
-fn default_job_steps(entry: &DefaultJobEntry) -> Result<Vec<JobStep>, OrbitError> {
-    entry
-        .steps
-        .iter()
-        .map(|s| {
-            let target_type = match s.target_type.as_str() {
-                "activity" => JobTargetType::Activity,
-                "job" => JobTargetType::Job,
-                other => {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "unsupported target_type '{}' in default job '{}'",
-                        other, entry.job_id
-                    )));
-                }
-            };
-            Ok(JobStep {
-                target_type,
-                target_id: s.target_id.clone(),
-                default_input: normalize_job_default_input(s.default_input.clone())?,
-                agent_cli: s.agent_cli.clone(),
-                model: s.model.clone(),
-                agent_cli_from_input: s.agent_cli_from_input.clone(),
-                model_from_input: s.model_from_input.clone(),
-                timeout_seconds: s.timeout_seconds,
-                env_extra: s.env_extra.clone(),
-                env_set: s.env_set.clone(),
-                retry_max_attempts: s.retry_max_attempts,
-                retry_backoff_seconds: s.retry_backoff_seconds,
-                condition: s.condition,
-                output_map: s.output_map.clone(),
-            })
-        })
-        .collect()
 }
 
 fn validate_job_max_active_runs(max_active_runs: Option<u32>) -> Result<u32, OrbitError> {
@@ -483,164 +460,4 @@ fn validate_job_max_active_runs(max_active_runs: Option<u32>) -> Result<u32, Orb
         ));
     }
     Ok(value)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{DEFAULT_JOB_FILES, load_default_job_specs};
-    use orbit_types::StepCondition;
-
-    #[test]
-    fn duel_review_cycle_runs_loop_before_merge_and_records_after_merge_attempt() {
-        let specs = load_default_job_specs(DEFAULT_JOB_FILES).expect("jobs");
-        let duel_cycle = specs
-            .into_iter()
-            .find(|spec| spec.job_id == "job_duel_review_cycle")
-            .expect("job_duel_review_cycle");
-
-        let step_ids = duel_cycle
-            .steps
-            .iter()
-            .map(|step| step.target_id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            step_ids,
-            vec![
-                "review_duel_pr",
-                "sync_batch_review_to_github",
-                "arbitrate_review",
-                "check_duel_review_decision",
-                "job_duel_review_loop",
-                "merge_batch_pr",
-                "cleanup_worktree",
-                "record_duel_scores",
-            ]
-        );
-
-        let loop_step = duel_cycle
-            .steps
-            .iter()
-            .find(|step| step.target_id == "job_duel_review_loop")
-            .expect("loop step");
-        assert_eq!(loop_step.condition, StepCondition::OnSuccess);
-
-        let record_step = duel_cycle
-            .steps
-            .iter()
-            .find(|step| step.target_id == "record_duel_scores")
-            .expect("record step");
-        assert_eq!(record_step.condition, StepCondition::Always);
-
-        let cleanup_step = duel_cycle
-            .steps
-            .iter()
-            .find(|step| step.target_id == "cleanup_worktree")
-            .expect("cleanup step");
-        assert_eq!(cleanup_step.condition, StepCondition::OnSuccess);
-    }
-
-    #[test]
-    fn local_task_pipeline_cleans_up_worktree_only_after_successful_merge() {
-        let specs = load_default_job_specs(DEFAULT_JOB_FILES).expect("jobs");
-        let local_pipeline = specs
-            .into_iter()
-            .find(|spec| spec.job_id == "job_local_task_pipeline")
-            .expect("job_local_task_pipeline");
-
-        let step_ids = local_pipeline
-            .steps
-            .iter()
-            .map(|step| step.target_id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            step_ids[step_ids.len() - 2..],
-            ["merge_batch_worktree_into_base", "cleanup_worktree"]
-        );
-
-        let cleanup_step = local_pipeline
-            .steps
-            .iter()
-            .find(|step| step.target_id == "cleanup_worktree")
-            .expect("cleanup step");
-        assert_eq!(cleanup_step.condition, StepCondition::OnSuccess);
-    }
-
-    #[test]
-    fn duel_plan_pipeline_runs_a_single_planning_duel_activity() {
-        let specs = load_default_job_specs(DEFAULT_JOB_FILES).expect("jobs");
-        let duel_plan = specs
-            .into_iter()
-            .find(|spec| spec.job_id == "job_duel_plan_pipeline")
-            .expect("job_duel_plan_pipeline");
-
-        let step_ids = duel_plan
-            .steps
-            .iter()
-            .map(|step| step.target_id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(step_ids, vec!["run_planning_duel"]);
-
-        let step = duel_plan.steps.first().expect("run_planning_duel step");
-        assert_eq!(step.condition, StepCondition::OnSuccess);
-        assert!(step.output_map.is_empty());
-        assert_eq!(step.timeout_seconds, 3600);
-    }
-
-    #[test]
-    fn parallel_task_worker_uses_step_default_input_for_update_task() {
-        let specs = load_default_job_specs(DEFAULT_JOB_FILES).expect("jobs");
-        let worker = specs
-            .into_iter()
-            .find(|spec| spec.job_id == "job_parallel_task_worker")
-            .expect("job_parallel_task_worker");
-
-        let step_ids = worker
-            .steps
-            .iter()
-            .map(|step| step.target_id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(step_ids, vec!["implement_change", "update_task"]);
-
-        let update_step = worker
-            .steps
-            .iter()
-            .find(|step| step.target_id == "update_task")
-            .expect("update_task step");
-        assert_eq!(
-            update_step
-                .default_input
-                .as_ref()
-                .and_then(|input| input.get("status")),
-            Some(&serde_json::json!("review"))
-        );
-    }
-
-    #[test]
-    fn parallel_task_pipeline_keeps_finalize_after_commit_task_artifacts() {
-        let specs = load_default_job_specs(DEFAULT_JOB_FILES).expect("jobs");
-        let pipeline = specs
-            .into_iter()
-            .find(|spec| spec.job_id == "job_parallel_task_pipeline")
-            .expect("job_parallel_task_pipeline");
-
-        let step_ids = pipeline
-            .steps
-            .iter()
-            .map(|step| step.target_id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            step_ids,
-            vec![
-                "update_knowledge_graph",
-                "dispatch_and_plan_batch",
-                "snapshot_batch_state",
-                "parallel_dispatch_tasks",
-                "commit_task_artifact_changes",
-                "finalize_tasks",
-                "commit_finalize_artifact_changes",
-                "commit_and_open_batch_pr",
-                "job_batch_review_cycle",
-            ]
-        );
-    }
 }

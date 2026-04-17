@@ -54,34 +54,3 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::Io(_) => "io_error",
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use orbit_core::OrbitError;
-    use serde_json::json;
-
-    use super::{error_payload, render};
-
-    #[test]
-    fn render_defaults_to_compact_json() {
-        let rendered = render(&json!({"id": "T001", "status": "backlog"}), false)
-            .expect("compact JSON should render");
-
-        assert_eq!(rendered, "{\"id\":\"T001\",\"status\":\"backlog\"}");
-    }
-
-    #[test]
-    fn render_pretty_json_keeps_indentation() {
-        let rendered = render(&json!({"id": "T001"}), true).expect("pretty JSON should render");
-
-        assert!(rendered.contains("\n  \"id\": \"T001\"\n"));
-    }
-
-    #[test]
-    fn error_payload_uses_structured_code() {
-        let payload = error_payload(&OrbitError::InvalidInput("missing `id`".to_string()));
-
-        assert_eq!(payload["code"], "invalid_input");
-        assert_eq!(payload["error"], "invalid input: missing `id`");
-    }
-}

@@ -5,7 +5,7 @@ use orbit_types::{ActorIdentity, FrictionEntry, MetricsEntry};
 use serde_json::Value;
 use std::path::Path;
 
-use crate::context::EngineHost;
+use crate::context::{EnvironmentHost, ExecutorLookupHost, RuntimeHost};
 
 use super::helpers::{extract_task_id, normalize_agent_label, resolved_model_name};
 
@@ -18,7 +18,7 @@ pub(super) struct FrictionContext {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn append_failed_step_friction<H: EngineHost>(
+pub(super) fn append_failed_step_friction<H: RuntimeHost + EnvironmentHost + ExecutorLookupHost>(
     data_root: &Path,
     host: &H,
     run_id: &str,
@@ -94,7 +94,7 @@ fn command_label(execution: &crate::context::ExecutionContext) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn append_step_metrics<H: EngineHost>(
+pub(super) fn append_step_metrics<H: RuntimeHost + EnvironmentHost + ExecutorLookupHost>(
     data_root: &Path,
     host: &H,
     run_id: &str,

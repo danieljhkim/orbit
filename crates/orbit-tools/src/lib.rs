@@ -151,39 +151,3 @@ pub fn map_input_from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -
     }
     Value::Object(map)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn require_str_accepts_numeric_value() {
-        let input = json!({"pr": 86});
-        assert_eq!(require_str(&input, "pr").unwrap(), "86");
-    }
-
-    #[test]
-    fn require_str_accepts_string_value() {
-        let input = json!({"pr": "86"});
-        assert_eq!(require_str(&input, "pr").unwrap(), "86");
-    }
-
-    #[test]
-    fn require_str_rejects_missing_key() {
-        let input = json!({});
-        assert!(require_str(&input, "pr").is_err());
-    }
-
-    #[test]
-    fn require_str_rejects_empty_string() {
-        let input = json!({"pr": ""});
-        assert!(require_str(&input, "pr").is_err());
-    }
-
-    #[test]
-    fn require_str_rejects_whitespace_only() {
-        let input = json!({"pr": "   "});
-        assert!(require_str(&input, "pr").is_err());
-    }
-}

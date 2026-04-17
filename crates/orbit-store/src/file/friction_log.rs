@@ -25,10 +25,8 @@ pub fn read_friction_entries_for_month(
     root: &Path,
     year_month: &str,
 ) -> Result<Vec<FrictionEntry>, OrbitError> {
-    let month_dir = root
-        .join("diagnostics")
-        .join("friction")
-        .join(validate_year_month(year_month)?);
+    let year_month = validate_year_month(year_month)?;
+    let month_dir = diagnostics_month_dir(root, "friction", year_month);
     if !month_dir.exists() {
         return Ok(Vec::new());
     }
@@ -79,8 +77,13 @@ fn validate_year_month(raw: &str) -> Result<&str, OrbitError> {
 }
 
 fn friction_day_path(root: &Path, entry: &FrictionEntry) -> PathBuf {
-    root.join("diagnostics")
-        .join("friction")
-        .join(entry.ts.format("%Y-%m").to_string())
+    diagnostics_month_dir(root, "friction", &entry.ts.format("%Y-%m").to_string())
         .join(format!("{}.jsonl", entry.ts.format("%d")))
+}
+
+fn diagnostics_month_dir(root: &Path, category: &str, year_month: &str) -> PathBuf {
+    root.join("state")
+        .join("diagnostics")
+        .join(category)
+        .join(year_month)
 }

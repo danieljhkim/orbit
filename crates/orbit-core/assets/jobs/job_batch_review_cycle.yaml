@@ -1,55 +1,50 @@
 schemaVersion: 1
-
-# ---- job ----
-job:
-  # ---- registration ----
-  job_id: job_batch_review_cycle
+kind: Job
+metadata:
+  name: job_batch_review_cycle
+spec:
   state: enabled
-
-  # ---- execution ----
-  #
-  # Batch review cycle: review a batch PR and either merge it or enter the fix-and-review loop.
-  #
-  # Step flow:
-  #   bootstrap_batch_review     — resolve tasks for this review cycle by existing batch_id or supplied PR number
-  #   review_batch_pr             — review the opened PR against all batch tasks' acceptance criteria
-  #   sync_batch_review_to_github — publish review threads to GitHub
-  #   check_batch_review_decision — gate: succeeds if all tasks APPROVED, fails if any REQUEST_CHANGES
-  #   job_batch_review_loop       — (on_failure) iterative fix-and-review loop until approved
-  #   merge_batch_pr              — merge approved PRs only after rechecking branch freshness, then advance all tasks to done
-  #
-  max_active_runs: 1
   default_input:
     base: main
+  max_active_runs: 1
   steps:
-    - target_type: activity
-      target_id: bootstrap_batch_review
-      condition: on_success
-      timeout_seconds: 30
-
-    - target_type: activity
-      target_id: review_batch_pr
-      agent_cli_from_input: review_agent_cli
-      model_from_input: review_model
+    - id: review
+      target_type: activity
+      target_id: agent_batch_review
+      executor: claude
+      model_tier: weak
       condition: on_success
       timeout_seconds: 600
-
-    - target_type: activity
-      target_id: sync_batch_review_to_github
+    - id: sync_reviews
+      target_type: activity
+      target_id: pr_sync_reviews
       condition: on_success
       timeout_seconds: 120
-
-    - target_type: activity
-      target_id: check_batch_review_decision
+    - id: gate
+      target_type: activity
+      target_id: check_task_value
+      default_input:
+        field: pr_status
+        expected: APPROVED
+        scope: all
+        normalize: true
+        fail_on_mismatch: true
       condition: on_success
       timeout_seconds: 30
-
-    - target_type: job
+    - id: fix_loop
+      target_type: job
       target_id: job_batch_review_loop
       condition: on_failure
       timeout_seconds: 7200
-
-    - target_type: activity
-      target_id: merge_batch_pr
+    - id: merge
+      target_type: activity
+      target_id: git_merge
+      default_input:
+        strategy: pr_merge
       condition: on_success
       timeout_seconds: 60
+    - id: cleanup
+      target_type: activity
+      target_id: worktree_cleanup
+      condition: on_success
+      timeout_seconds: 30

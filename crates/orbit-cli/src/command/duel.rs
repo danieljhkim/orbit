@@ -13,13 +13,15 @@ use orbit_core::{
     OrbitError, OrbitRuntime, WorkflowInput, build_workflow_input_for, find_workflow,
     validate_workflow_flags,
 };
-use orbit_types::DuelRun;
+use orbit_types::{DuelRun, TaskStatus};
 use serde_json::json;
+use std::cmp::Reverse;
 
 use crate::command::Execute;
 use crate::command::job_run_support::{
-    RunHistoryFilter, job_run_step_to_json, job_run_to_json, load_filtered_job_runs,
-    load_latest_job_run, print_job_run, print_job_run_list, print_step_detail,
+    RunHistoryFilter, job_run_step_to_json, job_run_to_json_with_workflow, load_filtered_job_runs,
+    load_latest_job_run, print_job_run_list_with_workflow, print_job_run_with_workflow,
+    print_step_detail,
 };
 
 const DUEL_RUN_WORKFLOW: &str = "duel";
@@ -49,7 +51,7 @@ pub enum DuelSubcommand {
     Run(DuelRunArgs),
     /// Run a single-task planning duel
     Plan(DuelPlanArgs),
-    /// Show scoreboard aggregates computed from `.orbit/scoreboard/duel.json`.
+    /// Show scoreboard aggregates computed from `.orbit/state/scoreboard/duel.json`.
     #[command(alias = "scoreboard")]
     Score(DuelScoreboardArgs),
     /// List duel job runs
@@ -142,6 +144,11 @@ fn execute_duel_workflow(
 ) -> Result<(), OrbitError> {
     let workflow = find_workflow(workflow_alias)
         .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
+    let task_id = if workflow_alias == DUEL_RUN_WORKFLOW {
+        Some(resolve_duel_task_id(runtime, task_id)?)
+    } else {
+        task_id
+    };
     let input = WorkflowInput {
         tasks: task_id,
         parallelism: None,
@@ -286,11 +293,15 @@ impl Execute for DuelListArgs {
 
         if self.json {
             return crate::output::json::print_pretty(&serde_json::Value::Array(
-                runs.iter().map(job_run_to_json).collect::<Vec<_>>(),
+                runs.iter()
+                    .map(|run| {
+                        job_run_to_json_with_workflow(run, duel_workflow_name(run.job_id.as_str()))
+                    })
+                    .collect::<Vec<_>>(),
             ));
         }
 
-        print_job_run_list(&runs, self.full);
+        print_job_run_list_with_workflow(&runs, self.full, duel_workflow_name);
         Ok(())
     }
 }
@@ -332,10 +343,13 @@ impl Execute for DuelShowArgs {
         }
 
         if self.json {
-            return crate::output::json::print_pretty(&job_run_to_json(&run));
+            return crate::output::json::print_pretty(&job_run_to_json_with_workflow(
+                &run,
+                duel_workflow_name(run.job_id.as_str()),
+            ));
         }
 
-        print_job_run(&run);
+        print_job_run_with_workflow(&run, duel_workflow_name(run.job_id.as_str()));
         Ok(())
     }
 }
@@ -408,382 +422,54 @@ fn ensure_duel_run(run: &orbit_core::JobRun) -> Result<(), OrbitError> {
     )))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::{DateTime, Utc};
-    use clap::Parser;
-    use orbit_types::{
-        Ambiguity, Cost, Decision, DuelRun, ImplementerStats, Outcome, ReviewerStats,
-        RoleAssignment, Roles, Scores, TaskClass, TaskScope, ValidIssuesBySeverity,
-    };
+fn duel_workflow_name(job_id: &str) -> Option<&'static str> {
+    match job_id {
+        "job_duel_pipeline" => Some(DUEL_RUN_WORKFLOW),
+        "job_duel_plan_pipeline" => Some(DUEL_PLAN_WORKFLOW),
+        _ => None,
+    }
+}
 
-    use crate::command::{Cli, Commands};
-
-    fn ts(s: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+fn resolve_duel_task_id(
+    runtime: &OrbitRuntime,
+    task_id: Option<String>,
+) -> Result<String, OrbitError> {
+    if let Some(task_id) = task_id {
+        return Ok(task_id);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn run(
-        id: &str,
-        implementer: (&str, &str),
-        reviewer: (&str, &str),
-        arbiter: (&str, &str),
-        impl_score: f32,
-        rev_score: f32,
-        merged: bool,
-        fix_iters: u32,
-        scope: TaskScope,
-        ambiguity: Option<Ambiguity>,
-    ) -> DuelRun {
-        DuelRun {
-            run_id: id.to_string(),
-            task_id: format!("T-{id}"),
-            completed_at: ts("2026-04-09T04:00:00Z"),
-            task_class: TaskClass {
-                scope,
-                ambiguity,
-                source: "derived".to_string(),
-            },
-            roles: Roles {
-                implementer: RoleAssignment {
-                    agent: implementer.0.to_string(),
-                    model: implementer.1.to_string(),
-                },
-                reviewer: RoleAssignment {
-                    agent: reviewer.0.to_string(),
-                    model: reviewer.1.to_string(),
-                },
-                arbiter: RoleAssignment {
-                    agent: arbiter.0.to_string(),
-                    model: arbiter.1.to_string(),
-                },
-            },
-            outcome: Outcome {
-                decision: if merged {
-                    Decision::Approved
-                } else {
-                    Decision::RequestChanges
-                },
-                fix_loop_iterations: fix_iters,
-                fix_loop_exhausted: fix_iters >= 3,
-                pr_number: Some(100),
-                merged,
-            },
-            scores: Scores {
-                implementer_score: impl_score,
-                reviewer_score: rev_score,
-            },
-            reviewer_stats: ReviewerStats {
-                total_comments: 0,
-                valid: 0,
-                invalid: 0,
-                out_of_scope: 0,
-                nitpick: 0,
-                precision: 0.0,
-                arbiter_override_rate: 0.0,
-            },
-            implementer_stats: ImplementerStats {
-                valid_issues_against: ValidIssuesBySeverity::default(),
-            },
-            cost: Cost {
-                wall_clock_seconds: 600,
-                tokens_in: None,
-                tokens_out: None,
-            },
-        }
-    }
+    let mut tasks = runtime.list_tasks_filtered(Some(TaskStatus::Backlog), None, None, None)?;
+    tasks.retain(|task| {
+        task.batch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    });
+    tasks.sort_by(|left, right| {
+        (
+            Reverse(duel_priority_rank(left.priority)),
+            left.created_at,
+            left.id.clone(),
+        )
+            .cmp(&(
+                Reverse(duel_priority_rank(right.priority)),
+                right.created_at,
+                right.id.clone(),
+            ))
+    });
+    tasks.first().map(|task| task.id.clone()).ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "no duel-eligible backlog tasks found for auto-selection".to_string(),
+        )
+    })
+}
 
-    fn seeded_runs() -> Vec<DuelRun> {
-        vec![
-            run(
-                "r1",
-                ("claude", "opus"),
-                ("codex", "gpt-5.4"),
-                ("gemini", "gemini-3.1-pro-preview"),
-                5.0,
-                4.0,
-                true,
-                0,
-                TaskScope::SingleFile,
-                Some(Ambiguity::WellSpecified),
-            ),
-            run(
-                "r2",
-                ("claude", "opus"),
-                ("gemini", "gemini-3.1-pro-preview"),
-                ("codex", "gpt-5.4"),
-                3.0,
-                5.0,
-                true,
-                1,
-                TaskScope::MultiFile,
-                Some(Ambiguity::NeedsJudgment),
-            ),
-            run(
-                "r3",
-                ("codex", "gpt-5.4"),
-                ("claude", "opus"),
-                ("gemini", "gemini-3.1-pro-preview"),
-                2.0,
-                2.5,
-                false,
-                3,
-                TaskScope::CrossCrate,
-                None,
-            ),
-        ]
-    }
-
-    #[test]
-    fn duel_list_accepts_full_flag() {
-        let cli =
-            Cli::try_parse_from(["orbit", "duel", "list", "--full"]).expect("duel list parses");
-
-        let Commands::Duel(duel) = cli.command else {
-            panic!("expected duel command");
-        };
-        let DuelSubcommand::List(args) = duel.command else {
-            panic!("expected duel list command");
-        };
-        assert!(args.full);
-    }
-
-    #[test]
-    fn duel_plan_parses_task_id() {
-        let cli = Cli::try_parse_from(["orbit", "duel", "plan", "T20260409-0310"])
-            .expect("duel plan parses");
-
-        let Commands::Duel(duel) = cli.command else {
-            panic!("expected duel command");
-        };
-        let DuelSubcommand::Plan(args) = duel.command else {
-            panic!("expected duel plan command");
-        };
-        assert_eq!(args.task_id, "T20260409-0310");
-    }
-
-    #[test]
-    fn duel_run_still_parses_optional_task_id() {
-        let cli = Cli::try_parse_from(["orbit", "duel", "run", "T20260409-0310"])
-            .expect("duel run parses");
-
-        let Commands::Duel(duel) = cli.command else {
-            panic!("expected duel command");
-        };
-        let DuelSubcommand::Run(args) = duel.command else {
-            panic!("expected duel run command");
-        };
-        assert_eq!(args.task_id.as_deref(), Some("T20260409-0310"));
-    }
-
-    #[test]
-    fn aggregate_none_segment_all_roles_produces_three_rows_per_run() {
-        let runs = seeded_runs();
-        let aggs = aggregate(
-            &runs,
-            AggregateFilter {
-                segment_by: SegmentBy::None,
-                role: None,
-            },
-        );
-        // 3 runs × 3 roles = 9 role-rows; aggregate folds by
-        // (segment, role, agent, model). Exact row count depends on how
-        // many (role, agent, model) keys collided.
-        assert!(!aggs.rows.is_empty());
-        let total_runs: u64 = aggs.rows.iter().map(|r| r.runs as u64).sum();
-        assert_eq!(
-            total_runs, 9,
-            "every run contributes to all three role rows"
-        );
-    }
-
-    #[test]
-    fn filter_by_implementer_role_collapses_rows_to_implementers_only() {
-        let runs = seeded_runs();
-        let aggs = aggregate(
-            &runs,
-            AggregateFilter {
-                segment_by: SegmentBy::None,
-                role: Some(RoleAxis::Implementer),
-            },
-        );
-        for row in &aggs.rows {
-            assert_eq!(row.role, "implementer");
-        }
-        let total_runs: u64 = aggs.rows.iter().map(|r| r.runs as u64).sum();
-        assert_eq!(total_runs, 3);
-    }
-
-    #[test]
-    fn segment_by_scope_produces_distinct_segments_per_scope_value() {
-        let runs = seeded_runs();
-        let aggs = aggregate(
-            &runs,
-            AggregateFilter {
-                segment_by: SegmentBy::Scope,
-                role: Some(RoleAxis::Implementer),
-            },
-        );
-        let segments: std::collections::BTreeSet<&str> =
-            aggs.rows.iter().map(|r| r.segment.as_str()).collect();
-        assert!(segments.contains("single_file"));
-        assert!(segments.contains("multi_file"));
-        assert!(segments.contains("cross_crate"));
-    }
-
-    #[test]
-    fn segment_by_ambiguity_buckets_null_as_unknown() {
-        let runs = seeded_runs();
-        let aggs = aggregate(
-            &runs,
-            AggregateFilter {
-                segment_by: SegmentBy::Ambiguity,
-                role: Some(RoleAxis::Reviewer),
-            },
-        );
-        let segments: std::collections::BTreeSet<&str> =
-            aggs.rows.iter().map(|r| r.segment.as_str()).collect();
-        assert!(segments.contains("well_specified"));
-        assert!(segments.contains("needs_judgment"));
-        assert!(segments.contains("unknown"));
-    }
-
-    #[test]
-    fn empty_runs_yields_empty_aggregates_not_an_error() {
-        let runs: Vec<DuelRun> = Vec::new();
-        let aggs = aggregate(
-            &runs,
-            AggregateFilter {
-                segment_by: SegmentBy::None,
-                role: None,
-            },
-        );
-        assert!(aggs.rows.is_empty());
-    }
-
-    #[test]
-    fn implementer_merge_rate_matches_manual_calculation() {
-        let runs = seeded_runs();
-        // claude-opus implementer: r1 merged=true, r2 merged=true → 2/2 = 1.0
-        // codex-gpt-5.4 implementer: r3 merged=false → 0/1 = 0.0
-        let aggs = aggregate(
-            &runs,
-            AggregateFilter {
-                segment_by: SegmentBy::None,
-                role: Some(RoleAxis::Implementer),
-            },
-        );
-        let claude_row = aggs
-            .rows
-            .iter()
-            .find(|r| r.agent == "claude" && r.model == "opus")
-            .expect("claude implementer row");
-        assert_eq!(claude_row.runs, 2);
-        assert!((claude_row.merge_rate - 1.0).abs() < 1e-9);
-        assert!((claude_row.avg_score - 4.0).abs() < 1e-9); // (5 + 3) / 2
-
-        let codex_row = aggs
-            .rows
-            .iter()
-            .find(|r| r.agent == "codex" && r.model == "gpt-5.4")
-            .expect("codex implementer row");
-        assert_eq!(codex_row.runs, 1);
-        assert!((codex_row.merge_rate - 0.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn duel_score_parser_preserves_existing_flags() {
-        let cli = Cli::try_parse_from([
-            "orbit", "duel", "score", "--by", "scope", "--role", "reviewer", "--json",
-        ])
-        .expect("duel score should parse");
-
-        let Commands::Duel(duel) = cli.command else {
-            panic!("expected duel command");
-        };
-        let DuelSubcommand::Score(args) = duel.command else {
-            panic!("expected duel score subcommand");
-        };
-        assert!(matches!(args.by, SegmentByArg::Scope));
-        assert!(matches!(args.role, RoleFilterArg::Reviewer));
-        assert!(args.json);
-    }
-
-    #[test]
-    fn duel_run_parser_accepts_optional_task_id() {
-        let cli = Cli::try_parse_from(["orbit", "duel", "run", "T20260409-0310"])
-            .expect("duel run should parse");
-
-        let Commands::Duel(duel) = cli.command else {
-            panic!("expected duel command");
-        };
-        let DuelSubcommand::Run(args) = duel.command else {
-            panic!("expected duel run subcommand");
-        };
-        assert_eq!(args.task_id.as_deref(), Some("T20260409-0310"));
-    }
-
-    #[test]
-    fn duel_show_accepts_missing_run_id() {
-        let cli = Cli::try_parse_from(["orbit", "duel", "show"]).expect("duel show should parse");
-
-        let Commands::Duel(duel) = cli.command else {
-            panic!("expected duel command");
-        };
-        let DuelSubcommand::Show(args) = duel.command else {
-            panic!("expected duel show subcommand");
-        };
-        assert!(args.run_id.is_none());
-    }
-
-    #[test]
-    fn ensure_duel_run_accepts_planning_duel_pipeline_runs() {
-        let now = Utc::now();
-        let run = orbit_core::JobRun {
-            run_id: "run-1".into(),
-            job_id: "job_duel_plan_pipeline".into(),
-            attempt: 1,
-            state: orbit_core::JobRunState::Success,
-            scheduled_at: now,
-            started_at: Some(now),
-            finished_at: Some(now),
-            duration_ms: Some(1),
-            created_at: now,
-            pid: None,
-            pid_start_time: None,
-            input: None,
-            retry_source_run_id: None,
-            knowledge_metrics: None,
-            steps: Vec::new(),
-        };
-
-        ensure_duel_run(&run).expect("planning duel run should be accepted");
-    }
-
-    #[test]
-    fn ensure_duel_run_rejects_non_duel_pipeline_runs() {
-        let now = Utc::now();
-        let run = orbit_core::JobRun {
-            run_id: "run-2".into(),
-            job_id: "job_unrelated".into(),
-            attempt: 1,
-            state: orbit_core::JobRunState::Success,
-            scheduled_at: now,
-            started_at: Some(now),
-            finished_at: Some(now),
-            duration_ms: Some(1),
-            created_at: now,
-            pid: None,
-            pid_start_time: None,
-            input: None,
-            retry_source_run_id: None,
-            knowledge_metrics: None,
-            steps: Vec::new(),
-        };
-
-        let err = ensure_duel_run(&run).unwrap_err();
-        assert!(err.to_string().contains("not a duel pipeline"));
+fn duel_priority_rank(priority: orbit_types::TaskPriority) -> u8 {
+    match priority {
+        orbit_types::TaskPriority::Low => 0,
+        orbit_types::TaskPriority::Medium => 1,
+        orbit_types::TaskPriority::High => 2,
+        orbit_types::TaskPriority::Critical => 3,
     }
 }

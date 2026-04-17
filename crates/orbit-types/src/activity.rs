@@ -27,6 +27,9 @@ pub struct Activity {
     /// Program allowlist for `proc.spawn`. Empty means unrestricted.
     #[serde(default)]
     pub proc_allowed_programs: Vec<String>,
+    /// Optional executor name override. When set, overrides spec_type-based dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<String>,
     /// Optional workspace path override used when resolving execution context.
     #[serde(default)]
     pub workspace_path: Option<String>,

@@ -33,6 +33,8 @@ impl Execute for InitCommand {
             created_config: result.created_config,
             refreshed_default_activities: result.refreshed_default_activities,
             refreshed_default_jobs: result.refreshed_default_jobs,
+            refreshed_default_executors: result.refreshed_default_executors,
+            refreshed_default_policies: result.refreshed_default_policies,
         });
         Ok(())
     }
@@ -57,6 +59,8 @@ impl InitCommand {
             created_config: result.created_config,
             refreshed_default_activities: result.refreshed_default_activities,
             refreshed_default_jobs: result.refreshed_default_jobs,
+            refreshed_default_executors: result.refreshed_default_executors,
+            refreshed_default_policies: result.refreshed_default_policies,
         });
         Ok(())
     }
@@ -64,14 +68,16 @@ impl InitCommand {
 
 fn print_init_result(output: InitOutput) {
     println!(
-        "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}",
+        "skills: root={}, refreshed={}, symlink_created={}; config: path={}, created={}; default_activities_refreshed={}; default_jobs_refreshed={}; default_executors_refreshed={}; default_policies_refreshed={}",
         output.skills_root,
         output.refreshed_skill_files,
         output.created_skills_symlink,
         output.config_path,
         output.created_config,
         output.refreshed_default_activities,
-        output.refreshed_default_jobs
+        output.refreshed_default_jobs,
+        output.refreshed_default_executors,
+        output.refreshed_default_policies,
     );
 }
 
@@ -84,6 +90,8 @@ struct InitOutput {
     created_config: bool,
     refreshed_default_activities: usize,
     refreshed_default_jobs: usize,
+    refreshed_default_executors: usize,
+    refreshed_default_policies: usize,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -95,12 +103,12 @@ struct ReportedInitPaths {
 fn reported_init_paths(root_override: Option<&Path>) -> ReportedInitPaths {
     if root_override.is_some_and(|path| !is_global_orbit_root(path)) {
         ReportedInitPaths {
-            skills_root: "<custom orbit root>/skills",
+            skills_root: "<custom orbit root>/resources/skills",
             config_path: "<custom orbit root>/config.toml",
         }
     } else {
         ReportedInitPaths {
-            skills_root: "~/.orbit/skills",
+            skills_root: "~/.orbit/resources/skills",
             config_path: "~/.orbit/config.toml",
         }
     }

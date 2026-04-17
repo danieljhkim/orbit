@@ -1,0 +1,33 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: git_merge
+spec:
+  spec_type: automation
+  description: Merge a branch using fast-forward or PR merge strategy.
+  input_schema_json:
+    type: object
+    required:
+      - run_id
+      - strategy
+    properties:
+      run_id:
+        type: string
+        description: Job run ID for this pipeline execution.
+      batch_id:
+        type: string
+        description: Original batch identifier when merge runs inside a nested review or fix-loop job.
+      strategy:
+        type: string
+        enum:
+          - fast_forward
+          - pr_merge
+        description: 'Merge strategy: fast_forward for local ff-only merge, pr_merge to merge via the GitHub PR.'
+      workspace_path:
+        type: string
+        description: Override worktree path. Resolved from run context when omitted.
+  output_schema_json:
+    type: object
+    properties: {}
+  action: git_merge
+  created_by: system

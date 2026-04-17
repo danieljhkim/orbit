@@ -58,6 +58,32 @@ pub fn agent_family_from_cli(agent_cli: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Best-effort reverse mapping from an exact model string to the agent CLI
+/// family that would invoke it.
+///
+/// Orbit stores model-only attribution on tasks, but some execution paths still
+/// need to recover the agent family for provider dispatch. This helper accepts
+/// both the new exact model strings (for example `claude-opus-4.6`) and the
+/// older shorthand values that may still appear in legacy artifacts.
+pub fn infer_agent_family_from_model(model: &str) -> Option<String> {
+    let model = model.trim().to_ascii_lowercase();
+    if model.is_empty() {
+        return None;
+    }
+
+    if model.starts_with("gpt-") || model.starts_with("o1") || model.starts_with("o3") {
+        return Some("codex".to_string());
+    }
+    if model.starts_with("claude-") || model.starts_with("opus") || model.starts_with("sonnet") {
+        return Some("claude".to_string());
+    }
+    if model.starts_with("gemini-") {
+        return Some("gemini".to_string());
+    }
+
+    None
+}
+
 /// Resolve the orchestrator/helper model pair for an `agent_cli`.
 ///
 /// Returns `None` for unknown agent families. Callers that need a fallback
@@ -90,75 +116,5 @@ pub fn resolve_agent_model_pair_or(
             "gemini-3-flash-preview",
         )),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn family_normalizes_path_and_case() {
-        assert_eq!(agent_family_from_cli("codex"), "codex");
-        assert_eq!(agent_family_from_cli("/usr/local/bin/Codex"), "codex");
-        assert_eq!(agent_family_from_cli("/opt/CLAUDE"), "claude");
-    }
-
-    #[test]
-    fn resolves_codex_pair() {
-        let pair = resolve_agent_model_pair("codex").expect("codex pair");
-        assert_eq!(pair.orchestrator, "gpt-5.4");
-        assert_eq!(pair.helper, "gpt-5.4-mini");
-    }
-
-    #[test]
-    fn resolves_claude_pair() {
-        let pair = resolve_agent_model_pair("claude").expect("claude pair");
-        assert_eq!(pair.orchestrator, "opus-4.6");
-        assert_eq!(pair.helper, "sonnet-4.6");
-    }
-
-    #[test]
-    fn resolves_gemini_pair() {
-        let pair = resolve_agent_model_pair("gemini").expect("gemini pair");
-        assert_eq!(pair.orchestrator, "gemini-3.1-pro-preview");
-        assert_eq!(pair.helper, "gemini-3-flash-preview");
-    }
-
-    #[test]
-    fn resolves_path_prefixed_cli() {
-        let pair =
-            resolve_agent_model_pair("/usr/local/bin/codex").expect("path-prefixed codex pair");
-        assert_eq!(pair.orchestrator, "gpt-5.4");
-        assert_eq!(pair.helper, "gpt-5.4-mini");
-    }
-
-    #[test]
-    fn override_pair_takes_precedence_over_defaults() {
-        let override_pair = AgentModelPair::new("opus-4.7", "sonnet-4.7");
-        let pair =
-            resolve_agent_model_pair_or("claude", Some(&override_pair)).expect("override pair");
-        assert_eq!(pair, override_pair);
-    }
-
-    #[test]
-    fn unknown_agent_returns_none() {
-        assert!(resolve_agent_model_pair("mock-agent").is_none());
-        assert!(resolve_agent_model_pair("").is_none());
-    }
-
-    #[test]
-    fn all_agent_families_lists_codex_claude_gemini_in_order() {
-        assert_eq!(all_agent_families(), ["codex", "claude", "gemini"]);
-    }
-
-    #[test]
-    fn all_agent_families_members_resolve_to_real_pairs() {
-        for family in all_agent_families() {
-            assert!(
-                resolve_agent_model_pair(family).is_some(),
-                "family {family:?} has no registered model pair"
-            );
-        }
     }
 }

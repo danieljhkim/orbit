@@ -1,18 +1,10 @@
-schema_version: 1
-
-# ---- metadata ----
-created_by: system
-
-# ---- activity ----
-activity:
-  # ---- registration ----
-  id: parallel_dispatch_tasks
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: parallel_dispatch_tasks
+spec:
   spec_type: automation
-
-  # ---- content ----
-  description: Execute an explicit, conflict-free task batch using the shared worktree parallel worker pipeline on main.
-
-  # ---- interface ----
+  description: Execute a conflict-free batched task set using the shared-worktree parallel worker pipeline. The base branch defaults to main.
   input_schema_json:
     type: object
     required:
@@ -61,6 +53,5 @@ activity:
           required:
             - task_id
             - error
-
-  # ---- execution ----
   action: run_parallel_task_pipeline
+  created_by: system

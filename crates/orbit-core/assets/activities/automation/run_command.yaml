@@ -1,0 +1,37 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: run_command
+spec:
+  spec_type: automation
+  description: Run a shell command with template interpolation from pipeline context.
+  input_schema_json:
+    type: object
+    required:
+      - command
+    properties:
+      command:
+        type: string
+        description: 'Shell command to execute. Supports template variables: {{input.*}}, {{steps.<id>.state.<field>}}, {{steps.<id>.output.<field>}}, {{env.*}}, {{workspace_path}}.'
+      working_dir:
+        type: string
+        description: Working directory for the command. Defaults to workspace_path.
+      expected_exit_codes:
+        type: array
+        items:
+          type: integer
+        description: Exit codes treated as success. Defaults to [0].
+      timeout_seconds:
+        type: integer
+        description: Maximum execution time in seconds before the command is killed.
+      env:
+        type: object
+        description: Additional environment variables to set for the command.
+  output_schema_json:
+    type: object
+    properties:
+      exit_code:
+        type: integer
+        description: Exit code of the completed command.
+  action: run_command
+  created_by: system

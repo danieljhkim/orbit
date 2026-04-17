@@ -1,0 +1,15 @@
+schemaVersion: 1
+kind: Executor
+metadata:
+  name: codex
+spec:
+  executor_type: agent_cli
+  command: codex
+  args:
+    - exec
+    - --json
+  stdout_format: envelope
+  models:
+    strong: gpt-5.4
+    weak: gpt-5.4-mini
+  env: {}

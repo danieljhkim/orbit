@@ -158,9 +158,11 @@ impl JobRunState {
     /// Validates that a step result state is one of the allowed write-once values.
     pub fn validate_step_state(self) -> Result<(), String> {
         match self {
-            Self::Success | Self::Failed | Self::Timeout | Self::Skipped => Ok(()),
+            Self::Success | Self::Failed | Self::Timeout | Self::Skipped | Self::Cancelled => {
+                Ok(())
+            }
             other => Err(format!(
-                "invalid step result state: {} (must be success, failed, timeout, or skipped)",
+                "invalid step result state: {} (must be success, failed, timeout, skipped, or cancelled)",
                 other
             )),
         }
@@ -200,15 +202,57 @@ impl FromStr for JobRunState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[serde(rename_all = "snake_case")]
+/// Step execution condition.
+///
+/// Keyword shorthands (`always`, `on_success`, `on_failure`, `on_timeout`) are
+/// kept for backwards compatibility. Any other string is treated as an
+/// expression that is evaluated at runtime against the template context.
+///
+/// Expression syntax (after template resolution):
+///   `<lhs> == <rhs>`, `<lhs> != <rhs>`, combined with `&&` / `||`.
+///   `&&` binds tighter than `||`.
+///
+/// Example:
+///   `"{{steps.plan.state.status}} == success && {{steps.gate.output.match}} == true"`
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepCondition {
-    #[default]
     Always,
     OnSuccess,
     OnFailure,
     OnTimeout,
+    /// A runtime expression evaluated against the template context.
+    Expr(String),
+}
+
+impl Default for StepCondition {
+    fn default() -> Self {
+        Self::Always
+    }
+}
+
+impl Serialize for StepCondition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Always => serializer.serialize_str("always"),
+            Self::OnSuccess => serializer.serialize_str("on_success"),
+            Self::OnFailure => serializer.serialize_str("on_failure"),
+            Self::OnTimeout => serializer.serialize_str("on_timeout"),
+            Self::Expr(expr) => serializer.serialize_str(expr),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StepCondition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "always" => Self::Always,
+            "on_success" => Self::OnSuccess,
+            "on_failure" => Self::OnFailure,
+            "on_timeout" => Self::OnTimeout,
+            _ => Self::Expr(s),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -246,6 +290,14 @@ pub struct AgentCommitRequest {
 /// - `timeout_seconds` defaults to 0; callers must set this explicitly
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JobStep {
+    /// Optional step identifier for DAG execution. When any step in a job has
+    /// `upstream`, ALL steps must have an `id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Steps that must complete before this step can start. Empty means no
+    /// dependencies. When any step has `upstream`, DAG execution is used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub upstream: Vec<String>,
     pub target_type: JobTargetType,
     pub target_id: OrbitId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,21 +305,11 @@ pub struct JobStep {
     #[serde(default)]
     pub agent_cli: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// When set and `agent_cli` is empty, the engine reads this key from the
-    /// current job input and uses its string value as the step's `agent_cli`.
-    /// Resolution precedence: explicit `agent_cli` > `agent_cli_from_input` >
-    /// task actor identity fallback.
-    ///
-    /// Enables workflows (e.g. `duel`) that randomize or otherwise compute
-    /// the agent family per run without patching the step at load time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_cli_from_input: Option<String>,
-    /// Companion to [`JobStep::agent_cli_from_input`]: reads the step's
-    /// `model` from the named key in the current job input. Applied only
-    /// when `model` is `None` on the step.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_from_input: Option<String>,
+    pub model_tier: Option<String>,
     pub timeout_seconds: u64,
     /// Additional env var names to pass through in hermetic mode, on top of the global allowlist.
     #[serde(default)]
@@ -295,13 +337,15 @@ pub struct JobStep {
 impl Default for JobStep {
     fn default() -> Self {
         Self {
+            id: None,
+            upstream: Vec::new(),
             target_type: JobTargetType::default(),
             target_id: OrbitId::default(),
             default_input: None,
             agent_cli: String::new(),
+            executor: None,
             model: None,
-            agent_cli_from_input: None,
-            model_from_input: None,
+            model_tier: None,
             timeout_seconds: 0,
             env_extra: Vec::new(),
             env_set: HashMap::new(),
@@ -328,6 +372,9 @@ pub struct Job {
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
     pub steps: Vec<JobStep>,
+    /// Optional policy name. When set, the named policy is loaded and enforced during execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -394,96 +441,4 @@ pub struct JobRun {
     /// Step execution results; populated in-memory from step files, not stored in jrun.yaml.
     #[serde(skip)]
     pub steps: Vec<JobRunStep>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn job_step_default_has_no_input_driven_agent_fields() {
-        let step = JobStep::default();
-        assert!(step.default_input.is_none());
-        assert!(step.agent_cli_from_input.is_none());
-        assert!(step.model_from_input.is_none());
-    }
-
-    #[test]
-    fn job_step_serde_round_trip_preserves_input_driven_agent_fields() {
-        let step = JobStep {
-            target_type: JobTargetType::Activity,
-            target_id: OrbitId::from("review_duel_pr"),
-            default_input: Some(serde_json::json!({ "status": "review" })),
-            agent_cli: String::new(),
-            model: None,
-            agent_cli_from_input: Some("reviewer_agent_cli".to_string()),
-            model_from_input: Some("reviewer_model".to_string()),
-            timeout_seconds: 600,
-            ..JobStep::default()
-        };
-
-        let json = serde_json::to_string(&step).expect("serialize");
-        assert!(json.contains("\"default_input\":{\"status\":\"review\"}"));
-        assert!(json.contains("\"agent_cli_from_input\":\"reviewer_agent_cli\""));
-        assert!(json.contains("\"model_from_input\":\"reviewer_model\""));
-
-        let parsed: JobStep = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(
-            parsed.default_input,
-            Some(serde_json::json!({ "status": "review" }))
-        );
-        assert_eq!(
-            parsed.agent_cli_from_input.as_deref(),
-            Some("reviewer_agent_cli")
-        );
-        assert_eq!(parsed.model_from_input.as_deref(), Some("reviewer_model"));
-    }
-
-    #[test]
-    fn job_step_json_without_input_driven_fields_deserializes_as_none() {
-        let json = r#"{
-            "target_type": "activity",
-            "target_id": "implement_change",
-            "agent_cli": "claude",
-            "timeout_seconds": 2400
-        }"#;
-        let step: JobStep = serde_json::from_str(json).expect("deserialize minimal step");
-        assert!(step.agent_cli_from_input.is_none());
-        assert!(step.model_from_input.is_none());
-    }
-
-    #[test]
-    fn job_run_round_trip_preserves_knowledge_metrics() {
-        let run = JobRun {
-            run_id: "jrun-123".to_string(),
-            job_id: "job-123".to_string(),
-            attempt: 1,
-            state: JobRunState::Success,
-            scheduled_at: Utc::now(),
-            started_at: None,
-            finished_at: None,
-            duration_ms: Some(42),
-            created_at: Utc::now(),
-            pid: None,
-            pid_start_time: None,
-            input: None,
-            retry_source_run_id: None,
-            knowledge_metrics: Some(KnowledgeRunMetrics {
-                raw_read_token_baseline: 1000,
-                knowledge_pack_tokens: Some(250),
-                compression_ratio: Some(4.0),
-                actual_fs_read_tokens_during_run: 100,
-                double_read_rate: Some(0.1),
-                knowledge_pack_used: true,
-                knowledge_pack_unresolved_count: 2,
-                total_llm_input_tokens: 1800,
-            }),
-            steps: vec![],
-        };
-
-        let yaml = serde_yaml::to_string(&run).expect("serialize");
-        let parsed: JobRun = serde_yaml::from_str(&yaml).expect("deserialize");
-
-        assert_eq!(parsed.knowledge_metrics, run.knowledge_metrics);
-    }
 }

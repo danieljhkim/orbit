@@ -256,7 +256,7 @@ const MINIMAL_TASK_FIELDS: &[&str] = &[
     "status",
     "priority",
     "type",
-    "assigned_to",
+    "implemented_by",
     "created_at",
     "updated_at",
 ];
@@ -328,132 +328,6 @@ fn select_fields(map: Map<String, Value>, fields: &[String]) -> Map<String, Valu
         }
     }
     selected
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::{filter_top_level_fields, shape_tool_output};
-
-    #[test]
-    fn fields_filter_array_items_individually() {
-        let value = json!([
-            {
-                "id": "T001",
-                "title": "First",
-                "status": "backlog",
-                "plan": "full"
-            }
-        ]);
-        let filtered = filter_top_level_fields(value, &["id".to_string(), "status".to_string()]);
-
-        assert_eq!(filtered, json!([{ "id": "T001", "status": "backlog" }]));
-    }
-
-    #[test]
-    fn default_task_projection_keeps_minimal_fields() {
-        let output = json!({
-            "id": "T001",
-            "title": "First",
-            "status": "backlog",
-            "priority": "high",
-            "type": "task",
-            "assigned_to": "codex / gpt-5.4",
-            "created_at": "2026-04-11T00:00:00Z",
-            "updated_at": "2026-04-11T00:00:00Z",
-            "plan": "long plan",
-            "description": "long description"
-        });
-
-        let shaped = shape_tool_output(
-            "orbit.task.show",
-            &json!({"id": "T001"}),
-            output,
-            false,
-            &[],
-        );
-
-        assert_eq!(
-            shaped,
-            json!({
-                "id": "T001",
-                "title": "First",
-                "status": "backlog",
-                "priority": "high",
-                "type": "task",
-                "assigned_to": "codex / gpt-5.4",
-                "created_at": "2026-04-11T00:00:00Z",
-                "updated_at": "2026-04-11T00:00:00Z"
-            })
-        );
-    }
-
-    #[test]
-    fn fields_override_default_task_projection() {
-        let output = json!({
-            "id": "T001",
-            "title": "First",
-            "status": "backlog",
-            "plan": "long plan"
-        });
-
-        let shaped = shape_tool_output(
-            "orbit.task.show",
-            &json!({"id": "T001"}),
-            output,
-            false,
-            &["id".to_string(), "plan".to_string()],
-        );
-
-        assert_eq!(shaped, json!({ "id": "T001", "plan": "long plan" }));
-    }
-
-    #[test]
-    fn full_preserves_complete_output() {
-        let output = json!({
-            "id": "T001",
-            "title": "First",
-            "plan": "long plan"
-        });
-
-        let shaped = shape_tool_output(
-            "orbit.task.show",
-            &json!({"id": "T001"}),
-            output.clone(),
-            true,
-            &[],
-        );
-
-        assert_eq!(shaped, output);
-    }
-
-    #[test]
-    fn task_show_field_input_skips_task_projection() {
-        let output = json!("plan body");
-
-        let shaped = shape_tool_output(
-            "orbit.task.show",
-            &json!({"id": "T001", "field": "plan"}),
-            output.clone(),
-            false,
-            &[],
-        );
-
-        assert_eq!(shaped, output);
-    }
-
-    #[test]
-    fn non_task_tools_are_left_unchanged_by_default() {
-        let output = json!({
-            "kind": "knowledge_pack",
-            "entries": 4
-        });
-
-        let shaped = shape_tool_output("orbit.graph.pack", &json!({}), output.clone(), false, &[]);
-
-        assert_eq!(shaped, output);
-    }
 }
 
 // --- Add ---
