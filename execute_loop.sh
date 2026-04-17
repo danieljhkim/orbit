@@ -20,7 +20,7 @@ while :; do
 
   echo "[orbit] backlog tasks: ${BACKLOG_COUNT}; running pipeline at $(date -Is)"
 
-  if ! orbit ship run; then
+  if ! orbit ship pr; then
     echo "[orbit] ship pipeline failed at $(date -Is)" >&2
     # Keep trying until backlog is empty.
   fi

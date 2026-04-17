@@ -49,8 +49,8 @@ Setup:
 
 Run:
   reconcile  Reconcile pending/running job runs
-  ship       Ship tasks through the pipeline (legacy)
-  duel       Cross-agent scoring (legacy)
+  ship       Ship tasks through the pipeline
+  duel       Cross-agent scoring and planning
 
 Manage work:
   task       Create, update, and manage tasks

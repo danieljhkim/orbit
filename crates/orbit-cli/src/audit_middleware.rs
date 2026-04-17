@@ -318,7 +318,8 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
         Commands::Ship(cmd) => {
             use crate::command::ship::ShipSubcommand;
             let (sub, target_id) = match &cmd.command {
-                ShipSubcommand::Run(_) => ("run", Some("ship")),
+                ShipSubcommand::Pr(_) => ("pr", Some("ship")),
+                ShipSubcommand::Local(_) => ("local", Some("ship-local")),
                 ShipSubcommand::List(_) => ("list", Some("ship")),
                 ShipSubcommand::Show(args) => ("show", args.run_id.as_deref()),
             };
@@ -335,7 +336,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
         Commands::Duel(cmd) => {
             use crate::command::duel::DuelSubcommand;
             let (sub, target_id) = match &cmd.command {
-                DuelSubcommand::Run(args) => ("run", args.task_id.as_deref()),
+                DuelSubcommand::Pr(args) => ("pr", args.task_id.as_deref()),
                 DuelSubcommand::Plan(args) => ("plan", Some(args.task_id.as_str())),
                 DuelSubcommand::Score(_) => ("score", None),
                 DuelSubcommand::List(_) => ("list", None),

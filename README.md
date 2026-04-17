@@ -14,7 +14,7 @@ Orbit itself can be installed without Rust. Only source builds require a Rust to
 
 Suggestion: Get cheapest tier subscriptions for above 3, and milk every dollar out of it.
 
-For the PR-based workflow (`orbit ship run`), you also need the GitHub CLI (`gh`) installed and authenticated. If you do not want to use GitHub or open pull requests, use `orbit ship run --local` instead.
+For the PR-based workflow (`orbit ship pr`), you also need the GitHub CLI (`gh`) installed and authenticated. If you do not want to use GitHub or open pull requests, use `orbit ship local` instead.
 
 ```bash
 # install via curl | sh (macOS and Linux)
@@ -44,16 +44,16 @@ orbit task show <task_id>
 orbit task approve <task_id> --note "LGTM"
 
 # run the default PR-based workflow (this requires gh)
-orbit ship run
+orbit ship pr
 
 # or run a local-only workflow with no PR/review loop
-orbit ship run --local
+orbit ship local
 ```
 
 If you already know which tasks you want to run, pin them explicitly:
 
 ```bash
-orbit ship run --tasks T123,T456 --parallelism 2 --base main
+orbit ship pr --tasks T123,T456 --parallelism 2 --base main
 ```
 
 Pinned installs and custom install directories are supported:
@@ -71,35 +71,39 @@ Orbit exposes a small, workflow-oriented top-level surface:
 
 | Workflow | Command | Description |
 | :--- | :--- | :--- |
-| **ship** | `orbit ship run` | Select tasks, dispatch agents, verify results, open a PR, review, and merge; requires `gh` auth |
-| **ship-local** | `orbit ship run --local` | Select tasks, dispatch agents, and commit locally without a PR |
-| **duel** | `orbit duel run [task_id]` | Single-task cross-agent evaluation: a random permutation of implementer/reviewer/arbiter across agent families, scored into `.orbit/scoreboard/duel.json` |
+| **ship** | `orbit ship pr` | Select tasks, dispatch agents, verify results, open a PR, review, and merge; requires `gh` auth |
+| **ship-local** | `orbit ship local` | Select tasks, dispatch agents, and commit locally without a PR |
+| **duel** | `orbit duel pr [task_id]` | Single-task cross-agent evaluation: a random permutation of implementer/reviewer/arbiter across agent families, scored into `.orbit/scoreboard/duel.json` |
+| **duel-plan** | `orbit duel plan <task_id>` | Single-task planning duel between planners with arbiter scoring |
 
 Each duel run appends an entry to `.orbit/scoreboard/duel.json`. Inspect aggregates with `orbit duel score` (add `--by scope` or `--by ambiguity` to segment, `--role implementer` to filter, `--json` for raw output). The numbers feed back into agent selection for `ship`.
 
 Optional flags:
 
-- `orbit ship run --tasks T1,T2` pins a specific ship batch instead of auto-selecting from backlog
-- `orbit ship run --parallelism N` controls the number of parallel workers
-- `orbit ship run --base BRANCH` and `orbit duel run <task_id> --base BRANCH` override the base branch
+- `orbit ship pr --tasks T1,T2` and `orbit ship local --tasks T1,T2` pin a specific ship batch instead of auto-selecting from backlog
+- `orbit ship pr --parallelism N` and `orbit ship local --parallelism N` control the number of parallel workers
+- `orbit ship pr --base BRANCH`, `orbit ship local --base BRANCH`, `orbit duel pr <task_id> --base BRANCH`, and `orbit duel plan <task_id> --base BRANCH` override the base branch
 
 Examples:
 
 ```bash
 # auto-select tasks from backlog
-orbit ship run
+orbit ship pr
 
 # pin specific tasks
-orbit ship run --tasks T20260402-0352,T20260402-0406 --parallelism 2
+orbit ship pr --tasks T20260402-0352,T20260402-0406 --parallelism 2
 
 # local-only pipeline
-orbit ship run --local --base main
+orbit ship local --base main
 
 # inspect the latest ship run
 orbit ship show
 
 # run a duel against a specific task
-orbit duel run T20260402-0352
+orbit duel pr T20260402-0352
+
+# run a planning duel against a specific task
+orbit duel plan T20260402-0352
 
 # inspect the latest duel run
 orbit duel show
@@ -124,7 +128,7 @@ Setup:
 
 Run workflows:
   ship       Ship tasks through the pipeline
-  duel       Cross-agent scoring
+  duel       Cross-agent scoring and planning
 
 Manage work:
   task       Create, update, and manage tasks

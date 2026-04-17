@@ -24,7 +24,7 @@ use crate::command::job_run_support::{
     print_step_detail,
 };
 
-const DUEL_RUN_WORKFLOW: &str = "duel";
+const DUEL_PR_WORKFLOW: &str = "duel";
 const DUEL_PLAN_WORKFLOW: &str = "duel-plan";
 const DUEL_JOB_IDS: &[&str] = &["job_duel_pipeline", "job_duel_plan_pipeline"];
 
@@ -47,8 +47,8 @@ impl Execute for DuelCommand {
 
 #[derive(Subcommand)]
 pub enum DuelSubcommand {
-    /// Run a single-task duel
-    Run(DuelRunArgs),
+    /// Run a single-task PR duel
+    Pr(DuelPrArgs),
     /// Run a single-task planning duel
     Plan(DuelPlanArgs),
     /// Show scoreboard aggregates computed from `.orbit/state/scoreboard/duel.json`.
@@ -63,7 +63,7 @@ pub enum DuelSubcommand {
 impl Execute for DuelSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
-            DuelSubcommand::Run(args) => args.execute(runtime),
+            DuelSubcommand::Pr(args) => args.execute(runtime),
             DuelSubcommand::Plan(args) => args.execute(runtime),
             DuelSubcommand::Score(args) => args.execute(runtime),
             DuelSubcommand::List(args) => args.execute(runtime),
@@ -74,9 +74,9 @@ impl Execute for DuelSubcommand {
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit duel run\n  orbit duel run T20260409-0310\n  orbit duel run T20260409-0310 --base main --json"
+    after_help = "Examples:\n  orbit duel pr\n  orbit duel pr T20260409-0310\n  orbit duel pr T20260409-0310 --base main --json"
 )]
-pub struct DuelRunArgs {
+pub struct DuelPrArgs {
     /// Optional task ID. Omit to auto-select the first available duel-eligible task.
     pub task_id: Option<String>,
     /// Base branch for the duel pipeline
@@ -108,11 +108,11 @@ pub struct DuelPlanArgs {
     pub json: bool,
 }
 
-impl Execute for DuelRunArgs {
+impl Execute for DuelPrArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         execute_duel_workflow(
             runtime,
-            DUEL_RUN_WORKFLOW,
+            DUEL_PR_WORKFLOW,
             self.task_id,
             self.base,
             self.debug,
@@ -144,7 +144,7 @@ fn execute_duel_workflow(
 ) -> Result<(), OrbitError> {
     let workflow = find_workflow(workflow_alias)
         .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
-    let task_id = if workflow_alias == DUEL_RUN_WORKFLOW {
+    let task_id = if workflow_alias == DUEL_PR_WORKFLOW {
         Some(resolve_duel_task_id(runtime, task_id)?)
     } else {
         task_id
@@ -424,7 +424,7 @@ fn ensure_duel_run(run: &orbit_core::JobRun) -> Result<(), OrbitError> {
 
 fn duel_workflow_name(job_id: &str) -> Option<&'static str> {
     match job_id {
-        "job_duel_pipeline" => Some(DUEL_RUN_WORKFLOW),
+        "job_duel_pipeline" => Some(DUEL_PR_WORKFLOW),
         "job_duel_plan_pipeline" => Some(DUEL_PLAN_WORKFLOW),
         _ => None,
     }

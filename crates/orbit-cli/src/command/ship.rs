@@ -38,8 +38,10 @@ impl Execute for ShipCommand {
 
 #[derive(Subcommand)]
 pub enum ShipSubcommand {
-    /// Execute the ship pipeline
-    Run(ShipRunArgs),
+    /// Execute the PR-based ship pipeline
+    Pr(ShipPrArgs),
+    /// Execute the local-only ship pipeline
+    Local(ShipLocalArgs),
     /// List job runs for ship pipelines
     List(ShipListArgs),
     /// Show a ship pipeline run, or the latest one when no run ID is provided
@@ -49,7 +51,8 @@ pub enum ShipSubcommand {
 impl Execute for ShipSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
-            ShipSubcommand::Run(args) => args.execute(runtime),
+            ShipSubcommand::Pr(args) => args.execute(runtime),
+            ShipSubcommand::Local(args) => args.execute(runtime),
             ShipSubcommand::List(args) => args.execute(runtime),
             ShipSubcommand::Show(args) => args.execute(runtime),
         }
@@ -58,13 +61,24 @@ impl Execute for ShipSubcommand {
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit ship run\n  orbit ship run --tasks T123,T456 --parallelism 2\n  orbit ship run --local --tasks T123 --base main\n  orbit ship run --loop 3"
+    after_help = "Examples:\n  orbit ship pr\n  orbit ship pr --tasks T123,T456 --parallelism 2\n  orbit ship pr --base main\n  orbit ship pr --loop 3"
 )]
-pub struct ShipRunArgs {
-    /// Use the local ship pipeline (`job_local_task_pipeline`) instead of the default PR pipeline.
-    #[arg(long)]
-    pub local: bool,
+pub struct ShipPrArgs {
+    #[command(flatten)]
+    pub args: ShipWorkflowArgs,
+}
 
+#[derive(Args)]
+#[command(
+    after_help = "Examples:\n  orbit ship local\n  orbit ship local --tasks T123 --parallelism 1\n  orbit ship local --base main\n  orbit ship local --loop 3"
+)]
+pub struct ShipLocalArgs {
+    #[command(flatten)]
+    pub args: ShipWorkflowArgs,
+}
+
+#[derive(Args)]
+pub struct ShipWorkflowArgs {
     /// Comma-separated task IDs to process (omit to auto-select from backlog)
     #[arg(long)]
     pub tasks: Option<String>,
@@ -90,47 +104,61 @@ pub struct ShipRunArgs {
     pub json: bool,
 }
 
-impl Execute for ShipRunArgs {
+impl Execute for ShipPrArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let plan = build_ship_run_plan(&self)?;
-        let runs = dispatch_workflow(
-            runtime,
-            plan.workflow_alias,
-            &plan.input,
-            self.debug,
-            plan.loop_count,
-        )?;
-
-        if self.json {
-            if runs.len() == 1 {
-                return crate::output::json::print_pretty(&ship_run_to_json(&runs[0]));
-            }
-            return crate::output::json::print_pretty(&json!({
-                "workflow": plan.workflow_alias,
-                "runs": runs.iter().map(ship_run_to_json).collect::<Vec<_>>(),
-            }));
-        }
-
-        for run in &runs {
-            let error_code = run.error_code.clone().unwrap_or_else(|| "-".to_string());
-            let error_message = run
-                .error_message
-                .clone()
-                .unwrap_or_else(|| "-".to_string())
-                .replace('\n', " ");
-            println!(
-                "workflow={};job_id={};run_id={};state={};attempt={};error_code={};error_message={}",
-                run.workflow_alias,
-                run.job_id,
-                run.run_id,
-                run.state,
-                run.attempt,
-                error_code,
-                error_message
-            );
-        }
-        Ok(())
+        execute_ship_workflow(runtime, SHIP_WORKFLOW, self.args)
     }
+}
+
+impl Execute for ShipLocalArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        execute_ship_workflow(runtime, SHIP_LOCAL_WORKFLOW, self.args)
+    }
+}
+
+fn execute_ship_workflow(
+    runtime: &OrbitRuntime,
+    workflow_alias: &'static str,
+    args: ShipWorkflowArgs,
+) -> Result<(), OrbitError> {
+    let plan = build_ship_run_plan(workflow_alias, &args)?;
+    let runs = dispatch_workflow(
+        runtime,
+        plan.workflow_alias,
+        &plan.input,
+        args.debug,
+        plan.loop_count,
+    )?;
+
+    if args.json {
+        if runs.len() == 1 {
+            return crate::output::json::print_pretty(&ship_run_to_json(&runs[0]));
+        }
+        return crate::output::json::print_pretty(&json!({
+            "workflow": plan.workflow_alias,
+            "runs": runs.iter().map(ship_run_to_json).collect::<Vec<_>>(),
+        }));
+    }
+
+    for run in &runs {
+        let error_code = run.error_code.clone().unwrap_or_else(|| "-".to_string());
+        let error_message = run
+            .error_message
+            .clone()
+            .unwrap_or_else(|| "-".to_string())
+            .replace('\n', " ");
+        println!(
+            "workflow={};job_id={};run_id={};state={};attempt={};error_code={};error_message={}",
+            run.workflow_alias,
+            run.job_id,
+            run.run_id,
+            run.state,
+            run.attempt,
+            error_code,
+            error_message
+        );
+    }
+    Ok(())
 }
 
 #[derive(Args)]
@@ -239,7 +267,10 @@ struct WorkflowDispatchResult {
     error_message: Option<String>,
 }
 
-fn build_ship_run_plan(args: &ShipRunArgs) -> Result<ShipRunPlan, OrbitError> {
+fn build_ship_run_plan(
+    workflow_alias: &'static str,
+    args: &ShipWorkflowArgs,
+) -> Result<ShipRunPlan, OrbitError> {
     if args.loop_count == 0 {
         return Err(OrbitError::InvalidInput(
             "--loop must be greater than 0".to_string(),
@@ -248,11 +279,6 @@ fn build_ship_run_plan(args: &ShipRunArgs) -> Result<ShipRunPlan, OrbitError> {
 
     validate_explicit_task_selection(args.tasks.as_deref(), args.parallelism)?;
 
-    let workflow_alias = if args.local {
-        SHIP_LOCAL_WORKFLOW
-    } else {
-        SHIP_WORKFLOW
-    };
     let workflow = find_workflow(workflow_alias)
         .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
 

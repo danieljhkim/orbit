@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+- **Ship and duel subcommands renamed**: `orbit ship run` is now `orbit ship pr`, `orbit ship run --local` is now `orbit ship local`, and `orbit duel run` is now `orbit duel pr`; the old `run` verb and `--local` flag are removed.
+
 ## 0.2.0
 
 ### Features
