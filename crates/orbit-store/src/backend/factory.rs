@@ -1,15 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orbit_types::OrbitError;
-
 use super::contracts::{
-    ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobStoreBackend,
-    PolicyDefStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend,
+    JobDefinitionStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
+    ToolStoreBackend,
 };
-use super::layered_executor_def::LayeredExecutorDefStore;
-use super::layered_job::LayeredJobStore;
-use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{SqliteAuditEventStoreBackend, SqliteToolStoreBackend};
 use crate::Store;
 use crate::file::activity_store::ActivityFileStore;
@@ -18,41 +15,42 @@ use crate::file::job_store::JobFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskFileStore;
 
-/// The resolved store path(s) after applying scope resolution rules.
-#[derive(Debug, Clone)]
-pub enum ResolvedScope {
-    /// Use a single path for the store.
-    Single(PathBuf),
-    /// Merge two stores: workspace shadows global by key.
-    Layered { global: PathBuf, workspace: PathBuf },
+pub struct WorkspaceTaskBackends {
+    pub task: Arc<dyn TaskStoreBackend>,
+    pub document: Arc<dyn TaskDocumentStoreBackend>,
+    pub history: Arc<dyn TaskHistoryStoreBackend>,
+    pub review: Arc<dyn TaskReviewStoreBackend>,
+    pub artifact: Arc<dyn TaskArtifactStoreBackend>,
 }
 
-impl ResolvedScope {
-    /// Extract the single path, panicking if this is a `Layered` scope.
-    /// Use only when the resolution strategy guarantees `Single` (e.g. `GlobalOnly`).
-    pub fn into_single(self) -> PathBuf {
-        match self {
-            Self::Single(path) => path,
-            Self::Layered { .. } => {
-                panic!("expected Single scope, got Layered")
-            }
-        }
+pub fn workspace_task_backends(root: PathBuf) -> WorkspaceTaskBackends {
+    let store = Arc::new(TaskFileStore::new(root));
+    WorkspaceTaskBackends {
+        task: store.clone(),
+        document: store.clone(),
+        history: store.clone(),
+        review: store.clone(),
+        artifact: store,
     }
 }
 
-pub fn task_store_file(root: PathBuf) -> Arc<dyn TaskStoreBackend> {
-    Arc::new(TaskFileStore::new(root))
-}
-
-pub fn activity_store_file(root: PathBuf) -> Arc<dyn ActivityStoreBackend> {
+pub fn global_activity_store(root: PathBuf) -> Arc<dyn ActivityStoreBackend> {
     Arc::new(ActivityFileStore::new(root))
 }
 
-pub fn job_store_file(root: PathBuf) -> Arc<dyn JobStoreBackend> {
-    Arc::new(JobFileStore::new(root))
+pub struct ScopedJobBackends {
+    pub definition: Arc<dyn JobDefinitionStoreBackend>,
+    pub run: Arc<dyn JobRunStoreBackend>,
 }
 
-pub fn executor_def_store_file(root: PathBuf) -> Arc<dyn ExecutorDefStoreBackend> {
+pub fn scoped_job_backends(global_root: PathBuf, workspace_root: PathBuf) -> ScopedJobBackends {
+    ScopedJobBackends {
+        definition: Arc::new(JobFileStore::new(global_root)),
+        run: Arc::new(JobFileStore::new(workspace_root)),
+    }
+}
+
+pub fn global_executor_def_store(root: PathBuf) -> Arc<dyn ExecutorDefStoreBackend> {
     Arc::new(ExecutorDefFileStore::new(root))
 }
 
@@ -64,70 +62,6 @@ pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend>
     Arc::new(SqliteAuditEventStoreBackend { store })
 }
 
-/// Creates a task store from a resolved scope. Tasks only support `Single`.
-pub fn task_store_resolved(scope: ResolvedScope) -> Result<Arc<dyn TaskStoreBackend>, OrbitError> {
-    match scope {
-        ResolvedScope::Single(path) => Ok(task_store_file(path)),
-        ResolvedScope::Layered { .. } => Err(OrbitError::InvalidInput(
-            "task store does not support layered resolution".to_string(),
-        )),
-    }
-}
-
-/// Creates an activity store from a resolved scope. Runtime scoping uses `Single`
-/// because activities are globally scoped artifacts.
-pub fn activity_store_resolved(
-    scope: ResolvedScope,
-) -> Result<Arc<dyn ActivityStoreBackend>, OrbitError> {
-    match scope {
-        ResolvedScope::Single(path) => Ok(activity_store_file(path)),
-        ResolvedScope::Layered { .. } => Err(OrbitError::InvalidInput(
-            "activity store does not support layered resolution".to_string(),
-        )),
-    }
-}
-
-/// Creates a job store from a resolved scope.
-///
-/// Jobs use layered resolution at runtime so definitions remain global while
-/// job runs stay workspace-local.
-pub fn job_store_resolved(scope: ResolvedScope) -> Result<Arc<dyn JobStoreBackend>, OrbitError> {
-    match scope {
-        ResolvedScope::Single(path) => Ok(job_store_file(path)),
-        ResolvedScope::Layered { global, workspace } => {
-            let g = job_store_file(global);
-            let w = job_store_file(workspace);
-            Ok(Arc::new(LayeredJobStore::new(w, g)))
-        }
-    }
-}
-
-pub fn policy_def_store_file(root: PathBuf) -> Arc<dyn PolicyDefStoreBackend> {
+pub fn global_policy_def_store(root: PathBuf) -> Arc<dyn PolicyDefStoreBackend> {
     Arc::new(PolicyDefFileStore::new(root))
-}
-
-pub fn executor_def_store_resolved(
-    scope: ResolvedScope,
-) -> Result<Arc<dyn ExecutorDefStoreBackend>, OrbitError> {
-    match scope {
-        ResolvedScope::Single(path) => Ok(executor_def_store_file(path)),
-        ResolvedScope::Layered { global, workspace } => {
-            let g = executor_def_store_file(global);
-            let w = executor_def_store_file(workspace);
-            Ok(Arc::new(LayeredExecutorDefStore::new(w, g)))
-        }
-    }
-}
-
-pub fn policy_def_store_resolved(
-    scope: ResolvedScope,
-) -> Result<Arc<dyn PolicyDefStoreBackend>, OrbitError> {
-    match scope {
-        ResolvedScope::Single(path) => Ok(policy_def_store_file(path)),
-        ResolvedScope::Layered { global, workspace } => {
-            let g = policy_def_store_file(global);
-            let w = policy_def_store_file(workspace);
-            Ok(Arc::new(LayeredPolicyDefStore::new(w, g)))
-        }
-    }
 }

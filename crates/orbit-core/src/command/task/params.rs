@@ -1,7 +1,8 @@
-use orbit_store::TaskUpdateParams as StoreTaskUpdateParams;
 use orbit_types::{
     OrbitId, ReviewThread, TaskArtifact, TaskComplexity, TaskPriority, TaskStatus, TaskType,
 };
+
+use crate::runtime::TaskRecordUpdateParams;
 
 #[derive(Clone)]
 pub struct TaskAddParams {
@@ -59,7 +60,7 @@ pub struct TaskUpdateParams {
     pub append_review_threads: Vec<ReviewThread>,
 }
 
-impl From<TaskUpdateParams> for StoreTaskUpdateParams {
+impl From<TaskUpdateParams> for TaskRecordUpdateParams {
     fn from(p: TaskUpdateParams) -> Self {
         Self {
             title: p.title,

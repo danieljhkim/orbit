@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orbit_store::{executor_def_store_file, policy_def_store_file};
+use orbit_store::{global_executor_def_store, global_policy_def_store};
 use orbit_types::{OrbitError, WorkspacePaths};
 
 use crate::OrbitRuntime;
@@ -146,8 +146,8 @@ pub fn init_workspace_at_root(
         scoring_enabled,
     ) = if options.global_only {
         let init_runtime = OrbitRuntime::from_data_root(&orbit_root)?;
-        let executor_store = executor_def_store_file(layout.executors_dir.clone());
-        let policy_store = policy_def_store_file(layout.policies_dir.clone());
+        let executor_store = global_executor_def_store(layout.executors_dir.clone());
+        let policy_store = global_policy_def_store(layout.policies_dir.clone());
         let refreshed_default_executors =
             seed_default_executors(executor_store.as_ref(), overwrite)?;
         let refreshed_default_policies = seed_default_policies(policy_store.as_ref(), overwrite)?;

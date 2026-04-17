@@ -1,11 +1,9 @@
-use orbit_store::{
-    TaskCreateParams as StoreTaskCreateParams, TaskUpdateParams as StoreTaskUpdateParams,
-    friction_bounty,
-};
+use orbit_store::{TaskCreateParams as StoreTaskCreateParams, friction_bounty};
 use orbit_types::{OrbitError, OrbitEvent, Task, prune_missing_context_files};
 
 use crate::OrbitRuntime;
 use crate::context::ActorKind;
+use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{authored_role_value, build_task_comments, effective_actor_label};
 use super::params::TaskAddParams;
@@ -98,7 +96,7 @@ impl OrbitRuntime {
         } else {
             self.stores().tasks().update(
                 &task.id,
-                StoreTaskUpdateParams {
+                TaskRecordUpdateParams {
                     actor: create_label.clone(),
                     append_history: vec![context_files_pruned_history_entry(
                         &create_label,

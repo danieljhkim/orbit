@@ -1,7 +1,7 @@
-use orbit_store::TaskUpdateParams as StoreTaskUpdateParams;
 use orbit_types::{OrbitError, Task, TaskArtifact, prune_missing_context_files};
 
 use crate::OrbitRuntime;
+use crate::runtime::TaskRecordUpdateParams;
 
 use super::paths::context_workspace_root;
 
@@ -24,7 +24,7 @@ impl OrbitRuntime {
         let task = self.get_task(id)?;
         self.stores().tasks().update(
             id,
-            StoreTaskUpdateParams {
+            TaskRecordUpdateParams {
                 actor: self.actor_label().to_string(),
                 created_by: Some(task.created_by.clone()),
                 planned_by: Some(task.planned_by.clone()),

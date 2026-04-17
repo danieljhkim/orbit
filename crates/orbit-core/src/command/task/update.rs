@@ -1,9 +1,9 @@
-use orbit_store::TaskUpdateParams as StoreTaskUpdateParams;
 use orbit_types::{
     OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus, prune_missing_context_files,
 };
 
 use crate::OrbitRuntime;
+use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{build_task_comments, effective_actor_label};
 use super::params::TaskUpdateParams;
@@ -157,14 +157,14 @@ impl OrbitRuntime {
         let updated = self.with_mutation(|| {
             let task = self.stores().tasks().update(
                 id,
-                StoreTaskUpdateParams {
+                TaskRecordUpdateParams {
                     actor: effective_label.clone(),
                     planned_by,
                     implemented_by,
                     status_note,
                     append_comments: append_comments.clone(),
                     append_history: append_history.clone(),
-                    ..StoreTaskUpdateParams::from(params)
+                    ..TaskRecordUpdateParams::from(params)
                 },
             )?;
             Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))

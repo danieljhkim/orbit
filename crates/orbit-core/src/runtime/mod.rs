@@ -34,6 +34,7 @@ use crate::context::ActorIdentity;
 use crate::context::OrbitStores;
 
 pub(crate) use resolve::{resolve_global_root, resolve_initialize_data_root};
+pub(crate) use store_delegates::TaskRecordUpdateParams;
 
 #[derive(Clone)]
 pub struct OrbitRuntime {

@@ -6,8 +6,10 @@ use orbit_types::{
 
 use super::contracts::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, ExecutorDefStoreBackend,
-    JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams,
-    PolicyDefStoreBackend, TaskCreateParams, TaskStoreBackend, TaskUpdateParams,
+    JobCreateParams, JobDefinitionStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend,
+    JobUpdateParams, PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
 };
 use crate::file::activity_store::ActivityFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -38,20 +40,56 @@ impl TaskStoreBackend for TaskFileStore {
         self.get_task(id)
     }
 
-    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
-        self.get_task_artifacts(id)
-    }
-
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         self.search_tasks(query)
     }
 
-    fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
-        self.update_task(id, &params)
-    }
-
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
         self.delete_task(id)
+    }
+}
+
+impl TaskDocumentStoreBackend for TaskFileStore {
+    fn update_task_document(
+        &self,
+        id: &str,
+        params: TaskDocumentUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.update_task_document(id, &params)
+    }
+}
+
+impl TaskHistoryStoreBackend for TaskFileStore {
+    fn update_task_history(
+        &self,
+        id: &str,
+        params: TaskHistoryUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.update_task_history(id, &params)
+    }
+}
+
+impl TaskReviewStoreBackend for TaskFileStore {
+    fn update_task_reviews(
+        &self,
+        id: &str,
+        params: TaskReviewUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.update_task_reviews(id, &params)
+    }
+}
+
+impl TaskArtifactStoreBackend for TaskFileStore {
+    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
+        self.get_task_artifacts(id)
+    }
+
+    fn upsert_task_artifacts(
+        &self,
+        id: &str,
+        params: TaskArtifactUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.upsert_task_artifacts(id, &params)
     }
 }
 
@@ -81,7 +119,7 @@ impl ActivityStoreBackend for ActivityFileStore {
     }
 }
 
-impl JobStoreBackend for JobFileStore {
+impl JobDefinitionStoreBackend for JobFileStore {
     fn add_job(&self, params: JobCreateParams) -> Result<Job, OrbitError> {
         self.add_job(params)
     }
@@ -98,6 +136,16 @@ impl JobStoreBackend for JobFileStore {
         self.get_job(job_id)
     }
 
+    fn set_job_state(&self, job_id: &str, state: JobScheduleState) -> Result<bool, OrbitError> {
+        self.set_job_state(job_id, state)
+    }
+
+    fn mark_job_disabled(&self, job_id: &str) -> Result<bool, OrbitError> {
+        self.mark_job_disabled(job_id)
+    }
+}
+
+impl JobRunStoreBackend for JobFileStore {
     fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         self.list_job_runs(job_id)
     }
@@ -112,18 +160,6 @@ impl JobStoreBackend for JobFileStore {
 
     fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         self.list_pending_or_running_job_runs(job_id)
-    }
-
-    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_all_pending_or_running_runs()
-    }
-
-    fn set_job_state(&self, job_id: &str, state: JobScheduleState) -> Result<bool, OrbitError> {
-        self.set_job_state(job_id, state)
-    }
-
-    fn mark_job_disabled(&self, job_id: &str) -> Result<bool, OrbitError> {
-        self.mark_job_disabled(job_id)
     }
 
     fn insert_job_run(
@@ -211,6 +247,10 @@ impl JobStoreBackend for JobFileStore {
 
     fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError> {
         self.write_run_state(run_id, state)
+    }
+
+    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
+        self.list_all_pending_or_running_runs()
     }
 }
 

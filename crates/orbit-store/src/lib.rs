@@ -2,21 +2,22 @@
 //!
 //! Provides two storage backends — a file store for human-readable, git-friendly
 //! YAML artifacts (tasks, jobs, activities, skills) and a SQLite store for
-//! append-only data (audit events, stored tools). A layered store pattern merges
-//! global and workspace-local stores with configurable scoping strategies.
+//! append-only data (audit events, stored tools). Store builders make the
+//! supported workspace/global split explicit per domain.
 //!
 //! # Role
 //! Depends only on `orbit-types`. Consumed by `orbit-core`, which constructs
 //! the appropriate backend(s) and injects them into the [`OrbitRuntime`].
 //!
 //! # Key exports
-//! - Backend trait types: [`TaskStoreBackend`], [`JobStoreBackend`], [`ActivityStoreBackend`],
-//!   [`AuditEventStoreBackend`], [`ToolStoreBackend`]
-//! - Factory functions: `task_store_file`, `task_store_resolved`, `job_store_file`,
-//!   `job_store_resolved`, `activity_store_file`, `activity_store_resolved`,
-//!   `executor_def_store_resolved`, `policy_def_store_resolved`,
-//!   `audit_event_store_sqlite`, `tool_store_sqlite`
-//! - [`ResolvedScope`] — scoping strategies (Single, Layered)
+//! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
+//!   [`TaskHistoryStoreBackend`], [`TaskReviewStoreBackend`],
+//!   [`TaskArtifactStoreBackend`], [`JobDefinitionStoreBackend`],
+//!   [`JobRunStoreBackend`], [`ActivityStoreBackend`], [`AuditEventStoreBackend`],
+//!   [`ToolStoreBackend`]
+//! - Factory functions: `workspace_task_backends`, `scoped_job_backends`,
+//!   `global_activity_store`, `global_executor_def_store`,
+//!   `global_policy_def_store`, `audit_event_store_sqlite`, `tool_store_sqlite`
 //! - [`Store`] / [`StoreTx`] — SQLite connection handle and transaction wrapper
 //! - [`validate_instance_against_schema`] — JSON Schema validation for activity I/O
 //!
@@ -91,13 +92,14 @@ use chrono::{DateTime, Utc};
 
 pub use backend::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, AuditEventStoreBackend,
-    ExecutorDefStoreBackend, JobCreateParams, JobRunQuery, JobRunStepParams, JobStoreBackend,
-    JobUpdateParams, LayeredActivityStore, LayeredExecutorDefStore, LayeredJobStore,
-    LayeredPolicyDefStore, PolicyDefStoreBackend, ResolvedScope, TaskCreateParams,
-    TaskStoreBackend, TaskUpdateParams, ToolStoreBackend, activity_store_file,
-    activity_store_resolved, audit_event_store_sqlite, executor_def_store_file,
-    executor_def_store_resolved, job_store_file, job_store_resolved, policy_def_store_file,
-    policy_def_store_resolved, task_store_file, task_store_resolved, tool_store_sqlite,
+    ExecutorDefStoreBackend, JobCreateParams, JobDefinitionStoreBackend, JobRunQuery,
+    JobRunStepParams, JobRunStoreBackend, JobUpdateParams, PolicyDefStoreBackend,
+    ScopedJobBackends, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    ToolStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite, global_activity_store,
+    global_executor_def_store, global_policy_def_store, scoped_job_backends, tool_store_sqlite,
+    workspace_task_backends,
 };
 pub use invocation_store_impl::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,

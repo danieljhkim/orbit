@@ -1,8 +1,8 @@
 use orbit_engine::{TaskAutomationUpdate, TaskReadHost, TaskWriteHost};
-use orbit_store::TaskUpdateParams as StoreTaskUpdateParams;
 use orbit_types::{OrbitError, OrbitEvent, Task, TaskPriority, TaskStatus};
 
 use crate::OrbitRuntime;
+use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 
 impl TaskReadHost for OrbitRuntime {
     fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {

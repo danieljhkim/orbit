@@ -1,21 +1,102 @@
 use orbit_store::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, AuditEventFilter,
     AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobCreateParams,
-    JobRunQuery, JobRunStepParams, JobStoreBackend, JobUpdateParams, PolicyDefStoreBackend,
-    TaskCreateParams, TaskStoreBackend, TaskUpdateParams as StoreTaskUpdateParams,
+    JobDefinitionStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend, JobUpdateParams,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
     ToolStoreBackend,
 };
 use orbit_types::{
     Activity, AuditEvent, ExecutorDef, Job, JobRun, JobRunState, KnowledgeRunMetrics, OrbitError,
-    PolicyDef, StoredTool, Task, TaskArtifact, TaskPriority, TaskStatus,
+    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
+    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 
 use crate::context::OrbitStores;
+
+#[derive(Default, Clone)]
+pub(crate) struct TaskRecordUpdateParams {
+    pub(crate) actor: String,
+    pub(crate) title: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) acceptance_criteria: Option<Vec<String>>,
+    pub(crate) plan: Option<String>,
+    pub(crate) execution_summary: Option<String>,
+    pub(crate) context_files: Option<Vec<String>>,
+    pub(crate) workspace_path: Option<Option<String>>,
+    pub(crate) repo_root: Option<Option<String>>,
+    pub(crate) created_by: Option<Option<String>>,
+    pub(crate) planned_by: Option<Option<String>>,
+    pub(crate) implemented_by: Option<Option<String>>,
+    pub(crate) agent: Option<Option<String>>,
+    pub(crate) model: Option<Option<String>>,
+    pub(crate) status: Option<TaskStatus>,
+    pub(crate) priority: Option<TaskPriority>,
+    pub(crate) complexity: Option<TaskComplexity>,
+    pub(crate) task_type: Option<TaskType>,
+    pub(crate) pr_number: Option<Option<String>>,
+    pub(crate) pr_status: Option<Option<String>>,
+    pub(crate) source_task_id: Option<Option<String>>,
+    pub(crate) batch_id: Option<Option<String>>,
+    pub(crate) status_event: Option<String>,
+    pub(crate) status_note: Option<String>,
+    pub(crate) append_history: Vec<TaskHistoryEntry>,
+    pub(crate) append_comments: Vec<TaskComment>,
+    pub(crate) append_review_threads: Vec<ReviewThread>,
+    pub(crate) replace_review_threads: Option<Vec<ReviewThread>>,
+    pub(crate) upsert_artifacts: Vec<TaskArtifact>,
+}
+
+impl TaskRecordUpdateParams {
+    fn has_document_changes(&self) -> bool {
+        self.title.is_some()
+            || self.description.is_some()
+            || self.acceptance_criteria.is_some()
+            || self.plan.is_some()
+            || self.execution_summary.is_some()
+            || self.context_files.is_some()
+            || self.workspace_path.is_some()
+            || self.repo_root.is_some()
+            || self.created_by.is_some()
+            || self.planned_by.is_some()
+            || self.implemented_by.is_some()
+            || self.agent.is_some()
+            || self.model.is_some()
+            || self.priority.is_some()
+            || self.complexity.is_some()
+            || self.task_type.is_some()
+            || self.pr_number.is_some()
+            || self.pr_status.is_some()
+            || self.source_task_id.is_some()
+            || self.batch_id.is_some()
+    }
+
+    fn has_history_changes(&self) -> bool {
+        self.status.is_some()
+            || self.status_event.is_some()
+            || self.status_note.is_some()
+            || !self.append_history.is_empty()
+            || !self.append_comments.is_empty()
+    }
+
+    fn has_review_changes(&self) -> bool {
+        self.replace_review_threads.is_some() || !self.append_review_threads.is_empty()
+    }
+
+    fn has_artifact_changes(&self) -> bool {
+        !self.upsert_artifacts.is_empty()
+    }
+}
 
 impl OrbitStores {
     pub(crate) fn tasks(&self) -> TaskRecords<'_> {
         TaskRecords {
             store: self.task.as_ref(),
+            document: self.task_document.as_ref(),
+            history: self.task_history.as_ref(),
+            review: self.task_review.as_ref(),
+            artifact: self.task_artifact.as_ref(),
         }
     }
 
@@ -27,7 +108,8 @@ impl OrbitStores {
 
     pub(crate) fn jobs(&self) -> JobRecords<'_> {
         JobRecords {
-            store: self.job.as_ref(),
+            definition: self.job_definition.as_ref(),
+            run: self.job_run.as_ref(),
         }
     }
 
@@ -58,6 +140,10 @@ impl OrbitStores {
 
 pub(crate) struct TaskRecords<'a> {
     store: &'a dyn TaskStoreBackend,
+    document: &'a dyn TaskDocumentStoreBackend,
+    history: &'a dyn TaskHistoryStoreBackend,
+    review: &'a dyn TaskReviewStoreBackend,
+    artifact: &'a dyn TaskArtifactStoreBackend,
 }
 
 impl TaskRecords<'_> {
@@ -70,7 +156,7 @@ impl TaskRecords<'_> {
     }
 
     pub(crate) fn get_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
-        self.store.get_task_artifacts(id)
+        self.artifact.get_task_artifacts(id)
     }
 
     pub(crate) fn list(&self) -> Result<Vec<Task>, OrbitError> {
@@ -91,9 +177,72 @@ impl TaskRecords<'_> {
     pub(crate) fn update(
         &self,
         id: &str,
-        params: StoreTaskUpdateParams,
+        params: TaskRecordUpdateParams,
     ) -> Result<Task, OrbitError> {
-        self.store.update_task(id, params)
+        if params.has_document_changes() {
+            self.document.update_task_document(
+                id,
+                TaskDocumentUpdateParams {
+                    actor: params.actor.clone(),
+                    title: params.title.clone(),
+                    description: params.description.clone(),
+                    acceptance_criteria: params.acceptance_criteria.clone(),
+                    plan: params.plan.clone(),
+                    execution_summary: params.execution_summary.clone(),
+                    context_files: params.context_files.clone(),
+                    workspace_path: params.workspace_path.clone(),
+                    repo_root: params.repo_root.clone(),
+                    created_by: params.created_by.clone(),
+                    planned_by: params.planned_by.clone(),
+                    implemented_by: params.implemented_by.clone(),
+                    agent: params.agent.clone(),
+                    model: params.model.clone(),
+                    priority: params.priority,
+                    complexity: params.complexity,
+                    task_type: params.task_type,
+                    pr_number: params.pr_number.clone(),
+                    pr_status: params.pr_status.clone(),
+                    source_task_id: params.source_task_id.clone(),
+                    batch_id: params.batch_id.clone(),
+                },
+            )?;
+        }
+
+        if params.has_history_changes() {
+            self.history.update_task_history(
+                id,
+                TaskHistoryUpdateParams {
+                    actor: params.actor.clone(),
+                    status: params.status,
+                    status_event: params.status_event.clone(),
+                    status_note: params.status_note.clone(),
+                    append_history: params.append_history.clone(),
+                    append_comments: params.append_comments.clone(),
+                },
+            )?;
+        }
+
+        if params.has_review_changes() {
+            self.review.update_task_reviews(
+                id,
+                TaskReviewUpdateParams {
+                    append_review_threads: params.append_review_threads.clone(),
+                    replace_review_threads: params.replace_review_threads.clone(),
+                },
+            )?;
+        }
+
+        if params.has_artifact_changes() {
+            self.artifact.upsert_task_artifacts(
+                id,
+                TaskArtifactUpdateParams {
+                    upsert_artifacts: params.upsert_artifacts.clone(),
+                },
+            )?;
+        }
+
+        self.get(id)?
+            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
     }
 
     pub(crate) fn delete(&self, id: &str) -> Result<bool, OrbitError> {
@@ -136,43 +285,44 @@ impl ActivityRecords<'_> {
 }
 
 pub(crate) struct JobRecords<'a> {
-    store: &'a dyn JobStoreBackend,
+    definition: &'a dyn JobDefinitionStoreBackend,
+    run: &'a dyn JobRunStoreBackend,
 }
 
 impl JobRecords<'_> {
     pub(crate) fn add(&self, params: JobCreateParams) -> Result<Job, OrbitError> {
-        self.store.add_job(params)
+        self.definition.add_job(params)
     }
 
     pub(crate) fn update(&self, job_id: &str, params: JobUpdateParams) -> Result<Job, OrbitError> {
-        self.store.update_job(job_id, params)
+        self.definition.update_job(job_id, params)
     }
 
     pub(crate) fn mark_disabled(&self, job_id: &str) -> Result<bool, OrbitError> {
-        self.store.mark_job_disabled(job_id)
+        self.definition.mark_job_disabled(job_id)
     }
 
     pub(crate) fn list(&self, include_disabled: bool) -> Result<Vec<Job>, OrbitError> {
-        self.store.list_jobs(include_disabled)
+        self.definition.list_jobs(include_disabled)
     }
 
     pub(crate) fn get(&self, job_id: &str) -> Result<Option<Job>, OrbitError> {
-        self.store.get_job(job_id)
+        self.definition.get_job(job_id)
     }
 
     pub(crate) fn list_runs_filtered(
         &self,
         query: &JobRunQuery,
     ) -> Result<Vec<JobRun>, OrbitError> {
-        self.store.list_job_runs_filtered(query)
+        self.run.list_job_runs_filtered(query)
     }
 
     pub(crate) fn list_all_pending_or_running(&self) -> Result<Vec<JobRun>, OrbitError> {
-        self.store.list_all_pending_or_running_runs()
+        self.run.list_all_pending_or_running_runs()
     }
 
     pub(crate) fn list_pending_or_running(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        self.store.list_pending_or_running_job_runs(job_id)
+        self.run.list_pending_or_running_job_runs(job_id)
     }
 
     pub(crate) fn insert_run(
@@ -183,7 +333,7 @@ impl JobRecords<'_> {
         input: Option<serde_json::Value>,
         retry_source_run_id: Option<String>,
     ) -> Result<JobRun, OrbitError> {
-        self.store
+        self.run
             .insert_job_run(job_id, attempt, scheduled_at, input, retry_source_run_id)
     }
 
@@ -193,7 +343,7 @@ impl JobRecords<'_> {
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError> {
-        self.store.mark_job_run_running(run_id, started_at, pid)
+        self.run.mark_job_run_running(run_id, started_at, pid)
     }
 
     pub(crate) fn take_over_running_run(
@@ -204,7 +354,7 @@ impl JobRecords<'_> {
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
     ) -> Result<bool, OrbitError> {
-        self.store.take_over_running_job_run(
+        self.run.take_over_running_job_run(
             run_id,
             expected_pid,
             expected_pid_start_time,
@@ -218,7 +368,7 @@ impl JobRecords<'_> {
         run_id: &str,
         finished_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<bool, OrbitError> {
-        self.store.abandon_job_run(run_id, finished_at)
+        self.run.abandon_job_run(run_id, finished_at)
     }
 
     pub(crate) fn complete_run_step(
@@ -226,7 +376,7 @@ impl JobRecords<'_> {
         run_id: &str,
         params: &JobRunStepParams,
     ) -> Result<bool, OrbitError> {
-        self.store.complete_job_run_step(run_id, params)
+        self.run.complete_job_run_step(run_id, params)
     }
 
     pub(crate) fn record_run_knowledge_metrics(
@@ -234,7 +384,7 @@ impl JobRecords<'_> {
         run_id: &str,
         metrics: KnowledgeRunMetrics,
     ) -> Result<bool, OrbitError> {
-        self.store.record_job_run_knowledge_metrics(run_id, metrics)
+        self.run.record_job_run_knowledge_metrics(run_id, metrics)
     }
 
     pub(crate) fn finalize_run(
@@ -244,19 +394,19 @@ impl JobRecords<'_> {
         finished_at: chrono::DateTime<chrono::Utc>,
         duration_ms: Option<u64>,
     ) -> Result<bool, OrbitError> {
-        self.store
+        self.run
             .finalize_job_run(run_id, state, finished_at, duration_ms)
     }
 
     pub(crate) fn get_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
-        self.store.get_job_run(run_id)
+        self.run.get_job_run(run_id)
     }
 
     pub(crate) fn read_run_state(
         &self,
         run_id: &str,
     ) -> Result<Option<orbit_types::PipelineState>, OrbitError> {
-        self.store.read_run_state(run_id)
+        self.run.read_run_state(run_id)
     }
 
     pub(crate) fn write_run_state(
@@ -264,19 +414,19 @@ impl JobRecords<'_> {
         run_id: &str,
         state: &orbit_types::PipelineState,
     ) -> Result<(), OrbitError> {
-        self.store.write_run_state(run_id, state)
+        self.run.write_run_state(run_id, state)
     }
 
     pub(crate) fn list_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        self.store.list_job_runs(job_id)
+        self.run.list_job_runs(job_id)
     }
 
     pub(crate) fn archive_run(&self, run_id: &str) -> Result<String, OrbitError> {
-        self.store.archive_job_run(run_id)
+        self.run.archive_job_run(run_id)
     }
 
     pub(crate) fn delete_run(&self, run_id: &str) -> Result<String, OrbitError> {
-        self.store.delete_job_run(run_id)
+        self.run.delete_job_run(run_id)
     }
 }
 

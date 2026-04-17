@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobStoreBackend,
-    PolicyDefStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend,
+    JobDefinitionStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
+    ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 use orbit_types::WorkspacePaths;
@@ -79,8 +81,13 @@ pub struct OrbitContext {
 #[derive(Clone)]
 pub(crate) struct OrbitStores {
     pub(crate) task: Arc<dyn TaskStoreBackend>,
+    pub(crate) task_document: Arc<dyn TaskDocumentStoreBackend>,
+    pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
+    pub(crate) task_review: Arc<dyn TaskReviewStoreBackend>,
+    pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
     pub(crate) activity: Arc<dyn ActivityStoreBackend>,
-    pub(crate) job: Arc<dyn JobStoreBackend>,
+    pub(crate) job_definition: Arc<dyn JobDefinitionStoreBackend>,
+    pub(crate) job_run: Arc<dyn JobRunStoreBackend>,
     pub(crate) tool: Arc<dyn ToolStoreBackend>,
     pub(crate) audit_event: Arc<dyn AuditEventStoreBackend>,
     pub(crate) executor_def: Arc<dyn ExecutorDefStoreBackend>,
@@ -90,8 +97,13 @@ pub(crate) struct OrbitStores {
 impl OrbitStores {
     pub(crate) fn new(
         task: Arc<dyn TaskStoreBackend>,
+        task_document: Arc<dyn TaskDocumentStoreBackend>,
+        task_history: Arc<dyn TaskHistoryStoreBackend>,
+        task_review: Arc<dyn TaskReviewStoreBackend>,
+        task_artifact: Arc<dyn TaskArtifactStoreBackend>,
         activity: Arc<dyn ActivityStoreBackend>,
-        job: Arc<dyn JobStoreBackend>,
+        job_definition: Arc<dyn JobDefinitionStoreBackend>,
+        job_run: Arc<dyn JobRunStoreBackend>,
         tool: Arc<dyn ToolStoreBackend>,
         audit_event: Arc<dyn AuditEventStoreBackend>,
         executor_def: Arc<dyn ExecutorDefStoreBackend>,
@@ -99,8 +111,13 @@ impl OrbitStores {
     ) -> Self {
         Self {
             task,
+            task_document,
+            task_history,
+            task_review,
+            task_artifact,
             activity,
-            job,
+            job_definition,
+            job_run,
             tool,
             audit_event,
             executor_def,

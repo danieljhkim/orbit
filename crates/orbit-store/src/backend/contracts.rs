@@ -50,7 +50,7 @@ pub struct TaskCreateParams {
 /// - `Some(Some(v))`  → set the field to `v`
 /// - `Some(None)`     → explicitly clear the field (set it to null/absent)
 #[derive(Debug, Default, Clone)]
-pub struct TaskUpdateParams {
+pub struct TaskDocumentUpdateParams {
     pub actor: String,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -65,7 +65,6 @@ pub struct TaskUpdateParams {
     pub implemented_by: Option<Option<String>>,
     pub agent: Option<Option<String>>,
     pub model: Option<Option<String>>,
-    pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
     pub complexity: Option<TaskComplexity>,
     pub task_type: Option<TaskType>,
@@ -73,15 +72,29 @@ pub struct TaskUpdateParams {
     pub pr_status: Option<Option<String>>,
     pub source_task_id: Option<Option<String>>,
     pub batch_id: Option<Option<String>>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TaskHistoryUpdateParams {
+    pub actor: String,
+    pub status: Option<TaskStatus>,
     pub status_event: Option<String>,
     pub status_note: Option<String>,
     pub append_history: Vec<TaskHistoryEntry>,
     pub append_comments: Vec<TaskComment>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TaskReviewUpdateParams {
     /// Review threads to append or merge. Threads whose `thread_id` matches
     /// an existing thread have their messages appended; new threads are added.
     pub append_review_threads: Vec<ReviewThread>,
     /// When set, replaces the entire review_threads collection (used by sync).
     pub replace_review_threads: Option<Vec<ReviewThread>>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TaskArtifactUpdateParams {
     /// Artifact files to write under the task bundle `artifacts/` directory.
     /// Existing files at the same relative path are overwritten.
     pub upsert_artifacts: Vec<TaskArtifact>,
@@ -152,10 +165,41 @@ pub trait TaskStoreBackend: Send + Sync {
         batch_id: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError>;
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError>;
-    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError>;
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError>;
-    fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError>;
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;
+}
+
+pub trait TaskDocumentStoreBackend: Send + Sync {
+    fn update_task_document(
+        &self,
+        id: &str,
+        params: TaskDocumentUpdateParams,
+    ) -> Result<(), OrbitError>;
+}
+
+pub trait TaskHistoryStoreBackend: Send + Sync {
+    fn update_task_history(
+        &self,
+        id: &str,
+        params: TaskHistoryUpdateParams,
+    ) -> Result<(), OrbitError>;
+}
+
+pub trait TaskReviewStoreBackend: Send + Sync {
+    fn update_task_reviews(
+        &self,
+        id: &str,
+        params: TaskReviewUpdateParams,
+    ) -> Result<(), OrbitError>;
+}
+
+pub trait TaskArtifactStoreBackend: Send + Sync {
+    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError>;
+    fn upsert_task_artifacts(
+        &self,
+        id: &str,
+        params: TaskArtifactUpdateParams,
+    ) -> Result<(), OrbitError>;
 }
 
 pub trait ActivityStoreBackend: Send + Sync {
@@ -170,17 +214,20 @@ pub trait ActivityStoreBackend: Send + Sync {
     fn disable_activity(&self, id: &str) -> Result<bool, OrbitError>;
 }
 
-pub trait JobStoreBackend: Send + Sync {
+pub trait JobDefinitionStoreBackend: Send + Sync {
     fn add_job(&self, params: JobCreateParams) -> Result<Job, OrbitError>;
     fn update_job(&self, job_id: &str, params: JobUpdateParams) -> Result<Job, OrbitError>;
     fn list_jobs(&self, include_disabled: bool) -> Result<Vec<Job>, OrbitError>;
     fn get_job(&self, job_id: &str) -> Result<Option<Job>, OrbitError>;
+    fn set_job_state(&self, job_id: &str, state: JobScheduleState) -> Result<bool, OrbitError>;
+    fn mark_job_disabled(&self, job_id: &str) -> Result<bool, OrbitError>;
+}
+
+pub trait JobRunStoreBackend: Send + Sync {
     fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
     fn list_job_runs_filtered(&self, query: &JobRunQuery) -> Result<Vec<JobRun>, OrbitError>;
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError>;
     fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
-    fn set_job_state(&self, job_id: &str, state: JobScheduleState) -> Result<bool, OrbitError>;
-    fn mark_job_disabled(&self, job_id: &str) -> Result<bool, OrbitError>;
     fn insert_job_run(
         &self,
         job_id: &str,

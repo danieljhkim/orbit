@@ -1,7 +1,8 @@
-use orbit_store::{TaskUpdateParams as StoreTaskUpdateParams, friction_bounty};
+use orbit_store::friction_bounty;
 use orbit_types::{OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus};
 
 use crate::OrbitRuntime;
+use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 
 use super::helpers::{build_task_comments, effective_actor_label};
 

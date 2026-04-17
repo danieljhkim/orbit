@@ -10,7 +10,10 @@ use super::bundle::{TaskBundle, bundle_to_task, merge_review_threads};
 use super::constants::TASK_SCHEMA_VERSION;
 use super::doc::TaskFileDocument;
 use super::layout::TaskStateDir;
-use crate::backend::{TaskCreateParams, TaskUpdateParams};
+use crate::backend::{
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
+    TaskReviewUpdateParams,
+};
 use crate::file::sort::sort_by_created_desc_id_asc;
 
 pub(crate) struct TaskFileStore {
@@ -145,11 +148,11 @@ impl TaskFileStore {
             .collect())
     }
 
-    pub(crate) fn update_task(
+    pub(crate) fn update_task_document(
         &self,
         id: &str,
-        fields: &TaskUpdateParams,
-    ) -> Result<Task, OrbitError> {
+        fields: &TaskDocumentUpdateParams,
+    ) -> Result<(), OrbitError> {
         if fields.actor.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task actor must not be empty".to_string(),
@@ -224,21 +227,44 @@ impl TaskFileStore {
         if let Some(value) = &fields.batch_id {
             bundle.doc.batch_id = value.clone();
         }
+
+        bundle.doc.updated_at = Utc::now();
+        if title_changed {
+            bundle.doc.history.push(TaskHistoryEntry {
+                at: bundle.doc.updated_at,
+                by: fields.actor.clone(),
+                event: "renamed".to_string(),
+                note: None,
+                from_status: None,
+                to_status: None,
+            });
+        }
+
+        self.persist_bundle_update(current_state, &current_dir, current_state, &bundle)?;
+        Ok(())
+    }
+
+    pub(crate) fn update_task_history(
+        &self,
+        id: &str,
+        fields: &TaskHistoryUpdateParams,
+    ) -> Result<(), OrbitError> {
+        if fields.actor.trim().is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "task actor must not be empty".to_string(),
+            ));
+        }
+        let Some((current_state, current_dir)) = self.locate_task(id)? else {
+            return Err(OrbitError::TaskNotFound(id.to_string()));
+        };
+        let mut bundle = self.read_bundle_at(&current_dir)?;
+
         if !fields.append_history.is_empty() {
             bundle.doc.history.extend(fields.append_history.clone());
         }
         if !fields.append_comments.is_empty() {
             bundle.doc.comments.extend(fields.append_comments.clone());
         }
-        if let Some(ref threads) = fields.replace_review_threads {
-            bundle.doc.review_threads = threads.clone();
-        } else if !fields.append_review_threads.is_empty() {
-            merge_review_threads(
-                &mut bundle.doc.review_threads,
-                fields.append_review_threads.clone(),
-            );
-        }
-        let upsert_artifacts = fields.upsert_artifacts.clone();
 
         let target_state = fields
             .status
@@ -266,31 +292,65 @@ impl TaskFileStore {
                 to_status: status_transition.map(|(_, to)| to),
             });
         }
-        if title_changed {
-            bundle.doc.history.push(TaskHistoryEntry {
-                at: bundle.doc.updated_at,
-                by: fields.actor.clone(),
-                event: "renamed".to_string(),
-                note: None,
-                from_status: None,
-                to_status: None,
-            });
-        }
 
-        let final_dir = if target_state == current_state {
-            self.write_bundle_at(&current_dir, &bundle)?;
-            current_dir.clone()
-        } else {
-            self.write_bundle_at(&current_dir, &bundle)?;
-            let target_dir = self.task_dir(target_state, &bundle.doc.id);
-            self.move_task_dir(&current_dir, &target_dir)?;
-            target_dir
+        self.persist_bundle_update(current_state, &current_dir, target_state, &bundle)?;
+        Ok(())
+    }
+
+    pub(crate) fn update_task_reviews(
+        &self,
+        id: &str,
+        fields: &TaskReviewUpdateParams,
+    ) -> Result<(), OrbitError> {
+        let Some((current_state, current_dir)) = self.locate_task(id)? else {
+            return Err(OrbitError::TaskNotFound(id.to_string()));
         };
-        if !upsert_artifacts.is_empty() {
-            self.write_artifacts_at(&final_dir, &upsert_artifacts)?;
+        let mut bundle = self.read_bundle_at(&current_dir)?;
+
+        if let Some(ref threads) = fields.replace_review_threads {
+            bundle.doc.review_threads = threads.clone();
+        } else if !fields.append_review_threads.is_empty() {
+            merge_review_threads(
+                &mut bundle.doc.review_threads,
+                fields.append_review_threads.clone(),
+            );
         }
 
-        Ok(bundle_to_task(target_state, bundle))
+        bundle.doc.updated_at = Utc::now();
+        self.persist_bundle_update(current_state, &current_dir, current_state, &bundle)?;
+        Ok(())
+    }
+
+    pub(crate) fn upsert_task_artifacts(
+        &self,
+        id: &str,
+        fields: &TaskArtifactUpdateParams,
+    ) -> Result<(), OrbitError> {
+        let Some((_, task_dir)) = self.locate_task(id)? else {
+            return Err(OrbitError::TaskNotFound(id.to_string()));
+        };
+        if !fields.upsert_artifacts.is_empty() {
+            self.write_artifacts_at(&task_dir, &fields.upsert_artifacts)?;
+        }
+        Ok(())
+    }
+
+    fn persist_bundle_update(
+        &self,
+        current_state: TaskStateDir,
+        current_dir: &PathBuf,
+        target_state: TaskStateDir,
+        bundle: &TaskBundle,
+    ) -> Result<(), OrbitError> {
+        if target_state == current_state {
+            self.write_bundle_at(current_dir, bundle)?;
+        } else {
+            self.write_bundle_at(current_dir, bundle)?;
+            let target_dir = self.task_dir(target_state, &bundle.doc.id);
+            self.move_task_dir(current_dir, &target_dir)?;
+        }
+
+        Ok(())
     }
 
     pub(crate) fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {

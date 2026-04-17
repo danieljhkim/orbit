@@ -4,9 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    ResolvedScope, Store, activity_store_resolved, audit_event_store_sqlite,
-    executor_def_store_resolved, job_store_resolved, policy_def_store_resolved, task_store_file,
-    tool_store_sqlite,
+    Store, audit_event_store_sqlite, global_activity_store, global_executor_def_store,
+    global_policy_def_store, scoped_job_backends, tool_store_sqlite, workspace_task_backends,
 };
 
 use orbit_tools::ToolRegistry;
@@ -47,23 +46,16 @@ pub(crate) fn build_context_from_roots(
         global_root.to_path_buf(),
     );
 
-    // Build task store (workspace only).
-    let task_store = task_store_file(persistence.task_dir.clone());
+    let task_backends = workspace_task_backends(persistence.task_dir.clone());
+    let job_backends = scoped_job_backends(persistence.job_dir.clone(), paths.jobs_dir.clone());
 
-    // Activities are global-only. Jobs use layered storage so definitions stay
-    // global while run artifacts remain workspace-local.
-    let activity_store =
-        activity_store_resolved(ResolvedScope::Single(persistence.activity_dir.clone()))?;
-    let job_store = job_store_resolved(ResolvedScope::Layered {
-        global: persistence.job_dir.clone(),
-        workspace: paths.jobs_dir.clone(),
-    })?;
+    // Activities, executors, and policies are global-only. Jobs always read
+    // definitions from the global store and write run state to the workspace.
+    let activity_store = global_activity_store(persistence.activity_dir.clone());
     let tool_store = tool_store_sqlite(store.clone());
     let audit_event_store = audit_event_store_sqlite(store.clone());
-    let executor_def_store =
-        executor_def_store_resolved(ResolvedScope::Single(persistence.executor_dir.clone()))?;
-    let policy_def_store =
-        policy_def_store_resolved(ResolvedScope::Single(persistence.policy_dir.clone()))?;
+    let executor_def_store = global_executor_def_store(persistence.executor_dir.clone());
+    let policy_def_store = global_policy_def_store(persistence.policy_dir.clone());
 
     let skill_catalog = SkillCatalog::new(persistence.skill_dir.clone());
     skill_catalog.ensure_layout()?;
@@ -84,9 +76,14 @@ pub(crate) fn build_context_from_roots(
     Ok(OrbitContext::new(
         paths,
         OrbitStores::new(
-            task_store,
+            task_backends.task,
+            task_backends.document,
+            task_backends.history,
+            task_backends.review,
+            task_backends.artifact,
             activity_store,
-            job_store,
+            job_backends.definition,
+            job_backends.run,
             tool_store,
             audit_event_store,
             executor_def_store,
