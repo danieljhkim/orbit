@@ -27,6 +27,7 @@ let activeStatuses = new Set(
 let lastTasks = [];
 let lastDiagnostics = { metrics: [], friction: [] };
 let activeDiagSubtab = "metrics";
+let expandedTaskIds = new Set();
 
 function el(tag, opts = {}, children = []) {
   const node = document.createElement(tag);
@@ -79,6 +80,101 @@ function filterTasks(tasks) {
   });
 }
 
+const TASK_META_FIELDS = [
+  ["implemented_by", "implemented_by"],
+  ["planned_by", "planned_by"],
+  ["created_by", "created_by"],
+  ["pr_number", "pr"],
+  ["pr_status", "pr_status"],
+  ["created_at", "created"],
+  ["updated_at", "updated"],
+];
+
+function buildTaskDetail(task) {
+  const detail = el("div", { class: "row-detail" });
+  detail.addEventListener("click", (e) => e.stopPropagation());
+
+  const meta = el("div", { class: "meta-line" });
+  let metaCount = 0;
+  for (const [key, label] of TASK_META_FIELDS) {
+    const v = task[key];
+    if (v == null || v === "") continue;
+    const display = key.endsWith("_at") ? fmtAbsTime(v) : String(v);
+    const span = el("span", {}, [
+      el("span", { class: "label", text: `${label}:` }),
+      el("span", { class: "value", text: display }),
+    ]);
+    meta.appendChild(span);
+    metaCount++;
+  }
+  if (metaCount > 0) detail.appendChild(meta);
+
+  if (task.description && task.description.trim()) {
+    detail.appendChild(el("h4", { text: "description" }));
+    detail.appendChild(el("div", { class: "description", text: task.description }));
+  }
+
+  if (Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0) {
+    detail.appendChild(el("h4", { text: "acceptance criteria" }));
+    const ul = el("ul", { class: "ac-list" });
+    for (const ac of task.acceptance_criteria) {
+      ul.appendChild(el("li", { text: ac }));
+    }
+    detail.appendChild(ul);
+  }
+
+  if (task.plan && task.plan.trim()) {
+    detail.appendChild(el("h4", { text: "plan" }));
+    const pre = el("pre");
+    pre.textContent = task.plan;
+    detail.appendChild(pre);
+  }
+
+  if (task.execution_summary && task.execution_summary.trim()) {
+    detail.appendChild(el("h4", { text: "execution summary" }));
+    const pre = el("pre");
+    pre.textContent = task.execution_summary;
+    detail.appendChild(pre);
+  }
+
+  if (Array.isArray(task.comments) && task.comments.length > 0) {
+    detail.appendChild(el("h4", { text: "comments" }));
+    for (const c of task.comments) {
+      const line = el("div", { class: "comment-line" }, [
+        document.createTextNode(`[${fmtAbsTime(c.at)}] `),
+        el("span", { class: "author", text: c.by || "?" }),
+        document.createTextNode(`: ${c.message || ""}`),
+      ]);
+      detail.appendChild(line);
+    }
+  }
+
+  if (Array.isArray(task.context_files) && task.context_files.length > 0) {
+    detail.appendChild(el("h4", { text: "context" }));
+    const ul = el("ul", { class: "file-list" });
+    for (const path of task.context_files) {
+      ul.appendChild(el("li", { text: path }));
+    }
+    detail.appendChild(ul);
+  }
+
+  if (Array.isArray(task.history) && task.history.length > 0) {
+    detail.appendChild(el("h4", { text: "recent history" }));
+    const recent = task.history.slice(-5).reverse();
+    for (const h of recent) {
+      const note = h.note ? ` (${h.note})` : "";
+      const line = el("div", { class: "history-line" }, [
+        document.createTextNode(`[${fmtAbsTime(h.at)}] `),
+        el("span", { class: "actor", text: h.by || "?" }),
+        document.createTextNode(`: ${h.event}${note}`),
+      ]);
+      detail.appendChild(line);
+    }
+  }
+
+  return detail;
+}
+
 function renderTasks(tasks) {
   const body = $("tasks-body");
   body.innerHTML = "";
@@ -118,7 +214,20 @@ function renderTasks(tasks) {
         priorityCell(t.priority),
         el("span", { class: "type mono", text: t.type }),
       ]);
+      row.dataset.taskId = t.id;
+      row.addEventListener("click", () => {
+        if (expandedTaskIds.has(t.id)) {
+          expandedTaskIds.delete(t.id);
+        } else {
+          expandedTaskIds.add(t.id);
+        }
+        renderTasks(lastTasks);
+      });
+      if (expandedTaskIds.has(t.id)) row.classList.add("expanded");
       body.appendChild(row);
+      if (expandedTaskIds.has(t.id)) {
+        body.appendChild(buildTaskDetail(t));
+      }
     }
   }
 }
@@ -133,6 +242,14 @@ function fmtTimestamp(iso) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   return `${Math.floor(diff / 86400)}d`;
+}
+
+function fmtAbsTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function fmtDuration(ms) {
