@@ -1,11 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use orbit_knowledge::extract::{self, Language};
-use orbit_knowledge::lock::GraphLockGuard;
-use orbit_knowledge::{
-    KnowledgeStore, Selector, WorkingGraph, WorkingLeaf, load_task_working_graph,
-    save_task_working_graph,
-};
+use orbit_knowledge::{Selector, TaskGraphScope, TaskGraphService, default_knowledge_dir};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
@@ -79,10 +74,9 @@ impl Tool for OrbitKnowledgeWriteTool {
         let position_str = optional_str(&input, "position");
 
         let selector: Selector = selector_str
-            .parse()
-            .map_err(|e| OrbitError::InvalidInput(format!("{e}")))?;
+            .parse::<Selector>()
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
 
-        // Reject dir selectors — only symbol and file are valid
         if matches!(selector, Selector::Dir { .. }) {
             return Err(OrbitError::InvalidInput(
                 "graph.write does not accept dir selectors".to_string(),
@@ -91,166 +85,88 @@ impl Tool for OrbitKnowledgeWriteTool {
 
         let workspace_root_buf = resolve_workspace_root_with_override(ctx, &input)?;
         let workspace_root = workspace_root_buf.as_path();
-
         let knowledge_dir = resolve_knowledge_dir(ctx, &input)?;
-        let mut working_graph =
-            match load_task_working_graph(ctx.orbit_root.as_deref(), ctx.task_id.as_deref())? {
-                Some(graph) => graph,
-                None => initialize_working_graph(&knowledge_dir, &selector, workspace_root)?,
-            };
-
-        let lock_owner = graph_lock_owner(ctx);
+        let service = TaskGraphService::new(knowledge_dir, task_graph_scope(ctx));
         let position_selector = parse_position_selector(position_str.as_deref())?;
-        let lock_targets = lock_targets_for_mutation(&selector, &[]);
 
-        let result = with_graph_locks(
-            &knowledge_dir,
-            lock_owner,
-            ctx.task_id.as_deref(),
+        let result = service.mutate(
+            &selector,
+            &[],
             reason.as_deref().unwrap_or("editing"),
-            &lock_targets,
-            || {
-                let result = match &selector {
-                    Selector::File { path } => {
-                        let start_line = input.get("start_line").and_then(Value::as_u64);
-                        let end_line = input.get("end_line").and_then(Value::as_u64);
-                        match (start_line, end_line) {
-                            (Some(sl), Some(el)) => working_graph
-                                .rewrite_file_region(
-                                    path,
-                                    sl as usize,
-                                    el as usize,
-                                    &new_source,
-                                    reason.as_deref(),
-                                    workspace_root,
-                                )
-                                .map_err(write_err_to_orbit)?,
-                            (None, None) => working_graph
-                                .rewrite_file(path, &new_source, reason.as_deref(), workspace_root)
-                                .map_err(write_err_to_orbit)?,
-                            _ => {
-                                return Err(OrbitError::InvalidInput(
-                                    "both start_line and end_line are required for region edits"
-                                        .to_string(),
-                                ));
-                            }
-                        }
+            workspace_root,
+            |working_graph| match &selector {
+                Selector::File { path } => {
+                    let start_line = input.get("start_line").and_then(Value::as_u64);
+                    let end_line = input.get("end_line").and_then(Value::as_u64);
+                    match (start_line, end_line) {
+                        (Some(start_line), Some(end_line)) => working_graph
+                            .rewrite_file_region(
+                                path.as_str(),
+                                start_line as usize,
+                                end_line as usize,
+                                &new_source,
+                                reason.as_deref(),
+                                workspace_root,
+                            )
+                            .map_err(write_err_to_orbit),
+                        (None, None) => working_graph
+                            .rewrite_file(
+                                path.as_str(),
+                                &new_source,
+                                reason.as_deref(),
+                                workspace_root,
+                            )
+                            .map_err(write_err_to_orbit),
+                        _ => Err(OrbitError::InvalidInput(
+                            "both start_line and end_line are required for region edits"
+                                .to_string(),
+                        )),
                     }
-                    Selector::Symbol { .. } => {
-                        if working_graph.has_leaf(&selector) {
-                            working_graph
-                                .edit_leaf(
-                                    &selector,
-                                    &new_source,
-                                    reason.as_deref(),
-                                    workspace_root,
-                                )
-                                .map_err(write_err_to_orbit)?
-                        } else {
-                            working_graph
-                                .insert_leaf(
-                                    &selector,
-                                    &new_source,
-                                    position_selector.as_ref(),
-                                    reason.as_deref(),
-                                    workspace_root,
-                                )
-                                .map_err(write_err_to_orbit)?
-                        }
+                }
+                Selector::Symbol { .. } => {
+                    if working_graph.has_leaf(&selector) {
+                        working_graph
+                            .edit_leaf(&selector, &new_source, reason.as_deref(), workspace_root)
+                            .map_err(write_err_to_orbit)
+                    } else {
+                        working_graph
+                            .insert_leaf(
+                                &selector,
+                                &new_source,
+                                position_selector.as_ref(),
+                                reason.as_deref(),
+                                workspace_root,
+                            )
+                            .map_err(write_err_to_orbit)
                     }
-                    Selector::Dir { .. } => unreachable!(),
-                };
-
-                save_task_working_graph(
-                    ctx.orbit_root.as_deref(),
-                    ctx.task_id.as_deref(),
-                    &working_graph,
-                )?;
-                Ok(result)
+                }
+                Selector::Dir { .. } => unreachable!(),
             },
         )?;
 
         serde_json::to_value(result)
-            .map_err(|e| OrbitError::Execution(format!("serialize result: {e}")))
+            .map_err(|error| OrbitError::Execution(format!("serialize result: {error}")))
     }
 }
 
-/// Resolve the effective workspace root, with optional override from input.
 pub(super) fn resolve_workspace_root_with_override(
     ctx: &ToolContext,
     input: &Value,
-) -> Result<std::path::PathBuf, OrbitError> {
-    if let Some(ws) = input.get("workspace_path").and_then(Value::as_str)
-        && !ws.trim().is_empty()
+) -> Result<PathBuf, OrbitError> {
+    if let Some(workspace_path) = input.get("workspace_path").and_then(Value::as_str)
+        && !workspace_path.trim().is_empty()
     {
-        return Ok(std::path::PathBuf::from(ws));
+        return Ok(PathBuf::from(workspace_path));
     }
     ctx.workspace_root
         .clone()
         .ok_or_else(|| OrbitError::InvalidInput("workspace_root is required".to_string()))
 }
 
-pub(super) fn write_err_to_orbit(e: orbit_knowledge::WriteError) -> OrbitError {
-    serde_json::to_value(&e)
-        .map(|v| OrbitError::Execution(v.to_string()))
-        .unwrap_or_else(|_| OrbitError::Execution(format!("{:?}", e)))
-}
-
-pub(super) fn lock_targets_for_mutation(selector: &Selector, extra_files: &[&str]) -> Vec<String> {
-    let mut targets = Vec::new();
-    match selector {
-        Selector::File { path } => targets.push(format!("file:{path}")),
-        Selector::Symbol { path, .. } => {
-            targets.push(selector.to_string());
-            targets.push(format!("file:{path}"));
-        }
-        Selector::Dir { .. } => {}
-    }
-
-    for file in extra_files {
-        let file_selector = format!("file:{file}");
-        if !targets.contains(&file_selector) {
-            targets.push(file_selector);
-        }
-    }
-
-    targets
-}
-
-pub(super) fn with_graph_locks<T, F>(
-    knowledge_dir: &Path,
-    owner: &str,
-    task_id: Option<&str>,
-    reason: &str,
-    selectors: &[String],
-    f: F,
-) -> Result<T, OrbitError>
-where
-    F: FnOnce() -> Result<T, OrbitError>,
-{
-    let mut guard = GraphLockGuard::acquire(knowledge_dir, owner, task_id, reason, selectors)
-        .map_err(|e| OrbitError::Execution(format!("acquire graph locks: {e}")))?;
-
-    let operation_result = f();
-    let unlock_result = guard
-        .release()
-        .map_err(|e| OrbitError::Execution(format!("release graph locks: {e}")));
-
-    match (operation_result, unlock_result) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(unlock_error)) => Err(unlock_error),
-        (Err(error), Err(unlock_error)) => Err(OrbitError::Execution(format!(
-            "{error}; also failed to release graph locks: {unlock_error}"
-        ))),
-    }
-}
-
-pub(super) fn graph_lock_owner(ctx: &ToolContext) -> &str {
-    ctx.task_id
-        .as_deref()
-        .or(ctx.agent_name.as_deref())
-        .unwrap_or("unknown")
+pub(super) fn write_err_to_orbit(error: orbit_knowledge::WriteError) -> OrbitError {
+    serde_json::to_value(&error)
+        .map(|value| OrbitError::Execution(value.to_string()))
+        .unwrap_or_else(|_| OrbitError::Execution(format!("{error:?}")))
 }
 
 fn require_new_source(input: &Value) -> Result<String, OrbitError> {
@@ -271,45 +187,42 @@ fn require_new_source(input: &Value) -> Result<String, OrbitError> {
 fn optional_str(input: &Value, key: &str) -> Option<String> {
     input
         .get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.to_string())
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn parse_position_selector(position: Option<&str>) -> Result<Option<Selector>, OrbitError> {
-    let Some(pos) = position else {
+    let Some(position) = position else {
         return Ok(None);
     };
 
-    // Strip "after:" prefix if present
-    let selector_str = pos.strip_prefix("after:").unwrap_or(pos);
-    let selector: Selector = selector_str
+    let selector = position.strip_prefix("after:").unwrap_or(position);
+    selector
         .parse()
-        .map_err(|e| OrbitError::InvalidInput(format!("invalid position: {e}")))?;
-    Ok(Some(selector))
+        .map(Some)
+        .map_err(|error| OrbitError::InvalidInput(format!("invalid position: {error}")))
 }
 
 pub(super) fn resolve_knowledge_dir(
     ctx: &ToolContext,
     input: &Value,
 ) -> Result<PathBuf, OrbitError> {
-    if let Some(raw) = input.get("knowledge_dir").and_then(|v| v.as_str())
+    if let Some(raw) = input.get("knowledge_dir").and_then(Value::as_str)
         && !raw.trim().is_empty()
     {
         let path = Path::new(raw);
         if path.is_absolute() {
             return Ok(path.to_path_buf());
         }
-        if let Some(ws) = ctx.workspace_root.as_deref() {
-            return Ok(ws.join(path));
+        if let Some(workspace_root) = ctx.workspace_root.as_deref() {
+            return Ok(workspace_root.join(path));
         }
         return Ok(path.to_path_buf());
     }
 
-    // Prefer orbit_root (the resolved .orbit data directory) over workspace_root.
-    // In worktree contexts, workspace_root points to the worktree checkout while
-    // orbit_root points to the main repo's .orbit/ where knowledge artifacts live.
-    if let Some(orbit_root) = ctx.orbit_root.as_deref() {
+    let task_scope = super::task_scope(ctx);
+    if let Some(orbit_root) = task_scope.orbit_root.as_deref() {
         return Ok(orbit_root.join("knowledge"));
     }
 
@@ -318,60 +231,22 @@ pub(super) fn resolve_knowledge_dir(
             "`knowledge_dir` is required when `workspace_root` is unavailable".to_string(),
         ));
     };
-    Ok(workspace_root.join(".orbit/knowledge"))
+    Ok(default_knowledge_dir(
+        workspace_root,
+        task_scope.orbit_root.as_deref(),
+    ))
 }
 
-/// Initialize a working graph by loading the persisted knowledge store,
-/// or create a minimal graph by extracting the target file.
-pub(super) fn initialize_working_graph(
-    knowledge_dir: &Path,
-    selector: &Selector,
-    workspace_root: &Path,
-) -> Result<WorkingGraph, OrbitError> {
-    // Try to load from persisted store
-    if let Ok(store) = KnowledgeStore::open(knowledge_dir)
-        && let Ok(mut graph) = WorkingGraph::from_store(&store)
-    {
-        graph.seed_file_snapshots_from_workspace(workspace_root);
-        return Ok(graph);
+pub(super) fn task_graph_scope(ctx: &ToolContext) -> TaskGraphScope {
+    let task_scope = super::task_scope(ctx);
+    let owner = task_scope
+        .task_id
+        .clone()
+        .or_else(|| ctx.agent_name.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    TaskGraphScope {
+        orbit_root: task_scope.orbit_root,
+        task_id: task_scope.task_id,
+        owner,
     }
-
-    // Fallback: extract the target file to build a minimal working graph
-    let Selector::Symbol { path, .. } = selector else {
-        return Ok(WorkingGraph::new());
-    };
-
-    let file_path = workspace_root.join(path);
-    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let Some(language) = Language::from_extension(ext) else {
-        return Ok(WorkingGraph::new());
-    };
-
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| OrbitError::Execution(format!("read {}: {e}", file_path.display())))?;
-
-    let extraction = extract::extract_file(&content, language);
-    let mut graph = WorkingGraph::new();
-
-    // Populate from extraction
-    for leaf in &extraction.leaves {
-        let sel_str = format!("symbol:{path}#{}:{}", leaf.qualified_name, leaf.kind);
-        let working_leaf = WorkingLeaf {
-            selector: sel_str.clone(),
-            file_path: path.clone(),
-            name: leaf.name.clone(),
-            qualified_name: leaf.qualified_name.clone(),
-            kind: leaf.kind.clone(),
-            start_line: leaf.start_line,
-            end_line: leaf.end_line,
-            source: leaf.source.clone(),
-            source_hash: leaf.source_hash.clone(),
-            parent_qualified_name: leaf.parent_qualified_name.clone(),
-            children_qualified_names: leaf.children_qualified_names.clone(),
-        };
-        graph.insert_working_leaf(sel_str, working_leaf);
-    }
-    graph.seed_file_snapshots_from_workspace(workspace_root);
-
-    Ok(graph)
 }

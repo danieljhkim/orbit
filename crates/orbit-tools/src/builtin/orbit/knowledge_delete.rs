@@ -1,12 +1,12 @@
-use orbit_knowledge::{Selector, load_task_working_graph, save_task_working_graph};
+use orbit_knowledge::{Selector, TaskGraphService};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{Tool, ToolContext};
 
 use super::knowledge_write::{
-    graph_lock_owner, initialize_working_graph, lock_targets_for_mutation, resolve_knowledge_dir,
-    resolve_workspace_root_with_override, with_graph_locks, write_err_to_orbit,
+    resolve_knowledge_dir, resolve_workspace_root_with_override, task_graph_scope,
+    write_err_to_orbit,
 };
 
 pub struct OrbitKnowledgeDeleteTool;
@@ -47,13 +47,12 @@ impl Tool for OrbitKnowledgeDeleteTool {
         let reason = input
             .get("reason")
             .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string());
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned);
 
         let selector: Selector = selector_str
-            .parse()
-            .map_err(|e| OrbitError::InvalidInput(format!("{e}")))?;
-
+            .parse::<Selector>()
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
         if !matches!(selector, Selector::Symbol { .. }) {
             return Err(OrbitError::InvalidInput(
                 "graph.delete requires a symbol selector (symbol:path#name:kind)".to_string(),
@@ -62,37 +61,22 @@ impl Tool for OrbitKnowledgeDeleteTool {
 
         let workspace_root_buf = resolve_workspace_root_with_override(ctx, &input)?;
         let workspace_root = workspace_root_buf.as_path();
-
         let knowledge_dir = resolve_knowledge_dir(ctx, &input)?;
-        let mut working_graph =
-            match load_task_working_graph(ctx.orbit_root.as_deref(), ctx.task_id.as_deref())? {
-                Some(graph) => graph,
-                None => initialize_working_graph(&knowledge_dir, &selector, workspace_root)?,
-            };
+        let service = TaskGraphService::new(knowledge_dir, task_graph_scope(ctx));
 
-        let lock_targets = lock_targets_for_mutation(&selector, &[]);
-
-        let result = with_graph_locks(
-            &knowledge_dir,
-            graph_lock_owner(ctx),
-            ctx.task_id.as_deref(),
+        let result = service.mutate(
+            &selector,
+            &[],
             reason.as_deref().unwrap_or("deleting"),
-            &lock_targets,
-            || {
-                let result = working_graph
+            workspace_root,
+            |working_graph| {
+                working_graph
                     .delete_leaf(&selector, reason.as_deref(), workspace_root)
-                    .map_err(write_err_to_orbit)?;
-
-                save_task_working_graph(
-                    ctx.orbit_root.as_deref(),
-                    ctx.task_id.as_deref(),
-                    &working_graph,
-                )?;
-                Ok(result)
+                    .map_err(write_err_to_orbit)
             },
         )?;
 
         serde_json::to_value(result)
-            .map_err(|e| OrbitError::Execution(format!("serialize result: {e}")))
+            .map_err(|error| OrbitError::Execution(format!("serialize result: {error}")))
     }
 }

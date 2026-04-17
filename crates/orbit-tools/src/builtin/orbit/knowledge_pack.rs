@@ -1,9 +1,4 @@
-use std::path::PathBuf;
-
-use orbit_knowledge::{
-    KnowledgeError, KnowledgeStore, Selector, load_task_working_graph,
-    overlay_pack_with_working_graph, pack_from_working_graph,
-};
+use orbit_knowledge::{Selector, TaskGraphService};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
@@ -40,70 +35,14 @@ impl Tool for OrbitKnowledgePackTool {
         let selectors = parse_selector_strings(&input)?;
         let selectors = Selector::parse_many(&selectors)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
-        let knowledge_dir = resolve_knowledge_dir(ctx, &input)?;
-        super::maybe_refresh_knowledge_graph(ctx, &input, &knowledge_dir);
-
-        let working_graph =
-            load_task_working_graph(ctx.orbit_root.as_deref(), ctx.task_id.as_deref())?;
-
-        let pack_result = || -> Result<_, KnowledgeError> {
-            let store = KnowledgeStore::open(&knowledge_dir)?;
-            store.pack(&selectors)
-        };
-        let pack = match pack_result() {
-            Ok(pack) => pack,
-            Err(first_error) => {
-                let pack_or_error = match super::rebuild_default_knowledge_graph(
-                    ctx,
-                    &knowledge_dir,
-                    &first_error,
-                ) {
-                    Ok(true) => match pack_result() {
-                        Ok(pack) => Ok(pack),
-                        Err(retry_error) => Err(KnowledgeError {
-                            kind: "knowledge_unavailable".to_string(),
-                            reason: format!(
-                                "failed to load knowledge pack: {first_error}; retry after rebuild failed: {retry_error}"
-                            ),
-                        }),
-                    },
-                    Ok(false) => Err(first_error),
-                    Err(rebuild_error) => Err(KnowledgeError {
-                        kind: "knowledge_unavailable".to_string(),
-                        reason: format!(
-                            "failed to load knowledge pack: {first_error}; rebuild attempt failed: {rebuild_error}"
-                        ),
-                    }),
-                };
-
-                match pack_or_error {
-                    Ok(pack) => pack,
-                    Err(error) => {
-                        if let Some(graph) = working_graph.as_ref() {
-                            let pack = pack_from_working_graph(&knowledge_dir, &selectors, graph);
-                            return serde_json::to_value(pack).map_err(|serialize| {
-                                OrbitError::Execution(format!(
-                                    "failed to serialize knowledge pack: {serialize}"
-                                ))
-                            });
-                        }
-                        return serde_json::to_value(error).map_err(|serialize| {
-                            OrbitError::Execution(format!(
-                                "failed to serialize knowledge error: {serialize}"
-                            ))
-                        });
-                    }
-                }
-            }
-        };
-        let pack = if let Some(graph) = working_graph.as_ref() {
-            overlay_pack_with_working_graph(pack, &selectors, graph)
-        } else {
-            pack
-        };
-
-        serde_json::to_value(pack)
-            .map_err(|error| OrbitError::Execution(format!("serialize knowledge pack: {error}")))
+        let knowledge_dir = super::knowledge_write::resolve_knowledge_dir(ctx, &input)?;
+        let service =
+            TaskGraphService::new(knowledge_dir, super::knowledge_write::task_graph_scope(ctx));
+        service.pack_json(
+            &selectors,
+            ctx.workspace_root.as_deref(),
+            super::has_explicit_knowledge_dir(&input),
+        )
     }
 }
 
@@ -128,8 +67,4 @@ fn parse_selector_strings(input: &Value) -> Result<Vec<String>, OrbitError> {
             })
         })
         .collect()
-}
-
-fn resolve_knowledge_dir(ctx: &ToolContext, input: &Value) -> Result<PathBuf, OrbitError> {
-    super::knowledge_write::resolve_knowledge_dir(ctx, input)
 }

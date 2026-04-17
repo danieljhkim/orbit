@@ -1,7 +1,7 @@
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
-use crate::{Tool, ToolContext};
+use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitStateGetTool;
 
@@ -37,15 +37,6 @@ impl Tool for OrbitStateGetTool {
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        let state_dir = super::resolve_state_dir(ctx, &input)?;
-        let pipeline = orbit_store::state_io::read_pipeline(&state_dir)?;
-        match super::optional_string(&input, "key")? {
-            Some(key) => Ok(pipeline
-                .as_object()
-                .and_then(|map| map.get(&key))
-                .cloned()
-                .unwrap_or(Value::Null)),
-            None => Ok(pipeline),
-        }
+        super::execute_host_action(ctx, input, OrbitBuiltinAction::StateGet)
     }
 }

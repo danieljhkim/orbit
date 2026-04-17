@@ -36,19 +36,23 @@ impl OrbitRuntime {
                 .map(|cwd| cwd.to_string_lossy().into_owned());
         }
 
-        if tool_context.task_id.is_none() {
-            tool_context.task_id = resolve_task_id_from_context(self, &tool_context)?;
-        }
+        let resolved_task_id = match tool_context.orbit_host.as_ref() {
+            Some(host) => host.task_scope().task_id,
+            None => resolve_task_id_from_context(self, &tool_context)?,
+        };
 
-        // Ensure orbit tools always know the resolved data root so they can
-        // inject --root into spawned orbit CLI calls (worktree-safe).
-        if tool_context.orbit_root.is_none() {
-            tool_context.orbit_root = Some(self.data_root_path().to_path_buf());
+        if tool_context.orbit_host.is_none() {
+            tool_context.orbit_host =
+                Some(super::build_orbit_tool_host(self, resolved_task_id.clone()));
         }
 
         // Ensure fs tools always have a workspace boundary for sandboxing.
         if tool_context.workspace_root.is_none() {
-            tool_context.workspace_root = resolve_workspace_root_from_context(self, &tool_context)?;
+            tool_context.workspace_root = resolve_workspace_root_from_context(
+                self,
+                resolved_task_id.as_deref(),
+                &tool_context,
+            )?;
         }
 
         self.check_tool_enabled(name)?;
@@ -118,7 +122,9 @@ impl OrbitRuntime {
                 .map(|cwd| cwd.to_string_lossy().into_owned()),
             ..Default::default()
         };
-        tool_context.workspace_root = resolve_workspace_root_from_context(self, &tool_context)?;
+        let task_id = resolve_task_id_from_context(self, &tool_context)?;
+        tool_context.workspace_root =
+            resolve_workspace_root_from_context(self, task_id.as_deref(), &tool_context)?;
 
         let decision =
             self.evaluate_tool_invocation_policy(name, input, Role::Admin, &tool_context);
@@ -203,9 +209,10 @@ fn resolve_task_id_from_context(
 
 fn resolve_workspace_root_from_context(
     runtime: &OrbitRuntime,
-    tool_context: &ToolContext,
+    task_id: Option<&str>,
+    _tool_context: &ToolContext,
 ) -> Result<Option<PathBuf>, OrbitError> {
-    if let Some(task_id) = tool_context.task_id.as_deref()
+    if let Some(task_id) = task_id
         && let Some(workspace_root) = resolve_task_workspace_root(runtime, task_id)
     {
         return Ok(Some(workspace_root));

@@ -1,15 +1,11 @@
-use orbit_exec::{NoSandbox, run_process};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
-use serde_json::json;
+use serde_json::{Value, json};
 
-use crate::{Tool, ToolContext};
+use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitDuelPlanWinnerTool;
 
-fn build_exec_requests(
-    ctx: &ToolContext,
-    input: &serde_json::Value,
-) -> Result<(orbit_exec::ExecRequest, orbit_exec::ExecRequest), OrbitError> {
+fn build_update_input(ctx: &ToolContext, input: &Value) -> Result<Value, OrbitError> {
     let identity = super::resolve_identity(ctx, input)?;
     let arbiter_agent = identity.agent.clone().ok_or_else(|| {
         OrbitError::InvalidInput(
@@ -38,7 +34,7 @@ fn build_exec_requests(
         "arbiter_model": arbiter_model,
         "arbiter_rationale": arbiter_rationale,
     });
-    let update_input = json!({
+    Ok(json!({
         "id": id,
         "artifacts": [{
             "path": "planning-duel/winner.json",
@@ -46,8 +42,7 @@ fn build_exec_requests(
         }],
         "agent": identity.agent,
         "model": identity.model,
-    });
-    super::task_update::build_exec_requests(ctx, &update_input)
+    }))
 }
 
 impl Tool for OrbitDuelPlanWinnerTool {
@@ -86,24 +81,11 @@ impl Tool for OrbitDuelPlanWinnerTool {
         }
     }
 
-    fn execute(
-        &self,
-        ctx: &ToolContext,
-        input: serde_json::Value,
-    ) -> Result<serde_json::Value, OrbitError> {
-        let (update_req, show_req) = build_exec_requests(ctx, &input)?;
-        let update_result = run_process(&update_req, &NoSandbox)?;
-        if !update_result.success {
-            let stderr = update_result.stderr.trim();
-            let detail = if stderr.is_empty() {
-                "command returned non-zero exit status"
-            } else {
-                stderr
-            };
-            return Err(OrbitError::Execution(format!(
-                "orbit duel plan winner failed: {detail}"
-            )));
-        }
-        super::run_orbit_json_command(show_req, "orbit task show")
+    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+        super::execute_host_action(
+            ctx,
+            build_update_input(ctx, &input)?,
+            OrbitBuiltinAction::TaskUpdate,
+        )
     }
 }

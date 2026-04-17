@@ -239,8 +239,6 @@ pub(super) fn cleanup_stale_planning_duel_artifacts<H: RuntimeHost + TaskHost + 
         cwd: Some(host.data_root().display().to_string()),
         allowed_tools: vec!["fs.delete".to_string()],
         workspace_root: Some(host.data_root().to_path_buf()),
-        orbit_root: Some(host.data_root().to_path_buf()),
-        task_id: Some(task_id.to_string()),
         ..ToolContext::default()
     };
 

@@ -21,8 +21,8 @@
 //! The builtin registry wires together the standard Orbit tool families:
 //! filesystem mutation, git and GitHub helpers, Orbit task/job commands,
 //! process spawning, network fetches, and time utilities. Each tool executes
-//! inside a [`ToolContext`] that carries workspace boundaries, task identity,
-//! Orbit data-root resolution, and any agent-specific allowlists.
+//! inside a [`ToolContext`] that carries workspace boundaries, agent metadata,
+//! process allowlists, and the narrow Orbit host surface used by Orbit builtins.
 //!
 //! # Dependency direction
 //! `orbit-types` → `orbit-exec` → `orbit-tools` → orbit-engine, orbit-core
@@ -32,6 +32,7 @@ pub mod external;
 pub mod registry;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
@@ -54,6 +55,45 @@ pub const TIMEOUT_LONG_MS: u64 = 60_000;
 
 pub use registry::ToolRegistry;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrbitBuiltinAction {
+    ActivityShow,
+    ReviewThreadAdd,
+    ReviewThreadList,
+    ReviewThreadReply,
+    ReviewThreadResolve,
+    StateGet,
+    StateSet,
+    TaskAdd,
+    TaskApprove,
+    TaskDelete,
+    TaskLint,
+    TaskList,
+    TaskLocks,
+    TaskReject,
+    TaskShow,
+    TaskStart,
+    TaskUpdate,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrbitTaskScope {
+    pub orbit_root: Option<PathBuf>,
+    pub task_id: Option<String>,
+}
+
+pub trait OrbitToolHost: Send + Sync {
+    fn execute(
+        &self,
+        action: OrbitBuiltinAction,
+        input: Value,
+        agent: Option<String>,
+        model: Option<String>,
+    ) -> Result<Value, OrbitError>;
+
+    fn task_scope(&self) -> OrbitTaskScope;
+}
+
 #[derive(Clone, Default)]
 pub struct ToolContext {
     pub cwd: Option<String>,
@@ -64,15 +104,6 @@ pub struct ToolContext {
     /// If `None`, fs tools deny all access (fail-closed). The runtime pipeline
     /// auto-populates this from the data root's parent directory.
     pub workspace_root: Option<PathBuf>,
-    /// The resolved `.orbit` data directory (e.g. `<repo>/.orbit`). Distinct from
-    /// `workspace_root` (the repo root used for fs sandboxing) because the data
-    /// directory can be redirected via `config.toml` or path overrides and is not
-    /// always `<workspace_root>/.orbit`. When set, orbit tool calls inject
-    /// `--root <path>` so the spawned orbit CLI resolves to the correct data root
-    /// regardless of the agent's working directory (e.g. inside a git worktree).
-    pub orbit_root: Option<PathBuf>,
-    /// Active Orbit task id for the current tool invocation when known.
-    pub task_id: Option<String>,
     /// Normalized agent name (e.g. `"claude"`). When set, GitHub tools auto-append
     /// an attribution footer to PR bodies and review comments.
     pub agent_name: Option<String>,
@@ -82,6 +113,9 @@ pub struct ToolContext {
     /// Program allowlist for `proc.spawn`. When non-empty, `proc.spawn` rejects
     /// any program not in this list. Empty means unrestricted.
     pub proc_allowed_programs: Vec<String>,
+    /// Narrow Orbit application host used by Orbit builtins instead of respawning
+    /// the Orbit CLI or carrying task-specific state in the generic tool context.
+    pub orbit_host: Option<Arc<dyn OrbitToolHost>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -90,8 +124,6 @@ impl std::fmt::Debug for ToolContext {
             .field("cwd", &self.cwd)
             .field("allowed_tools", &self.allowed_tools)
             .field("workspace_root", &self.workspace_root)
-            .field("orbit_root", &self.orbit_root)
-            .field("task_id", &self.task_id)
             .field("agent_name", &self.agent_name)
             .field("model_name", &self.model_name)
             .field("proc_allowed_programs", &self.proc_allowed_programs)

@@ -16,6 +16,7 @@ pub mod builder;
 mod engine;
 pub mod event_bus;
 pub mod mutation;
+mod orbit_tool_host;
 pub mod pipeline;
 mod resolve;
 mod store_delegates;
@@ -33,6 +34,7 @@ use crate::command::init::ensure_orbit_root_initialized;
 use crate::context::ActorIdentity;
 use crate::context::OrbitStores;
 
+pub(crate) use orbit_tool_host::build_orbit_tool_host;
 pub(crate) use resolve::{resolve_global_root, resolve_initialize_data_root};
 pub(crate) use store_delegates::TaskRecordUpdateParams;
 

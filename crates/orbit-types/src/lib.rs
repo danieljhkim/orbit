@@ -42,6 +42,7 @@ pub mod run_state;
 pub mod skill;
 pub mod task;
 pub mod tool;
+pub mod tool_input;
 pub mod workspace;
 
 pub use activity::Activity;
@@ -90,4 +91,8 @@ pub use task::{
     prune_missing_context_files,
 };
 pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema};
+pub use tool_input::{
+    optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
+    optional_string_list_alias, optional_u32_alias, required_string, split_csv,
+};
 pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};

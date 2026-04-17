@@ -1,12 +1,12 @@
-use orbit_knowledge::{Selector, load_task_working_graph, save_task_working_graph};
+use orbit_knowledge::{Selector, TaskGraphService};
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
 use crate::{Tool, ToolContext};
 
 use super::knowledge_write::{
-    graph_lock_owner, initialize_working_graph, lock_targets_for_mutation, resolve_knowledge_dir,
-    resolve_workspace_root_with_override, with_graph_locks, write_err_to_orbit,
+    resolve_knowledge_dir, resolve_workspace_root_with_override, task_graph_scope,
+    write_err_to_orbit,
 };
 
 pub struct OrbitKnowledgeAddTool;
@@ -58,18 +58,17 @@ impl Tool for OrbitKnowledgeAddTool {
         let reason = input
             .get("reason")
             .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string());
-        let position_str = input
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned);
+        let position = input
             .get("position")
             .and_then(Value::as_str)
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string());
+            .filter(|value| !value.trim().is_empty())
+            .map(ToOwned::to_owned);
 
         let selector: Selector = selector_str
-            .parse()
-            .map_err(|e| OrbitError::InvalidInput(format!("{e}")))?;
-
+            .parse::<Selector>()
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
         if !matches!(selector, Selector::Symbol { .. }) {
             return Err(OrbitError::InvalidInput(
                 "graph.add requires a symbol selector (symbol:path#name:kind)".to_string(),
@@ -78,35 +77,26 @@ impl Tool for OrbitKnowledgeAddTool {
 
         let workspace_root_buf = resolve_workspace_root_with_override(ctx, &input)?;
         let workspace_root = workspace_root_buf.as_path();
-
         let knowledge_dir = resolve_knowledge_dir(ctx, &input)?;
-        let mut working_graph =
-            match load_task_working_graph(ctx.orbit_root.as_deref(), ctx.task_id.as_deref())? {
-                Some(graph) => graph,
-                None => initialize_working_graph(&knowledge_dir, &selector, workspace_root)?,
-            };
+        let service = TaskGraphService::new(knowledge_dir, task_graph_scope(ctx));
+        let position_selector = parse_position(position.as_deref())?;
 
-        // Reject if the symbol already exists
-        if working_graph.has_leaf(&selector) {
-            let err = orbit_knowledge::WriteError::leaf_already_exists(&selector_str);
-            return Err(OrbitError::Execution(
-                serde_json::to_value(&err)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|_| format!("{err:?}")),
-            ));
-        }
-
-        let position_selector = parse_position(position_str.as_deref())?;
-        let lock_targets = lock_targets_for_mutation(&selector, &[]);
-
-        let result = with_graph_locks(
-            &knowledge_dir,
-            graph_lock_owner(ctx),
-            ctx.task_id.as_deref(),
+        let result = service.mutate(
+            &selector,
+            &[],
             reason.as_deref().unwrap_or("adding"),
-            &lock_targets,
-            || {
-                let result = working_graph
+            workspace_root,
+            |working_graph| {
+                if working_graph.has_leaf(&selector) {
+                    let error = orbit_knowledge::WriteError::leaf_already_exists(&selector_str);
+                    return Err(OrbitError::Execution(
+                        serde_json::to_value(&error)
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|_| format!("{error:?}")),
+                    ));
+                }
+
+                working_graph
                     .insert_leaf(
                         &selector,
                         &source,
@@ -114,29 +104,23 @@ impl Tool for OrbitKnowledgeAddTool {
                         reason.as_deref(),
                         workspace_root,
                     )
-                    .map_err(write_err_to_orbit)?;
-
-                save_task_working_graph(
-                    ctx.orbit_root.as_deref(),
-                    ctx.task_id.as_deref(),
-                    &working_graph,
-                )?;
-                Ok(result)
+                    .map_err(write_err_to_orbit)
             },
         )?;
 
         serde_json::to_value(result)
-            .map_err(|e| OrbitError::Execution(format!("serialize result: {e}")))
+            .map_err(|error| OrbitError::Execution(format!("serialize result: {error}")))
     }
 }
 
 fn parse_position(position: Option<&str>) -> Result<Option<Selector>, OrbitError> {
-    let Some(pos) = position else {
+    let Some(position) = position else {
         return Ok(None);
     };
-    let selector_str = pos.strip_prefix("after:").unwrap_or(pos);
-    let selector: Selector = selector_str
+    position
+        .strip_prefix("after:")
+        .unwrap_or(position)
         .parse()
-        .map_err(|e| OrbitError::InvalidInput(format!("invalid position: {e}")))?;
-    Ok(Some(selector))
+        .map(Some)
+        .map_err(|error| OrbitError::InvalidInput(format!("invalid position: {error}")))
 }

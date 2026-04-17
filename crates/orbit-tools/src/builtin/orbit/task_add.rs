@@ -1,98 +1,9 @@
-use orbit_exec::ExecRequest;
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
-use crate::{Tool, ToolContext};
+use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitTaskAddTool;
-
-pub(super) fn build_exec_request(
-    ctx: &ToolContext,
-    input: &Value,
-) -> Result<ExecRequest, OrbitError> {
-    let identity = super::resolve_identity(ctx, input)?;
-    let title = super::required_string(input, &["title"], "title")?;
-    let description = super::required_string(input, &["description"], "description")?;
-    let workspace = super::required_string(input, &["workspace"], "workspace")?;
-    let plan = match input.get("plan") {
-        Some(Value::String(value)) => Some(value.clone()),
-        Some(Value::Null) | None => None,
-        Some(_) => {
-            return Err(OrbitError::InvalidInput(
-                "`plan` must be a string".to_string(),
-            ));
-        }
-    };
-
-    let mut args = vec![
-        "task".to_string(),
-        "add".to_string(),
-        "--title".to_string(),
-        title,
-        "--description".to_string(),
-        description,
-        "--workspace".to_string(),
-        workspace,
-    ];
-    if let Some(plan) = plan {
-        args.push("--plan".to_string());
-        args.push(plan);
-    }
-    if let Some(criteria) = super::optional_string_list_alias(
-        input,
-        &[
-            "acceptance_criteria",
-            "acceptanceCriteria",
-            "acceptance-criteria",
-        ],
-    )? {
-        for criterion in criteria {
-            args.push("--acceptance-criteria".to_string());
-            args.push(criterion);
-        }
-    }
-
-    if let Some(comment) = super::optional_string(input, "comment")? {
-        args.push("--comment".to_string());
-        args.push(comment);
-    }
-    if let Some(context) = super::optional_string(input, "context")? {
-        args.push("--context".to_string());
-        args.push(context);
-    }
-    if let Some(priority) = super::optional_string(input, "priority")? {
-        args.push("--priority".to_string());
-        args.push(priority);
-    }
-    if let Some(complexity) = super::optional_string(input, "complexity")? {
-        args.push("--complexity".to_string());
-        args.push(complexity);
-    }
-    if let Some(task_type) =
-        super::optional_string_alias(input, &["type", "task_type", "taskType"])?
-    {
-        args.push("--type".to_string());
-        args.push(task_type);
-    }
-    if let Some(source_task) =
-        super::optional_string_alias(input, &["source_task_id", "source_task", "sourceTaskId"])?
-    {
-        args.push("--source-task".to_string());
-        args.push(source_task);
-    }
-    if let Some(parent_id) =
-        super::optional_string_alias(input, &["parent_id", "parent", "parentId"])?
-    {
-        args.push("--parent".to_string());
-        args.push(parent_id);
-    }
-    super::append_identity_flags(&mut args, &identity);
-
-    args.push("--json".to_string());
-    Ok(super::orbit_exec_request_with_identity(
-        ctx, args, &identity,
-    ))
-}
 
 impl Tool for OrbitTaskAddTool {
     fn schema(&self) -> ToolSchema {
@@ -185,7 +96,6 @@ impl Tool for OrbitTaskAddTool {
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        let req = build_exec_request(ctx, &input)?;
-        super::run_orbit_json_command(req, "orbit task add")
+        super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskAdd)
     }
 }

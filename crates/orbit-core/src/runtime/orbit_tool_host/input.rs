@@ -1,0 +1,185 @@
+use std::path::PathBuf;
+use std::str::FromStr;
+
+use orbit_store::state_io;
+use orbit_tools::OrbitTaskScope;
+use orbit_types::{
+    OrbitError, TaskArtifact, TaskComplexity, TaskPriority, TaskStatus, TaskType, optional_string,
+    optional_string_alias, optional_u32_alias,
+};
+use serde_json::{Value, json};
+
+pub(super) fn resolve_state_dir(
+    scope: &OrbitTaskScope,
+    input: &Value,
+) -> Result<PathBuf, OrbitError> {
+    if let Some(state_dir) = optional_string_alias(input, &["state_dir", "stateDir", "state-dir"])?
+    {
+        return Ok(PathBuf::from(state_dir));
+    }
+    if let Ok(state_dir) = std::env::var("ORBIT_STATE_DIR") {
+        let trimmed = state_dir.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
+    let run_id = optional_string_alias(input, &["run_id", "runId", "run-id"])?.or_else(|| {
+        std::env::var("ORBIT_RUN_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
+    let run_id = run_id.ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "missing `state_dir`; provide `state_dir` or `run_id`, or set ORBIT_STATE_DIR/ORBIT_RUN_ID"
+                .to_string(),
+        )
+    })?;
+
+    let orbit_root = scope
+        .orbit_root
+        .clone()
+        .or_else(|| std::env::var("ORBIT_ROOT").ok().map(PathBuf::from));
+    let orbit_root = orbit_root.ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "cannot resolve active run path without orbit_root; pass `state_dir` explicitly"
+                .to_string(),
+        )
+    })?;
+
+    state_io::resolve_active_run_state_dir(&orbit_root, &run_id)?
+        .ok_or(OrbitError::JobRunNotFound(run_id))
+}
+
+pub(super) fn resolve_step_index(input: &Value) -> Result<u32, OrbitError> {
+    if let Some(step_index) = optional_u32_alias(input, &["step_index", "stepIndex", "step-index"])?
+    {
+        return Ok(step_index);
+    }
+    let raw = std::env::var("ORBIT_STEP_INDEX").map_err(|_| {
+        OrbitError::InvalidInput(
+            "missing `step_index`; provide `step_index` or set ORBIT_STEP_INDEX".to_string(),
+        )
+    })?;
+    raw.trim().parse::<u32>().map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "ORBIT_STEP_INDEX must be an unsigned integer: {error}"
+        ))
+    })
+}
+
+pub(super) fn resolve_state_payload(input: &Value) -> Result<Value, OrbitError> {
+    let data = input.get("data");
+    let key = optional_string(input, "key")?;
+    let value = input.get("value");
+    match (data, key, value) {
+        (Some(_), Some(_), _) => Err(OrbitError::InvalidInput(
+            "provide either `data` or `key`/`value`, not both".to_string(),
+        )),
+        (Some(data), None, None) => {
+            if !data.is_object() {
+                return Err(OrbitError::InvalidInput(
+                    "`data` must be a JSON object".to_string(),
+                ));
+            }
+            Ok(data.clone())
+        }
+        (None, Some(key), Some(value)) => Ok(json!({ key: value.clone() })),
+        (None, Some(_), None) => Err(OrbitError::InvalidInput(
+            "`value` is required when `key` is provided".to_string(),
+        )),
+        (None, None, Some(_)) => Err(OrbitError::InvalidInput(
+            "`key` is required when `value` is provided".to_string(),
+        )),
+        (None, None, None) => Err(OrbitError::InvalidInput(
+            "provide either `data` or `key`/`value`".to_string(),
+        )),
+        (Some(_), None, Some(_)) => Err(OrbitError::InvalidInput(
+            "provide either `data` or `key`/`value`, not both".to_string(),
+        )),
+    }
+}
+
+pub(super) fn parse_artifacts(input: &Value) -> Result<Vec<TaskArtifact>, OrbitError> {
+    let Some(value) = input.get("artifacts").or_else(|| input.get("artifact")) else {
+        return Ok(Vec::new());
+    };
+
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::Object(map) => map
+            .iter()
+            .map(|(path, content)| {
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(OrbitError::InvalidInput(
+                        "`artifacts` keys must not be empty".to_string(),
+                    ));
+                }
+                let content = content.as_str().ok_or_else(|| {
+                    OrbitError::InvalidInput("`artifacts` values must be strings".to_string())
+                })?;
+                Ok(TaskArtifact {
+                    path: path.to_string(),
+                    content: content.to_string(),
+                })
+            })
+            .collect(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                let path = item.get("path").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput(
+                        "`artifacts` entries must include string `path` values".to_string(),
+                    )
+                })?;
+                let content = item.get("content").and_then(Value::as_str).ok_or_else(|| {
+                    OrbitError::InvalidInput(
+                        "`artifacts` entries must include string `content` values".to_string(),
+                    )
+                })?;
+                let path = path.trim();
+                if path.is_empty() {
+                    return Err(OrbitError::InvalidInput(
+                        "`artifacts` entry paths must not be empty".to_string(),
+                    ));
+                }
+                Ok(TaskArtifact {
+                    path: path.to_string(),
+                    content: content.to_string(),
+                })
+            })
+            .collect(),
+        _ => Err(OrbitError::InvalidInput(
+            "`artifacts` must be an object or array".to_string(),
+        )),
+    }
+}
+
+pub(super) fn empty_string_to_none(raw: String) -> Option<String> {
+    if raw.trim().is_empty() {
+        None
+    } else {
+        Some(raw)
+    }
+}
+
+pub(super) fn parse_task_status(field: &str, raw: &str) -> Result<TaskStatus, OrbitError> {
+    TaskStatus::from_str(raw)
+        .map_err(|error| OrbitError::InvalidInput(format!("`{field}` {error}")))
+}
+
+pub(super) fn parse_task_priority(field: &str, raw: &str) -> Result<TaskPriority, OrbitError> {
+    TaskPriority::from_str(raw)
+        .map_err(|error| OrbitError::InvalidInput(format!("`{field}` {error}")))
+}
+
+pub(super) fn parse_task_complexity(field: &str, raw: &str) -> Result<TaskComplexity, OrbitError> {
+    TaskComplexity::from_str(raw)
+        .map_err(|error| OrbitError::InvalidInput(format!("`{field}` {error}")))
+}
+
+pub(super) fn parse_task_type(field: &str, raw: &str) -> Result<TaskType, OrbitError> {
+    TaskType::from_str(raw).map_err(|error| OrbitError::InvalidInput(format!("`{field}` {error}")))
+}

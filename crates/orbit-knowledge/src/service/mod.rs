@@ -9,6 +9,7 @@ mod context;
 mod overview;
 mod search;
 mod selectors;
+mod task_graph;
 mod types;
 
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use crate::graph::navigator::GraphNavigator;
 use crate::graph::nodes::CodebaseGraphV1;
 
 pub use overview::compact_from_overview;
+pub use task_graph::{TaskGraphScope, TaskGraphService, default_knowledge_dir};
 pub use types::{
     FileOverview, GraphOverview, GraphOverviewSummary, NodeContext, ReferenceHit, SearchResult,
     SymbolBrief, TopFileEntry,

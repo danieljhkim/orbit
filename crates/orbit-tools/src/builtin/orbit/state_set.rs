@@ -1,7 +1,7 @@
 use orbit_types::{OrbitError, ToolParam, ToolSchema};
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::{Tool, ToolContext};
+use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitStateSetTool;
 
@@ -56,46 +56,6 @@ impl Tool for OrbitStateSetTool {
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        let state_dir = super::resolve_state_dir(ctx, &input)?;
-        let step_index = super::resolve_step_index(&input)?;
-        let payload = resolve_payload(&input)?;
-        orbit_store::state_io::write_step_output(&state_dir, step_index, &payload)?;
-        Ok(json!({
-            "state_dir": state_dir.display().to_string(),
-            "step_index": step_index,
-            "written": payload,
-        }))
-    }
-}
-
-fn resolve_payload(input: &Value) -> Result<Value, OrbitError> {
-    let data = input.get("data");
-    let key = super::optional_string(input, "key")?;
-    let value = input.get("value");
-    match (data, key, value) {
-        (Some(_), Some(_), _) => Err(OrbitError::InvalidInput(
-            "provide either `data` or `key`/`value`, not both".to_string(),
-        )),
-        (Some(data), None, None) => {
-            if !data.is_object() {
-                return Err(OrbitError::InvalidInput(
-                    "`data` must be a JSON object".to_string(),
-                ));
-            }
-            Ok(data.clone())
-        }
-        (None, Some(key), Some(value)) => Ok(json!({ key: value.clone() })),
-        (None, Some(_), None) => Err(OrbitError::InvalidInput(
-            "`value` is required when `key` is provided".to_string(),
-        )),
-        (None, None, Some(_)) => Err(OrbitError::InvalidInput(
-            "`key` is required when `value` is provided".to_string(),
-        )),
-        (None, None, None) => Err(OrbitError::InvalidInput(
-            "provide either `data` or `key`/`value`".to_string(),
-        )),
-        (Some(_), None, Some(_)) => Err(OrbitError::InvalidInput(
-            "provide either `data` or `key`/`value`, not both".to_string(),
-        )),
+        super::execute_host_action(ctx, input, OrbitBuiltinAction::StateSet)
     }
 }
