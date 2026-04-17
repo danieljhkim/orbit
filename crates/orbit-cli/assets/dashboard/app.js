@@ -13,13 +13,17 @@ const STATUS_ORDER = [
   "archived",
 ];
 
+const DEFAULT_INACTIVE_STATUSES = new Set(["done", "someday", "archived"]);
+
 const params = new URLSearchParams(window.location.search);
 const POLL_MS = Math.max(1000, parseInt(params.get("poll") || "5000", 10));
 
 const $ = (id) => document.getElementById(id);
 
 let searchQuery = "";
-let activeStatuses = new Set(STATUS_ORDER);
+let activeStatuses = new Set(
+  STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s)),
+);
 let lastTasks = [];
 let lastDiagnostics = { metrics: [], friction: [] };
 let activeDiagSubtab = "metrics";
