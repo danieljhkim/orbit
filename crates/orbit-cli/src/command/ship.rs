@@ -8,9 +8,9 @@ use std::collections::HashSet;
 
 use crate::command::Execute;
 use crate::command::job_run_support::{
-    RunHistoryFilter, job_run_step_to_json, job_run_to_json_with_workflow, load_filtered_job_runs,
-    load_latest_job_run, print_job_run_list_with_workflow, print_job_run_with_workflow,
-    print_step_detail, summary_step,
+    RunHistoryFilter, dispatch_workflow, job_run_step_to_json, job_run_to_json_with_workflow,
+    load_filtered_job_runs, load_latest_job_run, print_job_run_list_with_workflow,
+    print_job_run_with_workflow, print_step_detail, workflow_dispatch_result_to_json,
 };
 
 const SHIP_WORKFLOW: &str = "ship";
@@ -132,11 +132,14 @@ fn execute_ship_workflow(
 
     if args.json {
         if runs.len() == 1 {
-            return crate::output::json::print_pretty(&ship_run_to_json(&runs[0]));
+            return crate::output::json::print_pretty(&workflow_dispatch_result_to_json(&runs[0]));
         }
         return crate::output::json::print_pretty(&json!({
             "workflow": plan.workflow_alias,
-            "runs": runs.iter().map(ship_run_to_json).collect::<Vec<_>>(),
+            "runs": runs
+                .iter()
+                .map(workflow_dispatch_result_to_json)
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -256,17 +259,6 @@ struct ShipRunPlan {
     loop_count: u32,
 }
 
-#[derive(Clone)]
-struct WorkflowDispatchResult {
-    workflow_alias: &'static str,
-    job_id: String,
-    run_id: String,
-    state: String,
-    attempt: u32,
-    error_code: Option<String>,
-    error_message: Option<String>,
-}
-
 fn build_ship_run_plan(
     workflow_alias: &'static str,
     args: &ShipWorkflowArgs,
@@ -325,55 +317,6 @@ fn validate_explicit_task_selection(
     }
 
     Ok(())
-}
-
-fn dispatch_workflow(
-    runtime: &OrbitRuntime,
-    workflow_alias: &'static str,
-    input: &Value,
-    debug: bool,
-    loop_count: u32,
-) -> Result<Vec<WorkflowDispatchResult>, OrbitError> {
-    let workflow = find_workflow(workflow_alias)
-        .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
-
-    let mut results = Vec::with_capacity(loop_count as usize);
-    for _ in 0..loop_count {
-        let run = runtime.run_job_now_with_input_debug(workflow.job_id, input.clone(), debug)?;
-        let run_details = runtime
-            .job_history(workflow.job_id)?
-            .into_iter()
-            .find(|entry| entry.run_id == run.run_id);
-        results.push(WorkflowDispatchResult {
-            workflow_alias,
-            job_id: run.job_id,
-            run_id: run.run_id,
-            state: run.state.to_string(),
-            attempt: run.attempt,
-            error_code: run_details
-                .as_ref()
-                .and_then(summary_step)
-                .and_then(|step| step.error_code.clone()),
-            error_message: run_details
-                .as_ref()
-                .and_then(summary_step)
-                .and_then(|step| step.error_message.clone()),
-        });
-    }
-
-    Ok(results)
-}
-
-fn ship_run_to_json(run: &WorkflowDispatchResult) -> Value {
-    json!({
-        "workflow": run.workflow_alias,
-        "job_id": run.job_id,
-        "run_id": run.run_id,
-        "state": run.state,
-        "attempt": run.attempt,
-        "error_code": run.error_code,
-        "error_message": run.error_message,
-    })
 }
 
 fn ensure_ship_run(run: &orbit_core::JobRun) -> Result<(), OrbitError> {

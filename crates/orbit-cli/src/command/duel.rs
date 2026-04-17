@@ -14,13 +14,13 @@ use orbit_core::{
     validate_workflow_flags,
 };
 use orbit_types::DuelRun;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::command::Execute;
 use crate::command::job_run_support::{
-    RunHistoryFilter, job_run_step_to_json, job_run_to_json_with_workflow, load_filtered_job_runs,
-    load_latest_job_run, print_job_run_list_with_workflow, print_job_run_with_workflow,
-    print_step_detail, summary_step,
+    RunHistoryFilter, dispatch_workflow, job_run_step_to_json, job_run_to_json_with_workflow,
+    load_filtered_job_runs, load_latest_job_run, print_job_run_list_with_workflow,
+    print_job_run_with_workflow, print_step_detail, summary_step, workflow_dispatch_result_to_json,
 };
 
 const DUEL_PR_WORKFLOW: &str = "duel";
@@ -73,7 +73,7 @@ impl Execute for DuelSubcommand {
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit duel pr\n  orbit duel pr T20260409-0310\n  orbit duel pr T20260409-0310 --base main --json"
+    after_help = "Examples:\n  orbit duel pr\n  orbit duel pr --loop 3\n  orbit duel pr T20260409-0310\n  orbit duel pr T20260409-0310 --base main --json"
 )]
 pub struct DuelPrArgs {
     /// Optional task ID. Omit to auto-select the first available duel-eligible task.
@@ -88,6 +88,9 @@ pub struct DuelPrArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+    /// Repeat the selected duel workflow N times
+    #[arg(long = "loop")]
+    pub loop_count: Option<u32>,
 }
 
 #[derive(Args)]
@@ -110,14 +113,49 @@ pub struct DuelPlanArgs {
 
 impl Execute for DuelPrArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        execute_duel_workflow(
+        let plan = build_duel_pr_run_plan(&self)?;
+        let runs = dispatch_workflow(
             runtime,
-            DUEL_PR_WORKFLOW,
-            self.task_id,
-            self.base,
+            plan.workflow_alias,
+            &plan.input,
             self.debug,
-            self.json,
-        )
+            plan.loop_count,
+        )?;
+
+        if self.json {
+            if runs.len() == 1 {
+                return crate::output::json::print_pretty(&workflow_dispatch_result_to_json(
+                    &runs[0],
+                ));
+            }
+            return crate::output::json::print_pretty(&json!({
+                "workflow": plan.workflow_alias,
+                "runs": runs
+                    .iter()
+                    .map(workflow_dispatch_result_to_json)
+                    .collect::<Vec<_>>(),
+            }));
+        }
+
+        for run in &runs {
+            let error_code = run.error_code.clone().unwrap_or_else(|| "-".to_string());
+            let error_message = run
+                .error_message
+                .clone()
+                .unwrap_or_else(|| "-".to_string())
+                .replace('\n', " ");
+            println!(
+                "workflow={};job_id={};run_id={};state={};attempt={};error_code={};error_message={}",
+                run.workflow_alias,
+                run.job_id,
+                run.run_id,
+                run.state,
+                run.attempt,
+                error_code,
+                error_message
+            );
+        }
+        Ok(())
     }
 }
 
@@ -186,6 +224,43 @@ fn execute_duel_workflow(
         workflow.alias, run.job_id, run.run_id, run.state, run.attempt, error_code, error_message
     );
     Ok(())
+}
+
+struct DuelRunPlan {
+    workflow_alias: &'static str,
+    input: Value,
+    loop_count: u32,
+}
+
+fn build_duel_pr_run_plan(args: &DuelPrArgs) -> Result<DuelRunPlan, OrbitError> {
+    let loop_count = args.loop_count.unwrap_or(1);
+    if loop_count == 0 {
+        return Err(OrbitError::InvalidInput(
+            "--loop must be greater than 0".to_string(),
+        ));
+    }
+    if args.loop_count.is_some() && args.task_id.is_some() {
+        return Err(OrbitError::InvalidInput(
+            "--loop cannot be combined with an explicit task id; omit [TASK_ID] to auto-select each iteration".to_string(),
+        ));
+    }
+
+    let workflow = find_workflow(DUEL_PR_WORKFLOW).ok_or_else(|| {
+        OrbitError::InvalidInput(format!("unknown workflow '{DUEL_PR_WORKFLOW}'"))
+    })?;
+    let input = WorkflowInput {
+        tasks: args.task_id.clone(),
+        parallelism: None,
+        base: args.base.clone(),
+        pr_number: None,
+    };
+    validate_workflow_flags(workflow, &input)?;
+
+    Ok(DuelRunPlan {
+        workflow_alias: DUEL_PR_WORKFLOW,
+        input: build_workflow_input_for(Some(workflow), &input)?,
+        loop_count,
+    })
 }
 
 /// How the flat table should be sliced before display.

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime};
+use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime, find_workflow};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Default)]
@@ -7,6 +7,17 @@ pub(crate) struct RunHistoryFilter {
     pub status: Option<JobRunState>,
     pub since: Option<String>,
     pub limit: Option<usize>,
+}
+
+#[derive(Clone)]
+pub(crate) struct WorkflowDispatchResult {
+    pub workflow_alias: &'static str,
+    pub job_id: String,
+    pub run_id: String,
+    pub state: String,
+    pub attempt: u32,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
 }
 
 pub(crate) fn load_filtered_job_runs(
@@ -118,6 +129,43 @@ pub(crate) fn load_latest_job_run(
     .ok_or_else(|| OrbitError::InvalidInput(format!("no {label} runs found")))
 }
 
+pub(crate) fn dispatch_workflow(
+    runtime: &OrbitRuntime,
+    workflow_alias: &'static str,
+    input: &Value,
+    debug: bool,
+    loop_count: u32,
+) -> Result<Vec<WorkflowDispatchResult>, OrbitError> {
+    let workflow = find_workflow(workflow_alias)
+        .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
+
+    let mut results = Vec::with_capacity(loop_count as usize);
+    for _ in 0..loop_count {
+        let run = runtime.run_job_now_with_input_debug(workflow.job_id, input.clone(), debug)?;
+        let run_details = runtime
+            .job_history(workflow.job_id)?
+            .into_iter()
+            .find(|entry| entry.run_id == run.run_id);
+        results.push(WorkflowDispatchResult {
+            workflow_alias,
+            job_id: run.job_id,
+            run_id: run.run_id,
+            state: run.state.to_string(),
+            attempt: run.attempt,
+            error_code: run_details
+                .as_ref()
+                .and_then(summary_step)
+                .and_then(|step| step.error_code.clone()),
+            error_message: run_details
+                .as_ref()
+                .and_then(summary_step)
+                .and_then(|step| step.error_message.clone()),
+        });
+    }
+
+    Ok(results)
+}
+
 #[allow(dead_code)]
 pub(crate) fn print_job_run_list(runs: &[JobRun], full: bool) {
     let headers = if full {
@@ -218,6 +266,18 @@ pub(crate) fn job_run_to_json_with_workflow(run: &JobRun, workflow: Option<&str>
         map.insert("workflow".to_string(), Value::String(workflow.to_string()));
     }
     value
+}
+
+pub(crate) fn workflow_dispatch_result_to_json(run: &WorkflowDispatchResult) -> Value {
+    json!({
+        "workflow": run.workflow_alias,
+        "job_id": run.job_id,
+        "run_id": run.run_id,
+        "state": run.state,
+        "attempt": run.attempt,
+        "error_code": run.error_code,
+        "error_message": run.error_message,
+    })
 }
 
 pub(crate) fn job_run_step_to_json(step: &JobRunStep) -> Value {
