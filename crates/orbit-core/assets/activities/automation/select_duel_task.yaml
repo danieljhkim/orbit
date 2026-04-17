@@ -1,0 +1,37 @@
+schemaVersion: 1
+kind: Activity
+metadata:
+  name: select_duel_task
+spec:
+  spec_type: automation
+  description: Resolve the duel task ID from explicit input or by selecting the next eligible backlog task for the duel workflow.
+  input_schema_json:
+    type: object
+    properties:
+      task_id:
+        type: string
+        description: Explicit Orbit task ID to pass through unchanged when provided.
+      task_ids:
+        type: array
+        items:
+          type: string
+        description: Optional single-item task list preserved for downstream workflow context.
+      base:
+        type: string
+        description: Pass-through pipeline base branch input for downstream steps. This activity does not read it.
+  output_schema_json:
+    type: object
+    required:
+      - task_id
+      - task_ids
+    properties:
+      task_id:
+        type: string
+        description: Orbit task ID selected for the duel workflow.
+      task_ids:
+        type: array
+        items:
+          type: string
+        description: Single-item array containing the selected duel task ID.
+  action: select_duel_task
+  created_by: system

@@ -13,15 +13,14 @@ use orbit_core::{
     OrbitError, OrbitRuntime, WorkflowInput, build_workflow_input_for, find_workflow,
     validate_workflow_flags,
 };
-use orbit_types::{DuelRun, TaskStatus};
+use orbit_types::DuelRun;
 use serde_json::json;
-use std::cmp::Reverse;
 
 use crate::command::Execute;
 use crate::command::job_run_support::{
     RunHistoryFilter, job_run_step_to_json, job_run_to_json_with_workflow, load_filtered_job_runs,
     load_latest_job_run, print_job_run_list_with_workflow, print_job_run_with_workflow,
-    print_step_detail,
+    print_step_detail, summary_step,
 };
 
 const DUEL_PR_WORKFLOW: &str = "duel";
@@ -144,11 +143,6 @@ fn execute_duel_workflow(
 ) -> Result<(), OrbitError> {
     let workflow = find_workflow(workflow_alias)
         .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
-    let task_id = if workflow_alias == DUEL_PR_WORKFLOW {
-        Some(resolve_duel_task_id(runtime, task_id)?)
-    } else {
-        task_id
-    };
     let input = WorkflowInput {
         tasks: task_id,
         parallelism: None,
@@ -170,19 +164,19 @@ fn execute_duel_workflow(
             "run_id": run.run_id,
             "state": run.state.to_string(),
             "attempt": run.attempt,
-            "error_code": run_details.as_ref().and_then(|entry| entry.steps.last()).and_then(|step| step.error_code.clone()),
-            "error_message": run_details.as_ref().and_then(|entry| entry.steps.last()).and_then(|step| step.error_message.clone()),
+            "error_code": run_details.as_ref().and_then(summary_step).and_then(|step| step.error_code.clone()),
+            "error_message": run_details.as_ref().and_then(summary_step).and_then(|step| step.error_message.clone()),
         }));
     }
 
     let error_code = run_details
         .as_ref()
-        .and_then(|entry| entry.steps.last())
+        .and_then(summary_step)
         .and_then(|step| step.error_code.clone())
         .unwrap_or_else(|| "-".to_string());
     let error_message = run_details
         .as_ref()
-        .and_then(|entry| entry.steps.last())
+        .and_then(summary_step)
         .and_then(|step| step.error_message.clone())
         .unwrap_or_else(|| "-".to_string())
         .replace('\n', " ");
@@ -427,49 +421,5 @@ fn duel_workflow_name(job_id: &str) -> Option<&'static str> {
         "job_duel_pipeline" => Some(DUEL_PR_WORKFLOW),
         "job_duel_plan_pipeline" => Some(DUEL_PLAN_WORKFLOW),
         _ => None,
-    }
-}
-
-fn resolve_duel_task_id(
-    runtime: &OrbitRuntime,
-    task_id: Option<String>,
-) -> Result<String, OrbitError> {
-    if let Some(task_id) = task_id {
-        return Ok(task_id);
-    }
-
-    let mut tasks = runtime.list_tasks_filtered(Some(TaskStatus::Backlog), None, None, None)?;
-    tasks.retain(|task| {
-        task.batch_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_none()
-    });
-    tasks.sort_by(|left, right| {
-        (
-            Reverse(duel_priority_rank(left.priority)),
-            left.created_at,
-            left.id.clone(),
-        )
-            .cmp(&(
-                Reverse(duel_priority_rank(right.priority)),
-                right.created_at,
-                right.id.clone(),
-            ))
-    });
-    tasks.first().map(|task| task.id.clone()).ok_or_else(|| {
-        OrbitError::InvalidInput(
-            "no duel-eligible backlog tasks found for auto-selection".to_string(),
-        )
-    })
-}
-
-fn duel_priority_rank(priority: orbit_types::TaskPriority) -> u8 {
-    match priority {
-        orbit_types::TaskPriority::Low => 0,
-        orbit_types::TaskPriority::Medium => 1,
-        orbit_types::TaskPriority::High => 2,
-        orbit_types::TaskPriority::Critical => 3,
     }
 }

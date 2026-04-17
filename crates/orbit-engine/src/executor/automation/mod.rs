@@ -15,6 +15,7 @@ mod record_duel_scores;
 pub(crate) mod review;
 mod run_command;
 mod select_duel_roles;
+mod select_duel_task;
 mod setup_worktree;
 mod sync_review;
 mod task;
@@ -34,6 +35,7 @@ use crate::context::{ACTIVITY_EXECUTION_FAILED, AttemptOutcome, ExecutionContext
 // ---- retained internal actions (still referenced by duel/worker jobs) ----
 const UPDATE_TASK_ACTION: &str = "update_task";
 const RUN_PARALLEL_TASK_PIPELINE_ACTION: &str = "run_parallel_task_pipeline";
+const SELECT_DUEL_TASK_ACTION: &str = "select_duel_task";
 const SELECT_DUEL_ROLES_ACTION: &str = "select_duel_roles";
 const RECORD_DUEL_SCORES_ACTION: &str = "record_duel_scores";
 const RUN_PLANNING_DUEL_ACTION: &str = "run_planning_duel";
@@ -150,6 +152,7 @@ pub fn execute<
         RUN_PARALLEL_TASK_PIPELINE_ACTION => {
             parallel::run_parallel_task_pipeline(host, input, debug)
         }
+        SELECT_DUEL_TASK_ACTION => select_duel_task::select_duel_task(host, input),
         SELECT_DUEL_ROLES_ACTION => select_duel_roles::select_duel_roles(host, input),
         RECORD_DUEL_SCORES_ACTION => record_duel_scores::record_duel_scores(host, input),
         RUN_PLANNING_DUEL_ACTION => planning_duel::run_planning_duel(host, input, debug),

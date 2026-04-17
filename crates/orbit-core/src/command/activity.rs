@@ -23,6 +23,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/automation/parallel_dispatch_tasks.yaml"),
     ),
     (
+        "select_duel_task",
+        include_str!("../../assets/activities/automation/select_duel_task.yaml"),
+    ),
+    (
         "select_duel_roles",
         include_str!("../../assets/activities/automation/select_duel_roles.yaml"),
     ),

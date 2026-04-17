@@ -10,6 +10,11 @@ spec:
   max_active_runs: 1
   max_iterations: 1
   steps:
+    - id: select_task
+      target_type: activity
+      target_id: select_duel_task
+      condition: on_success
+      timeout_seconds: 30
     - id: select_roles
       target_type: activity
       target_id: select_duel_roles
