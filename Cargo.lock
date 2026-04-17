@@ -1383,6 +1383,7 @@ dependencies = [
  "orbit-knowledge",
  "orbit-types",
  "predicates",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",

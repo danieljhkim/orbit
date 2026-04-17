@@ -34,7 +34,7 @@ use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process
 use orbit_knowledge::graph::nodes::CodebaseGraphV1;
 use orbit_knowledge::graph::object_store::GraphObjectStore;
 use orbit_store::state_io;
-use orbit_types::{OrbitError, ToolParam};
+use orbit_types::{OrbitError, ToolParam, normalize_optional_attribution_label};
 use serde_json::Value;
 
 use crate::{TIMEOUT_DEFAULT_MS, ToolContext, ToolRegistry};
@@ -81,12 +81,7 @@ pub fn register(registry: &mut ToolRegistry) {
 }
 
 fn build_actor_label(agent: Option<&str>, model: Option<&str>) -> Option<String> {
-    match (agent, model) {
-        (Some(agent), Some(model)) => Some(format!("{agent} / {model}")),
-        (Some(agent), None) => Some(agent.to_string()),
-        (None, Some(model)) => Some(model.to_string()),
-        (None, None) => None,
-    }
+    normalize_optional_attribution_label(model.or(agent), model)
 }
 
 pub(super) fn resolve_identity(

@@ -3,7 +3,10 @@ use std::fs;
 use std::path::Path;
 
 use chrono::Utc;
-use orbit_types::{OrbitError, PlannerSlot, Task, TaskStatus};
+use orbit_types::{
+    OrbitError, PlannerSlot, Task, TaskStatus, normalize_attribution_label,
+    normalize_optional_attribution_label,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -194,10 +197,13 @@ pub fn generate_summary(
         if !matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
             continue;
         }
-        let Some(model) = task.implemented_by.as_deref() else {
+        let Some(model) = normalize_optional_attribution_label(
+            task.model.as_deref().or(task.implemented_by.as_deref()),
+            task.model.as_deref(),
+        ) else {
             continue;
         };
-        let summary = agents.entry(model_key(model)).or_default();
+        let summary = agents.entry(model_key(&model)).or_default();
         summary.tasks_completed = summary.tasks_completed.saturating_add(1);
     }
 
@@ -273,7 +279,7 @@ fn overlay_nested_metric(
 }
 
 fn model_key(model: &str) -> String {
-    model.trim().to_string()
+    normalize_attribution_label(model, None)
 }
 
 fn normalize_model_scoreboard(parsed: Value) -> Result<ModelScoreboard, OrbitError> {

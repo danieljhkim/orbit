@@ -1,5 +1,7 @@
 use orbit_engine::{TaskAutomationUpdate, TaskReadHost, TaskWriteHost};
-use orbit_types::{OrbitError, OrbitEvent, Task, TaskPriority, TaskStatus};
+use orbit_types::{
+    OrbitError, OrbitEvent, Task, TaskPriority, TaskStatus, normalize_optional_attribution_label,
+};
 
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
@@ -60,16 +62,36 @@ impl TaskWriteHost for OrbitRuntime {
         task_id: &str,
         update: TaskAutomationUpdate,
     ) -> Result<(), OrbitError> {
+        let existing_task = self.get_task(task_id)?;
         if update.status == Some(TaskStatus::InProgress) {
-            let task = self.get_task(task_id)?;
-            if crate::command::task::in_progress_transition_requires_plan(task.status) {
-                crate::command::task::ensure_task_has_execution_plan(task_id, task.plan.as_str())?;
+            if crate::command::task::in_progress_transition_requires_plan(existing_task.status) {
+                crate::command::task::ensure_task_has_execution_plan(
+                    task_id,
+                    existing_task.plan.as_str(),
+                )?;
             }
         }
         let _ = self.with_mutation(|| {
             let (agent, model) = self
                 .canonical_agent_model_identity(update.agent.as_deref(), update.model.as_deref());
-            let actor_label = model.clone().unwrap_or_else(|| "agent".to_string());
+            let actor_label = normalize_optional_attribution_label(
+                update
+                    .model
+                    .as_deref()
+                    .or(update.agent.as_deref())
+                    .or(Some("agent")),
+                existing_task.model.as_deref().or(model.as_deref()),
+            )
+            .unwrap_or_else(|| "agent".to_string());
+            let implemented_by = normalize_optional_attribution_label(
+                existing_task
+                    .model
+                    .as_deref()
+                    .or(model.as_deref())
+                    .or(existing_task.implemented_by.as_deref())
+                    .or(Some(actor_label.as_str())),
+                existing_task.model.as_deref().or(model.as_deref()),
+            );
             let task = self.stores().tasks().update(
                 task_id,
                 StoreTaskUpdateParams {
@@ -81,7 +103,7 @@ impl TaskWriteHost for OrbitRuntime {
                         update.status,
                         Some(TaskStatus::Review | TaskStatus::Done)
                     ) {
-                        Some(Some(actor_label.clone()))
+                        implemented_by.clone().map(Some)
                     } else {
                         None
                     },

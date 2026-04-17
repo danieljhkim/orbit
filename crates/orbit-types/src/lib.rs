@@ -45,7 +45,7 @@ pub mod tool;
 pub mod workspace;
 
 pub use activity::Activity;
-pub use actor::ActorIdentity;
+pub use actor::{ActorIdentity, normalize_attribution_label, normalize_optional_attribution_label};
 pub use agent_pair::{
     AgentModelPair, agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
     resolve_agent_model_pair,

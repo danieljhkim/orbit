@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_types::OrbitError;
+use orbit_types::{OrbitError, normalize_attribution_label};
 
 type ModelScores = HashMap<String, u64>;
 type Scoreboard = HashMap<String, ModelScores>;
@@ -32,6 +32,7 @@ pub fn record_friction_rejected(scoreboard_dir: &Path, model: &str) -> Result<()
 
 fn increment(scoreboard_dir: &Path, metric: &str, model: &str) -> Result<(), OrbitError> {
     let path = scoreboard_dir.join("friction_bounty.json");
+    let normalized_model = normalize_attribution_label(model, None);
     let mut scoreboard: Scoreboard = if path.exists() {
         let content = fs::read_to_string(&path)
             .map_err(|e| OrbitError::Io(format!("read friction_bounty.json: {e}")))?;
@@ -42,7 +43,7 @@ fn increment(scoreboard_dir: &Path, metric: &str, model: &str) -> Result<(), Orb
     };
 
     let model_map = scoreboard.entry(metric.to_string()).or_default();
-    let counter = model_map.entry(model.to_string()).or_insert(0);
+    let counter = model_map.entry(normalized_model).or_insert(0);
     *counter += 1;
 
     let json = serde_json::to_string_pretty(&scoreboard)

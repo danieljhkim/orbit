@@ -2,6 +2,8 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::agent_pair::{agent_family_from_cli, all_agent_families};
+
 /// Typed identity for attribution across all Orbit artifacts.
 ///
 /// Replaces ad-hoc `(Option<String>, Option<String>)` agent/model pairs.
@@ -119,6 +121,48 @@ impl Display for ActorIdentity {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label())
     }
+}
+
+/// Normalize legacy attribution labels to the model-only convention when a
+/// concrete model is available.
+pub fn normalize_attribution_label(label: &str, model_hint: Option<&str>) -> String {
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some((family, model)) = trimmed.rsplit_once(" / ") {
+        let family = family.trim();
+        let model = model.trim();
+        let is_known_family = family.eq_ignore_ascii_case("agent")
+            || all_agent_families()
+                .iter()
+                .any(|known| family.eq_ignore_ascii_case(known));
+        if is_known_family && !model.is_empty() {
+            return model.to_string();
+        }
+    }
+
+    if let Some(model_hint) = model_hint.map(str::trim).filter(|value| !value.is_empty()) {
+        let family = agent_family_from_cli(trimmed);
+        let is_known_family = all_agent_families()
+            .iter()
+            .any(|known| family == *known && trimmed.eq_ignore_ascii_case(known));
+        if trimmed.eq_ignore_ascii_case("agent") || is_known_family {
+            return model_hint.to_string();
+        }
+    }
+
+    trimmed.to_string()
+}
+
+pub fn normalize_optional_attribution_label(
+    label: Option<&str>,
+    model_hint: Option<&str>,
+) -> Option<String> {
+    label
+        .map(|value| normalize_attribution_label(value, model_hint))
+        .filter(|value| !value.is_empty())
 }
 
 /// Custom serialization: emits the flat display label string.

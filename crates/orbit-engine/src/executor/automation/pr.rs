@@ -2,7 +2,9 @@ use std::path::Path;
 
 use orbit_store::pr_scoreboard;
 use orbit_tools::ToolContext;
-use orbit_types::{OrbitError, ReviewThreadStatus, Role, Task, TaskStatus};
+use orbit_types::{
+    OrbitError, ReviewThreadStatus, Role, Task, TaskStatus, normalize_optional_attribution_label,
+};
 use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
@@ -129,9 +131,13 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
 
     let batch_requires_revision = batch_tasks.iter().any(task_required_revision);
     let batch_author = batch_tasks.iter().find_map(|task| {
-        task.implemented_by
-            .clone()
-            .or_else(|| task.created_by.clone())
+        normalize_optional_attribution_label(
+            task.implemented_by
+                .as_deref()
+                .or(task.model.as_deref())
+                .or(task.created_by.as_deref()),
+            task.model.as_deref(),
+        )
     });
 
     // Advance ALL batch tasks to Done status

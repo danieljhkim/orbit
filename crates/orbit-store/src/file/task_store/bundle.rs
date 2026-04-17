@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use orbit_types::{ActorIdentity, OrbitError, ReviewThread, Task, TaskStatus};
+use orbit_types::{
+    ActorIdentity, OrbitError, ReviewThread, Task, TaskStatus, normalize_optional_attribution_label,
+};
 
 use crate::file::fs_utils::write_atomic;
 use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
@@ -158,11 +160,18 @@ pub(super) fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         bundle.doc.actor_identity
     };
     let (legacy_agent, legacy_model) = legacy_identity.to_legacy();
-    let created_by = bundle
-        .doc
-        .created_by
-        .or(bundle.doc.proposed_by.clone())
-        .or_else(|| legacy_model.clone());
+    let model_hint = bundle.doc.model.as_deref().or(legacy_model.as_deref());
+    let created_by = normalize_optional_attribution_label(
+        bundle
+            .doc
+            .created_by
+            .as_deref()
+            .or(bundle.doc.proposed_by.as_deref())
+            .or(legacy_model.as_deref()),
+        model_hint,
+    );
+    let planned_by =
+        normalize_optional_attribution_label(bundle.doc.planned_by.as_deref(), model_hint);
     let legacy_implemented_by = if matches!(
         state.to_status(),
         TaskStatus::Review | TaskStatus::Done | TaskStatus::Archived
@@ -175,7 +184,14 @@ pub(super) fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
     } else {
         None
     };
-    let implemented_by = bundle.doc.implemented_by.or(legacy_implemented_by);
+    let implemented_by = normalize_optional_attribution_label(
+        bundle
+            .doc
+            .implemented_by
+            .as_deref()
+            .or(legacy_implemented_by.as_deref()),
+        model_hint,
+    );
 
     Task {
         id: bundle.doc.id,
@@ -189,7 +205,7 @@ pub(super) fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         workspace_path: bundle.doc.workspace_path,
         repo_root: bundle.doc.repo_root,
         created_by,
-        planned_by: bundle.doc.planned_by,
+        planned_by,
         implemented_by,
         agent: bundle.doc.agent.or(legacy_agent),
         model: bundle.doc.model.or(legacy_model),

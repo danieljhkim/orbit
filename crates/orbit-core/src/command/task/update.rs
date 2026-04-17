@@ -5,7 +5,7 @@ use orbit_types::{
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams;
 
-use super::helpers::{build_task_comments, effective_actor_label};
+use super::helpers::{build_task_comments, effective_actor_label, implementation_label};
 use super::params::TaskUpdateParams;
 use super::paths::{context_files_pruned_history_entry, context_workspace_root};
 use super::transitions::{ensure_task_has_execution_plan, in_progress_transition_requires_plan};
@@ -136,9 +136,11 @@ impl OrbitRuntime {
         let append_comments =
             build_task_comments(params.comment.clone(), effective_label.as_str())?;
         let planned_by = params.plan.as_ref().map(|_| Some(effective_label.clone()));
+        let implementation_label =
+            implementation_label(&task, effective_label.as_str(), canonical_model.as_deref());
         let implemented_by = params.status.and_then(|status| {
             if matches!(status, TaskStatus::Review | TaskStatus::Done) {
-                Some(Some(effective_label.clone()))
+                implementation_label.clone().map(Some)
             } else {
                 None
             }

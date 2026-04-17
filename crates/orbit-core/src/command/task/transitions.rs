@@ -1,10 +1,13 @@
 use orbit_store::friction_bounty;
-use orbit_types::{OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus};
+use orbit_types::{
+    OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus,
+    normalize_optional_attribution_label,
+};
 
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 
-use super::helpers::{build_task_comments, effective_actor_label};
+use super::helpers::{build_task_comments, effective_actor_label, implementation_label};
 
 const UNAUTHORED_TASK_PLAN_PLACEHOLDER: &str = "To be authored by executing agent at start time.";
 
@@ -30,6 +33,8 @@ impl OrbitRuntime {
         let actor = self.actor().clone();
         let effective_label =
             effective_actor_label(&actor.label, agent.as_deref(), model.as_deref());
+        let implemented_by =
+            implementation_label(&task, effective_label.as_str(), model.as_deref());
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
 
         let result = match task.status {
@@ -61,7 +66,7 @@ impl OrbitRuntime {
                         status: Some(TaskStatus::Done),
                         status_event: Some("review_approved".to_string()),
                         status_note: note.clone(),
-                        implemented_by: Some(Some(effective_label.clone())),
+                        implemented_by: implemented_by.clone().map(Some),
                         append_comments: append_comments.clone(),
                         ..Default::default()
                     },
@@ -402,7 +407,9 @@ impl OrbitRuntime {
         if !self.scoring_enabled() || !task.task_type.counts_toward_friction_bounty() {
             return;
         }
-        let Some(model) = task.created_by.as_deref() else {
+        let Some(model) =
+            normalize_optional_attribution_label(task.created_by.as_deref(), task.model.as_deref())
+        else {
             return;
         };
         let scoreboard_dir = &self.paths().scoreboard_dir;
@@ -415,9 +422,9 @@ impl OrbitRuntime {
         );
 
         if is_approval {
-            let _ = friction_bounty::record_friction_accepted(scoreboard_dir, model);
+            let _ = friction_bounty::record_friction_accepted(scoreboard_dir, &model);
         } else if to == TaskStatus::Rejected {
-            let _ = friction_bounty::record_friction_rejected(scoreboard_dir, model);
+            let _ = friction_bounty::record_friction_rejected(scoreboard_dir, &model);
         }
     }
 }
