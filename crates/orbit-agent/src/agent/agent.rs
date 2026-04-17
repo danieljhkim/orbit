@@ -4,7 +4,7 @@ use orbit_types::{InvocationTrace, OrbitError};
 
 use crate::providers::AgentProvider;
 use crate::runtime::{AgentRuntime, RuntimeBackend, resolve_runtime};
-use crate::types::{AgentRequest, AgentResponse};
+use crate::types::{AgentInvocationSpec, AgentRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderOptions {
@@ -106,7 +106,7 @@ impl Agent {
     pub fn invoke(
         &self,
         req: AgentRequest,
-    ) -> Result<(AgentResponse, InvocationTrace), OrbitError> {
+    ) -> Result<(AgentInvocationSpec, InvocationTrace), OrbitError> {
         self.runtime.invoke(req)
     }
 

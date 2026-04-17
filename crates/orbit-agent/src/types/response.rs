@@ -13,7 +13,7 @@ use serde_json::Value;
 pub use envelope::{is_timeout, parse_and_validate_response};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentResponse {
+pub struct AgentInvocationSpec {
     pub runtime_key: &'static str,
     pub program: String,
     pub args: Vec<String>,

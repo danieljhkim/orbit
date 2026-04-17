@@ -1,9 +1,9 @@
 use orbit_types::{InvocationTrace, OrbitError};
 
+use crate::providers::AgentProvider;
 use crate::providers::ollama::ollama_cli::OllamaCliTransport;
-use crate::providers::{AgentProvider, build_agent_response};
 use crate::runtime::AgentRuntime;
-use crate::types::{AgentRequest, AgentResponse};
+use crate::types::{AgentInvocationSpec, AgentRequest};
 
 pub(crate) struct OllamaRuntime {
     command: String,
@@ -20,9 +20,12 @@ impl OllamaRuntime {
 }
 
 impl AgentRuntime for OllamaRuntime {
-    fn invoke(&self, req: AgentRequest) -> Result<(AgentResponse, InvocationTrace), OrbitError> {
+    fn invoke(
+        &self,
+        req: AgentRequest,
+    ) -> Result<(AgentInvocationSpec, InvocationTrace), OrbitError> {
         Ok((
-            build_agent_response(
+            crate::providers::build_invocation_spec(
                 AgentProvider::Ollama,
                 self.command.clone(),
                 self.cli.args(req.verbose),
