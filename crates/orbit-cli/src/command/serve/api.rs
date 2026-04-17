@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use chrono::Utc;
 use orbit_core::OrbitRuntime;
 use orbit_core::command::job_run::JobRunListParams;
@@ -59,12 +59,30 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
     Router::new()
         .route("/tasks", get(list_tasks))
         .route("/tasks/:id", get(get_task))
+        .route("/tasks/:id/approve", post(approve_task_action))
+        .route("/tasks/:id/reject", post(reject_task_action))
+        .route("/tasks/:id/archive", post(archive_task_action))
         .route("/jobs", get(list_jobs))
         .route("/job-runs", get(list_job_runs))
         .route("/audit", get(list_audit))
         .route("/scoreboard", get(scoreboard))
         .route("/diagnostics/metrics", get(list_diagnostics_metrics))
         .route("/diagnostics/friction", get(list_diagnostics_friction))
+}
+
+#[derive(Deserialize, Default)]
+pub(super) struct ApproveBody {
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    comment: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct RejectBody {
+    note: String,
+    #[serde(default)]
+    comment: Option<String>,
 }
 
 async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
@@ -80,10 +98,40 @@ async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
 async fn get_task(State(runtime): State<Arc<OrbitRuntime>>, Path(id): Path<String>) -> Response {
     match runtime.get_task(&id) {
         Ok(task) => Json(task_to_json(&task)).into_response(),
-        Err(e) => match e {
-            orbit_core::OrbitError::TaskNotFound(_) => not_found(format!("task not found: {id}")),
-            other => server_error(other),
-        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+async fn approve_task_action(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path(id): Path<String>,
+    body: Option<Json<ApproveBody>>,
+) -> Response {
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    match runtime.approve_task(&id, body.note, body.comment) {
+        Ok(task) => Json(task_to_json(&task)).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+async fn reject_task_action(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path(id): Path<String>,
+    Json(body): Json<RejectBody>,
+) -> Response {
+    match runtime.reject_task(&id, body.note, body.comment) {
+        Ok(task) => Json(task_to_json(&task)).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+async fn archive_task_action(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path(id): Path<String>,
+) -> Response {
+    match runtime.archive_task(&id) {
+        Ok(()) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Err(e) => map_runtime_error(e),
     }
 }
 
@@ -183,6 +231,7 @@ async fn list_diagnostics_friction(
 fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
     match e {
         orbit_core::OrbitError::InvalidInput(msg) => bad_request(msg),
+        orbit_core::OrbitError::TaskNotFound(msg) => not_found(format!("task not found: {msg}")),
         other => server_error(other),
     }
 }

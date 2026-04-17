@@ -269,6 +269,59 @@
       }
       .row-detail .history-line .actor,
       .row-detail .comment-line .author { color: var(--fg); }
+      .row-detail .actions {
+        display: flex;
+        gap: 6px;
+        padding-top: 4px;
+        flex-wrap: wrap;
+      }
+      .action {
+        font: inherit;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        padding: 3px 10px;
+        border-radius: 3px;
+        cursor: pointer;
+        background: transparent;
+        text-transform: lowercase;
+      }
+      .action:disabled { opacity: 0.5; cursor: progress; }
+      .action.approve { border: 1px solid #3fb950; color: #3fb950; }
+      .action.approve:hover { background: rgba(63, 185, 80, 0.08); }
+      .action.reject { border: 1px solid #f85149; color: #f85149; }
+      .action.reject:hover { background: rgba(248, 81, 73, 0.08); }
+      .action.archive { border: 1px solid var(--fg-dim); color: var(--fg-dim); }
+      .action.archive:hover { background: rgba(110, 118, 129, 0.1); color: var(--fg); }
+      .action.cancel { border: 1px solid var(--border); color: var(--fg-dim); }
+      .action.cancel:hover { color: var(--fg); }
+      .reject-form {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .reject-form textarea {
+        background: var(--bg);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 6px 8px;
+        font: inherit;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        min-height: 60px;
+        resize: vertical;
+        outline: none;
+      }
+      .reject-form textarea:focus { border-color: var(--accent); }
+      .action-error {
+        padding: 6px 10px;
+        border: 1px solid var(--state-failed);
+        border-radius: 3px;
+        color: var(--state-failed);
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        background: rgba(248, 81, 73, 0.08);
+      }
       .pill {
         display: inline-block;
         padding: 1px 6px;

@@ -172,7 +172,103 @@ function buildTaskDetail(task) {
     }
   }
 
+  detail.appendChild(buildActionsRow(task, detail));
+
   return detail;
+}
+
+const APPROVE_STATUSES = new Set(["proposed", "review"]);
+const REJECT_STATUSES = new Set(["proposed", "review", "backlog"]);
+
+function buildActionsRow(task, detail) {
+  const actions = el("div", { class: "actions" });
+  if (APPROVE_STATUSES.has(task.status)) {
+    const btn = el("button", { class: "action approve", text: "approve" });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      runAction(task, "approve", detail);
+    });
+    actions.appendChild(btn);
+  }
+  if (REJECT_STATUSES.has(task.status)) {
+    const btn = el("button", { class: "action reject", text: "reject" });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showRejectForm(task, detail, actions);
+    });
+    actions.appendChild(btn);
+  }
+  if (task.status !== "archived") {
+    const btn = el("button", { class: "action archive", text: "archive" });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (window.confirm(`Archive task ${task.id}?`)) {
+        runAction(task, "archive", detail);
+      }
+    });
+    actions.appendChild(btn);
+  }
+  return actions;
+}
+
+function showRejectForm(task, detail, actions) {
+  const form = el("div", { class: "reject-form" });
+  form.addEventListener("click", (e) => e.stopPropagation());
+  const ta = el("textarea");
+  ta.placeholder = "reason for rejection";
+  const buttons = el("div", { class: "actions" });
+  const submit = el("button", { class: "action reject", text: "submit" });
+  const cancel = el("button", { class: "action cancel", text: "cancel" });
+  submit.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const note = ta.value.trim();
+    if (!note) {
+      ta.focus();
+      return;
+    }
+    runAction(task, "reject", detail, { note });
+  });
+  cancel.addEventListener("click", (e) => {
+    e.stopPropagation();
+    form.replaceWith(actions);
+  });
+  buttons.appendChild(submit);
+  buttons.appendChild(cancel);
+  form.appendChild(ta);
+  form.appendChild(buttons);
+  actions.replaceWith(form);
+  ta.focus();
+}
+
+async function runAction(task, kind, detail, body) {
+  // Disable buttons while in flight to prevent double-clicks
+  for (const b of detail.querySelectorAll("button.action")) b.disabled = true;
+  // Clear any prior error
+  const prior = detail.querySelector(".action-error");
+  if (prior) prior.remove();
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/${kind}`, {
+      method: "POST",
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      let msg = `${kind} failed: HTTP ${res.status}`;
+      try {
+        const errBody = await res.json();
+        if (errBody && errBody.error) msg = `${kind} failed: ${errBody.error}`;
+      } catch (_) {
+        /* keep generic msg */
+      }
+      throw new Error(msg);
+    }
+    expandedTaskIds.delete(task.id);
+    await tick();
+  } catch (err) {
+    for (const b of detail.querySelectorAll("button.action")) b.disabled = false;
+    const errEl = el("div", { class: "action-error", text: String(err.message || err) });
+    detail.prepend(errEl);
+  }
 }
 
 function renderTasks(tasks) {
