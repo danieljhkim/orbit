@@ -6,7 +6,8 @@ use orbit_types::{Job, JobRun, JobRunState, JobScheduleState, OrbitError};
 
 use super::resource::{job_to_resource, validate_max_active_runs};
 use crate::backend::{JobCreateParams, JobUpdateParams};
-use crate::file::fs_utils::write_atomic;
+use crate::file::sort::sort_by_created_desc_id_asc;
+use crate::file::yaml_doc::write_yaml_atomic;
 
 pub(crate) struct JobFileStore {
     pub(super) jobs_root: PathBuf,
@@ -61,11 +62,7 @@ impl JobFileStore {
         if !include_disabled {
             jobs.retain(|job| job.state != JobScheduleState::Disabled);
         }
-        jobs.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.job_id.cmp(&b.job_id))
-        });
+        sort_by_created_desc_id_asc(&mut jobs, |job| &job.created_at, |job| &job.job_id);
         Ok(jobs)
     }
 
@@ -133,11 +130,7 @@ impl JobFileStore {
 
     pub(crate) fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         let mut runs = self.read_runs_for_activity(job_id)?;
-        runs.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.run_id.cmp(&b.run_id))
-        });
+        sort_by_created_desc_id_asc(&mut runs, |run| &run.created_at, |run| &run.run_id);
         Ok(runs)
     }
 
@@ -158,11 +151,7 @@ impl JobFileStore {
             runs.retain(|run| run.created_at >= created_since);
         }
 
-        runs.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.run_id.cmp(&b.run_id))
-        });
+        sort_by_created_desc_id_asc(&mut runs, |run| &run.created_at, |run| &run.run_id);
 
         if let Some(limit) = query.limit {
             runs.truncate(limit);
@@ -235,9 +224,7 @@ impl JobFileStore {
         job.state = JobScheduleState::Disabled;
         job.updated_at = Utc::now();
         // Write updated state to disabled/ then remove the active file.
-        let content = serde_yaml::to_string(&job_to_resource(&job))
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        write_atomic(&disabled_path, &content)?;
+        write_yaml_atomic(&disabled_path, &job_to_resource(&job))?;
         let active_path = self.job_path(job_id);
         if active_path.exists() {
             fs::remove_file(&active_path).map_err(|e| OrbitError::Io(e.to_string()))?;

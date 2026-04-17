@@ -8,7 +8,9 @@ use orbit_types::{
 };
 
 use crate::backend::{ActivityCreateParams, ActivityUpdateParams};
-use crate::file::fs_utils::write_atomic;
+use crate::file::layout::{DualLayout, file_timestamps};
+use crate::file::sort::sort_by_created_desc_id_asc;
+use crate::file::yaml_doc::{enumerate_yaml, read_yaml, write_yaml_atomic};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -48,9 +50,7 @@ impl ActivityFileStore {
     }
 
     pub(crate) fn ensure_layout(&self) -> Result<(), OrbitError> {
-        fs::create_dir_all(self.active_dir()).map_err(|e| OrbitError::Io(e.to_string()))?;
-        fs::create_dir_all(self.inactive_dir()).map_err(|e| OrbitError::Io(e.to_string()))?;
-        Ok(())
+        self.doc_layout().ensure()
     }
 
     pub(crate) fn insert_work(
@@ -93,26 +93,22 @@ impl ActivityFileStore {
         &self,
         include_inactive: bool,
     ) -> Result<Vec<Activity>, OrbitError> {
-        let mut activities = self.list_dir_docs(&self.active_dir(), true)?;
+        let layout = self.doc_layout();
+        let mut activities = self.list_dir_docs(&layout.primary, true)?;
         if include_inactive {
-            activities.extend(self.list_dir_docs(&self.inactive_dir(), false)?);
+            activities.extend(self.list_dir_docs(&layout.secondary, false)?);
         }
-        activities.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        sort_by_created_desc_id_asc(
+            &mut activities,
+            |activity| &activity.created_at,
+            |activity| &activity.id,
+        );
         Ok(activities)
     }
 
     pub(crate) fn get_activity(&self, id: &str) -> Result<Option<Activity>, OrbitError> {
-        let active = self.active_doc_path(id);
-        if active.exists() {
-            return Ok(Some(self.read_activity_at(&active, true)?));
-        }
-        let inactive = self.inactive_doc_path(id);
-        if inactive.exists() {
-            return Ok(Some(self.read_activity_at(&inactive, false)?));
+        if let Some((path, is_active)) = self.doc_layout().locate(id, "yaml") {
+            return Ok(Some(self.read_activity_at(&path, is_active)?));
         }
         Ok(None)
     }
@@ -123,11 +119,8 @@ impl ActivityFileStore {
         params: &ActivityUpdateParams,
     ) -> Result<Activity, OrbitError> {
         self.ensure_layout()?;
-        let (path, current_active) = if self.active_doc_path(id).exists() {
-            (self.active_doc_path(id), true)
-        } else if self.inactive_doc_path(id).exists() {
-            (self.inactive_doc_path(id), false)
-        } else {
+        let layout = self.doc_layout();
+        let Some((path, current_active)) = layout.locate(id, "yaml") else {
             return Err(OrbitError::InvalidInput(format!(
                 "activity not found: {id}"
             )));
@@ -156,11 +149,10 @@ impl ActivityFileStore {
         }
         let new_active = params.is_active.unwrap_or(current_active);
         if new_active != current_active {
-            // Move the file to the new location.
             let new_path = if new_active {
-                self.active_doc_path(id)
+                layout.primary_file(id, "yaml")
             } else {
-                self.inactive_doc_path(id)
+                layout.secondary_file(id, "yaml")
             };
             self.write_doc_at(&new_path, &doc)?;
             fs::remove_file(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
@@ -172,16 +164,17 @@ impl ActivityFileStore {
 
     pub(crate) fn disable_activity(&self, id: &str) -> Result<bool, OrbitError> {
         self.ensure_layout()?;
-        let active = self.active_doc_path(id);
+        let layout = self.doc_layout();
+        let active = layout.primary_file(id, "yaml");
         if active.exists() {
             let doc = self.read_doc_at(&active)?;
-            let inactive = self.inactive_doc_path(id);
+            let inactive = layout.secondary_file(id, "yaml");
             self.write_doc_at(&inactive, &doc)?;
             fs::remove_file(&active).map_err(|e| OrbitError::Io(e.to_string()))?;
             return Ok(true);
         }
 
-        let inactive = self.inactive_doc_path(id);
+        let inactive = layout.secondary_file(id, "yaml");
         if inactive.exists() {
             let doc = self.read_doc_at(&inactive)?;
             self.write_doc_at(&inactive, &doc)?;
@@ -192,29 +185,13 @@ impl ActivityFileStore {
     }
 
     fn list_dir_docs(&self, dir: &Path, active: bool) -> Result<Vec<Activity>, OrbitError> {
-        if !dir.exists() {
-            return Ok(Vec::new());
-        }
-        let mut paths = fs::read_dir(dir)
-            .map_err(|e| OrbitError::Io(e.to_string()))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| is_yaml(path))
-            .collect::<Vec<_>>();
-        paths.sort();
-
-        let mut activities = Vec::new();
-        for path in paths {
-            activities.push(self.read_activity_at(&path, active)?);
-        }
-        Ok(activities)
+        enumerate_yaml(dir, "activity file", |path| {
+            self.read_activity_at(&path, active)
+        })
     }
 
     fn read_doc_at(&self, path: &Path) -> Result<LegacyActivityFileDocument, OrbitError> {
-        let raw = fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-        let doc = serde_yaml::from_str::<ActivityResource>(&raw).map_err(|e| {
-            OrbitError::Store(format!("invalid activity file '{}': {e}", path.display()))
-        })?;
+        let doc = read_yaml::<ActivityResource>(path, "activity file")?;
         legacy_doc_from_resource(doc, path)
     }
 
@@ -229,26 +206,19 @@ impl ActivityFileStore {
         path: &Path,
         doc: &LegacyActivityFileDocument,
     ) -> Result<(), OrbitError> {
-        let is_active = path.starts_with(self.active_dir());
-        let yaml = serde_yaml::to_string(&resource_from_legacy_doc(doc, is_active))
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        write_atomic(path, &yaml)
+        let is_active = path.starts_with(self.doc_layout().primary.as_path());
+        write_yaml_atomic(path, &resource_from_legacy_doc(doc, is_active))
+    }
+
+    fn doc_layout(&self) -> DualLayout {
+        DualLayout {
+            primary: self.root.join("active"),
+            secondary: self.root.join("inactive"),
+        }
     }
 
     fn active_doc_path(&self, id: &str) -> PathBuf {
-        self.active_dir().join(format!("{id}.yaml"))
-    }
-
-    fn inactive_doc_path(&self, id: &str) -> PathBuf {
-        self.inactive_dir().join(format!("{id}.yaml"))
-    }
-
-    fn active_dir(&self) -> PathBuf {
-        self.root.join("active")
-    }
-
-    fn inactive_dir(&self) -> PathBuf {
-        self.root.join("inactive")
+        self.doc_layout().primary_file(id, "yaml")
     }
 }
 
@@ -352,23 +322,6 @@ fn resource_from_legacy_doc(doc: &LegacyActivityFileDocument, is_active: bool) -
             spec_config: doc.activity.spec_config.clone(),
         },
     )
-}
-
-fn file_timestamps(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), OrbitError> {
-    let metadata = fs::metadata(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-    let created_at = metadata.created().ok().map(DateTime::<Utc>::from);
-    let updated_at = metadata.modified().ok().map(DateTime::<Utc>::from);
-    let now = Utc::now();
-
-    let created_at = created_at.or(updated_at).unwrap_or(now);
-    let updated_at = updated_at.unwrap_or(created_at);
-    Ok((created_at, updated_at))
-}
-
-fn is_yaml(path: &Path) -> bool {
-    path.extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
 }
 
 fn normalize_json_schema_for_storage(value: serde_json::Value) -> serde_json::Value {

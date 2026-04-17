@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use orbit_types::{OrbitError, TaskStatus};
 
 use super::TaskFileStore;
+use crate::file::layout::{ensure_dirs, read_child_dirs as list_child_dirs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TaskStateDir {
@@ -86,11 +87,11 @@ impl TaskStateDir {
 
 impl TaskFileStore {
     pub(super) fn ensure_layout(&self) -> Result<(), OrbitError> {
-        for state in TaskStateDir::all() {
-            fs::create_dir_all(self.root.join(state.as_dir()))
-                .map_err(|e| OrbitError::Io(e.to_string()))?;
-        }
-        Ok(())
+        let dirs = TaskStateDir::all()
+            .map(|state| self.root.join(state.as_dir()))
+            .to_vec();
+        let dir_refs = dirs.iter().map(|dir| dir.as_path()).collect::<Vec<_>>();
+        ensure_dirs(&dir_refs)
     }
 
     pub(super) fn next_task_id(&self, now: DateTime<Utc>) -> Result<String, OrbitError> {
@@ -184,17 +185,17 @@ impl TaskFileStore {
         }
 
         if !state.is_partitioned() {
-            return read_child_dirs(&state_dir);
+            return list_child_dirs(&state_dir);
         }
 
         let mut task_dirs = Vec::new();
-        for entry in read_child_dirs(&state_dir)? {
+        for entry in list_child_dirs(&state_dir)? {
             let Some(name) = entry.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
 
             if is_partition_dir_name(name) {
-                task_dirs.extend(read_child_dirs(&entry)?);
+                task_dirs.extend(list_child_dirs(&entry)?);
                 continue;
             }
 
@@ -212,7 +213,7 @@ impl TaskFileStore {
             return Ok(Vec::new());
         }
 
-        Ok(read_child_dirs(&state_dir)?
+        Ok(list_child_dirs(&state_dir)?
             .into_iter()
             .filter(|path| {
                 path.file_name()
@@ -276,15 +277,4 @@ fn is_valid_year_month(year: &str, month: &str) -> bool {
             month,
             "01" | "02" | "03" | "04" | "05" | "06" | "07" | "08" | "09" | "10" | "11" | "12"
         )
-}
-
-fn read_child_dirs(dir: &Path) -> Result<Vec<PathBuf>, OrbitError> {
-    let mut child_dirs = fs::read_dir(dir)
-        .map_err(|e| OrbitError::Io(e.to_string()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-    child_dirs.sort();
-    Ok(child_dirs)
 }

@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 #[cfg(unix)]
 use std::process::Command;
@@ -9,26 +8,14 @@ use orbit_types::{
 };
 
 use super::JobFileStore;
+use crate::file::layout::list_yaml_files;
+use crate::file::yaml_doc::{read_yaml, write_yaml_atomic};
 
 impl JobFileStore {
     pub(super) fn read_all_activities(&self) -> Result<Vec<Job>, OrbitError> {
         self.ensure_layout()?;
-        let mut paths: Vec<std::path::PathBuf> = fs::read_dir(self.jobs_dir())
-            .map_err(|e| OrbitError::Io(e.to_string()))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| is_yaml(path))
-            .collect();
-        // Also include disabled jobs.
-        if self.disabled_jobs_dir().exists() {
-            let disabled: Vec<std::path::PathBuf> = fs::read_dir(self.disabled_jobs_dir())
-                .map_err(|e| OrbitError::Io(e.to_string()))?
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|path| is_yaml(path))
-                .collect();
-            paths.extend(disabled);
-        }
+        let mut paths = list_yaml_files(&self.jobs_dir())?;
+        paths.extend(list_yaml_files(&self.disabled_jobs_dir())?);
         paths.sort();
         let mut jobs = Vec::new();
         for path in paths {
@@ -38,18 +25,14 @@ impl JobFileStore {
     }
 
     pub(super) fn read_activity_at(&self, path: &Path) -> Result<Job, OrbitError> {
-        let raw = fs::read_to_string(path).map_err(|e| OrbitError::Io(e.to_string()))?;
-        let doc = serde_yaml::from_str::<JobResource>(&raw).map_err(|e| {
-            OrbitError::Store(format!("invalid job file '{}': {e}", path.display()))
-        })?;
+        let doc = read_yaml::<JobResource>(path, "job file")?;
         job_from_resource(doc, path)
     }
 
     pub(super) fn write_activity(&self, job: &Job) -> Result<(), OrbitError> {
         self.ensure_layout()?;
         let doc = job_to_resource(job);
-        let content = serde_yaml::to_string(&doc).map_err(|e| OrbitError::Store(e.to_string()))?;
-        write_atomic(&self.job_path(&job.job_id), &content)
+        write_yaml_atomic(&self.job_path(&job.job_id), &doc)
     }
 }
 
@@ -147,12 +130,4 @@ pub(super) fn process_start_time_token(pid: u32) -> Option<String> {
 #[cfg(not(unix))]
 pub(super) fn process_start_time_token(_pid: u32) -> Option<String> {
     None
-}
-
-use crate::file::fs_utils::write_atomic;
-
-fn is_yaml(path: &Path) -> bool {
-    path.extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"))
 }

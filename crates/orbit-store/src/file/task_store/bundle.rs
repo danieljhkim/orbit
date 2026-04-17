@@ -4,6 +4,7 @@ use std::path::Path;
 use orbit_types::{ActorIdentity, OrbitError, ReviewThread, Task, TaskStatus};
 
 use crate::file::fs_utils::write_atomic;
+use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
 
 use super::{
     TaskFileStore,
@@ -40,9 +41,10 @@ impl TaskFileStore {
         fs::create_dir_all(self.artifacts_dir(task_dir))
             .map_err(|e| OrbitError::Io(e.to_string()))?;
 
-        write_atomic(
+        write_yaml_atomic_with(
             &self.task_doc_path(task_dir),
-            &serialize_task_doc_yaml(&bundle.doc)?,
+            &bundle.doc,
+            serialize_task_doc_yaml,
         )?;
         write_atomic(&self.plan_path(task_dir), &bundle.plan)?;
         write_atomic(
@@ -54,10 +56,15 @@ impl TaskFileStore {
 
     pub(super) fn read_bundle_at(&self, task_dir: &Path) -> Result<TaskBundle, OrbitError> {
         let doc_path = self.task_doc_path(task_dir);
-        let raw = fs::read_to_string(&doc_path)
-            .map_err(|e| bundle_read_error(&doc_path, "task metadata", e))?;
-        let doc = serde_yaml::from_str::<TaskFileDocument>(&raw).map_err(|e| {
-            OrbitError::Store(format!("invalid task file {}: {e}", doc_path.display()))
+        if !doc_path.exists() {
+            return Err(bundle_read_error(
+                &doc_path,
+                "task metadata",
+                std::io::Error::new(std::io::ErrorKind::NotFound, "task metadata not found"),
+            ));
+        }
+        let doc = read_yaml_with(&doc_path, |path, err| {
+            OrbitError::Store(format!("invalid task file {}: {err}", path.display()))
         })?;
         let bundle = TaskBundle {
             doc,

@@ -1,26 +1,32 @@
-use std::fs;
 use std::path::PathBuf;
 
 use orbit_types::OrbitError;
 
 use super::JobFileStore;
+use crate::file::layout::DualLayout;
 
 impl JobFileStore {
     pub(super) fn ensure_layout(&self) -> Result<(), OrbitError> {
-        fs::create_dir_all(self.jobs_dir()).map_err(|e| OrbitError::Io(e.to_string()))?;
-        fs::create_dir_all(self.disabled_jobs_dir()).map_err(|e| OrbitError::Io(e.to_string()))?;
+        self.job_layout().ensure()?;
         // runs_dir is NOT created here: job runs are WorkspaceOnly per scoping rules
         // and must not be initialized at global scope. write_run creates run dirs
         // on demand via fs::create_dir_all.
         Ok(())
     }
 
+    pub(super) fn job_layout(&self) -> DualLayout {
+        DualLayout {
+            primary: self.jobs_root.clone(),
+            secondary: self.jobs_root.join("disabled"),
+        }
+    }
+
     pub(super) fn jobs_dir(&self) -> PathBuf {
-        self.jobs_root.clone()
+        self.job_layout().primary
     }
 
     pub(super) fn disabled_jobs_dir(&self) -> PathBuf {
-        self.jobs_dir().join("disabled")
+        self.job_layout().secondary
     }
 
     pub(super) fn runs_dir(&self) -> PathBuf {
@@ -28,11 +34,11 @@ impl JobFileStore {
     }
 
     pub(super) fn job_path(&self, job_id: &str) -> PathBuf {
-        self.jobs_dir().join(format!("{job_id}.yaml"))
+        self.job_layout().primary_file(job_id, "yaml")
     }
 
     pub(super) fn disabled_job_path(&self, job_id: &str) -> PathBuf {
-        self.disabled_jobs_dir().join(format!("{job_id}.yaml"))
+        self.job_layout().secondary_file(job_id, "yaml")
     }
 
     pub(super) fn run_dir(&self, job_id: &str) -> PathBuf {

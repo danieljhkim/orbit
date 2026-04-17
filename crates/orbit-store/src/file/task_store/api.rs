@@ -11,6 +11,7 @@ use super::constants::TASK_SCHEMA_VERSION;
 use super::doc::TaskFileDocument;
 use super::layout::TaskStateDir;
 use crate::backend::{TaskCreateParams, TaskUpdateParams};
+use crate::file::sort::sort_by_created_desc_id_asc;
 
 pub(crate) struct TaskFileStore {
     pub(super) root: PathBuf,
@@ -93,11 +94,7 @@ impl TaskFileStore {
             }
         }
 
-        tasks.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        sort_by_created_desc_id_asc(&mut tasks, |task| &task.created_at, |task| &task.id);
         Ok(tasks)
     }
 
