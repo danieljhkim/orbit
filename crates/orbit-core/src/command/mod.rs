@@ -12,6 +12,7 @@
 
 pub mod activity;
 pub mod audit_event;
+pub mod diagnostics;
 pub mod executor;
 pub mod init;
 pub mod job;

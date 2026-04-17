@@ -21,6 +21,8 @@ const $ = (id) => document.getElementById(id);
 let searchQuery = "";
 let activeStatuses = new Set(STATUS_ORDER);
 let lastTasks = [];
+let lastDiagnostics = { metrics: [], friction: [] };
+let activeDiagSubtab = "metrics";
 
 function el(tag, opts = {}, children = []) {
   const node = document.createElement(tag);
@@ -290,29 +292,150 @@ function wireSearch() {
   });
 }
 
-const TABS = ["tasks", "scoreboard"];
+const TABS = ["tasks", "scoreboard", "diagnostics"];
+const DIAG_SUBTABS = ["metrics", "friction"];
 
-function setActiveTab(name) {
-  if (!TABS.includes(name)) name = "tasks";
+function setActiveTab(raw) {
+  const [topRaw, subRaw] = String(raw || "").split("/");
+  const top = TABS.includes(topRaw) ? topRaw : "tasks";
   for (const tab of document.querySelectorAll(".tab")) {
-    tab.classList.toggle("active", tab.dataset.tab === name);
+    tab.classList.toggle("active", tab.dataset.tab === top);
   }
   for (const pane of document.querySelectorAll(".tab-pane")) {
-    pane.classList.toggle("active", pane.dataset.tab === name);
+    pane.classList.toggle("active", pane.dataset.tab === top);
   }
-  if (window.location.hash !== `#${name}`) {
-    window.location.hash = `#${name}`;
+  let hash = `#${top}`;
+  if (top === "diagnostics") {
+    const sub = DIAG_SUBTABS.includes(subRaw) ? subRaw : activeDiagSubtab;
+    setDiagSubtab(sub);
+    hash = `#diagnostics/${sub}`;
   }
+  if (window.location.hash !== hash) {
+    window.location.hash = hash;
+  }
+}
+
+function setDiagSubtab(name) {
+  if (!DIAG_SUBTABS.includes(name)) name = "metrics";
+  activeDiagSubtab = name;
+  for (const btn of document.querySelectorAll("#diag-subtabs .subtab")) {
+    btn.classList.toggle("active", btn.dataset.subtab === name);
+  }
+  $("diag-title").textContent = name;
+  renderDiagnostics();
 }
 
 function initTabs() {
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => setActiveTab(tab.dataset.tab));
   }
+  for (const btn of document.querySelectorAll("#diag-subtabs .subtab")) {
+    btn.addEventListener("click", () => setActiveTab(`diagnostics/${btn.dataset.subtab}`));
+  }
   window.addEventListener("hashchange", () => {
     setActiveTab(window.location.hash.replace(/^#/, ""));
   });
   setActiveTab(window.location.hash.replace(/^#/, "") || "tasks");
+}
+
+function fmtRelative(iso) {
+  return fmtTimestamp(iso);
+}
+
+function truncate(text, max) {
+  if (text == null) return "";
+  if (text.length <= max) return text;
+  return text.slice(0, max) + "\u2026";
+}
+
+const DIAG_METRICS_COLUMNS = [
+  { key: "ts", label: "time", num: false, render: (v) => fmtRelative(v) },
+  { key: "step", label: "step", num: false },
+  { key: "actor_identity", label: "actor", num: false, render: (v) => v || "-" },
+  {
+    key: "token_usage",
+    label: "tokens",
+    num: true,
+    render: (v) => (v == null ? "-" : String(v)),
+  },
+  { key: "tool_invocations", label: "tools", num: true },
+  {
+    key: "step_duration_ms",
+    label: "duration",
+    num: true,
+    render: (v) => (v == null ? "-" : fmtDuration(v)),
+  },
+  { key: "retry_count", label: "retries", num: true },
+];
+
+const DIAG_FRICTION_COLUMNS = [
+  { key: "ts", label: "time", num: false, render: (v) => fmtRelative(v) },
+  { key: "step", label: "step", num: false },
+  { key: "command", label: "command", num: false },
+  {
+    key: "exit_code",
+    label: "exit",
+    num: true,
+    render: (v, _row, td) => {
+      if (v == null) return "-";
+      if (v !== 0) td.classList.add("exit-fail");
+      return String(v);
+    },
+  },
+  {
+    key: "stderr",
+    label: "stderr",
+    num: false,
+    cellClass: "stderr",
+    render: (v, _row, td) => {
+      const full = v || "";
+      td.title = full;
+      return truncate(full, 160);
+    },
+  },
+];
+
+function renderDiagnosticsTable(rows, columns) {
+  const body = $("diag-body");
+  body.innerHTML = "";
+  if (!rows || rows.length === 0) {
+    body.appendChild(el("div", { class: "empty", text: "no entries this month." }));
+    return;
+  }
+  const table = el("table", { class: "scoreboard-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const col of columns) {
+    headRow.appendChild(el("th", { class: col.num ? "num" : "", text: col.label }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    for (const col of columns) {
+      const baseClass =
+        (col.num ? "num" : "") + (col.cellClass ? ` ${col.cellClass}` : "");
+      const td = el("td", { class: baseClass });
+      const v = row[col.key];
+      const text = col.render ? col.render(v, row, td) : v == null ? "" : String(v);
+      td.textContent = text;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  body.appendChild(table);
+}
+
+function renderDiagnostics() {
+  const sub = activeDiagSubtab;
+  const rows = lastDiagnostics[sub] || [];
+  $("diag-count").textContent = `${rows.length}`;
+  renderDiagnosticsTable(
+    rows,
+    sub === "metrics" ? DIAG_METRICS_COLUMNS : DIAG_FRICTION_COLUMNS,
+  );
 }
 
 async function tick() {
@@ -326,9 +449,27 @@ async function tick() {
       })
       .catch((e) => showError("tasks-body", e)),
     fetchJson("/api/job-runs").then(renderRuns).catch((e) => showError("runs-body", e)),
-    fetchJson("/api/scoreboard").then(renderScoreboard).catch((e) => showError("scoreboard-body", e)),
+    fetchJson("/api/scoreboard")
+      .then(renderScoreboard)
+      .catch((e) => showError("scoreboard-body", e)),
+    fetchJson("/api/diagnostics/metrics")
+      .then((rows) => {
+        lastDiagnostics.metrics = rows;
+        if (activeDiagSubtab === "metrics") renderDiagnostics();
+      })
+      .catch((e) => {
+        if (activeDiagSubtab === "metrics") showError("diag-body", e);
+      }),
+    fetchJson("/api/diagnostics/friction")
+      .then((rows) => {
+        lastDiagnostics.friction = rows;
+        if (activeDiagSubtab === "friction") renderDiagnostics();
+      })
+      .catch((e) => {
+        if (activeDiagSubtab === "friction") showError("diag-body", e);
+      }),
   ]);
-  $("footer").textContent = `orbit dashboard · GET /api/{tasks,jobs,job-runs,audit,scoreboard}`;
+  $("footer").textContent = `orbit dashboard · GET /api/{tasks,jobs,job-runs,audit,scoreboard,diagnostics/{metrics,friction}}`;
 }
 
 initTabs();

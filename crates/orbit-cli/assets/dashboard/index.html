@@ -285,6 +285,40 @@
       table.scoreboard-table td.zero { color: var(--fg-dim); }
       table.scoreboard-table tbody tr:hover { background: rgba(88, 166, 255, 0.04); }
       table.scoreboard-table td.agent { font-weight: 500; }
+      .subtabs {
+        display: flex;
+        gap: 2px;
+        padding: 6px 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-elev);
+      }
+      .subtab {
+        background: transparent;
+        color: var(--fg-dim);
+        border: none;
+        padding: 4px 10px;
+        cursor: pointer;
+        font: inherit;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -7px;
+        text-transform: lowercase;
+      }
+      .subtab:hover { color: var(--fg); }
+      .subtab.active {
+        color: var(--fg);
+        border-bottom-color: var(--accent);
+      }
+      .exit-fail { color: var(--state-failed); font-weight: 600; }
+      td.stderr {
+        max-width: 600px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        color: var(--fg-dim);
+      }
       footer {
         padding: 12px 20px 24px;
         font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -302,6 +336,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab" data-tab="tasks" type="button">tasks</button>
       <button class="tab" data-tab="scoreboard" type="button">scoreboard</button>
+      <button class="tab" data-tab="diagnostics" type="button">diagnostics</button>
     </nav>
     <section class="tab-pane" data-tab="tasks">
       <main>
@@ -326,6 +361,21 @@
         <section class="panel" id="scoreboard-panel">
           <header><span>scoreboard</span><span class="count" id="scoreboard-count"></span></header>
           <div class="body scoreboard-table-wrap" id="scoreboard-body"><div class="empty">loading&hellip;</div></div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="diagnostics">
+      <main style="grid-template-columns: 1fr;">
+        <section class="panel" id="diagnostics-panel">
+          <header>
+            <span id="diag-title">metrics</span>
+            <span class="count" id="diag-count"></span>
+          </header>
+          <nav class="subtabs" id="diag-subtabs">
+            <button class="subtab" data-subtab="metrics" type="button">metrics</button>
+            <button class="subtab" data-subtab="friction" type="button">friction</button>
+          </nav>
+          <div class="body scoreboard-table-wrap" id="diag-body"><div class="empty">loading&hellip;</div></div>
         </section>
       </main>
     </section>
