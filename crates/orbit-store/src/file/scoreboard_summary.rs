@@ -70,7 +70,7 @@ struct TokenAgentEntry {
     #[serde(rename = "agent")]
     _agent: String,
     #[serde(default)]
-    model: String,
+    model: Option<String>,
     #[serde(default)]
     total_tokens: u64,
     #[serde(default, alias = "output_tokens")]
@@ -133,7 +133,15 @@ pub fn generate_summary(
     );
 
     for token_row in read_token_agents(scoreboard_dir)? {
-        let summary = agents.entry(model_key(&token_row.model)).or_default();
+        let Some(model) = token_row
+            .model
+            .as_deref()
+            .map(model_key)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let summary = agents.entry(model).or_default();
         summary.tokens.total = summary.tokens.total.saturating_add(token_row.total_tokens);
         summary.tokens.output = summary
             .tokens
