@@ -150,30 +150,50 @@ function buildTaskDetail(task) {
 
   if (task.description && task.description.trim()) {
     detail.appendChild(el("h4", { text: "description" }));
-    detail.appendChild(el("div", { class: "description", text: task.description }));
+    const view = el("div", { class: "markdown-body" });
+    if (typeof marked !== "undefined") {
+      view.innerHTML = marked.parse(task.description);
+    } else {
+      view.textContent = task.description;
+    }
+    detail.appendChild(view);
   }
 
   if (Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0) {
     detail.appendChild(el("h4", { text: "acceptance criteria" }));
     const ul = el("ul", { class: "ac-list" });
     for (const ac of task.acceptance_criteria) {
-      ul.appendChild(el("li", { text: ac }));
+      if (typeof marked !== "undefined") {
+        const li = el("li");
+        li.innerHTML = marked.parseInline(ac);
+        ul.appendChild(li);
+      } else {
+        ul.appendChild(el("li", { text: ac }));
+      }
     }
     detail.appendChild(ul);
   }
 
   if (task.plan && task.plan.trim()) {
     detail.appendChild(el("h4", { text: "plan" }));
-    const pre = el("pre");
-    pre.textContent = task.plan;
-    detail.appendChild(pre);
+    const view = el("div", { class: "markdown-body" });
+    if (typeof marked !== "undefined") {
+      view.innerHTML = marked.parse(task.plan);
+    } else {
+      view.textContent = task.plan;
+    }
+    detail.appendChild(view);
   }
 
   if (task.execution_summary && task.execution_summary.trim()) {
     detail.appendChild(el("h4", { text: "execution summary" }));
-    const pre = el("pre");
-    pre.textContent = task.execution_summary;
-    detail.appendChild(pre);
+    const view = el("div", { class: "markdown-body" });
+    if (typeof marked !== "undefined") {
+      view.innerHTML = marked.parse(task.execution_summary);
+    } else {
+      view.textContent = task.execution_summary;
+    }
+    detail.appendChild(view);
   }
 
   if (Array.isArray(task.comments) && task.comments.length > 0) {
