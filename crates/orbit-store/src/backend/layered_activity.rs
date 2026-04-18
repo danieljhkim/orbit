@@ -3,6 +3,7 @@ use std::sync::Arc;
 use orbit_types::{Activity, OrbitError};
 
 use super::contracts::{ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams};
+use crate::scope::{resolve, ScopeStrategy, ScopedStore};
 
 /// A layered activity store that merges a workspace store with a global store.
 ///
@@ -46,10 +47,9 @@ impl ActivityStoreBackend for LayeredActivityStore {
     }
 
     fn get_activity(&self, id: &str) -> Result<Option<Activity>, OrbitError> {
-        if let Some(activity) = self.workspace.get_activity(id)? {
-            return Ok(Some(activity));
-        }
-        self.global.get_activity(id)
+        // Pilot caller for the unified §9 scope resolver. Activities use the
+        // MergeByKey strategy per `CLAUDE.md`.
+        resolve::<Activity, _>(self, id)
     }
 
     fn update_activity(
@@ -68,5 +68,21 @@ impl ActivityStoreBackend for LayeredActivityStore {
             return self.workspace.disable_activity(id);
         }
         self.global.disable_activity(id)
+    }
+}
+
+impl ScopedStore<Activity> for LayeredActivityStore {
+    type Err = OrbitError;
+
+    fn strategy(&self) -> ScopeStrategy {
+        ScopeStrategy::MergeByKey
+    }
+
+    fn get_workspace(&self, key: &str) -> Result<Option<Activity>, OrbitError> {
+        self.workspace.get_activity(key)
+    }
+
+    fn get_global(&self, key: &str) -> Result<Option<Activity>, OrbitError> {
+        self.global.get_activity(key)
     }
 }

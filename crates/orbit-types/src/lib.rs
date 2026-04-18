@@ -43,6 +43,7 @@ pub mod skill;
 pub mod task;
 pub mod tool;
 pub mod tool_input;
+pub mod v2;
 pub mod workspace;
 
 pub use activity::Activity;
@@ -94,5 +95,12 @@ pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema};
 pub use tool_input::{
     optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
     optional_string_list_alias, optional_u32_alias, required_string, split_csv,
+};
+pub use v2::{
+    AUDIT_ENVELOPE_SCHEMA_VERSION, ActivityAsset, ActivityV2, ActivityV2Asset, ActivityV2Spec,
+    AgentLoopSpec, AssetLoadError, DeterministicSpec, JobAsset, JobV2, JobV2Asset, JobV2Step,
+    LegacyActivity, LegacyJob, OnDenial, PipelineRef, SchemaHeader, ShellSpec, ToolAllowlistError,
+    V2_TOOL_WILDCARD_ROOTS, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind, load_activity_asset,
+    load_job_asset, tool_allowed, validate_tool_allowlist,
 };
 pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};

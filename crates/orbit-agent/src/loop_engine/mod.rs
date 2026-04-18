@@ -21,9 +21,12 @@
 
 pub mod agent_loop;
 pub mod audit;
+pub mod replay_transport;
 pub mod session;
 pub mod tool_dispatch;
 pub mod transport;
+
+pub use replay_transport::{ReplayTransport, ReplayTurn};
 
 pub use agent_loop::{
     AgentLoop, AgentLoopConfig, AgentLoopError, IterationTrace, LoopOutcome, TerminateReason,

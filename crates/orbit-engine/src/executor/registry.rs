@@ -47,6 +47,7 @@ impl ActivityExecutorRegistry {
         let _ = self.register(AgentExecutor::new());
         let _ = self.register(CliCommandExecutor);
         let _ = self.register(AutomationExecutor);
+        let _ = self.register(crate::v2::OrbitToolCallExecutor);
     }
 
     /// Load executor definitions from YAML resources. Entries override builtins by name.

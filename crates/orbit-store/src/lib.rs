@@ -29,6 +29,7 @@ mod file;
 #[path = "sqlite/invocation_store.rs"]
 mod invocation_store_impl;
 pub mod json_schema;
+pub mod scope;
 pub mod sqlite;
 pub mod state_io;
 #[path = "file/token_scoreboard.rs"]

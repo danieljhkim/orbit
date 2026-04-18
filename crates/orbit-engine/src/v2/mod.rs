@@ -1,0 +1,19 @@
+//! v2 activity runtime. Phase 2 coexistence layer — the v1 runtime is untouched.
+//!
+//! Depends on `orbit_types::v2` for the type surface (activity/spec/audit
+//! shapes, tool-allowlist helpers). This module wires those types to the
+//! engine's executor infrastructure and to the loop-engine audit pipeline.
+
+pub mod audit_writer;
+pub mod dispatcher;
+pub mod jsonl_sink;
+pub mod orbit_tool_executor;
+pub mod tool_enforcement;
+
+pub use audit_writer::{V2AuditWriter, WriteError};
+pub use dispatcher::{
+    DispatchError, DispatchOutcome, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+};
+pub use jsonl_sink::V2JsonlSink;
+pub use orbit_tool_executor::OrbitToolCallExecutor;
+pub use tool_enforcement::{EnforcedAuditSink, EnforcementDecision};

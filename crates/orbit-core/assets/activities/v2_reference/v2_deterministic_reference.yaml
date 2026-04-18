@@ -1,0 +1,33 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: v2_deterministic_reference
+spec:
+  type: deterministic
+  description: >
+    Phase 2 reference for the deterministic activity type. Dispatches into
+    the `orbit_tool_call` executor registered by
+    orbit-engine::v2::orbit_tool_executor, which wraps a pure-Rust Orbit tool
+    invocation (no LLM, no shell). Used as the structural proof that v2
+    dispatch reaches a registered deterministic action.
+  input_schema_json:
+    type: object
+    required: [tool_name]
+    properties:
+      tool_name:
+        type: string
+      args:
+        type: object
+  output_schema_json:
+    type: object
+    properties:
+      tool_name:
+        type: string
+      args: {}
+      status:
+        type: string
+  action: orbit_tool_call
+  config:
+    tool_name: orbit.graph.search
+    args:
+      query: "Activity"

@@ -28,6 +28,7 @@ mod executor;
 mod job_runner;
 pub mod reconciler;
 mod template;
+pub mod v2;
 
 pub use activity_runner::{
     activity_skill_refs_from_spec_config, execute_single_attempt, run_activity_direct,
