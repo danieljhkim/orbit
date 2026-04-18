@@ -24,6 +24,8 @@ pub struct EnforcedAuditSink {
     inner: Arc<dyn AuditSink>,
     allowlist: Vec<String>,
     writer: Arc<V2AuditWriter>,
+    run_id: String,
+    session_id: String,
     tripped: Mutex<Option<EnforcementDecision>>,
 }
 
@@ -32,11 +34,15 @@ impl EnforcedAuditSink {
         inner: Arc<dyn AuditSink>,
         allowlist: Vec<String>,
         writer: Arc<V2AuditWriter>,
+        run_id: impl Into<String>,
+        session_id: impl Into<String>,
     ) -> Self {
         Self {
             inner,
             allowlist,
             writer,
+            run_id: run_id.into(),
+            session_id: session_id.into(),
             tripped: Mutex::new(None),
         }
     }
@@ -48,36 +54,57 @@ impl EnforcedAuditSink {
 
 impl AuditSink for EnforcedAuditSink {
     fn emit(&self, event: &LoopAuditEvent) {
-        if let LoopAuditEvent::ToolCallRequested { tool_name, .. } = event
-            && !tool_allowed(tool_name, &self.allowlist)
-        {
-            let reason = format!("tool `{tool_name}` not in allowlist");
-            // Emit a §7 tool.denied envelope event.
-            let _ = self.writer.emit(V2AuditEventKind::ToolDenied {
-                tool_name: tool_name.clone(),
-                reason: reason.clone(),
-            });
-            // Preserve the original event in the loop stream too, so a
-            // review can see the inbound request that was denied.
-            self.inner.emit(event);
-            // Additionally emit a PolicyDenial on the inner loop sink so
-            // the loop-level JSONL records the enforcement decision.
-            let denial = LoopAuditEvent::PolicyDenial {
-                ts: chrono::Utc::now(),
-                run_id: String::new(),
-                session_id: String::new(),
-                iteration: 0,
-                tool_name: tool_name.clone(),
-                reason: reason.clone(),
-            };
-            self.inner.emit(&denial);
-            *self.tripped.lock().expect("tripped mutex") = Some(EnforcementDecision::Denied {
-                tool_name: tool_name.clone(),
-                reason,
-            });
-            return;
+        // Two paths can trigger the denial:
+        //
+        // 1. `AgentLoop` enforces the allowlist internally BEFORE dispatching
+        //    a `ToolCallRequested` event and emits its own `PolicyDenial`.
+        //    When we see a `PolicyDenial`, we mirror it into a §7
+        //    `tool.denied` envelope event so the higher-level trail records
+        //    the policy outcome alongside the loop-level event.
+        //
+        // 2. A caller that bypasses the loop's own check could still emit a
+        //    `ToolCallRequested` for a tool we shouldn't allow — we catch
+        //    that here too and synthesize both a §7 `tool.denied` envelope
+        //    event and a loop-level `PolicyDenial`.
+        match event {
+            LoopAuditEvent::PolicyDenial {
+                tool_name, reason, ..
+            } => {
+                let _ = self.writer.emit(V2AuditEventKind::ToolDenied {
+                    tool_name: tool_name.clone(),
+                    reason: reason.clone(),
+                });
+                *self.tripped.lock().expect("tripped mutex") = Some(EnforcementDecision::Denied {
+                    tool_name: tool_name.clone(),
+                    reason: reason.clone(),
+                });
+                self.inner.emit(event);
+            }
+            LoopAuditEvent::ToolCallRequested { tool_name, .. }
+                if !tool_allowed(tool_name, &self.allowlist) =>
+            {
+                let reason = format!("tool `{tool_name}` not in allowlist");
+                let _ = self.writer.emit(V2AuditEventKind::ToolDenied {
+                    tool_name: tool_name.clone(),
+                    reason: reason.clone(),
+                });
+                self.inner.emit(event);
+                let denial = LoopAuditEvent::PolicyDenial {
+                    ts: chrono::Utc::now(),
+                    run_id: self.run_id.clone(),
+                    session_id: self.session_id.clone(),
+                    iteration: 0,
+                    tool_name: tool_name.clone(),
+                    reason: reason.clone(),
+                };
+                self.inner.emit(&denial);
+                *self.tripped.lock().expect("tripped mutex") = Some(EnforcementDecision::Denied {
+                    tool_name: tool_name.clone(),
+                    reason,
+                });
+            }
+            _ => self.inner.emit(event),
         }
-        self.inner.emit(event);
     }
 
     fn write_blob(&self, content: &[u8]) -> String {

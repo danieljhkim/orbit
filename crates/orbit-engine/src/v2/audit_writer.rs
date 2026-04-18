@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
@@ -6,6 +6,8 @@ use orbit_types::v2::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
 use thiserror::Error;
+
+use super::jsonl_sink::V2JsonlSink;
 
 /// Writes §7 v2 audit envelope events. Nests the existing loop-engine events
 /// underneath an Activity event via `parent_event_id` so the whole tree
@@ -18,7 +20,8 @@ use thiserror::Error;
 pub struct V2AuditWriter {
     run_id: String,
     agent_identity: String,
-    inner: Box<dyn AuditSink>,
+    inner: Arc<dyn AuditSink>,
+    envelope_sink: Option<Arc<V2JsonlSink>>,
     events: Mutex<Vec<V2AuditEvent>>,
     event_counter: Mutex<u64>,
     parent_stack: Mutex<Vec<String>>,
@@ -34,16 +37,25 @@ impl V2AuditWriter {
     pub fn new(
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,
-        inner: Box<dyn AuditSink>,
+        inner: Arc<dyn AuditSink>,
     ) -> Self {
         Self {
             run_id: run_id.into(),
             agent_identity: agent_identity.into(),
             inner,
+            envelope_sink: None,
             events: Mutex::new(Vec::new()),
             event_counter: Mutex::new(0),
             parent_stack: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Attach a JSONL sink for §7 envelope events. When set, every emitted
+    /// envelope event is persisted to disk alongside the in-memory snapshot
+    /// (resolves Phase 2a design-risk #2).
+    pub fn with_envelope_sink(mut self, sink: Arc<V2JsonlSink>) -> Self {
+        self.envelope_sink = Some(sink);
+        self
     }
 
     /// Emit a v2 envelope event of the given kind. Returns the event_id so
@@ -67,6 +79,12 @@ impl V2AuditWriter {
             parent_event_id,
         };
         let event = V2AuditEvent { envelope, kind };
+        if let Some(sink) = &self.envelope_sink {
+            // Disk persistence failures should not crash the run. Emitting
+            // the event to the in-memory snapshot is the load-bearing path;
+            // JSONL is for review-time inspection.
+            let _ = sink.write(&event);
+        }
         self.events
             .lock()
             .map_err(|_| WriteError::Poisoned)?
@@ -102,9 +120,11 @@ impl V2AuditWriter {
     }
 
     /// Access to the inner loop-level sink for the loop engine to emit
-    /// http.*/tool.call.* events through.
-    pub fn inner_sink(&self) -> &dyn AuditSink {
-        self.inner.as_ref()
+    /// http.*/tool.call.* events through. Returns a cloned `Arc` so callers
+    /// (e.g. `EnforcedAuditSink`) can share ownership without lifetime
+    /// gymnastics.
+    pub fn inner_sink(&self) -> Arc<dyn AuditSink> {
+        Arc::clone(&self.inner)
     }
 
     /// Proxy: write a blob via the inner sink (sha256-based, per §7.4 / §12 Q11).

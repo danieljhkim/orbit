@@ -16,6 +16,7 @@ use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::job_store::JobFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskFileStore;
+use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 
 impl TaskStoreBackend for TaskFileStore {
     fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError> {
@@ -37,7 +38,8 @@ impl TaskStoreBackend for TaskFileStore {
     }
 
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
-        self.get_task(id)
+        // Tasks use the WorkspaceOnly strategy per `CLAUDE.md`.
+        resolve::<Task, _>(self, id)
     }
 
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
@@ -46,6 +48,22 @@ impl TaskStoreBackend for TaskFileStore {
 
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
         self.delete_task(id)
+    }
+}
+
+impl ScopedStore<Task> for TaskFileStore {
+    type Err = OrbitError;
+
+    fn strategy(&self) -> ScopeStrategy {
+        ScopeStrategy::WorkspaceOnly
+    }
+
+    fn get_workspace(&self, key: &str) -> Result<Option<Task>, OrbitError> {
+        self.get_task(key)
+    }
+
+    fn get_global(&self, _key: &str) -> Result<Option<Task>, OrbitError> {
+        Ok(None)
     }
 }
 

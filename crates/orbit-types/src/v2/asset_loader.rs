@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{ActivityResource, JobResource};
+use crate::{ActivityResource, JobResource, ResourceKind};
 
 use super::activity_v2::ActivityV2;
 use super::job_v2::JobV2;
@@ -45,6 +45,8 @@ pub enum AssetLoadError {
     V1Parse(serde_yaml::Error),
     #[error("v2 parse failed: {0}")]
     V2Parse(serde_yaml::Error),
+    #[error("kind mismatch: expected `{expected}`, got `{actual}`")]
+    KindMismatch { expected: String, actual: String },
 }
 
 /// Two-pass activity-asset loader (§8.1 Candidate 2).
@@ -59,6 +61,7 @@ pub fn load_activity_asset(yaml: &str) -> Result<ActivityAsset, AssetLoadError> 
         2 => {
             let res: V2EnvelopeYaml<ActivityV2> =
                 serde_yaml::from_str(yaml).map_err(AssetLoadError::V2Parse)?;
+            require_kind(&res.kind, ResourceKind::Activity)?;
             Ok(ActivityAsset::V2(ActivityV2Asset {
                 name: res.metadata.name,
                 spec: res.spec,
@@ -79,6 +82,7 @@ pub fn load_job_asset(yaml: &str) -> Result<JobAsset, AssetLoadError> {
         2 => {
             let res: V2EnvelopeYaml<JobV2> =
                 serde_yaml::from_str(yaml).map_err(AssetLoadError::V2Parse)?;
+            require_kind(&res.kind, ResourceKind::Job)?;
             Ok(JobAsset::V2(JobV2Asset {
                 name: res.metadata.name,
                 spec: res.spec,
@@ -88,12 +92,22 @@ pub fn load_job_asset(yaml: &str) -> Result<JobAsset, AssetLoadError> {
     }
 }
 
+fn require_kind(actual: &ResourceKind, expected: ResourceKind) -> Result<(), AssetLoadError> {
+    if actual == &expected {
+        Ok(())
+    } else {
+        Err(AssetLoadError::KindMismatch {
+            expected: expected.to_string(),
+            actual: actual.to_string(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 struct V2EnvelopeYaml<T> {
     #[serde(rename = "schemaVersion")]
     _schema_version: u32,
-    #[serde(rename = "kind")]
-    _kind: String,
+    kind: ResourceKind,
     metadata: crate::ResourceMetadata,
     spec: T,
 }

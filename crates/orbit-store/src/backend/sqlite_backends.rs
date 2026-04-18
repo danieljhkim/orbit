@@ -3,6 +3,7 @@ use orbit_types::{AuditEvent, OrbitError, StoredTool};
 
 use super::contracts::{AuditEventStoreBackend, ToolStoreBackend};
 use crate::Store;
+use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
 
 #[derive(Clone)]
@@ -48,7 +49,10 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
     }
 
     fn get_audit_event(&self, id: i64) -> Result<Option<AuditEvent>, OrbitError> {
-        self.store.get_audit_event(id)
+        // Audit events use the GlobalOnly strategy per `CLAUDE.md`. The key is
+        // stringified so the canonical `resolve` helper can handle it; the
+        // ScopedStore impl parses it back inside `get_global`.
+        resolve::<AuditEvent, _>(self, &id.to_string())
     }
 
     fn get_audit_event_stats(
@@ -69,5 +73,24 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
 
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {
         self.store.prune_audit_events(older_than)
+    }
+}
+
+impl ScopedStore<AuditEvent> for SqliteAuditEventStoreBackend {
+    type Err = OrbitError;
+
+    fn strategy(&self) -> ScopeStrategy {
+        ScopeStrategy::GlobalOnly
+    }
+
+    fn get_workspace(&self, _key: &str) -> Result<Option<AuditEvent>, OrbitError> {
+        Ok(None)
+    }
+
+    fn get_global(&self, key: &str) -> Result<Option<AuditEvent>, OrbitError> {
+        let id = key
+            .parse::<i64>()
+            .map_err(|e| OrbitError::Store(format!("invalid audit event id '{key}': {e}")))?;
+        self.store.get_audit_event(id)
     }
 }

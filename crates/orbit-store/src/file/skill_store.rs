@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::json_schema::validate_schema_document;
+use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 use orbit_types::OrbitError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -145,21 +146,12 @@ impl SkillCatalog {
             ));
         }
 
-        // Try workspace root first.
-        let dir = self.root.join(skill_id);
-        if dir.exists() {
-            return load_skill_from_dir(skill_id, &dir);
+        // Skills use the WorkspaceReplaces strategy per `CLAUDE.md`: workspace
+        // wins if present, otherwise fall through to global.
+        match resolve::<LoadedSkill, _>(self, skill_id)? {
+            Some(skill) => Ok(skill),
+            None => Err(OrbitError::SkillNotFound(skill_id.to_string())),
         }
-
-        // Fall back to global root if configured.
-        if let Some(ref global) = self.global_root {
-            let global_dir = global.join(skill_id);
-            if global_dir.exists() {
-                return load_skill_from_dir(skill_id, &global_dir);
-            }
-        }
-
-        Err(OrbitError::SkillNotFound(skill_id.to_string()))
     }
 
     fn list_candidate_ids(&self) -> Result<Vec<String>, OrbitError> {
@@ -179,6 +171,35 @@ impl SkillCatalog {
         }
 
         Ok(ids)
+    }
+}
+
+impl ScopedStore<LoadedSkill> for SkillCatalog {
+    type Err = OrbitError;
+
+    fn strategy(&self) -> ScopeStrategy {
+        ScopeStrategy::WorkspaceReplaces
+    }
+
+    fn get_workspace(&self, key: &str) -> Result<Option<LoadedSkill>, OrbitError> {
+        let dir = self.root.join(key);
+        if dir.exists() {
+            load_skill_from_dir(key, &dir).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn get_global(&self, key: &str) -> Result<Option<LoadedSkill>, OrbitError> {
+        let Some(ref global) = self.global_root else {
+            return Ok(None);
+        };
+        let dir = global.join(key);
+        if dir.exists() {
+            load_skill_from_dir(key, &dir).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 }
 
