@@ -20,6 +20,7 @@ mod orbit_tool_host;
 pub mod pipeline;
 mod resolve;
 mod store_delegates;
+mod v2_host;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

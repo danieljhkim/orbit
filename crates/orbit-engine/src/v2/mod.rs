@@ -17,3 +17,22 @@ pub use dispatcher::{
 pub use jsonl_sink::V2JsonlSink;
 pub use orbit_tool_executor::OrbitToolCallExecutor;
 pub use tool_enforcement::{EnforcedAuditSink, EnforcementDecision};
+
+/// Re-exports from `orbit-agent` that downstream implementors of
+/// [`V2RuntimeHost`] need to name in trait signatures or construct for
+/// transport/session building.
+///
+/// This is a **temporary workaround** for Phase 2b's trait design, which
+/// leaks orbit-agent types through `V2RuntimeHost::run_agent_loop`'s return
+/// type. Tracked for proper correction in T20260418-2210: reshape the trait
+/// so agent-loop construction lives in this crate as a free function and
+/// implementors never need to name orbit-agent types. Once that task lands,
+/// this module can be deleted.
+pub mod agent_reexports {
+    pub use orbit_agent::loop_engine::{
+        AgentLoop, AgentLoopConfig, AgentLoopError, AuditSink, ContentBlock, InMemorySink,
+        LoopOutcome, LoopTransport, ReplayTransport, ReplayTurn, Session, StopReason,
+        TerminateReason, TurnUsage,
+    };
+    pub use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
+}

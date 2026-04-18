@@ -11,6 +11,7 @@
 //! at compile time via `include_str!` and seeded to disk on first `orbit init`.
 
 pub mod activity;
+pub mod activity_v2;
 pub mod audit_event;
 pub mod diagnostics;
 pub mod executor;

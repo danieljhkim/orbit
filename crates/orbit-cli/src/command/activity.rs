@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Subcommand};
 use orbit_core::command::activity::{ActivityAddParams, ActivityRunParams, ActivityUpdateParams};
 use orbit_core::{Activity, OrbitError, OrbitRuntime};
@@ -30,6 +32,9 @@ pub enum ActivitySubcommand {
     Update(ActivityUpdateArgs),
     /// Execute an activity immediately
     Run(ActivityRunArgs),
+    /// Execute a v2 activity from a YAML path (schemaVersion: 2)
+    #[command(name = "run-v2")]
+    RunV2(ActivityRunV2Args),
     /// Delete an activity definition
     Delete(ActivityDeleteArgs),
 }
@@ -42,6 +47,7 @@ impl Execute for ActivitySubcommand {
             ActivitySubcommand::Show(args) => args.execute(runtime),
             ActivitySubcommand::Update(args) => args.execute(runtime),
             ActivitySubcommand::Run(args) => args.execute(runtime),
+            ActivitySubcommand::RunV2(args) => args.execute(runtime),
             ActivitySubcommand::Delete(args) => args.execute(runtime),
         }
     }
@@ -301,6 +307,53 @@ impl Execute for ActivityRunArgs {
                 result.duration_ms.unwrap_or_default(),
                 error_code,
                 error_message
+            );
+            Ok(())
+        }
+    }
+}
+
+#[derive(Args)]
+pub struct ActivityRunV2Args {
+    /// Path to a v2 (schemaVersion:2) activity YAML file.
+    pub path: PathBuf,
+    /// Optional JSON input passed to the dispatcher.
+    #[arg(long, default_value = "null")]
+    pub input: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for ActivityRunV2Args {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let input: Value = serde_json::from_str(&self.input)
+            .map_err(|e| OrbitError::InvalidInput(format!("--input must be valid JSON: {e}")))?;
+        let result = runtime.run_activity_v2_from_yaml(&self.path, input)?;
+        if self.json {
+            crate::output::json::print_pretty(&json!({
+                "activity_name": result.activity_name,
+                "activity_type": result.activity_type,
+                "success": result.success,
+                "message": result.message,
+                "output": result.output,
+                "audit_jsonl": result.audit_jsonl.display().to_string(),
+                "events_emitted": result.events_emitted,
+            }))
+        } else {
+            println!(
+                "activity={};type={};success={};events={};audit_jsonl={}",
+                result.activity_name,
+                result.activity_type,
+                result.success,
+                result.events_emitted,
+                result.audit_jsonl.display(),
+            );
+            if let Some(msg) = &result.message {
+                println!("message: {msg}");
+            }
+            println!(
+                "output: {}",
+                serde_json::to_string_pretty(&result.output).unwrap_or_default()
             );
             Ok(())
         }
