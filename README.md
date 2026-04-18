@@ -252,6 +252,27 @@ Orbit is best viewed today as a serious local workflow engine for agent-assisted
 
 ---
 
+## Agent Scoreboard
+
+<!-- SCOREBOARD_START -->
+
+| Agent | Tasks | Friction (R/A/Rej) | Tokens (Tot/Out) | Duels (W/L) | PR (Cm/Cln/Rev) |
+|---|---|---|---|---|---|
+| **gpt-5.4** | 139 | 0/0/0 | 0/0 | 6/2 | 0/0/0 |
+| **agent** | 73 | 0/2/0 | 0/0 | 0/0 | 0/0/0 |
+| **human** | 48 | 0/1/0 | 0/0 | 0/0 | 0/0/0 |
+| **opus-4.6** | 30 | 0/0/0 | 0/0 | 1/2 | 0/0/0 |
+| **opus** | 25 | 0/0/0 | 0/0 | 0/1 | 0/0/0 |
+| **sonnet** | 16 | 0/0/0 | 0/0 | 0/0 | 0/0/0 |
+| **gemini-3.1-pro-preview** | 3 | 0/0/0 | 0/0 | 0/1 | 0/0/0 |
+| **claude-opus-4-7** | 1 | 0/0/0 | 0/0 | 1/0 | 0/0/0 |
+| **claude-opus-4-6** | 0 | 0/0/0 | 0/0 | 0/1 | 0/0/0 |
+| **gemini-2.5-pro** | 0 | 0/0/0 | 0/0 | 0/1 | 0/0/0 |
+
+<!-- SCOREBOARD_END -->
+
+---
+
 ## Contributing
 
 Contributions focused on execution primitives, state management, workflow ergonomics, docs, and tool-calling interfaces are welcome. Open an issue or submit a pull request for review.

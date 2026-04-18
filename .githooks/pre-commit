@@ -11,3 +11,8 @@ if command -v ruff >/dev/null 2>&1; then
     ruff format .
     git add -u
 fi
+
+if [ -f scripts/update_readme_scoreboard.py ]; then
+    python3 scripts/update_readme_scoreboard.py || true
+    git add README.md
+fi
