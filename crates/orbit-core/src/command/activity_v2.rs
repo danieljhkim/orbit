@@ -1,19 +1,19 @@
 //! `orbit activity run-v2 <yaml-path>` command — v2 entrypoint.
 //!
-//! The v2 runtime dispatches per-type via `orbit_engine::v2::dispatch_v2_activity`.
-//! This module reads a YAML file from disk, parses it through the two-pass
-//! loader at `orbit_types::v2::load_activity_asset`, and invokes the
-//! dispatcher with `OrbitRuntime` as the `V2RuntimeHost` (the impl lives in
+//! Reads a YAML file from disk, parses it through the two-pass loader at
+//! `orbit_types::v2::load_activity_asset`, and invokes the dispatcher with
+//! `OrbitRuntime` as the `V2RuntimeHost` (impl lives in
 //! `crate::runtime::v2_host`).
+//!
+//! Loop + envelope audit sink construction is delegated to
+//! `V2AuditWriter::with_disk_sinks` — this file never names orbit-agent types.
 //!
 //! The existing `orbit activity run <id>` handler is untouched — it still
 //! drives v1 assets via `orbit_engine::run_activity_direct`.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use orbit_engine::v2::agent_reexports::{AuditSink, InMemorySink};
-use orbit_engine::v2::{V2AuditWriter, V2DispatchInput, V2JsonlSink, dispatch_v2_activity};
+use orbit_engine::v2::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
 use orbit_types::v2::{ActivityAsset, V2AuditEventKind, load_activity_asset};
 use orbit_types::{OrbitError, OrbitEvent};
 use serde_json::Value;
@@ -26,7 +26,7 @@ pub struct V2ActivityRunResult {
     pub success: bool,
     pub output: Value,
     pub message: Option<String>,
-    pub audit_jsonl: PathBuf,
+    pub audit_jsonl: Option<PathBuf>,
     pub events_emitted: usize,
 }
 
@@ -59,24 +59,11 @@ impl OrbitRuntime {
             chrono::Utc::now().format("%Y%m%dT%H%M%S%.3f")
         );
 
-        // Audit sinks: loop-level events go to an in-memory sink backed by a
-        // blob store on disk; §7 envelope events go to a JSONL sink under
-        // the workspace audit root.
         let audit_root = self.data_root().join("audit");
-        let blob_dir = audit_root.join("blobs");
-        std::fs::create_dir_all(&blob_dir)
-            .map_err(|err| OrbitError::Execution(format!("create blob dir: {err}")))?;
-        let loop_sink: Arc<dyn AuditSink> = Arc::new(InMemorySink::new(blob_dir));
-        let envelope_sink = Arc::new(
-            V2JsonlSink::open(&audit_root, &run_id)
-                .map_err(|err| OrbitError::Execution(format!("open v2 jsonl: {err}")))?,
-        );
-        let audit_jsonl_path = envelope_sink.log_path().to_path_buf();
         let agent_identity = self.actor().label.clone();
-        let writer = Arc::new(
-            V2AuditWriter::new(&run_id, agent_identity, loop_sink.clone())
-                .with_envelope_sink(envelope_sink.clone()),
-        );
+        let writer = V2AuditWriter::with_disk_sinks(&audit_root, &run_id, agent_identity)
+            .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
+        let audit_jsonl = writer.envelope_log_path();
 
         // Record the standard orbit-core activity-run lifecycle events so v2
         // runs appear in the same audit stream v1 runs use.
@@ -127,7 +114,7 @@ impl OrbitRuntime {
                 success: o.success,
                 output: o.output,
                 message: o.message,
-                audit_jsonl: audit_jsonl_path,
+                audit_jsonl,
                 events_emitted: events_count,
             }),
             Err(err) => Err(OrbitError::Execution(format!("v2 dispatch: {err}"))),

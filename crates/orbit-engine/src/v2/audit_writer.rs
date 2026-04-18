@@ -1,6 +1,8 @@
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
+use orbit_agent::loop_engine::InMemorySink;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_types::v2::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
@@ -56,6 +58,36 @@ impl V2AuditWriter {
     pub fn with_envelope_sink(mut self, sink: Arc<V2JsonlSink>) -> Self {
         self.envelope_sink = Some(sink);
         self
+    }
+
+    /// High-level constructor for CLI / library callers that don't want to
+    /// name the loop-level sink types directly (orbit-core's primary use
+    /// case). Creates an `InMemorySink` backed by `audit_root/blobs/` and a
+    /// `V2JsonlSink` at `audit_root/v2_loop/{run_id}.jsonl`, wires them
+    /// together, and returns a ready-to-dispatch writer.
+    ///
+    /// Callers that need a custom sink configuration use `new` +
+    /// `with_envelope_sink` directly.
+    pub fn with_disk_sinks(
+        audit_root: &Path,
+        run_id: impl Into<String>,
+        agent_identity: impl Into<String>,
+    ) -> std::io::Result<Arc<Self>> {
+        let run_id = run_id.into();
+        let blob_dir = audit_root.join("blobs");
+        std::fs::create_dir_all(&blob_dir)?;
+        let inner: Arc<dyn AuditSink> = Arc::new(InMemorySink::new(blob_dir));
+        let envelope_sink = Arc::new(V2JsonlSink::open(audit_root, &run_id)?);
+        let writer = Self::new(run_id, agent_identity, inner).with_envelope_sink(envelope_sink);
+        Ok(Arc::new(writer))
+    }
+
+    /// Path to the JSONL sink's log file, if one is attached. Used by CLI
+    /// callers to report where envelope events were persisted.
+    pub fn envelope_log_path(&self) -> Option<std::path::PathBuf> {
+        self.envelope_sink
+            .as_ref()
+            .map(|s| s.log_path().to_path_buf())
     }
 
     /// Emit a v2 envelope event of the given kind. Returns the event_id so

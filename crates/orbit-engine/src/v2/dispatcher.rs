@@ -1,18 +1,23 @@
 use std::process::Command;
 use std::sync::Arc;
 
-use orbit_agent::loop_engine::LoopOutcome;
 use orbit_types::v2::{ActivityV2Spec, AgentLoopSpec, DeterministicSpec, ShellSpec};
 use serde_json::Value;
 use thiserror::Error;
 
+use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
 
-/// Runtime wiring for v2 dispatch paths that need resources constructed by
-/// orbit-core (Session / LoopTransport / ToolContext / AuditSink) or the
-/// ActivityExecutorRegistry. Implemented by orbit-core as
-/// `impl V2RuntimeHost for OrbitRuntime`. The dispatcher itself remains
-/// free of orbit-core dependencies.
+/// Orbit-core-owned responsibilities the v2 dispatcher delegates back across
+/// the engine→core boundary: deterministic action execution (which needs the
+/// runtime's tool registry + ToolContext) and provider credential sourcing
+/// (which needs env/config access).
+///
+/// Agent-loop construction itself is NOT on this trait — it lives in
+/// `orbit_engine::v2::agent_loop_driver::drive_agent_loop`, so implementors
+/// never have to name orbit-agent types. The dispatcher calls
+/// `host.api_key_for(provider)?` then `drive_agent_loop(spec, &api_key, ...)`
+/// directly.
 pub trait V2RuntimeHost: Send + Sync {
     /// Dispatch a deterministic action by name. The host looks up `action`
     /// in its registry and returns the action's structured output.
@@ -23,17 +28,10 @@ pub trait V2RuntimeHost: Send + Sync {
         input: &Value,
     ) -> Result<Value, DispatchError>;
 
-    /// Drive an agent_loop activity through `AgentLoop::run` with the given
-    /// spec. The host builds Session/LoopTransport/ToolContext/AuditSink and
-    /// returns the `LoopOutcome`. The audit writer is passed in so the host
-    /// can nest loop-level events under the current Activity parent.
-    fn run_agent_loop(
-        &self,
-        spec: &AgentLoopSpec,
-        run_id: &str,
-        audit: Arc<V2AuditWriter>,
-        input: &Value,
-    ) -> Result<LoopOutcome, DispatchError>;
+    /// Source the API key for a given provider (e.g. `"anthropic"`). Returns
+    /// the raw key as a `String` so nothing orbit-agent-shaped bleeds across
+    /// the boundary. Implementors typically read from env or config.
+    fn api_key_for(&self, provider: &str) -> Result<String, DispatchError>;
 }
 
 /// Input bundle for a single v2 activity dispatch.
@@ -105,9 +103,13 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
 
     let result = match input.spec {
         ActivityV2Spec::AgentLoop(spec) => match input.host {
-            Some(host) => {
-                run_agent_loop(host, spec, input.run_id, input.audit.clone(), &input.input)
-            }
+            Some(host) => run_agent_loop_via_driver(
+                host,
+                spec,
+                input.run_id,
+                input.audit.clone(),
+                &input.input,
+            ),
             None => Err(DispatchError::HostRequired("agent_loop")),
         },
         ActivityV2Spec::Deterministic(spec) => match input.host {
@@ -146,14 +148,20 @@ fn run_deterministic(
     })
 }
 
-fn run_agent_loop(
+fn run_agent_loop_via_driver(
     host: &dyn V2RuntimeHost,
     spec: &AgentLoopSpec,
     run_id: &str,
     audit: Arc<V2AuditWriter>,
     input: &Value,
 ) -> Result<DispatchOutcome, DispatchError> {
-    let outcome = host.run_agent_loop(spec, run_id, audit, input)?;
+    // Sourcing only: orbit-core pulls the provider credential from wherever
+    // makes sense (env var, config, secrets manager). We treat a sourcing
+    // failure as `None` so `drive_agent_loop` can still honor the offline
+    // replay path (ORBIT_V2_REPLAY) without credentials. When the driver
+    // actually needs a key and none is present, it errors structurally.
+    let api_key = host.api_key_for("anthropic").ok();
+    let outcome = drive_agent_loop(spec, api_key.as_deref(), run_id, audit, input)?;
     Ok(DispatchOutcome {
         success: true,
         output: serde_json::json!({

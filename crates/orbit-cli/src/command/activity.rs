@@ -329,6 +329,11 @@ impl Execute for ActivityRunV2Args {
         let input: Value = serde_json::from_str(&self.input)
             .map_err(|e| OrbitError::InvalidInput(format!("--input must be valid JSON: {e}")))?;
         let result = runtime.run_activity_v2_from_yaml(&self.path, input)?;
+        let audit_jsonl_str = result
+            .audit_jsonl
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "-".to_string());
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "activity_name": result.activity_name,
@@ -336,7 +341,7 @@ impl Execute for ActivityRunV2Args {
                 "success": result.success,
                 "message": result.message,
                 "output": result.output,
-                "audit_jsonl": result.audit_jsonl.display().to_string(),
+                "audit_jsonl": audit_jsonl_str,
                 "events_emitted": result.events_emitted,
             }))
         } else {
@@ -346,7 +351,7 @@ impl Execute for ActivityRunV2Args {
                 result.activity_type,
                 result.success,
                 result.events_emitted,
-                result.audit_jsonl.display(),
+                audit_jsonl_str,
             );
             if let Some(msg) = &result.message {
                 println!("message: {msg}");
