@@ -23,7 +23,14 @@ fn collect_usage(value: &Value, usage: &mut TokenUsage, allow_direct_usage: bool
                 return;
             }
 
-            for key in ["usage", "token_usage", "tokenUsage", "tokens"] {
+            for key in [
+                "usage",
+                "token_usage",
+                "tokenUsage",
+                "tokens",
+                "usageMetadata",
+                "usage_metadata",
+            ] {
                 if let Some(child) = map.get(key) {
                     collect_usage(child, usage, true);
                 }
@@ -35,6 +42,8 @@ fn collect_usage(value: &Value, usage: &mut TokenUsage, allow_direct_usage: bool
                     && key != "token_usage"
                     && key != "tokenUsage"
                     && key != "tokens"
+                    && key != "usageMetadata"
+                    && key != "usage_metadata"
                 {
                     collect_usage(child, usage, false);
                 }
@@ -69,6 +78,8 @@ fn usage_from_map(map: &JsonMap) -> Option<TokenUsage> {
             "inputTokens",
             "prompt_tokens",
             "promptTokens",
+            "promptTokenCount",
+            "prompt_token_count",
         ],
     );
     let cache_read = first_u64(
@@ -80,6 +91,8 @@ fn usage_from_map(map: &JsonMap) -> Option<TokenUsage> {
             "cacheReadTokens",
             "cached_input_tokens",
             "cachedInputTokens",
+            "cachedContentTokenCount",
+            "cached_content_token_count",
         ],
     );
     let cache_create = first_u64(
@@ -98,6 +111,8 @@ fn usage_from_map(map: &JsonMap) -> Option<TokenUsage> {
             "outputTokens",
             "completion_tokens",
             "completionTokens",
+            "candidatesTokenCount",
+            "candidates_token_count",
         ],
     );
 
