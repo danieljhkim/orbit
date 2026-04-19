@@ -24,6 +24,7 @@ use super::jsonl_sink::V2JsonlSink;
 pub struct V2AuditWriter {
     run_id: String,
     agent_identity: String,
+    workspace_path: Option<String>,
     inner: Arc<dyn AuditSink>,
     envelope_sink: Option<Arc<V2JsonlSink>>,
     events: Mutex<Vec<V2AuditEvent>>,
@@ -53,6 +54,7 @@ impl V2AuditWriter {
         Self {
             run_id: run_id.into(),
             agent_identity: agent_identity.into(),
+            workspace_path: None,
             inner,
             envelope_sink: None,
             events: Mutex::new(Vec::new()),
@@ -69,6 +71,14 @@ impl V2AuditWriter {
         self
     }
 
+    /// Attach the originating workspace path for §7 `workspace_path`
+    /// provenance. Call before the writer is shared (`Arc::new`). Absent
+    /// when the caller has no meaningful workspace (stub hosts, smokes).
+    pub fn with_workspace_path(mut self, path: impl Into<String>) -> Self {
+        self.workspace_path = Some(path.into());
+        self
+    }
+
     /// High-level constructor for CLI / library callers that don't want to
     /// name the loop-level sink types directly (orbit-core's primary use
     /// case). Creates an `InMemorySink` backed by `audit_root/blobs/` and a
@@ -81,13 +91,17 @@ impl V2AuditWriter {
         audit_root: &Path,
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,
+        workspace_path: Option<&Path>,
     ) -> std::io::Result<Arc<Self>> {
         let run_id = run_id.into();
         let blob_dir = audit_root.join("blobs");
         std::fs::create_dir_all(&blob_dir)?;
         let inner: Arc<dyn AuditSink> = Arc::new(InMemorySink::new(blob_dir));
         let envelope_sink = Arc::new(V2JsonlSink::open(audit_root, &run_id)?);
-        let writer = Self::new(run_id, agent_identity, inner).with_envelope_sink(envelope_sink);
+        let mut writer = Self::new(run_id, agent_identity, inner).with_envelope_sink(envelope_sink);
+        if let Some(path) = workspace_path {
+            writer = writer.with_workspace_path(path.display().to_string());
+        }
         Ok(Arc::new(writer))
     }
 
@@ -113,6 +127,7 @@ impl V2AuditWriter {
             run_id: self.run_id.clone(),
             agent_identity: self.agent_identity.clone(),
             parent_event_id,
+            workspace_path: self.workspace_path.clone(),
         };
         let event = V2AuditEvent { envelope, kind };
         if let Some(sink) = &self.envelope_sink {

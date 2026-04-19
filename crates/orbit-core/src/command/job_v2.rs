@@ -54,8 +54,14 @@ impl OrbitRuntime {
 
         let audit_root = self.data_root().join("audit");
         let agent_identity = self.actor().label.clone();
-        let writer = V2AuditWriter::with_disk_sinks(&audit_root, &run_id, agent_identity)
-            .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
+        let workspace_path = self.paths().repo_root.clone();
+        let writer = V2AuditWriter::with_disk_sinks(
+            &audit_root,
+            &run_id,
+            agent_identity,
+            Some(workspace_path.as_path()),
+        )
+        .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
         let audit_jsonl = writer.envelope_log_path();
 
         self.record_event(OrbitEvent::ActivityRunStarted {

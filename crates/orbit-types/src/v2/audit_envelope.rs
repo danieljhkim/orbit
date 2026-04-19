@@ -18,6 +18,13 @@ pub struct V2AuditEnvelope {
     pub agent_identity: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_event_id: Option<String>,
+    /// Absolute filesystem path of the workspace that produced this event.
+    /// Populated by CLI entry points under `GlobalOnly` audit scoping so the
+    /// shared `~/.orbit/audit/v2_loop/*.jsonl` trail can be filtered by origin
+    /// repo. Absent for smokes and stub hosts that don't carry a workspace
+    /// identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 /// §7 v2 audit event — the envelope plus a type-specific body.
