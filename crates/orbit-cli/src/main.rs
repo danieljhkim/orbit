@@ -32,13 +32,7 @@ use crate::command::workspace::{WorkspaceCommand, WorkspaceSubcommand};
 use crate::command::{Commands, Execute, init::InitCommand};
 
 fn main() {
-    let _ = tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .try_init();
+    orbit_common::logging::init_default_subscriber("warn");
 
     let cli = command::Cli::parse();
     let root_override = cli.root.clone();

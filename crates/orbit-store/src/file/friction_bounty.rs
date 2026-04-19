@@ -12,7 +12,7 @@ use std::path::Path;
 
 use orbit_types::{OrbitError, normalize_attribution_label};
 
-use super::fs_utils::{with_exclusive_file_lock, write_atomic};
+use orbit_common::fs::{atomic_write_text_volatile as write_atomic, with_exclusive_file_lock};
 
 type ModelScores = HashMap<String, u64>;
 type Scoreboard = HashMap<String, ModelScores>;
@@ -51,6 +51,6 @@ fn increment(scoreboard_dir: &Path, metric: &str, model: &str) -> Result<(), Orb
 
         let json = serde_json::to_string_pretty(&scoreboard)
             .map_err(|e| OrbitError::Io(format!("serialize friction_bounty.json: {e}")))?;
-        write_atomic(&path, &format!("{json}\n"))
+        write_atomic(&path, &format!("{json}\n")).map_err(Into::into)
     })
 }

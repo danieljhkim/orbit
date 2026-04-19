@@ -15,6 +15,7 @@ clap.workspace = true
 colored = "2"
 comfy-table = "7"
 csv = "1"
+orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core", features = ["clap"] }
 orbit-knowledge = { path = "../orbit-knowledge" }
 orbit-mcp = { path = "../orbit-mcp" }
@@ -24,7 +25,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 tokio.workspace = true
-tracing-subscriber.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2"

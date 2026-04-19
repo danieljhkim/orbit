@@ -12,7 +12,7 @@ use std::path::Path;
 use orbit_types::{OrbitError, PlannerSlot, PlanningDuelRun};
 use serde::{Deserialize, Serialize};
 
-use super::fs_utils::write_atomic;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 const SCOREBOARD_FILENAME: &str = "duel_plan.json";
 const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -84,7 +84,7 @@ pub fn append_run(scoreboard_dir: &Path, run: &PlanningDuelRun) -> Result<(), Or
 
     let json = serde_json::to_string_pretty(&file)
         .map_err(|e| OrbitError::Io(format!("serialize duel_plan.json: {e}")))?;
-    write_atomic(&path, &format!("{json}\n"))
+    write_atomic(&path, &format!("{json}\n")).map_err(Into::into)
 }
 
 /// Load every run entry from `scoreboard_dir/duel_plan.json`.

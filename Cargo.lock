@@ -1419,6 +1419,7 @@ name = "orbit-agent"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "orbit-common",
  "orbit-tools",
  "orbit-types",
  "regex",
@@ -1440,6 +1441,7 @@ dependencies = [
  "colored",
  "comfy-table",
  "csv",
+ "orbit-common",
  "orbit-core",
  "orbit-knowledge",
  "orbit-mcp",
@@ -1451,6 +1453,17 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "orbit-common"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "regex",
+ "serde_json",
+ "sha2",
+ "tracing",
  "tracing-subscriber",
 ]
 
@@ -1461,12 +1474,12 @@ dependencies = [
  "chrono",
  "jsonschema",
  "libc",
+ "orbit-common",
  "orbit-engine",
  "orbit-policy",
  "orbit-store",
  "orbit-tools",
  "orbit-types",
- "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1485,6 +1498,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "orbit-agent",
+ "orbit-common",
  "orbit-exec",
  "orbit-store",
  "orbit-tools",
@@ -1555,6 +1569,7 @@ dependencies = [
  "chrono",
  "fs2",
  "jsonschema",
+ "orbit-common",
  "orbit-types",
  "rusqlite",
  "serde",
@@ -1588,6 +1603,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "orbit-common",
  "regex",
  "serde",
  "serde_json",

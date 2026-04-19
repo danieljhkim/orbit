@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use orbit_types::{OrbitError, Workspace, WorkspaceRegistry, WorkspaceStatus};
 
-use crate::fs_utils::atomic_write_text;
+use orbit_common::fs::atomic_write_text;
 
 /// Returns the global Orbit directory: `~/.orbit/`.
 pub fn global_orbit_dir() -> Result<PathBuf, OrbitError> {
@@ -41,7 +41,7 @@ pub fn save_registry(registry: &WorkspaceRegistry) -> Result<(), OrbitError> {
 pub fn save_registry_to(registry: &WorkspaceRegistry, path: &Path) -> Result<(), OrbitError> {
     let content = serde_json::to_string_pretty(registry)
         .map_err(|e| OrbitError::WorkspaceError(format!("failed to serialize registry: {e}")))?;
-    atomic_write_text(path, &content)
+    atomic_write_text(path, &content).map_err(Into::into)
 }
 
 /// Registers a new workspace. Errors if a workspace with the same id or name already exists.

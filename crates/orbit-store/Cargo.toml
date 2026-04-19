@@ -8,6 +8,7 @@ license.workspace = true
 chrono.workspace = true
 fs2.workspace = true
 jsonschema.workspace = true
+orbit-common = { path = "../orbit-common" }
 orbit-types = { path = "../orbit-types" }
 rusqlite.workspace = true
 serde.workspace = true

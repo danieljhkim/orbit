@@ -10,8 +10,9 @@ use crate::command::executor::seed_default_executors;
 use crate::command::job::seed_default_jobs;
 use crate::command::policy::seed_default_policies;
 use crate::command::skill::{default_skill_ids, seed_default_skills};
+use orbit_common::fs::{create_dir_symlink, remove_path_if_exists};
+
 use crate::config::{RuntimeConfig, seed_default_config};
-use crate::fs_utils::{create_dir_symlink, remove_path_if_exists};
 use crate::runtime::resolve_global_root;
 
 #[derive(Debug, Clone)]

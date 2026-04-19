@@ -11,9 +11,6 @@
 //! `.orbit/audit/blobs/`. Sinks are pluggable: tests use [`InMemorySink`],
 //! callers with no need for persistence use [`NullSink`].
 
-mod blob_store;
-mod redaction;
-
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -23,8 +20,12 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
-pub use blob_store::BlobStore;
-pub use redaction::RedactionMiddleware;
+// Re-exports for existing `orbit_agent::...` callers. New code should import
+// directly from `orbit_common` — these aliases preserve the public surface
+// for the `redaction_smoke` example and downstream crates that already
+// import via `orbit_agent::loop_engine::audit`.
+pub use orbit_common::blob_store::BlobStore;
+pub use orbit_common::redaction::PatternRedactor as RedactionMiddleware;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UsageSnapshot {

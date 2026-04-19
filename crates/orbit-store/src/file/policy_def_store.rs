@@ -6,7 +6,7 @@ use orbit_types::{
     ResourceKind, ResourceMetadata, parse_policy_resource,
 };
 
-use crate::file::fs_utils::write_atomic;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 pub(crate) struct PolicyDefFileStore {
     root: PathBuf,
@@ -80,7 +80,7 @@ impl PolicyDefFileStore {
         .map_err(|e| {
             OrbitError::InvalidInput(format!("failed to serialize policy {}: {e}", def.name))
         })?;
-        write_atomic(&path, &content)
+        write_atomic(&path, &content).map_err(Into::into)
     }
 }
 

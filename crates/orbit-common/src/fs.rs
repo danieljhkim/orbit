@@ -1,0 +1,227 @@
+//! Atomic filesystem primitives.
+//!
+//! Consolidates the three variants that exist across the workspace today:
+//! - `orbit-core::fs_utils::atomic_write_text` (volatile)
+//! - `orbit-store::file::fs_utils::write_atomic` (volatile, with separate flock helper)
+//! - `orbit-knowledge::io::write_text_atomic_durable` (durable, parent-dir fsync)
+//!
+//! The durable variant is the canonical one: rename-into-place plus
+//! parent-directory fsync so the rename itself is flushed. Volatile is
+//! offered for hot paths where the caller accepts post-crash inconsistency.
+//!
+//! All functions return `io::Result`; callers map to their domain error type
+//! (`OrbitError`, `KnowledgeError`, etc.) at the boundary. Keeping this
+//! module domain-free lets orbit-types stay a pure leaf.
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use fs2::FileExt;
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Atomically write `content` to `path`, then fsync the parent directory so
+/// the rename survives a crash. Creates parent directories as needed.
+pub fn atomic_write_text(path: &Path, content: &str) -> io::Result<()> {
+    let mut staged = StagedTextFile::new_internal(path, content, true)?;
+    staged.commit()
+}
+
+/// Atomically write `content` to `path` without fsyncing the parent.
+/// Cheaper than [`atomic_write_text`] but post-crash the rename may be lost.
+pub fn atomic_write_text_volatile(path: &Path, content: &str) -> io::Result<()> {
+    let mut staged = StagedTextFile::new_internal(path, content, false)?;
+    staged.commit()
+}
+
+/// A staged write that can be committed or dropped. Useful when a caller
+/// needs to perform additional validation between staging and commit.
+///
+/// Drop before `commit()` removes the temp file.
+pub struct StagedTextFile {
+    target_path: PathBuf,
+    temp_path: PathBuf,
+    sync_parent: bool,
+    committed: bool,
+}
+
+impl StagedTextFile {
+    /// Stage a durable write. `commit()` renames and fsyncs the parent dir.
+    pub fn new(target_path: &Path, content: &str) -> io::Result<Self> {
+        Self::new_internal(target_path, content, true)
+    }
+
+    /// Stage a volatile write. `commit()` renames without fsyncing.
+    pub fn new_volatile(target_path: &Path, content: &str) -> io::Result<Self> {
+        Self::new_internal(target_path, content, false)
+    }
+
+    fn new_internal(target_path: &Path, content: &str, durable: bool) -> io::Result<Self> {
+        let parent = target_path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("no parent dir for {}", target_path.display()),
+            )
+        })?;
+        fs::create_dir_all(parent)?;
+
+        let temp_path = temp_path_for(target_path);
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .truncate(true)
+            .write(true)
+            .open(&temp_path)?;
+
+        if let Ok(metadata) = fs::metadata(target_path) {
+            fs::set_permissions(&temp_path, metadata.permissions())?;
+        }
+
+        file.write_all(content.as_bytes())?;
+        if durable {
+            file.sync_all()?;
+        }
+        drop(file);
+
+        Ok(Self {
+            target_path: target_path.to_path_buf(),
+            temp_path,
+            sync_parent: durable,
+            committed: false,
+        })
+    }
+
+    pub fn commit(&mut self) -> io::Result<()> {
+        fs::rename(&self.temp_path, &self.target_path)?;
+        self.committed = true;
+        if self.sync_parent {
+            sync_parent_dir(&self.target_path)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for StagedTextFile {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let _ = fs::remove_file(&self.temp_path);
+    }
+}
+
+fn temp_path_for(target_path: &Path) -> PathBuf {
+    let file_name = target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("orbit");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_name = format!(".{file_name}.{nanos}.{counter}.tmp");
+    target_path.with_file_name(temp_name)
+}
+
+fn sync_parent_dir(target_path: &Path) -> io::Result<()> {
+    let parent = target_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("no parent dir for {}", target_path.display()),
+        )
+    })?;
+    File::open(parent)?.sync_all()
+}
+
+// ---------------------------------------------------------------------------
+// Filesystem helpers beyond atomic write
+// ---------------------------------------------------------------------------
+
+/// Creates a directory symlink `dst` → `src`. Platform-abstracted over
+/// Unix (`symlink`) and Windows (`symlink_dir`).
+#[cfg(unix)]
+pub fn create_dir_symlink(src: &Path, dst: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(src, dst)
+}
+
+#[cfg(windows)]
+pub fn create_dir_symlink(src: &Path, dst: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(src, dst)
+}
+
+/// Removes `path` if it exists, tolerating missing paths. Symlinks are
+/// unlinked without following; directories are removed recursively.
+pub fn remove_path_if_exists(path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
+/// Writes `content` to `path`, creating parent directories as needed. Not
+/// atomic — for crash-safe writes use [`atomic_write_text`].
+pub fn write_text_with_parent(path: &Path, content: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, content)
+}
+
+/// Run `op` while holding an exclusive advisory flock on a sibling lock
+/// file of `target_path` (`.<filename>.lock`). Creates the parent directory
+/// if missing. The lock is released when this function returns.
+///
+/// The closure returns `Result<T, E>` where any filesystem error hit while
+/// acquiring the lock is folded into `E` via `From<std::io::Error>` —
+/// callers returning `OrbitError`, `io::Error`, or any error type that
+/// implements `From<io::Error>` compose directly.
+///
+/// `label` prefixes error messages for diagnosability when the lock path
+/// alone isn't enough context.
+pub fn with_exclusive_file_lock<T, E, F>(target_path: &Path, label: &str, op: F) -> Result<T, E>
+where
+    F: FnOnce() -> Result<T, E>,
+    E: From<io::Error>,
+{
+    let parent = target_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("cannot determine parent for '{}'", target_path.display()),
+        )
+    })?;
+    fs::create_dir_all(parent)?;
+
+    let lock_path = lock_path_for(target_path)?;
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| {
+            io::Error::other(format!("open {label} lock '{}': {e}", lock_path.display()))
+        })?;
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| io::Error::other(format!("lock {label} '{}': {e}", lock_path.display())))?;
+
+    op()
+}
+
+fn lock_path_for(path: &Path) -> io::Result<PathBuf> {
+    let file_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path '{}' has no file name", path.display()),
+        )
+    })?;
+    Ok(path.with_file_name(format!(".{file_name}.lock")))
+}

@@ -10,8 +10,8 @@ use orbit_types::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::fs_utils::write_atomic;
 use super::planning_duel_scoreboard;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 const SUMMARY_FILENAME: &str = "summary.json";
 const CURRENT_SCHEMA_VERSION: u32 = 1;

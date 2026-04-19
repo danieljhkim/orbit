@@ -10,6 +10,7 @@ clap = ["dep:clap"]
 [dependencies]
 chrono.workspace = true
 clap = { workspace = true, optional = true }
+orbit-common = { path = "../orbit-common" }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

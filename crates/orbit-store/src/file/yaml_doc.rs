@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use orbit_types::OrbitError;
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::fs_utils::write_atomic;
 use super::layout::list_yaml_files;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 pub(crate) fn read_yaml<T: DeserializeOwned>(path: &Path, label: &str) -> Result<T, OrbitError> {
     read_yaml_with(path, |path, err| {
@@ -39,7 +39,7 @@ where
     F: FnOnce(&T) -> Result<String, OrbitError>,
 {
     let yaml = serialize(value)?;
-    write_atomic(path, &yaml)
+    write_atomic(path, &yaml).map_err(Into::into)
 }
 
 pub(crate) fn enumerate_yaml<T, F>(

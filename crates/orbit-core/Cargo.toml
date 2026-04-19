@@ -10,12 +10,12 @@ clap = ["orbit-types/clap"]
 [dependencies]
 chrono.workspace = true
 jsonschema.workspace = true
+orbit-common = { path = "../orbit-common" }
 orbit-engine = { path = "../orbit-engine" }
 orbit-policy = { path = "../orbit-policy" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }
 orbit-types = { path = "../orbit-types" }
-reqwest.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 serde.workspace = true

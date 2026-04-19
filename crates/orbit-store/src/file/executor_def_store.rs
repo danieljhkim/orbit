@@ -6,7 +6,7 @@ use orbit_types::{
     ResourceKind,
 };
 
-use crate::file::fs_utils::write_atomic;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 pub struct ExecutorDefFileStore {
     root: PathBuf,
@@ -72,7 +72,7 @@ impl ExecutorDefFileStore {
             },
         ))
         .map_err(|e| OrbitError::Execution(format!("failed to serialize executor def: {e}")))?;
-        write_atomic(&path, &content)
+        write_atomic(&path, &content).map_err(Into::into)
     }
 }
 

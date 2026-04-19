@@ -6,7 +6,7 @@ use chrono::Utc;
 use orbit_types::{OrbitError, PipelineState};
 use serde_json::Value;
 
-use crate::file::fs_utils::write_atomic;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 pub fn resolve_active_run_state_dir(
     orbit_root: &Path,
@@ -93,7 +93,7 @@ fn read_state_file(state_dir: &Path) -> Result<PipelineState, OrbitError> {
 fn write_state_file(state_dir: &Path, state: &PipelineState) -> Result<(), OrbitError> {
     let content = serde_json::to_string_pretty(state)
         .map_err(|error| OrbitError::Store(error.to_string()))?;
-    write_atomic(&state_path(state_dir), &content)
+    write_atomic(&state_path(state_dir), &content).map_err(Into::into)
 }
 
 fn state_path(state_dir: &Path) -> PathBuf {

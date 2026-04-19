@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+orbit-common = { path = "../orbit-common" }
 orbit-types = { path = "../orbit-types" }
 orbit-tools = { path = "../orbit-tools" }
 chrono = { workspace = true }

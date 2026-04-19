@@ -2,7 +2,7 @@ use std::path::Path;
 
 use orbit_types::OrbitError;
 
-use crate::fs_utils::write_text_with_parent;
+use orbit_common::fs::write_text_with_parent;
 
 const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../assets/config/default-config.toml");
 

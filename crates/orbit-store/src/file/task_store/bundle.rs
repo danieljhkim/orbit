@@ -5,8 +5,8 @@ use orbit_types::{
     ActorIdentity, OrbitError, ReviewThread, Task, TaskStatus, normalize_optional_attribution_label,
 };
 
-use crate::file::fs_utils::write_atomic;
 use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 use super::{
     TaskFileStore,

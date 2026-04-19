@@ -1,0 +1,13 @@
+[package]
+name = "orbit-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fs2.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

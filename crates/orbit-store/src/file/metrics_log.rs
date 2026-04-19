@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use orbit_types::{MetricsEntry, OrbitError};
 
-use super::fs_utils::with_exclusive_file_lock;
+use orbit_common::fs::with_exclusive_file_lock;
 
 pub fn append_metrics_entry(root: &Path, entry: &MetricsEntry) -> Result<(), OrbitError> {
     let file_path = metrics_day_path(root, entry);

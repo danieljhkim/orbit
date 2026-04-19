@@ -40,7 +40,7 @@ impl TaskFileStore {
     }
 }
 
-use crate::file::fs_utils::write_atomic;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 fn normalize_artifact_path(raw: &str) -> Result<String, OrbitError> {
     let trimmed = raw.trim();

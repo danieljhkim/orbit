@@ -15,9 +15,10 @@
 //!   6. Emit §7.6 `cli.invocation.finished` with stdout/stderr blob refs,
 //!      exit code, duration, and the timeout flag.
 //!
-//! Argv redaction is applied here using `orbit_agent::loop_engine::audit::
-//! RedactionMiddleware` plus an additional `sk-[A-Za-z0-9_\-]+` pattern
-//! covering raw Anthropic-style keys that may appear in argv when a user
+//! Argv redaction is applied here via
+//! `orbit_common::redaction::PatternRedactor::with_argv_secrets()`, which
+//! bundles the HTTP header/JSON patterns with a raw `sk-[A-Za-z0-9_\-]+`
+//! pattern covering provider keys that may appear in argv when a user
 //! mis-configures a provider.
 
 use std::collections::HashMap;
@@ -27,10 +28,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use orbit_agent::loop_engine::audit::RedactionMiddleware;
 use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest};
+use orbit_common::redaction::PatternRedactor;
 use orbit_types::v2::{AgentLoopSpec, V2AuditEventKind};
-use regex::Regex;
 use serde_json::Value;
 
 use super::audit_writer::V2AuditWriter;
@@ -98,12 +98,12 @@ pub fn run_cli_backend(
     argv.push(invocation.program.clone());
     argv.extend(invocation.args.iter().cloned());
 
-    let redaction = ArgvRedactor::default();
-    let argv_redacted = redaction.redact_argv(&argv);
+    let redaction = PatternRedactor::with_argv_secrets();
+    let argv_redacted: Vec<String> = argv.iter().map(|a| redaction.apply_str(a)).collect();
 
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
 
-    let model_redacted = agent.model_name().map(|m| redaction.redact_single(m));
+    let model_redacted = agent.model_name().map(|m| redaction.apply_str(m));
     let _ = audit.emit(V2AuditEventKind::CliInvocationStarted {
         provider: provider.clone(),
         argv_redacted: argv_redacted.clone(),
@@ -261,38 +261,4 @@ fn spawn_with_timeout(
     let exit_code = exit_status.as_ref().and_then(|s| s.code());
     let duration = started.elapsed();
     Ok((stdout, stderr, exit_code, duration, timed_out))
-}
-
-/// Redaction helper: delegates bearer/API-key header patterns to the shared
-/// loop-engine middleware, then additionally scrubs raw `sk-…` tokens that
-/// occasionally end up on argv when a provider is mis-configured.
-struct ArgvRedactor {
-    middleware: RedactionMiddleware,
-    sk_pattern: Regex,
-}
-
-impl Default for ArgvRedactor {
-    fn default() -> Self {
-        Self {
-            middleware: RedactionMiddleware::default_redaction(),
-            sk_pattern: Regex::new(r"sk-[A-Za-z0-9_\-]+").expect("valid regex"),
-        }
-    }
-}
-
-impl ArgvRedactor {
-    fn redact_argv(&self, argv: &[String]) -> Vec<String> {
-        argv.iter().map(|a| self.redact_single(a)).collect()
-    }
-
-    fn redact_single(&self, value: &str) -> String {
-        let middleware_out = self.middleware.apply(value.as_bytes());
-        let text = match String::from_utf8(middleware_out) {
-            Ok(s) => s,
-            Err(err) => return format!("[REDACTED_NONUTF8:{}]", err.utf8_error()),
-        };
-        self.sk_pattern
-            .replace_all(&text, "[REDACTED_API_KEY]")
-            .into_owned()
-    }
 }

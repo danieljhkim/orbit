@@ -7,7 +7,7 @@ use orbit_types::OrbitError;
 
 use crate::Store;
 
-use crate::file::fs_utils::{with_exclusive_file_lock, write_atomic};
+use orbit_common::fs::{atomic_write_text_volatile as write_atomic, with_exclusive_file_lock};
 
 pub fn write_token_scoreboard(scoreboard_dir: &Path, store: &Store) -> Result<(), OrbitError> {
     let path = scoreboard_dir.join("tokens.json");
@@ -30,6 +30,6 @@ pub fn write_token_scoreboard(scoreboard_dir: &Path, store: &Store) -> Result<()
         fs::create_dir_all(scoreboard_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
         let raw = serde_json::to_string_pretty(&payload)
             .map_err(|e| OrbitError::Store(format!("serialize tokens.json: {e}")))?;
-        write_atomic(&path, &format!("{raw}\n"))
+        write_atomic(&path, &format!("{raw}\n")).map_err(Into::into)
     })
 }

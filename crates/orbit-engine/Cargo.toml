@@ -9,6 +9,7 @@ chrono.workspace = true
 libc = { workspace = true }
 jsonschema.workspace = true
 orbit-agent = { path = "../orbit-agent" }
+orbit-common = { path = "../orbit-common" }
 orbit-exec = { path = "../orbit-exec" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }

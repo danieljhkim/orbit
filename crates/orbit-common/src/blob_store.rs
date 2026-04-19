@@ -1,9 +1,12 @@
-//! Content-addressed blob store for verbatim HTTP/tool payloads.
+//! Content-addressed blob store.
 //!
-//! Blobs are redacted at write time and keyed by sha256 of the post-redaction
-//! bytes. Audit events reference blobs by hash, not by path, so a future
-//! `orbit.audit.loop.blob.get` tool can fetch them without callers constructing
-//! filesystem paths. Layout: `{root}/{hash[..2]}/{hash}`.
+//! Writes bytes to `{root}/{hash[..2]}/{hash}` keyed by sha256 of the
+//! post-redaction content. De-duplicates: if the target path already exists
+//! the write is a no-op. Intended for audit/verbatim payload storage where
+//! events reference blobs by hash rather than path.
+//!
+//! Redaction runs at write time via a [`PatternRedactor`]; the stored bytes
+//! are already safe, so read-side tooling does not need to re-apply it.
 
 use std::fs;
 use std::io::{self, Write};
@@ -11,22 +14,22 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use super::redaction::RedactionMiddleware;
+use crate::redaction::PatternRedactor;
 
 pub struct BlobStore {
     root: PathBuf,
-    redactor: RedactionMiddleware,
+    redactor: PatternRedactor,
 }
 
 impl BlobStore {
     pub fn new<P: Into<PathBuf>>(root: P) -> Self {
         Self {
             root: root.into(),
-            redactor: RedactionMiddleware::default_redaction(),
+            redactor: PatternRedactor::http_default(),
         }
     }
 
-    pub fn with_redaction(mut self, redactor: RedactionMiddleware) -> Self {
+    pub fn with_redaction(mut self, redactor: PatternRedactor) -> Self {
         self.redactor = redactor;
         self
     }
@@ -36,7 +39,7 @@ impl BlobStore {
     }
 
     pub fn write(&self, content: &[u8]) -> io::Result<String> {
-        let redacted = self.redactor.apply(content);
+        let redacted = self.redactor.apply_bytes(content);
         let hash = sha256_hex(&redacted);
         let dir = self.root.join(&hash[..2]);
         fs::create_dir_all(&dir)?;

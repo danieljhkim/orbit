@@ -8,8 +8,8 @@ use orbit_types::{
 };
 
 use crate::backend::JobRunStepParams;
-use crate::file::fs_utils::write_atomic;
 use crate::file::layout::validate_path_stem;
+use orbit_common::fs::atomic_write_text_volatile as write_atomic;
 
 use super::{
     JobFileStore,
@@ -345,7 +345,7 @@ impl JobFileStore {
             run: run.clone(),
         };
         let content = serde_yaml::to_string(&doc).map_err(|e| OrbitError::Store(e.to_string()))?;
-        write_atomic(&run_dir.join("jrun.yaml"), &content)
+        write_atomic(&run_dir.join("jrun.yaml"), &content).map_err(Into::into)
     }
 
     /// Write a step result file inside `<run_bundle_dir>/steps/`.
@@ -371,7 +371,7 @@ impl JobFileStore {
             step: step.clone(),
         };
         let content = serde_yaml::to_string(&doc).map_err(|e| OrbitError::Store(e.to_string()))?;
-        write_atomic(&steps_dir.join(filename), &content)
+        write_atomic(&steps_dir.join(filename), &content).map_err(Into::into)
     }
 
     pub(crate) fn archive_run(&self, run_id: &str) -> Result<String, OrbitError> {
@@ -415,7 +415,7 @@ impl JobFileStore {
         };
         let content =
             serde_json::to_string_pretty(state).map_err(|e| OrbitError::Store(e.to_string()))?;
-        write_atomic(&run_dir.join("state.json"), &content)
+        write_atomic(&run_dir.join("state.json"), &content).map_err(Into::into)
     }
 
     pub(crate) fn delete_run(&self, run_id: &str) -> Result<String, OrbitError> {

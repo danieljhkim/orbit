@@ -4,8 +4,9 @@ use std::collections::HashSet;
 
 use orbit_types::OrbitError;
 
+use orbit_common::fs::write_text_with_parent;
+
 use crate::OrbitRuntime;
-use crate::fs_utils::write_text_with_parent;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
 const DEFAULT_SKILL_FILES: [(&str, &str); 7] = [

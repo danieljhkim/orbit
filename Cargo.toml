@@ -2,6 +2,7 @@
 members = [
   "crates/orbit-agent",
   "crates/orbit-cli",
+  "crates/orbit-common",
   "crates/orbit-core",
   "crates/orbit-engine",
   "crates/orbit-knowledge",

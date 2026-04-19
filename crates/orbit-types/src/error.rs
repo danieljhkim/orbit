@@ -45,3 +45,9 @@ pub enum OrbitError {
     #[error("io error: {0}")]
     Io(String),
 }
+
+impl From<std::io::Error> for OrbitError {
+    fn from(err: std::io::Error) -> Self {
+        OrbitError::Io(err.to_string())
+    }
+}
