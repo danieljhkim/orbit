@@ -13,6 +13,7 @@ orbit-exec = { path = "../orbit-exec" }
 orbit-store = { path = "../orbit-store" }
 orbit-tools = { path = "../orbit-tools" }
 orbit-types = { path = "../orbit-types" }
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile = "3"

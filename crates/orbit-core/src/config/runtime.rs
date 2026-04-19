@@ -28,6 +28,10 @@ pub(crate) struct RuntimeConfig {
     pub(crate) task_approval: TaskApprovalConfig,
     pub(crate) scoring_enabled: bool,
     pub(crate) graph_editing: bool,
+    /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
+    /// `None` means "not configured"; the resolver falls through to the hard-
+    /// coded `http` default.
+    pub(crate) v2_backend: Option<String>,
 }
 
 impl Default for RuntimeConfig {
@@ -45,6 +49,7 @@ impl RuntimeConfig {
             task_approval: TaskApprovalConfig::default(),
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
+            v2_backend: None,
         }
     }
 
@@ -113,6 +118,11 @@ impl RuntimeConfig {
             .and_then(|g| g.editing)
             .unwrap_or(DEFAULT_GRAPH_EDITING);
 
+        let v2_backend = parsed
+            .runtime
+            .as_ref()
+            .and_then(|section| section.backend.clone());
+
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_raw(
                 parsed.execution.clone().and_then(|v| v.env),
@@ -124,7 +134,13 @@ impl RuntimeConfig {
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
             scoring_enabled,
             graph_editing,
+            v2_backend,
         })
+    }
+
+    /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
+    pub(crate) fn v2_backend(&self) -> Option<&str> {
+        self.v2_backend.as_deref()
     }
 }
 

@@ -234,6 +234,12 @@ impl V2RuntimeHost for EchoHost {
             "EchoHost has no credentials".into(),
         ))
     }
+
+    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
+        Err(DispatchError::CliInvocationFailed(
+            "EchoHost has no CLI provider mapping".into(),
+        ))
+    }
 }
 
 fn build_writer_and_sinks(

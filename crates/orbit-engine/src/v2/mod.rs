@@ -6,6 +6,7 @@
 
 pub mod agent_loop_driver;
 pub mod audit_writer;
+pub mod cli_runner;
 pub mod dispatcher;
 pub mod job_executor;
 pub mod jsonl_sink;
@@ -16,6 +17,7 @@ pub use agent_loop_driver::{
     drive_agent_loop, drive_agent_loop_with_session, reset_replay_transport,
 };
 pub use audit_writer::{V2AuditWriter, WriteError};
+pub use cli_runner::run_cli_backend;
 pub use dispatcher::{
     DispatchError, DispatchOutcome, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
 };

@@ -114,6 +114,35 @@ pub enum V2AuditEventKind {
         tool_name: String,
         reason: String,
     },
+    /// §6 harness-delegated allowlist advisory. Emitted once per CLI backend
+    /// invocation when the declared `tools:` list is passed through to the
+    /// provider harness (Orbit does not enforce it in CLI mode).
+    ToolAllowlistHarnessDelegated {
+        provider: String,
+        tools: Vec<String>,
+    },
+    /// §7.6 — CLI backend subprocess starting. Emitted after redaction has been
+    /// applied to `argv`; the stdin blob is already written and hashed by the
+    /// time this event fires.
+    CliInvocationStarted {
+        provider: String,
+        argv_redacted: Vec<String>,
+        stdin_blob_ref: Option<String>,
+        model: Option<String>,
+        wall_clock_timeout_ms: u64,
+    },
+    /// §7.6 — CLI backend subprocess finished (either naturally or by
+    /// wall-clock timeout). `timed_out == true` iff the subprocess was killed
+    /// because it exceeded `wall_clock_timeout_ms`.
+    CliInvocationFinished {
+        provider: String,
+        exit_code: Option<i32>,
+        duration_ms: u64,
+        stdout_blob_ref: Option<String>,
+        stderr_blob_ref: Option<String>,
+        harness_version: Option<String>,
+        timed_out: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -537,6 +537,12 @@ impl V2RuntimeHost for StubHost {
             "smoke host: no credentials".into(),
         ))
     }
+
+    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
+        Err(DispatchError::CliInvocationFailed(
+            "smoke host: no CLI mapping".into(),
+        ))
+    }
 }
 
 fn workspace_root() -> PathBuf {

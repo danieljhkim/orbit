@@ -39,7 +39,7 @@ use serde_json::Value;
 use crate::job_runner::evaluate_bool_expr;
 use crate::template::{self, TemplateContext};
 
-use super::agent_loop_driver::{drive_agent_loop, drive_agent_loop_with_session};
+use super::agent_loop_driver::drive_agent_loop_with_session;
 use super::audit_writer::V2AuditWriter;
 use super::dispatcher::{DispatchError, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity};
 
@@ -310,6 +310,22 @@ fn run_target(
 
     match (&t.spec, &t.session) {
         (ActivityV2Spec::AgentLoop(agent_spec), Some(binding)) => {
+            // Sessions only bind in HTTP mode; the loader rejects `loop +
+            // session + cli` via `validate_job_loop_session_backends`, but we
+            // also guard structurally here in case a flat (non-loop) target
+            // declares session + cli.
+            if agent_spec.backend != orbit_types::v2::Backend::Http {
+                return Err(DispatchError::JobValidation(format!(
+                    "step `{}`: `session:` binding requires backend: http (got {})",
+                    step.id,
+                    agent_spec.backend.as_str()
+                )));
+            }
+            if !agent_spec.provider.has_http_transport() {
+                return Err(DispatchError::UnwiredHttpTransport {
+                    provider: agent_spec.provider.as_str().to_string(),
+                });
+            }
             // Reuse the named Session across calls. Held under a Mutex so
             // siblings could theoretically reference the same binding; the
             // validator rejects that shape, but the lock is cheap.
@@ -336,23 +352,23 @@ fn run_target(
                 ctx,
             )
         }
-        (ActivityV2Spec::AgentLoop(agent_spec), None) => {
-            let api_key = ctx.host.api_key_for("anthropic").ok();
-            let outcome = drive_agent_loop(
-                agent_spec,
-                api_key.as_deref(),
-                &ctx.run_id,
-                ctx.audit.clone(),
-                &rendered_input,
-            )?;
-            let out_json = serde_json::json!({
-                "final_message": outcome.final_message,
-                "terminate_reason": format!("{:?}", outcome.terminate_reason),
-            });
-            record_pipeline(ctx, &step.id, out_json.clone());
+        (ActivityV2Spec::AgentLoop(_agent_spec), None) => {
+            // Route through the backend-aware dispatcher so a step with
+            // `backend: cli` lands on the CLI runner rather than the HTTP
+            // driver.
+            let dispatch = dispatch_v2_activity(V2DispatchInput {
+                activity_name: &step.id,
+                spec: &t.spec,
+                input: rendered_input,
+                audit: ctx.audit.clone(),
+                run_id: &ctx.run_id,
+                host: Some(ctx.host),
+            })?;
+            let out = dispatch.output.clone();
+            record_pipeline(ctx, &step.id, out.clone());
             Ok(StepOutcome {
-                success: true,
-                output: out_json,
+                success: dispatch.success,
+                output: out,
                 skipped: false,
             })
         }

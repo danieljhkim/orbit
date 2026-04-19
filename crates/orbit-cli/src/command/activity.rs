@@ -320,6 +320,11 @@ pub struct ActivityRunV2Args {
     /// Optional JSON input passed to the dispatcher.
     #[arg(long, default_value = "null")]
     pub input: String,
+    /// Explicit execution backend override for `agent_loop` activities (§3.1).
+    /// Precedence: this flag > `ORBIT_BACKEND` > `[runtime] backend` > `http`.
+    /// Accepted values: `http`, `cli`, `auto`.
+    #[arg(long)]
+    pub backend: Option<String>,
     #[arg(long)]
     pub json: bool,
 }
@@ -328,16 +333,24 @@ impl Execute for ActivityRunV2Args {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let input: Value = serde_json::from_str(&self.input)
             .map_err(|e| OrbitError::InvalidInput(format!("--input must be valid JSON: {e}")))?;
-        let result = runtime.run_activity_v2_from_yaml(&self.path, input)?;
+        let backend_flag =
+            orbit_core::command::backend_resolver::parse_backend_flag(self.backend.as_deref())
+                .map_err(OrbitError::InvalidInput)?;
+        let result = runtime.run_activity_v2_from_yaml(&self.path, input, backend_flag)?;
         let audit_jsonl_str = result
             .audit_jsonl
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "-".to_string());
+        let backend_str = result
+            .resolved_backend
+            .map(|b| b.as_str().to_string())
+            .unwrap_or_else(|| "n/a".to_string());
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "activity_name": result.activity_name,
                 "activity_type": result.activity_type,
+                "resolved_backend": backend_str,
                 "success": result.success,
                 "message": result.message,
                 "output": result.output,
@@ -346,9 +359,10 @@ impl Execute for ActivityRunV2Args {
             }))
         } else {
             println!(
-                "activity={};type={};success={};events={};audit_jsonl={}",
+                "activity={};type={};backend={};success={};events={};audit_jsonl={}",
                 result.activity_name,
                 result.activity_type,
+                backend_str,
                 result.success,
                 result.events_emitted,
                 audit_jsonl_str,

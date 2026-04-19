@@ -9,6 +9,14 @@ pub(super) struct RawRuntimeConfig {
     pub(super) scoring: Option<RawScoringConfig>,
     pub(super) graph: Option<RawGraphConfig>,
     pub(super) watch: Option<toml::Value>,
+    pub(super) runtime: Option<RawRuntimeSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawRuntimeSection {
+    /// `runtime.backend` — persisted default for the v2 `agent_loop` execution
+    /// backend (§3.1). One of `http`, `cli`, `auto`.
+    pub(super) backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

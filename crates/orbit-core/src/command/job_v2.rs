@@ -8,7 +8,10 @@
 use std::path::{Path, PathBuf};
 
 use orbit_engine::v2::{JobOutcome, V2AuditWriter, execute_job};
-use orbit_types::v2::{JobAsset, V2AuditEventKind, load_job_asset};
+use orbit_types::v2::{
+    Backend, JobAsset, V2AuditEventKind, load_job_asset, resolve_job_backends,
+    validate_job_loop_session_backends,
+};
 use orbit_types::{OrbitError, OrbitEvent};
 use serde_json::Value;
 
@@ -21,6 +24,9 @@ pub struct V2JobRunResult {
     pub message: Option<String>,
     pub audit_jsonl: Option<PathBuf>,
     pub events_emitted: usize,
+    /// Resolved backend applied at load time to every `agent_loop` step in
+    /// the DAG. Recorded so smokes can inspect the precedence outcome.
+    pub resolved_backend: Backend,
 }
 
 impl OrbitRuntime {
@@ -31,11 +37,12 @@ impl OrbitRuntime {
         &self,
         yaml_path: &Path,
         input: Value,
+        backend_flag: Option<Backend>,
     ) -> Result<V2JobRunResult, OrbitError> {
         let yaml = std::fs::read_to_string(yaml_path).map_err(|err| {
             OrbitError::InvalidInput(format!("read {}: {err}", yaml_path.display()))
         })?;
-        let asset = match load_job_asset(&yaml).map_err(|err| {
+        let mut asset = match load_job_asset(&yaml).map_err(|err| {
             OrbitError::InvalidInput(format!("load {}: {err}", yaml_path.display()))
         })? {
             JobAsset::V2(a) => a,
@@ -46,6 +53,16 @@ impl OrbitRuntime {
                 )));
             }
         };
+
+        // §3.1 resolution: replace every `Auto` with a concrete backend.
+        let resolution = self.resolve_v2_backend(backend_flag);
+        resolve_job_backends(&mut asset.spec, resolution.backend);
+
+        // §3.2 loader rejection: any `loop:`-nested step with `session:`
+        // binding must resolve to `backend: http`. We reject at load time so
+        // CLI-mode runs never start a DAG they can't finish.
+        validate_job_loop_session_backends(&asset.spec, &yaml_path.display().to_string())
+            .map_err(|err| OrbitError::InvalidInput(format!("{err}")))?;
         let run_id = format!(
             "v2job-{}-{}",
             asset.name,
@@ -101,6 +118,7 @@ impl OrbitRuntime {
                 message: o.message,
                 audit_jsonl,
                 events_emitted: events_count,
+                resolved_backend: resolution.backend,
             }),
             Err(err) => Err(err),
         }

@@ -170,6 +170,8 @@ pub(crate) struct OrbitRuntimeSettings {
     task_delegate_approval: bool,
     scoring_enabled: bool,
     graph_editing: bool,
+    /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
+    v2_backend: Option<String>,
 }
 
 impl OrbitRuntimeSettings {
@@ -180,6 +182,7 @@ impl OrbitRuntimeSettings {
         task_delegate_approval: bool,
         scoring_enabled: bool,
         graph_editing: bool,
+        v2_backend: Option<String>,
     ) -> Self {
         Self {
             persistence,
@@ -188,7 +191,12 @@ impl OrbitRuntimeSettings {
             task_delegate_approval,
             scoring_enabled,
             graph_editing,
+            v2_backend,
         }
+    }
+
+    pub(crate) fn v2_backend(&self) -> Option<&str> {
+        self.v2_backend.as_deref()
     }
 }
 
@@ -276,6 +284,12 @@ impl OrbitContext {
 
     pub(crate) fn graph_editing(&self) -> bool {
         self.runtime.graph_editing
+    }
+
+    /// Persisted default for the v2 `agent_loop` execution backend (§3.1
+    /// resolution precedence step 3). `None` means "not configured".
+    pub(crate) fn v2_backend(&self) -> Option<&str> {
+        self.runtime.v2_backend()
     }
 }
 

@@ -1,12 +1,13 @@
 use std::process::Command;
 use std::sync::Arc;
 
-use orbit_types::v2::{ActivityV2Spec, AgentLoopSpec, DeterministicSpec, ShellSpec};
+use orbit_types::v2::{ActivityV2Spec, AgentLoopSpec, Backend, DeterministicSpec, ShellSpec};
 use serde_json::Value;
 use thiserror::Error;
 
 use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
+use super::cli_runner::run_cli_backend;
 
 /// Orbit-core-owned responsibilities the v2 dispatcher delegates back across
 /// the engine→core boundary: deterministic action execution (which needs the
@@ -32,6 +33,13 @@ pub trait V2RuntimeHost: Send + Sync {
     /// the raw key as a `String` so nothing orbit-agent-shaped bleeds across
     /// the boundary. Implementors typically read from env or config.
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError>;
+
+    /// Resolve the CLI binary command for a given v2 provider name (§3.1
+    /// backend: cli path). Workspace / env overrides live in the host so the
+    /// engine's CLI runner stays environment-agnostic. Returning an error is
+    /// the structured failure path when a provider has no CLI mapping (e.g.
+    /// `openai_compat` which is HTTP-only).
+    fn resolve_cli_command(&self, provider: &str) -> Result<String, DispatchError>;
 }
 
 /// Input bundle for a single v2 activity dispatch.
@@ -79,6 +87,25 @@ pub enum DispatchError {
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
 
+    /// §3.1 no-silent-fallback: `backend: http` requested a provider whose
+    /// HTTP transport is not wired. Must surface as a structured error rather
+    /// than silently dispatching to CLI.
+    #[error(
+        "provider `{provider}` has no HTTP transport wired at this phase — set backend: cli or choose a provider whose HTTP path is implemented"
+    )]
+    UnwiredHttpTransport { provider: String },
+
+    /// `backend: auto` was observed past the load-time resolver — every
+    /// dispatch site must see a concrete backend. Indicates a caller that
+    /// forgot to run `resolve_*_backends` before dispatching.
+    #[error("backend `auto` leaked past load-time resolution (step id `{step_id}`)")]
+    UnresolvedAutoBackend { step_id: String },
+
+    /// CLI subprocess invocation failed at the host layer (e.g. failed to
+    /// spawn, or provider key unknown). Wraps the host's error text verbatim.
+    #[error("cli invocation failed: {0}")]
+    CliInvocationFailed(String),
+
     /// Tool-allowlist denial (§6). Non-retryable — the retry wrapper must not
     /// re-attempt a denied call. Phase 2 formerly translated this to
     /// `Ok(terminated)`; Phase 3 surfaces it structurally so the DAG executor
@@ -111,6 +138,8 @@ impl DispatchError {
                 | DispatchError::ShellProgramNotAllowed(_)
                 | DispatchError::JobValidation(_)
                 | DispatchError::HostRequired(_)
+                | DispatchError::UnwiredHttpTransport { .. }
+                | DispatchError::UnresolvedAutoBackend { .. }
         )
     }
 }
@@ -135,8 +164,9 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
 
     let result = match input.spec {
         ActivityV2Spec::AgentLoop(spec) => match input.host {
-            Some(host) => run_agent_loop_via_driver(
+            Some(host) => run_agent_loop_activity(
                 host,
+                input.activity_name,
                 spec,
                 input.run_id,
                 input.audit.clone(),
@@ -178,6 +208,30 @@ fn run_deterministic(
         output,
         message: None,
     })
+}
+
+fn run_agent_loop_activity(
+    host: &dyn V2RuntimeHost,
+    activity_name: &str,
+    spec: &AgentLoopSpec,
+    run_id: &str,
+    audit: Arc<V2AuditWriter>,
+    input: &Value,
+) -> Result<DispatchOutcome, DispatchError> {
+    match spec.backend {
+        Backend::Auto => Err(DispatchError::UnresolvedAutoBackend {
+            step_id: activity_name.to_string(),
+        }),
+        Backend::Http => {
+            if !spec.provider.has_http_transport() {
+                return Err(DispatchError::UnwiredHttpTransport {
+                    provider: spec.provider.as_str().to_string(),
+                });
+            }
+            run_agent_loop_via_driver(host, spec, run_id, audit, input)
+        }
+        Backend::Cli => run_cli_backend(host, spec, run_id, audit, input),
+    }
 }
 
 fn run_agent_loop_via_driver(

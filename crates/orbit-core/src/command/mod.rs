@@ -13,6 +13,7 @@
 pub mod activity;
 pub mod activity_v2;
 pub mod audit_event;
+pub mod backend_resolver;
 pub mod diagnostics;
 pub mod executor;
 pub mod init;

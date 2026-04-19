@@ -53,6 +53,84 @@ pub struct AgentLoopSpec {
     /// Upper bound on loop iterations.
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
+    /// Execution backend (§3.1). `Auto` is resolved to `Http` or `Cli` once per
+    /// Run at load time per the precedence rules in §3.1 and then never observed
+    /// by the dispatcher — everything downstream sees the concrete backend.
+    #[serde(default)]
+    pub backend: Backend,
+    /// Provider whose runtime executes this activity (§3.1). Default `Claude`
+    /// matches the Phase 2c HTTP wiring that currently supports only Anthropic.
+    #[serde(default)]
+    pub provider: Provider,
+    /// Wall-clock timeout for a CLI invocation (§7.6). Ignored in HTTP mode
+    /// where the loop engine applies its own timeout.
+    #[serde(default = "default_cli_wall_clock_timeout_seconds")]
+    pub wall_clock_timeout_seconds: u64,
+}
+
+/// Execution backend for an `agent_loop` activity (§3.1). `Auto` resolves at
+/// load time per the precedence chain in §3.1: flag → env → config → default.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    #[default]
+    Http,
+    Cli,
+    Auto,
+}
+
+impl Backend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Backend::Http => "http",
+            Backend::Cli => "cli",
+            Backend::Auto => "auto",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "http" => Some(Backend::Http),
+            "cli" => Some(Backend::Cli),
+            "auto" => Some(Backend::Auto),
+            _ => None,
+        }
+    }
+}
+
+/// Named provider whose runtime executes an `agent_loop` activity. The enum is
+/// closed-set: adding a provider means wiring a new HTTP transport AND/OR a new
+/// CLI runtime factory, both of which are code changes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Provider {
+    #[default]
+    Claude,
+    Codex,
+    Gemini,
+    Ollama,
+    #[serde(rename = "openai_compat", alias = "openai-compat")]
+    OpenaiCompat,
+}
+
+impl Provider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Provider::Claude => "claude",
+            Provider::Codex => "codex",
+            Provider::Gemini => "gemini",
+            Provider::Ollama => "ollama",
+            Provider::OpenaiCompat => "openai_compat",
+        }
+    }
+
+    /// Whether Phase 2c wires an HTTP transport for this provider. Used by the
+    /// dispatcher's §3.1 no-silent-fallback check: `backend: http` against a
+    /// provider whose HTTP transport is not wired must fail structurally, not
+    /// silently fall back to CLI.
+    pub fn has_http_transport(self) -> bool {
+        matches!(self, Provider::Claude)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -96,4 +174,8 @@ const fn default_max_iterations() -> u32 {
 
 const fn default_timeout_seconds() -> u64 {
     60
+}
+
+const fn default_cli_wall_clock_timeout_seconds() -> u64 {
+    300
 }

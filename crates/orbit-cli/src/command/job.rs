@@ -504,6 +504,11 @@ pub struct JobRunV2Args {
     /// Optional JSON input passed to the v2 job executor.
     #[arg(long, default_value = "null")]
     pub input: String,
+    /// Explicit execution backend override for `agent_loop` steps (§3.1).
+    /// Precedence: this flag > `ORBIT_BACKEND` > `[runtime] backend` > `http`.
+    /// Accepted values: `http`, `cli`, `auto`.
+    #[arg(long)]
+    pub backend: Option<String>,
     #[arg(long)]
     pub json: bool,
 }
@@ -512,15 +517,20 @@ impl Execute for JobRunV2Args {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let input: Value = serde_json::from_str(&self.input)
             .map_err(|e| OrbitError::InvalidInput(format!("--input must be valid JSON: {e}")))?;
-        let result = runtime.run_job_v2_from_yaml(&self.path, input)?;
+        let backend_flag =
+            orbit_core::command::backend_resolver::parse_backend_flag(self.backend.as_deref())
+                .map_err(OrbitError::InvalidInput)?;
+        let result = runtime.run_job_v2_from_yaml(&self.path, input, backend_flag)?;
         let audit_jsonl_str = result
             .audit_jsonl
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "-".to_string());
+        let backend_str = result.resolved_backend.as_str();
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "job_name": result.job_name,
+                "resolved_backend": backend_str,
                 "success": result.success,
                 "message": result.message,
                 "pipeline": result.pipeline,
@@ -529,8 +539,12 @@ impl Execute for JobRunV2Args {
             }))
         } else {
             println!(
-                "job={};success={};events={};audit_jsonl={}",
-                result.job_name, result.success, result.events_emitted, audit_jsonl_str,
+                "job={};backend={};success={};events={};audit_jsonl={}",
+                result.job_name,
+                backend_str,
+                result.success,
+                result.events_emitted,
+                audit_jsonl_str,
             );
             if let Some(msg) = &result.message {
                 println!("message: {msg}");

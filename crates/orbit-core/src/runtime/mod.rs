@@ -175,6 +175,12 @@ impl OrbitRuntime {
         self.context.graph_editing()
     }
 
+    /// Configured default for the v2 `agent_loop` execution backend (§3.1
+    /// precedence step 3). Returns `None` when not set.
+    pub fn v2_backend_config(&self) -> Option<&str> {
+        self.context.v2_backend()
+    }
+
     pub(crate) fn actor(&self) -> &ActorIdentity {
         self.context.actor()
     }

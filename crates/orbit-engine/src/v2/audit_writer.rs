@@ -285,5 +285,10 @@ fn event_type_of(kind: &V2AuditEventKind) -> &'static str {
         V2AuditEventKind::ActivityStarted { .. } => "activity.started",
         V2AuditEventKind::ActivityFinished { .. } => "activity.finished",
         V2AuditEventKind::ToolDenied { .. } => "tool.denied",
+        V2AuditEventKind::ToolAllowlistHarnessDelegated { .. } => {
+            "tool_allowlist.harness_delegated"
+        }
+        V2AuditEventKind::CliInvocationStarted { .. } => "cli.invocation.started",
+        V2AuditEventKind::CliInvocationFinished { .. } => "cli.invocation.finished",
     }
 }

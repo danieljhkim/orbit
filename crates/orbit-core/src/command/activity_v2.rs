@@ -14,7 +14,9 @@
 use std::path::{Path, PathBuf};
 
 use orbit_engine::v2::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
-use orbit_types::v2::{ActivityAsset, V2AuditEventKind, load_activity_asset};
+use orbit_types::v2::{
+    ActivityAsset, Backend, V2AuditEventKind, load_activity_asset, resolve_activity_backends,
+};
 use orbit_types::{OrbitError, OrbitEvent};
 use serde_json::Value;
 
@@ -28,20 +30,28 @@ pub struct V2ActivityRunResult {
     pub message: Option<String>,
     pub audit_jsonl: Option<PathBuf>,
     pub events_emitted: usize,
+    /// Resolved execution backend applied to the asset at load time. `None`
+    /// when the activity isn't `agent_loop` (deterministic/shell ignore
+    /// `backend:`).
+    pub resolved_backend: Option<Backend>,
 }
 
 impl OrbitRuntime {
     /// Execute a v2 activity from a YAML path. Returns a structural result
     /// plus the path to the persisted §7 envelope JSONL.
+    ///
+    /// `backend_flag` is the `--backend` invocation-level override; when
+    /// `None`, the resolver falls through to env → config → default.
     pub fn run_activity_v2_from_yaml(
         &self,
         yaml_path: &Path,
         input: Value,
+        backend_flag: Option<Backend>,
     ) -> Result<V2ActivityRunResult, OrbitError> {
         let yaml = std::fs::read_to_string(yaml_path).map_err(|err| {
             OrbitError::InvalidInput(format!("read {}: {err}", yaml_path.display()))
         })?;
-        let asset = match load_activity_asset(&yaml).map_err(|err| {
+        let mut asset = match load_activity_asset(&yaml).map_err(|err| {
             OrbitError::InvalidInput(format!("load {}: {err}", yaml_path.display()))
         })? {
             ActivityAsset::V2(a) => a,
@@ -51,6 +61,15 @@ impl OrbitRuntime {
                     yaml_path.display()
                 )));
             }
+        };
+
+        // §3.1 resolution: replace `Auto` with a concrete backend per
+        // precedence (flag → env → config → http).
+        let resolution = self.resolve_v2_backend(backend_flag);
+        resolve_activity_backends(&mut asset.spec, resolution.backend);
+        let resolved_backend = match &asset.spec.spec {
+            orbit_types::v2::ActivityV2Spec::AgentLoop(spec) => Some(spec.backend),
+            _ => None,
         };
 
         let run_id = format!(
@@ -122,6 +141,7 @@ impl OrbitRuntime {
                 message: o.message,
                 audit_jsonl,
                 events_emitted: events_count,
+                resolved_backend,
             }),
             Err(err) => Err(OrbitError::Execution(format!("v2 dispatch: {err}"))),
         }
