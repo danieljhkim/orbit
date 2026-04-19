@@ -26,16 +26,16 @@ All must pass before a task moves to `review`.
 ## Crate Architecture
 
 ```
-orbit-types → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → orbit-store, orbit-agent → orbit-engine → orbit-core → orbit-cli
-                                                        ↘ orbit-mcp ↗
+orbit-common → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → orbit-store, orbit-agent → orbit-engine → orbit-core → orbit-cli
+                                                         ↘ orbit-mcp ↗
 ```
 
-- **orbit-types**: leaf — no internal deps. Shared types, `OrbitError`, ID generation.
-- **orbit-knowledge**: knowledge/graph parsing and storage helpers. Depends on `orbit-types`; consumed by `orbit-tools` and `orbit-cli`.
+- **orbit-common**: leaf — no internal deps. `types::` owns shared domain types, `OrbitError`, ID generation, and v2 schemas; `utility::` owns generic helpers like fs, redaction, logging, and blob storage.
+- **orbit-knowledge**: knowledge/graph parsing and storage helpers. Depends on `orbit-common`; consumed by `orbit-tools` and `orbit-cli`.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones.
 - **orbit-agent**: HTTP `LoopTransport` primitives **and** the retained `AgentRuntime` + `providers/*_cli.rs` CLI runtimes. Per the 2026-04-18 amendment to `docs/design/activity-job-v2.md` (§10.1 retention table), the CLI provider files are **kept** through Phase 5 as the implementation of v2 `backend: cli`. Phase 5 deletes the v1 asset format and v1 dispatch path; it does NOT delete `providers/*_cli.rs` or the `AgentRuntime` trait.
 - **orbit-engine**: activity/job execution, template rendering, retry logic. Also owns the v2 `backend: cli` subprocess runner (`v2::cli_runner`), which names `orbit-agent::{Agent, AgentConfig}` directly — orbit-core stays clean of orbit-agent types per the T20260418-2210 boundary.
-- **orbit-mcp**: Model Context Protocol adapter over `orbit-tools::ToolRegistry`. Depends only on `orbit-types`, `orbit-tools`, and `rmcp`; consumed by `orbit-cli` via `orbit serve mcp`.
+- **orbit-mcp**: Model Context Protocol adapter over `orbit-tools::ToolRegistry`. Depends only on `orbit-common`, `orbit-tools`, and `rmcp`; consumed by `orbit-cli` via `orbit serve mcp`.
 - **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding. Exposes `V2RuntimeHost` via `impl` for `OrbitRuntime`; the trait surface is primitive (deterministic dispatch, API-key sourcing, CLI command resolution) so no orbit-agent type leaks through it.
 - **orbit-cli**: clap-based CLI entry point.
 

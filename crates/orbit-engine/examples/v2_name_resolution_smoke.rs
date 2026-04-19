@@ -20,15 +20,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use orbit_engine::v2::{
-    DispatchError, V2AuditWriter, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
-};
-use orbit_types::JobScheduleState;
-use orbit_types::v2::{
+use orbit_common::types::JobScheduleState;
+use orbit_common::types::v2::{
     ActivityV2, ActivityV2Spec, AgentLoopSpec, Backend, JobAsset, JobKind, JobV2, JobV2Step,
     JobV2StepBody, LoopBlock, OnDenial, Provider, ResolveError, TargetRef, V2ActivityCatalog,
     load_job_asset, resolve_job_backends, resolve_job_target_refs,
     validate_job_loop_session_backends,
+};
+use orbit_engine::v2::{
+    DispatchError, V2AuditWriter, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
 };
 use serde_json::Value;
 
@@ -428,6 +428,7 @@ fn pipeline_with_reviewer_loop() -> JobV2 {
             retry: None,
             body: JobV2StepBody::Loop {
                 loop_: LoopBlock {
+                    items: None,
                     max_iterations: 3,
                     break_when: None,
                     steps: vec![review_step],
@@ -443,7 +444,7 @@ fn stub_deterministic_activity(name: &str) -> ActivityV2 {
         input_schema_json: serde_json::Value::Null,
         output_schema_json: serde_json::Value::Null,
         fs_profile: None,
-        spec: ActivityV2Spec::Deterministic(orbit_types::v2::DeterministicSpec {
+        spec: ActivityV2Spec::Deterministic(orbit_common::types::v2::DeterministicSpec {
             action: "noop".to_string(),
             config: serde_json::Value::Null,
         }),

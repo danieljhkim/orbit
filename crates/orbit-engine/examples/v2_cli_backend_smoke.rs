@@ -20,14 +20,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use orbit_engine::v2::{
-    DispatchError, V2AuditWriter, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
-};
-use orbit_types::JobScheduleState;
-use orbit_types::v2::{
+use orbit_common::types::JobScheduleState;
+use orbit_common::types::v2::{
     ActivityAsset, ActivityV2Spec, AgentLoopSpec, Backend, BackendConstraintError, JobKind, JobV2,
     JobV2Step, JobV2StepBody, LoopBlock, OnDenial, Provider, TargetStep, load_activity_asset,
     resolve_job_backends, validate_job_loop_session_backends,
+};
+use orbit_engine::v2::{
+    DispatchError, V2AuditWriter, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -456,6 +456,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
         retry: None,
         body: JobV2StepBody::Loop {
             loop_: LoopBlock {
+                items: None,
                 max_iterations: 3,
                 break_when: None,
                 steps: vec![review_step],
