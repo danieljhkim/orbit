@@ -53,10 +53,21 @@ Run:
   reconcile  Reconcile pending/running job runs
   ship       Ship tasks through the pipeline
   duel       Cross-agent scoring and planning
+  job        Run job workflows
+  run        Run a job workflow
 
 Manage work:
   task       Create, update, and manage tasks
+  graph      graph
+  executor   executor
+  policy     policy
+  activity   activity
 
+Resource Management:
+  apply      apply
+  get        get
+  describe   describe
+  
 Inspect:
   audit      Query the audit event log
   metrics    Inspect token, tool-call, and knowledge-pack metrics

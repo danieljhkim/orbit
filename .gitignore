@@ -33,3 +33,7 @@ uv.lock
 tmp
 node_modules
 package-lock.json
+
+# direnv — per-repo env vars (holds secrets like ANTHROPIC_API_KEY)
+.envrc
+.direnv/
