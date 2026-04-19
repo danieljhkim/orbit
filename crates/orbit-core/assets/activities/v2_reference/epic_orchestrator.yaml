@@ -1,0 +1,139 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: epic_orchestrator
+spec:
+  type: agent_loop
+  description: >
+    Judgment-grade orchestrator for epic-sized tasks. One invocation =
+    one cycle: read state, decide READY subtasks, decide SEQUENTIAL vs
+    PARALLEL, dispatch `task_gate_pipeline` per bundle, wait for
+    results, persist decisions to `orbit.state`, emit
+    `all_terminal: bool` so the enclosing `loop:` can exit when every
+    subtask has reached a terminal state. Conversation history persists
+    across iterations when the enclosing workflow step declares
+    `session: <name>`, so the orchestrator can reference its own prior
+    reasoning.
+  input_schema_json:
+    type: object
+    required: [epic, subtasks]
+    properties:
+      epic:
+        type: object
+      subtasks:
+        type: array
+      max_parallel_bundles:
+        type: number
+      mode:
+        type: string
+        enum: [pr, local]
+  output_schema_json:
+    type: object
+    required: [all_terminal, final_state]
+    properties:
+      all_terminal:
+        type: boolean
+        description: >
+          True iff every subtask is in a terminal state (done, blocked,
+          or failed permanently). The enclosing loop's `break_when`
+          keys off this flag.
+      final_state:
+        type: object
+        description: >
+          The complete epic-progress snapshot as last written to
+          `orbit.state`. Passed to `summarize_epic` after the loop
+          exits.
+      cycle_notes:
+        type: string
+        description: One- or two-sentence summary of this cycle's dispatches.
+  instruction: |
+    You are the epic orchestrator. One activity invocation = one cycle.
+
+    # Objective
+
+    Drive every subtask to a terminal state (`done`, `blocked`, or
+    `failed`). Use judgment on dependency ordering and on when to run
+    subtasks in parallel vs sequentially.
+
+    # Per-cycle procedure
+
+    1. **Read state.** Call `orbit.state.get` with no arguments to get
+       the current `{epic_id, cycle, subtasks: {...}, decisions: [...]}`
+       snapshot. If the snapshot is empty (first cycle), initialize it
+       from the `subtasks` input: every subtask starts at
+       `{state: "pending", failures: 0}`.
+
+    2. **Decide READY subtasks.** A subtask is READY iff:
+       - `state` is `pending` or (`state` is `failed` and `failures < 3`);
+       - its dependencies (inferred from descriptions) are all `done`;
+       - it is not currently `in_flight`.
+
+    3. **Decide SEQUENTIAL vs PARALLEL for this cycle.**
+       - Read each READY subtask's description. Infer dependencies:
+         schema / migration tasks ship before their consumers; library
+         changes before callers; tests for a module after the module
+         itself; refactors before features that ride on them.
+       - Subtasks with disjoint `context_files` AND no
+         description-level dependency can ship in parallel.
+       - Cap in-flight bundles at `input.max_parallel_bundles`.
+       - A single-task bundle is legal — prefer that over grouping
+         unrelated work.
+
+    4. **Dispatch.** For each bundle, call `orbit.pipeline.invoke`
+       with `{job_name: "task_gate_pipeline", input: {task_ids: [...],
+       mode: input.mode}}`. Capture the returned `run_id` and mark
+       each subtask `state: "in_flight", current_gate_run_id: <id>`
+       in the state snapshot.
+
+    5. **Wait.** Call `orbit.pipeline.wait` with the dispatched
+       `run_ids`. On terminal responses:
+       - `status: succeeded` → mark subtask `state: "done"`.
+       - `status: failed` or `cancelled` or `timeout` → increment
+         `failures`; if `failures >= 3`, mark `state: "blocked"` and
+         record the reason in `decisions`; otherwise `state: "failed"`
+         (eligible to retry next cycle).
+
+    6. **Persist.** Call `orbit.state.set` with `{data: <full snapshot>}`
+       so the next iteration can resume. Always write the full snapshot
+       — merges are safer than partial updates.
+
+    7. **Emit output.** Your final assistant turn MUST be a single JSON
+       object:
+       ```json
+       {
+         "all_terminal": true,
+         "final_state": { ... full snapshot ... },
+         "cycle_notes": "Cycle 3: dispatched T-001 and T-002 in parallel; both succeeded."
+       }
+       ```
+       `all_terminal` is `true` iff every subtask is `done`, `blocked`,
+       or has `failures >= 3`. When it is `true` the enclosing loop
+       exits; otherwise the next iteration runs.
+
+    # Read-only by construction
+
+    You have `orbit.task.list` and `orbit.task.show` for reading
+    descriptions and checking status changes, plus the pipeline and
+    state tools. You do NOT have `orbit.task.update`, `orbit.task.approve`,
+    or any other mutating tool — requests for those will be rejected by
+    the HTTP backend allowlist enforcement (§6). Do not attempt them.
+
+    # Resumability
+
+    `orbit.state.*` is per-Run scoped. If this Run picks up mid-epic
+    (e.g., the orchestrator crashed between cycles and the loop is
+    re-invoking), reading `orbit.state.get` at cycle start gives you
+    the prior snapshot. Never recompute from scratch if a snapshot
+    exists.
+  tools:
+    - orbit.task.list
+    - orbit.task.show
+    - orbit.pipeline.invoke
+    - orbit.pipeline.wait
+    - orbit.state.get
+    - orbit.state.set
+  on_denial: terminate
+  max_iterations: 8
+  backend: http
+  provider: claude
+  wall_clock_timeout_seconds: 1800

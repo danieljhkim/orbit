@@ -204,6 +204,117 @@ impl V2RuntimeHost for OrbitRuntime {
                     "tasks": task_objs,
                 }))
             }
+            // Materialize an epic's working set for the orchestrator:
+            // the epic task itself plus non-terminal subtasks
+            // (`parent_id == epic_task_id` and status ∉ {done, archived}).
+            // Full descriptions ride along because the orchestrator
+            // reasons about dependency ordering from prose.
+            "load_epic" => {
+                let epic_id = input
+                    .get("epic_task_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: "missing `epic_task_id`".to_string(),
+                    })?;
+                let epic = self.get_task(epic_id).map_err(|err| {
+                    DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("load epic {epic_id}: {err}"),
+                    }
+                })?;
+                let subtasks = self
+                    .list_tasks_filtered(None, None, Some(epic_id), None)
+                    .map_err(|err| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("list subtasks of {epic_id}: {err}"),
+                    })?;
+                let subtask_payload: Vec<Value> = subtasks
+                    .iter()
+                    .filter(|t| !matches!(t.status, TaskStatus::Done | TaskStatus::Archived))
+                    .map(|t| {
+                        serde_json::json!({
+                            "id": t.id,
+                            "title": t.title,
+                            "description": t.description,
+                            "type": t.task_type.to_string(),
+                            "status": t.status.to_string(),
+                            "context_files": t.context_files,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({
+                    "epic": {
+                        "id": epic.id,
+                        "title": epic.title,
+                        "description": epic.description,
+                        "type": epic.task_type.to_string(),
+                        "status": epic.status.to_string(),
+                    },
+                    "subtasks": subtask_payload,
+                }))
+            }
+            // Fold the orchestrator's final state snapshot into counters
+            // + a human-readable one-liner. Pure aggregation — the
+            // decision history already lives in `orbit.state` per the
+            // role prompt.
+            "summarize_epic" => {
+                let state = input.get("state").cloned().unwrap_or(Value::Null);
+                let subtasks_map = state
+                    .get("subtasks")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut done = 0u64;
+                let mut failed = 0u64;
+                let mut blocked = 0u64;
+                let mut in_flight = 0u64;
+                let mut unfinished_ids: Vec<String> = Vec::new();
+                for (id, entry) in subtasks_map.iter() {
+                    let entry_state = entry
+                        .get("state")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    match entry_state {
+                        "done" => done += 1,
+                        "blocked" => {
+                            blocked += 1;
+                            unfinished_ids.push(id.clone());
+                        }
+                        "failed" => {
+                            failed += 1;
+                            unfinished_ids.push(id.clone());
+                        }
+                        "in_flight" | "pending" => {
+                            in_flight += 1;
+                            unfinished_ids.push(id.clone());
+                        }
+                        _ => {
+                            unfinished_ids.push(id.clone());
+                        }
+                    }
+                }
+                let total = subtasks_map.len() as u64;
+                let message = if total == 0 {
+                    "epic had no subtasks".to_string()
+                } else if unfinished_ids.is_empty() {
+                    format!("all {total} subtasks done")
+                } else {
+                    format!(
+                        "{done}/{total} done; {failed} failed, {blocked} blocked, \
+                         {in_flight} in flight/pending"
+                    )
+                };
+                Ok(serde_json::json!({
+                    "total": total,
+                    "done": done,
+                    "failed": failed,
+                    "blocked": blocked,
+                    "in_flight": in_flight,
+                    "unfinished_ids": unfinished_ids,
+                    "message": message,
+                }))
+            }
             // Guard the `dispatch_agent`'s bundle output before fan_out.
             // Rejects duplicated task_ids, unknown ids, and oversize
             // bundles with a structured error so a misgrouped backlog

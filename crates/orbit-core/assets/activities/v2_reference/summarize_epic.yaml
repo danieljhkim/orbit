@@ -1,0 +1,40 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: summarize_epic
+spec:
+  type: deterministic
+  description: >
+    Fold the orchestrator's final `state` snapshot into an audit-grade
+    summary (counts + unfinished ids + one-line status message). Pure
+    aggregation — no I/O, no side effects. The orchestrator already
+    persists decision history in `orbit.state.*`; this step only
+    computes summary counters for the Run's `pipeline` output.
+  input_schema_json:
+    type: object
+    required: [state]
+    properties:
+      state:
+        type: object
+  output_schema_json:
+    type: object
+    required: [total, done, failed, blocked, in_flight, unfinished_ids, message]
+    properties:
+      total:
+        type: number
+      done:
+        type: number
+      failed:
+        type: number
+      blocked:
+        type: number
+      in_flight:
+        type: number
+      unfinished_ids:
+        type: array
+        items:
+          type: string
+      message:
+        type: string
+  action: summarize_epic
+  config: {}
