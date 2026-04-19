@@ -1,0 +1,80 @@
+# Auto-dispatch pipeline.
+#
+# Pulls the workspace backlog, asks `dispatch_agent` to group related tasks
+# into bundles, validates the grouping deterministically, then fans out
+# each bundle through `task_gate_pipeline` for admission-controlled
+# dispatch. The gate layer is deterministic (correct, auditable); this
+# workflow only decides bundle SHAPE.
+#
+# Empty-backlog behavior
+# - `list_backlog` returns `tasks: []` and `bundles` comes back as `[]`
+#   from `dispatch_agent` per its short-circuit prompt. The fan_out over
+#   an empty list is a no-op and the Run succeeds with zero child Runs.
+#
+# Audit trail (AC 8)
+# - `dispatch_agent` runs as `type: agent_loop`, `backend: http`. Each
+#   Run emits `ActivityStarted` / `ActivityFinished` events at the v2
+#   layer; the underlying loop engine emits `http.*` and `tool.call.*`
+#   events referenced via `parent_event_id`. The full prompt, tool
+#   calls, and model response are therefore recoverable from the audit
+#   trail for the Run.
+#
+# Concurrency cap (AC 7)
+# - `fan_out.max_workers` bounds the number of in-flight child gate
+#   Runs via a `Semaphore` in `run_fan_out` (orbit-engine). The value
+#   is a literal `u32` in the v2 `FanOutBlock` schema — it is NOT a
+#   templated expression, so the `input.concurrency` default is a
+#   structural placeholder callers can override by forking this YAML.
+#   A future amendment to `FanOutBlock` to accept templated numerics
+#   would let the top-level `concurrency` input flow through.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: task_auto_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 10
+  default_input:
+    mode: pr
+    max_bundles: 10
+    concurrency: 3
+    max_bundle_size: 5
+    max_tasks: 50
+
+  steps:
+    - id: list_backlog
+      target: activity:list_backlog_tasks
+      default_input:
+        max_tasks: "{{ input.max_tasks }}"
+
+    - id: dispatch_agent
+      target: activity:dispatch_agent
+      default_input:
+        tasks: "{{ steps.list_backlog.output.tasks }}"
+        max_bundle_size: "{{ input.max_bundle_size }}"
+
+    - id: validate_bundles
+      target: activity:validate_bundles
+      default_input:
+        bundles: "{{ steps.dispatch_agent.output.bundles }}"
+        max_bundle_size: "{{ input.max_bundle_size }}"
+        known_task_ids: "{{ steps.list_backlog.output.task_ids }}"
+
+    - id: dispatch
+      fan_out:
+        items: "{{ steps.validate_bundles.output.bundles }}"
+        max_workers: 3
+        worker:
+          id: gate_invoke
+          target: activity:invoke_and_wait
+          default_input:
+            job_name: task_gate_pipeline
+            run_input:
+              task_ids: "{{ item }}"
+              mode: "{{ input.mode }}"
+      fan_in:
+        join:
+          mode: all
+        collect: gate_results

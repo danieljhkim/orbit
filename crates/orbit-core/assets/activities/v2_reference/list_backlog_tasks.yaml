@@ -1,0 +1,55 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: list_backlog_tasks
+spec:
+  type: deterministic
+  description: >
+    Materialize the current workspace backlog as an ordered task list for
+    the auto-pipeline's `dispatch_agent` grouping step. Filters to
+    `status: backlog` and excludes `type: friction` (per CLAUDE.md,
+    friction is reserved for agent self-reports, not shippable work).
+    Sorts critical → high → medium → low, then by `created_at` ascending
+    so older high-priority work ships first. Caps at `max_tasks` (default
+    50) to keep the agent's context window bounded.
+  input_schema_json:
+    type: object
+    properties:
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 500
+  output_schema_json:
+    type: object
+    required: [tasks, task_ids, task_count]
+    properties:
+      task_count:
+        type: number
+      task_ids:
+        type: array
+        items:
+          type: string
+      tasks:
+        type: array
+        items:
+          type: object
+          required: [id, title, type, priority, context_files]
+          properties:
+            id:
+              type: string
+            title:
+              type: string
+            type:
+              type: string
+            priority:
+              type: string
+            context_files:
+              type: array
+              items:
+                type: string
+            parent_id:
+              oneOf:
+                - type: string
+                - type: "null"
+  action: list_backlog_tasks
+  config: {}

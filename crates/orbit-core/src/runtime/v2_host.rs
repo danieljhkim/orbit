@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use orbit_engine::v2::{DispatchError, V2RuntimeHost};
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::{FsAuditLogger, ToolContext};
-use orbit_types::{AuditEventStatus, Role, UNRESTRICTED_FS_PROFILE};
+use orbit_types::{AuditEventStatus, Role, TaskStatus, UNRESTRICTED_FS_PROFILE};
 use serde_json::Value;
 
 use super::orbit_tool_host::{
@@ -151,6 +151,133 @@ impl V2RuntimeHost for OrbitRuntime {
                 std::thread::sleep(Duration::from_secs_f64(seconds));
                 Ok(serde_json::json!({
                     "slept_seconds": started_at.elapsed().as_secs_f64(),
+                }))
+            }
+            // Materialize the workspace backlog for `dispatch_agent`.
+            // Filters `status: backlog` and excludes `type: friction`
+            // (per CLAUDE.md: friction is reserved for agent self-reports,
+            // not shippable work). Sorts critical → high → medium → low then
+            // by `created_at` ascending so older high-priority work ships
+            // first. Caps at `max_tasks` (default 50).
+            "list_backlog_tasks" => {
+                let max_tasks = input
+                    .get("max_tasks")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(50)
+                    .min(500) as usize;
+                let mut tasks = self
+                    .list_tasks_filtered(Some(TaskStatus::Backlog), None, None, None)
+                    .map_err(|err| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("list backlog: {err}"),
+                    })?;
+                tasks.retain(|t| !t.task_type.is_friction());
+                tasks.sort_by(|a, b| {
+                    let rank = |p: orbit_types::TaskPriority| match p {
+                        orbit_types::TaskPriority::Critical => 0,
+                        orbit_types::TaskPriority::High => 1,
+                        orbit_types::TaskPriority::Medium => 2,
+                        orbit_types::TaskPriority::Low => 3,
+                    };
+                    rank(a.priority)
+                        .cmp(&rank(b.priority))
+                        .then(a.created_at.cmp(&b.created_at))
+                });
+                tasks.truncate(max_tasks);
+                let ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
+                let task_objs: Vec<Value> = tasks
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "id": t.id,
+                            "title": t.title,
+                            "type": t.task_type.to_string(),
+                            "priority": t.priority.to_string(),
+                            "context_files": t.context_files,
+                            "parent_id": t.parent_id,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({
+                    "task_count": task_objs.len(),
+                    "task_ids": ids,
+                    "tasks": task_objs,
+                }))
+            }
+            // Guard the `dispatch_agent`'s bundle output before fan_out.
+            // Rejects duplicated task_ids, unknown ids, and oversize
+            // bundles with a structured error so a misgrouped backlog
+            // never silently dispatches.
+            "validate_bundles" => {
+                let bundles_raw = input
+                    .get("bundles")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: "`bundles` must be an array".to_string(),
+                    })?;
+                let max_bundle_size = input
+                    .get("max_bundle_size")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(5) as usize;
+                let known: std::collections::BTreeSet<String> = input
+                    .get("known_task_ids")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(ToOwned::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let mut seen: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                let mut violations: Vec<String> = Vec::new();
+                let mut bundles: Vec<Vec<String>> = Vec::with_capacity(bundles_raw.len());
+                for (idx, bundle) in bundles_raw.iter().enumerate() {
+                    let items = bundle.as_array().ok_or_else(|| {
+                        DispatchError::DeterministicActionFailed {
+                            action: action.to_string(),
+                            message: format!("bundle[{idx}] is not an array"),
+                        }
+                    })?;
+                    if items.len() > max_bundle_size {
+                        violations.push(format!(
+                            "bundle[{idx}] size {} exceeds max_bundle_size {}",
+                            items.len(),
+                            max_bundle_size
+                        ));
+                    }
+                    let mut bundle_ids: Vec<String> = Vec::with_capacity(items.len());
+                    for item in items {
+                        let id = item.as_str().ok_or_else(|| {
+                            DispatchError::DeterministicActionFailed {
+                                action: action.to_string(),
+                                message: format!("bundle[{idx}] contains a non-string task_id"),
+                            }
+                        })?;
+                        if !known.is_empty() && !known.contains(id) {
+                            violations
+                                .push(format!("bundle[{idx}] references unknown task_id {id}"));
+                        }
+                        if !seen.insert(id.to_string()) {
+                            violations
+                                .push(format!("task_id {id} appears in more than one bundle"));
+                        }
+                        bundle_ids.push(id.to_string());
+                    }
+                    bundles.push(bundle_ids);
+                }
+                if !violations.is_empty() {
+                    return Err(DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("invalid bundles: {}", violations.join("; ")),
+                    });
+                }
+                Ok(serde_json::json!({
+                    "bundles": bundles,
+                    "bundle_count": bundles.len(),
                 }))
             }
             // Thin passthrough over `orbit.task.locks.reserve`. Exists as a
