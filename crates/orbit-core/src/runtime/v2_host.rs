@@ -12,8 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use orbit_engine::v2::{DispatchError, V2RuntimeHost};
+use orbit_store::AuditEventInsertParams;
 use orbit_tools::{FsAuditLogger, ToolContext};
-use orbit_types::{Role, UNRESTRICTED_FS_PROFILE};
+use orbit_types::{AuditEventStatus, Role, UNRESTRICTED_FS_PROFILE};
 use serde_json::Value;
 
 use super::orbit_tool_host::{
@@ -151,6 +152,193 @@ impl V2RuntimeHost for OrbitRuntime {
                 Ok(serde_json::json!({
                     "slept_seconds": started_at.elapsed().as_secs_f64(),
                 }))
+            }
+            // Thin passthrough over `orbit.task.locks.reserve`. Exists as a
+            // dedicated action (rather than a `orbit_tool_call` config) so a
+            // workflow inside a `loop:` with `break_when:` can reference
+            // `steps.<id>.output.reserved` directly without leaking the
+            // generic `{tool_name, args}` envelope into the activity's
+            // input_schema.
+            "reserve_locks" => self
+                .run_tool_with_context_and_role(
+                    "orbit.task.locks.reserve",
+                    input.clone(),
+                    Role::Admin,
+                    tool_context,
+                )
+                .map_err(|err| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("{err}"),
+                }),
+            // Submit a child v2 Job and block on its terminal state.
+            // Chains `orbit.pipeline.invoke` + `orbit.pipeline.wait` so
+            // workflows can model "dispatch and join" as a single step
+            // with `{status, run_id, pipeline?, error?}` output.
+            "invoke_and_wait" => {
+                let job_name = input
+                    .get("job_name")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: "missing `job_name`".to_string(),
+                    })?
+                    .to_string();
+                let run_input = input
+                    .get("run_input")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Object(Default::default()));
+                let mut invoke_args = serde_json::Map::new();
+                invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
+                invoke_args.insert("input".to_string(), run_input);
+                if let Some(priority) = input.get("priority").cloned() {
+                    invoke_args.insert("priority".to_string(), priority);
+                }
+
+                let invoke_ctx = tool_context.clone();
+                let invoke_output = self
+                    .run_tool_with_context_and_role(
+                        "orbit.pipeline.invoke",
+                        Value::Object(invoke_args),
+                        Role::Admin,
+                        invoke_ctx,
+                    )
+                    .map_err(|err| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("pipeline.invoke failed: {err}"),
+                    })?;
+
+                let run_id = invoke_output
+                    .get("run_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: "pipeline.invoke returned no run_id".to_string(),
+                    })?
+                    .to_string();
+
+                let mut wait_args = serde_json::Map::new();
+                wait_args.insert(
+                    "run_ids".to_string(),
+                    Value::Array(vec![Value::String(run_id.clone())]),
+                );
+                if let Some(timeout) = input.get("timeout_seconds").cloned() {
+                    wait_args.insert("timeout_seconds".to_string(), timeout);
+                }
+                if let Some(poll) = input.get("poll_interval_seconds").cloned() {
+                    wait_args.insert("poll_interval_seconds".to_string(), poll);
+                }
+
+                let wait_output = self
+                    .run_tool_with_context_and_role(
+                        "orbit.pipeline.wait",
+                        Value::Object(wait_args),
+                        Role::Admin,
+                        tool_context,
+                    )
+                    .map_err(|err| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("pipeline.wait failed: {err}"),
+                    })?;
+
+                let first = wait_output
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .and_then(|arr| arr.first())
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        serde_json::json!({
+                            "run_id": run_id,
+                            "status": "pending",
+                        })
+                    });
+                Ok(first)
+            }
+            // Post-loop gate signal: the admission window never opened in
+            // time. Emits a `gate.starvation` audit event with task_ids and
+            // conflicting_files so an epic-orchestrator parent can decide
+            // to replan, then fails the Run with a structured error.
+            "gate_starvation_fail" => {
+                let task_ids_vec: Vec<String> = input
+                    .get("task_ids")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(ToOwned::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let conflicts = input
+                    .get("conflicts")
+                    .cloned()
+                    .unwrap_or(Value::Array(Vec::new()));
+                let max_wait_seconds = input.get("max_wait_seconds").and_then(Value::as_f64);
+                let conflicting_files: Vec<String> = conflicts
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|entry| {
+                                entry
+                                    .get("file")
+                                    .and_then(Value::as_str)
+                                    .map(ToOwned::to_owned)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let payload = serde_json::json!({
+                    "task_ids": task_ids_vec,
+                    "conflicting_files": conflicting_files,
+                    "conflicts": conflicts,
+                    "max_wait_seconds": max_wait_seconds,
+                });
+
+                let execution_id = format!(
+                    "audit-gate-starvation-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos())
+                        .unwrap_or(0)
+                );
+                let working_directory = self.paths().repo_root.to_string_lossy().into_owned();
+                self.record_audit_event(&AuditEventInsertParams {
+                    execution_id,
+                    command: "gate.starvation".to_string(),
+                    subcommand: None,
+                    tool_name: None,
+                    target_type: Some("task_bundle".to_string()),
+                    target_id: task_ids_vec.first().cloned(),
+                    role: "admin".to_string(),
+                    status: AuditEventStatus::Failure,
+                    exit_code: 1,
+                    duration_ms: 0,
+                    working_directory,
+                    arguments_json: Some(serde_json::to_string(&payload).map_err(|error| {
+                        DispatchError::DeterministicActionFailed {
+                            action: action.to_string(),
+                            message: format!("serialize gate.starvation payload: {error}"),
+                        }
+                    })?),
+                    stdout_truncated: None,
+                    stderr_truncated: None,
+                    error_message: Some("gate.starvation".to_string()),
+                    host: std::env::var("HOSTNAME").ok(),
+                    pid: std::process::id(),
+                    session_id: None,
+                })
+                .map_err(|err| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("record gate.starvation audit: {err}"),
+                })?;
+
+                Err(DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!(
+                        "gate.starvation: admission window never opened for bundle {:?} \
+                         (conflicting_files={:?}, max_wait_seconds={:?})",
+                        task_ids_vec, conflicting_files, max_wait_seconds
+                    ),
+                })
             }
             other => Err(DispatchError::DeterministicActionNotRegistered(
                 other.to_string(),

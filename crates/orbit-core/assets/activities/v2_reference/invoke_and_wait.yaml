@@ -1,0 +1,51 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: invoke_and_wait
+spec:
+  type: deterministic
+  description: >
+    Submit a named v2 Job and block until its Run reaches a terminal
+    state, then return the outcome. Internally chains
+    `orbit.pipeline.invoke` (to submit the child Run) and
+    `orbit.pipeline.wait` (to block on completion). The returned
+    `status` mirrors the child Run's terminal state: `succeeded`,
+    `failed`, `cancelled`, or `timeout`. A `timeout` here means the
+    WAIT side of the activity exceeded `timeout_seconds`; the child
+    Run itself may still be running — callers that care must inspect
+    `run_id` to decide follow-up.
+  input_schema_json:
+    type: object
+    required: [job_name, run_input]
+    properties:
+      job_name:
+        type: string
+      run_input:
+        type: object
+      timeout_seconds:
+        type: number
+        minimum: 1
+        maximum: 7200
+      poll_interval_seconds:
+        type: number
+        minimum: 1
+      priority:
+        type: string
+        enum: [low, medium, high, critical]
+  output_schema_json:
+    type: object
+    required: [status, run_id]
+    properties:
+      status:
+        type: string
+        enum: [succeeded, failed, cancelled, timeout, pending, running]
+      run_id:
+        type: string
+      finished_at:
+        type: string
+      pipeline:
+        type: object
+      error:
+        type: string
+  action: invoke_and_wait
+  config: {}

@@ -1,0 +1,84 @@
+# Task bundle gate pipeline.
+#
+# Admission control for "these must ship" bundles: wait until the bundle's
+# context_files are not held by any in-flight task lock or active
+# reservation, atomically reserve them, then dispatch to either
+# `task_pr_pipeline` or `task_local_pipeline` via `invoke_and_wait`.
+#
+# Behavioral contract
+# - `wait_for_window` polls by calling `reserve_locks` each iteration. The
+#   reserve step is always executed (never skipped) so its output can be
+#   referenced from `break_when` and from the post-loop starvation guard
+#   without hitting the template engine's "no data recorded for step"
+#   error on skipped-step output references.
+# - On conflict, `sleep_if_conflict` backs off by `poll_interval_seconds`
+#   before the next iteration; when `reserve.output.reserved` flips to
+#   true the loop breaks.
+# - `max_iterations: 120` is the structural ceiling. The actual wait
+#   budget is enforced by `input.max_wait_seconds`, which the
+#   `starvation_check` step surfaces via the `gate.starvation` audit
+#   event when the loop exits without a reservation.
+# - Reservation release is left to the reservation TTL (default 1800s in
+#   `orbit.task.locks.reserve`) rather than a finally-style step. The
+#   dispatched child pipeline runs while the reservation is still valid;
+#   a fresh `orbit.task.locks.reserve` call from another bundle will
+#   either wait or surface `task.locks.reserve.denied`.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: task_gate_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 10
+  default_input:
+    task_ids: []
+    mode: pr
+    max_wait_seconds: 3600
+    poll_interval_seconds: 30
+    ttl_seconds: 1800
+    dispatch_timeout_seconds: 7200
+
+  steps:
+    - id: wait_for_window
+      loop:
+        max_iterations: 120
+        break_when: "{{ steps.reserve.output.reserved }} == true"
+        steps:
+          - id: reserve
+            target: activity:reserve_locks
+            default_input:
+              task_ids: "{{ input.task_ids }}"
+              ttl_seconds: "{{ input.ttl_seconds }}"
+          - id: sleep_if_conflict
+            when: "{{ steps.reserve.output.reserved }} == false"
+            target: activity:sleep
+            default_input:
+              seconds: "{{ input.poll_interval_seconds }}"
+
+    - id: starvation_check
+      when: "{{ steps.reserve.output.reserved }} == false"
+      target: activity:gate_starvation_fail
+      default_input:
+        task_ids: "{{ input.task_ids }}"
+        conflicts: "{{ steps.reserve.output.conflicts }}"
+        max_wait_seconds: "{{ input.max_wait_seconds }}"
+
+    - id: dispatch_pr
+      when: "{{ input.mode }} == pr && {{ steps.reserve.output.reserved }} == true"
+      target: activity:invoke_and_wait
+      default_input:
+        job_name: task_pr_pipeline
+        run_input:
+          task_ids: "{{ input.task_ids }}"
+        timeout_seconds: "{{ input.dispatch_timeout_seconds }}"
+
+    - id: dispatch_local
+      when: "{{ input.mode }} == local && {{ steps.reserve.output.reserved }} == true"
+      target: activity:invoke_and_wait
+      default_input:
+        job_name: task_local_pipeline
+        run_input:
+          task_ids: "{{ input.task_ids }}"
+        timeout_seconds: "{{ input.dispatch_timeout_seconds }}"
