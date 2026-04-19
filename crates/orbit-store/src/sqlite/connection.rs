@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use orbit_types::OrbitError;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::sqlite::migration;
 
@@ -48,13 +48,24 @@ impl Store {
     where
         F: FnOnce(&mut StoreTx<'_>) -> Result<T, OrbitError>,
     {
+        self.with_transaction_behavior(TransactionBehavior::Deferred, op)
+    }
+
+    pub fn with_transaction_behavior<T, F>(
+        &self,
+        behavior: TransactionBehavior,
+        op: F,
+    ) -> Result<T, OrbitError>
+    where
+        F: FnOnce(&mut StoreTx<'_>) -> Result<T, OrbitError>,
+    {
         let mut conn = self
             .conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
 
         let tx = conn
-            .transaction()
+            .transaction_with_behavior(behavior)
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let mut store_tx = StoreTx { tx };

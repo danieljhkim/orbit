@@ -8,6 +8,8 @@ pub struct TemplateContext {
     pub input: Value,
     pub env: HashMap<String, String>,
     pub workspace_path: Option<String>,
+    pub item: Option<Value>,
+    pub iteration: Option<u32>,
     /// Accumulated outputs from completed steps, keyed by step id (or target_id).
     pub steps: HashMap<String, Value>,
 }
@@ -37,6 +39,14 @@ fn resolve_token(token: &str, ctx: &TemplateContext) -> Result<String, OrbitErro
             OrbitError::InvalidInput("workspace_path is unavailable in this context".to_string())
         });
     }
+    if token == "item" {
+        return resolve_input_path(ctx.item.as_ref(), &[]);
+    }
+    if token == "iteration" {
+        return ctx.iteration.map(|value| value.to_string()).ok_or_else(|| {
+            OrbitError::InvalidInput("iteration is unavailable in this context".to_string())
+        });
+    }
 
     let mut parts = token.split('.');
     let namespace = parts
@@ -52,6 +62,7 @@ fn resolve_token(token: &str, ctx: &TemplateContext) -> Result<String, OrbitErro
 
     match namespace {
         "input" => resolve_input_path(Some(&ctx.input), &path),
+        "item" => resolve_input_path(ctx.item.as_ref(), &path),
         "env" => {
             if path.len() != 1 {
                 return Err(OrbitError::InvalidInput(format!(

@@ -18,6 +18,7 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 
 pub struct V2JobRunResult {
+    pub run_id: String,
     pub job_name: String,
     pub success: bool,
     pub pipeline: Value,
@@ -38,6 +39,16 @@ impl OrbitRuntime {
         yaml_path: &Path,
         input: Value,
         backend_flag: Option<Backend>,
+    ) -> Result<V2JobRunResult, OrbitError> {
+        self.run_job_v2_from_yaml_with_run_id(yaml_path, input, backend_flag, None)
+    }
+
+    pub fn run_job_v2_from_yaml_with_run_id(
+        &self,
+        yaml_path: &Path,
+        input: Value,
+        backend_flag: Option<Backend>,
+        run_id_override: Option<String>,
     ) -> Result<V2JobRunResult, OrbitError> {
         let yaml = std::fs::read_to_string(yaml_path).map_err(|err| {
             OrbitError::InvalidInput(format!("read {}: {err}", yaml_path.display()))
@@ -71,11 +82,13 @@ impl OrbitRuntime {
         // CLI-mode runs never start a DAG they can't finish.
         validate_job_loop_session_backends(&asset.spec, &yaml_path.display().to_string())
             .map_err(|err| OrbitError::InvalidInput(format!("{err}")))?;
-        let run_id = format!(
-            "v2job-{}-{}",
-            asset.name,
-            chrono::Utc::now().format("%Y%m%dT%H%M%S%.3f")
-        );
+        let run_id = run_id_override.unwrap_or_else(|| {
+            format!(
+                "v2job-{}-{}",
+                asset.name,
+                chrono::Utc::now().format("%Y%m%dT%H%M%S%.3f")
+            )
+        });
 
         let audit_root = self.data_root().join("audit");
         let agent_identity = self.actor().label.clone();
@@ -120,6 +133,7 @@ impl OrbitRuntime {
 
         match outcome_res {
             Ok(o) => Ok(V2JobRunResult {
+                run_id,
                 job_name: asset.name,
                 success: o.success,
                 pipeline: o.pipeline,

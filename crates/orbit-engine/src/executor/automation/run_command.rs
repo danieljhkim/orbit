@@ -51,6 +51,8 @@ pub(super) fn run_command<H: RuntimeHost + TaskHost + EnvironmentHost + ?Sized>(
         input: input.clone(),
         env,
         workspace_path: spec.workspace_path.clone(),
+        item: None,
+        iteration: None,
         steps: steps_outputs.clone(),
     };
 

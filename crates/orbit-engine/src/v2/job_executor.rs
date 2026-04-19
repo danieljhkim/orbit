@@ -75,9 +75,10 @@ pub fn execute_job(
         audit: audit.clone(),
         host,
         input: base_input.clone(),
-        pipeline: Mutex::new(HashMap::new()),
-        sessions: Mutex::new(HashMap::new()),
+        pipeline: Arc::new(Mutex::new(HashMap::new())),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
         item: None,
+        iteration: None,
     };
 
     let mut overall_ok = true;
@@ -116,11 +117,12 @@ struct ExecCtx<'a> {
     audit: Arc<V2AuditWriter>,
     host: &'a dyn V2RuntimeHost,
     input: Value,
-    pipeline: Mutex<HashMap<String, Value>>,
-    sessions: Mutex<HashMap<String, Session>>,
+    pipeline: Arc<Mutex<HashMap<String, Value>>>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
     /// `Some(value)` inside a fan-out worker. Rendered into template context
     /// as `{{ item }}`.
     item: Option<Value>,
+    iteration: Option<u32>,
 }
 
 impl ExecCtx<'_> {
@@ -139,10 +141,17 @@ impl ExecCtx<'_> {
                 map.insert("item".to_string(), item.clone());
             }
         }
+        if let Some(iteration) = self.iteration
+            && let Value::Object(map) = &mut input
+        {
+            map.insert("iteration".to_string(), Value::from(iteration));
+        }
         TemplateContext {
             input,
             env: Default::default(),
             workspace_path: None,
+            item: self.item.clone(),
+            iteration: self.iteration,
             steps,
         }
     }
@@ -445,6 +454,22 @@ fn render_input(
     render_value(&src, tctx)
 }
 
+fn render_items_expression(
+    expression: &str,
+    tctx: &TemplateContext,
+    label: &str,
+) -> Result<Vec<Value>, DispatchError> {
+    let rendered = template::render(expression, tctx)
+        .map_err(|err| DispatchError::JobExecution(format!("{label} render: {err}")))?;
+    Ok(serde_json::from_str(&rendered).unwrap_or_else(|_| {
+        rendered
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| Value::String(segment.to_string()))
+            .collect()
+    }))
+}
+
 /// Recursive template render: resolves `{{ ... }}` tokens in any string
 /// within a JSON tree. Non-strings pass through unchanged.
 fn render_value(v: &Value, tctx: &TemplateContext) -> Result<Value, DispatchError> {
@@ -602,17 +627,7 @@ fn run_fan_out(
     ctx: &ExecCtx<'_>,
 ) -> Result<StepOutcome, DispatchError> {
     let tctx = ctx.template_ctx();
-    let items_rendered = template::render(&block.items, &tctx)
-        .map_err(|err| DispatchError::JobExecution(format!("fan_out.items render: {err}")))?;
-    let items: Vec<Value> = serde_json::from_str(&items_rendered).unwrap_or_else(|_| {
-        // Fallback: split CSV-style on whitespace/commas if the rendered
-        // value isn't a JSON array (handles simple shell-produced outputs).
-        items_rendered
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .filter(|s| !s.is_empty())
-            .map(|s| Value::String(s.to_string()))
-            .collect()
-    });
+    let items = render_items_expression(&block.items, &tctx, "fan_out.items")?;
     let worker_count = items.len() as u32;
 
     let _ = ctx.audit.emit(V2AuditEventKind::FanoutDispatched {
@@ -678,9 +693,10 @@ fn run_fan_out(
                     audit: audit.clone(),
                     host,
                     input: base_input,
-                    pipeline: Mutex::new(pipeline_snapshot),
-                    sessions: Mutex::new(HashMap::new()),
+                    pipeline: Arc::new(Mutex::new(pipeline_snapshot)),
+                    sessions: Arc::new(Mutex::new(HashMap::new())),
                     item: Some(item),
+                    iteration: Some(idx),
                 };
                 let res = run_step(&worker_step, &worker_ctx);
                 let state = match &res {
@@ -768,17 +784,52 @@ fn run_loop(
     block: &LoopBlock,
     ctx: &ExecCtx<'_>,
 ) -> Result<StepOutcome, DispatchError> {
+    let loop_items = match &block.items {
+        Some(expression) => Some(render_items_expression(
+            expression,
+            &ctx.template_ctx(),
+            "loop.items",
+        )?),
+        None => None,
+    };
+    if let Some(items) = &loop_items
+        && items.len() > block.max_iterations as usize
+    {
+        return Err(DispatchError::JobExecution(format!(
+            "loop.items produced {} entries, exceeding max_iterations {}",
+            items.len(),
+            block.max_iterations
+        )));
+    }
+
     let mut broke = false;
     let mut last_iter: u32 = 0;
-    for iter in 1..=block.max_iterations {
+    let planned_iterations = loop_items
+        .as_ref()
+        .map(|items| items.len() as u32)
+        .unwrap_or(block.max_iterations);
+    for iter in 1..=planned_iterations {
+        let iteration_index = iter - 1;
         last_iter = iter;
         let _ = ctx.audit.emit(V2AuditEventKind::LoopIterationStart {
             step_id: step.id.clone(),
             iteration: iter,
         });
+        let loop_ctx = ExecCtx {
+            run_id: ctx.run_id.clone(),
+            audit: ctx.audit.clone(),
+            host: ctx.host,
+            input: ctx.input.clone(),
+            pipeline: ctx.pipeline.clone(),
+            sessions: ctx.sessions.clone(),
+            item: loop_items
+                .as_ref()
+                .and_then(|items| items.get(iteration_index as usize).cloned()),
+            iteration: Some(iteration_index),
+        };
 
         for body in &block.steps {
-            let outcome = run_step(body, ctx)?;
+            let outcome = run_step(body, &loop_ctx)?;
             if !outcome.success {
                 return Ok(StepOutcome {
                     success: false,
@@ -791,7 +842,7 @@ fn run_loop(
         // Evaluate break_when after the body runs so the body can populate
         // pipeline state that the expression references.
         let should_break = if let Some(expr) = &block.break_when {
-            let tctx = ctx.template_ctx();
+            let tctx = loop_ctx.template_ctx();
             evaluate_bool_expr(expr, &tctx)
                 .map_err(|err| DispatchError::JobExecution(format!("break_when: {err}")))?
         } else {

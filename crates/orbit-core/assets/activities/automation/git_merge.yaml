@@ -23,6 +23,9 @@ spec:
           - fast_forward
           - pr_merge
         description: 'Merge strategy: fast_forward for local ff-only merge, pr_merge to merge via the GitHub PR.'
+      base:
+        type: string
+        description: Target base branch. Defaults to main when omitted.
       workspace_path:
         type: string
         description: Override worktree path. Resolved from run context when omitted.

@@ -12,12 +12,14 @@
 //! # Key exports
 //! - Backend trait types: [`TaskStoreBackend`], [`TaskDocumentStoreBackend`],
 //!   [`TaskHistoryStoreBackend`], [`TaskReviewStoreBackend`],
-//!   [`TaskArtifactStoreBackend`], [`JobDefinitionStoreBackend`],
+//!   [`TaskArtifactStoreBackend`], [`TaskReservationStoreBackend`],
+//!   [`JobDefinitionStoreBackend`],
 //!   [`JobRunStoreBackend`], [`ActivityStoreBackend`], [`AuditEventStoreBackend`],
 //!   [`ToolStoreBackend`]
 //! - Factory functions: `workspace_task_backends`, `scoped_job_backends`,
 //!   `global_activity_store`, `global_executor_def_store`,
-//!   `global_policy_def_store`, `audit_event_store_sqlite`, `tool_store_sqlite`
+//!   `global_policy_def_store`, `audit_event_store_sqlite`,
+//!   `task_reservation_store_sqlite`, `tool_store_sqlite`
 //! - [`Store`] / [`StoreTx`] — SQLite connection handle and transaction wrapper
 //! - [`validate_instance_against_schema`] — JSON Schema validation for activity I/O
 //!
@@ -93,14 +95,18 @@ use chrono::{DateTime, Utc};
 
 pub use backend::{
     ActivityCreateParams, ActivityStoreBackend, ActivityUpdateParams, AuditEventStoreBackend,
-    ExecutorDefStoreBackend, JobCreateParams, JobDefinitionStoreBackend, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, JobUpdateParams, PolicyDefStoreBackend,
+    ExecutorDefStoreBackend, ExpiredTaskReservation, JobCreateParams, JobDefinitionStoreBackend,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, JobUpdateParams, PolicyDefStoreBackend,
     ScopedJobBackends, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
     TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
-    ToolStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite, global_activity_store,
+    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationReleaseParams, TaskReservationReleaseResult,
+    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
+    TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    WorkspaceTaskBackends, audit_event_store_sqlite, global_activity_store,
     global_executor_def_store, global_policy_def_store, layered_policy_def_store,
-    scoped_job_backends, tool_store_sqlite, workspace_policy_def_store, workspace_task_backends,
+    scoped_job_backends, task_reservation_store_sqlite, tool_store_sqlite,
+    workspace_policy_def_store, workspace_task_backends,
 };
 pub use invocation_store_impl::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,

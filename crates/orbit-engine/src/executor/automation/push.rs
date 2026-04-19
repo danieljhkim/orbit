@@ -22,8 +22,14 @@ pub(super) fn push_batch_changes<H: RuntimeHost + ?Sized>(
         }
     };
 
-    let branch = git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    let branch = branch.trim().to_string();
+    let branch = input_string_field(input, "branch")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            git_output(&workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .unwrap_or_else(|_| "HEAD".to_string())
+                .trim()
+                .to_string()
+        });
 
     if branch == "HEAD" {
         return Err(OrbitError::Execution(

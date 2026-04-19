@@ -43,6 +43,9 @@ pub enum JobSubcommand {
     /// Execute a v2 Job (schemaVersion:2) directly from a YAML path
     #[command(name = "run-v2")]
     RunV2(JobRunV2Args),
+    /// Internal worker entrypoint for persisted pipeline runs
+    #[command(name = "run-pipeline-worker", hide = true)]
+    RunPipelineWorker(JobRunPipelineWorkerArgs),
 }
 
 impl Execute for JobSubcommand {
@@ -56,6 +59,7 @@ impl Execute for JobSubcommand {
             JobSubcommand::Delete(args) => args.execute(runtime),
             JobSubcommand::RunState(args) => args.execute(runtime),
             JobSubcommand::RunV2(args) => args.execute(runtime),
+            JobSubcommand::RunPipelineWorker(args) => args.execute(runtime),
         }
     }
 }
@@ -791,6 +795,18 @@ impl Execute for JobRunStateArgs {
     }
 }
 
+#[derive(Args)]
+pub struct JobRunPipelineWorkerArgs {
+    /// Persisted run ID to claim and execute.
+    pub run_id: String,
+}
+
+impl Execute for JobRunPipelineWorkerArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        runtime.execute_pipeline_run_worker(&self.run_id)
+    }
+}
+
 fn build_job_run_input(pairs: &[String]) -> Result<Value, OrbitError> {
     let mut map = serde_json::Map::new();
     for pair in pairs {
@@ -842,6 +858,7 @@ impl Execute for JobRunV2Args {
         let backend_str = result.resolved_backend.as_str();
         if self.json {
             crate::output::json::print_pretty(&json!({
+                "run_id": result.run_id,
                 "job_name": result.job_name,
                 "resolved_backend": backend_str,
                 "success": result.success,
@@ -852,7 +869,8 @@ impl Execute for JobRunV2Args {
             }))
         } else {
             println!(
-                "job={};backend={};success={};events={};audit_jsonl={}",
+                "run_id={};job={};backend={};success={};events={};audit_jsonl={}",
+                result.run_id,
                 result.job_name,
                 backend_str,
                 result.success,

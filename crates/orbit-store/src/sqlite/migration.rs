@@ -55,6 +55,17 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
                 session_id TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS task_reservations (
+                reservation_id TEXT PRIMARY KEY,
+                workspace_orbit_dir TEXT NOT NULL,
+                task_ids_json TEXT NOT NULL,
+                files_json TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                released_at TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS invocations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts TEXT NOT NULL,
@@ -92,6 +103,7 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_agent_sessions_schema(conn)?;
     ensure_tools_schema(conn)?;
     ensure_audit_events_schema(conn)?;
+    ensure_task_reservations_schema(conn)?;
     ensure_invocation_schema(conn)?;
 
     Ok(())
@@ -296,6 +308,30 @@ fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
 
             CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_name
             ON tool_calls(tool_name);
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS task_reservations (
+                reservation_id TEXT PRIMARY KEY,
+                workspace_orbit_dir TEXT NOT NULL,
+                task_ids_json TEXT NOT NULL,
+                files_json TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                released_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_reservations_workspace_expires
+            ON task_reservations(workspace_orbit_dir, expires_at);
+
+            CREATE INDEX IF NOT EXISTS idx_task_reservations_workspace_release
+            ON task_reservations(workspace_orbit_dir, released_at);
         "#,
     )
     .map_err(|e| OrbitError::Store(e.to_string()))

@@ -385,6 +385,17 @@ impl OrbitRuntime {
             if !matches_job_filter(asset.spec.kind, filter) {
                 continue;
             }
+            let last_run = self
+                .stores()
+                .jobs()
+                .list_runs_filtered(&JobRunQuery {
+                    job_id: Some(job_id.clone()),
+                    state: None,
+                    created_since: None,
+                    limit: Some(1),
+                })
+                .ok()
+                .and_then(|runs| runs.into_iter().next());
             result.push((
                 JobCatalogEntry {
                     job_id: job_id.clone(),
@@ -396,7 +407,7 @@ impl OrbitRuntime {
                         spec: asset.spec.clone(),
                     },
                 },
-                None,
+                last_run,
             ));
         }
 
@@ -518,6 +529,19 @@ impl OrbitRuntime {
         dirs.push(self.paths().global_dir.join("jobs/v2"));
         dirs.push(self.paths().repo_root.join(REPO_V2_SAMPLE_JOBS_DIR));
         dirs
+    }
+
+    pub(crate) fn load_v2_job_asset_by_name(
+        &self,
+        job_id: &str,
+    ) -> Result<(PathBuf, JobV2), OrbitError> {
+        let mut found = None;
+        for dir in self.v2_job_asset_dirs() {
+            if dir.is_dir() {
+                find_v2_job_asset_in_dir(&dir, job_id, &mut found)?;
+            }
+        }
+        found.ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))
     }
 }
 
@@ -679,6 +703,54 @@ fn load_v2_job_assets_from_dir(
                 spec: asset.spec,
             },
         );
+    }
+    Ok(())
+}
+
+fn find_v2_job_asset_in_dir(
+    dir: &Path,
+    expected_job_id: &str,
+    found: &mut Option<(PathBuf, JobV2)>,
+) -> Result<(), OrbitError> {
+    let iter = std::fs::read_dir(dir)
+        .map_err(|err| OrbitError::InvalidInput(format!("read dir {}: {err}", dir.display())))?;
+    for entry in iter {
+        let entry = entry.map_err(|err| {
+            OrbitError::InvalidInput(format!("read dir {}: {err}", dir.display()))
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            find_v2_job_asset_in_dir(&path, expected_job_id, found)?;
+            continue;
+        }
+        let is_yaml = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext == "yaml" || ext == "yml");
+        if !is_yaml {
+            continue;
+        }
+
+        let yaml = match std::fs::read_to_string(&path) {
+            Ok(yaml) => yaml,
+            Err(_) => continue,
+        };
+        let asset = match load_job_asset(&yaml) {
+            Ok(JobAsset::V2(asset)) => asset,
+            _ => continue,
+        };
+        if asset.name != expected_job_id {
+            continue;
+        }
+        if let Some((first_path, _)) = found {
+            return Err(OrbitError::InvalidInput(format!(
+                "duplicate v2 job name '{}' — defined in both {} and {}",
+                expected_job_id,
+                first_path.display(),
+                path.display()
+            )));
+        }
+        *found = Some((path, asset.spec));
     }
     Ok(())
 }

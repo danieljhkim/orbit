@@ -1,0 +1,38 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: context_conflict_check
+spec:
+  type: deterministic
+  description: >
+    Check whether a bundle's context files conflict with in-flight task locks or
+    active task reservation records without claiming any files.
+  input_schema_json:
+    type: object
+    required: [task_ids]
+    properties:
+      task_ids:
+        type: array
+        items:
+          type: string
+  output_schema_json:
+    type: object
+    required: [clear, conflicts]
+    properties:
+      clear:
+        type: boolean
+      conflicts:
+        type: array
+        items:
+          type: object
+          required: [file, held_by, held_by_id]
+          properties:
+            file:
+              type: string
+            held_by:
+              type: string
+              enum: [task, reservation]
+            held_by_id:
+              type: string
+  action: context_conflict_check
+  config: {}

@@ -1,23 +1,28 @@
 mod input;
 mod json;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use orbit_store::state_io;
+use orbit_store::{
+    ExpiredTaskReservation, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationReleaseParams, TaskReservationReserveParams, state_io,
+};
 use orbit_tools::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost};
 use orbit_types::{
-    OrbitError, ReviewThreadStatus, TaskPriority, TaskStatus, TaskType,
-    optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
-    optional_string_list_alias, required_string, split_csv,
+    AuditEventStatus, OrbitError, ReviewThreadStatus, Task, TaskPriority, TaskStatus, TaskType,
+    normalize_optional_attribution_label, optional_csv_or_string_list_alias, optional_raw_string,
+    optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
+    required_string, split_csv,
 };
 use serde_json::{Value, json};
 
 use self::input::{
-    empty_string_to_none, parse_artifacts, parse_task_complexity, parse_task_priority,
-    parse_task_status, parse_task_type, resolve_state_dir, resolve_state_payload,
-    resolve_step_index,
+    empty_string_to_none, parse_artifacts, parse_optional_poll_interval_seconds,
+    parse_optional_timeout_seconds, parse_string_array_field, parse_task_complexity,
+    parse_task_priority, parse_task_status, parse_task_type, require_object_field,
+    resolve_state_dir, resolve_state_payload, resolve_step_index,
 };
 use self::json::{
     serialize_error, serialize_task, serialize_task_lint_report, task_fields_to_json,
@@ -58,6 +63,53 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                 let id = required_string(&input, &["id"], "id")?;
                 serde_json::to_value(self.runtime.show_activity(&id)?)
                     .map_err(serialize_error("serialize activity"))
+            }
+            OrbitBuiltinAction::PipelineInvoke => {
+                let job_name = required_string(&input, &["job_name"], "job_name")?;
+                let payload = require_object_field(&input, "input")?.clone();
+                let priority = optional_string(&input, "priority")?
+                    .map(|value| parse_task_priority("priority", &value))
+                    .transpose()?
+                    .map(|value| value.to_string());
+                let actor = Some(
+                    normalize_optional_attribution_label(
+                        model.as_deref().or(agent.as_deref()),
+                        model.as_deref(),
+                    )
+                    .unwrap_or_else(|| self.runtime.actor_label().to_string()),
+                )
+                .filter(|value| !value.trim().is_empty());
+                serde_json::to_value(self.runtime.submit_pipeline_run(
+                    &job_name,
+                    payload,
+                    priority.as_deref(),
+                    actor.as_deref(),
+                )?)
+                .map_err(serialize_error("serialize pipeline invoke"))
+            }
+            OrbitBuiltinAction::PipelineWait => {
+                let run_ids = parse_string_array_field(&input, "run_ids")?;
+                let timeout_seconds = OrbitRuntime::normalize_pipeline_wait_timeout(
+                    parse_optional_timeout_seconds(&input)?,
+                )?;
+                let poll_interval_seconds = OrbitRuntime::normalize_pipeline_wait_poll_interval(
+                    parse_optional_poll_interval_seconds(&input)?,
+                );
+                let actor = Some(
+                    normalize_optional_attribution_label(
+                        model.as_deref().or(agent.as_deref()),
+                        model.as_deref(),
+                    )
+                    .unwrap_or_else(|| self.runtime.actor_label().to_string()),
+                )
+                .filter(|value| !value.trim().is_empty());
+                serde_json::to_value(self.runtime.wait_pipeline_runs(
+                    &run_ids,
+                    timeout_seconds,
+                    poll_interval_seconds,
+                    actor.as_deref(),
+                )?)
+                .map_err(serialize_error("serialize pipeline wait"))
             }
             OrbitBuiltinAction::ReviewThreadAdd => {
                 let id = required_string(&input, &["id"], "id")?;
@@ -250,6 +302,150 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                     "total_tasks": tasks.len(),
                 }))
             }
+            OrbitBuiltinAction::TaskLocksRelease => {
+                let reservation_id = required_string(
+                    &input,
+                    &["reservation_id", "reservationId", "reservation-id"],
+                    "reservation_id",
+                )?;
+                let result = self.runtime.stores().task_reservations().release(
+                    TaskReservationReleaseParams {
+                        workspace_orbit_dir: workspace_orbit_dir(&self.runtime),
+                        reservation_id: reservation_id.clone(),
+                    },
+                )?;
+                emit_expired_reservation_events(&self.runtime, &result.expired_reservations)?;
+                if result.released {
+                    record_task_lock_audit_event(
+                        &self.runtime,
+                        "task.locks.reserve.released",
+                        "orbit.task.locks.release",
+                        Some(reservation_id.as_str()),
+                        AuditEventStatus::Success,
+                        json!({
+                            "reservation_id": reservation_id,
+                            "released_at": result.released_at,
+                            "released_by": reservation_actor_label(
+                                &self.runtime,
+                                agent.as_deref(),
+                                model.as_deref(),
+                            ),
+                        }),
+                    )?;
+                }
+                Ok(json!({ "released": result.released }))
+            }
+            OrbitBuiltinAction::TaskLocksReserve => {
+                let task_ids = parse_task_ids(&input)?;
+                let ttl_seconds =
+                    optional_u32_alias(&input, &["ttl_seconds", "ttlSeconds", "ttl-seconds"])?
+                        .unwrap_or(1800);
+                if !(1..=7200).contains(&ttl_seconds) {
+                    return Err(OrbitError::InvalidInput(
+                        "`ttl_seconds` must be between 1 and 7200 seconds".to_string(),
+                    ));
+                }
+
+                let actor =
+                    reservation_actor_label(&self.runtime, agent.as_deref(), model.as_deref());
+                let requested_files = requested_task_files(&self.runtime, &task_ids)?;
+                let mut conflicts =
+                    task_lock_conflicts(&self.runtime, &task_ids, &requested_files)?;
+
+                record_task_lock_audit_event(
+                    &self.runtime,
+                    "task.locks.reserve.requested",
+                    "orbit.task.locks.reserve",
+                    None,
+                    AuditEventStatus::Success,
+                    json!({
+                        "actor": actor.clone(),
+                        "task_ids": task_ids.clone(),
+                        "ttl_seconds": ttl_seconds,
+                    }),
+                )?;
+
+                let reservation_result = if conflicts.is_empty() {
+                    self.runtime.stores().task_reservations().reserve(
+                        TaskReservationReserveParams {
+                            workspace_orbit_dir: workspace_orbit_dir(&self.runtime),
+                            task_ids: task_ids.clone(),
+                            requested_files: requested_files.clone(),
+                            actor: actor.clone(),
+                            ttl_seconds,
+                        },
+                    )?
+                } else {
+                    let check = self.runtime.stores().task_reservations().check(
+                        TaskReservationCheckParams {
+                            workspace_orbit_dir: workspace_orbit_dir(&self.runtime),
+                            requested_files: requested_files.clone(),
+                        },
+                    )?;
+                    conflicts = merge_task_lock_conflicts(conflicts, check.conflicts);
+                    emit_expired_reservation_events(&self.runtime, &check.expired_reservations)?;
+                    orbit_store::TaskReservationReserveResult {
+                        reserved: false,
+                        reservation_id: None,
+                        expires_at: None,
+                        reserved_files: Vec::new(),
+                        conflicts: conflicts.clone(),
+                        expired_reservations: Vec::new(),
+                    }
+                };
+
+                emit_expired_reservation_events(
+                    &self.runtime,
+                    &reservation_result.expired_reservations,
+                )?;
+
+                if reservation_result.reserved {
+                    let reservation_id =
+                        reservation_result.reservation_id.clone().ok_or_else(|| {
+                            OrbitError::Execution(
+                                "reservation grant is missing reservation_id".to_string(),
+                            )
+                        })?;
+                    record_task_lock_audit_event(
+                        &self.runtime,
+                        "task.locks.reserve.granted",
+                        "orbit.task.locks.reserve",
+                        Some(reservation_id.as_str()),
+                        AuditEventStatus::Success,
+                        json!({
+                            "reservation_id": reservation_id,
+                            "files": reservation_result.reserved_files.clone(),
+                            "expires_at": reservation_result.expires_at.clone(),
+                            "actor": actor,
+                        }),
+                    )?;
+                    Ok(json!({
+                        "reserved": true,
+                        "reservation_id": reservation_result.reservation_id,
+                        "expires_at": reservation_result.expires_at,
+                        "reserved_files": reservation_result.reserved_files,
+                    }))
+                } else {
+                    let conflicts =
+                        merge_task_lock_conflicts(conflicts, reservation_result.conflicts);
+                    record_task_lock_audit_event(
+                        &self.runtime,
+                        "task.locks.reserve.denied",
+                        "orbit.task.locks.reserve",
+                        None,
+                        AuditEventStatus::Denied,
+                        json!({
+                            "actor": actor,
+                            "task_ids": task_ids.clone(),
+                            "conflicts": conflicts.clone(),
+                        }),
+                    )?;
+                    Ok(json!({
+                        "reserved": false,
+                        "conflicts": conflicts,
+                    }))
+                }
+            }
             OrbitBuiltinAction::TaskReject => {
                 let id = required_string(&input, &["id"], "id")?;
                 let note = required_string(&input, &["note"], "note")?;
@@ -344,4 +540,187 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
     fn task_scope(&self) -> OrbitTaskScope {
         self.task_scope.clone()
     }
+}
+
+pub(crate) fn parse_task_ids(input: &Value) -> Result<Vec<String>, OrbitError> {
+    let task_ids = optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?
+        .ok_or_else(|| OrbitError::InvalidInput("missing `task_ids`".to_string()))?;
+    let deduped = task_ids.into_iter().collect::<BTreeSet<_>>();
+    if deduped.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "`task_ids` must contain at least one task ID".to_string(),
+        ));
+    }
+    Ok(deduped.into_iter().collect())
+}
+
+pub(crate) fn workspace_orbit_dir(runtime: &OrbitRuntime) -> String {
+    runtime.paths().orbit_dir.to_string_lossy().into_owned()
+}
+
+pub(crate) fn requested_task_files(
+    runtime: &OrbitRuntime,
+    task_ids: &[String],
+) -> Result<Vec<String>, OrbitError> {
+    let tasks = runtime.stores().tasks().list()?;
+    let task_map = tasks
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut requested_files = BTreeSet::new();
+    for task_id in task_ids {
+        let task = task_map
+            .get(task_id)
+            .ok_or_else(|| OrbitError::TaskNotFound(task_id.clone()))?;
+        requested_files.extend(task.context_files.iter().cloned());
+    }
+
+    Ok(requested_files.into_iter().collect())
+}
+
+pub(crate) fn task_lock_conflicts(
+    runtime: &OrbitRuntime,
+    bundle_task_ids: &[String],
+    requested_files: &[String],
+) -> Result<Vec<TaskLockConflict>, OrbitError> {
+    let bundle_ids = bundle_task_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let requested_files = requested_files.iter().cloned().collect::<BTreeSet<_>>();
+    if requested_files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut tasks: Vec<Task> = runtime
+        .stores()
+        .tasks()
+        .list()?
+        .into_iter()
+        .filter(|task| {
+            matches!(task.status, TaskStatus::InProgress | TaskStatus::Review)
+                && !bundle_ids.contains(&task.id)
+        })
+        .collect();
+    tasks.sort_by_key(|task| {
+        (
+            task_lock_status_rank(task.status),
+            task.created_at,
+            task.id.clone(),
+        )
+    });
+
+    let mut conflicts = Vec::new();
+    for task in tasks {
+        for file in &task.context_files {
+            if requested_files.contains(file) {
+                conflicts.push(TaskLockConflict {
+                    file: file.clone(),
+                    held_by: TaskLockHolder::Task,
+                    held_by_id: task.id.clone(),
+                });
+            }
+        }
+    }
+
+    conflicts.sort_by(|left, right| {
+        left.file
+            .cmp(&right.file)
+            .then(left.held_by_id.cmp(&right.held_by_id))
+    });
+    Ok(conflicts)
+}
+
+pub(crate) fn merge_task_lock_conflicts(
+    left: Vec<TaskLockConflict>,
+    right: Vec<TaskLockConflict>,
+) -> Vec<TaskLockConflict> {
+    let mut merged = left;
+    merged.extend(right);
+    merged.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| match (a.held_by, b.held_by) {
+                (TaskLockHolder::Task, TaskLockHolder::Reservation) => std::cmp::Ordering::Less,
+                (TaskLockHolder::Reservation, TaskLockHolder::Task) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            })
+            .then(a.held_by_id.cmp(&b.held_by_id))
+    });
+    merged.dedup_by(|a, b| {
+        a.file == b.file && a.held_by == b.held_by && a.held_by_id == b.held_by_id
+    });
+    merged
+}
+
+pub(crate) fn emit_expired_reservation_events(
+    runtime: &OrbitRuntime,
+    expired_reservations: &[ExpiredTaskReservation],
+) -> Result<(), OrbitError> {
+    for expired in expired_reservations {
+        record_task_lock_audit_event(
+            runtime,
+            "task.locks.reserve.expired",
+            "orbit.task.locks.reserve",
+            Some(expired.reservation_id.as_str()),
+            AuditEventStatus::Success,
+            json!({
+                "reservation_id": expired.reservation_id,
+                "expired_at": expired.expired_at,
+            }),
+        )?;
+    }
+    Ok(())
+}
+
+fn reservation_actor_label(
+    runtime: &OrbitRuntime,
+    agent: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    normalize_optional_attribution_label(model.or(agent), model)
+        .unwrap_or_else(|| runtime.actor_label().to_string())
+}
+
+fn record_task_lock_audit_event(
+    runtime: &OrbitRuntime,
+    command: &str,
+    tool_name: &str,
+    target_id: Option<&str>,
+    status: AuditEventStatus,
+    payload: Value,
+) -> Result<(), OrbitError> {
+    runtime.record_audit_event(&crate::AuditEventInsertParams {
+        execution_id: format!(
+            "audit-{}-{}",
+            command.replace('.', "-"),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ),
+        command: command.to_string(),
+        subcommand: None,
+        tool_name: Some(tool_name.to_string()),
+        target_type: Some("task_reservation".to_string()),
+        target_id: target_id.map(ToOwned::to_owned),
+        role: "admin".to_string(),
+        status,
+        exit_code: if status == AuditEventStatus::Denied {
+            1
+        } else {
+            0
+        },
+        duration_ms: 0,
+        working_directory: runtime.paths().repo_root.to_string_lossy().into_owned(),
+        arguments_json: Some(
+            serde_json::to_string(&payload).map_err(|error| {
+                OrbitError::Execution(format!("serialize audit payload: {error}"))
+            })?,
+        ),
+        stdout_truncated: None,
+        stderr_truncated: None,
+        error_message: None,
+        host: std::env::var("HOSTNAME").ok(),
+        pid: std::process::id(),
+        session_id: None,
+    })
 }

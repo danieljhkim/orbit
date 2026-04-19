@@ -4,8 +4,10 @@ use orbit_store::{
     JobDefinitionStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend, JobUpdateParams,
     PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
     TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
-    ToolStoreBackend,
+    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
+    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_types::{
     Activity, AuditEvent, ExecutorDef, Job, JobRun, JobRunState, KnowledgeRunMetrics, OrbitError,
@@ -106,6 +108,12 @@ impl OrbitStores {
         }
     }
 
+    pub(crate) fn task_reservations(&self) -> TaskReservationRecords<'_> {
+        TaskReservationRecords {
+            store: self.task_reservation.as_ref(),
+        }
+    }
+
     pub(crate) fn jobs(&self) -> JobRecords<'_> {
         JobRecords {
             definition: self.job_definition.as_ref(),
@@ -144,6 +152,10 @@ pub(crate) struct TaskRecords<'a> {
     history: &'a dyn TaskHistoryStoreBackend,
     review: &'a dyn TaskReviewStoreBackend,
     artifact: &'a dyn TaskArtifactStoreBackend,
+}
+
+pub(crate) struct TaskReservationRecords<'a> {
+    store: &'a dyn TaskReservationStoreBackend,
 }
 
 impl TaskRecords<'_> {
@@ -251,6 +263,29 @@ impl TaskRecords<'_> {
 
     pub(crate) fn search(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         self.store.search_tasks(query)
+    }
+}
+
+impl TaskReservationRecords<'_> {
+    pub(crate) fn check(
+        &self,
+        params: TaskReservationCheckParams,
+    ) -> Result<TaskReservationCheckResult, OrbitError> {
+        self.store.check_task_reservation_conflicts(params)
+    }
+
+    pub(crate) fn reserve(
+        &self,
+        params: TaskReservationReserveParams,
+    ) -> Result<TaskReservationReserveResult, OrbitError> {
+        self.store.reserve_task_reservation(params)
+    }
+
+    pub(crate) fn release(
+        &self,
+        params: TaskReservationReleaseParams,
+    ) -> Result<TaskReservationReleaseResult, OrbitError> {
+        self.store.release_task_reservation(params)
     }
 }
 

@@ -22,6 +22,17 @@ spec:
       workspace_path:
         type: string
         description: Override worktree path. Resolved from run context when omitted.
+      completed_task_ids:
+        type: array
+        items:
+          type: string
+        description: Optional ordered task list to preserve bundle ordering in the generated PR metadata.
+      title:
+        type: string
+        description: Optional PR title override. When omitted, Orbit derives one from the batch tasks.
+      body:
+        type: string
+        description: Optional PR body override. When omitted, Orbit generates a task-list body for the batch.
   output_schema_json:
     type: object
     properties: {}

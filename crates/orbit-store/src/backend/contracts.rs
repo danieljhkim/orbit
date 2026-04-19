@@ -5,6 +5,7 @@ use orbit_types::{
     Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
     TaskType,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
@@ -98,6 +99,70 @@ pub struct TaskArtifactUpdateParams {
     /// Artifact files to write under the task bundle `artifacts/` directory.
     /// Existing files at the same relative path are overwritten.
     pub upsert_artifacts: Vec<TaskArtifact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskLockHolder {
+    Task,
+    Reservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLockConflict {
+    pub file: String,
+    pub held_by: TaskLockHolder,
+    pub held_by_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExpiredTaskReservation {
+    pub reservation_id: String,
+    pub expired_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationCheckParams {
+    pub workspace_orbit_dir: String,
+    pub requested_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationCheckResult {
+    pub conflicts: Vec<TaskLockConflict>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationReserveParams {
+    pub workspace_orbit_dir: String,
+    pub task_ids: Vec<String>,
+    pub requested_files: Vec<String>,
+    pub actor: String,
+    pub ttl_seconds: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationReserveResult {
+    pub reserved: bool,
+    pub reservation_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub reserved_files: Vec<String>,
+    pub conflicts: Vec<TaskLockConflict>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationReleaseParams {
+    pub workspace_orbit_dir: String,
+    pub reservation_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationReleaseResult {
+    pub released: bool,
+    pub released_at: Option<String>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +265,23 @@ pub trait TaskArtifactStoreBackend: Send + Sync {
         id: &str,
         params: TaskArtifactUpdateParams,
     ) -> Result<(), OrbitError>;
+}
+
+pub trait TaskReservationStoreBackend: Send + Sync {
+    fn check_task_reservation_conflicts(
+        &self,
+        params: TaskReservationCheckParams,
+    ) -> Result<TaskReservationCheckResult, OrbitError>;
+
+    fn reserve_task_reservation(
+        &self,
+        params: TaskReservationReserveParams,
+    ) -> Result<TaskReservationReserveResult, OrbitError>;
+
+    fn release_task_reservation(
+        &self,
+        params: TaskReservationReleaseParams,
+    ) -> Result<TaskReservationReleaseResult, OrbitError>;
 }
 
 pub trait ActivityStoreBackend: Send + Sync {

@@ -4,16 +4,21 @@ metadata:
   name: worktree_setup
 spec:
   spec_type: automation
-  description: Create a git worktree and branch for a pipeline run, stamp the task with batch/workspace metadata, and move it to in-progress.
+  description: Create a git worktree and branch for a pipeline run, stamp the task or bundled tasks with batch/workspace metadata, and move them to in-progress. Single-task inputs keep the historical `<prefix>/<task_id>-<timestamp>` naming; bundled `task_ids` derive a deterministic `<prefix>/bundle-<sha256>` branch from the sorted task IDs.
   input_schema_json:
     type: object
     required:
-      - task_id
       - run_id
     properties:
       task_id:
         type: string
         description: Orbit task ID.
+      task_ids:
+        type: array
+        minItems: 1
+        items:
+          type: string
+        description: Optional task bundle. When present, all listed tasks share one worktree, branch, and batch_id.
       run_id:
         type: string
         description: Job run ID, stamped as batch_id on the task.

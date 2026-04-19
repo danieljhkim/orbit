@@ -9,12 +9,17 @@
 //! `orbit-engine`, so this module never names orbit-agent types.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use orbit_engine::v2::{DispatchError, V2RuntimeHost};
 use orbit_tools::{FsAuditLogger, ToolContext};
 use orbit_types::{Role, UNRESTRICTED_FS_PROFILE};
 use serde_json::Value;
 
+use super::orbit_tool_host::{
+    emit_expired_reservation_events, merge_task_lock_conflicts, parse_task_ids,
+    requested_task_files, task_lock_conflicts, workspace_orbit_dir,
+};
 use crate::OrbitRuntime;
 
 impl V2RuntimeHost for OrbitRuntime {
@@ -84,6 +89,67 @@ impl V2RuntimeHost for OrbitRuntime {
                     "follow_up_issue": null,
                     "skipped_reason":
                         format!("stub: real revert of `{sha}` lands in a follow-up"),
+                }))
+            }
+            "context_conflict_check" => {
+                let task_ids = parse_task_ids(input).map_err(|error| {
+                    DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: error.to_string(),
+                    }
+                })?;
+                let requested_files = requested_task_files(self, &task_ids).map_err(|error| {
+                    DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: error.to_string(),
+                    }
+                })?;
+                let task_conflicts = task_lock_conflicts(self, &task_ids, &requested_files)
+                    .map_err(|error| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: error.to_string(),
+                    })?;
+                let reservation_check = self
+                    .stores()
+                    .task_reservations()
+                    .check(orbit_store::TaskReservationCheckParams {
+                        workspace_orbit_dir: workspace_orbit_dir(self),
+                        requested_files,
+                    })
+                    .map_err(|error| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: error.to_string(),
+                    })?;
+                emit_expired_reservation_events(self, &reservation_check.expired_reservations)
+                    .map_err(|error| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: error.to_string(),
+                    })?;
+                let conflicts =
+                    merge_task_lock_conflicts(task_conflicts, reservation_check.conflicts);
+                Ok(serde_json::json!({
+                    "clear": conflicts.is_empty(),
+                    "conflicts": conflicts,
+                }))
+            }
+            "sleep" => {
+                let seconds = input
+                    .get("seconds")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: "missing `seconds`".to_string(),
+                    })?;
+                if !(0.0..=3600.0).contains(&seconds) {
+                    return Err(DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: "`seconds` must be between 0 and 3600".to_string(),
+                    });
+                }
+                let started_at = Instant::now();
+                std::thread::sleep(Duration::from_secs_f64(seconds));
+                Ok(serde_json::json!({
+                    "slept_seconds": started_at.elapsed().as_secs_f64(),
                 }))
             }
             other => Err(DispatchError::DeterministicActionNotRegistered(

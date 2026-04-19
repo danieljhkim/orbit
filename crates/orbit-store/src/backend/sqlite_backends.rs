@@ -1,7 +1,11 @@
 use chrono::{DateTime, Utc};
 use orbit_types::{AuditEvent, OrbitError, StoredTool};
 
-use super::contracts::{AuditEventStoreBackend, ToolStoreBackend};
+use super::contracts::{
+    AuditEventStoreBackend, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationStoreBackend, ToolStoreBackend,
+};
 use crate::Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
@@ -92,5 +96,33 @@ impl ScopedStore<AuditEvent> for SqliteAuditEventStoreBackend {
             .parse::<i64>()
             .map_err(|e| OrbitError::Store(format!("invalid audit event id '{key}': {e}")))?;
         self.store.get_audit_event(id)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SqliteTaskReservationStoreBackend {
+    pub(crate) store: Store,
+}
+
+impl TaskReservationStoreBackend for SqliteTaskReservationStoreBackend {
+    fn check_task_reservation_conflicts(
+        &self,
+        params: TaskReservationCheckParams,
+    ) -> Result<TaskReservationCheckResult, OrbitError> {
+        self.store.check_task_reservation_conflicts(&params)
+    }
+
+    fn reserve_task_reservation(
+        &self,
+        params: TaskReservationReserveParams,
+    ) -> Result<TaskReservationReserveResult, OrbitError> {
+        self.store.reserve_task_reservation(&params)
+    }
+
+    fn release_task_reservation(
+        &self,
+        params: TaskReservationReleaseParams,
+    ) -> Result<TaskReservationReleaseResult, OrbitError> {
+        self.store.release_task_reservation(&params)
     }
 }

@@ -157,6 +157,7 @@ impl DispatchError {
 /// Dispatch a v2 activity by type. Emits §7 activity.started/finished
 /// events around the per-type runner and nests the runner's events beneath.
 pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcome, DispatchError> {
+    let activity_input = inject_run_id(&input.input, input.run_id);
     let activity_type = match input.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
         ActivityV2Spec::Deterministic(_) => "deterministic",
@@ -180,7 +181,7 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
                 spec,
                 input.run_id,
                 input.audit.clone(),
-                &input.input,
+                &activity_input,
                 input.fs_profile,
             ),
             None => Err(DispatchError::HostRequired("agent_loop")),
@@ -191,7 +192,7 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
                 spec,
                 input.fs_profile,
                 input.audit.clone(),
-                &input.input,
+                &activity_input,
             ),
             None => Err(DispatchError::HostRequired("deterministic")),
         },
@@ -212,6 +213,19 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
         });
 
     result
+}
+
+fn inject_run_id(input: &Value, run_id: &str) -> Value {
+    let Value::Object(map) = input else {
+        return input.clone();
+    };
+    if map.contains_key("run_id") {
+        return input.clone();
+    }
+
+    let mut augmented = map.clone();
+    augmented.insert("run_id".to_string(), Value::String(run_id.to_string()));
+    Value::Object(augmented)
 }
 
 fn run_deterministic(

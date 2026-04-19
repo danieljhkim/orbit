@@ -262,6 +262,8 @@ pub struct FanInSpec {
 /// Session map across iterations.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LoopBlock {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<String>,
     pub max_iterations: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub break_when: Option<String>,

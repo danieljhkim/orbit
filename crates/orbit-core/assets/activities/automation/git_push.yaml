@@ -19,6 +19,9 @@ spec:
       workspace_path:
         type: string
         description: Override worktree path. Resolved from run context when omitted.
+      branch:
+        type: string
+        description: Optional branch to push. Defaults to the branch checked out in workspace_path.
   output_schema_json:
     type: object
     properties: {}

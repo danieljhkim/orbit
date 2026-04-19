@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     Store, audit_event_store_sqlite, global_activity_store, global_executor_def_store,
-    global_policy_def_store, layered_policy_def_store, scoped_job_backends, tool_store_sqlite,
-    workspace_policy_def_store, workspace_task_backends,
+    global_policy_def_store, layered_policy_def_store, scoped_job_backends,
+    task_reservation_store_sqlite, tool_store_sqlite, workspace_policy_def_store,
+    workspace_task_backends,
 };
 
 use orbit_tools::ToolRegistry;
@@ -56,6 +57,7 @@ pub(crate) fn build_context_from_roots(
     let activity_store = global_activity_store(persistence.activity_dir.clone());
     let tool_store = tool_store_sqlite(store.clone());
     let audit_event_store = audit_event_store_sqlite(store.clone());
+    let task_reservation_store = task_reservation_store_sqlite(store.clone());
     let executor_def_store = global_executor_def_store(persistence.executor_dir.clone());
     let global_policy_store = global_policy_def_store(persistence.policy_dir.clone());
     seed_default_policies(global_policy_store.as_ref(), false)?;
@@ -94,6 +96,7 @@ pub(crate) fn build_context_from_roots(
             task_backends.history,
             task_backends.review,
             task_backends.artifact,
+            task_reservation_store,
             activity_store,
             job_backends.definition,
             job_backends.run,

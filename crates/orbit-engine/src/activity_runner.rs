@@ -257,6 +257,8 @@ pub(crate) fn execution_template_context_with_env(
             .workspace_path
             .clone()
             .or_else(|| input_workspace_path(&execution.input)),
+        item: None,
+        iteration: None,
         steps: execution.steps_outputs.clone(),
     }
 }

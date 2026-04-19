@@ -59,6 +59,8 @@ pub use registry::ToolRegistry;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrbitBuiltinAction {
     ActivityShow,
+    PipelineInvoke,
+    PipelineWait,
     ReviewThreadAdd,
     ReviewThreadList,
     ReviewThreadReply,
@@ -71,6 +73,8 @@ pub enum OrbitBuiltinAction {
     TaskLint,
     TaskList,
     TaskLocks,
+    TaskLocksRelease,
+    TaskLocksReserve,
     TaskReject,
     TaskShow,
     TaskStart,

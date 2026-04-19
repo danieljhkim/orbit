@@ -5,8 +5,8 @@ use orbit_policy::PolicyEngine;
 use orbit_store::{
     ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend,
     JobDefinitionStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
-    ToolStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
+    TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 use orbit_types::WorkspacePaths;
@@ -85,6 +85,7 @@ pub(crate) struct OrbitStores {
     pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
     pub(crate) task_review: Arc<dyn TaskReviewStoreBackend>,
     pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
+    pub(crate) task_reservation: Arc<dyn TaskReservationStoreBackend>,
     pub(crate) activity: Arc<dyn ActivityStoreBackend>,
     pub(crate) job_definition: Arc<dyn JobDefinitionStoreBackend>,
     pub(crate) job_run: Arc<dyn JobRunStoreBackend>,
@@ -101,6 +102,7 @@ impl OrbitStores {
         task_history: Arc<dyn TaskHistoryStoreBackend>,
         task_review: Arc<dyn TaskReviewStoreBackend>,
         task_artifact: Arc<dyn TaskArtifactStoreBackend>,
+        task_reservation: Arc<dyn TaskReservationStoreBackend>,
         activity: Arc<dyn ActivityStoreBackend>,
         job_definition: Arc<dyn JobDefinitionStoreBackend>,
         job_run: Arc<dyn JobRunStoreBackend>,
@@ -115,6 +117,7 @@ impl OrbitStores {
             task_history,
             task_review,
             task_artifact,
+            task_reservation,
             activity,
             job_definition,
             job_run,

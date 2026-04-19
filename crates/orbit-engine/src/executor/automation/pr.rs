@@ -229,14 +229,12 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         ensure_task_can_enter_pr_review(&task)?;
         completed_tasks.push(task);
     }
-    let id_labels: Vec<&str> = completed_tasks
-        .iter()
-        .map(|task| task.id.as_str())
-        .collect();
-    let ids_joined = id_labels.join(", ");
-
-    let title = format!("feat: parallel batch [{ids_joined}]");
-    let body = build_batch_pr_body(&completed_tasks, &freshness, &changed_files);
+    let title = input_string_field(input, "title")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_pr_title(&completed_tasks));
+    let body = input_string_field(input, "body")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| build_batch_pr_body(&completed_tasks, &freshness, &changed_files));
 
     let tool_context = ToolContext {
         cwd: Some(workspace_path.to_string_lossy().to_string()),
@@ -349,9 +347,9 @@ fn build_batch_pr_body(
 ) -> String {
     let task_sections = tasks
         .iter()
-        .map(render_task_section)
+        .map(render_task_line)
         .collect::<Vec<_>>()
-        .join("\n\n");
+        .join("\n");
     let changed_files_section = changed_files
         .iter()
         .map(|file| format!("- `{file}`"))
@@ -375,16 +373,26 @@ fn build_batch_pr_body(
     body
 }
 
-fn render_task_section(task: &Task) -> String {
-    let mut section = format!("### {}: {}", task.id, task.title.trim());
-    let summary = task.execution_summary.trim();
-    if !summary.is_empty() {
-        section.push_str(&format!(
-            "\n<details><summary>Execution Summary</summary>\n\n{}\n\n</details>",
-            summary
-        ));
+fn render_task_line(task: &Task) -> String {
+    let title = task.title.trim();
+    if title.is_empty() {
+        format!("- [{}]", task.id)
+    } else {
+        format!("- [{}] {}", task.id, title)
     }
-    section
+}
+
+fn default_pr_title(tasks: &[Task]) -> String {
+    let first_task = tasks.first();
+    let first_title = first_task
+        .map(|task| task.title.trim())
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| first_task.map(|task| task.id.as_str()).unwrap_or("Bundle"));
+    if tasks.len() == 1 {
+        first_title.to_string()
+    } else {
+        format!("[Bundle] {first_title}")
+    }
 }
 
 fn batch_pr_signature(tasks: &[Task]) -> Option<String> {

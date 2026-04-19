@@ -4,11 +4,13 @@ use std::sync::Arc;
 use super::contracts::{
     ActivityStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend,
     JobDefinitionStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
-    ToolStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
+    TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
-use super::sqlite_backends::{SqliteAuditEventStoreBackend, SqliteToolStoreBackend};
+use super::sqlite_backends::{
+    SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
+};
 use crate::Store;
 use crate::file::activity_store::ActivityFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -61,6 +63,10 @@ pub fn tool_store_sqlite(store: Store) -> Arc<dyn ToolStoreBackend> {
 
 pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend> {
     Arc::new(SqliteAuditEventStoreBackend { store })
+}
+
+pub fn task_reservation_store_sqlite(store: Store) -> Arc<dyn TaskReservationStoreBackend> {
+    Arc::new(SqliteTaskReservationStoreBackend { store })
 }
 
 pub fn global_policy_def_store(root: PathBuf) -> Arc<dyn PolicyDefStoreBackend> {

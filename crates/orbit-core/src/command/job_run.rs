@@ -113,16 +113,22 @@ impl OrbitRuntime {
     }
 
     pub fn job_history(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        let job = self.show_job(job_id)?;
-        let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
+        if let Ok(job) = self.show_job(job_id) {
+            let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
+        } else {
+            let _ = self.load_v2_job_asset_by_name(job_id)?;
+        }
         self.list_job_history_backend(job_id)
     }
 
     pub fn list_job_runs(&self, params: JobRunListParams) -> Result<Vec<JobRun>, OrbitError> {
         let now = Utc::now();
         if let Some(job_id) = params.job_id.as_deref() {
-            let job = self.show_job(job_id)?;
-            let _ = self.recover_stale_active_run_for_job(&job, now)?;
+            if let Ok(job) = self.show_job(job_id) {
+                let _ = self.recover_stale_active_run_for_job(&job, now)?;
+            } else {
+                let _ = self.load_v2_job_asset_by_name(job_id)?;
+            }
         } else {
             for job in self.list_jobs(true)? {
                 let _ = self.recover_stale_active_run_for_job(&job, now)?;
