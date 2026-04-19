@@ -65,6 +65,23 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | 
 
 ---
 
+## Human vs Agent Surfaces
+
+Humans use the direct CLI surface such as `orbit task add`, `orbit task approve`, and `orbit run ...`.
+Agents use `orbit tool run ...`.
+
+When an agent invokes `orbit tool run ...` directly, pass `agent` and `model` in the input JSON:
+
+```bash
+orbit tool run orbit.task.show --input '{
+  "id": "<task-id>",
+  "agent": "<claude|codex|gemini>",
+  "model": "<model_name>"
+}'
+```
+
+---
+
 ## First-Class Workflows
 
 Orbit exposes workflow entrypoints under `orbit run`:

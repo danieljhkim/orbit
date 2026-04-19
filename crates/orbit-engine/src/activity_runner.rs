@@ -241,13 +241,9 @@ pub(crate) fn execution_template_context_with_env(
     execution: &ExecutionContext,
     env_pairs: Vec<(String, String)>,
 ) -> TemplateContext {
-    let mut env = env_pairs
+    let env = env_pairs
         .into_iter()
         .collect::<std::collections::HashMap<_, _>>();
-    env.insert("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string());
-    if let Some(actor_label) = execution.activity.created_by.as_ref() {
-        env.insert("ORBIT_TASK_ACTOR_LABEL".to_string(), actor_label.clone());
-    }
 
     TemplateContext {
         input: execution.input.clone(),

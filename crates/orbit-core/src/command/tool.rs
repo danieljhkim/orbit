@@ -1,10 +1,12 @@
 use std::path::Path;
 
 use orbit_tools::ToolContext;
-use orbit_types::{OrbitError, OrbitEvent, Role, StoredTool, ToolParam};
+use orbit_types::{
+    OrbitError, OrbitEvent, Role, StoredTool, ToolParam, normalize_optional_attribution_label,
+};
 use serde_json::Value;
 
-use crate::OrbitRuntime;
+use crate::{OrbitRuntime, context::ActorIdentity};
 
 pub use crate::runtime::pipeline::DryRunResult;
 
@@ -40,7 +42,7 @@ impl OrbitRuntime {
         model_override: Option<String>,
     ) -> Result<Value, OrbitError> {
         let allowed_tools = read_activity_tools_from_env();
-        let (agent_name, model_name) = resolve_agent_identity(agent_override, model_override);
+        let (actor, agent_name, model_name) = resolve_tool_identity(agent_override, model_override);
         let proc_allowed_programs = read_proc_allowed_programs_from_env();
         let cwd = std::env::current_dir()
             .ok()
@@ -54,7 +56,9 @@ impl OrbitRuntime {
             proc_allowed_programs,
             ..Default::default()
         };
-        self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
+        self.clone()
+            .with_actor(actor)
+            .run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
     }
 }
 
@@ -79,6 +83,19 @@ fn resolve_agent_identity(
     )
 }
 
+fn resolve_tool_identity(
+    agent_override: Option<String>,
+    model_override: Option<String>,
+) -> (ActorIdentity, Option<String>, Option<String>) {
+    let (agent_name, model_name) = resolve_agent_identity(agent_override, model_override);
+    let actor_label = normalize_optional_attribution_label(
+        model_name.as_deref().or(agent_name.as_deref()),
+        model_name.as_deref(),
+    )
+    .unwrap_or_else(|| "agent".to_string());
+    (ActorIdentity::agent(actor_label), agent_name, model_name)
+}
+
 fn read_proc_allowed_programs_from_env() -> Vec<String> {
     std::env::var("ORBIT_PROC_ALLOWED_PROGRAMS")
         .ok()
@@ -93,9 +110,6 @@ fn read_proc_allowed_programs_from_env() -> Vec<String> {
 }
 
 fn read_activity_tools_from_env() -> Vec<String> {
-    if std::env::var("ORBIT_TASK_ACTOR_KIND").ok().as_deref() != Some("agent") {
-        return Vec::new();
-    }
     std::env::var("ORBIT_ACTIVITY_TOOLS")
         .ok()
         .map(|raw| {

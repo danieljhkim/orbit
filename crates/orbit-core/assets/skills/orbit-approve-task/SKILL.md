@@ -18,30 +18,39 @@ The tool commands auto-detect the current status and record the decision in task
 - `review -> done`: appends `review_approved`
 - `review -> rejected`: appends `review_rejected`
 
+When invoking `orbit tool run` directly, include `agent` and `model` in the input JSON:
+
+```json
+{
+  "agent": "<claude|codex|gemini>",
+  "model": "<model_name>"
+}
+```
+
 ```bash
-orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>"}'
-orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>"}'
-orbit tool run orbit.task.start --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>"}'
+orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
+orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
+orbit tool run orbit.task.start --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 ```
 
 ## Workflow
 
-1. Run `orbit tool run orbit.task.list --input '{"status": "proposed"}'` and `'{"status": "review"}'`. If both are empty, your job is done.
+1. Run `orbit tool run orbit.task.list --input '{"status": "proposed", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'` and `'{"status": "review", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`. If both are empty, your job is done.
 2. For `proposed` tasks, review the task carefully.
-   - If valid and execution should begin immediately: run `orbit tool run orbit.task.start --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>"}'`.
-   - If valid but execution should remain queued: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>"}'`.
-   - If not valid: run `orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<reason>", "comment": "<audit summary>"}'`.
+   - If valid and execution should begin immediately: run `orbit tool run orbit.task.start --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`.
+   - If valid but execution should remain queued: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`.
+   - If not valid: run `orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<reason>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`.
 3. For `review` tasks, confirm all requirements were fulfilled as outlined in the task.
-   - If complete and code changes are acceptable: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>"}'`.
-   - If incomplete: run `orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<what still needs resolving>", "comment": "<audit summary>"}'`.
+   - If complete and code changes are acceptable: run `orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "<note>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`.
+   - If incomplete: run `orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "<what still needs resolving>", "comment": "<audit summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`.
 
 ## Verification
 
 Prefer the returned payload from `approve`, `reject`, or `start` as your
 default verification. If you need to confirm the canonical stored task record:
 
-- Check status (all cases): `orbit tool run orbit.task.show --input '{"id": "<id>"}'`
-- Check history (started case): `orbit tool run orbit.task.show --input '{"id": "<id>", "field": "history"}'`
+- Check status (all cases): `orbit tool run orbit.task.show --input '{"id": "<id>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`
+- Check history (started case): `orbit tool run orbit.task.show --input '{"id": "<id>", "field": "history", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'`
 
 Expected outcomes:
 
@@ -59,7 +68,9 @@ Include the brief audit summary in the same `approve`, `reject`, or `start` comm
 orbit tool run orbit.task.approve --input '{
   "id": "<id>",
   "note": "<decision note>",
-  "comment": "<action taken> — <decision note> — <verification result>"
+  "comment": "<action taken> — <decision note> — <verification result>",
+  "agent": "<claude|codex|gemini>",
+  "model": "<model_name>"
 }'
 ```
 

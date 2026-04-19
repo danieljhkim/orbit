@@ -35,21 +35,6 @@ pub(crate) fn inject_agent_identity(
     })
 }
 
-pub(crate) fn inject_actor_kind(mode: EnvironmentMode, agent_label: &str) -> EnvironmentMode {
-    let actor_label = normalize_agent_label(agent_label);
-    inject_environment(mode, |pairs| {
-        pairs.push(("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()));
-        pairs.push((
-            "ORBIT_TASK_ACTOR_LABEL".to_string(),
-            if actor_label.is_empty() {
-                "agent".to_string()
-            } else {
-                actor_label.clone()
-            },
-        ));
-    })
-}
-
 pub(super) fn resolve_model_for_env<H: EnvironmentHost + ?Sized>(
     host: &H,
     resolved: &ResolvedAgentExecution,

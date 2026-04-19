@@ -13,27 +13,36 @@ Handle a human-requested engineering task or existing Orbit task from intent to 
 
 All agent Orbit interactions go through `orbit tool run`. Never use `orbit task ...` directly — it skips agent provenance. Never guess tool names — run `orbit tool list` to see all registered tools.
 
+When invoking `orbit tool run` directly, include `agent` and `model` in the input JSON:
+
+```json
+{
+  "agent": "<claude|codex|gemini>",
+  "model": "<model_name>"
+}
+```
+
 ```bash
 # Load a full task
-orbit tool run orbit.task.show --full --input '{"id": "<task-id>"}'
+orbit tool run orbit.task.show --full --input '{"id": "<task-id>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 
 # Load a specific field only
-orbit tool run orbit.task.show --input '{"id": "<task-id>", "field": "plan"}'
+orbit tool run orbit.task.show --input '{"id": "<task-id>", "field": "plan", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 # Valid fields: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts
 
 # Start a task (proposed/backlog/someday/blocked -> in-progress)
-orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why>"}'
+orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 
 # Update plan, status, or add a comment
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>"}'
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review"}'
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "comment": "<what happened>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "comment": "<what happened>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 
 # Persist execution summary
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 
 # List tasks
-orbit tool run orbit.task.list --input '{"status": "backlog"}'
+orbit tool run orbit.task.list --input '{"status": "backlog", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 ```
 
 **If running from a worktree**, pass `--root` pointing to the original repo's `.orbit` directory so commands resolve correctly.
@@ -55,7 +64,7 @@ orbit tool run orbit.task.list --input '{"status": "backlog"}'
 If the task lacks a concrete plan, write one:
 
 ```bash
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 ```
 
 Replace placeholders like `To be authored by executing agent at start time.` Keep the plan concrete: target files, validation commands, risks.
@@ -63,7 +72,7 @@ Replace placeholders like `To be authored by executing agent at start time.` Kee
 ### Step 3: Start
 
 ```bash
-orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this is ready>"}'
+orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this is ready>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 ```
 
 - Moves `backlog -> in-progress` or `proposed -> in-progress` (records approval automatically).
@@ -77,13 +86,13 @@ Follow the task's `plan` step by step. Read `context_files` before touching code
 ### Step 5: Move to review and summarize
 
 ```bash
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 ```
 
 Then persist the execution summary (see template below):
 
 ```bash
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>", "agent": "<claude|codex|gemini>", "model": "<model_name>"}'
 ```
 
 ## Execution Summary Template

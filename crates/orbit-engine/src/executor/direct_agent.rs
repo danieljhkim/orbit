@@ -13,9 +13,7 @@ use crate::context::{
 
 // Re-use the environment helpers defined in agent.rs.  They are crate-public
 // (non-`pub(super)`) so we can reference them via the sibling module path.
-use super::agent::{
-    inject_activity_tools, inject_actor_kind, inject_agent_identity, inject_proc_allowed_programs,
-};
+use super::agent::{inject_activity_tools, inject_agent_identity, inject_proc_allowed_programs};
 
 pub struct DirectAgentExecutor {
     bound_executor: ExecutorDef,
@@ -66,16 +64,13 @@ impl ActivityExecutor for DirectAgentExecutor {
         let environment_mode = apply_env_set(
             inject_state_env(
                 inject_proc_allowed_programs(
-                    inject_actor_kind(
-                        inject_agent_identity(
-                            inject_activity_tools(
-                                agent_host.execution_environment_mode(&execution.env_extra),
-                                &execution.activity.tools,
-                            ),
-                            &label,
-                            model.as_deref(),
+                    inject_agent_identity(
+                        inject_activity_tools(
+                            agent_host.execution_environment_mode(&execution.env_extra),
+                            &execution.activity.tools,
                         ),
                         &label,
+                        model.as_deref(),
                     ),
                     &execution.activity.proc_allowed_programs,
                 ),

@@ -25,7 +25,7 @@ mod output;
 mod parse;
 
 use clap::Parser;
-use orbit_core::OrbitRuntime;
+use orbit_core::{ActorIdentity, OrbitRuntime};
 
 use crate::command::tool::{OutputFormat, ToolSubcommand};
 use crate::command::workspace::{WorkspaceCommand, WorkspaceSubcommand};
@@ -65,7 +65,10 @@ fn main() {
             print_error(&err, tool_run_json_output);
             std::process::exit(1);
         }
-    };
+    }
+    // Direct CLI commands are human-driven by default. Tool-dispatch paths
+    // reclassify themselves as agent-driven inside `execute_tool_command`.
+    .with_actor(ActorIdentity::human("human"));
 
     let result = match cli.command {
         Commands::Audit(cmd) => cmd.execute(&runtime),

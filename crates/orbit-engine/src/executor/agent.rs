@@ -13,7 +13,7 @@ use crate::context::{
 };
 
 pub(crate) use environment::{
-    inject_activity_tools, inject_actor_kind, inject_agent_identity, inject_proc_allowed_programs,
+    inject_activity_tools, inject_agent_identity, inject_proc_allowed_programs,
 };
 use execution::{execute_with_cwd, resolve_agent_execution};
 

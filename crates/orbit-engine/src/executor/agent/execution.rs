@@ -16,8 +16,8 @@ use crate::context::{
 
 use super::{
     environment::{
-        inject_activity_tools, inject_actor_kind, inject_agent_identity,
-        inject_proc_allowed_programs, resolve_model_for_env,
+        inject_activity_tools, inject_agent_identity, inject_proc_allowed_programs,
+        resolve_model_for_env,
     },
     response::{
         format_timeout_error_message, invocation_failed_outcome, parse_agent_output,
@@ -251,16 +251,13 @@ fn execute_agent_process<H: EnvironmentHost + AgentProtocolHost + ?Sized>(
     let environment_mode = apply_env_set(
         inject_state_env(
             inject_proc_allowed_programs(
-                inject_actor_kind(
-                    inject_agent_identity(
-                        inject_activity_tools(
-                            host.execution_environment_mode(&execution.env_extra),
-                            &execution.activity.tools,
-                        ),
-                        &resolved.label,
-                        resolved_model.as_deref(),
+                inject_agent_identity(
+                    inject_activity_tools(
+                        host.execution_environment_mode(&execution.env_extra),
+                        &execution.activity.tools,
                     ),
                     &resolved.label,
+                    resolved_model.as_deref(),
                 ),
                 &execution.activity.proc_allowed_programs,
             ),

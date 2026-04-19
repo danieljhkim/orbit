@@ -14,9 +14,8 @@ use orbit_types::WorkspacePaths;
 use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
 
-const ORBIT_TASK_ACTOR_KIND: &str = "ORBIT_TASK_ACTOR_KIND";
-const ORBIT_TASK_ACTOR_LABEL: &str = "ORBIT_TASK_ACTOR_LABEL";
-const LEGACY_ORBIT_TASK_ACTOR_IDENTITY_ID: &str = "ORBIT_TASK_ACTOR_IDENTITY_ID";
+const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
+const ORBIT_AGENT_MODEL: &str = "ORBIT_AGENT_MODEL";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorKind {
@@ -46,20 +45,13 @@ impl ActorIdentity {
     }
 
     pub(crate) fn from_env() -> Self {
-        let kind_raw = std::env::var(ORBIT_TASK_ACTOR_KIND).ok();
-        let actor_label = std::env::var(ORBIT_TASK_ACTOR_LABEL)
+        let actor_label = std::env::var(ORBIT_AGENT_MODEL)
             .ok()
-            .or_else(|| std::env::var(LEGACY_ORBIT_TASK_ACTOR_IDENTITY_ID).ok())
+            .or_else(|| std::env::var(ORBIT_AGENT_NAME).ok())
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
 
-        match kind_raw.as_deref() {
-            Some("agent") => actor_label
-                .map(Self::agent)
-                .unwrap_or_else(|| Self::agent("agent")),
-            _ if actor_label.is_some() => Self::agent(actor_label.unwrap_or_default()),
-            _ => Self::default(),
-        }
+        actor_label.map(Self::agent).unwrap_or_default()
     }
 }
 
