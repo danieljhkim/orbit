@@ -791,7 +791,7 @@
       <button class="tab" data-tab="diagnostics" type="button">Diagnostics</button>
     </nav>
     <section class="tab-pane" data-tab="tasks">
-      <main>
+      <main style="grid-template-columns: 1fr;">
         <section class="panel" id="tasks-panel">
           <header><span>Tasks</span><span class="count" id="tasks-count">-</span></header>
           <div class="controls">
@@ -806,17 +806,7 @@
             </div>
           </div>
         </section>
-        <div class="col-side">
-          <section class="panel" id="runs-panel">
-            <header><span>Recent Job Runs</span><span class="count" id="runs-count">-</span></header>
-            <div class="body" id="runs-body">
-              <div class="skeleton-state">
-                <div class="skeleton skeleton-row"></div>
-                <div class="skeleton skeleton-row" style="width: 80%"></div>
-              </div>
-            </div>
-          </section>
-        </div>
+
       </main>
     </section>
     <section class="tab-pane" data-tab="scoreboard">
@@ -847,6 +837,15 @@
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
               <div class="skeleton skeleton-row" style="width: 75%"></div>
+            </div>
+          </div>
+        </section>
+        <section class="panel" id="runs-panel">
+          <header><span>Recent Job Runs</span><span class="count" id="runs-count">-</span></header>
+          <div class="body" id="runs-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
             </div>
           </div>
         </section>

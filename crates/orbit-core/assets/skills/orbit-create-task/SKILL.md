@@ -72,7 +72,9 @@ orbit tool run orbit.task.add --input '{
   "context": "<comma,separated,paths>",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
-  "type": "<task|feature|issue|bug|chore|refactor>"
+  "type": "<task|feature|issue|bug|chore|refactor>",
+  "agent": "<claude|codex|gemini>",
+  "model": "<model_name>" # gpt-5.4, claude-opus-4-6, gemini-2.5-pro, etc
 }'
 ```
 
