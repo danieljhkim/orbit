@@ -9,7 +9,7 @@ spec:
     - --approval-mode
     - yolo
     - -o
-    - text
+    - json
   stdout_format: envelope
   models:
     strong: gemini-2.5-pro
