@@ -1,8 +1,10 @@
 pub mod copy;
 pub mod delete;
+pub mod ls;
 pub mod mkdir;
 pub mod move_file;
 pub mod patch;
+pub mod read;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -13,6 +15,8 @@ use crate::{ToolContext, ToolRegistry};
 
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(copy::FsCopyTool);
+    registry.register(read::FsReadTool);
+    registry.register(ls::FsLsTool);
     registry.register(write::FsWriteTool);
     registry.register(delete::FsDeleteTool);
     registry.register(move_file::FsMoveTool);
