@@ -155,6 +155,7 @@ fn v2_type_label(spec: &orbit_common::types::activity_job::ActivityV2) -> &'stat
     use orbit_common::types::activity_job::ActivityV2Spec;
     match &spec.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
+        ActivityV2Spec::Groundhog(_) => "groundhog",
         ActivityV2Spec::Deterministic(_) => "deterministic",
         ActivityV2Spec::Shell(_) => "shell",
     }

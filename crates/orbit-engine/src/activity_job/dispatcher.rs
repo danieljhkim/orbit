@@ -12,6 +12,7 @@ use thiserror::Error;
 use super::agent_loop_driver::drive_agent_loop;
 use super::audit_writer::V2AuditWriter;
 use super::cli_runner::run_cli_backend;
+use super::groundhog::run_groundhog_activity;
 
 /// Orbit-core-owned responsibilities the v2 dispatcher delegates back across
 /// the engine→core boundary: deterministic action execution (which needs the
@@ -99,6 +100,9 @@ pub enum DispatchError {
     #[error("agent_loop run failed: {0}")]
     AgentLoopFailed(String),
 
+    #[error("groundhog run failed: {0}")]
+    GroundhogFailed(String),
+
     /// §3.1 no-silent-fallback: `backend: http` requested a provider whose
     /// HTTP transport is not wired. Must surface as a structured error rather
     /// than silently dispatching to CLI.
@@ -162,6 +166,7 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
     let activity_input = inject_run_id(&input.input, input.run_id);
     let activity_type = match input.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
+        ActivityV2Spec::Groundhog(_) => "groundhog",
         ActivityV2Spec::Deterministic(_) => "deterministic",
         ActivityV2Spec::Shell(_) => "shell",
     };
@@ -189,6 +194,25 @@ pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcom
                 input.fs_profile,
             ),
             None => Err(DispatchError::HostRequired("agent_loop")),
+        },
+        ActivityV2Spec::Groundhog(spec) => match input.host {
+            Some(host) => {
+                if !spec.provider.has_http_transport() {
+                    return Err(DispatchError::UnwiredHttpTransport {
+                        provider: spec.provider.as_str().to_string(),
+                    });
+                }
+                run_groundhog_activity(
+                    host,
+                    input.activity_name,
+                    spec,
+                    input.run_id,
+                    input.audit.clone(),
+                    &activity_input,
+                    input.fs_profile,
+                )
+            }
+            None => Err(DispatchError::HostRequired("groundhog")),
         },
         ActivityV2Spec::Deterministic(spec) => match input.host {
             Some(host) => run_deterministic(
@@ -273,6 +297,8 @@ fn run_agent_loop_activity(
         Backend::Cli => run_cli_backend(host, spec, run_id, audit, input),
     }
 }
+
+#[allow(dead_code)]
 
 fn run_agent_loop_via_driver(
     host: &dyn V2RuntimeHost,

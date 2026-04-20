@@ -1,6 +1,6 @@
 //! Groundhog chronicle data structures and canonical serialization helpers.
 //!
-//! The append-only serializer contract follows `docs/design/groundhog.md` §5.5:
+//! The append-only serializer contract follows `docs/design/groundhogv1.md` §5.3:
 //! every later chronicle serialization must extend prior bytes instead of
 //! rewriting them so prompt-cache breakpoints remain valid.
 //!
@@ -24,8 +24,8 @@ pub type Timestamp = DateTime<Utc>;
 ///
 /// Persisted via `task.update` into the `artifacts.chronicle` task-artifact
 /// field. The mutable [`Chronicle::deviation_stack`] is intentionally excluded
-/// from [`Chronicle::serialize_at`] because `docs/design/groundhog.md` §8.5
-/// stores that active stack separately from the append-only chronicle body.
+/// from [`Chronicle::serialize_at`] because v1 prompt-facing memory is derived
+/// separately from the append-only chronicle body.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Chronicle {
     pub task_id: OrbitId,

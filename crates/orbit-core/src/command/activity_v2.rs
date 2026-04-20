@@ -63,6 +63,7 @@ impl OrbitRuntime {
             orbit_common::types::activity_job::ActivityV2Spec::AgentLoop(spec) => {
                 Some(spec.backend)
             }
+            orbit_common::types::activity_job::ActivityV2Spec::Groundhog(_) => Some(Backend::Http),
             _ => None,
         };
 
@@ -95,6 +96,7 @@ impl OrbitRuntime {
 
         let activity_type = match &asset.spec.spec {
             orbit_common::types::activity_job::ActivityV2Spec::AgentLoop(_) => "agent_loop",
+            orbit_common::types::activity_job::ActivityV2Spec::Groundhog(_) => "groundhog",
             orbit_common::types::activity_job::ActivityV2Spec::Deterministic(_) => "deterministic",
             orbit_common::types::activity_job::ActivityV2Spec::Shell(_) => "shell",
         };

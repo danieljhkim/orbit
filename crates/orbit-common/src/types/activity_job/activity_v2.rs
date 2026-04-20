@@ -8,7 +8,7 @@ use serde_json::Value;
 /// metadata:
 ///   name: <name>
 /// spec:
-///   type: agent_loop | deterministic | shell
+///   type: agent_loop | groundhog | deterministic | shell
 ///   description: <text>
 ///   input_schema_json: {...}
 ///   output_schema_json: {...}
@@ -29,11 +29,13 @@ pub struct ActivityV2 {
     pub spec: ActivityV2Spec,
 }
 
-/// v2 activity type discriminator. Serialized as `type: agent_loop|deterministic|shell`.
+/// v2 activity type discriminator. Serialized as
+/// `type: agent_loop|groundhog|deterministic|shell`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActivityV2Spec {
     AgentLoop(AgentLoopSpec),
+    Groundhog(GroundhogSpec),
     Deterministic(DeterministicSpec),
     Shell(ShellSpec),
 }
@@ -68,6 +70,50 @@ pub struct AgentLoopSpec {
     /// where the loop engine applies its own timeout.
     #[serde(default = "default_cli_wall_clock_timeout_seconds")]
     pub wall_clock_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GroundhogSpec {
+    /// System prompt / instruction delivered to each Groundhog attempt.
+    #[serde(default)]
+    pub instruction: String,
+    /// Additional tool allowlist entries. Groundhog-required tools are
+    /// injected by the runner even when omitted here.
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Behavior when a denied tool is requested.
+    #[serde(default)]
+    pub on_denial: OnDenial,
+    /// Optional model override (provider-specific name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Upper bound on loop iterations per attempt.
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+    /// Provider whose HTTP runtime executes each attempt.
+    #[serde(default)]
+    pub provider: Provider,
+    /// Wall-clock timeout for one Groundhog attempt.
+    #[serde(default = "default_cli_wall_clock_timeout_seconds")]
+    pub wall_clock_timeout_seconds: u64,
+    /// Fallback attempt budget when a checkpoint omits `attempt_budget`.
+    #[serde(default = "default_groundhog_attempt_budget")]
+    pub attempt_budget_default: u32,
+}
+
+impl GroundhogSpec {
+    pub fn as_agent_loop_spec(&self) -> AgentLoopSpec {
+        AgentLoopSpec {
+            instruction: self.instruction.clone(),
+            tools: self.tools.clone(),
+            on_denial: self.on_denial,
+            model: self.model.clone(),
+            max_iterations: self.max_iterations,
+            backend: Backend::Http,
+            provider: self.provider,
+            wall_clock_timeout_seconds: self.wall_clock_timeout_seconds,
+        }
+    }
 }
 
 /// Execution backend for an `agent_loop` activity (§3.1). `Auto` resolves at
@@ -180,4 +226,8 @@ const fn default_timeout_seconds() -> u64 {
 
 const fn default_cli_wall_clock_timeout_seconds() -> u64 {
     300
+}
+
+const fn default_groundhog_attempt_budget() -> u32 {
+    3
 }

@@ -48,16 +48,9 @@ pub fn drive_agent_loop(
     let model = resolve_model(spec);
     let provider = expected_provider();
     let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
-    drive_inner(
-        spec,
-        api_key,
-        run_id,
-        audit,
-        &mut session,
-        input,
-        host,
-        fs_profile,
-    )
+    let tool_ctx =
+        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
+    drive_inner(spec, api_key, run_id, audit, &mut session, input, tool_ctx)
 }
 
 /// Drive a v2 agent_loop activity reusing an existing `Session`.
@@ -75,9 +68,27 @@ pub fn drive_agent_loop_with_session(
     host: &dyn V2RuntimeHost,
     fs_profile: Option<&str>,
 ) -> Result<LoopOutcome, DispatchError> {
-    drive_inner(
-        spec, api_key, run_id, audit, session, input, host, fs_profile,
-    )
+    let tool_ctx =
+        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
+    drive_inner(spec, api_key, run_id, audit, session, input, tool_ctx)
+}
+
+/// Drive a v2 agent_loop activity with a caller-supplied ToolContext.
+///
+/// Groundhog uses this entry to attach an in-memory Groundhog verb host to the
+/// per-attempt tool context while reusing the shared HTTP loop driver.
+pub fn drive_agent_loop_with_tool_context(
+    spec: &AgentLoopSpec,
+    api_key: Option<&str>,
+    run_id: &str,
+    audit: Arc<V2AuditWriter>,
+    input: &Value,
+    tool_ctx: ToolContext,
+) -> Result<LoopOutcome, DispatchError> {
+    let model = resolve_model(spec);
+    let provider = expected_provider();
+    let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
+    drive_inner(spec, api_key, run_id, audit, &mut session, input, tool_ctx)
 }
 
 fn drive_inner(
@@ -87,8 +98,7 @@ fn drive_inner(
     audit: Arc<V2AuditWriter>,
     session: &mut Session,
     input: &Value,
-    host: &dyn V2RuntimeHost,
-    fs_profile: Option<&str>,
+    tool_ctx: ToolContext,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
     let user_prompt = user_prompt_from_input(input)?;
@@ -106,8 +116,7 @@ fn drive_inner(
             session,
             &*transport,
             &user_prompt,
-            host,
-            fs_profile,
+            tool_ctx,
         )
     } else {
         let key = api_key.ok_or_else(|| {
@@ -129,8 +138,7 @@ fn drive_inner(
             session,
             &transport,
             &user_prompt,
-            host,
-            fs_profile,
+            tool_ctx,
         )
     }
 }
@@ -295,20 +303,17 @@ fn run_loop<T: LoopTransport>(
     session: &mut Session,
     transport: &T,
     user_prompt: &str,
-    host: &dyn V2RuntimeHost,
-    fs_profile: Option<&str>,
+    tool_ctx: ToolContext,
 ) -> Result<LoopOutcome, DispatchError> {
     let mut registry = orbit_tools::ToolRegistry::new();
     registry.register_builtins();
-    let tool_ctx: ToolContext =
-        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
 
     let cfg = AgentLoopConfig::new_for_run(run_id)
         .with_allowlist(spec.tools.clone())
         .with_advertised_tools(spec.tools.clone())
         .with_max_iterations(spec.max_iterations.max(1))
         .with_max_total_tokens(u64::MAX)
-        .with_wall_clock_timeout(Duration::from_secs(300));
+        .with_wall_clock_timeout(Duration::from_secs(spec.wall_clock_timeout_seconds.max(1)));
 
     let session_id = session.id().to_string();
 

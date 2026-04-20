@@ -8,13 +8,15 @@ pub mod agent_loop_driver;
 pub mod audit_writer;
 pub mod cli_runner;
 pub mod dispatcher;
+pub mod groundhog;
 pub mod job_executor;
 pub mod jsonl_sink;
 pub mod orbit_tool_executor;
 pub mod tool_enforcement;
 
 pub use agent_loop_driver::{
-    drive_agent_loop, drive_agent_loop_with_session, reset_replay_transport,
+    drive_agent_loop, drive_agent_loop_with_session, drive_agent_loop_with_tool_context,
+    reset_replay_transport,
 };
 pub use audit_writer::{V2AuditWriter, WriteError};
 pub use cli_runner::run_cli_backend;

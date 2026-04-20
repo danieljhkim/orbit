@@ -24,6 +24,7 @@ use super::orbit_tool_host::{
     requested_task_files, task_lock_conflicts, workspace_orbit_dir,
 };
 use crate::OrbitRuntime;
+use crate::runtime::build_orbit_tool_host;
 
 impl V2RuntimeHost for OrbitRuntime {
     fn run_deterministic(
@@ -656,6 +657,7 @@ impl V2RuntimeHost for OrbitRuntime {
             policy_engine: Some(Arc::new(self.policy_engine().clone())),
             fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string()),
             fs_audit,
+            orbit_host: Some(build_orbit_tool_host(self, None)),
             ..Default::default()
         }
     }

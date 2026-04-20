@@ -526,6 +526,19 @@ fn print_v2_step(step: &JobV2Step, indent: usize) {
                         println!("{pad}{} {}", bold("Model:"), model);
                     }
                 }
+                ActivityV2Spec::Groundhog(spec) => {
+                    println!("{pad}{} groundhog", bold("Activity Type:"));
+                    println!("{pad}{} {}", bold("Provider:"), spec.provider.as_str());
+                    println!("{pad}{} http", bold("Backend:"));
+                    println!(
+                        "{pad}{} {}",
+                        bold("Attempt Budget Default:"),
+                        spec.attempt_budget_default
+                    );
+                    if let Some(model) = &spec.model {
+                        println!("{pad}{} {}", bold("Model:"), model);
+                    }
+                }
                 ActivityV2Spec::Deterministic(spec) => {
                     println!("{pad}{} deterministic", bold("Activity Type:"));
                     println!("{pad}{} {}", bold("Action:"), spec.action.as_str());
@@ -574,6 +587,12 @@ fn v2_step_target_summary(step: &JobV2Step) -> (String, String) {
         JobV2StepBody::Target(target) => match &target.spec {
             ActivityV2Spec::AgentLoop(spec) => (
                 "agent_loop".to_string(),
+                spec.model
+                    .clone()
+                    .unwrap_or_else(|| spec.provider.as_str().to_string()),
+            ),
+            ActivityV2Spec::Groundhog(spec) => (
+                "groundhog".to_string(),
                 spec.model
                     .clone()
                     .unwrap_or_else(|| spec.provider.as_str().to_string()),

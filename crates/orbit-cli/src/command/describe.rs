@@ -66,6 +66,7 @@ fn describe_activity(runtime: &OrbitRuntime, id: &str) -> Result<(), OrbitError>
         .ok_or_else(|| OrbitError::ActivityNotFound(id.to_string()))?;
     let type_label = match &activity.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
+        ActivityV2Spec::Groundhog(_) => "groundhog",
         ActivityV2Spec::Deterministic(_) => "deterministic",
         ActivityV2Spec::Shell(_) => "shell",
     };
@@ -80,6 +81,14 @@ fn describe_activity(runtime: &OrbitRuntime, id: &str) -> Result<(), OrbitError>
         ActivityV2Spec::AgentLoop(spec) => {
             println!("Backend:      {}", spec.backend.as_str());
             println!("Provider:     {}", spec.provider.as_str());
+            if !spec.tools.is_empty() {
+                println!("Tools:        {}", spec.tools.join(", "));
+            }
+        }
+        ActivityV2Spec::Groundhog(spec) => {
+            println!("Backend:      http");
+            println!("Provider:     {}", spec.provider.as_str());
+            println!("Attempts:     {}", spec.attempt_budget_default);
             if !spec.tools.is_empty() {
                 println!("Tools:        {}", spec.tools.join(", "));
             }
