@@ -15,7 +15,6 @@ pub mod logs;
 pub mod mcp;
 pub mod metrics;
 pub mod policy;
-pub mod reconcile;
 pub mod run;
 pub mod scoreboard;
 pub mod serve;
@@ -59,7 +58,6 @@ Resources:
 
 Workflows:
   run        Run a job workflow (supports run ship / run duel / run job / run <id>)
-  reconcile  Reconcile pending/running job runs
 
 Inspect:
   audit      Query the audit event log
@@ -99,7 +97,6 @@ pub enum Commands {
 
     // ── workflows ──
     Run(run::RunCommand),
-    Reconcile(reconcile::ReconcileCommand),
 
     // ── inspect ──
     Audit(audit::AuditCommand),
@@ -125,7 +122,6 @@ impl Execute for Commands {
             Commands::Init(cmd) => cmd.execute(runtime),
             Commands::Workspace(cmd) => cmd.execute(runtime),
             Commands::Config(cmd) => cmd.execute(runtime),
-            Commands::Reconcile(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),

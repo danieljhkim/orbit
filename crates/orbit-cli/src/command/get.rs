@@ -49,30 +49,34 @@ fn parse_resource_ref(s: &str) -> Result<(ResourceKind, Option<String>), OrbitEr
 // ── Jobs ──
 
 fn list_jobs(runtime: &OrbitRuntime, as_json: bool) -> Result<(), OrbitError> {
-    let jobs = runtime.list_jobs(false)?;
+    use orbit_core::command::job::JobCatalogFilter;
+    let entries = runtime.list_job_catalog_with_last_run(false, JobCatalogFilter::All)?;
     if as_json {
-        let values: Vec<Value> = jobs
+        let values: Vec<Value> = entries
             .iter()
-            .map(|j| {
+            .map(|(entry, _)| {
                 json!({
-                    "job_id": j.job_id,
-                    "state": j.state.to_string(),
-                    "steps": j.steps.len(),
+                    "job_id": entry.job_id,
+                    "kind": entry.kind().to_string(),
+                    "state": entry.state().to_string(),
+                    "steps": entry.spec.steps.len(),
                 })
             })
             .collect();
         crate::output::json::print_pretty(&Value::Array(values))
     } else {
-        if jobs.is_empty() {
+        if entries.is_empty() {
             println!("No jobs found.");
             return Ok(());
         }
-        let mut table = crate::output::table::build_table(&["JOB ID", "STATE", "STEPS"]);
-        for j in &jobs {
+        let mut table =
+            crate::output::table::build_table(&["JOB ID", "KIND", "STATE", "STEPS"]);
+        for (entry, _) in &entries {
             table.add_row(vec![
-                j.job_id.to_string(),
-                j.state.to_string(),
-                j.steps.len().to_string(),
+                entry.job_id.clone(),
+                entry.kind().to_string(),
+                entry.state().to_string(),
+                entry.spec.steps.len().to_string(),
             ]);
         }
         println!("{table}");
@@ -81,16 +85,21 @@ fn list_jobs(runtime: &OrbitRuntime, as_json: bool) -> Result<(), OrbitError> {
 }
 
 fn show_job(runtime: &OrbitRuntime, job_id: &str, as_json: bool) -> Result<(), OrbitError> {
-    let job = runtime
-        .get_job(job_id)?
-        .ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))?;
+    let entry = runtime.show_job_catalog_entry(job_id)?;
     if as_json {
-        let value = serde_json::to_value(&job).map_err(|e| OrbitError::Execution(e.to_string()))?;
+        let value = json!({
+            "job_id": entry.job_id,
+            "kind": entry.kind().to_string(),
+            "state": entry.state().to_string(),
+            "path": entry.path.display().to_string(),
+            "spec": entry.spec,
+        });
         crate::output::json::print_pretty(&value)
     } else {
-        println!("Job ID:  {}", job.job_id);
-        println!("State:   {}", job.state);
-        println!("Steps:   {}", job.steps.len());
+        println!("Job ID:  {}", entry.job_id);
+        println!("Kind:    {}", entry.kind());
+        println!("State:   {}", entry.state());
+        println!("Steps:   {}", entry.spec.steps.len());
         Ok(())
     }
 }

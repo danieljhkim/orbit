@@ -1,4 +1,3 @@
-pub mod activity_show;
 pub mod duel_plan_add;
 pub mod duel_plan_winner;
 pub mod knowledge_add;
@@ -77,7 +76,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(knowledge_search::OrbitKnowledgeSearchTool);
     registry.register(knowledge_show::OrbitKnowledgeShowTool);
     registry.register(knowledge_write::OrbitKnowledgeWriteTool);
-    registry.register(activity_show::OrbitActivityShowTool);
     registry.register(pipeline_invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline_wait::OrbitPipelineWaitTool);
     registry.register(review_thread_add::OrbitReviewThreadAddTool);

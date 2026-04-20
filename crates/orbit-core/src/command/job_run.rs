@@ -74,37 +74,6 @@ impl OrbitRuntime {
         })
     }
 
-    pub fn retry_job_run(
-        &self,
-        source_run_id: &str,
-        step_target_id: &str,
-        debug: bool,
-    ) -> Result<orbit_engine::JobRunResult, OrbitError> {
-        let source_run = self.show_job_run(source_run_id)?;
-
-        // Only allow retry from terminal failure states
-        if !matches!(
-            source_run.state,
-            JobRunState::Failed | JobRunState::Timeout | JobRunState::Cancelled
-        ) {
-            return Err(OrbitError::JobValidation(format!(
-                "job run '{}' is in state '{}'; only failed, timeout, or cancelled runs can be retried",
-                source_run_id, source_run.state
-            )));
-        }
-
-        let job = self.show_job(&source_run.job_id)?;
-
-        orbit_engine::retry_job_run_from_step(
-            self,
-            &self.data_root(),
-            job,
-            source_run,
-            step_target_id,
-            debug,
-        )
-    }
-
     pub fn read_run_state(
         &self,
         run_id: &str,
@@ -113,26 +82,13 @@ impl OrbitRuntime {
     }
 
     pub fn job_history(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        if let Ok(job) = self.show_job(job_id) {
-            let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
-        } else {
-            let _ = self.load_v2_job_asset_by_name(job_id)?;
-        }
+        let _ = self.load_v2_job_asset_by_name(job_id)?;
         self.list_job_history_backend(job_id)
     }
 
     pub fn list_job_runs(&self, params: JobRunListParams) -> Result<Vec<JobRun>, OrbitError> {
-        let now = Utc::now();
         if let Some(job_id) = params.job_id.as_deref() {
-            if let Ok(job) = self.show_job(job_id) {
-                let _ = self.recover_stale_active_run_for_job(&job, now)?;
-            } else {
-                let _ = self.load_v2_job_asset_by_name(job_id)?;
-            }
-        } else {
-            for job in self.list_jobs(true)? {
-                let _ = self.recover_stale_active_run_for_job(&job, now)?;
-            }
+            let _ = self.load_v2_job_asset_by_name(job_id)?;
         }
 
         self.list_job_runs_filtered_backend(&JobRunQuery {
@@ -144,20 +100,8 @@ impl OrbitRuntime {
     }
 
     pub fn show_job_run(&self, run_id: &str) -> Result<JobRun, OrbitError> {
-        let run = self
-            .get_job_run_backend(run_id)?
-            .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))?;
-
-        if matches!(run.state, JobRunState::Pending | JobRunState::Running)
-            && let Ok(job) = self.show_job(&run.job_id)
-        {
-            let _ = self.recover_stale_active_run_for_job(&job, Utc::now())?;
-            return self
-                .get_job_run_backend(run_id)?
-                .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()));
-        }
-
-        Ok(run)
+        self.get_job_run_backend(run_id)?
+            .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))
     }
 
     fn list_job_history_backend(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {

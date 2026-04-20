@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::command::audit::audit_event_to_json;
-use crate::command::job::{job_run_to_json, job_to_json_with_last_run};
+use crate::command::job::{job_catalog_to_json_with_last_run, job_run_to_json};
 use crate::command::task::output::task_to_json;
 
 const DIAG_DEFAULT_LIMIT: usize = 200;
@@ -155,11 +155,14 @@ async fn archive_task_action(
 }
 
 async fn list_jobs(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
-    match runtime.list_jobs_with_last_run(true) {
+    use orbit_core::command::job::JobCatalogFilter;
+    match runtime.list_job_catalog_with_last_run(true, JobCatalogFilter::All) {
         Ok(rows) => {
             let values: Vec<Value> = rows
                 .iter()
-                .map(|(job, last_run)| job_to_json_with_last_run(job, last_run.as_ref()))
+                .map(|(entry, last_run)| {
+                    job_catalog_to_json_with_last_run(entry, last_run.as_ref())
+                })
                 .collect();
             Json(Value::Array(values)).into_response()
         }

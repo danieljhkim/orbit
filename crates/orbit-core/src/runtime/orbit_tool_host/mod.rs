@@ -62,11 +62,6 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
         model: Option<String>,
     ) -> Result<Value, OrbitError> {
         match action {
-            OrbitBuiltinAction::ActivityShow => {
-                let id = required_string(&input, &["id"], "id")?;
-                serde_json::to_value(self.runtime.show_activity(&id)?)
-                    .map_err(serialize_error("serialize activity"))
-            }
             OrbitBuiltinAction::PipelineInvoke => {
                 let job_name = required_string(&input, &["job_name"], "job_name")?;
                 let payload = require_object_field(&input, "input")?.clone();

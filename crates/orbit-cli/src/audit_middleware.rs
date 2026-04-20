@@ -411,15 +411,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             role: "admin".to_string(),
             arguments_json: None,
         },
-        Commands::Reconcile(_) => CommandMeta {
-            command: "reconcile".to_string(),
-            subcommand: None,
-            tool_name: None,
-            target_type: Some("reconcile".to_string()),
-            target_id: None,
-            role: "admin".to_string(),
-            arguments_json: None,
-        },
         Commands::Serve(cmd) => serve_command_meta(cmd),
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
         Commands::Workspace(cmd) => {

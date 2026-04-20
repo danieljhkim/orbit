@@ -35,38 +35,23 @@ fn parse_resource_ref(s: &str) -> Result<(ResourceKind, String), OrbitError> {
 }
 
 fn describe_job(runtime: &OrbitRuntime, job_id: &str) -> Result<(), OrbitError> {
-    let job = runtime
-        .get_job(job_id)?
-        .ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))?;
+    let entry = runtime.show_job_catalog_entry(job_id)?;
 
-    println!("Job ID:          {}", job.job_id);
-    println!("State:           {}", job.state);
-    println!("Max Active Runs: {}", job.max_active_runs);
-    println!("Max Iterations:  {}", job.max_iterations);
-    if let Some(ref input) = job.default_input {
+    println!("Job ID:          {}", entry.job_id);
+    println!("Kind:            {}", entry.kind());
+    println!("State:           {}", entry.state());
+    println!("Max Active Runs: {}", entry.max_active_runs());
+    if let Some(input) = entry.default_input() {
         println!(
             "Default Input:   {}",
             serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string())
         );
     }
-    println!("Created:         {}", job.created_at.to_rfc3339());
-    println!("Updated:         {}", job.updated_at.to_rfc3339());
+    println!("Path:            {}", entry.path.display());
     println!();
-    println!("Steps ({}):", job.steps.len());
-    for (i, step) in job.steps.iter().enumerate() {
-        println!("  Step {}:", i + 1);
-        println!("    Target Type: {}", step.target_type);
-        println!("    Target ID:   {}", step.target_id);
-        println!("    Agent CLI:   {}", step.agent_cli);
-        if let Some(ref model) = step.model {
-            println!("    Model:       {model}");
-        }
-        if step.timeout_seconds > 0 {
-            println!("    Timeout:     {}s", step.timeout_seconds);
-        }
-        if step.retry_max_attempts > 0 {
-            println!("    Retries:     {}", step.retry_max_attempts);
-        }
+    println!("Steps ({}):", entry.spec.steps.len());
+    for (i, step) in entry.spec.steps.iter().enumerate() {
+        println!("  Step {}: {}", i + 1, step.id);
     }
     Ok(())
 }

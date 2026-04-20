@@ -58,7 +58,6 @@ pub use registry::ToolRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrbitBuiltinAction {
-    ActivityShow,
     PipelineInvoke,
     PipelineWait,
     ReviewThreadAdd,
