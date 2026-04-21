@@ -11,7 +11,10 @@ use crate::pipeline::context::PipelineContext;
 /// Write the assembled graph to the content-addressed object store.
 pub fn persist_graph(ctx: &PipelineContext) -> Result<String, KnowledgeError> {
     let store = GraphObjectStore::new(ctx.graph_dir());
-    store.write_graph(&ctx.graph)
+    store.prepare_refs_layout(ctx.default_ref_name.as_ref())?;
+    let current_ref = store.write_graph(&ctx.graph)?;
+    store.write_ref_atomic(&ctx.ref_name, &current_ref)?;
+    Ok(current_ref.root_graph_hash)
 }
 
 /// Write a `manifest.json` with build metadata.

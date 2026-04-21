@@ -26,6 +26,7 @@ impl Tool for OrbitKnowledgePackTool {
                     param_type: "string".to_string(),
                     required: false,
                 },
+                super::graph_ref_param(),
             ],
             builtin: true,
         }
@@ -36,12 +37,14 @@ impl Tool for OrbitKnowledgePackTool {
         let selectors = Selector::parse_many(&selectors)
             .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
         let knowledge_dir = super::knowledge_write::resolve_knowledge_dir(ctx, &input)?;
+        let explicit_ref = super::optional_string(&input, "ref")?;
         let service =
             TaskGraphService::new(knowledge_dir, super::knowledge_write::task_graph_scope(ctx));
         service.pack_json(
             &selectors,
             ctx.workspace_root.as_deref(),
             super::has_explicit_knowledge_dir(&input),
+            explicit_ref.as_deref(),
         )
     }
 }

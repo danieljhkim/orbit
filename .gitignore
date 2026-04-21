@@ -6,6 +6,11 @@ agentspace
 .DS_Store
 .agents
 docs
+!docs/
+docs/*
+!docs/design/
+docs/design/*
+!docs/design/knowledge-graph-refs.md
 sessions
 examples.md
 feature.md
@@ -15,7 +20,6 @@ orbit.db
 orbit.db-shm
 orbit.db-wal
 .orbit/
-docs
 .monodev
 
 # Python

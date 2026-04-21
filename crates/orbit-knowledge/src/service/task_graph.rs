@@ -4,7 +4,7 @@ use orbit_common::types::OrbitError;
 use serde_json::Value;
 
 use crate::extract::{self, Language};
-use crate::graph::object_store::GraphObjectStore;
+use crate::graph::object_store::{GraphObjectStore, resolve_graph_read_target};
 use crate::lock::GraphLockGuard;
 use crate::pipeline::context::BuildConfig;
 use crate::{
@@ -44,43 +44,60 @@ impl TaskGraphService {
         selectors: &[Selector],
         workspace_root: Option<&Path>,
         explicit_knowledge_dir: bool,
+        explicit_ref: Option<&str>,
     ) -> Result<Value, OrbitError> {
-        self.maybe_refresh_knowledge_graph(workspace_root, explicit_knowledge_dir);
+        if explicit_ref.is_none() {
+            self.maybe_refresh_knowledge_graph(workspace_root, explicit_knowledge_dir);
+        }
 
-        let working_graph = load_task_working_graph(
-            self.scope.orbit_root.as_deref(),
-            self.scope.task_id.as_deref(),
-        )?;
+        let read_target = resolve_graph_read_target(workspace_root, explicit_ref)?;
+        let working_graph = if explicit_ref.is_some() {
+            None
+        } else {
+            load_task_working_graph(
+                self.scope.orbit_root.as_deref(),
+                self.scope.task_id.as_deref(),
+            )?
+        };
 
         let pack_result = || -> Result<_, KnowledgeError> {
-            let store = KnowledgeStore::open(&self.knowledge_dir)?;
+            let store = KnowledgeStore::open(
+                &self.knowledge_dir,
+                &read_target.requested,
+                read_target.fallback.as_ref(),
+                read_target.default.as_ref(),
+            )?;
             store.pack(selectors)
         };
 
         let pack = match pack_result() {
             Ok(pack) => pack,
             Err(first_error) => {
-                let pack_or_error = match self.rebuild_default_knowledge_graph(
-                    workspace_root,
-                    explicit_knowledge_dir,
-                    &first_error,
-                ) {
-                    Ok(true) => match pack_result() {
-                        Ok(pack) => Ok(pack),
-                        Err(retry_error) => Err(KnowledgeError {
+                let pack_or_error = if explicit_ref.is_some() {
+                    Err(first_error)
+                } else {
+                    match self.rebuild_default_knowledge_graph(
+                        workspace_root,
+                        explicit_knowledge_dir,
+                        &first_error,
+                    ) {
+                        Ok(true) => match pack_result() {
+                            Ok(pack) => Ok(pack),
+                            Err(retry_error) => Err(KnowledgeError {
+                                kind: "knowledge_unavailable".to_string(),
+                                reason: format!(
+                                    "failed to load knowledge pack: {first_error}; retry after rebuild failed: {retry_error}"
+                                ),
+                            }),
+                        },
+                        Ok(false) => Err(first_error),
+                        Err(rebuild_error) => Err(KnowledgeError {
                             kind: "knowledge_unavailable".to_string(),
                             reason: format!(
-                                "failed to load knowledge pack: {first_error}; retry after rebuild failed: {retry_error}"
+                                "failed to load knowledge pack: {first_error}; rebuild attempt failed: {rebuild_error}"
                             ),
                         }),
-                    },
-                    Ok(false) => Err(first_error),
-                    Err(rebuild_error) => Err(KnowledgeError {
-                        kind: "knowledge_unavailable".to_string(),
-                        reason: format!(
-                            "failed to load knowledge pack: {first_error}; rebuild attempt failed: {rebuild_error}"
-                        ),
-                    }),
+                    }
                 };
 
                 match pack_or_error {
@@ -170,13 +187,26 @@ impl TaskGraphService {
         &self,
         workspace_root: Option<&Path>,
         explicit_knowledge_dir: bool,
+        explicit_ref: Option<&str>,
     ) -> Result<crate::graph::nodes::CodebaseGraphV1, OrbitError> {
-        self.maybe_refresh_knowledge_graph(workspace_root, explicit_knowledge_dir);
+        if explicit_ref.is_none() {
+            self.maybe_refresh_knowledge_graph(workspace_root, explicit_knowledge_dir);
+        }
+        let read_target = resolve_graph_read_target(workspace_root, explicit_ref)?;
 
         let graph_dir = self.knowledge_dir.join("graph");
-        match GraphObjectStore::new(&graph_dir).read_graph() {
+        match GraphObjectStore::new(&graph_dir).read_graph(
+            &read_target.requested,
+            read_target.fallback.as_ref(),
+            read_target.default.as_ref(),
+        ) {
             Ok(graph) => Ok(graph),
             Err(first_error) => {
+                if explicit_ref.is_some() {
+                    return Err(OrbitError::Execution(format!(
+                        "failed to load knowledge graph: {first_error}"
+                    )));
+                }
                 let rebuilt = self
                     .rebuild_default_knowledge_graph(
                         workspace_root,
@@ -195,7 +225,11 @@ impl TaskGraphService {
                 }
 
                 GraphObjectStore::new(&graph_dir)
-                    .read_graph()
+                    .read_graph(
+                        &read_target.requested,
+                        read_target.fallback.as_ref(),
+                        read_target.default.as_ref(),
+                    )
                     .map_err(|retry_error| {
                         OrbitError::Execution(format!(
                             "failed to load knowledge graph: {first_error}; retry after rebuild failed: {retry_error}"
@@ -246,6 +280,7 @@ impl TaskGraphService {
             repo_path: workspace_root.to_path_buf(),
             output_dir: self.knowledge_dir.clone(),
             incremental,
+            ref_name: None,
         })
         .map_err(|error| error.to_string())?;
         Ok(true)
@@ -278,7 +313,13 @@ fn initialize_working_graph(
     selector: &Selector,
     workspace_root: &Path,
 ) -> Result<WorkingGraph, OrbitError> {
-    if let Ok(store) = KnowledgeStore::open(knowledge_dir)
+    if let Ok(read_target) = resolve_graph_read_target(Some(workspace_root), None)
+        && let Ok(store) = KnowledgeStore::open(
+            knowledge_dir,
+            &read_target.requested,
+            read_target.fallback.as_ref(),
+            read_target.default.as_ref(),
+        )
         && let Ok(mut graph) = WorkingGraph::from_store(&store)
     {
         graph.seed_file_snapshots_from_workspace(workspace_root);

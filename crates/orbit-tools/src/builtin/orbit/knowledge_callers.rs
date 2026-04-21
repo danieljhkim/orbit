@@ -34,6 +34,7 @@ impl Tool for OrbitKnowledgeCallersTool {
                     param_type: "string".to_string(),
                     required: false,
                 },
+                super::graph_ref_param(),
             ],
             builtin: true,
         }

@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Subcommand};
 use comfy_table::Cell;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_knowledge::Selector;
 use orbit_knowledge::graph::navigator::GraphNodeRef;
 use orbit_knowledge::graph::nodes::CodebaseGraphV1;
-use orbit_knowledge::graph::object_store::GraphObjectStore;
+use orbit_knowledge::graph::object_store::RefName;
 use orbit_knowledge::pipeline::context::BuildConfig;
 use orbit_knowledge::service::GraphContextService;
+use orbit_knowledge::{Selector, TaskGraphScope, TaskGraphService};
 use serde_json::json;
 
 use crate::command::Execute;
@@ -38,6 +38,10 @@ pub struct GraphBuildArgs {
     /// Repository root (defaults to current working directory)
     #[arg(long)]
     pub repo: Option<PathBuf>,
+
+    /// Knowledge-graph ref name (defaults to the current git branch)
+    #[arg(long = "ref")]
+    pub ref_name: Option<String>,
 }
 
 #[derive(Args)]
@@ -45,6 +49,10 @@ pub struct GraphUpdateArgs {
     /// Repository root (defaults to current working directory)
     #[arg(long)]
     pub repo: Option<PathBuf>,
+
+    /// Knowledge-graph ref name (defaults to the current git branch)
+    #[arg(long = "ref")]
+    pub ref_name: Option<String>,
 }
 
 #[derive(Args)]
@@ -67,6 +75,10 @@ pub struct GraphShowArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Knowledge-graph ref name (defaults to the current git branch)
+    #[arg(long = "ref")]
+    pub ref_name: Option<String>,
 }
 
 #[derive(Args)]
@@ -89,6 +101,10 @@ pub struct GraphSearchArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Knowledge-graph ref name (defaults to the current git branch)
+    #[arg(long = "ref")]
+    pub ref_name: Option<String>,
 }
 
 impl Execute for GraphCommand {
@@ -104,19 +120,19 @@ impl Execute for GraphCommand {
 
 impl Execute for GraphBuildArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        run_pipeline(runtime, self.repo, false)
+        run_pipeline(runtime, self.repo, self.ref_name, false)
     }
 }
 
 impl Execute for GraphUpdateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        run_pipeline(runtime, self.repo, true)
+        run_pipeline(runtime, self.repo, self.ref_name, true)
     }
 }
 
 impl Execute for GraphShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let graph = load_graph(runtime)?;
+        let graph = load_graph(runtime, self.ref_name.as_deref())?;
         let svc = GraphContextService::new(&graph);
 
         let selector: Selector = self
@@ -145,7 +161,7 @@ impl Execute for GraphShowArgs {
 
 impl Execute for GraphSearchArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let graph = load_graph(runtime)?;
+        let graph = load_graph(runtime, self.ref_name.as_deref())?;
         let svc = GraphContextService::new(&graph);
 
         let type_refs: Vec<&str> = self.node_types.iter().map(String::as_str).collect();
@@ -184,20 +200,21 @@ impl Execute for GraphSearchArgs {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn load_graph(runtime: &OrbitRuntime) -> Result<CodebaseGraphV1, OrbitError> {
+fn load_graph(
+    runtime: &OrbitRuntime,
+    explicit_ref: Option<&str>,
+) -> Result<CodebaseGraphV1, OrbitError> {
     let data_root = runtime.data_root();
     let knowledge_dir = data_root.join("knowledge");
     let repo_path = data_root.parent().unwrap_or_else(|| Path::new("."));
-    let _ = orbit_knowledge::pipeline::ensure_fresh(&knowledge_dir, repo_path);
-    let store = GraphObjectStore::new(knowledge_dir.join("graph"));
-    store
-        .read_graph()
-        .map_err(|e| OrbitError::Execution(format!("failed to load knowledge graph: {e}")))
+    let service = TaskGraphService::new(knowledge_dir, TaskGraphScope::default());
+    service.read_graph(Some(repo_path), false, explicit_ref)
 }
 
 fn run_pipeline(
     runtime: &OrbitRuntime,
     repo_override: Option<PathBuf>,
+    ref_name: Option<String>,
     incremental: bool,
 ) -> Result<(), OrbitError> {
     let data_root = runtime.data_root();
@@ -216,6 +233,7 @@ fn run_pipeline(
         repo_path,
         output_dir,
         incremental,
+        ref_name: parse_ref_name(ref_name)?,
     };
 
     let ctx = orbit_knowledge::pipeline::run_build(config)
@@ -230,6 +248,14 @@ fn run_pipeline(
     eprintln!("knowledge {mode}: written to {}", ctx.output_dir.display());
 
     Ok(())
+}
+
+fn parse_ref_name(ref_name: Option<String>) -> Result<Option<RefName>, OrbitError> {
+    ref_name
+        .filter(|value| !value.trim().is_empty())
+        .map(RefName::new)
+        .transpose()
+        .map_err(|error| OrbitError::InvalidInput(error.to_string()))
 }
 
 fn node_context_to_json(

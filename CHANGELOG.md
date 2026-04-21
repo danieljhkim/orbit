@@ -6,6 +6,10 @@
 
 - **Ship and duel subcommands renamed**: `orbit ship run` is now `orbit ship pr`, `orbit ship run --local` is now `orbit ship local`, and `orbit duel run` is now `orbit duel pr`; the old `run` verb and `--local` flag are removed.
 
+### Fixes
+
+- **Branch-scoped knowledge graph refs**: graph builds now write `.orbit/knowledge/graph/refs/heads/<branch>.json` files that point at immutable per-build indexes, reads default to the current git branch with default-branch fallback, and legacy `.orbit/knowledge/graph/refs/current.json` stores auto-migrate on first open/write
+
 ## 0.2.0
 
 ### Features

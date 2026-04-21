@@ -99,11 +99,6 @@ pub(super) struct ManifestFile {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(super) struct CurrentRefFile {
-    pub(super) index: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub(super) struct GraphIndexFile {
     pub(super) nodes: HashMap<String, GraphIndexEntry>,
 }

@@ -92,6 +92,7 @@ impl WorkspaceInitArgs {
             repo_path: init_result.root.clone(),
             output_dir: init_result.orbit_dir.join("knowledge"),
             incremental: false,
+            ref_name: None,
         };
         match orbit_knowledge::pipeline::run_build(config) {
             Ok(ctx) => {

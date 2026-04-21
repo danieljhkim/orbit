@@ -14,6 +14,9 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use std::{fs, fs::OpenOptions, io::ErrorKind};
 
 use crate::error::KnowledgeError;
+use crate::graph::object_store::{
+    GraphObjectStore, resolve_graph_read_target, resolve_graph_write_target,
+};
 use crate::io::write_text_atomic_durable;
 use context::{BuildConfig, PipelineContext};
 use fs2::FileExt;
@@ -81,7 +84,14 @@ pub fn run_build(config: BuildConfig) -> Result<PipelineContext, KnowledgeError>
 }
 
 fn run_build_inner(config: BuildConfig) -> Result<PipelineContext, KnowledgeError> {
-    let mut ctx = PipelineContext::new(config);
+    let build_target = resolve_graph_write_target(
+        &config.repo_path,
+        config.ref_name.as_ref().map(|ref_name| ref_name.as_str()),
+    )
+    .map_err(|error| {
+        KnowledgeError::knowledge_unavailable(format!("resolve graph ref: {error}"))
+    })?;
+    let mut ctx = PipelineContext::new(config, build_target.requested, build_target.default);
 
     scan::scan_repo(&mut ctx)?;
     hash::compute_hashes(&mut ctx)?;
@@ -116,7 +126,7 @@ pub fn ensure_fresh(
     }
 
     let Some(_lock) = acquire_refresh_lock(knowledge_dir, true)? else {
-        wait_for_current_graph(knowledge_dir);
+        wait_for_current_graph(knowledge_dir, repo_path);
         return Ok(RefreshStatus::SkippedConcurrent);
     };
 
@@ -137,6 +147,7 @@ pub fn ensure_fresh(
         repo_path: repo_path.to_path_buf(),
         output_dir: knowledge_dir.to_path_buf(),
         incremental,
+        ref_name: None,
     };
     run_build_inner(config)
         .map_err(|e| KnowledgeError::knowledge_unavailable(format!("auto-refresh failed: {e}")))?;
@@ -220,7 +231,7 @@ fn compute_refresh_plan(
     repo_path: &Path,
 ) -> Result<RefreshPlan, KnowledgeError> {
     let manifest_path = knowledge_dir.join("manifest.json");
-    let graph_available = current_graph_available(knowledge_dir);
+    let graph_available = current_branch_graph_available(knowledge_dir, repo_path);
     let dirty_fingerprint = git_dirty_fingerprint(repo_path);
     let head_ts = git_head_timestamp(repo_path);
 
@@ -347,15 +358,30 @@ fn acquire_refresh_lock(
     }
 }
 
-fn current_graph_available(knowledge_dir: &Path) -> bool {
-    knowledge_dir.join("manifest.json").is_file()
-        && knowledge_dir.join("graph/refs/current.json").is_file()
+fn current_branch_graph_available(knowledge_dir: &Path, repo_path: &Path) -> bool {
+    if !knowledge_dir.join("manifest.json").is_file() {
+        return false;
+    }
+
+    let Ok(read_target) = resolve_graph_read_target(Some(repo_path), None) else {
+        return false;
+    };
+
+    let store = GraphObjectStore::new(knowledge_dir.join("graph"));
+    if store
+        .prepare_refs_layout(read_target.default.as_ref())
+        .is_err()
+    {
+        return false;
+    }
+
+    store.ref_path(&read_target.requested).is_file()
 }
 
-fn wait_for_current_graph(knowledge_dir: &Path) {
+fn wait_for_current_graph(knowledge_dir: &Path, repo_path: &Path) {
     let deadline = Instant::now() + Duration::from_millis(GRAPH_WAIT_TIMEOUT_MS);
     while Instant::now() < deadline {
-        if current_graph_available(knowledge_dir) {
+        if current_branch_graph_available(knowledge_dir, repo_path) {
             return;
         }
         std::thread::sleep(Duration::from_millis(GRAPH_WAIT_POLL_MS));

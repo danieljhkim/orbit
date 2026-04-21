@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::error::KnowledgeError;
 use crate::graph::navigator::GraphNodeRef;
 use crate::graph::nodes::CodebaseGraphV1;
-use crate::graph::object_store::GraphObjectStore;
+use crate::graph::object_store::{GraphObjectStore, resolve_graph_read_target};
 use crate::selector::Selector;
 use crate::service::GraphContextService;
 
@@ -47,11 +47,19 @@ pub enum LineageFormat {
 /// gathers bounded context, and renders as JSON or Markdown.
 pub fn render_lineage_pack(
     knowledge_dir: &Path,
+    workspace_path: Option<&Path>,
+    explicit_ref: Option<&str>,
     selectors: &[Selector],
     options: &LineagePackOptions,
 ) -> Result<String, KnowledgeError> {
     let store = GraphObjectStore::new(knowledge_dir.join("graph"));
-    let graph = store.read_graph()?;
+    let read_target = resolve_graph_read_target(workspace_path, explicit_ref)
+        .map_err(|error| KnowledgeError::knowledge_unavailable(error.to_string()))?;
+    let graph = store.read_graph(
+        &read_target.requested,
+        read_target.fallback.as_ref(),
+        read_target.default.as_ref(),
+    )?;
     render_lineage_pack_from_graph(&graph, selectors, options)
 }
 

@@ -4,15 +4,20 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::error::KnowledgeError;
-use crate::graph::object_store::validate_graph_index_ref;
+use crate::graph::object_store::{GraphObjectStore, RefName};
 use crate::selector::SelectorLookupKey;
 
 use super::KnowledgeStore;
-use super::graph_io::{CurrentRefFile, read_json_file};
+use super::graph_io::read_json_file;
 use super::types::SymbolSummary;
 
 impl KnowledgeStore {
-    pub fn open(knowledge_dir: &Path) -> Result<Self, KnowledgeError> {
+    pub fn open(
+        knowledge_dir: &Path,
+        requested_ref: &RefName,
+        fallback_ref: Option<&RefName>,
+        default_ref: Option<&RefName>,
+    ) -> Result<Self, KnowledgeError> {
         if !knowledge_dir.is_dir() {
             return Err(KnowledgeError::knowledge_unavailable(format!(
                 "knowledge directory does not exist: {}",
@@ -28,15 +33,10 @@ impl KnowledgeStore {
             ))
         })?;
 
-        let current_ref_path = knowledge_dir.join("graph/refs/current.json");
-        let current_ref: CurrentRefFile = read_json_file(&current_ref_path).map_err(|error| {
-            KnowledgeError::knowledge_unavailable(format!(
-                "graph reference is unavailable or invalid at {}: {error}",
-                current_ref_path.display()
-            ))
-        })?;
-
-        let graph_index_path = knowledge_dir.join(validate_graph_index_ref(&current_ref.index)?);
+        let graph_store = GraphObjectStore::new(knowledge_dir.join("graph"));
+        graph_store.prepare_refs_layout(default_ref)?;
+        let resolved_ref = graph_store.resolve_ref(requested_ref, fallback_ref)?;
+        let graph_index_path = resolved_ref.index_path;
         let graph_index = read_json_file(&graph_index_path).map_err(|error| {
             KnowledgeError::knowledge_unavailable(format!(
                 "graph index is unavailable or invalid at {}: {error}",
@@ -56,8 +56,13 @@ impl KnowledgeStore {
         })
     }
 
-    pub fn is_available(knowledge_dir: &Path) -> bool {
-        Self::open(knowledge_dir).is_ok()
+    pub fn is_available(
+        knowledge_dir: &Path,
+        requested_ref: &RefName,
+        fallback_ref: Option<&RefName>,
+        default_ref: Option<&RefName>,
+    ) -> bool {
+        Self::open(knowledge_dir, requested_ref, fallback_ref, default_ref).is_ok()
     }
 
     pub(super) fn dir_child_selectors(&self, dir_node_id: &str) -> Option<Vec<String>> {
