@@ -912,12 +912,63 @@ fn sha256_hex(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Depth of a directory location, with the repo root at depth 0.
+///
+/// Callers pass the `DirNode.location` string, which `build_graph_dirs`
+/// formats as `"<path>/"` — the trailing slash is part of every location.
+/// The root dir ends up as `"./"`, which must normalize to depth 0 so that
+/// `write_graph`'s depth-descending sort writes children before their parents.
+/// The pre-fix implementation treated the leading `.` as a segment and
+/// returned 1, which tied root with its top-level children and caused
+/// `dir references missing dir child` errors during serialization (T20260421-0652).
 fn dir_depth(location: &str) -> usize {
-    if location == "." || location.is_empty() {
+    let trimmed = location.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed == "." {
         return 0;
     }
-    location
+    trimmed
         .split('/')
-        .filter(|segment| !segment.is_empty())
+        .filter(|segment| !segment.is_empty() && *segment != ".")
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dir_depth_root_location_is_zero() {
+        // Regression for T20260421-0652: root location produced by
+        // `build_graph_dirs` is `"./"`, which must normalize to depth 0 so the
+        // depth-descending sort in `write_graph` writes root after its
+        // children.
+        assert_eq!(dir_depth("./"), 0);
+        assert_eq!(dir_depth("."), 0);
+        assert_eq!(dir_depth(""), 0);
+        assert_eq!(dir_depth("/"), 0);
+    }
+
+    #[test]
+    fn dir_depth_counts_segments_not_slashes() {
+        assert_eq!(dir_depth("src/"), 1);
+        assert_eq!(dir_depth("src"), 1);
+        assert_eq!(dir_depth("src/foo/"), 2);
+        assert_eq!(dir_depth("src/foo/bar/"), 3);
+    }
+
+    #[test]
+    fn dir_depth_ignores_current_dir_segments() {
+        // Paths like "./src/" should count "src" only — the leading "." is a
+        // relative-path marker, not a depth segment.
+        assert_eq!(dir_depth("./src/"), 1);
+        assert_eq!(dir_depth("./src/foo/"), 2);
+    }
+
+    #[test]
+    fn dir_depth_is_strict_weak_order_root_first_by_descending_depth() {
+        // Depth-descending sort must place nested dirs before root.
+        let mut locations = vec!["./", "src/", "src/foo/"];
+        locations.sort_by(|a, b| dir_depth(b).cmp(&dir_depth(a)));
+        assert_eq!(locations, vec!["src/foo/", "src/", "./"]);
+    }
 }

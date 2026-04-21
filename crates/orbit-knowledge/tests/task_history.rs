@@ -83,14 +83,7 @@ fn head_sha(repo: &Path) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-// Blocked by a pre-existing pipeline bug in `GraphObjectStore::write_graph`
-// that fails with `dir references missing dir child` on freshly-created
-// repos — reproduces at pre-T0528 baseline (see `tests/branch_refs.rs`
-// `concurrent_branch_builds_keep_distinct_refs_and_graphs_reachable` et al).
-// The attribution logic itself is covered by unit tests in
-// `pipeline::attribute::tests` and `store::task_commits::tests`.
 #[test]
-#[ignore = "pre-existing pipeline bug: dir_children refer to missing dir objects"]
 fn full_pipeline_attributes_task_ids_to_file_and_symbol() {
     let repo_dir = tempdir().expect("tempdir");
     let repo = repo_dir.path();
@@ -181,7 +174,6 @@ fn full_pipeline_attributes_task_ids_to_file_and_symbol() {
 }
 
 #[test]
-#[ignore = "pre-existing pipeline bug: dir_children refer to missing dir objects"]
 fn rebuild_is_idempotent_byte_for_byte() {
     let repo_dir = tempdir().expect("tempdir");
     let repo = repo_dir.path();

@@ -59,6 +59,13 @@ pub fn attribute_history(ctx: &mut PipelineContext) -> Result<AttributeOutcome, 
     let cursor = read_previous_cursor(ctx);
     let was_full_backfill = cursor.is_none();
 
+    // Hydrate task_ids and structural_conflict from the previous ref so that a
+    // repeat rebuild on the same HEAD (cursor == HEAD → no commits walked) is
+    // byte-identical to the first rebuild. Without this, task_ids set in an
+    // earlier rebuild would be dropped when `build_graph_*` produces fresh
+    // nodes in ctx.graph.
+    hydrate_previous_attributions(ctx);
+
     let commits = history::walk_commits(&ctx.repo_path, cursor.as_deref(), &head_sha)?;
 
     if commits.is_empty() {
@@ -567,6 +574,69 @@ fn read_previous_cursor(ctx: &PipelineContext) -> Option<String> {
         .read_ref(&ctx.ref_name)
         .ok()
         .and_then(|cr| cr.last_attributed_commit)
+}
+
+/// Copy `task_ids` and `structural_conflict` from the previously-persisted
+/// graph (if any) onto the freshly-built `ctx.graph`, keyed by node ID.
+///
+/// This guarantees `make idempotent` rebuild semantics: when the commit walker
+/// produces zero new commits (cursor already at HEAD), the re-serialised graph
+/// preserves the attribution state from the last rebuild rather than zeroing
+/// it out. Without this pass, every no-op rebuild would drop every
+/// previously-attributed task ID.
+///
+/// A node is matched only when its current-tree ID (derived from the identity
+/// key) equals the ID stored in the previous graph — consistent with the
+/// identity-matcher's "unchanged path+qname+kind" contract.
+fn hydrate_previous_attributions(ctx: &mut PipelineContext) {
+    let store = GraphObjectStore::new(ctx.graph_dir());
+    let previous = match store.read_graph(&ctx.ref_name, None, ctx.default_ref_name.as_ref()) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+
+    let mut inherited: HashMap<String, (Vec<String>, bool)> = HashMap::new();
+    for dir in &previous.dirs {
+        inherited.insert(
+            dir.base.id.clone(),
+            (dir.base.task_ids.clone(), dir.base.structural_conflict),
+        );
+    }
+    for file in &previous.files {
+        inherited.insert(
+            file.base.id.clone(),
+            (file.base.task_ids.clone(), file.base.structural_conflict),
+        );
+    }
+    for leaf in &previous.leaves {
+        inherited.insert(
+            leaf.base.id.clone(),
+            (leaf.base.task_ids.clone(), leaf.base.structural_conflict),
+        );
+    }
+
+    if inherited.is_empty() {
+        return;
+    }
+
+    for dir in ctx.graph.dirs.iter_mut() {
+        if let Some((task_ids, structural_conflict)) = inherited.get(&dir.base.id) {
+            dir.base.task_ids = task_ids.clone();
+            dir.base.structural_conflict = *structural_conflict;
+        }
+    }
+    for file in ctx.graph.files.iter_mut() {
+        if let Some((task_ids, structural_conflict)) = inherited.get(&file.base.id) {
+            file.base.task_ids = task_ids.clone();
+            file.base.structural_conflict = *structural_conflict;
+        }
+    }
+    for leaf in ctx.graph.leaves.iter_mut() {
+        if let Some((task_ids, structural_conflict)) = inherited.get(&leaf.base.id) {
+            leaf.base.task_ids = task_ids.clone();
+            leaf.base.structural_conflict = *structural_conflict;
+        }
+    }
 }
 
 #[cfg(test)]
