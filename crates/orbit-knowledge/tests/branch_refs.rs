@@ -433,6 +433,8 @@ fn base_node(id: &str, name: &str, location: &str, parent_id: Option<&str>) -> B
         lineage_locked: false,
         lock_owner: None,
         lock_reason: String::new(),
+        task_ids: Vec::new(),
+        structural_conflict: false,
     }
 }
 

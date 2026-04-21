@@ -118,7 +118,7 @@ fn local_branches(workspace_path: &Path) -> Result<Vec<String>, OrbitError> {
         .collect())
 }
 
-fn run_git(workspace_path: &Path, args: &[&str]) -> Result<GitCommandOutput, OrbitError> {
+pub fn run_git(workspace_path: &Path, args: &[&str]) -> Result<GitCommandOutput, OrbitError> {
     let output = Command::new("git")
         .args(args)
         .current_dir(workspace_path)
@@ -134,10 +134,12 @@ fn run_git(workspace_path: &Path, args: &[&str]) -> Result<GitCommandOutput, Orb
     Ok(GitCommandOutput {
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
 }
 
-struct GitCommandOutput {
-    success: bool,
-    stdout: String,
+pub struct GitCommandOutput {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
 }

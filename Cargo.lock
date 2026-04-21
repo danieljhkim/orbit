@@ -1533,6 +1533,7 @@ dependencies = [
  "chrono",
  "fs2",
  "orbit-common",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

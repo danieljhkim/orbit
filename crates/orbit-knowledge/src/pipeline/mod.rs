@@ -5,6 +5,7 @@
 pub mod build;
 pub mod context;
 pub mod hash;
+pub mod history;
 pub mod persist;
 pub mod scan;
 

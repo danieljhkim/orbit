@@ -54,6 +54,11 @@ pub struct CurrentRef {
     #[serde(default)]
     pub root_dir_id: String,
     pub index: String,
+    /// Newest commit SHA walked by the attribute-history pipeline stage
+    /// (T20260421-0528). `None` on pre-T0528 refs triggers a one-time
+    /// full-history backfill on next rebuild.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attributed_commit: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -689,6 +694,7 @@ impl GraphObjectStore {
             root_object_hash,
             root_dir_id: graph.root_dir_id.clone(),
             index: format!("graph/index/by-id/{root_graph_hash}.json"),
+            last_attributed_commit: None,
         })
     }
 
