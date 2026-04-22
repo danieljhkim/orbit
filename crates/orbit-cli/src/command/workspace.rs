@@ -36,6 +36,9 @@ pub struct WorkspaceInitArgs {
     /// Base branch for this workspace (default: main)
     #[arg(long, default_value = "main")]
     pub base_branch: String,
+    /// Skip automatic MCP client integration setup.
+    #[arg(long)]
+    pub no_mcp: bool,
     /// No-op (kept for backwards compatibility — defaults are always refreshed on init)
     #[arg(long, hide = true)]
     pub refresh_defaults: bool,
@@ -79,12 +82,27 @@ impl WorkspaceInitArgs {
     pub fn execute_without_runtime(self) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
         let registry_path = workspace_registry::registry_path()?;
+        let no_mcp = self.no_mcp;
         let init_result = self.execute_at_path(&cwd, &registry_path)?;
 
         println!("workspace '{}' initialized", init_result.name);
         println!("  id:        {}", init_result.id);
         println!("  root:      {}", init_result.root.display());
         println!("  orbit_dir: {}", init_result.orbit_dir.display());
+
+        if no_mcp {
+            println!("  mcp:       skipped (--no-mcp)");
+        } else {
+            let providers = crate::command::mcp::init_auto_for_workspace(
+                &init_result.root,
+                &init_result.orbit_dir,
+            )?;
+            if providers.is_empty() {
+                println!("  mcp:       no providers auto-detected");
+            } else {
+                println!("  mcp:       {}", providers.join(", "));
+            }
+        }
 
         // Build the knowledge graph
         eprintln!("graph build: scanning {}", init_result.root.display());
@@ -164,6 +182,135 @@ struct WorkspaceInitResult {
     name: String,
     root: std::path::PathBuf,
     orbit_dir: std::path::PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use tempfile::tempdir;
+
+    use super::WorkspaceInitArgs;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn workspace_init_seeds_auto_detected_mcp_configs() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let workspace = tempdir().expect("workspace tempdir");
+        let home = tempdir().expect("home tempdir");
+
+        std::fs::create_dir_all(workspace.path().join(".claude")).expect("create .claude");
+        std::fs::create_dir_all(workspace.path().join(".gemini")).expect("create .gemini");
+        std::fs::create_dir_all(home.path().join(".codex")).expect("create global .codex");
+        std::fs::write(
+            home.path().join(".codex").join("config.toml"),
+            "model = \"gpt-5.4\"\n",
+        )
+        .expect("write global codex config");
+
+        let previous_home = std::env::var_os("HOME");
+        let previous_cwd = std::env::current_dir().expect("capture cwd");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+        std::env::set_current_dir(workspace.path()).expect("enter workspace");
+
+        let result = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            no_mcp: false,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime();
+
+        std::env::set_current_dir(previous_cwd).expect("restore cwd");
+
+        match previous_home {
+            Some(value) => unsafe {
+                std::env::set_var("HOME", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOME");
+            },
+        }
+
+        result.expect("workspace init");
+        assert!(
+            workspace
+                .path()
+                .join(".claude")
+                .join("settings.json")
+                .exists()
+        );
+        assert!(workspace.path().join(".codex").join("config.toml").exists());
+        assert!(
+            workspace
+                .path()
+                .join(".gemini")
+                .join("settings.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn workspace_init_respects_no_mcp_flag() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let workspace = tempdir().expect("workspace tempdir");
+        let home = tempdir().expect("home tempdir");
+
+        std::fs::create_dir_all(workspace.path().join(".claude")).expect("create .claude");
+        std::fs::create_dir_all(workspace.path().join(".gemini")).expect("create .gemini");
+        std::fs::create_dir_all(home.path().join(".codex")).expect("create global .codex");
+        std::fs::write(
+            home.path().join(".codex").join("config.toml"),
+            "model = \"gpt-5.4\"\n",
+        )
+        .expect("write global codex config");
+
+        let previous_home = std::env::var_os("HOME");
+        let previous_cwd = std::env::current_dir().expect("capture cwd");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+        std::env::set_current_dir(workspace.path()).expect("enter workspace");
+
+        let result = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            no_mcp: true,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime();
+
+        std::env::set_current_dir(previous_cwd).expect("restore cwd");
+
+        match previous_home {
+            Some(value) => unsafe {
+                std::env::set_var("HOME", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOME");
+            },
+        }
+
+        result.expect("workspace init");
+        assert!(
+            !workspace
+                .path()
+                .join(".claude")
+                .join("settings.json")
+                .exists()
+        );
+        assert!(!workspace.path().join(".codex").join("config.toml").exists());
+        assert!(
+            !workspace
+                .path()
+                .join(".gemini")
+                .join("settings.json")
+                .exists()
+        );
+    }
 }
 
 impl Execute for WorkspaceListArgs {

@@ -3,6 +3,7 @@
 .claude
 agentspace
 .codex
+.gemini
 .DS_Store
 .agents
 docs

@@ -149,6 +149,22 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             role: "admin".to_string(),
             arguments_json: None,
         },
+        Commands::Mcp(cmd) => {
+            use crate::command::mcp::McpSubcommand;
+            let sub = match &cmd.command {
+                McpSubcommand::Init(_) => "init",
+                McpSubcommand::Remove(_) => "remove",
+            };
+            CommandMeta {
+                command: "mcp".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("mcp".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
         Commands::Tool(tool_cmd) => {
             use crate::command::tool::ToolSubcommand;
             let (sub, tool_name, target_type, target_id) = match &tool_cmd.command {

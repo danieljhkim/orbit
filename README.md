@@ -87,6 +87,8 @@ orbit init
 # initialize workspace-local Orbit state inside a repository
 cd <repo>
 orbit workspace init
+# or skip MCP client auto-detection / setup
+orbit workspace init --no-mcp
 
 # build the code graph
 orbit graph build
@@ -341,13 +343,30 @@ That is the center of gravity for Orbit.
 
 ## MCP And External Tools
 
-Orbit can expose enabled external tools through `orbit serve mcp`, making them available alongside Orbit's built-in tool surface.
+Orbit exposes a safe MCP surface by default:
+
+- all `orbit.task.*` tools
+- graph read tools such as `orbit.graph.search`, `orbit.graph.show`, and `orbit.graph.pack`
+- no experimental graph write tools unless you opt in with `--allow-write`
+
+Use `orbit mcp init` to seed client integrations for the current workspace. Auto mode targets Claude when the repo already has a `.claude/` directory, Gemini when the repo already has a `.gemini/` directory, and Codex when `~/.codex/config.toml` exists. `orbit workspace init` delegates to the same auto-detect path unless you pass `--no-mcp`.
+
+- `orbit mcp init --claude` updates the global Claude MCP registration in `~/.claude/.mcp.json` and repo-local permissions in `.claude/settings.json`. Orbit does not modify `.claude/settings.local.json`, which remains your private override layer.
+- `orbit mcp init --codex` updates project-local `.codex/config.toml`. Codex only loads project config for trusted projects, so make sure the repo is trusted in Codex before expecting the MCP entry to appear in-session.
+- `orbit mcp init --gemini` updates project-local `.gemini/settings.json` with an Orbit MCP server entry for the repo. Orbit does not modify `~/.gemini/settings.json`, which remains the user's global override layer.
 
 ```bash
-orbit tool scaffold ./plugins/hello_orbit.py --name demo.hello
-orbit tool add ./plugins/hello_orbit.py
-orbit tool show demo.hello
+orbit mcp init --auto
+orbit mcp init --claude
+orbit mcp init --codex
+orbit mcp init --gemini
+orbit mcp remove --all
+
+# serve the safe default MCP surface
 orbit serve mcp
+
+# opt in experimental graph write tools
+orbit serve mcp --allow-write
 ```
 
 MCP support is an integration layer, not Orbit's moat.

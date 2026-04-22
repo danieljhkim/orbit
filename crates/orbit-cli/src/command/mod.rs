@@ -46,6 +46,7 @@ pub trait Execute {
 Setup:
   init       Initialize the global Orbit root (~/.orbit)
   workspace  Initialize and manage workspaces
+  mcp        Manage MCP client integrations
   config     Show or update Orbit configuration
 
 Resources:
@@ -85,6 +86,7 @@ pub enum Commands {
     // ── setup ──
     Init(init::InitCommand),
     Workspace(workspace::WorkspaceCommand),
+    Mcp(mcp::McpCommand),
     Config(config::ConfigCommand),
 
     // ── resources ──
@@ -121,6 +123,7 @@ impl Execute for Commands {
         match self {
             Commands::Init(cmd) => cmd.execute(runtime),
             Commands::Workspace(cmd) => cmd.execute(runtime),
+            Commands::Mcp(cmd) => cmd.execute(runtime),
             Commands::Config(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
@@ -138,5 +141,29 @@ impl Execute for Commands {
             Commands::Logs(cmd) => cmd.execute(runtime),
             Commands::Artifacts(cmd) => cmd.execute(runtime),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Commands, mcp::McpSubcommand};
+
+    #[test]
+    fn cli_parses_top_level_mcp_command() {
+        let cli = Cli::parse_from(["orbit", "mcp", "init"]);
+        match cli.command {
+            Commands::Mcp(command) => match command.command {
+                McpSubcommand::Init(_) => {}
+                _ => panic!("expected mcp init"),
+            },
+            _ => panic!("expected top-level mcp command"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_down_alias() {
+        assert!(Cli::try_parse_from(["orbit", "mcp", "down"]).is_err());
     }
 }
