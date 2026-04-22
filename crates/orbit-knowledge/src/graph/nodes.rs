@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum LeafKind {
     Function,
     Method,
@@ -19,6 +19,15 @@ pub enum LeafKind {
     Impl,
     Field,
     Module,
+    /// Markdown ATX heading (`#`–`######`). `depth` is 1–6. Added T20260422-1540.
+    Section {
+        depth: u8,
+    },
+    /// Top-level key in a structured config file (YAML / JSON / TOML).
+    /// Added T20260422-1540.
+    ConfigKey,
+    /// Header cell in a tabular data file (CSV / TSV). Added T20260422-1540.
+    Column,
 }
 
 impl fmt::Display for LeafKind {
@@ -33,6 +42,9 @@ impl fmt::Display for LeafKind {
             Self::Impl => "impl",
             Self::Field => "field",
             Self::Module => "module",
+            Self::Section { .. } => "section",
+            Self::ConfigKey => "config_key",
+            Self::Column => "column",
         };
         f.write_str(s)
     }

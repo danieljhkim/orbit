@@ -25,7 +25,7 @@ use serde::Deserialize;
 use tracing::debug;
 
 use crate::error::KnowledgeError;
-use crate::extract::{ExtractorRegistry, Language};
+use crate::extract::{ExtractorRegistry, FileKind};
 use crate::graph::nodes::{CodebaseGraphV1, LeafKind, LeafNode};
 use crate::graph::object_store::GraphObjectStore;
 use crate::pipeline::context::PipelineContext;
@@ -225,10 +225,11 @@ pub(crate) fn collect_touched_for_commit(
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
-        let Some(language) = Language::from_extension(extension) else {
+        let file_kind = FileKind::from_extension(extension);
+        if !file_kind.is_extractable() {
             continue;
-        };
-        let Some(extractor) = registry.get(language) else {
+        }
+        let Some(extractor) = registry.get(file_kind) else {
             continue;
         };
 
@@ -833,6 +834,36 @@ mod tests {
         assert_eq!(graph.files[0].base.task_ids, vec!["T20260421-0528"]);
         assert!(graph.files[1].base.task_ids.is_empty());
         assert!(graph.dirs[0].base.task_ids.is_empty());
+    }
+
+    #[test]
+    fn apply_task_ids_attributes_non_code_leaf_kinds_unchanged() {
+        // Non-code leaves (Section / ConfigKey / Column added T20260422-1540)
+        // must pick up task_ids via the same byte-range → leaf-id path as code
+        // leaves. Task_ids are kind-agnostic because they live on
+        // BaseNodeFields, not on LeafKind.
+        let mut graph = CodebaseGraphV1 {
+            root_dir_id: "dir:root".to_string(),
+            dirs: vec![dir_node("dir:root", "./")],
+            files: vec![file_node("file:a", "docs/README.md")],
+            leaves: vec![
+                leaf(
+                    "docs/README.md#overview",
+                    "Overview",
+                    LeafKind::Section { depth: 1 },
+                ),
+                leaf("config.yaml#name", "name", LeafKind::ConfigKey),
+                leaf("data.csv#id", "id", LeafKind::Column),
+            ],
+        };
+        let mut touched = HashSet::new();
+        for l in &graph.leaves {
+            touched.insert(l.base.id.clone());
+        }
+        apply_task_ids_to_nodes(&mut graph, &touched, &["T20260422-1540".to_string()]);
+        for l in &graph.leaves {
+            assert_eq!(l.base.task_ids, vec!["T20260422-1540"]);
+        }
     }
 
     #[test]

@@ -1,13 +1,14 @@
 use tree_sitter::{Node, Parser};
 
-use super::LanguageExtractor;
+use super::FileExtractor;
 use super::common::{ExtractedLeaf, ExtractionResult, compute_source_hash};
+use super::language::{FileKind, Language};
 
 pub struct JavaScriptExtractor;
 
-impl LanguageExtractor for JavaScriptExtractor {
-    fn language(&self) -> &str {
-        "javascript"
+impl FileExtractor for JavaScriptExtractor {
+    fn file_kind(&self) -> FileKind {
+        FileKind::Code(Language::JavaScript)
     }
 
     fn extract(&self, source: &str) -> ExtractionResult {
@@ -78,6 +79,7 @@ fn extract_function(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -112,6 +114,7 @@ fn extract_class(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: children,
+        depth: None,
     });
 }
 
@@ -135,6 +138,7 @@ fn extract_method(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: Some(parent.to_string()),
         children_qualified_names: vec![],
+        depth: None,
     });
 
     Some(qualified_name)
@@ -169,6 +173,7 @@ fn extract_binding_declaration(node: Node, source: &str, leaves: &mut Vec<Extrac
                     source_hash: compute_source_hash(&src),
                     parent_qualified_name: None,
                     children_qualified_names: vec![],
+                    depth: None,
                 });
             }
             "class" => extract_class_binding(child, value, source, leaves, &name),
@@ -209,5 +214,6 @@ fn extract_class_binding(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: children,
+        depth: None,
     });
 }

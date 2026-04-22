@@ -546,7 +546,11 @@ impl GraphObjectStore {
                     "node_type": "leaf",
                     "location": leaf.base.location,
                     "identity_key": leaf.base.identity_key,
-                    "kind": leaf.kind,
+                    // LeafKind has data-carrying variants (e.g. `Section { depth }`)
+                    // since T20260422-1540. The index stores the Display form
+                    // (bare string) so downstream selector lookup stays simple;
+                    // the struct-variant payload lives in the full object body.
+                    "kind": leaf.kind.to_string(),
                 }),
             );
         }

@@ -1,13 +1,14 @@
 use tree_sitter::{Node, Parser};
 
-use super::LanguageExtractor;
+use super::FileExtractor;
 use super::common::{ExtractedLeaf, ExtractionResult, compute_source_hash};
+use super::language::{FileKind, Language};
 
 pub struct PythonExtractor;
 
-impl LanguageExtractor for PythonExtractor {
-    fn language(&self) -> &str {
-        "python"
+impl FileExtractor for PythonExtractor {
+    fn file_kind(&self) -> FileKind {
+        FileKind::Code(Language::Python)
     }
 
     fn extract(&self, source: &str) -> ExtractionResult {
@@ -93,6 +94,7 @@ fn extract_function(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: parent_class.map(str::to_string),
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -141,5 +143,6 @@ fn extract_class(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: children,
+        depth: None,
     });
 }

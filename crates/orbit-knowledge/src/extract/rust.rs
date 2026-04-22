@@ -1,13 +1,14 @@
 use tree_sitter::{Node, Parser};
 
-use super::LanguageExtractor;
+use super::FileExtractor;
 use super::common::{ExtractedLeaf, ExtractionResult, compute_source_hash};
+use super::language::{FileKind, Language};
 
 pub struct RustExtractor;
 
-impl LanguageExtractor for RustExtractor {
-    fn language(&self) -> &str {
-        "rust"
+impl FileExtractor for RustExtractor {
+    fn file_kind(&self) -> FileKind {
+        FileKind::Code(Language::Rust)
     }
 
     fn extract(&self, source: &str) -> ExtractionResult {
@@ -86,6 +87,7 @@ fn extract_function(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: parent.map(str::to_string),
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -106,6 +108,7 @@ fn extract_struct_like(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -126,6 +129,7 @@ fn extract_trait(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -166,6 +170,7 @@ fn extract_impl(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: children,
+        depth: None,
     });
 }
 
@@ -186,6 +191,7 @@ fn extract_mod(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -206,6 +212,7 @@ fn extract_type_alias(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>)
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -226,5 +233,6 @@ fn extract_const_static(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }

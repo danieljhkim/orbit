@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::KnowledgeError;
-use crate::extract::{self, Language, identity_key, leaf_location, node_id};
+use crate::extract::{self, FileKind, identity_key, leaf_location, node_id};
 use crate::graph::nodes::{BaseNodeFields, DirNode, FileNode, LeafKind, LeafNode};
 use crate::pipeline::context::PipelineContext;
 
@@ -154,8 +154,8 @@ pub fn build_graph_files(ctx: &mut PipelineContext) -> Result<(), KnowledgeError
 
         let language = extension
             .as_deref()
-            .and_then(Language::from_extension)
-            .map(|l| l.as_str().to_string())
+            .map(FileKind::from_extension)
+            .map(|k| k.as_str().to_string())
             .unwrap_or_default();
 
         let parent_dir_str = rel_path
@@ -217,37 +217,37 @@ pub fn build_graph_files(ctx: &mut PipelineContext) -> Result<(), KnowledgeError
 // build_graph_leaves
 // ---------------------------------------------------------------------------
 
-/// Extract leaf nodes from source files using tree-sitter extractors.
+/// Extract leaf nodes from source files using file-kind-dispatched extractors.
+///
+/// Covers code (tree-sitter), markdown, structured config (YAML/JSON/TOML),
+/// and tabular data (CSV/TSV). Non-extractable files yield no leaves.
 pub fn build_graph_leaves(ctx: &mut PipelineContext) -> Result<(), KnowledgeError> {
     let registry = extract::ExtractorRegistry::new();
 
     // Collect file indices to process (we need to mutate ctx.graph but iterate files)
-    let file_infos: Vec<(usize, String, String)> = ctx
+    let file_infos: Vec<(usize, String, String, FileKind)> = ctx
         .graph
         .files
         .iter()
         .enumerate()
         .filter_map(|(i, f)| {
             let ext = f.extension.as_deref()?;
-            Language::from_extension(ext)?;
-            Some((i, f.base.location.clone(), f.base.id.clone()))
+            let kind = FileKind::from_extension(ext);
+            if !kind.is_extractable() {
+                return None;
+            }
+            Some((i, f.base.location.clone(), f.base.id.clone(), kind))
         })
         .collect();
 
-    for (file_idx, location, file_id) in file_infos {
+    for (file_idx, location, file_id, file_kind) in file_infos {
         let abs = ctx.repo_path.join(&location);
         let content = match fs::read_to_string(&abs) {
             Ok(c) => c,
             Err(_) => continue,
         };
 
-        let ext = ctx.graph.files[file_idx].extension.as_deref().unwrap_or("");
-        let language = match Language::from_extension(ext) {
-            Some(l) => l,
-            None => continue,
-        };
-
-        let extractor = match registry.get(language) {
+        let extractor = match registry.get(file_kind) {
             Some(e) => e,
             None => continue,
         };
@@ -265,7 +265,7 @@ pub fn build_graph_leaves(ctx: &mut PipelineContext) -> Result<(), KnowledgeErro
             let id = node_id("symbol", &loc, &extracted.kind);
             let ikey = identity_key("symbol", &loc, &extracted.kind);
 
-            let kind = parse_leaf_kind(&extracted.kind);
+            let kind = parse_leaf_kind(&extracted.kind, extracted.depth);
 
             let leaf = LeafNode {
                 base: BaseNodeFields {
@@ -274,7 +274,7 @@ pub fn build_graph_leaves(ctx: &mut PipelineContext) -> Result<(), KnowledgeErro
                     object_hash: None,
                     name: extracted.name.clone(),
                     location: loc,
-                    language: language.as_str().to_string(),
+                    language: file_kind.as_str().to_string(),
                     description: String::new(),
                     parent_id: Some(file_id.clone()),
                     is_locked: false,
@@ -314,7 +314,7 @@ pub fn build_graph_leaves(ctx: &mut PipelineContext) -> Result<(), KnowledgeErro
     Ok(())
 }
 
-fn parse_leaf_kind(s: &str) -> LeafKind {
+fn parse_leaf_kind(s: &str, depth: Option<u8>) -> LeafKind {
     match s {
         "function" => LeafKind::Function,
         "method" => LeafKind::Method,
@@ -325,6 +325,11 @@ fn parse_leaf_kind(s: &str) -> LeafKind {
         "impl" => LeafKind::Impl,
         "field" => LeafKind::Field,
         "module" => LeafKind::Module,
+        "section" => LeafKind::Section {
+            depth: depth.unwrap_or(1),
+        },
+        "config_key" => LeafKind::ConfigKey,
+        "column" => LeafKind::Column,
         _ => LeafKind::Function,
     }
 }

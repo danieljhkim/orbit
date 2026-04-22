@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-22 (non-code extraction, T20260422-1540)
 
 This document specifies the knowledge graph as it exists today: on-disk layout, build pipeline, query services, Orbit integration, locking, and honest limitations. See [1_overview.md](./1_overview.md) for the "why" and [3_vision.md](./3_vision.md) for where it is headed. Task IDs are cited inline and collected at the end.
 
@@ -44,12 +44,12 @@ scan → hash → detect_changes → build_dirs → build_files → build_leaves
 | `detect_changes` | Added / modified / unchanged sets | Unchanged files reuse prior leaves |
 | `build_graph_dirs` | `DirNode` entries with parent/child wiring | Deterministic; root dir id derived from `.` |
 | `build_graph_files` | `FileNode` entries linked to parent dir | Language detected from extension |
-| `build_graph_leaves` | `LeafNode` entries via tree-sitter extractor | Rust, Python, Go, Java, JavaScript today |
+| `build_graph_leaves` | `LeafNode` entries via file-kind-dispatched extractor | Code via tree-sitter (Rust, Python, Go, Java, JavaScript); markdown sections, YAML/JSON/TOML top-level keys, and CSV/TSV header columns via shallow extractors added in [T20260422-1540] |
 | `persist_graph` | Content-addressed objects, blobs, index | Atomic via tempfile + rename |
 | `write_manifest` | `manifest.json` | Timestamp + commit + ref pointer |
 | `attribute_history` | `task_ids` on touched nodes | Introduced in [T20260421-0528] |
 
-Extraction is tree-sitter based. Each `LanguageExtractor` emits `ExtractedLeaf` records with a `qualified_name`, `kind`, source span, source hash, and child qualified names (methods inside classes, associated fns inside impls).
+Extraction is dispatched on `FileKind`. Each `FileExtractor` (renamed from `LanguageExtractor` in [T20260422-1540]) emits `ExtractedLeaf` records with a `qualified_name`, `kind`, source span, source hash, and child qualified names (methods inside classes, associated fns inside impls). Code extractors wrap tree-sitter grammars; the shallow doc/config/table extractors parse their formats directly (ATX headings for markdown, top-level map entries for YAML/JSON/TOML via the existing serde ecosystem, first-row cells for CSV/TSV with a 1 MiB size cap).
 
 ### 2.1 Incremental refresh
 
@@ -163,7 +163,7 @@ The shared file-based lock store was introduced in [T20260411-0424] (replacing a
 
 ### 6.1 Extractor coverage drives graph precision
 
-The leaf graph is only as good as the tree-sitter extractor. Today that means Rust, Python, Go, Java, and JavaScript — everything else is file-only. Mixed-language repos (e.g. a Rust workspace with TOML configs and shell scripts) get partial symbol coverage and the agent has to fall back to file-level reads for the uncovered slice.
+The leaf graph is only as good as each extractor. Code coverage (tree-sitter): Rust, Python, Go, Java, JavaScript. Doc coverage: markdown (ATX headings only — no frontmatter, no fenced-block leaves, no RST). Config coverage: YAML / JSON / TOML top-level keys only — nested paths like `a.b.c` are not indexed. Tabular coverage: CSV / TSV header row only; files over 1 MiB produce zero leaves by design. Anything outside those families (shell scripts, C/C++, `.env`, SQL, etc.) lands in the graph as a leafless `FileNode`, and the agent has to fall back to file-level reads for the uncovered slice. Depth-of-extraction tradeoffs are captured in ADR-011.
 
 ### 6.2 No cross-file reference resolution
 
@@ -207,5 +207,6 @@ Objects and blobs accumulate forever. There is no `orbit graph gc` today — aba
 - **[T20260417-0639]** — Speed up workspace-init graph persistence hot path.
 - **[T20260421-0358]** — Scope graph refs by branch.
 - **[T20260421-0528]** — `task_ids` schema on every node + git history walker for attribution.
+- **[T20260422-1540]** — Extend extraction to markdown sections, top-level config keys, and CSV/TSV columns via `FileKind`-dispatched extractors (`FileExtractor` trait, replacing `LanguageExtractor`).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,13 +1,14 @@
 use tree_sitter::{Node, Parser};
 
-use super::LanguageExtractor;
+use super::FileExtractor;
 use super::common::{ExtractedLeaf, ExtractionResult, compute_source_hash};
+use super::language::{FileKind, Language};
 
 pub struct JavaExtractor;
 
-impl LanguageExtractor for JavaExtractor {
-    fn language(&self) -> &str {
-        "java"
+impl FileExtractor for JavaExtractor {
+    fn file_kind(&self) -> FileKind {
+        FileKind::Code(Language::Java)
     }
 
     fn extract(&self, source: &str) -> ExtractionResult {
@@ -90,6 +91,7 @@ fn extract_type(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>, kind:
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: children,
+        depth: None,
     });
 }
 
@@ -113,6 +115,7 @@ fn extract_method(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: Some(parent.to_string()),
         children_qualified_names: vec![],
+        depth: None,
     });
 
     Some(qualified_name)
@@ -138,6 +141,7 @@ fn extract_constructor(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: Some(parent.to_string()),
         children_qualified_names: vec![],
+        depth: None,
     });
 
     Some(qualified_name)

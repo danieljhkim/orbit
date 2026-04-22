@@ -14,10 +14,30 @@ pub struct ExtractedLeaf {
     pub parent_qualified_name: Option<String>,
     /// For impl/class blocks: qualified_names of child methods.
     pub children_qualified_names: Vec<String>,
+    /// ATX heading depth (1–6) for `LeafKind::Section`. `None` for every other kind.
+    /// Added T20260422-1540 alongside markdown/config/tabular extraction.
+    pub depth: Option<u8>,
+}
+
+impl Default for ExtractedLeaf {
+    fn default() -> Self {
+        Self {
+            qualified_name: String::new(),
+            name: String::new(),
+            kind: String::new(),
+            start_line: 0,
+            end_line: 0,
+            source: String::new(),
+            source_hash: String::new(),
+            parent_qualified_name: None,
+            children_qualified_names: Vec::new(),
+            depth: None,
+        }
+    }
 }
 
 /// Result of extracting a single file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtractionResult {
     pub leaves: Vec<ExtractedLeaf>,
 }

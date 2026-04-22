@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 use tree_sitter::{Node, Parser};
 
-use super::LanguageExtractor;
+use super::FileExtractor;
 use super::common::{ExtractedLeaf, ExtractionResult, compute_source_hash};
+use super::language::{FileKind, Language};
 
 pub struct GoExtractor;
 
-impl LanguageExtractor for GoExtractor {
-    fn language(&self) -> &str {
-        "go"
+impl FileExtractor for GoExtractor {
+    fn file_kind(&self) -> FileKind {
+        FileKind::Code(Language::Go)
     }
 
     fn extract(&self, source: &str) -> ExtractionResult {
@@ -91,6 +92,7 @@ fn extract_function(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
         source_hash: compute_source_hash(&src),
         parent_qualified_name: None,
         children_qualified_names: vec![],
+        depth: None,
     });
 }
 
@@ -114,6 +116,7 @@ fn extract_method(
         source_hash: compute_source_hash(&src),
         parent_qualified_name: Some(receiver.clone()),
         children_qualified_names: vec![],
+        depth: None,
     });
 
     Some((receiver, qualified_name))
@@ -157,6 +160,7 @@ fn extract_type_declaration(
             source_hash: compute_source_hash(&src),
             parent_qualified_name: None,
             children_qualified_names: children,
+            depth: None,
         });
 
         type_indices.insert(name, leaves.len() - 1);
@@ -196,6 +200,7 @@ fn extract_interface_methods(
             source_hash: compute_source_hash(&src),
             parent_qualified_name: Some(parent.to_string()),
             children_qualified_names: vec![],
+            depth: None,
         });
     }
 
@@ -230,6 +235,7 @@ fn extract_binding_declaration(
             source_hash: compute_source_hash(&src),
             parent_qualified_name: None,
             children_qualified_names: vec![],
+            depth: None,
         });
     }
 }
