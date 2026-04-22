@@ -1,0 +1,20 @@
+task_id: locate-agentruntime
+class: locate
+difficulty: easy
+
+commit_sha: 87b709c2
+
+prompt: |
+  Where is the `AgentRuntime` trait defined in this repo, and what types
+  implement it? Answer with file paths and a one-line description of
+  each implementor.
+
+oracle:
+  grep:
+    must_include:
+      - "crates/orbit-agent/src/runtime/runtime_trait.rs"
+      - "ClaudeRuntime"
+      - "CodexRuntime"
+      - "GeminiRuntime"
+      - "MockAgentRuntime"
+    must_not_include: []

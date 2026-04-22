@@ -1,0 +1,32 @@
+# Fixture schema for benchmarks/graph/tasks/*.yaml
+#
+# One file per fixture. Filename = task_id (no spaces).
+---
+task_id: locate-agentruntime-easy
+class: locate          # locate | trace | edit
+difficulty: easy       # easy | medium | hard
+
+commit_sha: 87b709c2   # pinned repo state the harness checks out
+
+prompt: |
+  Where is `AgentRuntime` defined and what types implement it? Answer with
+  file paths, line numbers, and a one-line description of each implementor.
+
+oracle:
+  # Exactly one of: grep | cmd | judge
+  grep:
+    # Final assistant message must contain all `must_include` substrings
+    # and none of `must_not_include`.
+    must_include:
+      - "crates/orbit-agent/src/runtime.rs"
+    must_not_include: []
+
+  # cmd:
+  #   shell: "cargo test -p orbit-knowledge -- test_foo"
+  #   cwd: "{sandbox}"
+  #
+  # judge:
+  #   rubric: |
+  #     The answer must list at least 2 implementors with correct file paths.
+  #     Graded pass/fail by an independent judge model.
+  #   judge_model: "claude-sonnet-4-6"
