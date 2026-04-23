@@ -15,25 +15,23 @@ impl Tool for OrbitKnowledgeDeleteTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.graph.delete".to_string(),
-            description: "Use when you need to remove a symbol and keep the working graph in sync. Prefer over grep when a text-only delete could hit the wrong symbol or leave stale graph state.".to_string(),
+            description: "Use when you need to delete a symbol safely. Prefer over grep when text delete could hit the wrong node.".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "selector".to_string(),
-                    description: "Symbol selector to delete, e.g. `symbol:path#name:kind`."
-                        .to_string(),
+                    description: "Symbol selector.".to_string(),
                     param_type: "string".to_string(),
                     required: true,
                 },
                 ToolParam {
                     name: "reason".to_string(),
-                    description: "Optional reason recorded in the version chain.".to_string(),
+                    description: "Optional change note.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
                 ToolParam {
                     name: "workspace_path".to_string(),
-                    description: "Workspace root override for branch or worktree targeting."
-                        .to_string(),
+                    description: "Override workspace root.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },

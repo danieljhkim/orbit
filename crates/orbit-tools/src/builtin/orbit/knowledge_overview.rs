@@ -8,6 +8,7 @@ use crate::{Tool, ToolContext};
 
 pub struct OrbitKnowledgeOverviewTool;
 
+const AUTO_SUMMARY_FILE_THRESHOLD: usize = 20;
 const FILE_THRESHOLD: usize = 50;
 const SUMMARY_HINT: &str = "Use `prefix` to narrow the overview and get per-file symbol listings.";
 
@@ -18,17 +19,25 @@ enum OverviewFormat {
 }
 
 impl OverviewFormat {
-    fn parse(input: &Value) -> Result<Self, OrbitError> {
+    fn parse(input: &Value) -> Result<Option<Self>, OrbitError> {
         let Some(format) = super::optional_string(input, "format")? else {
-            return Ok(Self::Full);
+            return Ok(None);
         };
 
         match format.as_str() {
-            "full" => Ok(Self::Full),
-            "summary" => Ok(Self::Summary),
+            "full" => Ok(Some(Self::Full)),
+            "summary" => Ok(Some(Self::Summary)),
             other => Err(OrbitError::InvalidInput(format!(
                 "`format` must be `full` or `summary`, got `{other}`"
             ))),
+        }
+    }
+
+    fn default_for_scope(prefix: Option<&str>, file_count: usize) -> Self {
+        if prefix.is_none() || file_count > AUTO_SUMMARY_FILE_THRESHOLD {
+            Self::Summary
+        } else {
+            Self::Full
         }
     }
 }
@@ -37,24 +46,23 @@ impl Tool for OrbitKnowledgeOverviewTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.graph.overview".to_string(),
-            description: "Use when you need a structural map of a subtree. Prefer over grep when you want counts and shape, not a long list of text hits.".to_string(),
+            description: "Use when you need repo shape. Prefer over grep when you want counts, not text hits. Behavior: broad scopes default to `summary`; use `format:\"full\"` for per-file symbols.".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "prefix".to_string(),
-                    description: "Path prefix to summarize, e.g. `crates/orbit-knowledge/src`."
-                        .to_string(),
+                    description: "Only this path prefix.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
                 ToolParam {
                     name: "format".to_string(),
-                    description: "`full` for per-file symbol listings when the scope stays under 50 files; `summary` to always return the compact view.".to_string(),
+                    description: "`summary` or `full`.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
                 ToolParam {
                     name: "knowledge_dir".to_string(),
-                    description: "Knowledge artifact dir override. Defaults to `<workspace>/.orbit/knowledge`.".to_string(),
+                    description: "Override knowledge dir.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
@@ -66,16 +74,20 @@ impl Tool for OrbitKnowledgeOverviewTool {
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         let prefix = super::optional_string(&input, "prefix")?;
-        let format = OverviewFormat::parse(&input)?;
+        let requested_format = OverviewFormat::parse(&input)?;
         let graph = super::load_graph_for_read(ctx, &input)?;
         let svc = GraphContextService::new(&graph);
         let overview = svc.overview(prefix.as_deref());
-        let downgraded =
-            matches!(format, OverviewFormat::Full) && overview.files.len() > FILE_THRESHOLD;
-        let use_summary = matches!(format, OverviewFormat::Summary) || downgraded;
-        let requested_format = match format {
-            OverviewFormat::Full => "full",
-            OverviewFormat::Summary => "summary",
+        let resolved_format = requested_format.unwrap_or_else(|| {
+            OverviewFormat::default_for_scope(prefix.as_deref(), overview.files.len())
+        });
+        let downgraded = matches!(requested_format, Some(OverviewFormat::Full))
+            && overview.files.len() > FILE_THRESHOLD;
+        let use_summary = matches!(resolved_format, OverviewFormat::Summary) || downgraded;
+        let requested_format = match requested_format {
+            Some(OverviewFormat::Full) => "full",
+            Some(OverviewFormat::Summary) => "summary",
+            None => "auto",
         };
 
         Ok(if use_summary {

@@ -146,9 +146,7 @@ pub(super) fn identity_params() -> Vec<ToolParam> {
 pub(super) fn graph_ref_param() -> ToolParam {
     ToolParam {
         name: "ref".to_string(),
-        description:
-            "Graph ref to read. Defaults to the current branch; read tools may fall back to the repo default branch if this branch has no graph ref yet."
-                .to_string(),
+        description: "Ref.".to_string(),
         param_type: "string".to_string(),
         required: false,
     }

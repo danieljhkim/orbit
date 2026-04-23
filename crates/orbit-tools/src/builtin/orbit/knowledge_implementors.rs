@@ -12,17 +12,17 @@ impl Tool for OrbitKnowledgeImplementorsTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.graph.implementors".to_string(),
-            description: "Use when you need every type that implements a trait. Prefer over grep when `impl TraitName` misses qualified, generic, or re-exported impls. Behavior: matches by trailing identifier, so `crate::foo::EngineHost` and `EngineHost` both match.".to_string(),
+            description: "Use when you need types implementing a trait. Prefer over grep when `impl Trait` misses qualified or re-exported names. Behavior: trailing identifiers match.".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "trait_selector".to_string(),
-                    description: "Trait selector, e.g. `symbol:crates/orbit-engine/src/context.rs#EngineHost:trait`.".to_string(),
+                    description: "Trait selector.".to_string(),
                     param_type: "string".to_string(),
                     required: true,
                 },
                 ToolParam {
                     name: "knowledge_dir".to_string(),
-                    description: "Knowledge artifact dir override. Defaults to `<workspace>/.orbit/knowledge`.".to_string(),
+                    description: "Override knowledge dir.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
