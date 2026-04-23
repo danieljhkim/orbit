@@ -1,75 +1,103 @@
-# Knowledge Graph Token-Usage Benchmarks
+# Knowledge Graph Benchmarks
 
-Measures how much token budget an agent spends to solve the same task when it has access to different navigation toolsets. The goal is a repeatable, comparable number — not a one-off demo.
+Measures how much navigation budget an agent spends solving the same task under different tool surfaces. The benchmark is meant to compare repeatable experiment cells, not produce one-off anecdotes.
 
-See [docs/design/knowledge-graph/](../../docs/design/knowledge-graph/) for what the graph is.
+See [docs/design/knowledge-graph/](../../docs/design/knowledge-graph/) for the graph itself.
+
+## Providers
+
+The harness supports two CLI providers:
+
+| Provider | Navigation surface in this benchmark |
+|---|---|
+| `claude` | Native Claude Code tools plus Orbit MCP graph tools |
+| `codex` | Native Codex `exec_command`; graph access is Phase 1 shell-driven via `orbit tool run orbit.graph.*` |
+
+Codex does not currently use direct MCP graph calls in this harness. In Phase 1, its graph path is provider-native shell execution from the repo root.
 
 ## Arms
 
-Each run locks the agent to one of three tool allowlists:
+Each run locks the child session to one of three navigation modes:
 
-| Arm          | Allowed navigation tools                                    | Graph pre-built? |
-|--------------|-------------------------------------------------------------|------------------|
-| `no-graph`   | `Read`, `Grep`, `Glob`, `Bash(rg/ls/git log/git grep)`      | no               |
-| `graph-only` | `orbit.graph.{overview,search,show,pack,callers,implementors}` | yes           |
-| `hybrid`     | union of both                                               | yes              |
+| Arm | Claude behavior | Codex behavior |
+|---|---|---|
+| `no-graph` | `Read`, `Grep`, `Glob`; graph tools denied | shell-only filesystem navigation (`rg`, `ls`, `find`, focused reads); `orbit.graph.*` forbidden by prompt and classified as an error if used |
+| `graph-only` | Orbit graph MCP tools only | shell-only, but the intended surface is `orbit tool run orbit.graph.*`; zero graph calls with zero denials is classified as an error |
+| `hybrid` | filesystem tools plus graph MCP tools | shell-only with both graph commands and filesystem commands allowed |
 
-Allowlists live under [`arms/`](./arms/) as Claude Code `settings.json` fragments. Non-navigation tools (`Edit`, `Write`, `Bash(cargo ...)`) are permitted in all arms so the agent can actually complete edit tasks.
+Claude keeps native allowlists. Codex is provider-native in Phase 1, so the arm boundary is enforced through prompt steering plus post-run classification of observed commands.
 
-## Task suite
+## Running
 
-Three classes × three difficulty tiers, ~2 fixtures each (~18 total):
+Run a single cell:
 
-- **locate** — "Where is X defined, what kind is it, what implements/uses it?" The graph's sweet spot.
-- **trace**  — "Walk callers of X to depth 2 and summarize what each caller does." Tests deeper navigation.
-- **edit**   — A bounded code change with a compile-and-test oracle. Tests whether graph lookups survive the handoff to actual editing.
+```bash
+benchmarks/graph/scripts/run.sh graph-only locate-agentruntime 1 --provider claude
+benchmarks/graph/scripts/run.sh graph-only locate-agentruntime 1 --provider codex
+make -C benchmarks graph-run GRAPH_PROVIDER=codex GRAPH_ARM=graph-only GRAPH_TASK=locate-agentruntime
+```
 
-Each fixture is a YAML under [`tasks/`](./tasks/) pinning:
+Run a sweep:
 
-- `commit_sha` — exact repo state to run against
-- `prompt` — verbatim user message
-- `oracle` — one of:
-  - `grep:` assertion (substring must / must not appear in final diff or named file)
-  - `cmd:` shell command that must exit 0 (e.g. `cargo test -p orbit-knowledge -- test_foo`)
-  - `judge:` LLM-judge rubric (used as fallback for open-ended trace/summary tasks)
+```bash
+python3 benchmarks/graph/scripts/sweep.py --provider claude --n 5
+python3 benchmarks/graph/scripts/sweep.py --provider codex --n 5
+make -C benchmarks graph-sweep GRAPH_PROVIDER=codex GRAPH_N=1 GRAPH_TASKS=locate-agentruntime
+```
 
-See [`tasks/_schema.yaml`](./tasks/_schema.yaml) for the full schema.
+Useful flags:
 
-## Controls
+- `--provider {claude,codex}` selects the child CLI.
+- `--no-probe` skips the graph pre-flight check for graph-enabled arms.
+- `--budget` sets the Claude spend hint for a single run. Codex records cost as `0.0` in Phase 1 because its JSON event stream does not expose spend.
 
-- Single model + version across a sweep; `temperature=0`; fixed system-prompt scaffold in [`prompts/system.md`](./prompts/system.md).
-- Fresh sandbox per run: clone repo to `/tmp/orbit-bench-<uuid>`, checkout `commit_sha`, rebuild the graph for arms that need it, no prior prompt cache.
-- `N=5` runs per cell → `3 arms × 18 tasks × 5 = 270` runs per sweep.
+## Tasks
 
-## Metrics (per run)
+Fixtures live under [`tasks/`](./tasks/) and pin:
 
-Recorded as `runs/<arm>/<task_id>/<seed>.json`:
+- `commit_sha`: exact repo state to run against
+- `prompt`: verbatim user message
+- `oracle`: grading rule for the final assistant message
 
-- `input_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `output_tokens`, `total_cost_usd`
-- `wall_seconds`, `turns`, `tool_calls` (histogram by tool name)
-- `verdict` ∈ `{pass, fail, error}` from the oracle, plus `judge_rationale` when the judge fires
-- `transcript_path`, `final_diff_path` — full artifacts, gitignored
+See [`tasks/_schema.yaml`](./tasks/_schema.yaml) for the schema.
+
+## Outputs
+
+Per-run records live under:
+
+```text
+benchmarks/graph/runs/<provider>/<arm>/<task_id>/<seed>.json
+benchmarks/graph/runs/<provider>/<arm>/<task_id>/<seed>.transcript.json
+```
+
+Each run record includes:
+
+- `provider`, `requested_model`, `arm`, `task_id`, `seed`
+- token counts, wall time, total cost, tool-call histogram
+- normalized `model_usage`
+- `verdict` in `{pass, fail, error}` plus a diagnostic
+- transcript artifact paths
+
+Sweep metadata lives under:
+
+```text
+benchmarks/graph/runs/_sweeps/<provider>/<sweep_id>/
+```
 
 ## Aggregation
 
-`scripts/aggregate.py` reads `runs/` and emits a table per sweep:
+`python3 benchmarks/graph/scripts/aggregate.py` reads the run tree and prints:
 
-- median and p90 of `input_tokens + output_tokens` per (arm × task_class)
-- pass rate per (arm × task_class)
-- **tokens-per-success** = total tokens across runs ÷ number of passes (the headline number)
+- a primary table grouped by `(provider, arm, task_class)`
+- a secondary table grouped by `(provider, model, arm, task_class)`
+- an error table for excluded runs
 
-## Directory layout
+## Directory Layout
 
-```
+```text
 benchmarks/graph/
-├── README.md          ← this file
-├── arms/              ← per-arm Claude Code settings fragments
-├── prompts/           ← shared system prompt + per-arm preambles
-├── tasks/             ← fixture YAMLs + schema
-├── scripts/           ← run driver, judge, aggregator (not yet written)
-└── runs/              ← gitignored result artifacts
+├── README.md
+├── tasks/
+├── scripts/
+└── runs/
 ```
-
-## Status
-
-Design committed; scripts not yet implemented. Tracked as an Orbit task before any runs are executed.

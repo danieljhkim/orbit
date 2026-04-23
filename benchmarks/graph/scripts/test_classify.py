@@ -5,15 +5,16 @@ Run with: python3 -m unittest benchmarks/graph/scripts/test_classify.py
 
 from __future__ import annotations
 
-import json
+import sys
 import unittest
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
 import classify
 import run as run_module
-
-HERE = Path(__file__).resolve().parent
-BENCH_ROOT = HERE.parent
 
 
 class TestInfraModel(unittest.TestCase):
@@ -34,33 +35,48 @@ class TestInfraModel(unittest.TestCase):
 
 
 class TestArmEnforcement(unittest.TestCase):
-    def test_no_graph_arm_is_no_op(self):
-        # no-graph arm has no mcp__orbit-bench__ in allowlist → enforcement check skipped
+    def test_no_graph_arm_without_graph_calls_is_ok(self):
         result = classify.classify_arm_enforcement(
             arm="no-graph",
-            allowed_tools=["Read", "Grep"],
             tool_calls_by_name={},
             permission_denials=[],
         )
         self.assertIsNone(result)
 
+    def test_no_graph_arm_with_graph_call_is_error(self):
+        result = classify.classify_arm_enforcement(
+            arm="no-graph",
+            tool_calls_by_name={"orbit.graph.search": 1},
+            permission_denials=[],
+        )
+        self.assertIsNotNone(result)
+        verdict, diag = result
+        self.assertEqual(verdict, "error")
+        self.assertIn("forbids graph navigation", diag)
+
     def test_graph_arm_with_zero_calls_and_no_denials_is_error(self):
         result = classify.classify_arm_enforcement(
             arm="graph-only",
-            allowed_tools=["mcp__orbit-bench__orbit_graph_search"],
             tool_calls_by_name={},
             permission_denials=[],
         )
         self.assertIsNotNone(result)
         verdict, diag = result
         self.assertEqual(verdict, "error")
-        self.assertIn("mcp__orbit-bench__", diag)
+        self.assertIn("zero graph calls", diag)
 
-    def test_graph_arm_with_calls_is_ok(self):
+    def test_graph_arm_with_claude_graph_calls_is_ok(self):
         result = classify.classify_arm_enforcement(
             arm="graph-only",
-            allowed_tools=["mcp__orbit-bench__orbit_graph_search"],
             tool_calls_by_name={"mcp__orbit-bench__orbit_graph_search": 3},
+            permission_denials=[],
+        )
+        self.assertIsNone(result)
+
+    def test_graph_arm_with_codex_graph_calls_is_ok(self):
+        result = classify.classify_arm_enforcement(
+            arm="graph-only",
+            tool_calls_by_name={"orbit.graph.search": 2},
             permission_denials=[],
         )
         self.assertIsNone(result)
@@ -69,7 +85,6 @@ class TestArmEnforcement(unittest.TestCase):
         # Agent tried a denied tool — that's a fail, not arm-not-enforced.
         result = classify.classify_arm_enforcement(
             arm="graph-only",
-            allowed_tools=["mcp__orbit-bench__orbit_graph_search"],
             tool_calls_by_name={},
             permission_denials=[{"tool": "Read"}],
         )
@@ -79,6 +94,7 @@ class TestArmEnforcement(unittest.TestCase):
 class TestModelEscalation(unittest.TestCase):
     def test_opus_triggers_error(self):
         result = classify.classify_model_escalation(
+            "claude",
             {"claude-sonnet-4-6": {}, "claude-opus-4-7": {}}
         )
         self.assertIsNotNone(result)
@@ -87,35 +103,51 @@ class TestModelEscalation(unittest.TestCase):
         self.assertIn("opus", diag.lower())
 
     def test_sonnet_only_is_ok(self):
-        result = classify.classify_model_escalation({"claude-sonnet-4-6": {}})
+        result = classify.classify_model_escalation("claude", {"claude-sonnet-4-6": {}})
         self.assertIsNone(result)
 
     def test_sonnet_haiku_is_ok(self):
         result = classify.classify_model_escalation(
+            "claude",
             {"claude-sonnet-4-6": {}, "claude-haiku-4-5-20251001": {}}
         )
         self.assertIsNone(result)
 
+    def test_codex_model_usage_is_not_treated_as_escalation(self):
+        result = classify.classify_model_escalation("codex", {"gpt-5.4": {}})
+        self.assertIsNone(result)
+
 
 class TestEndToEndClassify(unittest.TestCase):
-    """Drive classify_run with shapes matching recorded raw.json."""
+    """Drive classify_run with provider-normalized shapes."""
 
-    def test_recorded_graph_only_run_2_classifies_as_opus_escalation(self):
-        # Run 2 of the sanity-check set DID include opus in modelUsage
-        # despite being advertised as "graph-only". Under the new harness
-        # rules that's an error — exactly the signal we want.
-        path = BENCH_ROOT / "runs" / "graph-only" / "locate-agentruntime" / "2.raw.json"
-        if not path.exists():
-            self.skipTest(f"fixture missing: {path}")
-        parsed = json.loads(path.read_text())
+    def test_claude_pass_classifies_as_pass(self):
         verdict, diag = classify.classify_run(
+            provider="claude",
             arm="graph-only",
-            allowed_tools=["mcp__orbit-bench__orbit_graph_search"],
-            claude_result=parsed,
+            run_result={
+                "tool_calls": {"mcp__orbit-bench__orbit_graph_search": 2},
+                "permission_denials": [],
+                "model_usage": {"claude-sonnet-4-6": {}},
+            },
+            oracle_verdict="pass",
+        )
+        self.assertEqual(verdict, "pass")
+        self.assertIn("oracle accepted", diag)
+
+    def test_codex_no_graph_violation_classifies_as_error(self):
+        verdict, diag = classify.classify_run(
+            provider="codex",
+            arm="no-graph",
+            run_result={
+                "tool_calls": {"exec_command": 2, "orbit.graph.search": 1},
+                "permission_denials": [],
+                "model_usage": {"gpt-5.4": {}},
+            },
             oracle_verdict="pass",
         )
         self.assertEqual(verdict, "error")
-        self.assertIn("opus", diag.lower())
+        self.assertIn("forbids graph navigation", diag)
 
 
 class TestNonce(unittest.TestCase):
@@ -135,28 +167,6 @@ class TestNonce(unittest.TestCase):
         b = run_module.build_system_prompt_suffix("nonce-x", "sweep-1", "graph-only")
         self.assertEqual(
             run_module.system_prompt_hash(a), run_module.system_prompt_hash(b)
-        )
-
-
-class TestArmFragmentPrefixes(unittest.TestCase):
-    """Every MCP tool name declared in arms/*.json must start with
-    mcp__orbit-bench__ so it matches the server name in mcp.json."""
-
-    def test_arm_fragments_use_orbit_prefix(self):
-        arms_dir = BENCH_ROOT / "arms"
-        if not arms_dir.exists():
-            self.skipTest(f"arms dir missing: {arms_dir}")
-        import json as _json
-        offenders = []
-        for p in arms_dir.glob("*.json"):
-            data = _json.loads(p.read_text())
-            perms = data.get("permissions", {})
-            for entry in perms.get("allow", []) + perms.get("deny", []):
-                if entry.startswith("mcp__") and not entry.startswith("mcp__orbit-bench__"):
-                    offenders.append((p.name, entry))
-        self.assertFalse(
-            offenders,
-            f"arm fragments reference non-orbit MCP prefix: {offenders}",
         )
 
 

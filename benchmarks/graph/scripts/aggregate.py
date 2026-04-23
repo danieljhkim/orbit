@@ -1,8 +1,9 @@
 """Sweep aggregator.
 
-Reads benchmarks/graph/runs/<arm>/<task_id>/<seed>.json and emits two
-markdown tables to stdout: the primary (arm, task_class) headline table
-and the secondary (model, arm, task_class) per-model breakdown.
+Reads benchmark records under `benchmarks/graph/runs/` and emits two
+markdown tables to stdout: the primary `(provider, arm, task_class)`
+headline table and the secondary `(provider, model, arm, task_class)`
+per-model breakdown.
 """
 
 from __future__ import annotations
@@ -17,19 +18,35 @@ from pathlib import Path
 import yaml
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
+ARMS = {"no-graph", "graph-only", "hybrid"}
+PROVIDERS = {"claude", "codex"}
 
 
-def load_runs(runs_dir: Path, tasks_dir: Path) -> list[dict]:
+def _fixture_map(tasks_dir: Path) -> dict[str, dict]:
     fixtures = {}
     for p in tasks_dir.glob("*.yaml"):
         if p.stem.startswith("_"):
             continue
         fx = yaml.safe_load(p.read_text())
         fixtures[fx["task_id"]] = fx
-    out = []
-    for arm_dir in runs_dir.iterdir():
-        if not arm_dir.is_dir() or arm_dir.name.startswith("_"):
+    return fixtures
+
+
+def _iter_arm_dirs(runs_dir: Path):
+    for provider_dir in runs_dir.iterdir():
+        if not provider_dir.is_dir() or provider_dir.name.startswith("_"):
             continue
+        if provider_dir.name not in PROVIDERS:
+            continue
+        for arm_dir in provider_dir.iterdir():
+            if arm_dir.is_dir() and arm_dir.name in ARMS:
+                yield (provider_dir.name, arm_dir)
+
+
+def load_runs(runs_dir: Path, tasks_dir: Path) -> list[dict]:
+    fixtures = _fixture_map(tasks_dir)
+    out = []
+    for provider, arm_dir in _iter_arm_dirs(runs_dir):
         for task_dir in arm_dir.iterdir():
             if not task_dir.is_dir():
                 continue
@@ -40,6 +57,8 @@ def load_runs(runs_dir: Path, tasks_dir: Path) -> list[dict]:
                     continue
                 if not isinstance(record, dict) or "verdict" not in record:
                     continue
+                record["provider"] = record.get("provider", provider)
+                record["arm"] = record.get("arm", arm_dir.name)
                 task_id = record.get("task_id", task_dir.name)
                 fx = fixtures.get(task_id, {})
                 record["_task_class"] = fx.get("class", "unknown")
@@ -48,19 +67,20 @@ def load_runs(runs_dir: Path, tasks_dir: Path) -> list[dict]:
 
 
 def primary_table(runs: list[dict]) -> str:
-    cells: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    cells: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
     for r in runs:
         if r["verdict"] == "error":
             continue
-        cells[(r["arm"], r["_task_class"])].append(r)
+        cells[(r["provider"], r["arm"], r["_task_class"])].append(r)
 
     rows = []
-    for (arm, cls), cell_runs in sorted(cells.items()):
+    for (provider, arm, cls), cell_runs in sorted(cells.items()):
         totals = [r["input_tokens"] + r["output_tokens"] for r in cell_runs]
         passes = sum(1 for r in cell_runs if r["verdict"] == "pass")
         tps = (sum(totals) / max(1, passes)) if passes else float("inf")
         rows.append(
             {
+                "provider": provider,
                 "arm": arm,
                 "task_class": cls,
                 "runs": len(cell_runs),
@@ -74,26 +94,27 @@ def primary_table(runs: list[dict]) -> str:
                 "tokens_per_success": f"{tps:.0f}" if tps != float("inf") else "∞",
             }
         )
-    return _render("Primary: arm × task_class", rows)
+    return _render("Primary: provider × arm × task_class", rows)
 
 
 def secondary_table(runs: list[dict]) -> str:
-    cells: dict[tuple[str, str, str], dict] = defaultdict(
+    cells: dict[tuple[str, str, str, str], dict] = defaultdict(
         lambda: {"cache_read_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "runs": 0}
     )
     for r in runs:
         if r["verdict"] == "error":
             continue
         for model, mu in (r.get("model_usage") or {}).items():
-            k = (model, r["arm"], r["_task_class"])
+            k = (r["provider"], model, r["arm"], r["_task_class"])
             cells[k]["cache_read_tokens"] += mu.get("cache_read_tokens", 0)
             cells[k]["output_tokens"] += mu.get("output_tokens", 0)
             cells[k]["cost_usd"] += mu.get("cost_usd", 0.0)
             cells[k]["runs"] += 1
     rows = []
-    for (model, arm, cls), vals in sorted(cells.items()):
+    for (provider, model, arm, cls), vals in sorted(cells.items()):
         rows.append(
             {
+                "provider": provider,
                 "model": model,
                 "arm": arm,
                 "task_class": cls,
@@ -103,7 +124,7 @@ def secondary_table(runs: list[dict]) -> str:
                 "cost_usd": f"{vals['cost_usd']:.4f}",
             }
         )
-    return _render("Secondary: model × arm × task_class", rows)
+    return _render("Secondary: provider × model × arm × task_class", rows)
 
 
 def error_table(runs: list[dict]) -> str:
@@ -112,6 +133,7 @@ def error_table(runs: list[dict]) -> str:
         return ""
     rows = [
         {
+            "provider": r["provider"],
             "arm": r["arm"],
             "task_id": r["task_id"],
             "seed": r["seed"],

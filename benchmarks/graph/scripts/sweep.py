@@ -31,6 +31,12 @@ def discover_tasks(task_dir: Path) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--provider",
+        choices=["claude", "codex"],
+        default="claude",
+        help="child CLI provider to benchmark",
+    )
     ap.add_argument("--arms", nargs="+", default=["no-graph", "graph-only", "hybrid"])
     ap.add_argument("--tasks", nargs="*", help="task_ids (default: all fixtures)")
     ap.add_argument("--n", type=int, default=5, help="runs per cell")
@@ -59,24 +65,36 @@ def main() -> int:
     rng = random.Random(sweep_seed)
     rng.shuffle(cells)
 
-    sweep_dir = BENCH_ROOT / "runs" / "_sweeps" / sweep_id
+    sweep_dir = BENCH_ROOT / "runs" / "_sweeps" / args.provider / sweep_id
     sweep_dir.mkdir(parents=True, exist_ok=True)
     order_path = sweep_dir / "order.json"
     order_path.write_text(
         json.dumps(
             {
+                "provider": args.provider,
                 "sweep_id": sweep_id,
                 "sweep_seed": sweep_seed,
                 "arms": args.arms,
                 "tasks": task_ids,
                 "n": args.n,
-                "order": [{"arm": a, "task_id": t, "seed": s} for (a, t, s) in cells],
+                "order": [
+                    {
+                        "provider": args.provider,
+                        "arm": a,
+                        "task_id": t,
+                        "seed": s,
+                    }
+                    for (a, t, s) in cells
+                ],
             },
             indent=2,
         )
         + "\n"
     )
-    print(f"sweep_id={sweep_id} seed={sweep_seed} cells={len(cells)} → {order_path}")
+    print(
+        f"provider={args.provider} sweep_id={sweep_id} "
+        f"seed={sweep_seed} cells={len(cells)} → {order_path}"
+    )
 
     if args.dry_run:
         return 0
@@ -91,9 +109,13 @@ def main() -> int:
             "RUN_ORDER_INDEX": str(i),
             "NONCE": nonce,
         }
-        print(f"[{i + 1}/{len(cells)}] arm={arm} task={task_id} seed={seed}", flush=True)
+        print(
+            f"[{i + 1}/{len(cells)}] provider={args.provider} "
+            f"arm={arm} task={task_id} seed={seed}",
+            flush=True,
+        )
         proc = subprocess.run(
-            [str(RUN_SH), arm, task_id, str(seed)],
+            [str(RUN_SH), arm, task_id, str(seed), "--provider", args.provider],
             env=env,
             capture_output=True,
             text=True,
@@ -102,10 +124,29 @@ def main() -> int:
         try:
             info = json.loads(tail)
             total_spend += info.get("cost", 0.0)
-            results.append({"arm": arm, "task_id": task_id, "seed": seed, **info})
-            print(f"  verdict={info.get('verdict')} cost={info.get('cost'):.3f} running_total=${total_spend:.2f}")
+            results.append(
+                {
+                    "provider": args.provider,
+                    "arm": arm,
+                    "task_id": task_id,
+                    "seed": seed,
+                    **info,
+                }
+            )
+            print(
+                f"  verdict={info.get('verdict')} cost={info.get('cost'):.3f} "
+                f"running_total=${total_spend:.2f}"
+            )
         except json.JSONDecodeError:
-            results.append({"arm": arm, "task_id": task_id, "seed": seed, "error": "unparseable run.sh output"})
+            results.append(
+                {
+                    "provider": args.provider,
+                    "arm": arm,
+                    "task_id": task_id,
+                    "seed": seed,
+                    "error": "unparseable run.sh output",
+                }
+            )
             print(f"  stderr: {proc.stderr[:400]}")
         if total_spend > args.budget_ceiling:
             print(f"BUDGET CEILING ${args.budget_ceiling:.2f} EXCEEDED — halting sweep", file=sys.stderr)
