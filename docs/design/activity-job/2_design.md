@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-23
 
 This document describes the shipped Activity / Job substrate as it exists today across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, load-time normalization, dispatch boundaries, backend semantics, DAG execution, audit, and the legacy edges that still matter. See [1_overview.md](./1_overview.md) for the feature's purpose and [3_vision.md](./3_vision.md) for forward-looking questions.
 
@@ -322,6 +322,10 @@ README already frames tasks, jobs, and activities as substrate rather than the l
 
 Most code comments are accurate, but some module prose still reflects earlier phase names or pass ordering. When there is tension, orbit-core entrypoints and executor behavior are the authoritative source.
 
+### 11.8 Historical run inspection can outlive seeded assets
+
+Read-only history surfaces do not always have the same dependency shape as live execution. After [T20260423-0447], `orbit run duel list` and latest `show` intentionally read stored run bundles without requiring the original duel job asset to remain seeded, because retirement of an executable surface must not also erase its observability trail.
+
 ---
 
 ## Task References
@@ -342,5 +346,6 @@ Most code comments are accurate, but some module prose still reflects earlier ph
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

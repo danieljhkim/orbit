@@ -235,7 +235,7 @@ Orbit also exposes lower-level operating surfaces:
 
 - `activity` and `job` for defining and running substrate assets directly
 - `policy`, `executor`, and `tool` for runtime customization
-- `orbit run duel` and `orbit run job <id>` for evaluation and direct workflow execution
+- `orbit run duel score|list|show` and `orbit run job <id>` for evaluation history and direct workflow execution
 - `metrics`, `scoreboard`, and `serve` for observability and outward integration
 
 They are intentionally available because durable local state is part of the product, but most users can ignore them on day one. Reach for `orbit --help` and `orbit <command> --help` when you need the deeper surface area.

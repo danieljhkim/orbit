@@ -475,6 +475,7 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
                 Some(DuelSubcommand::Score(_)) => ("duel/score", None),
                 Some(DuelSubcommand::List(_)) => ("duel/list", None),
                 Some(DuelSubcommand::Show(args)) => ("duel/show", args.run_id.as_deref()),
+                None if command.defaults_to_scoreboard() => ("duel/score", None),
                 None => ("duel", command.direct.task_id.as_deref()),
             };
             (sub, Some("duel"), target_id)

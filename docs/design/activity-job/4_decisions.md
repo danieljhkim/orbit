@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-23
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -125,6 +125,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - The agent loop type stays smaller and easier to reason about.
 - Cost: ActivityV2 gains another sibling variant and the feature family becomes slightly broader.
 
+## ADR-010 — Historical workflow inspection must not depend on live seeded job assets
+
+**Status:** Accepted · 2026-04 · [T20260423-0447]
+
+**Context.** After [T20260419-2156], some older workflow assets such as duel no longer ship as runnable seeded jobs. Their historical run bundles and scoreboards can still exist on disk, and users still need to inspect that history.
+
+**Decision.** Treat historical inspection as a stored-data concern, not a live-asset lookup. Read-only surfaces such as `orbit run duel list` and latest `orbit run duel show` must filter persisted run bundles directly, and bare `orbit run duel` defaults to the preserved scoreboard surface instead of the retired execution path.
+
+**Consequences.**
+- Retired workflows remain observable even after their executable assets disappear.
+- CLI retirement messaging and historical inspection behavior stay aligned.
+- Cost: some read-only inspection paths no longer share the same asset-validation gate as active workflow execution paths.
+
 ---
 
 ## Task References
@@ -142,5 +155,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -7,7 +7,7 @@ use crate::command::{duel, job, ship};
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
   orbit run ship <task_id> ...
-  orbit run duel <args>
+  orbit run duel [score|list|show|plan]
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
 Direct form:
@@ -44,7 +44,7 @@ impl Execute for RunCommand {
 pub enum RunSubcommand {
     /// Ship tasks through the pipeline
     Ship(ship::ShipCommand),
-    /// Run cross-agent scoring and planning workflows
+    /// Inspect cross-agent duel history and scoreboards
     Duel(duel::DuelCommand),
     /// Run an arbitrary job by ID
     Job(job::JobRunArgs),
