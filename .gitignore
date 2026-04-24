@@ -6,11 +6,6 @@ agentspace
 .gemini
 .DS_Store
 .agents
-docs
-!docs/
-docs/*
-!docs/POSITIONING.md
-!docs/design/
 sessions
 examples.md
 feature.md

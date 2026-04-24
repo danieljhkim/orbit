@@ -4,11 +4,34 @@
 
 ### Breaking Changes
 
-- **Ship and duel subcommands renamed**: `orbit ship run` is now `orbit ship pr`, `orbit ship run --local` is now `orbit ship local`, and `orbit duel run` is now `orbit duel pr`; the old `run` verb and `--local` flag are removed.
+- **Activity/job v1 retired**: `schemaVersion: 1` activity/job assets are rejected at load time, the old v1 reconcile/runtime/store paths were removed, and `schemaVersion: 2` is now the canonical activity/job surface ([T20260419-2156], [T20260420-0036])
+- **Workflow CLI surface reorganized**: workflows now use `orbit run ship [TASK_IDS]`, `orbit run ship local [TASK_IDS]`, `orbit run duel [TASK_ID]`, `orbit run duel plan <TASK_ID>`, and `orbit run job <JOB_ID>`; the older `orbit run ship-local`, `--tasks T1,T2`, and intermediate top-level `orbit ship ...` / `orbit duel ...` spellings are no longer public ([T20260417-0248], [T20260419-0355])
+
+### Features
+
+- **Activity/job v2 runtime**: added schema v2 activities and jobs with typed DAG blocks (`parallel`, `fan_out`, `loop`, `retry`, `when`), activity name resolution, `backend: auto` normalization, `backend: cli` dispatch, HTTP agent loops, session-bound loop steps, and a v2 audit envelope with workspace provenance ([T20260418-2018], [T20260418-2019], [T20260418-2143], [T20260418-2210], [T20260419-0002], [T20260419-0104])
+- **Seeded task pipelines**: added load-bearing seeded workflows for PR, local, gate, auto-dispatch, and epic shipment, including task reservations, backlog bundling, admission-controlled dispatch, and session-backed epic orchestration ([T20260419-0622-3], [T20260419-0623], [T20260419-0623-2], [T20260419-2347])
+- **Knowledge graph**: added the Rust `orbit-knowledge` graph, `orbit graph build/update/search/show`, graph MCP tools, compact overviews, callers/implementors/dependency navigation, graph edit buffering, shared locks, auto-refresh, branch-scoped refs, task-ID attribution, `orbit task history`, and markdown/config/table extraction ([T20260411-0424], [T20260412-0645-2], [T20260412-0645-3], [T20260421-0358], [T20260421-0528], [T20260422-1540])
+- **MCP integrations**: added the `orbit-mcp` crate, `orbit serve mcp`, safe default graph/task tool exposure, external MCP/plugin tooling, and `orbit mcp init/remove` setup for Claude, Codex, and Gemini clients ([T20260418-0336], [T20260419-0236], [T20260422-1713])
+- **Dashboard and observability**: added `orbit serve web`, task/job/audit/scoreboard/dashboard APIs, diagnostics and recent-runs views, task actions from the dashboard, copyable task IDs, connection health, skeleton/loading states, markdown rendering, and live-data animations ([T20260417-0346], [T20260417-0412], [T20260417-0427], [T20260417-0437], [T20260417-0528], [T20260418-2004])
+- **Task planning and search**: added structured task plans, dependency support, epic task type support, selector-first task context, agent task search, and richer task field projection for agent/tool callers ([T20260419-2300], [T20260420-0509-2], [T20260420-0521], [T20260421-0445], [T20260422-1756])
+- **Groundhog execution model**: added Groundhog chronicle serialization, workspace snapshots, verb tools, checkpoint verification, and a dedicated Groundhog v1 activity runner ([T20260420-0509], [T20260420-0509-3], [T20260420-0509-4], [T20260420-0510], [T20260420-0510-2])
+- **Provider and evaluation support**: added Gemini support, configurable agent/model selection, provider invocation traces, HTTP LoopTransport implementations for Anthropic/OpenAI-compatible/Gemini providers, planning duels, scoreboard attribution improvements, and versioned knowledge-graph benchmark harnesses ([T20260411-1937-2], [T20260412-0457-2], [T20260412-1939], [T20260412-2129], [T20260418-0645], [T20260418-0759], [T20260422-1609])
 
 ### Fixes
 
-- **Branch-scoped knowledge graph refs**: graph builds now write `.orbit/knowledge/graph/refs/heads/<branch>.json` files that point at immutable per-build indexes, reads default to the current git branch with default-branch fallback, and legacy `.orbit/knowledge/graph/refs/current.json` stores auto-migrate on first open/write
+- **Job run observability**: `orbit run ship --json`, `orbit run ship show`, and direct `orbit job run` now retain actionable failure details and durable run-state/job-history records, including synthetic job-level steps for early v2 pipeline failures ([T20260423-0445], [T20260423-2004-4])
+- **Branch-scoped knowledge graph refs**: graph builds now write `.orbit/knowledge/graph/refs/heads/<branch>.json` files that point at immutable per-build indexes, reads default to the current git branch with default-branch fallback, and legacy `.orbit/knowledge/graph/refs/current.json` stores auto-migrate on first open/write ([T20260421-0358])
+- **Knowledge graph hardening**: graph reads and refreshes recover from corrupted stores, avoid stale worktree data, gate refresh/search hot paths, prune missing context files from locks, and hydrate task IDs idempotently during attribution ([T20260416-0719], [T20260417-0307], [T20260420-0540], [T20260421-0652])
+- **Dispatch and locking correctness**: task locks now detect directory/file overlaps, backlog selection filters locked groups, failed task-scoped runs move tasks to blocked with job/run/error context, and drained local batches no longer fail spuriously ([T20260412-0443], [T20260417-0301], [T20260419-2109], [T20260420-0014])
+- **Workflow compatibility**: restored read-only `orbit run duel` history after executable duel assets were retired, merged object-valued job defaults with caller input, and aligned the Quick Start approval flow with the current task lifecycle ([T20260423-0447], [T20260423-0445], [T20260423-2004-2])
+- **Release and developer tooling**: restored release CI targets, repaired advertised developer targets, kept custom roots isolated, and fixed crashes/empty listings after seeded activity/job initialization ([T20260419-2347], [T20260423-2004], [T20260423-2004-3], [T20260423-2004-5])
+- **Security and concurrency hardening**: added localhost origin checks for web write endpoints, serialized diagnostics JSONL appends, hardened task-store concurrency, tightened filesystem/tool-runtime path boundaries, and strengthened agent protocol handling ([T20260417-0557], [T20260417-0558], [T20260418-1928])
+
+### Chores
+
+- **Crate architecture**: extracted `orbit-common`, `orbit-knowledge`, and `orbit-mcp`, merged the older `orbit-types` surface into `orbit-common`, decomposed execution/runtime modules, and kept crate dependency direction aligned with the documented architecture ([T20260411-0008], [T20260419-2014])
+- **Documentation and positioning**: added Orbit positioning docs, design-doc conventions, activity-job/knowledge-graph/Groundhog design docs, benchmark reports, and README updates for the current workflow and MCP surfaces
 
 ## 0.2.0
 

@@ -372,22 +372,6 @@ MCP support is an integration layer, not Orbit's moat.
 
 ---
 
-## What Orbit Is Not
-
-Orbit is deliberately not serving three audiences (see [docs/POSITIONING.md](docs/POSITIONING.md) for the reasoning):
-
-1. **Individual developers augmenting personal workflow.** Claude Code, Cursor, Aider, Codex CLI already serve this audience well. Optimizing for them — subscription-backed backends, zero-config installs, personal-context assumptions — compromises properties the primary audience needs.
-2. **Enterprise procurement buyers.** SOC 2, SSO, multi-tenant permissions, sales motions. The honest path if enterprise demand arrives is a commercial fork or partnership, not bolting enterprise surface onto the OSS core.
-3. **Generic workflow orchestrators.** n8n, Airflow, LangGraph, Temporal. Orbit is specifically a coding-agent platform, not a generic workflow engine.
-
-And Orbit is not trying to be:
-
-- a foundation model provider
-- a replacement for GitHub, Jira, or Linear
-- a generic task manager as the primary product
-
----
-
 ## Current Status
 
 Orbit is a work in progress.
@@ -409,7 +393,6 @@ Contributions focused on **graph-aware scheduling, locking, worktree/session man
 
 Before contributing, read:
 
-- [docs/POSITIONING.md](docs/POSITIONING.md) — who Orbit is for, what it refuses to become
 - [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md) — design doc conventions (required reading if you touch `docs/design/`)
 - [CLAUDE.md](CLAUDE.md) — project-wide instructions for human and agent contributors
 
