@@ -1,21 +1,33 @@
 /target
 
+# Agent / tool state
 .claude
-agentspace
 .codex
 .gemini
-.DS_Store
 .agents
+agentspace
+
+# OS / editor
+.DS_Store
+.vscode
+
+# Scratch / session files
 sessions
+tmp
+raw
 examples.md
 feature.md
 feat.md
+schema.md
+critique.md
+
+# Runtime state
 config.toml
 orbit.db
 orbit.db-shm
 orbit.db-wal
 .orbit/
-.monodev
+.monodev/
 
 # Python
 __pycache__/
@@ -23,17 +35,14 @@ __pycache__/
 *.egg-info/
 *.egg
 .venv/
+uv.lock
+
+# Node
+node_modules/
 dist/
 build/
-schema.md
-.vscode
-critique.md
-uv.lock
-tmp
-node_modules
-package-lock.json
+.astro/
 
 # direnv — per-repo env vars (holds secrets like ANTHROPIC_API_KEY)
 .envrc
 .direnv/
-raw
