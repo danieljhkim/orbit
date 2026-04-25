@@ -1,0 +1,41 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "no-graph",
+  "task_id": "macro-expanded-callers",
+  "seed": 2,
+  "sweep_id": "20260424-230632-f36f84",
+  "run_order_index": 63,
+  "nonce": "749b6cfdb8fd4c57beffdd312befac5c",
+  "system_prompt_hash": "787b5384d21cbf70",
+  "fixture_path": "benchmarks/graph/v4/tasks/macro-expanded-callers.yaml",
+  "allowed_tools": [
+    "exec_command"
+  ],
+  "disallowed_tools_head": [],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 13.66,
+  "turns": 1,
+  "input_tokens": 10896,
+  "cache_read_tokens": 27520,
+  "cache_creation_tokens": 0,
+  "output_tokens": 382,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "exec_command": 2
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 10896,
+      "cache_read_tokens": 27520,
+      "cache_creation_tokens": 0,
+      "output_tokens": 382,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/no-graph/macro-expanded-callers/2.transcript.json",
+  "final_diff_path": null
+}

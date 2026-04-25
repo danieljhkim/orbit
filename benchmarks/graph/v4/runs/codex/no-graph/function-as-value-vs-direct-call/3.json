@@ -1,0 +1,41 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "no-graph",
+  "task_id": "function-as-value-vs-direct-call",
+  "seed": 3,
+  "sweep_id": "20260424-230632-f36f84",
+  "run_order_index": 26,
+  "nonce": "0d9f36caef50400a8fc9b94c1d7a3421",
+  "system_prompt_hash": "7d6ce43e9ae3896d",
+  "fixture_path": "benchmarks/graph/v4/tasks/function-as-value-vs-direct-call.yaml",
+  "allowed_tools": [
+    "exec_command"
+  ],
+  "disallowed_tools_head": [],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 37.99,
+  "turns": 1,
+  "input_tokens": 12778,
+  "cache_read_tokens": 72448,
+  "cache_creation_tokens": 0,
+  "output_tokens": 1384,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "exec_command": 8
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 12778,
+      "cache_read_tokens": 72448,
+      "cache_creation_tokens": 0,
+      "output_tokens": 1384,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/no-graph/function-as-value-vs-direct-call/3.transcript.json",
+  "final_diff_path": null
+}

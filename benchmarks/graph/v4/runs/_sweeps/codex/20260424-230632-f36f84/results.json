@@ -1,0 +1,722 @@
+[
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "function-as-value-vs-direct-call",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/function-as-value-vs-direct-call/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 101.32
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "generic-dispatch-concrete-impl",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/generic-dispatch-concrete-impl/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 53.87
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "impl-divergence-trait-method",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/impl-divergence-trait-method/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 21.34
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "construct-vs-match-benchevent-distinct",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/construct-vs-match-benchevent-distinct/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 68.03
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "deps-downstream-orbit-knowledge",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/deps-downstream-orbit-knowledge/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 59.13
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "references-vs-callers-tool-registry-register",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/references-vs-callers-tool-registry-register/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 122.36
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "generic-dispatch-concrete-impl",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/generic-dispatch-concrete-impl/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 11.55
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "generic-dispatch-concrete-impl",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/generic-dispatch-concrete-impl/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 51.32
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "implementors-benchsink-with-blanket",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/implementors-benchsink-with-blanket/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 12.47
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "reverse-export-orbit-error",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/reverse-export-orbit-error/2.json",
+    "verdict": "fail",
+    "cost": 0.0,
+    "wall": 165.3
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "const-value-extraction",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/const-value-extraction/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 242.71
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "module-surface-orbit-mcp",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/module-surface-orbit-mcp/1.json",
+    "verdict": "fail",
+    "cost": 0.0,
+    "wall": 92.46
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "deps-downstream-orbit-knowledge",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/deps-downstream-orbit-knowledge/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 25.2
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "references-vs-callers-tool-registry-register",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/references-vs-callers-tool-registry-register/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 55.85
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "callers-2hop-graphbenchpolicy",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/callers-2hop-graphbenchpolicy/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 48.05
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "function-as-value-vs-direct-call",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/function-as-value-vs-direct-call/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 57.14
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "macro-expanded-callers",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/macro-expanded-callers/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 49.68
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "module-surface-orbit-mcp",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/module-surface-orbit-mcp/2.json",
+    "verdict": "fail",
+    "cost": 0.0,
+    "wall": 148.43
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "implementors-benchsink-with-blanket",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/implementors-benchsink-with-blanket/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 16.99
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "function-as-value-vs-direct-call",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/function-as-value-vs-direct-call/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 38.78
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "callers-2hop-graphbenchpolicy",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/callers-2hop-graphbenchpolicy/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 45.98
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "module-surface-orbit-mcp",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/module-surface-orbit-mcp/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 28.24
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "references-vs-callers-tool-registry-register",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/references-vs-callers-tool-registry-register/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 37.45
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "function-as-value-vs-direct-call",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/function-as-value-vs-direct-call/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 79.41
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "callers-2hop-graphbenchpolicy",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/callers-2hop-graphbenchpolicy/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 19.18
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "macro-expanded-callers",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/macro-expanded-callers/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 15.7
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "function-as-value-vs-direct-call",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/function-as-value-vs-direct-call/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 37.99
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "construct-vs-match-benchevent-distinct",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/construct-vs-match-benchevent-distinct/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 14.06
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "reverse-export-orbit-error",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/reverse-export-orbit-error/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 62.17
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "deps-downstream-orbit-knowledge",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/deps-downstream-orbit-knowledge/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 45.0
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "construct-vs-match-benchevent-distinct",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/construct-vs-match-benchevent-distinct/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 18.53
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "reverse-export-orbit-error",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/reverse-export-orbit-error/3.json",
+    "verdict": "fail",
+    "cost": 0.0,
+    "wall": 241.93
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "callers-2hop-graphbenchpolicy",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/callers-2hop-graphbenchpolicy/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 17.94
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "implementors-benchsink-with-blanket",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/implementors-benchsink-with-blanket/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 85.37
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "impl-divergence-trait-method",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/impl-divergence-trait-method/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 24.19
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "deps-downstream-orbit-knowledge",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/deps-downstream-orbit-knowledge/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 22.26
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "const-value-extraction",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/const-value-extraction/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 24.0
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "macro-expanded-callers",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/macro-expanded-callers/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 14.45
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "deps-downstream-orbit-knowledge",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/deps-downstream-orbit-knowledge/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 49.28
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "deps-downstream-orbit-knowledge",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/deps-downstream-orbit-knowledge/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 26.73
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "impl-divergence-trait-method",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/impl-divergence-trait-method/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 63.93
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "module-surface-orbit-mcp",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/module-surface-orbit-mcp/3.json",
+    "verdict": "fail",
+    "cost": 0.0,
+    "wall": 87.66
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "implementors-benchsink-with-blanket",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/implementors-benchsink-with-blanket/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 86.74
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "implementors-benchsink-with-blanket",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/implementors-benchsink-with-blanket/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 70.83
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "const-value-extraction",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/const-value-extraction/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 27.47
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "reverse-export-orbit-error",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/reverse-export-orbit-error/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 46.49
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "impl-divergence-trait-method",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/impl-divergence-trait-method/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 22.35
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "module-surface-orbit-mcp",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/module-surface-orbit-mcp/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 29.76
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "references-vs-callers-tool-registry-register",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/references-vs-callers-tool-registry-register/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 78.0
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "macro-expanded-callers",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/macro-expanded-callers/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 34.37
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "construct-vs-match-benchevent-distinct",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/construct-vs-match-benchevent-distinct/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 35.38
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "macro-expanded-callers",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/macro-expanded-callers/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 55.46
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "reverse-export-orbit-error",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/reverse-export-orbit-error/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 30.93
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "implementors-benchsink-with-blanket",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/implementors-benchsink-with-blanket/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 12.58
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "generic-dispatch-concrete-impl",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/generic-dispatch-concrete-impl/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 12.05
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "construct-vs-match-benchevent-distinct",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/construct-vs-match-benchevent-distinct/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 36.25
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "reverse-export-orbit-error",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/reverse-export-orbit-error/1.json",
+    "verdict": "fail",
+    "cost": 0.0,
+    "wall": 201.05
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "generic-dispatch-concrete-impl",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/generic-dispatch-concrete-impl/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 15.47
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "impl-divergence-trait-method",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/impl-divergence-trait-method/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 82.27
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "references-vs-callers-tool-registry-register",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/references-vs-callers-tool-registry-register/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 63.65
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "construct-vs-match-benchevent-distinct",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/construct-vs-match-benchevent-distinct/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 20.11
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "references-vs-callers-tool-registry-register",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/references-vs-callers-tool-registry-register/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 93.42
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "impl-divergence-trait-method",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/impl-divergence-trait-method/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 34.12
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "macro-expanded-callers",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/macro-expanded-callers/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 13.66
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "callers-2hop-graphbenchpolicy",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/callers-2hop-graphbenchpolicy/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 51.21
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "const-value-extraction",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/const-value-extraction/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 60.96
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "const-value-extraction",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/const-value-extraction/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 25.7
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "function-as-value-vs-direct-call",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/function-as-value-vs-direct-call/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 40.1
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "const-value-extraction",
+    "seed": 3,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/const-value-extraction/3.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 62.79
+  },
+  {
+    "provider": "codex",
+    "arm": "graph-only",
+    "task_id": "generic-dispatch-concrete-impl",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/graph-only/generic-dispatch-concrete-impl/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 51.06
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "module-surface-orbit-mcp",
+    "seed": 2,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/module-surface-orbit-mcp/2.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 29.92
+  },
+  {
+    "provider": "codex",
+    "arm": "no-graph",
+    "task_id": "callers-2hop-graphbenchpolicy",
+    "seed": 1,
+    "out": "/Users/daniel/workspace/repos/orbit/benchmarks/graph/v4/runs/codex/no-graph/callers-2hop-graphbenchpolicy/1.json",
+    "verdict": "pass",
+    "cost": 0.0,
+    "wall": 22.84
+  }
+]

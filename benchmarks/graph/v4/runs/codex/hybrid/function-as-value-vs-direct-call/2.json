@@ -1,0 +1,42 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "hybrid",
+  "task_id": "function-as-value-vs-direct-call",
+  "seed": 2,
+  "sweep_id": "20260425-001959-842b8c",
+  "run_order_index": 10,
+  "nonce": "826ff7132d024f4ea8893278567a0d86",
+  "system_prompt_hash": "8c4a4e7a8fdadc45",
+  "fixture_path": "benchmarks/graph/v4/tasks/function-as-value-vs-direct-call.yaml",
+  "allowed_tools": [
+    "exec_command",
+    "mcp:orbit_bench.orbit_graph_*"
+  ],
+  "disallowed_tools_head": [],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 32.57,
+  "turns": 1,
+  "input_tokens": 3667,
+  "cache_read_tokens": 64768,
+  "cache_creation_tokens": 0,
+  "output_tokens": 1205,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "exec_command": 6
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 3667,
+      "cache_read_tokens": 64768,
+      "cache_creation_tokens": 0,
+      "output_tokens": 1205,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/hybrid/function-as-value-vs-direct-call/2.transcript.json",
+  "final_diff_path": null
+}

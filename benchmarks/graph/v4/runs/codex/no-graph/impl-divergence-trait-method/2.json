@@ -1,0 +1,41 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "no-graph",
+  "task_id": "impl-divergence-trait-method",
+  "seed": 2,
+  "sweep_id": "20260424-230632-f36f84",
+  "run_order_index": 34,
+  "nonce": "a0ef874f11bc449383dd69f0297200b4",
+  "system_prompt_hash": "d6f51de7a1997cea",
+  "fixture_path": "benchmarks/graph/v4/tasks/impl-divergence-trait-method.yaml",
+  "allowed_tools": [
+    "exec_command"
+  ],
+  "disallowed_tools_head": [],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 24.19,
+  "turns": 1,
+  "input_tokens": 14479,
+  "cache_read_tokens": 97408,
+  "cache_creation_tokens": 0,
+  "output_tokens": 945,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "exec_command": 6
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 14479,
+      "cache_read_tokens": 97408,
+      "cache_creation_tokens": 0,
+      "output_tokens": 945,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/no-graph/impl-divergence-trait-method/2.transcript.json",
+  "final_diff_path": null
+}
