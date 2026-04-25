@@ -4,6 +4,7 @@ Orbit-specific terms used across the knowledge-graph docs and `orbit-knowledge`.
 
 | Term | Meaning |
 |------|---------|
+| **`.orbitignore`** | Workspace-local, gitignore-compatible exclusion file consumed by the knowledge-graph scan stage. It controls graph inclusion at parse time and is distinct from runtime policy deny rules. See [2_design.md §2.3]. |
 | **Attribution** | Orbit-specific pipeline stage that parses `\[T\d{8}-\d{4}(?:-\d+)?\]` task IDs from commit messages, maps hunks to leaves by line-range overlap, and unions the IDs onto touched nodes. See [2_design.md §2.2]. |
 | **CodebaseGraphV1** | Top-level serialized graph shape: `{ root_dir_id, dirs, files, leaves }`. The `V1` is load-bearing — it pins the on-disk schema. |
 | **DirNode / FileNode / LeafNode** | The three Orbit node types. `LeafNode` is the in-code name for what the tool surface calls a "symbol" (renamed under [T20260411-0424]; the type name predates the rename). |

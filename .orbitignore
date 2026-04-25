@@ -1,0 +1,4 @@
+# Frozen benchmark run artifacts are committed for reproducibility but should
+# not be indexed into the knowledge graph.
+benchmarks/**/tasks/**
+benchmarks/**/runs/**

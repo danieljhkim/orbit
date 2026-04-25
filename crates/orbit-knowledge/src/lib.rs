@@ -1,3 +1,36 @@
+//! Knowledge-graph parsing, storage, and query services for Orbit.
+//!
+//! The scan pipeline applies a built-in `.orbitignore` baseline before files
+//! are parsed. By default Orbit excludes `.orbit/`, `node_modules/`, and
+//! `target/` from indexing unless a workspace `.orbitignore` file overrides
+//! those patterns.
+
+/// Shared default patterns for the scan pipeline and newly initialized
+/// workspaces' `.orbitignore` files.
+pub const DEFAULT_ORBITIGNORE_PATTERNS: &[&str] = &[
+    ".orbit/",
+    "node_modules/",
+    "target/",
+    "dist/",
+    "build/",
+    ".venv/",
+    "venv/",
+    "__pycache__/",
+    "*.egg-info/",
+];
+
+/// Render the default `.orbitignore` file content for `orbit workspace init`.
+pub fn default_orbitignore_template() -> String {
+    let mut content = String::from(
+        "# Common generated/artifact directories that should stay out of the knowledge graph.\n",
+    );
+    for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
+        content.push_str(pattern);
+        content.push('\n');
+    }
+    content
+}
+
 mod error;
 pub mod extract;
 pub mod graph;

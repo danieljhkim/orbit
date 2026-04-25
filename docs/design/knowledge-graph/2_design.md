@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-22 (non-code extraction, T20260422-1540)
+**Last updated:** 2026-04-23 (`.orbitignore` scan exclusions, [T20260423-0452])
 
 This document specifies the knowledge graph as it exists today: on-disk layout, build pipeline, query services, Orbit integration, locking, and honest limitations. See [1_overview.md](./1_overview.md) for the "why" and [3_vision.md](./3_vision.md) for where it is headed. Task IDs are cited inline and collected at the end.
 
@@ -39,7 +39,7 @@ scan → hash → detect_changes → build_dirs → build_files → build_leaves
 
 | Stage | Output | Notes |
 |-------|--------|-------|
-| `scan_repo` | `ctx.file_paths` | Walks the repo honoring `.gitignore`-style rules |
+| `scan_repo` | `ctx.file_paths` | Walks the repo honoring `.gitignore` plus Orbit-specific `.orbitignore` rules |
 | `compute_hashes` | Per-file content hashes | Drives incremental detection |
 | `detect_changes` | Added / modified / unchanged sets | Unchanged files reuse prior leaves |
 | `build_graph_dirs` | `DirNode` entries with parent/child wiring | Deterministic; root dir id derived from `.` |
@@ -75,6 +75,21 @@ After the structural build, the history walker (`pipeline::history`, [T20260421-
 5. Write `last_attributed_commit` back into the ref.
 
 The walker shells out to `git` via `orbit_common::utility::git::run_git`. There is no in-process git library dependency — operational simplicity and behavioral parity with the CLI outweigh the per-commit process cost at current repo sizes.
+
+### 2.3 Inclusion vs Access: `.orbitignore` vs Policy
+
+The scan stage now evaluates two inclusion layers before a file ever reaches the parser:
+
+1. Git's own ignore rules via `git check-ignore --stdin`.
+2. Orbit's scan-only `.orbitignore` matcher inside `orbit-knowledge`, implemented with the `ignore` crate and composed from built-in defaults plus any root or nested `.orbitignore` files ([T20260423-0452]).
+
+Those layers answer a different question than runtime policy. `.orbitignore` lives in `orbit-knowledge` and is evaluated at parse/scan time to decide whether a path becomes part of `ctx.file_paths` at all. Policy `denyRead` / `denyModify` lives in `orbit-policy` and is evaluated later, at tool-call time, when an activity asks to read or modify a path on disk. One is about graph inclusion; the other is about runtime filesystem access.
+
+That split is structural on purpose. The knowledge-graph crate depends only on `orbit-common`; it does not depend on `orbit-policy`, and the scanner does not consult runtime policy while building the graph. This keeps graph refresh deterministic and keeps policy semantics out of the indexing hot path.
+
+The default `.orbitignore` baseline excludes common generated or runtime-owned trees (`.orbit/`, `node_modules/`, `target/`, `dist/`, `build/`, `.venv/`, `venv/`, `__pycache__/`, `*.egg-info/`). `orbit workspace init` seeds the same list into a visible workspace-root `.orbitignore` file so users can edit the defaults without discovering the behavior by reading source first.
+
+The same path may legitimately appear in both layers with different intent. For example, `benchmarks/graph_v1/runs/**` is excluded from graph indexing via `.orbitignore` so frozen benchmark transcripts do not pollute `orbit.graph.search`, while a policy profile could still allow or deny runtime reads to that subtree depending on the activity. Likewise, `.orbit/` is excluded from indexing because it is runtime state, and a policy may independently deny modification of `.orbit/**` during normal agent execution.
 
 ---
 
@@ -208,5 +223,6 @@ Objects and blobs accumulate forever. There is no `orbit graph gc` today — aba
 - **[T20260421-0358]** — Scope graph refs by branch.
 - **[T20260421-0528]** — `task_ids` schema on every node + git history walker for attribution.
 - **[T20260422-1540]** — Extend extraction to markdown sections, top-level config keys, and CSV/TSV columns via `FileKind`-dispatched extractors (`FileExtractor` trait, replacing `LanguageExtractor`).
+- **[T20260423-0452]** — `.orbitignore` scan exclusions, nested composition, default ignore baseline, and workspace-init seeding.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

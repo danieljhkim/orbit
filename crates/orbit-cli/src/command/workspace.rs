@@ -1,6 +1,7 @@
 use chrono::Utc;
 use clap::{Args, Subcommand};
 use orbit_common::types::{Workspace, WorkspaceStatus};
+use orbit_common::utility::fs::atomic_write_text;
 use orbit_core::command::init::{InitOptions, init_workspace_at_root};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -148,6 +149,7 @@ impl WorkspaceInitArgs {
                 ..Default::default()
             },
         )?;
+        seed_default_orbitignore(cwd)?;
 
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
 
@@ -181,6 +183,15 @@ impl WorkspaceInitArgs {
             orbit_dir: orbit_dir.to_path_buf(),
         })
     }
+}
+
+fn seed_default_orbitignore(workspace_root: &std::path::Path) -> Result<(), OrbitError> {
+    let orbitignore_path = workspace_root.join(".orbitignore");
+    if orbitignore_path.exists() {
+        return Ok(());
+    }
+    let template = orbit_knowledge::default_orbitignore_template();
+    atomic_write_text(&orbitignore_path, &template).map_err(|e| OrbitError::Io(e.to_string()))
 }
 
 struct WorkspaceInitResult {
@@ -375,6 +386,91 @@ mod tests {
         assert_eq!(
             std::fs::canonicalize(&workspace_record.orbit_dir).expect("canonical registered root"),
             std::fs::canonicalize(&custom_root).expect("canonical custom root")
+        );
+    }
+
+    #[test]
+    fn workspace_init_seeds_default_orbitignore_when_missing() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let workspace = tempdir().expect("workspace tempdir");
+        let home = tempdir().expect("home tempdir");
+
+        let previous_home = std::env::var_os("HOME");
+        let previous_cwd = std::env::current_dir().expect("capture cwd");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+        std::env::set_current_dir(workspace.path()).expect("enter workspace");
+
+        let result = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            no_mcp: true,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime(None);
+
+        std::env::set_current_dir(previous_cwd).expect("restore cwd");
+
+        match previous_home {
+            Some(value) => unsafe {
+                std::env::set_var("HOME", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOME");
+            },
+        }
+
+        result.expect("workspace init");
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join(".orbitignore"))
+                .expect("read .orbitignore"),
+            orbit_knowledge::default_orbitignore_template()
+        );
+    }
+
+    #[test]
+    fn workspace_init_preserves_existing_orbitignore() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let workspace = tempdir().expect("workspace tempdir");
+        let home = tempdir().expect("home tempdir");
+        std::fs::write(
+            workspace.path().join(".orbitignore"),
+            "custom-output/\n!custom-output/keep.txt\n",
+        )
+        .expect("seed existing .orbitignore");
+
+        let previous_home = std::env::var_os("HOME");
+        let previous_cwd = std::env::current_dir().expect("capture cwd");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+        std::env::set_current_dir(workspace.path()).expect("enter workspace");
+
+        let result = WorkspaceInitArgs {
+            name: None,
+            base_branch: "main".to_string(),
+            no_mcp: true,
+            refresh_defaults: false,
+        }
+        .execute_without_runtime(None);
+
+        std::env::set_current_dir(previous_cwd).expect("restore cwd");
+
+        match previous_home {
+            Some(value) => unsafe {
+                std::env::set_var("HOME", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOME");
+            },
+        }
+
+        result.expect("workspace init");
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join(".orbitignore"))
+                .expect("read .orbitignore"),
+            "custom-output/\n!custom-output/keep.txt\n"
         );
     }
 }

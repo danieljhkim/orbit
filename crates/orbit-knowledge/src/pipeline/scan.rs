@@ -2,39 +2,92 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
+
+use crate::DEFAULT_ORBITIGNORE_PATTERNS;
 use crate::error::KnowledgeError;
 use crate::pipeline::context::PipelineContext;
 
-const SKIP_DIRS: &[&str] = &[
-    "node_modules",
-    "__pycache__",
-    "target",
-    "dist",
-    "build",
-    ".venv",
-    "venv",
-    ".egg-info",
-];
+const ORBITIGNORE_FILE_NAME: &str = ".orbitignore";
 
 const SKIP_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "ico", "woff", "woff2", "ttf", "eot", "exe", "dll", "so", "dylib",
     "pdf", "zip", "tar", "gz", "lock",
 ];
 
+struct OrbitIgnoreMatcher {
+    gitignore: Gitignore,
+}
+
+impl OrbitIgnoreMatcher {
+    fn load(repo_path: &Path) -> Result<Self, KnowledgeError> {
+        let mut builder = GitignoreBuilder::new(repo_path);
+        for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
+            builder.add_line(None, pattern).map_err(|error| {
+                KnowledgeError::invalid_data(format!(
+                    "invalid default .orbitignore pattern `{pattern}`: {error}"
+                ))
+            })?;
+        }
+
+        let mut orbitignore_files = Vec::new();
+        collect_orbitignore_files(repo_path, repo_path, &mut orbitignore_files)?;
+        orbitignore_files.sort_by(|left, right| {
+            let left_rel = left.strip_prefix(repo_path).unwrap_or(left.as_path());
+            let right_rel = right.strip_prefix(repo_path).unwrap_or(right.as_path());
+            left_rel
+                .components()
+                .count()
+                .cmp(&right_rel.components().count())
+                .then_with(|| left_rel.cmp(right_rel))
+        });
+
+        for orbitignore in orbitignore_files {
+            if let Some(error) = builder.add(&orbitignore) {
+                return Err(KnowledgeError::invalid_data(format!(
+                    "load {}: {error}",
+                    orbitignore.display()
+                )));
+            }
+        }
+
+        let gitignore = builder.build().map_err(|error| {
+            KnowledgeError::invalid_data(format!("build .orbitignore matcher: {error}"))
+        })?;
+        Ok(Self { gitignore })
+    }
+
+    fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
+        self.gitignore
+            .matched_path_or_any_parents(rel_path, is_dir)
+            .is_ignore()
+    }
+}
+
 /// Scan the repo, populating `ctx.file_paths` with relative paths.
 pub fn scan_repo(ctx: &mut PipelineContext) -> Result<(), KnowledgeError> {
+    let orbitignore = OrbitIgnoreMatcher::load(&ctx.repo_path)?;
     let mut paths = Vec::new();
-    walk_dir(&ctx.repo_path, &ctx.repo_path, &mut paths)?;
+    walk_dir(&ctx.repo_path, &ctx.repo_path, &orbitignore, &mut paths)?;
     paths.sort();
 
     // Filter via git check-ignore
     let ignored = git_ignored_paths(&ctx.repo_path, &paths);
-    ctx.file_paths = paths.into_iter().filter(|p| !ignored.contains(p)).collect();
+    ctx.file_paths = paths
+        .into_iter()
+        .filter(|p| !ignored.contains(p))
+        .filter(|p| !orbitignore.is_ignored(p, false))
+        .collect();
 
     Ok(())
 }
 
-fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), KnowledgeError> {
+fn walk_dir(
+    root: &Path,
+    dir: &Path,
+    orbitignore: &OrbitIgnoreMatcher,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), KnowledgeError> {
     let entries = std::fs::read_dir(dir)
         .map_err(|e| KnowledgeError::io(format!("scan {}: {e}", dir.display())))?;
 
@@ -50,12 +103,16 @@ fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Knowl
             if name.starts_with('.') {
                 continue;
             }
-            // Skip known non-source directories
-            if SKIP_DIRS.iter().any(|d| name.as_ref() == *d) {
+            if let Ok(rel) = path.strip_prefix(root)
+                && orbitignore.is_ignored(rel, true)
+            {
                 continue;
             }
-            walk_dir(root, &path, out)?;
+            walk_dir(root, &path, orbitignore, out)?;
         } else if path.is_file() {
+            if name.as_ref() == ORBITIGNORE_FILE_NAME {
+                continue;
+            }
             // Skip hidden files
             if name.starts_with('.') {
                 continue;
@@ -67,10 +124,44 @@ fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Knowl
                 continue;
             }
             if let Ok(rel) = path.strip_prefix(root) {
+                if orbitignore.is_ignored(rel, false) {
+                    continue;
+                }
                 out.push(rel.to_path_buf());
             }
         }
     }
+    Ok(())
+}
+
+fn collect_orbitignore_files(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), KnowledgeError> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| KnowledgeError::io(format!("scan {}: {e}", dir.display())))?;
+
+    for entry in entries {
+        let entry =
+            entry.map_err(|e| KnowledgeError::io(format!("scan {}: {e}", dir.display())))?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+
+        if path.is_dir() {
+            if name.starts_with('.') {
+                continue;
+            }
+            collect_orbitignore_files(root, &path, out)?;
+        } else if path.is_file() && name.as_ref() == ORBITIGNORE_FILE_NAME {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|e| KnowledgeError::io(format!("strip prefix: {e}")))?;
+            out.push(root.join(relative));
+        }
+    }
+
     Ok(())
 }
 
@@ -113,4 +204,68 @@ fn git_ignored_paths(repo_path: &Path, paths: &[PathBuf]) -> HashSet<PathBuf> {
     }
 
     ignored
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use tempfile::tempdir;
+
+    use super::OrbitIgnoreMatcher;
+
+    #[test]
+    fn orbitignore_matches_literal_filename() {
+        let repo = tempdir().unwrap();
+        fs::write(repo.path().join(".orbitignore"), "foo.rs\n").unwrap();
+
+        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
+        assert!(matcher.is_ignored(Path::new("foo.rs"), false));
+        assert!(!matcher.is_ignored(Path::new("bar.rs"), false));
+    }
+
+    #[test]
+    fn orbitignore_matches_recursive_glob() {
+        let repo = tempdir().unwrap();
+        fs::write(repo.path().join(".orbitignore"), "**/generated.rs\n").unwrap();
+
+        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
+        assert!(matcher.is_ignored(Path::new("src/generated.rs"), false));
+        assert!(matcher.is_ignored(Path::new("deep/nested/generated.rs"), false));
+    }
+
+    #[test]
+    fn orbitignore_negation_reincludes_prior_exclusion() {
+        let repo = tempdir().unwrap();
+        fs::write(
+            repo.path().join(".orbitignore"),
+            "generated/**\n!generated/keep.rs\n",
+        )
+        .unwrap();
+
+        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
+        assert!(matcher.is_ignored(Path::new("generated/drop.rs"), false));
+        assert!(!matcher.is_ignored(Path::new("generated/keep.rs"), false));
+    }
+
+    #[test]
+    fn orbitignore_directory_only_patterns_match_dirs_but_not_files() {
+        let repo = tempdir().unwrap();
+        fs::write(repo.path().join(".orbitignore"), "foo/\n").unwrap();
+
+        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
+        assert!(matcher.is_ignored(Path::new("foo"), true));
+        assert!(!matcher.is_ignored(Path::new("foo"), false));
+    }
+
+    #[test]
+    fn orbitignore_ignores_comment_lines() {
+        let repo = tempdir().unwrap();
+        fs::write(repo.path().join(".orbitignore"), "# comment\nbar.rs\n").unwrap();
+
+        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
+        assert!(matcher.is_ignored(Path::new("bar.rs"), false));
+        assert!(!matcher.is_ignored(Path::new("comment"), false));
+    }
 }
