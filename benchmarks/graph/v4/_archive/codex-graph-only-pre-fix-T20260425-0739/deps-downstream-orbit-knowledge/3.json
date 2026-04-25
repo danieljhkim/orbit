@@ -1,0 +1,44 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "graph-only",
+  "task_id": "deps-downstream-orbit-knowledge",
+  "seed": 3,
+  "sweep_id": "20260424-230632-f36f84",
+  "run_order_index": 12,
+  "nonce": "c9a751366d5b41a6b60926fcba451958",
+  "system_prompt_hash": "0acdba55c77d7e46",
+  "fixture_path": "benchmarks/graph/v4/tasks/deps-downstream-orbit-knowledge.yaml",
+  "allowed_tools": [
+    "mcp:orbit_bench.orbit_graph_*"
+  ],
+  "disallowed_tools_head": [
+    "exec_command"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 25.2,
+  "turns": 1,
+  "input_tokens": 1281,
+  "cache_read_tokens": 46336,
+  "cache_creation_tokens": 0,
+  "output_tokens": 895,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "orbit.graph.overview": 1,
+    "orbit.graph.deps": 1
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 1281,
+      "cache_read_tokens": 46336,
+      "cache_creation_tokens": 0,
+      "output_tokens": 895,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/graph-only/deps-downstream-orbit-knowledge/3.transcript.json",
+  "final_diff_path": null
+}

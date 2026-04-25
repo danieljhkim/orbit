@@ -1,0 +1,46 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "graph-only",
+  "task_id": "generic-dispatch-concrete-impl",
+  "seed": 3,
+  "sweep_id": "20260424-230632-f36f84",
+  "run_order_index": 1,
+  "nonce": "736e6e4e350747c2b8d76c32f38f4246",
+  "system_prompt_hash": "482ada50d82e1db5",
+  "fixture_path": "benchmarks/graph/v4/tasks/generic-dispatch-concrete-impl.yaml",
+  "allowed_tools": [
+    "mcp:orbit_bench.orbit_graph_*"
+  ],
+  "disallowed_tools_head": [
+    "exec_command"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 53.87,
+  "turns": 1,
+  "input_tokens": 14656,
+  "cache_read_tokens": 136320,
+  "cache_creation_tokens": 0,
+  "output_tokens": 988,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "orbit.graph.search": 1,
+    "orbit.graph.show": 5,
+    "orbit.graph.implementors": 1,
+    "orbit.graph.callers": 1
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 14656,
+      "cache_read_tokens": 136320,
+      "cache_creation_tokens": 0,
+      "output_tokens": 988,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/graph-only/generic-dispatch-concrete-impl/3.transcript.json",
+  "final_diff_path": null
+}

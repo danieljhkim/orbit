@@ -1,0 +1,54 @@
+{
+  "provider": "codex",
+  "requested_model": "gpt-5.3-codex",
+  "arm": "graph-only",
+  "task_id": "implementors-benchsink-with-blanket",
+  "seed": 3,
+  "sweep_id": "20260424-230632-f36f84",
+  "run_order_index": 33,
+  "nonce": "d167baa69f1f4133a5ff7c77c09e4a5e",
+  "system_prompt_hash": "cdd5d21e1da19f3f",
+  "fixture_path": "benchmarks/graph/v4/tasks/implementors-benchsink-with-blanket.yaml",
+  "allowed_tools": [
+    "mcp:orbit_bench.orbit_graph_*"
+  ],
+  "disallowed_tools_head": [
+    "exec_command"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 85.37,
+  "turns": 1,
+  "input_tokens": 32850,
+  "cache_read_tokens": 164864,
+  "cache_creation_tokens": 0,
+  "output_tokens": 2066,
+  "total_cost_usd": 0.0,
+  "tool_calls": {
+    "orbit.graph.search": 3,
+    "orbit.graph.implementors": 1,
+    "orbit.graph.show": 6,
+    "orbit.graph.overview": 1,
+    "orbit.graph.refs": 2
+  },
+  "model_usage": {
+    "gpt-5.3-codex": {
+      "input_tokens": 32850,
+      "cache_read_tokens": 164864,
+      "cache_creation_tokens": 0,
+      "output_tokens": 2066,
+      "cost_usd": 0.0
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [
+    {
+      "type": "mcp_tool_call",
+      "tool": "orbit.graph.refs",
+      "status": "failed",
+      "message": ""
+    }
+  ],
+  "transcript_path": "benchmarks/graph/v4/runs/codex/graph-only/implementors-benchsink-with-blanket/3.transcript.json",
+  "final_diff_path": null
+}
