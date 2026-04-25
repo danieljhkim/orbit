@@ -132,10 +132,9 @@ impl OrbitRuntime {
 
     fn load_v2_job_assets(&self) -> Result<BTreeMap<String, V2JobAssetEntry>, OrbitError> {
         let mut entries = BTreeMap::new();
-        let mut sources = BTreeMap::new();
         for dir in self.v2_job_asset_dirs() {
             if dir.is_dir() {
-                load_v2_job_assets_from_dir(&dir, &mut entries, &mut sources)?;
+                load_v2_job_assets_from_dir(&dir, &mut entries)?;
             }
         }
         Ok(entries)
@@ -175,13 +174,17 @@ impl OrbitRuntime {
         &self,
         job_id: &str,
     ) -> Result<(PathBuf, JobV2), OrbitError> {
-        let mut found = None;
+        let mut selected = None;
         for dir in self.v2_job_asset_dirs() {
             if dir.is_dir() {
-                find_v2_job_asset_in_dir(&dir, job_id, &mut found)?;
+                if let Some(found) = find_v2_job_asset_in_dir(&dir, job_id)?
+                    && selected.is_none()
+                {
+                    selected = Some(found);
+                }
             }
         }
-        found.ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))
+        selected.ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))
     }
 }
 
@@ -196,6 +199,24 @@ fn matches_job_filter(kind: JobKind, filter: JobCatalogFilter) -> bool {
 fn load_v2_job_assets_from_dir(
     dir: &Path,
     entries: &mut BTreeMap<String, V2JobAssetEntry>,
+) -> Result<(), OrbitError> {
+    let mut local_entries = BTreeMap::new();
+    let mut local_sources = BTreeMap::new();
+    collect_v2_job_assets_from_dir(dir, &mut local_entries, &mut local_sources)?;
+
+    // v2_job_asset_dirs() is ordered from highest to lowest precedence.
+    // Keep the first entry for each name, while still rejecting duplicates
+    // inside an individual directory tree above.
+    for (name, asset) in local_entries {
+        entries.entry(name).or_insert(asset);
+    }
+
+    Ok(())
+}
+
+fn collect_v2_job_assets_from_dir(
+    dir: &Path,
+    entries: &mut BTreeMap<String, V2JobAssetEntry>,
     sources: &mut BTreeMap<String, PathBuf>,
 ) -> Result<(), OrbitError> {
     let iter = std::fs::read_dir(dir)
@@ -206,7 +227,7 @@ fn load_v2_job_assets_from_dir(
         })?;
         let path = entry.path();
         if path.is_dir() {
-            load_v2_job_assets_from_dir(&path, entries, sources)?;
+            collect_v2_job_assets_from_dir(&path, entries, sources)?;
             continue;
         }
         let is_yaml = path
@@ -244,6 +265,15 @@ fn load_v2_job_assets_from_dir(
 fn find_v2_job_asset_in_dir(
     dir: &Path,
     expected_job_id: &str,
+) -> Result<Option<(PathBuf, JobV2)>, OrbitError> {
+    let mut found = None;
+    find_v2_job_asset_in_dir_inner(dir, expected_job_id, &mut found)?;
+    Ok(found)
+}
+
+fn find_v2_job_asset_in_dir_inner(
+    dir: &Path,
+    expected_job_id: &str,
     found: &mut Option<(PathBuf, JobV2)>,
 ) -> Result<(), OrbitError> {
     let iter = std::fs::read_dir(dir)
@@ -254,7 +284,7 @@ fn find_v2_job_asset_in_dir(
         })?;
         let path = entry.path();
         if path.is_dir() {
-            find_v2_job_asset_in_dir(&path, expected_job_id, found)?;
+            find_v2_job_asset_in_dir_inner(&path, expected_job_id, found)?;
             continue;
         }
         let is_yaml = path
@@ -308,4 +338,110 @@ pub(crate) fn seed_default_jobs(jobs_dir: &Path, overwrite: bool) -> Result<usiz
         count += 1;
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tempfile::tempdir;
+
+    fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
+        let root = tempdir().expect("create tempdir");
+        let global_root = root.path().join("global");
+        let repo_root = root.path().join("repo");
+        let workspace_root = repo_root.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("create global root");
+        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+        (root, runtime, global_root, workspace_root)
+    }
+
+    fn write_job(path: &Path, name: &str, action: &str, max_active_runs: u32) {
+        let yaml = format!(
+            r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: {name}
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: {max_active_runs}
+  steps:
+    - id: marker
+      spec:
+        type: deterministic
+        action: {action}
+        config: {{}}
+"#
+        );
+        std::fs::create_dir_all(path.parent().expect("job path has parent"))
+            .expect("create job dir");
+        std::fs::write(path, yaml).expect("write job yaml");
+    }
+
+    #[test]
+    fn workspace_job_overrides_global_default_in_catalog_listing() {
+        let (_root, runtime, global_root, workspace_root) = test_runtime();
+        let global_job = global_root.join("resources/jobs/task_auto_pipeline.yaml");
+        let workspace_job = workspace_root.join("resources/jobs/task_auto_pipeline.yaml");
+        write_job(&global_job, "task_auto_pipeline", "global_action", 1);
+        write_job(&workspace_job, "task_auto_pipeline", "workspace_action", 7);
+
+        let jobs = runtime
+            .list_job_catalog_with_last_run(true, JobCatalogFilter::All)
+            .expect("list job catalog");
+        let matches = jobs
+            .iter()
+            .filter(|(entry, _)| entry.job_id == "task_auto_pipeline")
+            .collect::<Vec<_>>();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].0.path, workspace_job);
+        assert_eq!(matches[0].0.spec.max_active_runs, 7);
+    }
+
+    #[test]
+    fn workspace_job_overrides_global_default_in_name_lookup() {
+        let (_root, runtime, global_root, workspace_root) = test_runtime();
+        let global_job = global_root.join("resources/jobs/task_auto_pipeline.yaml");
+        let workspace_job = workspace_root.join("resources/jobs/task_auto_pipeline.yaml");
+        write_job(&global_job, "task_auto_pipeline", "global_action", 1);
+        write_job(&workspace_job, "task_auto_pipeline", "workspace_action", 7);
+
+        let entry = runtime
+            .show_job_catalog_entry("task_auto_pipeline")
+            .expect("catalog entry");
+        assert_eq!(entry.path, workspace_job);
+        assert_eq!(entry.spec.max_active_runs, 7);
+
+        let (path, spec) = runtime
+            .load_v2_job_asset_by_name("task_auto_pipeline")
+            .expect("job lookup");
+        assert_eq!(path, workspace_job);
+        assert_eq!(spec.max_active_runs, 7);
+    }
+
+    #[test]
+    fn duplicate_jobs_within_one_catalog_directory_remain_invalid() {
+        let (_root, runtime, _global_root, workspace_root) = test_runtime();
+        let jobs_dir = workspace_root.join("resources/jobs");
+        write_job(&jobs_dir.join("first.yaml"), "duplicate_job", "first", 1);
+        write_job(
+            &jobs_dir.join("nested/second.yaml"),
+            "duplicate_job",
+            "second",
+            1,
+        );
+
+        let err = runtime
+            .show_job_catalog_entry("duplicate_job")
+            .expect_err("duplicate job name should fail");
+        assert!(
+            err.to_string()
+                .contains("duplicate v2 job name 'duplicate_job'"),
+            "{err}"
+        );
+    }
 }

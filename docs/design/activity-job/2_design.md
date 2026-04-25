@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-23
+**Last updated:** 2026-04-25
 
 This document describes the shipped Activity / Job substrate as it exists today across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, load-time normalization, dispatch boundaries, backend semantics, DAG execution, audit, and the legacy edges that still matter. See [1_overview.md](./1_overview.md) for the feature's purpose and [3_vision.md](./3_vision.md) for forward-looking questions.
 
@@ -95,6 +95,8 @@ Step-level `default_input` is still recursively template-rendered before dispatc
 ## 4. Load-Time Normalization Pipeline
 
 The code does not dispatch the raw YAML shape. orbit-core normalizes it first.
+
+Catalog-discovered v2 jobs use `MergeByKey` precedence after [T20260425-0204]: `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries first, then workspace jobs, then global seeded jobs. The first valid `metadata.name` wins, so a workspace `task_auto_pipeline` overrides the global default without making `orbit run ship` fail. Duplicate names inside one directory tree remain invalid because that single layer would otherwise be ambiguous.
 
 For a single activity run:
 
@@ -369,6 +371,7 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
-- **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
+- **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into job history and run-state.
+- **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

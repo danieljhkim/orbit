@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-23
+**Last updated:** 2026-04-25
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -164,6 +164,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - Ad hoc YAML runs remain visible even when the job is not part of the live catalog, because history can fall back to stored run bundles.
 - Cost: direct v2 execution now has persistence side effects and can record synthetic job-level steps that were not literal authored YAML steps.
 
+## ADR-013 — Job catalog discovery honors layer precedence
+
+**Status:** Accepted · 2026-04 · [T20260425-0204]
+
+**Context.** Jobs are scoped as `MergeByKey`, but the v2 job catalog rejected a workspace/global duplicate `task_auto_pipeline` as invalid. That made normal workspace overrides fail before `orbit run ship` could start.
+
+**Decision.** Load catalog directories from highest to lowest precedence and keep the first job for each `metadata.name`; environment job dirs outrank workspace jobs, and workspace jobs outrank global seeded jobs. Keep duplicate-name rejection inside a single directory tree so one layer remains internally unambiguous.
+
+**Consequences.**
+- Workspace workflows can override seeded defaults without deleting global resources.
+- `orbit run ship` and pipeline-worker lookup paths share the same first-wins catalog resolution.
+- Cost: lower-precedence job assets can be shadowed silently, so debugging an unexpected workflow now requires checking catalog source paths.
+
 ---
 
 ## Task References
@@ -184,5 +197,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 - **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into job history and run-state.
+- **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
