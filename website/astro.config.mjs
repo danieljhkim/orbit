@@ -6,6 +6,11 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Orbit',
+      expressiveCode: {
+        styleOverrides: {
+          borderRadius: '12px',
+        },
+      },
       description:
         'Reference documentation for Orbit, a self-hosted runtime for fleets of coding agents.',
       logo: {
