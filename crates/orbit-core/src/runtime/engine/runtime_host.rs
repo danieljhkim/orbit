@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use orbit_common::types::{
-    Activity, AgentModelPair, InvocationTrace, JobTargetType, OrbitError, OrbitEvent, Role,
+    Activity, AgentModelPair, InvocationTrace, JobRunState, JobTargetType, OrbitError, OrbitEvent,
+    Role,
 };
-use orbit_engine::{ActivityInvocationResult, ExecutionContext, RuntimeHost};
+use orbit_engine::{ActivityInvocationResult, ExecutionContext, ExecutorHost, RuntimeHost};
 use orbit_store::{InvocationInsertParams, InvocationQuery, InvocationRecord, token_scoreboard};
 use orbit_tools::ToolContext;
 use serde_json::Value;
@@ -81,16 +84,60 @@ impl RuntimeHost for OrbitRuntime {
     fn invoke_activity(
         &self,
         activity: Activity,
-        _agent_cli: &str,
-        _model: Option<&str>,
-        _input: Value,
-        _timeout_seconds: u64,
-        _debug: bool,
+        agent_cli: &str,
+        model: Option<&str>,
+        input: Value,
+        timeout_seconds: u64,
+        debug: bool,
     ) -> Result<ActivityInvocationResult, OrbitError> {
-        Err(OrbitError::Execution(format!(
-            "v1 invoke_activity is retired; activity '{}' cannot be dispatched via RuntimeHost",
-            activity.id
-        )))
+        if !is_planning_duel_agent_activity(&activity.id) {
+            return Err(retired_invoke_activity_error(&activity.id));
+        }
+
+        let executor = self
+            .activity_executor_registry()
+            .get(agent_cli)
+            .ok_or_else(|| {
+                OrbitError::Execution(format!(
+                    "planning duel activity '{}' requires direct-agent executor '{}'",
+                    activity.id, agent_cli
+                ))
+            })?;
+        let execution = ExecutionContext {
+            activity,
+            job: None,
+            agent_cli: agent_cli.to_string(),
+            model: model.map(ToOwned::to_owned),
+            model_tier: None,
+            timeout_seconds,
+            env_extra: Vec::new(),
+            env_set: HashMap::new(),
+            input,
+            debug,
+            steps_outputs: HashMap::new(),
+            run_id: None,
+            step_index: None,
+            state_dir: None,
+        };
+        let outcome = executor.execute(ExecutorHost::new(self), &execution);
+        if outcome.state != JobRunState::Success {
+            return Err(OrbitError::Execution(outcome.error_message.unwrap_or_else(
+                || {
+                    format!(
+                        "planning duel activity '{}' failed with state {}",
+                        execution.activity.id, outcome.state
+                    )
+                },
+            )));
+        }
+        Ok(ActivityInvocationResult {
+            response_json: outcome.response_json,
+            invocation_trace: outcome.invocation_trace.clone(),
+            exit_code: outcome.exit_code,
+            duration_ms: outcome
+                .duration_ms
+                .unwrap_or(outcome.invocation_trace.duration_ms),
+        })
     }
 
     fn maybe_create_failure_task(
@@ -146,5 +193,126 @@ impl RuntimeHost for OrbitRuntime {
         }
 
         Ok(())
+    }
+}
+
+fn is_planning_duel_agent_activity(activity_id: &str) -> bool {
+    matches!(activity_id, "propose_duel_plan" | "arbitrate_duel_plan")
+}
+
+fn retired_invoke_activity_error(activity_id: &str) -> OrbitError {
+    OrbitError::Execution(format!(
+        "v1 invoke_activity is retired; activity '{activity_id}' cannot be dispatched via RuntimeHost"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use orbit_common::types::{ExecutorDef, ExecutorType};
+    use serde_json::json;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn planning_duel_invoke_activity_uses_direct_agent_bridge() {
+        let seed_runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let root = seed_runtime.data_root();
+        let fake_agent = root.join("fake-agent.sh");
+        std::fs::write(
+            &fake_agent,
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"ok\":true},\"error\":null}'\n",
+        )
+        .expect("write fake agent");
+        #[cfg(unix)]
+        {
+            let mut permissions = std::fs::metadata(&fake_agent)
+                .expect("fake agent metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&fake_agent, permissions).expect("chmod fake agent");
+        }
+
+        let now = Utc::now();
+        seed_runtime
+            .upsert_executor_def(&ExecutorDef {
+                name: "codex".to_string(),
+                executor_type: ExecutorType::DirectAgent,
+                command: Some(fake_agent.display().to_string()),
+                args: Vec::new(),
+                stdout_format: None,
+                models: HashMap::new(),
+                timeout_seconds: None,
+                env: HashMap::new(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("seed fake direct-agent executor");
+        let runtime = OrbitRuntime::from_roots(&root, &root).expect("reload runtime");
+
+        let result = runtime
+            .invoke_activity(
+                planning_duel_activity("propose_duel_plan"),
+                "codex",
+                Some("test-model"),
+                json!({}),
+                5,
+                false,
+            )
+            .expect("planning duel activity should invoke through bridge");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result
+                .response_json
+                .as_ref()
+                .and_then(|value| value.get("status"))
+                .and_then(Value::as_str),
+            Some("success")
+        );
+    }
+
+    #[test]
+    fn invoke_activity_still_rejects_non_planning_duel_v1_activities() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let err = runtime
+            .invoke_activity(
+                planning_duel_activity("legacy_activity"),
+                "codex",
+                None,
+                json!({}),
+                5,
+                false,
+            )
+            .expect_err("unrelated v1 activity should remain retired");
+
+        assert!(
+            err.to_string().contains("v1 invoke_activity is retired"),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn planning_duel_activity(id: &str) -> Activity {
+        let now = Utc::now();
+        Activity {
+            id: id.to_string(),
+            spec_type: "agent_invoke".to_string(),
+            description: "test planning duel activity".to_string(),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            spec_config: json!({
+                "instruction": "Return a success envelope."
+            }),
+            tools: Vec::new(),
+            proc_allowed_programs: Vec::new(),
+            executor: None,
+            workspace_path: None,
+            created_by: Some("test".to_string()),
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+        }
     }
 }
