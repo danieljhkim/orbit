@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::error::KnowledgeError;
 use crate::extract::{self, FileKind, identity_key, leaf_location, node_id};
-use crate::graph::nodes::{BaseNodeFields, DirNode, FileNode, LeafKind, LeafNode};
+use crate::graph::nodes::{BaseNodeFields, DirNode, FileNode, LeafKind, LeafNode, ReExport};
 use crate::pipeline::context::PipelineContext;
 
 // ---------------------------------------------------------------------------
@@ -200,6 +200,7 @@ pub fn build_graph_files(ctx: &mut PipelineContext) -> Result<(), KnowledgeError
             source_blob_hash: None,
             imports: Vec::new(),
             exports: Vec::new(),
+            re_exports: Vec::new(),
             leaf_children: Vec::new(),
         };
         ctx.graph.files.push(file_node);
@@ -257,6 +258,9 @@ pub fn build_graph_leaves(ctx: &mut PipelineContext) -> Result<(), KnowledgeErro
 
         // Set file source_blob_hash (will be written to blob by persist)
         ctx.graph.files[file_idx].source_blob_hash = Some(source_hash);
+        let (exports, re_exports) = file_exports(&result.exports);
+        ctx.graph.files[file_idx].exports = exports;
+        ctx.graph.files[file_idx].re_exports = re_exports;
 
         let mut leaf_ids = Vec::new();
 
@@ -332,4 +336,34 @@ fn parse_leaf_kind(s: &str, depth: Option<u8>) -> LeafKind {
         "column" => LeafKind::Column,
         _ => LeafKind::Function,
     }
+}
+
+fn file_exports(exports: &[extract::ExtractedExport]) -> (Vec<String>, Vec<ReExport>) {
+    let mut names = BTreeSet::new();
+    let mut re_exports = Vec::new();
+
+    for export in exports {
+        if export.name.is_empty() {
+            continue;
+        }
+        names.insert(export.name.clone());
+        if let Some(source_path) = export.source_path.as_ref()
+            && !source_path.is_empty()
+        {
+            re_exports.push(ReExport {
+                name: export.name.clone(),
+                source_path: source_path.clone(),
+            });
+        }
+    }
+
+    re_exports.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.source_path.cmp(&right.source_path))
+    });
+    re_exports
+        .dedup_by(|left, right| left.name == right.name && left.source_path == right.source_path);
+
+    (names.into_iter().collect(), re_exports)
 }

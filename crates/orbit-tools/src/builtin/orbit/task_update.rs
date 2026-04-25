@@ -25,14 +25,14 @@ impl Tool for OrbitTaskUpdateTool {
                 name: "acceptance_criteria".to_string(),
                 description: "New acceptance criteria as an array of strings or a single string"
                     .to_string(),
-                param_type: "array".to_string(),
+                param_type: "string_list".to_string(),
                 required: false,
             },
             ToolParam {
                 name: "dependencies".to_string(),
                 description: "Replacement dependency task IDs as a string or array of strings"
                     .to_string(),
-                param_type: "array".to_string(),
+                param_type: "string_list".to_string(),
                 required: false,
             },
             ToolParam {
@@ -83,7 +83,7 @@ impl Tool for OrbitTaskUpdateTool {
                 description:
                     "Task context selectors as a comma-separated string or array of strings. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically."
                         .to_string(),
-                param_type: "array".to_string(),
+                param_type: "string_list".to_string(),
                 required: false,
             },
             ToolParam {

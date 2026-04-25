@@ -21,8 +21,9 @@ impl Tool for GitStagePathsTool {
                 },
                 ToolParam {
                     name: "files".to_string(),
-                    description: "Explicit file paths to stage".to_string(),
-                    param_type: "array".to_string(),
+                    description: "Explicit file paths to stage as a string or array of strings."
+                        .to_string(),
+                    param_type: "string_list".to_string(),
                     required: true,
                 },
             ],

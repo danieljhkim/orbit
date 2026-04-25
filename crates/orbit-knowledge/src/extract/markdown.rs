@@ -54,7 +54,10 @@ impl FileExtractor for MarkdownExtractor {
             });
         }
 
-        ExtractionResult { leaves }
+        ExtractionResult {
+            leaves,
+            ..Default::default()
+        }
     }
 }
 

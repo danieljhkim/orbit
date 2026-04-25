@@ -21,7 +21,8 @@ mod rust;
 mod table;
 
 pub use common::{
-    ExtractedLeaf, ExtractionResult, compute_source_hash, identity_key, leaf_location, node_id,
+    ExtractedExport, ExtractedLeaf, ExtractionResult, compute_source_hash, identity_key,
+    leaf_location, node_id,
 };
 pub use language::{ConfigFormat, DocFormat, FileKind, Language, TableFormat};
 
@@ -93,5 +94,5 @@ pub fn extract_file(source: &str, language: Language) -> ExtractionResult {
     registry
         .get(FileKind::Code(language))
         .map(|e| e.extract(source))
-        .unwrap_or(ExtractionResult { leaves: vec![] })
+        .unwrap_or_default()
 }

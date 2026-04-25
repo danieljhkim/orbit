@@ -111,6 +111,9 @@ fn build_json(
             if !f.exports.is_empty() {
                 obj.insert("exports".to_string(), json!(f.exports));
             }
+            if !f.re_exports.is_empty() {
+                obj.insert("re_exports".to_string(), json!(f.re_exports));
+            }
         }
         GraphNodeRef::Dir(_) => {}
     }

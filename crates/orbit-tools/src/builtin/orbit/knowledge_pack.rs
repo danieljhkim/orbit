@@ -1,4 +1,6 @@
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::types::{
+    OrbitError, ToolParam, ToolSchema, optional_string, optional_string_list_alias,
+};
 use orbit_knowledge::{Selector, TaskGraphService};
 use serde_json::Value;
 
@@ -16,8 +18,8 @@ impl Tool for OrbitKnowledgePackTool {
             parameters: vec![
                 ToolParam {
                     name: "selectors".to_string(),
-                    description: "Exact selectors.".to_string(),
-                    param_type: "array".to_string(),
+                    description: "Selector string or array.".to_string(),
+                    param_type: "string_list".to_string(),
                     required: true,
                 },
                 ToolParam {
@@ -66,26 +68,24 @@ impl Tool for OrbitKnowledgePackTool {
 }
 
 fn parse_selector_strings(input: &Value) -> Result<Vec<String>, OrbitError> {
-    let raw = input
-        .get("selectors")
-        .ok_or_else(|| OrbitError::InvalidInput("missing `selectors`".to_string()))?;
-    let items = raw
-        .as_array()
-        .ok_or_else(|| OrbitError::InvalidInput("`selectors` must be an array".to_string()))?;
-    if items.is_empty() {
+    let selectors = if let Some(selectors) = optional_string_list_alias(input, &["selectors"])? {
+        selectors
+    } else if let Some(file) = optional_string(input, "file")? {
+        let selector = if file.starts_with("file:") {
+            file
+        } else {
+            format!("file:{file}")
+        };
+        vec![selector]
+    } else {
+        return Err(OrbitError::InvalidInput("missing `selectors`".to_string()));
+    };
+    if selectors.is_empty() {
         return Err(OrbitError::InvalidInput(
             "`selectors` must contain at least one selector".to_string(),
         ));
     }
-
-    items
-        .iter()
-        .map(|item| {
-            item.as_str().map(str::to_string).ok_or_else(|| {
-                OrbitError::InvalidInput("`selectors` entries must be strings".to_string())
-            })
-        })
-        .collect()
+    Ok(selectors)
 }
 
 fn summarize_pack_json(mut pack: Value) -> Value {

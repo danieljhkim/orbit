@@ -19,10 +19,20 @@ pub struct ExtractedLeaf {
     pub depth: Option<u8>,
 }
 
+/// A file-level export discovered while extracting source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtractedExport {
+    pub name: String,
+    /// Source path for `pub use` re-exports. `None` means the symbol is defined
+    /// in the file itself.
+    pub source_path: Option<String>,
+}
+
 /// Result of extracting a single file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtractionResult {
     pub leaves: Vec<ExtractedLeaf>,
+    pub exports: Vec<ExtractedExport>,
 }
 
 pub fn compute_source_hash(source: &str) -> String {

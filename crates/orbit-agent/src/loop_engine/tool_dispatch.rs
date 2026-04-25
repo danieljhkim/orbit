@@ -29,14 +29,12 @@ pub fn schema_to_tool_spec(schema: &ToolSchema) -> ToolSpec {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for param in &schema.parameters {
-        let json_type = map_param_type(&param.param_type);
-        properties.insert(
-            param.name.clone(),
-            json!({
-                "type": json_type,
-                "description": param.description.clone(),
-            }),
-        );
+        let mut property = schema_for_param_type(&param.param_type);
+        property
+            .as_object_mut()
+            .expect("parameter schema")
+            .insert("description".to_string(), json!(param.description.clone()));
+        properties.insert(param.name.clone(), property);
         if param.required {
             required.push(param.name.clone());
         }
@@ -56,6 +54,22 @@ pub fn schema_to_tool_spec(schema: &ToolSchema) -> ToolSpec {
         description: schema.description.clone(),
         input_schema,
     }
+}
+
+fn schema_for_param_type(raw: &str) -> Value {
+    if matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "string_list" | "string[]" | "strings"
+    ) {
+        return json!({
+            "anyOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+            ]
+        });
+    }
+
+    json!({ "type": map_param_type(raw) })
 }
 
 fn map_param_type(raw: &str) -> &'static str {

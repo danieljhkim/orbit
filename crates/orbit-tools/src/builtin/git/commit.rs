@@ -27,8 +27,10 @@ impl Tool for GitCommitTool {
                 },
                 ToolParam {
                     name: "files".to_string(),
-                    description: "Explicit file paths to include in the commit".to_string(),
-                    param_type: "array".to_string(),
+                    description:
+                        "Explicit file paths to include in the commit as a string or array of strings."
+                            .to_string(),
+                    param_type: "string_list".to_string(),
                     required: true,
                 },
             ],

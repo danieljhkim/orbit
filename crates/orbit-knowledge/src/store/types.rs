@@ -27,6 +27,8 @@ pub struct KnowledgePackEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exports: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub re_exports: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol_summary: Option<Vec<SymbolSummary>>,

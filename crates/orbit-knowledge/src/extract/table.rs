@@ -71,7 +71,10 @@ fn extract_with_cap(ext: &TableExtractor, source: &str, cap: usize) -> Extractio
             depth: None,
         });
     }
-    ExtractionResult { leaves }
+    ExtractionResult {
+        leaves,
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::types::{OrbitError, ToolParam, ToolSchema, optional_string_list_alias};
 use orbit_knowledge::Selector;
 use orbit_knowledge::service::GraphContextService;
 use serde_json::{Value, json};
@@ -39,8 +39,8 @@ impl Tool for OrbitKnowledgeRefsTool {
                 },
                 ToolParam {
                     name: "include".to_string(),
-                    description: "`code`, `doc`, `config`, or `all`.".to_string(),
-                    param_type: "array".to_string(),
+                    description: "String/array: `code`, `doc`, `config`, `all`.".to_string(),
+                    param_type: "string_list".to_string(),
                     required: false,
                 },
                 ToolParam {
@@ -178,12 +178,10 @@ impl RefInclude {
     }
 
     fn parse(input: &Value) -> Result<Self, OrbitError> {
-        let Some(raw) = input.get("include") else {
+        if input.get("include").is_none() {
             return Ok(Self::code_only());
-        };
-        let values = raw.as_array().ok_or_else(|| {
-            OrbitError::InvalidInput("`include` must be an array of strings".to_string())
-        })?;
+        }
+        let values = optional_string_list_alias(input, &["include"])?.unwrap_or_default();
         if values.is_empty() {
             return Ok(Self::code_only());
         }
@@ -193,13 +191,8 @@ impl RefInclude {
             doc: false,
             config: false,
         };
-        for value in values {
-            let Some(name) = value.as_str() else {
-                return Err(OrbitError::InvalidInput(
-                    "`include` entries must be strings".to_string(),
-                ));
-            };
-            match name {
+        for name in values {
+            match name.as_str() {
                 "code" => include.code = true,
                 "doc" => include.doc = true,
                 "config" => include.config = true,

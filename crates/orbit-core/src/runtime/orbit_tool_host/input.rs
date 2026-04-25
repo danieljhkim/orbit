@@ -231,20 +231,32 @@ pub(super) fn parse_string_array_field(
     let value = input
         .get(field)
         .ok_or_else(|| OrbitError::InvalidInput(format!("missing `{field}`")))?;
-    let items = value
-        .as_array()
-        .ok_or_else(|| OrbitError::InvalidInput(format!("`{field}` must be an array")))?;
-    if items.is_empty() {
-        return Err(OrbitError::InvalidInput(format!(
-            "`{field}` must contain at least one value"
-        )));
-    }
-    items
-        .iter()
-        .map(|item| {
-            let raw = item.as_str().ok_or_else(|| {
-                OrbitError::InvalidInput(format!("`{field}` entries must be strings"))
-            })?;
+    let values = match value {
+        Value::String(raw) => vec![raw.as_str()],
+        Value::Array(items) => {
+            if items.is_empty() {
+                return Err(OrbitError::InvalidInput(format!(
+                    "`{field}` must contain at least one value"
+                )));
+            }
+            items
+                .iter()
+                .map(|item| {
+                    item.as_str().ok_or_else(|| {
+                        OrbitError::InvalidInput(format!("`{field}` entries must be strings"))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+        _ => {
+            return Err(OrbitError::InvalidInput(format!(
+                "`{field}` must be a string or array of strings"
+            )));
+        }
+    };
+    values
+        .into_iter()
+        .map(|raw| {
             let trimmed = raw.trim();
             if trimmed.is_empty() {
                 return Err(OrbitError::InvalidInput(format!(
@@ -291,4 +303,35 @@ pub(super) fn parse_optional_timeout_seconds(input: &Value) -> Result<Option<u64
         OrbitError::InvalidInput("`timeout_seconds` must be an unsigned integer".to_string())
     })?;
     Ok(Some(seconds))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn parse_string_array_field_accepts_scalar_string() {
+        assert_eq!(
+            parse_string_array_field(&json!({"run_ids":"run-1"}), "run_ids").unwrap(),
+            vec!["run-1"]
+        );
+    }
+
+    #[test]
+    fn parse_string_array_field_preserves_array_behavior() {
+        assert_eq!(
+            parse_string_array_field(&json!({"run_ids":["run-1", "run-2"]}), "run_ids").unwrap(),
+            vec!["run-1", "run-2"]
+        );
+    }
+
+    #[test]
+    fn parse_string_array_field_rejects_non_string_shapes() {
+        let error = parse_string_array_field(&json!({"run_ids":{"id":"run-1"}}), "run_ids")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`run_ids` must be a string or array of strings"));
+    }
 }

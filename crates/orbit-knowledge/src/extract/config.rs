@@ -46,7 +46,10 @@ impl FileExtractor for ConfigExtractor {
                 depth: None,
             });
         }
-        ExtractionResult { leaves }
+        ExtractionResult {
+            leaves,
+            ..Default::default()
+        }
     }
 }
 

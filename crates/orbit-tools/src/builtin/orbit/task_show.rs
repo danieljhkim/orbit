@@ -17,7 +17,7 @@ impl Tool for OrbitTaskShowTool {
                 description, acceptance_criteria, dependencies, resolved_dependencies, history, \
                 context_files, artifacts."
                     .to_string(),
-            param_type: "array".to_string(),
+            param_type: "string_list".to_string(),
             required: false,
         });
         parameters.push(ToolParam {

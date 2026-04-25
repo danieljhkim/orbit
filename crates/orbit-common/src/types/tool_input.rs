@@ -160,3 +160,34 @@ pub fn split_csv(raw: &str) -> Vec<String> {
         .map(ToOwned::to_owned)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn optional_string_list_accepts_scalar_string() {
+        assert_eq!(
+            optional_string_list_alias(&json!({"values":"one"}), &["values"]).unwrap(),
+            Some(vec!["one".to_string()])
+        );
+    }
+
+    #[test]
+    fn optional_string_list_preserves_array_behavior() {
+        assert_eq!(
+            optional_string_list_alias(&json!({"values":["one", "two"]}), &["values"]).unwrap(),
+            Some(vec!["one".to_string(), "two".to_string()])
+        );
+    }
+
+    #[test]
+    fn optional_string_list_rejects_non_string_shapes() {
+        let error = optional_string_list_alias(&json!({"values":{"one":true}}), &["values"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`values` must be a string or array of strings"));
+    }
+}

@@ -124,12 +124,9 @@ fn build_input_schema(params: &[ToolParam]) -> JsonObject {
 
 /// Build the JSON-Schema fragment for a single parameter.
 ///
-/// Arrays and objects are emitted as `anyOf` unions because Orbit tool input
-/// handlers routinely normalize across shapes — e.g. `acceptance_criteria`
-/// accepts `string | string[]`, `context_files` accepts a comma-separated
-/// string or an array, and `artifacts` accepts an object map or an array of
-/// `{path, content}` objects. Emitting a single primitive type here would
-/// cause schema-driven MCP clients to reject legitimate calls.
+/// String-list and object-map parameters are emitted as `anyOf` unions because
+/// Orbit tool input handlers normalize those specific shapes. Generic arrays
+/// stay arrays so arrays of objects are not advertised as string lists.
 fn property_for(param_type: &str) -> Map<String, Value> {
     let mut m = Map::new();
     match param_type.trim().to_ascii_lowercase().as_str() {
@@ -145,7 +142,7 @@ fn property_for(param_type: &str) -> Map<String, Value> {
         "boolean" | "bool" => {
             m.insert("type".to_string(), Value::String("boolean".to_string()));
         }
-        "array" | "list" | "string_list" | "string[]" | "strings" => {
+        "string_list" | "string[]" | "strings" => {
             m.insert(
                 "anyOf".to_string(),
                 json!([
@@ -153,6 +150,9 @@ fn property_for(param_type: &str) -> Map<String, Value> {
                     { "type": "string" },
                 ]),
             );
+        }
+        "array" | "list" => {
+            m.insert("type".to_string(), Value::String("array".to_string()));
         }
         "object" | "map" | "json" => {
             m.insert(

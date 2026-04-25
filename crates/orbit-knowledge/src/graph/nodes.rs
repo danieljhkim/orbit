@@ -147,8 +147,16 @@ pub struct FileNode {
     pub imports: Vec<String>,
     #[serde(default)]
     pub exports: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub re_exports: Vec<ReExport>,
     #[serde(default)]
     pub leaf_children: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReExport {
+    pub name: String,
+    pub source_path: String,
 }
 
 // ---------------------------------------------------------------------------

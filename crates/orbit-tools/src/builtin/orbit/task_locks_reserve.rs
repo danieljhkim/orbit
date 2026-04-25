@@ -10,8 +10,8 @@ impl Tool for OrbitTaskLocksReserveTool {
         let mut parameters = vec![
             ToolParam {
                 name: "task_ids".to_string(),
-                description: "Task IDs in the bundle as an array of strings.".to_string(),
-                param_type: "array".to_string(),
+                description: "Task IDs in the bundle as a string or array of strings.".to_string(),
+                param_type: "string_list".to_string(),
                 required: true,
             },
             ToolParam {

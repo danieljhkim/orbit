@@ -19,12 +19,15 @@ impl FileExtractor for JavaScriptExtractor {
 
         let tree = match parser.parse(source, None) {
             Some(t) => t,
-            None => return ExtractionResult { leaves: vec![] },
+            None => return ExtractionResult::default(),
         };
 
         let mut leaves = Vec::new();
         extract_top_level(tree.root_node(), source, &mut leaves);
-        ExtractionResult { leaves }
+        ExtractionResult {
+            leaves,
+            ..Default::default()
+        }
     }
 }
 

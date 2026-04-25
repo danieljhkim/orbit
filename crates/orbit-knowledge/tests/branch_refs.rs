@@ -395,6 +395,7 @@ fn sample_graph(function_name: &str) -> CodebaseGraphV1 {
             source_blob_hash: None,
             imports: Vec::new(),
             exports: Vec::new(),
+            re_exports: Vec::new(),
             leaf_children: vec![leaf_id.clone()],
         }],
         leaves: vec![LeafNode {

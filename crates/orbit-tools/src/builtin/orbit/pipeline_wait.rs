@@ -10,8 +10,9 @@ impl Tool for OrbitPipelineWaitTool {
         let mut parameters = vec![
             ToolParam {
                 name: "run_ids".to_string(),
-                description: "One or more run IDs to wait for.".to_string(),
-                param_type: "array".to_string(),
+                description: "One or more run IDs to wait for as a string or array of strings."
+                    .to_string(),
+                param_type: "string_list".to_string(),
                 required: true,
             },
             ToolParam {

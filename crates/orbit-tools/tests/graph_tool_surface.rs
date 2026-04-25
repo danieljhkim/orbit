@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use orbit_common::types::OrbitError;
 use orbit_knowledge::graph::object_store::RefName;
 use orbit_knowledge::graph::{
     BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, GraphObjectStore, LeafKind, LeafNode,
@@ -191,6 +192,120 @@ fn refs_partition_code_doc_and_config_hits() {
     assert_eq!(all_response["code_refs"].as_array().unwrap().len(), 3);
     assert_eq!(all_response["doc_refs"].as_array().unwrap().len(), 2);
     assert_eq!(all_response["config_refs"].as_array().unwrap().len(), 1);
+
+    let scalar_all_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":"all"}),
+    );
+    assert_eq!(scalar_all_response, all_response);
+
+    let code_only_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":["code"]}),
+    );
+    assert_eq!(code_only_response["code_refs"].as_array().unwrap().len(), 3);
+    assert!(
+        code_only_response["doc_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        code_only_response["config_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let doc_only_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":["doc"]}),
+    );
+    assert!(
+        doc_only_response["code_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(doc_only_response["doc_refs"].as_array().unwrap().len(), 2);
+    assert!(
+        doc_only_response["config_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let config_only_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":["config"]}),
+    );
+    assert!(
+        config_only_response["code_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        config_only_response["doc_refs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        config_only_response["config_refs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let mixed_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":["code","config"]}),
+    );
+    assert_eq!(mixed_response["code_refs"].as_array().unwrap().len(), 3);
+    assert!(mixed_response["doc_refs"].as_array().unwrap().is_empty());
+    assert_eq!(mixed_response["config_refs"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn refs_rejects_invalid_include_shapes() {
+    let definition = leaf_node(
+        "src/runtime.rs",
+        "AgentRuntime",
+        LeafKind::Trait,
+        "pub trait AgentRuntime {}",
+    );
+    let fixture = write_graph_fixture(graph_with_root(
+        vec![attach_leaf(
+            file_node("src/runtime.rs", "rust", Some("rs"), vec![]),
+            &definition,
+        )],
+        vec![definition],
+    ));
+
+    let bogus = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":"bogus"}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(bogus.contains("`code`, `doc`, `config`, or `all`"));
+
+    let object_shape = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.refs",
+        json!({"selector":"symbol:src/runtime.rs#AgentRuntime:trait","include":{"kind":"code"}}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(object_shape.contains("`include` must be a string or array of strings"));
 }
 
 #[test]
@@ -214,6 +329,23 @@ fn pack_defaults_to_summary_without_leaf_bodies() {
         "orbit.graph.pack",
         json!({"selectors":["symbol:src/runtime.rs#AgentRuntimeImpl:impl"]}),
     );
+    let scalar_summary_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({"selectors":"symbol:src/runtime.rs#AgentRuntimeImpl:impl"}),
+    );
+    assert_eq!(scalar_summary_response, summary_response);
+
+    let file_alias_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({"file":"src/runtime.rs"}),
+    );
+    assert_eq!(
+        file_alias_response["entries"][0]["selector"],
+        "file:src/runtime.rs"
+    );
+
     let summary_entry = &summary_response["entries"][0];
     assert_eq!(summary_entry["file"], "src/runtime.rs");
     assert!(summary_entry.get("source").is_none());
@@ -234,7 +366,48 @@ fn pack_defaults_to_summary_without_leaf_bodies() {
     );
 }
 
+#[test]
+fn pack_rejects_invalid_selector_shapes() {
+    let impl_leaf = leaf_node(
+        "src/runtime.rs",
+        "AgentRuntimeImpl",
+        LeafKind::Impl,
+        "impl AgentRuntime for CodexRuntime {\n    fn run(&self) {}\n}\n",
+    );
+    let fixture = write_graph_fixture(graph_with_root(
+        vec![attach_leaf(
+            file_node("src/runtime.rs", "rust", Some("rs"), vec![]),
+            &impl_leaf,
+        )],
+        vec![impl_leaf],
+    ));
+
+    let empty =
+        execute_graph_tool_result(fixture.path(), "orbit.graph.pack", json!({"selectors":[]}))
+            .unwrap_err()
+            .to_string();
+    assert!(empty.contains("`selectors` must contain at least one selector"));
+
+    let object_shape = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({"selectors":{"selector":"symbol:src/runtime.rs#AgentRuntimeImpl:impl"}}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(object_shape.contains("`selectors` must be a string or array of strings"));
+}
+
 fn execute_graph_tool(repo_root: &Path, tool_name: &str, input: Value) -> Value {
+    execute_graph_tool_result(repo_root, tool_name, input)
+        .unwrap_or_else(|error| panic!("tool `{tool_name}` failed: {error}"))
+}
+
+fn execute_graph_tool_result(
+    repo_root: &Path,
+    tool_name: &str,
+    input: Value,
+) -> Result<Value, OrbitError> {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
@@ -246,16 +419,14 @@ fn execute_graph_tool(repo_root: &Path, tool_name: &str, input: Value) -> Value 
     );
     object.insert("ref".to_string(), Value::String(GRAPH_REF.to_string()));
 
-    registry
-        .execute(
-            tool_name,
-            &ToolContext {
-                workspace_root: Some(repo_root.to_path_buf()),
-                ..ToolContext::default()
-            },
-            input,
-        )
-        .unwrap_or_else(|error| panic!("tool `{tool_name}` failed: {error}"))
+    registry.execute(
+        tool_name,
+        &ToolContext {
+            workspace_root: Some(repo_root.to_path_buf()),
+            ..ToolContext::default()
+        },
+        input,
+    )
 }
 
 fn write_graph_fixture(graph: CodebaseGraphV1) -> TempDir {
@@ -313,6 +484,7 @@ fn file_node(path: &str, language: &str, extension: Option<&str>, imports: Vec<&
         source_blob_hash: None,
         imports: imports.into_iter().map(str::to_string).collect(),
         exports: Vec::new(),
+        re_exports: Vec::new(),
         leaf_children: Vec::new(),
     }
 }

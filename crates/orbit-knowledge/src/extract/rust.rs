@@ -1,7 +1,7 @@
 use tree_sitter::{Node, Parser};
 
 use super::FileExtractor;
-use super::common::{ExtractedLeaf, ExtractionResult, compute_source_hash};
+use super::common::{ExtractedExport, ExtractedLeaf, ExtractionResult, compute_source_hash};
 use super::language::{FileKind, Language};
 
 pub struct RustExtractor;
@@ -19,12 +19,14 @@ impl FileExtractor for RustExtractor {
 
         let tree = match parser.parse(source, None) {
             Some(t) => t,
-            None => return ExtractionResult { leaves: vec![] },
+            None => return ExtractionResult::default(),
         };
 
         let mut leaves = Vec::new();
-        extract_top_level(tree.root_node(), source, &mut leaves);
-        ExtractionResult { leaves }
+        let mut exports = Vec::new();
+        extract_top_level(tree.root_node(), source, &mut leaves, &mut exports);
+        sort_and_dedup_exports(&mut exports);
+        ExtractionResult { leaves, exports }
     }
 }
 
@@ -39,20 +41,183 @@ fn node_source(node: Node, source: &str) -> String {
         .to_string()
 }
 
-fn extract_top_level(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf>) {
+fn extract_top_level(
+    node: Node,
+    source: &str,
+    leaves: &mut Vec<ExtractedLeaf>,
+    exports: &mut Vec<ExtractedExport>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "function_item" => extract_function(child, source, leaves, None),
-            "struct_item" | "enum_item" => extract_struct_like(child, source, leaves),
-            "trait_item" => extract_trait(child, source, leaves),
+            "function_item" => {
+                extract_function(child, source, leaves, None);
+                extract_named_public_export(child, source, exports);
+            }
+            "struct_item" | "enum_item" => {
+                extract_struct_like(child, source, leaves);
+                extract_named_public_export(child, source, exports);
+            }
+            "trait_item" => {
+                extract_trait(child, source, leaves);
+                extract_named_public_export(child, source, exports);
+            }
             "impl_item" => extract_impl(child, source, leaves),
-            "mod_item" => extract_mod(child, source, leaves),
-            "type_item" => extract_type_alias(child, source, leaves),
-            "const_item" | "static_item" => extract_const_static(child, source, leaves),
+            "mod_item" => {
+                extract_mod(child, source, leaves);
+                extract_named_public_export(child, source, exports);
+            }
+            "type_item" => {
+                extract_type_alias(child, source, leaves);
+                extract_named_public_export(child, source, exports);
+            }
+            "const_item" | "static_item" => {
+                extract_const_static(child, source, leaves);
+                extract_named_public_export(child, source, exports);
+            }
+            "use_declaration" => extract_pub_use_exports(child, source, exports),
             _ => {}
         }
     }
+}
+
+fn extract_named_public_export(node: Node, source: &str, exports: &mut Vec<ExtractedExport>) {
+    if !is_unrestricted_public(node, source) {
+        return;
+    }
+    if let Some(name) = get_name(node, source) {
+        exports.push(ExtractedExport {
+            name,
+            source_path: None,
+        });
+    }
+}
+
+fn extract_pub_use_exports(node: Node, source: &str, exports: &mut Vec<ExtractedExport>) {
+    if !is_unrestricted_public(node, source) {
+        return;
+    }
+    let Some(argument) = node.child_by_field_name("argument") else {
+        return;
+    };
+    collect_use_exports(argument, source, &[], exports);
+}
+
+fn is_unrestricted_public(node: Node, source: &str) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor).any(|child| {
+        child.kind() == "visibility_modifier" && node_source(child, source).as_str() == "pub"
+    })
+}
+
+fn collect_use_exports(
+    node: Node,
+    source: &str,
+    prefix: &[String],
+    exports: &mut Vec<ExtractedExport>,
+) {
+    match node.kind() {
+        "scoped_use_list" => {
+            let mut next_prefix = prefix.to_vec();
+            if let Some(path) = node.child_by_field_name("path") {
+                next_prefix.extend(path_segments(path, source));
+            }
+            if let Some(list) = node.child_by_field_name("list") {
+                collect_use_exports(list, source, &next_prefix, exports);
+            }
+        }
+        "use_list" => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_use_exports(child, source, prefix, exports);
+            }
+        }
+        "use_as_clause" => {
+            let Some(alias) = node.child_by_field_name("alias") else {
+                return;
+            };
+            let Some(path) = node.child_by_field_name("path") else {
+                return;
+            };
+            let mut source_segments = prefix.to_vec();
+            source_segments.extend(path_segments(path, source));
+            let Some(source_path) = join_segments(&source_segments) else {
+                return;
+            };
+            exports.push(ExtractedExport {
+                name: node_source(alias, source),
+                source_path: Some(source_path),
+            });
+        }
+        "use_wildcard" => {
+            let mut source_segments = prefix.to_vec();
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                source_segments.extend(path_segments(child, source));
+            }
+            let Some(path) = join_segments(&source_segments) else {
+                return;
+            };
+            let source_path = format!("{path}::*");
+            exports.push(ExtractedExport {
+                name: source_path.clone(),
+                source_path: Some(source_path),
+            });
+        }
+        "identifier" | "crate" | "self" | "super" | "scoped_identifier" => {
+            let mut source_segments = prefix.to_vec();
+            source_segments.extend(path_segments(node, source));
+            let Some(source_path) = join_segments(&source_segments) else {
+                return;
+            };
+            let name = export_name(&source_segments);
+            exports.push(ExtractedExport {
+                name,
+                source_path: Some(source_path),
+            });
+        }
+        _ => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_use_exports(child, source, prefix, exports);
+            }
+        }
+    }
+}
+
+fn path_segments(node: Node, source: &str) -> Vec<String> {
+    node_source(node, source)
+        .split("::")
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn join_segments(segments: &[String]) -> Option<String> {
+    if segments.is_empty() {
+        None
+    } else {
+        Some(segments.join("::"))
+    }
+}
+
+fn export_name(segments: &[String]) -> String {
+    match segments.last().map(String::as_str) {
+        Some("self") if segments.len() > 1 => segments[segments.len() - 2].clone(),
+        Some(name) => name.to_string(),
+        None => String::new(),
+    }
+}
+
+fn sort_and_dedup_exports(exports: &mut Vec<ExtractedExport>) {
+    exports.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.source_path.cmp(&right.source_path))
+    });
+    exports
+        .dedup_by(|left, right| left.name == right.name && left.source_path == right.source_path);
 }
 
 fn extract_function(
@@ -235,4 +400,77 @@ fn extract_const_static(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf
         children_qualified_names: vec![],
         depth: None,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract_exports(source: &str) -> Vec<ExtractedExport> {
+        RustExtractor.extract(source).exports
+    }
+
+    fn export_names(source: &str) -> Vec<String> {
+        extract_exports(source)
+            .into_iter()
+            .map(|export| export.name)
+            .collect()
+    }
+
+    #[test]
+    fn extracts_pub_use_simple_alias_and_grouped_exports() {
+        let exports = extract_exports(
+            r#"
+pub use foo::Bar;
+pub use foo::Bar as Baz;
+pub use foo::{Qux, Quux};
+use private::Hidden;
+pub(crate) use crate_only::CrateOnly;
+"#,
+        );
+        let names: Vec<&str> = exports.iter().map(|export| export.name.as_str()).collect();
+
+        assert!(names.contains(&"Bar"));
+        assert!(names.contains(&"Baz"));
+        assert!(names.contains(&"Qux"));
+        assert!(names.contains(&"Quux"));
+        assert!(!names.contains(&"Hidden"));
+        assert!(!names.contains(&"CrateOnly"));
+        assert_eq!(
+            exports
+                .iter()
+                .find(|export| export.name == "Baz")
+                .and_then(|export| export.source_path.as_deref()),
+            Some("foo::Bar")
+        );
+    }
+
+    #[test]
+    fn extracts_nested_grouped_and_glob_reexports() {
+        let names = export_names(
+            r#"
+pub use foo::{bar::Baz, qux::{A, B}, nested::*};
+"#,
+        );
+
+        assert!(names.contains(&"Baz".to_string()));
+        assert!(names.contains(&"A".to_string()));
+        assert!(names.contains(&"B".to_string()));
+        assert!(names.contains(&"foo::nested::*".to_string()));
+    }
+
+    #[test]
+    fn combines_defined_public_items_and_reexports() {
+        let names = export_names(
+            r#"
+pub fn defined_here() {}
+fn private_helper() {}
+pub use foo::Imported;
+"#,
+        );
+
+        assert!(names.contains(&"defined_here".to_string()));
+        assert!(names.contains(&"Imported".to_string()));
+        assert!(!names.contains(&"private_helper".to_string()));
+    }
 }

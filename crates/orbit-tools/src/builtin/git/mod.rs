@@ -5,7 +5,7 @@ pub mod stage_paths;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, optional_string_list_alias};
 use serde_json::Value;
 
 use crate::{ToolContext, ToolRegistry};
@@ -69,9 +69,7 @@ pub(super) fn require_workspace_repo_root(
 }
 
 fn require_relative_file_paths(input: &Value, repo_root: &Path) -> Result<Vec<String>, OrbitError> {
-    let files = input
-        .get("files")
-        .and_then(Value::as_array)
+    let files = optional_string_list_alias(input, &["files"])?
         .ok_or_else(|| OrbitError::InvalidInput("missing `files`".to_string()))?;
     if files.is_empty() {
         return Err(OrbitError::InvalidInput(
@@ -81,18 +79,8 @@ fn require_relative_file_paths(input: &Value, repo_root: &Path) -> Result<Vec<St
 
     let mut seen = HashSet::new();
     let mut relative_paths = Vec::new();
-    for value in files {
-        let raw = value
-            .as_str()
-            .ok_or_else(|| OrbitError::InvalidInput("`files` entries must be strings".to_string()))?
-            .trim();
-        if raw.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "`files` must not contain empty paths".to_string(),
-            ));
-        }
-
-        let candidate = Path::new(raw);
+    for raw in files {
+        let candidate = Path::new(&raw);
         let absolute = if candidate.is_absolute() {
             candidate.to_path_buf()
         } else {
@@ -143,4 +131,47 @@ fn require_relative_file_paths(input: &Value, repo_root: &Path) -> Result<Vec<St
     }
 
     Ok(relative_paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn relative_file_paths_accept_scalar_string() {
+        let repo = repo_with_file("src/lib.rs");
+        let repo_root = repo.path().canonicalize().unwrap();
+        let paths = require_relative_file_paths(&json!({"files":"src/lib.rs"}), &repo_root)
+            .expect("scalar file path is accepted");
+
+        assert_eq!(paths, vec!["src/lib.rs"]);
+    }
+
+    #[test]
+    fn relative_file_paths_keep_array_behavior() {
+        let repo = repo_with_file("src/lib.rs");
+        fs::write(repo.path().join("README.md"), "hello\n").unwrap();
+        let repo_root = repo.path().canonicalize().unwrap();
+        let paths =
+            require_relative_file_paths(&json!({"files":["src/lib.rs", "README.md"]}), &repo_root)
+                .expect("array file paths are accepted");
+
+        assert_eq!(paths, vec!["src/lib.rs", "README.md"]);
+    }
+
+    fn repo_with_file(rel: &str) -> TempDir {
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let path = repo.path().join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, "content\n").unwrap();
+        repo
+    }
 }
