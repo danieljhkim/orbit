@@ -12,13 +12,16 @@ prompt: |
   variant. Construction includes:
     - direct struct-literal: `BenchAuditEvent::CallReturned { ... }`
     - calling the builder helper `BenchAuditEvent::call_returned(...)`
+      from another function
     - nested constructors (the variant wrapped inside another type)
     - imported variant: `use ...::CallReturned; CallReturned { ... }`
 
   Functions that only DESTRUCTURE the variant (match arms, `if let`,
   pattern bindings) are NOT constructors and must be excluded. Functions
   that only mention the type in a signature without constructing the
-  variant are also excluded.
+  variant are also excluded. The builder helper method definition itself
+  is also excluded; this fixture asks for call-sites that produce the
+  variant, not the helper's implementation body.
 
   Output JSON with this exact shape:
     {"answer": ["<function_name>", ...], "excluded": ["<function_name>", ...]}
@@ -38,6 +41,7 @@ oracle:
         - match_call_returned
         - if_let_call_returned
         - type_only_distractor
+        - call_returned
     deny_list:
       - pattern: match_
         reason: match_* functions destructure, not construct
@@ -45,6 +49,8 @@ oracle:
         reason: if_let_* functions destructure, not construct
       - pattern: type_only_
         reason: type_only_* functions never construct the variant
+      - pattern: call_returned
+        reason: the builder helper definition is not an external construction site
 
 notes:
   - "Precision-gap probe. Graph's BFS-by-name doesn't distinguish construction sites from match sites — both reference the variant name `CallReturned`. The agent must read source to disambiguate."

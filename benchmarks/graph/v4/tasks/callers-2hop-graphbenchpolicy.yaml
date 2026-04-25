@@ -34,7 +34,7 @@ oracle:
         - level1_lookup_alpha
         - level1_lookup_beta
         - level1_lookup_gamma
-        - level2_distractor_no_resolve
+        - level2_distractor_no_lookup_rule
     deny_list:
       - pattern: level1_
         reason: level-1 callers are direct, not 2-hop

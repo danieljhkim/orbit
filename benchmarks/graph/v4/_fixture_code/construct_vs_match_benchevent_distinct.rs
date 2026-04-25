@@ -7,13 +7,14 @@
 //! from production `LoopAuditEvent::ToolCallResult`; see METHOD.md
 //! §"Synthetic-vs-production name isolation").
 //!
-//! Construction patterns probed (all four MUST be in the answer):
+//! External construction patterns probed (all four MUST be in the answer):
 //!   1. Direct struct-literal — `BenchAuditEvent::CallReturned { .. }`
-//!   2. Builder helper — `BenchAuditEvent::call_returned(...)`
+//!   2. Builder helper call-site — `BenchAuditEvent::call_returned(...)`
 //!   3. Nested constructor — wrapped inside another type's variant
 //!   4. Imported variant — `use ...::CallReturned; CallReturned { .. }`
 //!
 //! Distractors (must NOT be in the answer):
+//!   - The builder helper method definition itself
 //!   - Pure `match` arm
 //!   - `if let` destructuring
 //!   - Type-only mention in a function signature
@@ -51,9 +52,8 @@ pub fn construct_direct() -> BenchAuditEvent {
     }
 }
 
-// Pattern #2: builder helper. The helper itself constructs the variant
-// internally; this function is also a constructor by the fixture's
-// definition because it produces a `CallReturned` value.
+// Pattern #2: external builder-helper call-site. The helper implementation
+// itself is not in the answer set.
 pub fn construct_via_builder() -> BenchAuditEvent {
     BenchAuditEvent::call_returned("beta", false)
 }

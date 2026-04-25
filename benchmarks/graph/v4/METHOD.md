@@ -87,7 +87,7 @@ Each fixture has a YAML at `tasks/<fixture-id>.yaml` with prompt, deny-list, ora
 | `construct-vs-match-benchevent-distinct` | synthetic | ✓ | Find files that CONSTRUCT synthetic enum `BenchAuditEvent::CallReturned{...}` (variant name distinct from production `LoopAuditEvent::ToolCallResult`) via builder helper, nested constructor, or imported variant. Exclude pure pattern-match files. |
 | `function-as-value-vs-direct-call` | production | ✓ | Find sites where `RefName::new` is passed as a value (e.g. `.map(RefName::new)`), excluding sites that call `RefName::new(...)` directly. Production has 3 as-value sites and ~22 direct calls — bounded ground truth. |
 | `generic-dispatch-concrete-impl` | synthetic | ✓ | At call-site `f::<ConcreteT>()`, identify which impl of `Trait::f` actually runs. |
-| `macro-expanded-callers` | synthetic | ✓ | Find call-sites of `Default::default()` on a struct that derives `Default`. **Expected-fail sentinel** — graph parser does not expand derive macros; treat as known-loss baseline. |
+| `macro-expanded-callers` | synthetic | ✓ | Find source-visible call-sites of `Default::default()` on a struct that derives `Default`; measures scoped call-site discovery and over-inclusion risk around derive-provided methods. |
 
 ### Payload-volume (2)
 
@@ -159,7 +159,7 @@ Successful retries after a failure are counted separately from un-recovered fail
 
 2. **Hybrid scope is reduced (8 of 12 fixtures).** Selector-ambiguity and payload-volume fixtures probe graph internals, not selection. Adding hybrid on those four cells would burn 24 seeds for no incremental insight.
 
-3. **`macro-expanded-callers` is an expected-fail sentinel.** Both providers are expected to fail this in graph-only because the graph parser does not expand derive macros. Reporting it as a "failure" in the pass-rate column is misleading; treat it as a known-loss baseline against which future macro-expansion work can be measured.
+3. **`macro-expanded-callers` is not a macro-expanded-impl oracle.** It asks for source-visible call-sites of a derive-provided method, not the generated `Default` impl body. Count it normally in pass-rate tables; macro-expanded impl indexing should be tested by a separate future fixture if needed.
 
 4. **No keep/cull threshold.** v4 produces structured findings, not a decision. Decisions land later as ADRs in `4_decisions.md` if v4's findings warrant.
 

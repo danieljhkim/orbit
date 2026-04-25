@@ -1,0 +1,49 @@
+task_id: const-value-extraction
+class: payload-volume
+difficulty: medium
+
+mode: production
+hybrid_eligible: false
+
+prompt: |
+  In `crates/orbit-common/src/types/`, list all `pub const` data declarations
+  and their declared values. Do not include `pub const fn` functions.
+
+  For slice/array values, normalize the value as a JSON-like array with no
+  spaces, for example `NAME=["a","b"]`.
+
+  Output JSON with this exact shape:
+    {"answer": ["<NAME>=<value>", ...], "excluded": ["<NAME>", ...]}
+
+oracle:
+  structured:
+    item_kind: symbol_with_value
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - ACTIVITY_REF_PREFIX="activity:"
+        - AUDIT_ENVELOPE_SCHEMA_VERSION=1
+        - DEFAULT_POLICY_NAME="default"
+        - EXECUTOR_RESOURCE_SCHEMA_VERSION=2
+        - POLICY_RESOURCE_SCHEMA_VERSION=2
+        - UNRESTRICTED_FS_PROFILE="unrestricted"
+        - V2_TOOL_WILDCARD_ROOTS=["orbit.graph.","orbit.task.","orbit.audit.","fs.","proc."]
+      excluded_acceptable:
+        - all_agent_families
+        - default_job_max_active_runs
+        - default_max_iterations
+        - default_retry_backoff_seconds
+    deny_list:
+      - pattern: all_agent_families
+        reason: pub const fn is a function, not a data const declaration
+      - pattern: default_job_max_active_runs
+        reason: pub const fn is a function, not a data const declaration
+      - pattern: default_max_iterations
+        reason: pub const fn is a function, not a data const declaration
+      - pattern: default_retry_backoff_seconds
+        reason: pub const fn is a function, not a data const declaration
+
+notes:
+  - "Verified with `rg -n \"^pub const \\w+|^pub const fn\" crates/orbit-common/src/types --glob '*.rs'`."
+  - "Payload-volume probe: the answer is spread across several nested modules under types/."

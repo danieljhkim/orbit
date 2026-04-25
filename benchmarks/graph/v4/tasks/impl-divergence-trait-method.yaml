@@ -1,0 +1,48 @@
+task_id: impl-divergence-trait-method
+class: payload-volume
+difficulty: hard
+
+mode: production
+hybrid_eligible: false
+
+prompt: |
+  In Orbit production code, compare all implementations of the
+  `AuditSink::emit` trait method. For each implementation, classify how it
+  handles `LoopAuditEvent::PolicyDenial`.
+
+  Use exactly these canonical labels when they apply:
+    - `no-op`
+    - `stores_all_events`
+    - `writes_all_events_to_jsonl`
+    - `mirrors_policy_denial_and_blocks_disallowed_tool_calls`
+
+  Output JSON with this exact shape:
+    {"answer": ["<TypeName>::emit=<canonical-label>", ...], "excluded": ["<TypeName>::emit", ...]}
+
+oracle:
+  structured:
+    item_kind: symbol_with_value
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - NullSink::emit=no-op
+        - InMemorySink::emit=stores_all_events
+        - JsonlFileSink::emit=writes_all_events_to_jsonl
+        - EnforcedAuditSink::emit=mirrors_policy_denial_and_blocks_disallowed_tool_calls
+      excluded_acceptable:
+        - V2JsonlSink::emit
+        - V2AuditWriter::emit
+        - V2AuditWriter::emit_loop_event
+        - FsAuditLogger::emit
+    deny_list:
+      - pattern: V2JsonlSink
+        reason: V2JsonlSink is not an AuditSink impl
+      - pattern: V2AuditWriter
+        reason: V2AuditWriter methods are not AuditSink::emit impls
+      - pattern: FsAuditLogger
+        reason: FsAuditLogger::emit is a different trait method
+
+notes:
+  - "Verified with `rg -n \"impl AuditSink for|fn emit\\(|PolicyDenial|EnforcedAuditSink\" crates/orbit-agent/src crates/orbit-engine/src`."
+  - "Payload-volume probe: a correct answer requires reading the bodies, especially EnforcedAuditSink::emit."

@@ -1,0 +1,37 @@
+task_id: reverse-export-orbit-error
+class: graph-strength
+difficulty: medium
+
+mode: production
+hybrid_eligible: true
+
+prompt: |
+  In Orbit production code, list every Rust module file that re-exports
+  `OrbitError` via a `pub use ...OrbitError` item.
+
+  Exclude the original enum definition and exclude ordinary uses of
+  `OrbitError::...` variants.
+
+  Output JSON with this exact shape:
+    {"answer": ["<file_path>", ...], "excluded": ["<file_path>", ...]}
+
+oracle:
+  structured:
+    item_kind: file_path
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - crates/orbit-common/src/types/mod.rs
+        - crates/orbit-core/src/lib.rs
+      excluded_acceptable:
+        - crates/orbit-common/src/types/error.rs
+    deny_list:
+      - pattern: crates/orbit-common/src/types/error.rs
+        reason: this file defines OrbitError; it does not re-export it
+      - pattern: "OrbitError::"
+        reason: variant references are not pub-use re-exports
+
+notes:
+  - "Verified with `rg -n \"^pub use .*OrbitError\" crates --glob '*.rs'`."
+  - "Graph-strength probe: answer requires following reverse export surface, not just finding type uses."

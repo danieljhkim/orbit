@@ -1,0 +1,45 @@
+task_id: function-as-value-vs-direct-call
+class: precision-gap
+difficulty: medium
+
+mode: production
+hybrid_eligible: true
+
+prompt: |
+  In Orbit production code under `crates/*/src`, find every site where
+  `RefName::new` is passed as a function value, such as `.map(RefName::new)`.
+
+  Exclude sites that call `RefName::new(...)` directly, including direct calls
+  inside closures such as `.and_then(|branch| RefName::new(branch).ok())`.
+  Exclude tests and examples.
+
+  Output JSON with this exact shape:
+    {"answer": ["<file_path>:<line>", ...], "excluded": ["<file_path>:<line>", ...]}
+
+oracle:
+  structured:
+    item_kind: file_line
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - crates/orbit-cli/src/command/graph.rs:256
+        - crates/orbit-cli/src/command/task/history.rs:240
+        - crates/orbit-knowledge/src/graph/object_store.rs:161
+      excluded_acceptable:
+        - crates/orbit-knowledge/src/graph/object_store.rs:140
+        - crates/orbit-knowledge/src/graph/object_store.rs:146
+        - crates/orbit-knowledge/src/service/history.rs:337
+    deny_list:
+      - pattern: "crates/orbit-knowledge/src/service/history.rs:"
+        reason: service/history.rs only contains direct RefName::new calls, not function-value uses
+      - pattern: crates/orbit-knowledge/src/graph/object_store.rs:140
+        reason: direct RefName::new call, not passed as a function value
+      - pattern: crates/orbit-knowledge/src/graph/object_store.rs:146
+        reason: direct RefName::new call, not passed as a function value
+      - pattern: /tests/
+        reason: fixture is scoped to production src code
+
+notes:
+  - "Verified with `rg -n \"\\.map\\(RefName::new\\)\" crates/*/src`."
+  - "Precision-gap probe: graph refs can over-include direct calls; the agent must inspect call shape."

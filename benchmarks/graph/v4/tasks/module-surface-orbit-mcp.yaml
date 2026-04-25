@@ -1,0 +1,42 @@
+task_id: module-surface-orbit-mcp
+class: selector-ambiguity
+difficulty: medium
+
+mode: production
+hybrid_eligible: false
+
+prompt: |
+  What is the public root surface of the `orbit-mcp` crate? List all public
+  items reachable as `orbit_mcp::<name>`.
+
+  Exclude public or crate-visible items inside private submodules unless they
+  are re-exported from `crates/orbit-mcp/src/lib.rs`.
+
+  Output JSON with this exact shape:
+    {"answer": ["<symbol_name>", ...], "excluded": ["<symbol_name>", ...]}
+
+oracle:
+  structured:
+    item_kind: symbol_name
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - McpHost
+        - OrbitToolServer
+        - serve_stdio
+      excluded_acceptable:
+        - adapter::OrbitToolServer
+        - error::tool_error_result
+        - tool_error_result
+    deny_list:
+      - pattern: "adapter::"
+        reason: answer should list root-reachable names, not private module paths
+      - pattern: "error::"
+        reason: private error module items are not crate-root public surface
+      - pattern: tool_error_result
+        reason: pub(crate) helper is not reachable as orbit_mcp::<name>
+
+notes:
+  - "Verified with `rg -n \"^pub\" crates/orbit-mcp/src --glob '*.rs'`."
+  - "Selector-ambiguity probe: overview, show, and search can all look plausible."

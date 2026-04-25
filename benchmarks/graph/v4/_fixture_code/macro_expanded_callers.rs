@@ -1,8 +1,8 @@
 //! Synthetic fixture: `macro-expanded-callers`
 //!
-//! Expected-fail sentinel. Tests whether graph's parser sees code generated
-//! by `#[derive(...)]` macros, specifically the synthetic `Default` impl
-//! that `#[derive(Default)]` produces.
+//! Precision-gap fixture for source-visible calls to a derive-provided method.
+//! Graph sees the explicit call-sites in this file, but not the synthetic
+//! `Default` impl that `#[derive(Default)]` produces.
 //!
 //! Target call-sites: every function in this file that calls
 //! `BenchDerivedStruct::default()`.
@@ -19,7 +19,7 @@
 //! name (`default`) and will return huge result sets without the scope.
 //!
 //! Predicted graph behaviour:
-//!   - The 3 call-sites IS in source AST → graph SHOULD see them.
+//!   - The 3 call-sites are in source AST → graph SHOULD see them.
 //!   - The macro-generated `impl Default for BenchDerivedStruct { fn default(...) }`
 //!     is NOT in source AST → graph CANNOT see it.
 //!   - So `callers of BenchDerivedStruct::default` should return the 3 sites,

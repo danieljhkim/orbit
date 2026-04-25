@@ -1,0 +1,49 @@
+task_id: references-vs-callers-tool-registry-register
+class: selector-ambiguity
+difficulty: medium
+
+mode: production
+hybrid_eligible: false
+
+prompt: |
+  In Orbit production code, where is the `orbit_tools::ToolRegistry::register`
+  method invoked from? List the source files that contain one or more call-sites
+  of that method.
+
+  Exclude unrelated `register(...)` methods on other registry types, and exclude
+  files that only define `ToolRegistry::register` without calling it.
+
+  Output JSON with this exact shape:
+    {"answer": ["<file_path>", ...], "excluded": ["<file_path>", ...]}
+
+oracle:
+  structured:
+    item_kind: file_path
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - crates/orbit-core/src/runtime/builder.rs
+        - crates/orbit-tools/src/builtin/fs/mod.rs
+        - crates/orbit-tools/src/builtin/git/mod.rs
+        - crates/orbit-tools/src/builtin/github/mod.rs
+        - crates/orbit-tools/src/builtin/net/mod.rs
+        - crates/orbit-tools/src/builtin/orbit/mod.rs
+        - crates/orbit-tools/src/builtin/proc/mod.rs
+        - crates/orbit-tools/src/builtin/time/mod.rs
+      excluded_acceptable:
+        - crates/orbit-agent/src/runtime/backend.rs
+        - crates/orbit-engine/src/executor/registry.rs
+        - crates/orbit-tools/src/registry.rs
+        - crates/orbit-tools/src/builtin/mod.rs
+    deny_list:
+      - pattern: crates/orbit-agent/src/runtime/backend.rs
+        reason: this file calls AgentRuntimeRegistry::register, not ToolRegistry::register
+      - pattern: crates/orbit-engine/src/executor/registry.rs
+        reason: this file calls ExecutorRegistry::register, not ToolRegistry::register
+      - pattern: crates/orbit-tools/src/registry.rs
+        reason: this file defines ToolRegistry::register; it is not an invocation site
+
+notes:
+  - "Verified with `rg -n \"(registry|self)\\.register\\(\" crates/orbit-tools/src crates/orbit-core/src/runtime/builder.rs` and then deduplicating file paths."
+  - "Selector-ambiguity probe: refs, callers, and search are all plausible first moves, but simple name search over `register` over-includes unrelated registries."

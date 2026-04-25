@@ -18,18 +18,18 @@ indexer, which Claude has already validated end-to-end.
 
 **Do not start Task A (production YAMLs) until this section's status is "LOCKED".**
 
-Status: **DRAFT — pending Claude commit and codex review**
+Status: **LOCKED — matches the committed v4 synthetic fixture YAMLs and structured oracle**
 
-The proposed YAML schema for v4 fixtures is below. Claude will commit a
-finalised version of this section once you've signed off (or pushed back).
-The fixture YAMLs you author go under `benchmarks/graph/v4/tasks/<id>.yaml`
-and must conform.
+The locked YAML schema for v4 fixtures is below. The fixture YAMLs you author
+go under `benchmarks/graph/v4/tasks/<id>.yaml` and must conform.
 
 ```yaml
-# v4 fixture YAML — proposed schema
+# v4 fixture YAML
 
-id: <fixture-id>                          # filename minus .yaml; matches METHOD.md inventory
+task_id: <fixture-id>                     # filename minus .yaml; matches METHOD.md inventory
 class: <graph-strength|precision-gap|payload-volume|selector-ambiguity>
+difficulty: <easy|medium|hard>
+
 mode: <production|synthetic>
 synthetic_code_path: <relative-path>      # only when mode: synthetic; e.g. "_fixture_code/foo.rs"
 hybrid_eligible: <true|false>             # whether this fixture runs in the hybrid arm
@@ -38,25 +38,24 @@ prompt: |
   <natural-language prompt for the agent>
   <must explicitly scope to "Orbit production code in <crate>" for production fixtures,
    or "in benchmarks/graph/v4/_fixture_code/<file>" for synthetic fixtures>
-  <must end with: "Output JSON: {\"answer\": [...], \"excluded\": [...]}">
+  <must end with an explicit JSON shape:
+   {"answer": ["<item>", ...], "excluded": ["<item>", ...]}>
 
 oracle:
-  type: structured                        # v4 default. Falls back to grep/cmd/judge only
-                                          # for trivial locate-style fixtures (rare).
-  item_kind: <file_path|symbol_name|symbol_with_value|crate_name>
-  scoring: <exact_set|superset_ok|subset_ok>
-  case_sensitive: false
-  ground_truth:
-    answer:
-      - <item>                            # ordered list, but matched as a set
-      - <item>
-    excluded_acceptable:                  # optional; if agent puts these in "excluded",
-      - <item>                            # that's allowed but not required
+  structured:                             # v4 default. Falls back to grep/cmd/judge only
+    item_kind: <file_path|file_line|symbol_name|symbol_with_value|crate_name>
+    scoring: <exact_set|superset_ok|subset_ok>
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - <item>                          # ordered list, but matched as a set
+        - <item>
+      excluded_acceptable:                # optional; if agent puts these in "excluded",
+        - <item>                          # that's allowed but not required
                                           # primary grading is on "answer" only
-
-deny_list:                                # patterns the agent's "answer" MUST NOT contain;
-  - pattern: <regex-or-substring>         # if any matches, the run fails
-    reason: <one-line explanation>
+    deny_list:                            # patterns the agent's "answer" MUST NOT contain;
+      - pattern: <substring>              # substring match only; not regex
+        reason: <one-line explanation>
 
 notes:                                    # optional; freeform authoring notes
   - <note>
@@ -66,6 +65,8 @@ notes:                                    # optional; freeform authoring notes
 
 - `file_path` — relative path from repo root, forward slashes. Example:
   `crates/orbit-knowledge/src/service/history.rs`
+- `file_line` — `file_path:line` from repo root. Example:
+  `crates/orbit-knowledge/src/service/history.rs:337`
 - `symbol_name` — fully qualified symbol. Example: `RefName::new`
 - `symbol_with_value` — `<name>=<value>` for const fixtures. Example:
   `DEFAULT_POLICY_NAME="default"`
@@ -78,8 +79,10 @@ notes:                                    # optional; freeform authoring notes
 - `subset_ok` — answer must be subset of ground truth; misses are allowed (rare;
   used when ground truth has plausible disagreement)
 
-If you want to change any of this, edit this section and ping back with reasoning.
-Once both sides agree, Claude commits the schema as locked and Task A starts.
+The structured oracle only grades the `answer` list as strings. If a fixture
+needs body-comparison payload, encode it as exact `symbol_with_value` labels
+or keep the graded `answer` as symbols and put any explanatory prose in
+`notes`; do not rely on the oracle to parse free-form summaries.
 
 ---
 
@@ -100,17 +103,21 @@ ground truth from the design doc.
 - **prompt direction:** "Find sites in Orbit production code where `RefName::new`
   is passed as a value (e.g. `.map(RefName::new)`), excluding sites that call
   `RefName::new(...)` directly. Output JSON: `{answer, excluded}`."
-- **item_kind:** `file_path` (path-line if you prefer, but file-level is cleanest)
+- **item_kind:** `file_line`
 - **ground-truth enumeration command:**
   ```
-  rg -n "\.map\(RefName::new\)|\.and_then\(RefName::new\)" crates/
+  rg -n "\.map\(RefName::new\)" crates/*/src
   ```
-  Expected hits: 3 sites (verified) — `crates/orbit-knowledge/src/graph/object_store.rs:161`,
-  `crates/orbit-cli/src/command/task/history.rs:240`, plus one more in
-  `crates/orbit-knowledge/src/service/history.rs`. Re-verify before locking.
+  Expected hits: 3 sites (verified):
+  - `crates/orbit-knowledge/src/graph/object_store.rs:161`
+  - `crates/orbit-cli/src/command/task/history.rs:240`
+  - `crates/orbit-cli/src/command/graph.rs:256`
+  Explicit non-answer: `crates/orbit-knowledge/src/service/history.rs:337`
+  is `.and_then(|branch| RefName::new(branch).ok())`, a direct call inside a
+  closure, not a function item passed as a value.
 - **deny_list:** patterns that look like as-value but are actually direct calls,
   e.g. `RefName::new(arg)` where `arg` is a variable name; populate from
-  `rg "RefName::new\(" crates/` minus the as-value sites.
+  `rg -n "RefName::new\(" crates/*/src` minus the as-value sites.
 - **hybrid_eligible:** true
 - **acceptance:** running `orbit graph refs --selector ...RefName::new...` should
   return a SUPERSET of the answer (graph returns both as-value and direct-call
@@ -120,39 +127,35 @@ ground truth from the design doc.
 
 - **target:** `AuditSink::emit` (4 production impls)
 - **prompt direction:** "List all production impls of `AuditSink::emit` and
-  summarise how each impl handles the `LoopAuditEvent::PolicyDenial` variant
-  (one short sentence per impl). Output JSON: `{answer: [<impl_name>: <one-sentence-summary>], excluded: []}`."
-- **item_kind:** `symbol_name` (each entry is `<TypeName>::emit`)
+  classify how each impl handles the `LoopAuditEvent::PolicyDenial` variant.
+  Output JSON: `{answer: [\"<TypeName>::emit=<canonical-label>\", ...], excluded: []}`."
+- **item_kind:** `symbol_with_value`
 - **ground truth (verified):**
-  - `NullSink::emit` — no-op (empty body)
-  - `InMemorySink::emit` — pushes the event into a `Mutex<Vec<...>>`
-  - `JsonlFileSink::emit` — serialises the event to JSON and writes to disk
-  - `EnforcedAuditSink::emit` — mirrors `PolicyDenial` events into a `tool.denied`
-    envelope; intercepts `ToolCallRequested` for disallowed tools
-- **scoring:** `exact_set` on `<TypeName>::emit` keys; the one-sentence summary
-  is informational. (Or use `subset_ok` if you want to allow agents to skip the
-  Enforced variant — your call.)
+  - `NullSink::emit=no-op`
+  - `InMemorySink::emit=stores_all_events`
+  - `JsonlFileSink::emit=writes_all_events_to_jsonl`
+  - `EnforcedAuditSink::emit=mirrors_policy_denial_and_blocks_disallowed_tool_calls`
+- **scoring:** `exact_set`
 - **hybrid_eligible:** false (graph-only diagnostic)
 
 #### A.3 `references-vs-callers-tool-registry-register.yaml`
 
 - **target:** `ToolRegistry::register` in `orbit-tools`
-- **prompt direction:** "Find production call-sites that invoke
-  `ToolRegistry::register(...)`. Output JSON: `{answer, excluded}`."
+- **prompt direction:** "Find production source files that contain call-sites
+  invoking the `orbit_tools::ToolRegistry::register(...)` method. Exclude
+  unrelated `register(...)` methods on other registry types, and exclude
+  declaration-only files. Output JSON: `{answer, excluded}`."
 - **item_kind:** `file_path`
 - **ground-truth enumeration:**
   ```
-  rg -nP "(\w+|self|registry)\.register\(" crates/ | rg -v "ToolRegistry"
+  rg -n "(registry|self)\.register\(" crates/orbit-tools/src crates/orbit-core/src/runtime/builder.rs
   ```
-  But be careful: `register` is also a free function in
-  `crates/orbit-tools/src/builtin/{git,fs,github,time,net}/mod.rs`. Those free
-  functions accept `&mut ToolRegistry` and call `registry.register(...)` inside.
-  Decide whether the prompt asks for direct callers or transitive callers and
-  bound ground truth accordingly.
-- **deny_list:** the 5 builtin `pub fn register(registry: &mut ToolRegistry)`
-  free functions IF the prompt asks for `ToolRegistry::register` callers
-  specifically, since those free functions are *containing functions*, not
-  call-sites of the method.
+  Answer set is the distinct file paths from that command:
+  `crates/orbit-tools/src/builtin/{fs,git,github,net,orbit,proc,time}/mod.rs`
+  plus `crates/orbit-core/src/runtime/builder.rs`.
+- **deny_list:** unrelated registry files:
+  `crates/orbit-agent/src/runtime/backend.rs`, `crates/orbit-engine/src/executor/registry.rs`,
+  and the method definition file `crates/orbit-tools/src/registry.rs`.
 - **hybrid_eligible:** false (selector-ambiguity diagnostic)
 - **note:** This is a selector-ambiguity probe. The interesting variable is
   whether the agent uses `orbit.graph.refs` vs `orbit.graph.callers` vs
@@ -175,7 +178,7 @@ ground truth from the design doc.
   `orbit-policy`, `orbit-exec`, `orbit-store`, `orbit-mcp`. Verify each.
 - **hybrid_eligible:** true
 - **note:** validate the depth-2 set before locking; cargo's transitive deps
-  may include surprises. `cargo tree -p orbit-knowledge --invert` is the
+  may include surprises. `cargo tree -i orbit-knowledge --workspace --depth 2` is the
   authoritative source.
 
 #### A.5 `reverse-export-orbit-error.yaml`
@@ -221,7 +224,7 @@ ground truth from the design doc.
 - **ground truth (verified via `rg "^pub const \w+" crates/orbit-common/src/types/`):**
   - `AUDIT_ENVELOPE_SCHEMA_VERSION=1`
   - `ACTIVITY_REF_PREFIX="activity:"`
-  - `V2_TOOL_WILDCARD_ROOTS=&[...]` (slice; pick a representation convention)
+  - `V2_TOOL_WILDCARD_ROOTS=["orbit.graph.","orbit.task.","orbit.audit.","fs.","proc."]`
   - `DEFAULT_POLICY_NAME="default"`
   - `UNRESTRICTED_FS_PROFILE="unrestricted"`
   - `EXECUTOR_RESOURCE_SCHEMA_VERSION=2`
@@ -276,7 +279,7 @@ during the v3 sweep but never was.
 
 1. **Round metadata** — sweep date, harness git SHA, total cells, providers,
    arms, fixtures.
-2. **Headline numbers** — codex hybrid 23/30 → 0/30 v2→v3 utilization flip;
+2. **Headline numbers** — codex hybrid 0/30 → 23/30 v2→v3 utilization flip;
    claude hybrid 0/30; per-arm pass rates.
 3. **Primary table** — provider × arm × task_class. Output the aggregator's
    primary table verbatim.
@@ -298,7 +301,9 @@ during the v3 sweep but never was.
 
 - `RESULTS.md` exists at `benchmarks/graph/v3/RESULTS.md`.
 - Numbers in the file reproduce from `aggregate.py` output and from the
-  per-cell table in `5_null_result.md`. No new computations.
+  per-cell table in `5_null_result.md`. The only permitted additional
+  derivation is the codex hybrid graph-call-rate-by-fixture table, computed
+  directly from frozen run records' `tool_calls` fields.
 - Cost section reports per-cell, with aggregate explicitly secondary.
 - Disposition is consistent with `5_null_result.md` (retain; mixed per-cell;
   utilization-carried). No drift from the closing entry.

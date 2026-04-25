@@ -1,0 +1,46 @@
+task_id: deps-downstream-orbit-knowledge
+class: graph-strength
+difficulty: medium
+
+mode: production
+hybrid_eligible: true
+
+prompt: |
+  In this workspace, list all crates that depend on `orbit-knowledge` either
+  directly or transitively through at most two dependency levels.
+
+  Do not include `orbit-knowledge` itself. Output crate names only.
+
+  Output JSON with this exact shape:
+    {"answer": ["<crate_name>", ...], "excluded": ["<crate_name>", ...]}
+
+oracle:
+  structured:
+    item_kind: crate_name
+    scoring: exact_set
+    case_sensitive: false
+    ground_truth:
+      answer:
+        - orbit-agent
+        - orbit-cli
+        - orbit-core
+        - orbit-engine
+        - orbit-tools
+      excluded_acceptable:
+        - orbit-common
+        - orbit-exec
+        - orbit-knowledge
+        - orbit-mcp
+        - orbit-policy
+        - orbit-store
+    deny_list:
+      - pattern: orbit-knowledge
+        reason: prompt asks for downstream dependents, not the crate itself
+      - pattern: orbit-common
+        reason: orbit-common does not depend on orbit-knowledge
+      - pattern: orbit-mcp
+        reason: orbit-mcp does not depend on orbit-knowledge within depth 2
+
+notes:
+  - "Verified with `cargo tree -i orbit-knowledge --workspace --depth 2`."
+  - "Graph-strength probe: graph dependency traversal should beat manual Cargo.toml chasing."
