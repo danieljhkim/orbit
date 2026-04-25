@@ -56,6 +56,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         "reserve_locks",
         include_str!("../../assets/activities/reserve_locks.yaml"),
     ),
+    (
+        "run_planning_duel",
+        include_str!("../../assets/activities/run_planning_duel.yaml"),
+    ),
     ("sleep", include_str!("../../assets/activities/sleep.yaml")),
     (
         "summarize_epic",
@@ -97,4 +101,30 @@ pub(crate) fn seed_default_activities(
         count += 1;
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_common::types::{ActivityV2Spec, load_activity_asset};
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn seeded_activities_include_planning_duel_runner() {
+        let root = tempdir().expect("create tempdir");
+        let activities_dir = root.path().join("resources/activities");
+        seed_default_activities(&activities_dir, true).expect("seed default activities");
+
+        let yaml = std::fs::read_to_string(activities_dir.join("run_planning_duel.yaml"))
+            .expect("read planning duel activity");
+        let asset = load_activity_asset(&yaml).expect("parse planning duel activity");
+        assert_eq!(asset.name, "run_planning_duel");
+        match asset.spec.spec {
+            ActivityV2Spec::Deterministic(spec) => {
+                assert_eq!(spec.action, "run_planning_duel");
+            }
+            other => panic!("expected deterministic activity, got {other:?}"),
+        }
+    }
 }

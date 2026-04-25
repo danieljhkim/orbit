@@ -248,7 +248,7 @@ The loop body runs before `break_when` is evaluated, so body steps can populate 
 
 ### 8.6 Persisted state for v2 job runs
 
-Persisted pipeline runs (`orbit run ship`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`, `orbit run ship show`) are stored through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create a durable `JobRun` bundle after [T20260423-2004-4], using the same workspace-local `state/job-runs/<job_id>/<run_id>/` layout so `orbit job history` and `orbit job run-state` can inspect the returned run ID.
+Persisted pipeline runs (`orbit run ship`, `orbit run ship-auto`, `orbit run duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) are stored through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create a durable `JobRun` bundle after [T20260423-2004-4], using the same workspace-local `state/job-runs/<job_id>/<run_id>/` layout so `orbit job history` and `orbit job run-state` can inspect the returned run ID. The workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010] so history inspection has one public surface.
 
 Before [T20260423-0445], a v2 workflow that failed before any concrete step file was written could leave behind a failed `JobRun` with `steps: []` and no surfaced `error_message`, even when the underlying executor had a concrete reason.
 
@@ -259,7 +259,7 @@ The current contract is:
 - that synthetic step uses `target_type: job` and `target_id: <job_id>`
 - the step's `error_message` carries the concrete executor error (or a fallback `success=false` summary for message-carrying non-success results)
 
-This is intentionally an operator-surface repair, not a new execution primitive. It keeps `run ship --json`, `run ship show`, direct `job run` output, `job history`, and `job run-state` actionable without introducing a second run-level error channel in `JobRun`.
+This is intentionally an operator-surface repair, not a new execution primitive. It keeps `run ship --json`, direct `job run` output, `job history`, and `job run-state` actionable without introducing a second run-level error channel in `JobRun`.
 
 The loop shares the same pipeline map and session map across iterations. That is what makes cross-iteration `session:` binding meaningful in the first place.
 
@@ -302,7 +302,7 @@ The seeded asset set is part of the design, not just repo clutter. Today it incl
 
 - small reference activities such as `agent_loop_reference` and `agent_loop_cli_reference`
 - control-plane jobs such as `task_gate_pipeline`
-- higher-level dispatch workflows such as `task_auto_pipeline` and `task_epic_pipeline`
+- higher-level dispatch workflows such as `task_auto_pipeline`, `task_epic_pipeline`, and `job_duel_plan_pipeline`
 
 The gate/auto/epic assets added in [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] are especially useful because they exercise the real v2 constructs instead of describing them abstractly:
 
@@ -345,9 +345,9 @@ README already frames tasks, jobs, and activities as substrate rather than the l
 
 Most code comments are accurate, but some module prose still reflects earlier phase names or pass ordering. When there is tension, orbit-core entrypoints and executor behavior are the authoritative source.
 
-### 11.8 Historical run inspection can outlive seeded assets
+### 11.8 Historical run inspection belongs to the job surface
 
-Read-only history surfaces do not always have the same dependency shape as live execution. After [T20260423-0447], `orbit run duel list` and latest `show` intentionally read stored run bundles without requiring the original duel job asset to remain seeded, because retirement of an executable surface must not also erase its observability trail.
+Read-only history surfaces do not always have the same dependency shape as live execution. [T20260423-0447] proved that retired workflow runs can remain observable without live assets, but [T20260425-2010] consolidated public inspection under `orbit job history <job_id>` and `orbit job run-state <run_id>`. `orbit run` now names execution aliases (`ship`, `ship-auto`, `duel-plan`, `job`), not workflow-specific history browsers.
 
 ---
 
@@ -373,5 +373,6 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 - **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into job history and run-state.
 - **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
+- **[T20260425-2010]** — Refactor `orbit run` task workflow commands and move workflow history inspection to `orbit job history`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

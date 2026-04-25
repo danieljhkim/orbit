@@ -45,7 +45,7 @@ orbit run ship "$TASK_ID"
 Run local-only when you do not want Orbit to open or update a pull request:
 
 ```bash
-orbit run ship local "$TASK_ID"
+orbit run ship --mode local "$TASK_ID"
 ```
 
 ## Pin Multiple Tasks
@@ -53,5 +53,5 @@ orbit run ship local "$TASK_ID"
 When you already know the work set, pin task IDs explicitly:
 
 ```bash
-orbit run ship T123 T456 --parallelism 2 --base main
+orbit run ship T123 T456 --base main
 ```

@@ -453,32 +453,20 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
 }
 
 fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
-    use crate::command::duel::DuelSubcommand;
     use crate::command::run::RunSubcommand;
-    use crate::command::ship::ShipSubcommand;
+    use crate::command::ship::ShipMode;
 
     let (subcommand, target_type, target_id) = match &cmd.command {
         Some(RunSubcommand::Ship(command)) => {
-            let (sub, target_id) = match command.command.as_ref() {
-                Some(ShipSubcommand::Pr(_)) => ("ship/pr", Some("ship")),
-                Some(ShipSubcommand::Local(_)) => ("ship/local", Some("ship-local")),
-                Some(ShipSubcommand::List(_)) => ("ship/list", Some("ship")),
-                Some(ShipSubcommand::Show(args)) => ("ship/show", args.run_id.as_deref()),
-                None => ("ship", Some("ship")),
+            let target_id = match command.mode {
+                ShipMode::Pr => "ship",
+                ShipMode::Local => "ship-local",
             };
-            (sub, Some("workflow"), target_id)
+            ("ship", Some("workflow"), Some(target_id))
         }
-        Some(RunSubcommand::Duel(command)) => {
-            let (sub, target_id) = match command.command.as_ref() {
-                Some(DuelSubcommand::Pr(args)) => ("duel/pr", args.task_id.as_deref()),
-                Some(DuelSubcommand::Plan(args)) => ("duel/plan", Some(args.task_id.as_str())),
-                Some(DuelSubcommand::Score(_)) => ("duel/score", None),
-                Some(DuelSubcommand::List(_)) => ("duel/list", None),
-                Some(DuelSubcommand::Show(args)) => ("duel/show", args.run_id.as_deref()),
-                None if command.defaults_to_scoreboard() => ("duel/score", None),
-                None => ("duel", command.direct.task_id.as_deref()),
-            };
-            (sub, Some("duel"), target_id)
+        Some(RunSubcommand::ShipAuto(_)) => ("ship-auto", Some("workflow"), Some("ship-auto")),
+        Some(RunSubcommand::DuelPlan(args)) => {
+            ("duel-plan", Some("task"), Some(args.task_id.as_str()))
         }
         Some(RunSubcommand::Job(args)) => ("job", Some("job"), Some(args.job_id.as_str())),
         None => ("job", Some("job"), cmd.positional.job_id.as_deref()),
@@ -511,5 +499,51 @@ fn serve_command_meta(cmd: &crate::command::serve::ServeCommand) -> CommandMeta 
         target_id: None,
         role: "admin".to_string(),
         arguments_json: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::command::Cli;
+
+    use super::*;
+
+    fn meta_for(args: &[&str]) -> CommandMeta {
+        let cli = Cli::parse_from(args);
+        extract_command_meta(&cli.command)
+    }
+
+    #[test]
+    fn run_ship_audit_meta_uses_selected_mode_alias() {
+        let pr = meta_for(&["orbit", "run", "ship", "T1"]);
+        assert_eq!(pr.command, "run");
+        assert_eq!(pr.subcommand.as_deref(), Some("ship"));
+        assert_eq!(pr.target_type.as_deref(), Some("workflow"));
+        assert_eq!(pr.target_id.as_deref(), Some("ship"));
+
+        let local = meta_for(&["orbit", "run", "ship", "-m", "local", "T1"]);
+        assert_eq!(local.subcommand.as_deref(), Some("ship"));
+        assert_eq!(local.target_type.as_deref(), Some("workflow"));
+        assert_eq!(local.target_id.as_deref(), Some("ship-local"));
+    }
+
+    #[test]
+    fn run_ship_auto_audit_meta_uses_new_top_level_command() {
+        let meta = meta_for(&["orbit", "run", "ship-auto"]);
+        assert_eq!(meta.command, "run");
+        assert_eq!(meta.subcommand.as_deref(), Some("ship-auto"));
+        assert_eq!(meta.target_type.as_deref(), Some("workflow"));
+        assert_eq!(meta.target_id.as_deref(), Some("ship-auto"));
+    }
+
+    #[test]
+    fn run_duel_plan_audit_meta_targets_task() {
+        let meta = meta_for(&["orbit", "run", "duel-plan", "T1"]);
+        assert_eq!(meta.command, "run");
+        assert_eq!(meta.subcommand.as_deref(), Some("duel-plan"));
+        assert_eq!(meta.target_type.as_deref(), Some("task"));
+        assert_eq!(meta.target_id.as_deref(), Some("T1"));
     }
 }

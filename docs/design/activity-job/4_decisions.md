@@ -127,28 +127,28 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 ## ADR-010 — Historical workflow inspection must not depend on live seeded job assets
 
-**Status:** Accepted · 2026-04 · [T20260423-0447]
+**Status:** Superseded by ADR-014 · 2026-04 · [T20260423-0447]
 
 **Context.** After [T20260419-2156], some older workflow assets such as duel no longer ship as runnable seeded jobs. Their historical run bundles and scoreboards can still exist on disk, and users still need to inspect that history.
 
-**Decision.** Treat historical inspection as a stored-data concern, not a live-asset lookup. Read-only surfaces such as `orbit run duel list` and latest `orbit run duel show` must filter persisted run bundles directly, and bare `orbit run duel` defaults to the preserved scoreboard surface instead of the retired execution path.
+**Decision.** Treat historical inspection as a stored-data concern, not a live-asset lookup. At the time, read-only surfaces such as `orbit run duel list` and latest `orbit run duel show` filtered persisted run bundles directly, and bare `orbit run duel` defaulted to the preserved scoreboard surface instead of the retired execution path.
 
 **Consequences.**
-- Retired workflows remain observable even after their executable assets disappear.
-- CLI retirement messaging and historical inspection behavior stay aligned.
-- Cost: some read-only inspection paths no longer share the same asset-validation gate as active workflow execution paths.
+- Retired workflows remained observable even after their executable assets disappeared.
+- CLI retirement messaging and historical inspection behavior stayed aligned until the public run surface was simplified in [T20260425-2010].
+- Cost: some read-only inspection paths no longer shared the same asset-validation gate as active workflow execution paths.
 
 ## ADR-011 — Merge object-valued job defaults with caller input, and surface early pipeline failures as synthetic job steps
 
 **Status:** Accepted · 2026-04 · [T20260423-0445]
 
-**Context.** The `task_auto_pipeline` / `orbit run ship` path passes only a partial input object (`mode`, `base_branch`, `task_ids`, optional concurrency). The earlier job executor contract only applied `job.default_input` when the caller passed `null`, so any explicit object silently discarded required default keys like `max_tasks` and `max_bundle_size`. The same incident exposed a second operator gap: persisted v2 pipeline runs that failed before writing any concrete step files surfaced as `steps: []` with no `error_message` in `run ship show`.
+**Context.** The `task_auto_pipeline` / historical `orbit run ship` auto-dispatch path passes only a partial input object (`mode`, `base_branch`, `task_ids`, optional concurrency). The earlier job executor contract only applied `job.default_input` when the caller passed `null`, so any explicit object silently discarded required default keys like `max_tasks` and `max_bundle_size`. The same incident exposed a second operator gap: persisted v2 pipeline runs that failed before writing any concrete step files surfaced as `steps: []` with no `error_message` in workflow-specific show surfaces.
 
 **Decision.** When both `job.default_input` and the caller input are JSON objects, Orbit performs a shallow merge and lets caller keys win on conflict; `null` and non-object caller inputs keep their pre-existing semantics. Separately, when a persisted v2 pipeline run fails and no recorded step already carries error detail, the pipeline worker writes a synthetic failed `JobRunStep` (`target_type: job`, `target_id: <job_id>`) so CLI/operator surfaces have a concrete message to show.
 
 **Consequences.**
 - Seeded workflows can rely on omitted keys inheriting from job defaults even when wrappers pass partial input objects.
-- `orbit run ship --json` and `orbit run ship show` surface actionable failure detail for early v2 pipeline failures instead of blank summaries.
+- `orbit run ship --json`, `orbit job history`, and `orbit job run-state` surface actionable failure detail for early v2 pipeline failures instead of blank summaries.
 - Cost: the job-level input contract is now a shallow merge rule that docs and tests must preserve, and run history can include synthetic job-level failure steps that were not literal authored YAML steps.
 
 ## ADR-012 — Direct v2 job runs are durable job runs, not audit-only executions
@@ -174,8 +174,22 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Consequences.**
 - Workspace workflows can override seeded defaults without deleting global resources.
-- `orbit run ship` and pipeline-worker lookup paths share the same first-wins catalog resolution.
+- Public run aliases and pipeline-worker lookup paths share the same first-wins catalog resolution.
 - Cost: lower-precedence job assets can be shadowed silently, so debugging an unexpected workflow now requires checking catalog source paths.
+
+## ADR-014 — Public run workflows are execution aliases only
+
+**Status:** Accepted · 2026-04 · [T20260425-2010]
+
+**Context.** `orbit run` had become a mixed surface: some entries executed workflows, while `ship list/show` and `duel list/show` browsed history that was already available through `orbit job history` and `orbit job run-state`. At the same time, the explicit task ship path and auto-dispatch path needed different job targets, and planning duel support had a live workflow alias without a seeded runnable job asset.
+
+**Decision.** Treat `orbit run` as an execution-alias surface only. `orbit run ship <TASK_ID>...` dispatches explicit bundles through `task_pr_pipeline` or `task_local_pipeline` selected by `--mode`; `orbit run ship-auto` dispatches `task_auto_pipeline`; `orbit run duel-plan <TASK_ID>` dispatches the seeded `job_duel_plan_pipeline`; `orbit run job <JOB_ID>` remains the direct job surface. Run history inspection belongs to `orbit job history <JOB_ID>` and `orbit job run-state <RUN_ID>`.
+
+**Consequences.**
+- The public command grammar separates execution from inspection and removes workflow-specific history aliases.
+- Explicit task shipping no longer routes through the auto-dispatch job, so task IDs map directly to the PR/local bundle jobs.
+- Planning duels are runnable again through a seeded activity/job pair instead of a stale workflow alias.
+- Cost: users of `orbit run ship local`, `orbit run ship list/show`, and `orbit run duel list/show` must update their command muscle memory and scripts.
 
 ---
 
@@ -198,5 +212,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 - **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into job history and run-state.
 - **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
+- **[T20260425-2010]** — Refactor `orbit run` task workflow commands and revive `duel-plan` as a seeded run workflow.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

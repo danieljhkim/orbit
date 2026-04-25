@@ -10,11 +10,16 @@ use crate::OrbitRuntime;
 /// Shippable default workflow assets, seeded under
 /// `<orbit_root>/resources/jobs/<name>.yaml` on `orbit init`. The five
 /// entries here are the admission-controlled task shipment workflows
-/// (auto / epic / gate / local / pr). Example and smoke fixtures live
+/// (auto / epic / gate / local / pr) plus the planning-duel workflow.
+/// Example and smoke fixtures live
 /// under `crates/orbit-core/assets/jobs/examples/` and are NOT seeded —
 /// they exist for `crates/orbit-engine/examples/v2_job_runtime_smoke.rs`
 /// only.
 const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
+    (
+        "job_duel_plan_pipeline",
+        include_str!("../../assets/jobs/job_duel_plan_pipeline.yaml"),
+    ),
     (
         "task_auto_pipeline",
         include_str!("../../assets/jobs/task_auto_pipeline.yaml"),
@@ -176,12 +181,11 @@ impl OrbitRuntime {
     ) -> Result<(PathBuf, JobV2), OrbitError> {
         let mut selected = None;
         for dir in self.v2_job_asset_dirs() {
-            if dir.is_dir() {
-                if let Some(found) = find_v2_job_asset_in_dir(&dir, job_id)?
-                    && selected.is_none()
-                {
-                    selected = Some(found);
-                }
+            if dir.is_dir()
+                && let Some(found) = find_v2_job_asset_in_dir(&dir, job_id)?
+                && selected.is_none()
+            {
+                selected = Some(found);
             }
         }
         selected.ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))
@@ -379,6 +383,19 @@ spec:
         std::fs::create_dir_all(path.parent().expect("job path has parent"))
             .expect("create job dir");
         std::fs::write(path, yaml).expect("write job yaml");
+    }
+
+    #[test]
+    fn seeded_jobs_include_planning_duel_pipeline() {
+        let (_root, runtime, global_root, _workspace_root) = test_runtime();
+        seed_default_jobs(&global_root.join("resources/jobs"), true).expect("seed default jobs");
+
+        let entry = runtime
+            .show_job_catalog_entry("job_duel_plan_pipeline")
+            .expect("planning duel job is seeded");
+        assert_eq!(entry.spec.kind, JobKind::Workflow);
+        assert_eq!(entry.spec.steps.len(), 1);
+        assert_eq!(entry.spec.steps[0].id, "run_planning_duel");
     }
 
     #[test]

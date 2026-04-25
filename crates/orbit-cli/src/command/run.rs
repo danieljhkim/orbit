@@ -7,17 +7,22 @@ use crate::command::{duel, job, ship};
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
   orbit run ship <task_id> ...
-  orbit run duel [score|list|show|plan]
+  orbit run ship-auto
+  orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
 Direct form:
   orbit run <job_id> [--input key=value] [--json] [--debug]
     Equivalent to `orbit run job <job_id>`.
+
+Run history:
+  orbit job history <job_id>
+  orbit job run-state <run_id>
 ";
 
 #[derive(Args)]
 #[command(
-    about = "Run a job workflow (supports run ship / run duel / run job / run <id>)",
+    about = "Run a job workflow (supports run ship / ship-auto / duel-plan / job / run <id>)",
     arg_required_else_help = true,
     args_conflicts_with_subcommands = true,
     override_usage = "orbit run <COMMAND>\n       orbit run <JOB_ID> [OPTIONS]",
@@ -42,10 +47,14 @@ impl Execute for RunCommand {
 
 #[derive(Subcommand)]
 pub enum RunSubcommand {
-    /// Ship tasks through the pipeline
+    /// Ship explicitly selected tasks through the task pipeline
     Ship(ship::ShipCommand),
-    /// Inspect cross-agent duel history and scoreboards
-    Duel(duel::DuelCommand),
+    /// Auto-select backlog tasks and ship them through the task pipeline
+    #[command(name = "ship-auto")]
+    ShipAuto(ship::ShipAutoCommand),
+    /// Run a planning duel for one task
+    #[command(name = "duel-plan")]
+    DuelPlan(duel::DuelPlanCommand),
     /// Run an arbitrary job by ID
     Job(job::JobRunArgs),
 }
@@ -54,7 +63,8 @@ impl Execute for RunSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
             RunSubcommand::Ship(command) => command.execute(runtime),
-            RunSubcommand::Duel(command) => command.execute(runtime),
+            RunSubcommand::ShipAuto(command) => command.execute(runtime),
+            RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::Job(command) => command.execute(runtime),
         }
     }
@@ -104,8 +114,104 @@ fn ensure_positional_job_exists(runtime: &OrbitRuntime, job_id: &str) -> Result<
     match runtime.show_job_catalog_entry(job_id) {
         Ok(_) => Ok(()),
         Err(OrbitError::JobNotFound(_)) => Err(OrbitError::InvalidInput(format!(
-            "unknown `orbit run` target `{job_id}`\navailable subcommands: ship, duel, job\ntip: use `orbit job list` to discover valid job ids"
+            "unknown `orbit run` target `{job_id}`\navailable subcommands: ship, ship-auto, duel-plan, job\ntip: use `orbit job list` to discover valid job ids"
         ))),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::command::{Cli, Commands};
+
+    use super::*;
+
+    fn parse_run(args: &[&str]) -> RunCommand {
+        let cli = Cli::parse_from(args);
+        match cli.command {
+            Commands::Run(command) => command,
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn parses_explicit_ship_defaults() {
+        let command = parse_run(&["orbit", "run", "ship", "T1", "T2"]);
+        match command.command.expect("subcommand") {
+            RunSubcommand::Ship(args) => {
+                assert_eq!(args.task_ids, vec!["T1", "T2"]);
+                assert_eq!(args.mode, ship::ShipMode::Pr);
+                assert_eq!(args.base, "agent-main");
+            }
+            _ => panic!("expected ship"),
+        }
+    }
+
+    #[test]
+    fn parses_explicit_ship_mode_and_base() {
+        let command = parse_run(&["orbit", "run", "ship", "-m", "local", "-b", "main", "T1"]);
+        match command.command.expect("subcommand") {
+            RunSubcommand::Ship(args) => {
+                assert_eq!(args.task_ids, vec!["T1"]);
+                assert_eq!(args.mode, ship::ShipMode::Local);
+                assert_eq!(args.base, "main");
+            }
+            _ => panic!("expected ship"),
+        }
+    }
+
+    #[test]
+    fn parses_ship_auto_as_top_level_subcommand() {
+        let command = parse_run(&["orbit", "run", "ship-auto", "-m", "pr", "-b", "main"]);
+        match command.command.expect("subcommand") {
+            RunSubcommand::ShipAuto(args) => {
+                assert_eq!(args.mode, ship::ShipMode::Pr);
+                assert_eq!(args.base, "main");
+            }
+            _ => panic!("expected ship-auto"),
+        }
+    }
+
+    #[test]
+    fn parses_duel_plan_as_top_level_subcommand() {
+        let command = parse_run(&["orbit", "run", "duel-plan", "T1", "-b", "main"]);
+        match command.command.expect("subcommand") {
+            RunSubcommand::DuelPlan(args) => {
+                assert_eq!(args.task_id, "T1");
+                assert_eq!(args.base, "main");
+            }
+            _ => panic!("expected duel-plan"),
+        }
+    }
+
+    #[test]
+    fn parses_run_job_unchanged() {
+        let command = parse_run(&["orbit", "run", "job", "task_auto_pipeline", "--json"]);
+        match command.command.expect("subcommand") {
+            RunSubcommand::Job(args) => {
+                assert_eq!(args.job_id, "task_auto_pipeline");
+                assert!(args.json);
+            }
+            _ => panic!("expected job"),
+        }
+    }
+
+    #[test]
+    fn parses_positional_job_fallback_unchanged() {
+        let command = parse_run(&["orbit", "run", "task_auto_pipeline", "--json"]);
+        assert!(command.command.is_none());
+        assert_eq!(
+            command.positional.job_id.as_deref(),
+            Some("task_auto_pipeline")
+        );
+        assert!(command.positional.json);
+    }
+
+    #[test]
+    fn rejects_removed_duel_history_forms() {
+        assert!(Cli::try_parse_from(["orbit", "run", "duel", "list"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "run", "duel", "show"]).is_err());
     }
 }

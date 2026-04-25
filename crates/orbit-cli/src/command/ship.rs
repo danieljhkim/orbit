@@ -1,323 +1,146 @@
-//! `orbit run ship` CLI subcommand tree.
-//!
-//! Thin wrapper over the existing ship workflow dispatch helpers.
+//! `orbit run ship` and `orbit run ship-auto` CLI entrypoints.
 
-use clap::{Args, Subcommand};
-use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
-use serde_json::{Value, json};
 use std::collections::HashSet;
 
-use crate::command::Execute;
-use crate::command::job_run_support::{
-    RunHistoryFilter, dispatch_workflow, job_run_step_to_json, job_run_to_json_with_workflow,
-    load_filtered_job_runs, load_latest_job_run, print_job_run_list_with_workflow,
-    print_job_run_with_workflow, print_step_detail, workflow_dispatch_result_to_json,
-};
+use clap::{Args, ValueEnum};
+use orbit_core::{OrbitError, OrbitRuntime, find_workflow};
+use serde_json::Value;
 
-const SHIP_WORKFLOW: &str = "ship";
+use crate::command::Execute;
+use crate::command::job_run_support::{dispatch_workflow, print_workflow_dispatch_results};
+
+const SHIP_PR_WORKFLOW: &str = "ship";
 const SHIP_LOCAL_WORKFLOW: &str = "ship-local";
-const SHIP_JOB_ID: &str = "task_auto_pipeline";
-const SHIP_JOB_IDS: &[&str] = &[SHIP_JOB_ID];
+const SHIP_AUTO_WORKFLOW: &str = "ship-auto";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ShipMode {
+    Pr,
+    Local,
+}
+
+impl ShipMode {
+    fn as_input_value(self) -> &'static str {
+        match self {
+            ShipMode::Pr => "pr",
+            ShipMode::Local => "local",
+        }
+    }
+
+    fn explicit_workflow_alias(self) -> &'static str {
+        match self {
+            ShipMode::Pr => SHIP_PR_WORKFLOW,
+            ShipMode::Local => SHIP_LOCAL_WORKFLOW,
+        }
+    }
+}
 
 #[derive(Args)]
 #[command(
-    about = "Ship tasks through the pipeline",
-    override_usage = "orbit run ship [TASK_IDS]... [OPTIONS]\n       orbit run ship <COMMAND>"
+    about = "Ship explicitly selected tasks through the task pipeline",
+    override_usage = "orbit run ship <TASK_ID> [<TASK_ID>...] [OPTIONS]",
+    after_help = "Examples:\n  orbit run ship T123\n  orbit run ship T123 T456 --mode local\n  orbit run ship T123 --base main\n\nRun history moved to `orbit job history <JOB_ID>`."
 )]
 pub struct ShipCommand {
-    #[command(subcommand)]
-    pub command: Option<ShipSubcommand>,
-
-    #[command(flatten)]
-    pub direct: ShipWorkflowArgs,
+    /// Task IDs to process as one explicit task bundle.
+    #[arg(value_name = "TASK_ID", num_args = 0..)]
+    pub task_ids: Vec<String>,
+    /// Pipeline mode for the selected task bundle.
+    #[arg(short = 'm', long, value_enum, default_value = "pr")]
+    pub mode: ShipMode,
+    /// Base branch for the selected pipeline.
+    #[arg(short = 'b', long, default_value = "agent-main")]
+    pub base: String,
+    /// Output as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 impl Execute for ShipCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self.command {
-            Some(command) => command.execute(runtime),
-            None => execute_ship_workflow(runtime, SHIP_WORKFLOW, self.direct),
-        }
-    }
-}
-
-#[derive(Subcommand)]
-pub enum ShipSubcommand {
-    /// Execute the PR-based ship pipeline
-    #[command(hide = true)]
-    Pr(ShipPrArgs),
-    /// Execute the local-only ship pipeline
-    Local(ShipLocalArgs),
-    /// List job runs for ship pipelines
-    List(ShipListArgs),
-    /// Show a ship pipeline run, or the latest one when no run ID is provided
-    Show(ShipShowArgs),
-}
-
-impl Execute for ShipSubcommand {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self {
-            ShipSubcommand::Pr(args) => args.execute(runtime),
-            ShipSubcommand::Local(args) => args.execute(runtime),
-            ShipSubcommand::List(args) => args.execute(runtime),
-            ShipSubcommand::Show(args) => args.execute(runtime),
-        }
+        let plan = build_ship_run_plan(&self)?;
+        let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, 1)?;
+        print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
 }
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit run ship\n  orbit run ship T123 T456 --parallelism 2\n  orbit run ship --base main\n  orbit run ship --loop 3"
+    about = "Auto-select backlog tasks and ship them through the task pipeline",
+    override_usage = "orbit run ship-auto [OPTIONS]",
+    after_help = "Examples:\n  orbit run ship-auto\n  orbit run ship-auto --mode local\n  orbit run ship-auto --base main\n\nRun history moved to `orbit job history task_auto_pipeline`."
 )]
-pub struct ShipPrArgs {
-    #[command(flatten)]
-    pub args: ShipWorkflowArgs,
-}
-
-#[derive(Args)]
-#[command(
-    after_help = "Examples:\n  orbit run ship local\n  orbit run ship local T123 --parallelism 1\n  orbit run ship local --base main\n  orbit run ship local --loop 3"
-)]
-pub struct ShipLocalArgs {
-    #[command(flatten)]
-    pub args: ShipWorkflowArgs,
-}
-
-#[derive(Args)]
-pub struct ShipWorkflowArgs {
-    /// Task IDs to process (omit to auto-select from backlog)
-    #[arg(value_name = "TASK_IDS", num_args = 1..)]
-    pub task_ids: Vec<String>,
-
-    /// Number of parallel workers
-    #[arg(long)]
-    pub parallelism: Option<u32>,
-
-    /// Base branch for the pipeline
-    #[arg(long)]
-    pub base: Option<String>,
-
-    /// Repeat the selected ship workflow N times
-    #[arg(long = "loop", default_value_t = 1)]
-    pub loop_count: u32,
-
-    /// Stream agent stderr to the terminal for debugging
-    #[arg(long)]
-    pub debug: bool,
-
-    /// Output as JSON
+pub struct ShipAutoCommand {
+    /// Pipeline mode for auto-selected task bundles.
+    #[arg(short = 'm', long, value_enum, default_value = "pr")]
+    pub mode: ShipMode,
+    /// Base branch for auto-selected task bundles.
+    #[arg(short = 'b', long, default_value = "agent-main")]
+    pub base: String,
+    /// Output as JSON.
     #[arg(long)]
     pub json: bool,
 }
 
-impl Execute for ShipPrArgs {
+impl Execute for ShipAutoCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        execute_ship_workflow(runtime, SHIP_WORKFLOW, self.args)
+        let plan = build_ship_auto_run_plan(&self)?;
+        let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, 1)?;
+        print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
 }
 
-impl Execute for ShipLocalArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        execute_ship_workflow(runtime, SHIP_LOCAL_WORKFLOW, self.args)
-    }
+#[derive(Debug)]
+pub(crate) struct WorkflowRunPlan {
+    pub workflow_alias: &'static str,
+    pub input: Value,
 }
 
-fn execute_ship_workflow(
-    runtime: &OrbitRuntime,
-    workflow_alias: &'static str,
-    args: ShipWorkflowArgs,
-) -> Result<(), OrbitError> {
-    let plan = build_ship_run_plan(workflow_alias, &args)?;
-    let runs = dispatch_workflow(
-        runtime,
-        plan.workflow_alias,
-        &plan.input,
-        args.debug,
-        plan.loop_count,
-    )?;
-
-    if args.json {
-        if runs.len() == 1 {
-            return crate::output::json::print_pretty(&workflow_dispatch_result_to_json(&runs[0]));
-        }
-        return crate::output::json::print_pretty(&json!({
-            "workflow": plan.workflow_alias,
-            "runs": runs
-                .iter()
-                .map(workflow_dispatch_result_to_json)
-                .collect::<Vec<_>>(),
-        }));
-    }
-
-    for run in &runs {
-        let error_code = run.error_code.clone().unwrap_or_else(|| "-".to_string());
-        let error_message = run
-            .error_message
-            .clone()
-            .unwrap_or_else(|| "-".to_string())
-            .replace('\n', " ");
-        println!(
-            "workflow={};job_id={};run_id={};state={};attempt={};error_code={};error_message={}",
-            run.workflow_alias,
-            run.job_id,
-            run.run_id,
-            run.state,
-            run.attempt,
-            error_code,
-            error_message
-        );
-    }
-    Ok(())
-}
-
-#[derive(Args)]
-pub struct ShipListArgs {
-    #[arg(long, value_enum)]
-    pub status: Option<orbit_core::JobRunState>,
-    #[arg(long)]
-    pub since: Option<String>,
-    #[arg(long)]
-    pub limit: Option<usize>,
-    #[arg(long)]
-    pub full: bool,
-    #[arg(long)]
-    pub json: bool,
-}
-
-impl Execute for ShipListArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let runs = load_filtered_job_runs(
-            runtime,
-            SHIP_JOB_IDS,
-            &RunHistoryFilter {
-                status: self.status,
-                since: self.since,
-                limit: self.limit,
-            },
-        )?;
-
-        if self.json {
-            return crate::output::json::print_pretty(&Value::Array(
-                runs.iter()
-                    .map(|run| {
-                        job_run_to_json_with_workflow(run, ship_workflow_name(run.job_id.as_str()))
-                    })
-                    .collect::<Vec<_>>(),
-            ));
-        }
-
-        print_job_run_list_with_workflow(&runs, self.full, ship_workflow_name);
-        Ok(())
-    }
-}
-
-#[derive(Args)]
-pub struct ShipShowArgs {
-    pub run_id: Option<String>,
-    #[arg(long)]
-    pub json: bool,
-    #[arg(long)]
-    pub step: Option<usize>,
-}
-
-impl Execute for ShipShowArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let run = match &self.run_id {
-            Some(run_id) => runtime.show_job_run(run_id)?,
-            None => load_latest_job_run(runtime, SHIP_JOB_IDS, "ship")?,
-        };
-        ensure_ship_run(&run)?;
-
-        if let Some(step_index) = self.step {
-            let step = run
-                .steps
-                .iter()
-                .find(|step| step.step_index as usize == step_index)
-                .ok_or_else(|| {
-                    OrbitError::InvalidInput(format!(
-                        "step {step_index} not found in run '{}' (run has {} step(s))",
-                        run.run_id,
-                        run.steps.len()
-                    ))
-                })?;
-            if self.json {
-                return crate::output::json::print_pretty(&job_run_step_to_json(step));
-            }
-            print_step_detail(step);
-            return Ok(());
-        }
-
-        if self.json {
-            return crate::output::json::print_pretty(&job_run_to_json_with_workflow(
-                &run,
-                ship_workflow_name(run.job_id.as_str()),
-            ));
-        }
-
-        print_job_run_with_workflow(&run, ship_workflow_name(run.job_id.as_str()));
-        Ok(())
-    }
-}
-
-struct ShipRunPlan {
-    workflow_alias: &'static str,
-    input: Value,
-    loop_count: u32,
-}
-
-fn build_ship_run_plan(
-    workflow_alias: &'static str,
-    args: &ShipWorkflowArgs,
-) -> Result<ShipRunPlan, OrbitError> {
-    if args.loop_count == 0 {
-        return Err(OrbitError::InvalidInput(
-            "--loop must be greater than 0".to_string(),
-        ));
-    }
-
-    validate_explicit_task_selection(&args.task_ids, args.parallelism)?;
-
-    find_workflow(workflow_alias)
-        .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))?;
-    let mode = if workflow_alias == SHIP_LOCAL_WORKFLOW {
-        "local"
-    } else {
-        "pr"
-    };
-    let mut map = serde_json::Map::new();
-    map.insert("mode".to_string(), Value::String(mode.to_string()));
-    if !args.task_ids.is_empty() {
-        map.insert(
-            "task_ids".to_string(),
-            Value::Array(
-                args.task_ids
-                    .iter()
-                    .cloned()
-                    .map(Value::String)
-                    .collect::<Vec<_>>(),
-            ),
-        );
-    }
-    if let Some(parallelism) = args.parallelism {
-        map.insert("concurrency".to_string(), Value::Number(parallelism.into()));
-    }
-    if let Some(base) = &args.base {
-        map.insert("base_branch".to_string(), Value::String(base.clone()));
-    }
-
-    Ok(ShipRunPlan {
+pub(crate) fn build_ship_run_plan(args: &ShipCommand) -> Result<WorkflowRunPlan, OrbitError> {
+    validate_explicit_task_selection(&args.task_ids)?;
+    let workflow_alias = args.mode.explicit_workflow_alias();
+    ensure_workflow_exists(workflow_alias)?;
+    Ok(WorkflowRunPlan {
         workflow_alias,
-        input: Value::Object(map),
-        loop_count: args.loop_count,
+        input: ship_input(args.mode, &args.base, Some(&args.task_ids)),
     })
 }
 
-fn validate_explicit_task_selection(
-    task_ids: &[String],
-    parallelism: Option<u32>,
-) -> Result<(), OrbitError> {
+pub(crate) fn build_ship_auto_run_plan(
+    args: &ShipAutoCommand,
+) -> Result<WorkflowRunPlan, OrbitError> {
+    ensure_workflow_exists(SHIP_AUTO_WORKFLOW)?;
+    Ok(WorkflowRunPlan {
+        workflow_alias: SHIP_AUTO_WORKFLOW,
+        input: ship_input(args.mode, &args.base, None),
+    })
+}
+
+fn ship_input(mode: ShipMode, base: &str, task_ids: Option<&[String]>) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "mode".to_string(),
+        Value::String(mode.as_input_value().to_string()),
+    );
+    map.insert("base_branch".to_string(), Value::String(base.to_string()));
+    if let Some(task_ids) = task_ids {
+        map.insert(
+            "task_ids".to_string(),
+            Value::Array(task_ids.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    Value::Object(map)
+}
+
+fn validate_explicit_task_selection(task_ids: &[String]) -> Result<(), OrbitError> {
     if task_ids.is_empty() {
-        return Ok(());
+        return Err(OrbitError::InvalidInput(
+            "`orbit run ship` requires at least one task ID; use `orbit run ship-auto` to auto-select backlog tasks".to_string(),
+        ));
+    }
+
+    if let Some(legacy) = task_ids.first().and_then(|value| legacy_ship_form(value)) {
+        return Err(OrbitError::InvalidInput(legacy.to_string()));
     }
 
     let mut seen = HashSet::new();
@@ -329,32 +152,151 @@ fn validate_explicit_task_selection(
         }
     }
 
-    if let Some(parallelism) = parallelism
-        && task_ids.len() > parallelism as usize
-    {
-        return Err(OrbitError::InvalidInput(format!(
-            "explicit task batch of {} exceeds --parallelism {}",
-            task_ids.len(),
-            parallelism
-        )));
-    }
-
     Ok(())
 }
 
-fn ensure_ship_run(run: &orbit_core::JobRun) -> Result<(), OrbitError> {
-    if SHIP_JOB_IDS.contains(&run.job_id.as_str()) {
-        return Ok(());
+fn legacy_ship_form(value: &str) -> Option<&'static str> {
+    match value {
+        "local" => {
+            Some("`orbit run ship local` was replaced by `orbit run ship --mode local <TASK_ID>`")
+        }
+        "pr" => Some("`orbit run ship pr` was replaced by `orbit run ship --mode pr <TASK_ID>`"),
+        "list" | "show" => Some(
+            "`orbit run ship list/show` was removed; use `orbit job history <JOB_ID>` and `orbit job run-state <RUN_ID>` for run inspection",
+        ),
+        _ => None,
     }
-    Err(OrbitError::InvalidInput(format!(
-        "run '{}' belongs to job '{}', not a ship pipeline",
-        run.run_id, run.job_id
-    )))
 }
 
-fn ship_workflow_name(job_id: &str) -> Option<&'static str> {
-    match job_id {
-        SHIP_JOB_ID => Some(SHIP_WORKFLOW),
-        _ => None,
+fn ensure_workflow_exists(workflow_alias: &'static str) -> Result<(), OrbitError> {
+    find_workflow(workflow_alias)
+        .map(|_| ())
+        .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn explicit_args(task_ids: &[&str], mode: ShipMode, base: &str) -> ShipCommand {
+        ShipCommand {
+            task_ids: task_ids.iter().map(|value| value.to_string()).collect(),
+            mode,
+            base: base.to_string(),
+            json: false,
+        }
+    }
+
+    fn auto_args(mode: ShipMode, base: &str) -> ShipAutoCommand {
+        ShipAutoCommand {
+            mode,
+            base: base.to_string(),
+            json: false,
+        }
+    }
+
+    #[test]
+    fn explicit_ship_defaults_to_pr_job_input_shape() {
+        let plan = build_ship_run_plan(&explicit_args(
+            &["T20260425-2010", "T20260425-2011"],
+            ShipMode::Pr,
+            "agent-main",
+        ))
+        .expect("build plan");
+
+        assert_eq!(plan.workflow_alias, SHIP_PR_WORKFLOW);
+        assert_eq!(
+            plan.input,
+            json!({
+                "mode": "pr",
+                "base_branch": "agent-main",
+                "task_ids": ["T20260425-2010", "T20260425-2011"],
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_ship_local_mode_uses_local_job_input_shape() {
+        let plan =
+            build_ship_run_plan(&explicit_args(&["T20260425-2010"], ShipMode::Local, "main"))
+                .expect("build plan");
+
+        assert_eq!(plan.workflow_alias, SHIP_LOCAL_WORKFLOW);
+        assert_eq!(
+            plan.input,
+            json!({
+                "mode": "local",
+                "base_branch": "main",
+                "task_ids": ["T20260425-2010"],
+            })
+        );
+    }
+
+    #[test]
+    fn ship_auto_uses_auto_job_without_explicit_task_ids() {
+        let plan =
+            build_ship_auto_run_plan(&auto_args(ShipMode::Pr, "agent-main")).expect("build plan");
+
+        assert_eq!(plan.workflow_alias, SHIP_AUTO_WORKFLOW);
+        assert_eq!(
+            plan.input,
+            json!({
+                "mode": "pr",
+                "base_branch": "agent-main",
+            })
+        );
+    }
+
+    #[test]
+    fn ship_rejects_removed_history_forms() {
+        let err = build_ship_run_plan(&explicit_args(&["list"], ShipMode::Pr, "agent-main"))
+            .expect_err("legacy history form should fail");
+        assert!(
+            err.to_string().contains("orbit job history"),
+            "unexpected error: {err}"
+        );
+
+        let err = build_ship_run_plan(&explicit_args(&["show"], ShipMode::Pr, "agent-main"))
+            .expect_err("legacy history form should fail");
+        assert!(
+            err.to_string().contains("orbit job history"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ship_rejects_removed_local_subcommand_form() {
+        let err = build_ship_run_plan(&explicit_args(&["local"], ShipMode::Pr, "agent-main"))
+            .expect_err("legacy local form should fail");
+        assert!(
+            err.to_string().contains("--mode local"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ship_requires_explicit_task_ids() {
+        let err = build_ship_run_plan(&explicit_args(&[], ShipMode::Pr, "agent-main"))
+            .expect_err("missing explicit task IDs should fail");
+        assert!(
+            err.to_string().contains("ship-auto"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ship_rejects_duplicate_task_ids() {
+        let err = build_ship_run_plan(&explicit_args(
+            &["T20260425-2010", "T20260425-2010"],
+            ShipMode::Pr,
+            "agent-main",
+        ))
+        .expect_err("duplicate task IDs should fail");
+        assert!(
+            err.to_string().contains("duplicate task id"),
+            "unexpected error: {err}"
+        );
     }
 }

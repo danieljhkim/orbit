@@ -40,7 +40,7 @@ orbit run ship "$TASK_ID"
 Use local mode when PR creation is not desired:
 
 ```bash
-orbit run ship local "$TASK_ID"
+orbit run ship --mode local "$TASK_ID"
 ```
 
 ## Review
