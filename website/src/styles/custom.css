@@ -141,11 +141,29 @@ body {
   line-height: 1.7;
 }
 
+.orbit-hero-install {
+  background: var(--sl-color-bg-inline-code);
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  margin: 1rem 0 0;
+  overflow-x: auto;
+  padding: 0.7rem 0.9rem;
+}
+
+.orbit-hero-install code {
+  background: transparent;
+  border: 0;
+  color: var(--sl-color-text);
+  font-family: var(--sl-font-mono);
+  padding: 0;
+}
+
 .orbit-hero-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 1.25rem;
+  margin-top: 1rem;
 }
 
 .orbit-button {
@@ -165,7 +183,7 @@ body {
 .orbit-button.primary {
   background: var(--sl-color-accent);
   border-color: var(--sl-color-accent);
-  color: #081020;
+  color: #0a0a0a;
 }
 
 .orbit-button:hover {
@@ -175,7 +193,7 @@ body {
 
 .orbit-button.primary:hover {
   background: #8ab3ff;
-  color: #081020;
+  color: #0a0a0a;
 }
 
 .orbit-hero-diagram {
@@ -242,17 +260,74 @@ body {
 .orbit-card {
   border: 1px solid var(--sl-color-hairline-light);
   border-radius: 8px;
+  color: var(--sl-color-text);
+  display: block;
   padding: 1rem;
+  text-decoration: none;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.orbit-card:hover,
+.orbit-card:focus-visible {
+  background: color-mix(in srgb, var(--sl-color-accent) 5%, transparent);
+  border-color: var(--sl-color-accent);
+  outline: none;
+}
+
+.orbit-card:hover h3,
+.orbit-card:focus-visible h3 {
+  color: var(--sl-color-text-accent);
 }
 
 .orbit-card h3 {
   font-size: 1rem;
   margin: 0 0 0.35rem;
+  transition: color 120ms ease;
 }
 
 .orbit-card p {
+  color: var(--sl-color-gray-3);
   font-size: 0.92rem;
   margin: 0;
+}
+
+.orbit-footer {
+  border-top: 1px solid var(--sl-color-hairline-light);
+  color: var(--sl-color-gray-3);
+  font-size: 0.85rem;
+  margin-top: 3rem;
+  padding: 1.25rem 0 0;
+}
+
+.orbit-footer-inner {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.orbit-footer-brand {
+  color: var(--sl-color-gray-3);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.orbit-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.orbit-footer a {
+  color: var(--sl-color-gray-3);
+  text-decoration: none;
+}
+
+.orbit-footer a:hover,
+.orbit-footer a:focus-visible {
+  color: var(--sl-color-text-accent);
 }
 
 @keyframes orbit-rotate {

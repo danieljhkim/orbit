@@ -7,15 +7,23 @@ sidebar:
 
 ## Install
 
-Use one install path.
+The recommended install is the install script:
 
 ```bash
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 ```
 
+It detects your platform, downloads the matching release binary, and places it on your `PATH`.
+
+### Alternatives
+
+Homebrew (macOS, Linuxbrew):
+
 ```bash
 brew install danieljhkim/tap/orbit
 ```
+
+From source (requires Rust toolchain):
 
 ```bash
 git clone https://github.com/danieljhkim/orbit.git
@@ -23,7 +31,7 @@ cd orbit
 make install
 ```
 
-Pinned installs and custom install directories are supported:
+### Pinned versions and custom install directory
 
 ```bash
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_VERSION=v0.1.0 sh

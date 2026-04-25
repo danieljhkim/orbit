@@ -6,6 +6,7 @@ description: "A two-minute orientation to Orbit and the documentation paths that
 <section class="orbit-hero">
   <div class="orbit-hero-copy">
     <p>Orbit is a self-hosted runtime for running fleets of coding agents against your team's real codebase. It combines a code-aware graph, task locks, isolated worktrees, and structured audit events so parallel agent work remains inspectable.</p>
+    <pre class="orbit-hero-install"><code>curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh</code></pre>
     <div class="orbit-hero-actions">
       <a class="orbit-button primary" href="./getting-started/install/">Install Orbit</a>
       <a class="orbit-button" href="./reference/cli/">CLI Reference</a>

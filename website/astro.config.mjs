@@ -29,6 +29,10 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       components: {
         ThemeProvider: './src/components/ThemeProvider.astro',
+        Footer: './src/components/Footer.astro',
+      },
+      editLink: {
+        baseUrl: 'https://github.com/danieljhkim/orbit/edit/main/website/',
       },
       pagefind: true,
       sidebar: [
@@ -107,6 +111,48 @@ export default defineConfig({
           attrs: {
             name: 'theme-color',
             content: '#0A0A0A',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image',
+            content: 'https://orbit-cli.com/og-image.svg',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:type',
+            content: 'image/svg+xml',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:width',
+            content: '1200',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:height',
+            content: '630',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:card',
+            content: 'summary_large_image',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:image',
+            content: 'https://orbit-cli.com/og-image.svg',
           },
         },
       ],
