@@ -29,11 +29,14 @@ sidebar:
 
 | Command | Purpose |
 |---------|---------|
-| `orbit run ship <task_id> ...` | Ship tasks through the pipeline. |
-| `orbit run ship local <task_id> ...` | Run the local-only task path. |
-| `orbit run duel ...` | Inspect cross-agent duel history and scoreboards. |
+| `orbit run ship <task_id> ...` | Ship explicitly selected tasks through the PR pipeline by default. |
+| `orbit run ship --mode local <task_id> ...` | Run the local-only task path for explicitly selected tasks. |
+| `orbit run ship-auto` | Auto-select backlog tasks and ship them through the task pipeline. |
+| `orbit run duel-plan <task_id>` | Run a planning duel for one task. |
 | `orbit run job <job_id>` | Run an arbitrary job by ID. |
 | `orbit run <job_id>` | Direct shorthand for `orbit run job <job_id>`. |
+| `orbit job history <job_id>` | Inspect job run history, including workflow runs. |
+| `orbit job run-state <run_id>` | Inspect persisted state for a job run. |
 
 ## Inspect
 

@@ -67,7 +67,7 @@ Supporting primitives (`activity`, `job`, `policy`, `executor`, `tool`) are the 
 
 Orbit itself can be installed without Rust. Only source builds require a Rust toolchain.
 
-For the default PR-based execution path (`orbit run ship`), you also need the GitHub CLI (`gh`) installed and authenticated. If you do not want to use GitHub or open pull requests, use `orbit run ship local` instead.
+For the default PR-based execution path (`orbit run ship`), you also need the GitHub CLI (`gh`) installed and authenticated. If you do not want to use GitHub or open pull requests, use `orbit run ship --mode local` instead.
 
 ```bash
 # install via curl | sh (macOS and Linux)
@@ -110,7 +110,7 @@ orbit task show "$TASK_ID"
 orbit run ship "$TASK_ID"
 
 # or run a local-only execution path
-orbit run ship local "$TASK_ID"
+orbit run ship --mode local "$TASK_ID"
 ```
 
 If you prefer conversational drafting, ask an agent to produce the `orbit task add ...` command for your real task, then run that command and continue with the same review + ship flow.
@@ -118,7 +118,7 @@ If you prefer conversational drafting, ask an agent to produce the `orbit task a
 If you already know which task(s) you want to run, pin them explicitly:
 
 ```bash
-orbit run ship T123 T456 --parallelism 2 --base main
+orbit run ship T123 T456 --base main
 ```
 
 Pinned installs and custom install directories are supported:
@@ -196,14 +196,18 @@ Build and inspect the code-aware structure Orbit uses for partitioning and sched
 ### Execution
 
 ```bash
-orbit run ship
 orbit run ship <task_id> ...
-orbit run ship local
+orbit run ship --mode local <task_id> ...
+orbit run ship-auto
+orbit run duel-plan <task_id>
+orbit run job <job_id>
 ```
 
-- `ship` runs the default PR-based execution path.
-- `ship local` runs a local-only execution path with no PR loop.
-- adding task IDs pins the run instead of auto-selecting from backlog.
+- `ship` runs explicitly selected tasks through the PR pipeline by default.
+- `ship --mode local` runs explicitly selected tasks through the local-only path.
+- `ship-auto` auto-selects backlog tasks and dispatches them through the same PR/local mode switch.
+- `duel-plan` runs the planning-duel workflow for one task.
+- use `orbit job history <job_id>` and `orbit job run-state <run_id>` for run inspection.
 
 ### Tasks
 
@@ -234,7 +238,7 @@ Orbit also exposes lower-level operating surfaces:
 
 - `activity` and `job` for defining and running substrate assets directly
 - `policy`, `executor`, and `tool` for runtime customization
-- `orbit run duel score|list|show` and `orbit run job <id>` for evaluation history and direct workflow execution
+- `orbit scoreboard`, `orbit job history <job_id>`, and `orbit run job <id>` for evaluation, history, and direct workflow execution
 - `metrics`, `scoreboard`, and `serve` for observability and outward integration
 
 They are intentionally available because durable local state is part of the product, but most users can ignore them on day one. Reach for `orbit --help` and `orbit <command> --help` when you need the deeper surface area.

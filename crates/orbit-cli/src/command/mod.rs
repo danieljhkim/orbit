@@ -58,7 +58,7 @@ Resources:
   tool       Manage tools and external MCP plugins
 
 Workflows:
-  run        Run a job workflow (supports run ship / run duel / run job / run <id>)
+  run        Run a job workflow (supports run ship / ship-auto / duel-plan / job)
 
 Inspect:
   audit      Query the audit event log

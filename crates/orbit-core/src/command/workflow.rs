@@ -13,7 +13,7 @@ pub struct Workflow {
     pub requires_pr_number: bool,
     /// Upper bound on explicit task-selection cardinality. `None` means unbounded (the
     /// historical default). Set to `Some(1)` for single-task workflows like
-    /// `duel` that must reject multi-task input with a loud, workflow-
+    /// `duel-plan` that must reject multi-task input with a loud, workflow-
     /// specific error rather than silently taking the first entry.
     pub max_tasks: Option<u32>,
 }
@@ -21,10 +21,10 @@ pub struct Workflow {
 pub const WORKFLOWS: &[Workflow] = &[
     Workflow {
         alias: "ship",
-        job_id: "task_auto_pipeline",
-        description: "Bundle backlog tasks, gate them, and ship through the PR pipeline",
+        job_id: "task_pr_pipeline",
+        description: "Ship explicitly selected tasks through the PR pipeline",
         supports_tasks: true,
-        supports_parallelism: true,
+        supports_parallelism: false,
         supports_base: true,
         supports_pr_number: false,
         requires_pr_number: false,
@@ -32,8 +32,19 @@ pub const WORKFLOWS: &[Workflow] = &[
     },
     Workflow {
         alias: "ship-local",
+        job_id: "task_local_pipeline",
+        description: "Ship explicitly selected tasks through the local pipeline",
+        supports_tasks: true,
+        supports_parallelism: false,
+        supports_base: true,
+        supports_pr_number: false,
+        requires_pr_number: false,
+        max_tasks: None,
+    },
+    Workflow {
+        alias: "ship-auto",
         job_id: "task_auto_pipeline",
-        description: "Bundle backlog tasks, gate them, and ship locally",
+        description: "Auto-select backlog tasks, gate them, and ship them",
         supports_tasks: true,
         supports_parallelism: true,
         supports_base: true,
@@ -51,17 +62,6 @@ pub const WORKFLOWS: &[Workflow] = &[
         supports_pr_number: true,
         requires_pr_number: true,
         max_tasks: None,
-    },
-    Workflow {
-        alias: "duel",
-        job_id: "job_duel_pipeline",
-        description: "Single-task cross-agent duel: random implementer/reviewer/arbiter, scored",
-        supports_tasks: true,
-        supports_parallelism: false,
-        supports_base: true,
-        supports_pr_number: false,
-        requires_pr_number: false,
-        max_tasks: Some(1),
     },
     Workflow {
         alias: "duel-plan",

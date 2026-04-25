@@ -5,7 +5,7 @@
 ### Breaking Changes
 
 - **Activity/job v1 retired**: `schemaVersion: 1` activity/job assets are rejected at load time, the old v1 reconcile/runtime/store paths were removed, and `schemaVersion: 2` is now the canonical activity/job surface ([T20260419-2156], [T20260420-0036])
-- **Workflow CLI surface reorganized**: workflows now use `orbit run ship [TASK_IDS]`, `orbit run ship local [TASK_IDS]`, `orbit run duel [TASK_ID]`, `orbit run duel plan <TASK_ID>`, and `orbit run job <JOB_ID>`; the older `orbit run ship-local`, `--tasks T1,T2`, and intermediate top-level `orbit ship ...` / `orbit duel ...` spellings are no longer public ([T20260417-0248], [T20260419-0355])
+- **Workflow CLI surface reorganized**: workflows now use `orbit run ship <TASK_ID>...`, `orbit run ship --mode local <TASK_ID>...`, `orbit run ship-auto`, `orbit run duel-plan <TASK_ID>`, and `orbit run job <JOB_ID>`; workflow-specific `run ship list/show` and `run duel list/show` moved to the generic `orbit job history` / `orbit job run-state` inspection surface ([T20260417-0248], [T20260419-0355], [T20260425-2010])
 
 ### Features
 
@@ -20,11 +20,11 @@
 
 ### Fixes
 
-- **Job run observability**: `orbit run ship --json`, `orbit run ship show`, and direct `orbit job run` now retain actionable failure details and durable run-state/job-history records, including synthetic job-level steps for early v2 pipeline failures ([T20260423-0445], [T20260423-2004-4])
+- **Job run observability**: `orbit run ship --json`, `orbit job history`, `orbit job run-state`, and direct `orbit job run` now retain actionable failure details and durable run-state/job-history records, including synthetic job-level steps for early v2 pipeline failures ([T20260423-0445], [T20260423-2004-4], [T20260425-2010])
 - **Branch-scoped knowledge graph refs**: graph builds now write `.orbit/knowledge/graph/refs/heads/<branch>.json` files that point at immutable per-build indexes, reads default to the current git branch with default-branch fallback, and legacy `.orbit/knowledge/graph/refs/current.json` stores auto-migrate on first open/write ([T20260421-0358])
 - **Knowledge graph hardening**: graph reads and refreshes recover from corrupted stores, avoid stale worktree data, gate refresh/search hot paths, prune missing context files from locks, and hydrate task IDs idempotently during attribution ([T20260416-0719], [T20260417-0307], [T20260420-0540], [T20260421-0652])
 - **Dispatch and locking correctness**: task locks now detect directory/file overlaps, backlog selection filters locked groups, failed task-scoped runs move tasks to blocked with job/run/error context, and drained local batches no longer fail spuriously ([T20260412-0443], [T20260417-0301], [T20260419-2109], [T20260420-0014])
-- **Workflow compatibility**: restored read-only `orbit run duel` history after executable duel assets were retired, merged object-valued job defaults with caller input, and aligned the Quick Start approval flow with the current task lifecycle ([T20260423-0447], [T20260423-0445], [T20260423-2004-2])
+- **Workflow compatibility**: merged object-valued job defaults with caller input, aligned the Quick Start approval flow with the current task lifecycle, and consolidated retired workflow inspection under generic job history commands ([T20260423-0445], [T20260423-0447], [T20260423-2004-2], [T20260425-2010])
 - **Release and developer tooling**: restored release CI targets, repaired advertised developer targets, kept custom roots isolated, and fixed crashes/empty listings after seeded activity/job initialization ([T20260419-2347], [T20260423-2004], [T20260423-2004-3], [T20260423-2004-5])
 - **Security and concurrency hardening**: added localhost origin checks for web write endpoints, serialized diagnostics JSONL appends, hardened task-store concurrency, tightened filesystem/tool-runtime path boundaries, and strengthened agent protocol handling ([T20260417-0557], [T20260417-0558], [T20260418-1928])
 
