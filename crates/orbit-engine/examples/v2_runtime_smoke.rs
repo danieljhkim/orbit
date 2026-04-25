@@ -19,7 +19,7 @@ use orbit_common::types::activity_job::{
     ActivityV2, ActivityV2Spec, V2AuditEventKind, load_activity_asset,
 };
 use orbit_engine::activity_job::{
-    DispatchError, V2AuditWriter, V2DispatchInput, V2JsonlSink, V2RuntimeHost,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2JsonlSink, V2RuntimeHost,
     agent_loop_driver::drive_agent_loop, dispatch_v2_activity,
 };
 use serde_json::Value;
@@ -247,7 +247,7 @@ impl V2RuntimeHost for EchoHost {
         ))
     }
 
-    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
+    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         Err(DispatchError::CliInvocationFailed(
             "EchoHost has no CLI provider mapping".into(),
         ))

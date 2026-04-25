@@ -150,7 +150,7 @@ Activity / Job is the seam where orbit-core hands work to orbit-engine without t
 
 - run a deterministic action by name
 - source an API key for a provider
-- resolve a provider's CLI command
+- resolve a provider's CLI executor command plus static args
 - build `ToolContext` for an activity, including policy and filesystem audit hooks
 
 That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] made the boundary primitive on purpose: the engine receives strings, `Value`, and `ToolContext`, not `orbit-agent` transport objects.
@@ -185,13 +185,15 @@ The allowlist is enforced in the loop engine on this path. A denied tool becomes
 
 The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow is:
 
-1. Ask the host for the concrete CLI command.
+1. Ask the host for the concrete CLI executor: command plus static executor args.
 2. Build an `Agent` from `orbit-agent`.
-3. Ask the retained CLI runtime for an `AgentInvocationSpec`.
+3. Ask the retained CLI runtime for an `AgentInvocationSpec` containing provider-specific per-request args.
 4. Emit the advisory `ToolAllowlistHarnessDelegated` event.
 5. Emit `CliInvocationStarted` with redacted argv and stdin blob ref.
 6. Spawn the subprocess with a wall-clock timeout.
 7. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
+
+Executor args are prepended before provider runtime args. For the seeded Codex executor, that means the subprocess starts as `codex exec --json --sandbox workspace-write ...`, not as the interactive `codex` TUI with piped stdin. This was tightened after a local ship run for [T20260423-0114] exposed that the earlier command-only boundary ignored executor args.
 
 The important retention boundary is that the older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers. They are the shipped implementation of `backend: cli`.
 
@@ -369,6 +371,7 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 - **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into job history and run-state.

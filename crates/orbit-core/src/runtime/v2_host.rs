@@ -15,12 +15,12 @@ use std::time::{Duration, Instant};
 
 use orbit_common::types::Task;
 use orbit_common::types::{
-    AuditEventStatus, Role, TaskStatus, TaskType, UNRESTRICTED_FS_PROFILE,
+    AuditEventStatus, ExecutorType, Role, TaskStatus, TaskType, UNRESTRICTED_FS_PROFILE,
     prune_missing_context_files,
 };
 use orbit_common::utility::path::workspace_relative_paths_overlap;
 use orbit_common::utility::selector::canonical_selector_in_workspace;
-use orbit_engine::activity_job::{DispatchError, V2RuntimeHost};
+use orbit_engine::activity_job::{DispatchError, ResolvedCliExecutor, V2RuntimeHost};
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::{FsAuditLogger, ToolContext};
@@ -665,8 +665,8 @@ impl V2RuntimeHost for OrbitRuntime {
         }
     }
 
-    fn resolve_cli_command(&self, provider: &str) -> Result<String, DispatchError> {
-        resolve_cli_command(provider)
+    fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
+        resolve_cli_executor(self, provider)
     }
 
     fn tool_context_for_activity(
@@ -716,20 +716,65 @@ impl V2RuntimeHost for OrbitRuntime {
     }
 }
 
-/// Map a v2 provider name to the CLI command that dispatches it. Env-var
+/// Map a v2 provider name to the CLI executor that dispatches it. Env-var
 /// overrides (`ORBIT_V2_CLI_<PROVIDER>`) let smokes substitute a fixture
-/// binary for the real provider CLI; production defaults to the provider
-/// name itself (`claude`, `codex`, `gemini`, `ollama`) which resolves via
-/// `$PATH`.
-fn resolve_cli_command(provider: &str) -> Result<String, DispatchError> {
+/// binary for the real provider CLI; production normally comes from the
+/// registered executor def, falling back to the provider name itself
+/// (`claude`, `codex`, `gemini`, `ollama`) when no executor is registered.
+fn resolve_cli_executor(
+    runtime: &OrbitRuntime,
+    provider: &str,
+) -> Result<ResolvedCliExecutor, DispatchError> {
     let env_key = format!("ORBIT_V2_CLI_{}", provider.to_ascii_uppercase());
-    if let Ok(value) = std::env::var(&env_key)
-        && !value.is_empty()
-    {
-        return Ok(value);
+    let env_command = std::env::var(&env_key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if let Some(def) = runtime.get_executor_def(provider).map_err(|err| {
+        DispatchError::CliInvocationFailed(format!("load executor `{provider}`: {err}"))
+    })? {
+        if !matches!(
+            def.executor_type,
+            ExecutorType::DirectAgent | ExecutorType::AgentCli
+        ) {
+            return Err(DispatchError::CliInvocationFailed(format!(
+                "executor `{provider}` has type `{}`; backend: cli requires a direct_agent or agent_cli executor",
+                def.executor_type
+            )));
+        }
+
+        let command = env_command
+            .or_else(|| {
+                def.command
+                    .as_ref()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .ok_or_else(|| {
+                DispatchError::CliInvocationFailed(format!(
+                    "executor `{provider}` is missing a command"
+                ))
+            })?;
+
+        return Ok(ResolvedCliExecutor {
+            command,
+            args: def.args,
+        });
     }
+
+    if let Some(command) = env_command {
+        return Ok(ResolvedCliExecutor {
+            command,
+            args: Vec::new(),
+        });
+    }
+
     match provider {
-        "claude" | "codex" | "gemini" | "ollama" => Ok(provider.to_string()),
+        "claude" | "codex" | "gemini" | "ollama" => Ok(ResolvedCliExecutor {
+            command: provider.to_string(),
+            args: Vec::new(),
+        }),
         "openai_compat" => Err(DispatchError::CliInvocationFailed(
             "provider openai_compat has no CLI runtime (HTTP-only)".to_string(),
         )),
@@ -807,9 +852,12 @@ fn task_root_id(task: &Task, task_lookup: &BTreeMap<String, Task>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use orbit_common::types::{ExecutorDef, ExecutorType};
     use orbit_engine::activity_job::V2RuntimeHost;
     use orbit_tools::ToolContext;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn run_planning_duel_is_registered_for_v2_deterministic_dispatch() {
@@ -833,5 +881,32 @@ mod tests {
             }
             other => panic!("expected registered action failure, got {other}"),
         }
+    }
+
+    #[test]
+    fn cli_executor_resolution_preserves_registered_static_args() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let now = Utc::now();
+        runtime
+            .upsert_executor_def(&ExecutorDef {
+                name: "codex".to_string(),
+                executor_type: ExecutorType::DirectAgent,
+                command: Some("codex".to_string()),
+                args: vec!["exec".to_string(), "--json".to_string()],
+                stdout_format: None,
+                models: HashMap::new(),
+                timeout_seconds: None,
+                env: HashMap::new(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("seed executor");
+
+        let resolved = runtime
+            .resolve_cli_executor("codex")
+            .expect("resolve codex executor");
+
+        assert_eq!(resolved.command, "codex");
+        assert_eq!(resolved.args, ["exec", "--json"]);
     }
 }

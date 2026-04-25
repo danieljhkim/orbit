@@ -27,7 +27,8 @@ use orbit_common::types::activity_job::{
     resolve_job_backends, validate_job_loop_session_backends,
 };
 use orbit_engine::activity_job::{
-    DispatchError, V2AuditWriter, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    dispatch_v2_activity,
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -44,6 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     scenario_g_auto_backend_unresolved_is_structural_error()?;
     scenario_h_cli_reference_asset_round_trip()?;
     scenario_i_existing_agent_loop_assets_still_deserialize()?;
+    scenario_j_cli_executor_static_args_are_audited()?;
 
     println!("OK — all scenarios passed");
     Ok(())
@@ -283,7 +285,8 @@ fn scenario_g_auto_backend_unresolved_is_structural_error() -> Result<(), Box<dy
 fn scenario_h_cli_reference_asset_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     println!("  H) agent_loop_cli_reference.yaml round-trips + dispatches");
     let repo_root = repo_root();
-    let path = repo_root.join("crates/orbit-core/assets/activities/agent_loop_cli_reference.yaml");
+    let path = repo_root
+        .join("crates/orbit-core/assets/activities/examples/agent_loop_cli_reference.yaml");
     let yaml = fs::read_to_string(&path)?;
     let asset = load_activity_asset(&yaml)?;
     match &asset.spec.spec {
@@ -328,7 +331,7 @@ fn scenario_i_existing_agent_loop_assets_still_deserialize()
     println!("  I) existing v2 agent_loop assets deserialize unchanged");
     let repo_root = repo_root();
     let asset_path =
-        repo_root.join("crates/orbit-core/assets/activities/agent_loop_reference.yaml");
+        repo_root.join("crates/orbit-core/assets/activities/examples/agent_loop_reference.yaml");
     let yaml = fs::read_to_string(&asset_path)?;
     let asset = load_activity_asset(&yaml)?;
     if let ActivityV2Spec::AgentLoop(spec) = &asset.spec.spec {
@@ -342,6 +345,59 @@ fn scenario_i_existing_agent_loop_assets_still_deserialize()
     println!(
         "    {}: backend=http (default), provider=claude (default)",
         asset.name
+    );
+    Ok(())
+}
+
+/// J: static args from the resolved executor are prepended before per-provider
+/// runtime args and appear in the persisted invocation argv.
+fn scenario_j_cli_executor_static_args_are_audited() -> Result<(), Box<dyn std::error::Error>> {
+    println!("  J) cli executor static args are included in audited argv");
+    let tmp_audit = tempfile::tempdir()?;
+    let (writer, _sink) = build_writer(tmp_audit.path(), "smoke-cli-j")?;
+
+    let fake = fake_cli(
+        "codex",
+        "#!/bin/sh\ncat > /dev/null\necho '{\"status\":\"ok\"}'\n",
+    )?;
+
+    let mut spec = cli_agent_loop_spec(Some(Provider::Codex));
+    spec.model = None;
+    let host = ScriptHost::new_with_args(fake.cli_path(), vec!["exec".into(), "--json".into()]);
+
+    let outcome = dispatch_v2_activity(V2DispatchInput {
+        activity_name: "cli_smoke_j",
+        spec: &ActivityV2Spec::AgentLoop(spec),
+        fs_profile: None,
+        input: serde_json::json!({ "prompt": "hello" }),
+        audit: writer.clone(),
+        run_id: "smoke-cli-j",
+        host: Some(&host),
+    })?;
+
+    assert!(outcome.success, "fake codex should exit 0");
+
+    let events = writer.events_snapshot()?;
+    let argv = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            orbit_common::types::activity_job::V2AuditEventKind::CliInvocationStarted {
+                argv_redacted,
+                ..
+            } => Some(argv_redacted),
+            _ => None,
+        })
+        .expect("cli.invocation.started event");
+
+    assert_eq!(
+        argv,
+        &vec![
+            fake.cli_path().display().to_string(),
+            "exec".to_string(),
+            "--json".to_string(),
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+        ]
     );
     Ok(())
 }
@@ -480,11 +536,17 @@ fn synthetic_loop_session_auto_job() -> JobV2 {
 
 struct ScriptHost {
     command: String,
+    args: Vec<String>,
 }
 impl ScriptHost {
     fn new(path: &Path) -> Self {
+        Self::new_with_args(path, Vec::new())
+    }
+
+    fn new_with_args(path: &Path, args: Vec<String>) -> Self {
         Self {
             command: path.to_string_lossy().into_owned(),
+            args,
         }
     }
 }
@@ -503,8 +565,11 @@ impl V2RuntimeHost for ScriptHost {
     fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
         Err(DispatchError::AgentLoopFailed("no key in smoke".into()))
     }
-    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
-        Ok(self.command.clone())
+    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
+        Ok(ResolvedCliExecutor {
+            command: self.command.clone(),
+            args: self.args.clone(),
+        })
     }
 
     fn tool_context_for_activity(
@@ -532,7 +597,7 @@ impl V2RuntimeHost for NullCliHost {
     fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
         Err(DispatchError::AgentLoopFailed("no key in smoke".into()))
     }
-    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
+    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         Err(DispatchError::CliInvocationFailed(
             "NullCliHost has no CLI mapping".into(),
         ))

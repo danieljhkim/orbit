@@ -18,7 +18,8 @@ use std::sync::Arc;
 use orbit_agent::loop_engine::{InMemorySink, LoopAuditEvent};
 use orbit_common::types::activity_job::{V2AuditEventKind, load_job_asset};
 use orbit_engine::activity_job::{
-    DispatchError, V2AuditWriter, V2JsonlSink, V2RuntimeHost, execute_job, reset_replay_transport,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2JsonlSink, V2RuntimeHost, execute_job,
+    reset_replay_transport,
 };
 use serde_json::Value;
 
@@ -537,7 +538,7 @@ impl V2RuntimeHost for StubHost {
         ))
     }
 
-    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
+    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         Err(DispatchError::CliInvocationFailed(
             "smoke host: no CLI mapping".into(),
         ))

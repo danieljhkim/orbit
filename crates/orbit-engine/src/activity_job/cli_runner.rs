@@ -1,11 +1,11 @@
 //! `backend: cli` dispatch for v2 `agent_loop` activities (§3.1).
 //!
 //! Flow:
-//!   1. Host resolves the provider name to a concrete CLI command (env-
-//!      overridable for smokes).
+//!   1. Host resolves the provider name to a concrete CLI executor command and
+//!      static args (env-overridable command for smokes).
 //!   2. Build an `AgentRuntime` via `orbit-agent::Agent` — this retains the
 //!      `*_cli.rs` runtimes unchanged (T20260419-0104 constraint). The
-//!      `AgentInvocationSpec` it returns is our argv+stdin plan.
+//!      `AgentInvocationSpec` it returns supplies provider runtime args and stdin.
 //!   3. Emit §6 `tool_allowlist.harness_delegated` envelope event naming the
 //!      declared allowlist + provider. Orbit does **not** enforce the
 //!      allowlist — the harness owns enforcement.
@@ -51,7 +51,7 @@ pub fn run_cli_backend(
     let _ = run_id;
 
     let provider = spec.provider.as_str().to_string();
-    let command = host.resolve_cli_command(&provider)?;
+    let cli_executor = host.resolve_cli_executor(&provider)?;
     let prompt = user_prompt_from_input(input)?;
     let timeout_seconds = if spec.wall_clock_timeout_seconds == 0 {
         DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS
@@ -76,9 +76,12 @@ pub fn run_cli_backend(
     let envelope_json = serde_json::to_vec(&envelope)
         .map_err(|err| DispatchError::CliInvocationFailed(format!("serialize envelope: {err}")))?;
 
-    let config =
-        AgentConfig::from_cli_config(command.clone(), spec.model.as_deref(), &HashMap::new())
-            .map_err(|err| DispatchError::CliInvocationFailed(format!("agent config: {err}")))?;
+    let config = AgentConfig::from_cli_config(
+        cli_executor.command.clone(),
+        spec.model.as_deref(),
+        &HashMap::new(),
+    )
+    .map_err(|err| DispatchError::CliInvocationFailed(format!("agent config: {err}")))?;
     let agent = Agent::new(&config)
         .map_err(|err| DispatchError::CliInvocationFailed(format!("agent build: {err}")))?;
 
@@ -94,9 +97,13 @@ pub fn run_cli_backend(
         .invoke(agent_req)
         .map_err(|err| DispatchError::CliInvocationFailed(format!("agent invoke: {err}")))?;
 
-    let mut argv = Vec::with_capacity(invocation.args.len() + 1);
+    let mut subprocess_args = Vec::with_capacity(cli_executor.args.len() + invocation.args.len());
+    subprocess_args.extend(cli_executor.args.iter().cloned());
+    subprocess_args.extend(invocation.args.iter().cloned());
+
+    let mut argv = Vec::with_capacity(subprocess_args.len() + 1);
     argv.push(invocation.program.clone());
-    argv.extend(invocation.args.iter().cloned());
+    argv.extend(subprocess_args.iter().cloned());
 
     let redaction = PatternRedactor::with_argv_secrets();
     let argv_redacted: Vec<String> = argv.iter().map(|a| redaction.apply_str(a)).collect();
@@ -114,7 +121,7 @@ pub fn run_cli_backend(
 
     let (stdout, stderr, exit_code, duration, timed_out) = spawn_with_timeout(
         &invocation.program,
-        &invocation.args,
+        &subprocess_args,
         &invocation.stdin,
         wall_clock_timeout,
     )

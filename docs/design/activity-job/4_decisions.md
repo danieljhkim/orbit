@@ -83,7 +83,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Consequences.**
 - The v2 runtime gets a CLI backend without a second provider-integration stack.
-- The engine/core boundary remains clean because orbit-core only asks for CLI command strings.
+- The engine/core boundary remains clean because orbit-core only supplies primitive CLI executor fields, not orbit-agent transport objects.
 - Cost: the feature now has materially different semantics between HTTP and CLI, especially around tool enforcement.
 
 ## ADR-007 — Treat the v2 audit envelope as a separate tree layered over loop-level audit
@@ -191,6 +191,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - Planning duels are runnable again through a seeded activity/job pair instead of a stale workflow alias.
 - Cost: users of `orbit run ship local`, `orbit run ship list/show`, and `orbit run duel list/show` must update their command muscle memory and scripts.
 
+## ADR-015 — CLI backend resolves executor args, not just provider commands
+
+**Status:** Accepted · 2026-04 · [T20260423-0114]
+
+**Context.** A local ship run for [T20260423-0114] failed in `backend: cli` before task execution because Orbit launched `codex --sandbox workspace-write` with piped stdin. The seeded Codex executor already declared `args: [exec, --json]`, but the v2 host boundary only returned a provider command string, so those static args were lost.
+
+**Decision.** Make the v2 CLI host boundary return a resolved CLI executor (`command` plus static `args`) and have `cli_runner.rs` prepend those executor args before provider runtime args from the retained `AgentRuntime`. Environment command overrides remain command overrides; registered executor args still define the static CLI mode.
+
+**Consequences.**
+- `backend: cli` now honors seeded and workspace executor definitions for subprocess shape.
+- Codex task runs enter non-interactive `codex exec --json` instead of the interactive TUI.
+- Cost: the engine/core boundary is slightly wider than a single string and every smoke host implementing `V2RuntimeHost` must model executor args explicitly.
+
 ---
 
 ## Task References
@@ -208,6 +221,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
 - **[T20260423-2004-4]** — Persist direct v2 `orbit job run` executions into job history and run-state.

@@ -27,7 +27,8 @@ use orbit_common::types::activity_job::{
     resolve_job_backends, resolve_job_target_refs, validate_job_loop_session_backends,
 };
 use orbit_engine::activity_job::{
-    DispatchError, V2AuditWriter, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    dispatch_v2_activity,
 };
 use serde_json::Value;
 
@@ -350,7 +351,7 @@ impl V2RuntimeHost for PipelineHost {
         ))
     }
 
-    fn resolve_cli_command(&self, _provider: &str) -> Result<String, DispatchError> {
+    fn resolve_cli_executor(&self, _provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         Err(DispatchError::CliInvocationFailed(
             "PipelineHost has no CLI mapping".into(),
         ))

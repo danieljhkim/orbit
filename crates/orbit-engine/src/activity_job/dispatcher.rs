@@ -14,6 +14,12 @@ use super::audit_writer::V2AuditWriter;
 use super::cli_runner::run_cli_backend;
 use super::groundhog::run_groundhog_activity;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedCliExecutor {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
 /// Orbit-core-owned responsibilities the v2 dispatcher delegates back across
 /// the engine→core boundary: deterministic action execution (which needs the
 /// runtime's tool registry + ToolContext) and provider credential sourcing
@@ -40,12 +46,12 @@ pub trait V2RuntimeHost: Send + Sync {
     /// the boundary. Implementors typically read from env or config.
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError>;
 
-    /// Resolve the CLI binary command for a given v2 provider name (§3.1
-    /// backend: cli path). Workspace / env overrides live in the host so the
-    /// engine's CLI runner stays environment-agnostic. Returning an error is
-    /// the structured failure path when a provider has no CLI mapping (e.g.
-    /// `openai_compat` which is HTTP-only).
-    fn resolve_cli_command(&self, provider: &str) -> Result<String, DispatchError>;
+    /// Resolve the CLI executor command and static args for a given v2
+    /// provider name (§3.1 backend: cli path). Workspace / env overrides live
+    /// in the host so the engine's CLI runner stays environment-agnostic.
+    /// Returning an error is the structured failure path when a provider has no
+    /// CLI mapping (e.g. `openai_compat` which is HTTP-only).
+    fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError>;
 
     fn tool_context_for_activity(
         &self,

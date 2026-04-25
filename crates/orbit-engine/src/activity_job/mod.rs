@@ -21,7 +21,8 @@ pub use agent_loop_driver::{
 pub use audit_writer::{V2AuditWriter, WriteError};
 pub use cli_runner::run_cli_backend;
 pub use dispatcher::{
-    DispatchError, DispatchOutcome, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+    DispatchError, DispatchOutcome, ResolvedCliExecutor, V2DispatchInput, V2RuntimeHost,
+    dispatch_v2_activity,
 };
 pub use job_executor::{JobOutcome, execute_job, validate_job};
 pub use jsonl_sink::V2JsonlSink;
