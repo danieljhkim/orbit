@@ -96,6 +96,19 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Benchmarks',
+          items: [
+            {
+              label: 'Graph Benchmarks',
+              autogenerate: {
+                directory: 'benchmarks/graph',
+                collapsed: true,
+              },
+              collapsed: true,
+            },
+          ],
+        },
+        {
           label: 'Contributing',
           items: [
             { slug: 'contributing', label: 'Overview' },

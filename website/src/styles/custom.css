@@ -120,6 +120,33 @@ body {
 
 .sl-markdown-content table {
   font-size: 0.92rem;
+  background-color: var(--sl-color-bg-inline-code);
+  border-radius: 12px;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--sl-color-hairline-light);
+  overflow: hidden;
+}
+
+.sl-markdown-content table th,
+.sl-markdown-content table td {
+  border-bottom: 1px solid var(--sl-color-hairline-light);
+  border-right: 1px solid var(--sl-color-hairline-light);
+  padding: 0.6rem 1rem;
+}
+
+.sl-markdown-content table th {
+  background-color: color-mix(in srgb, var(--sl-color-gray-6) 40%, transparent);
+}
+
+.sl-markdown-content table th:last-child,
+.sl-markdown-content table td:last-child {
+  border-right: none;
+}
+
+.sl-markdown-content table tr:last-child th,
+.sl-markdown-content table tr:last-child td {
+  border-bottom: none;
 }
 
 .sl-markdown-content blockquote {
