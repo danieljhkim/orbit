@@ -156,9 +156,7 @@ Command surface determines provenance by default:
 ## Skill Selection
 
 - `orbit-create-task`: Create a new task with description, acceptance criteria, and context.
-- `orbit-approve-task`: Record human approval or rejection at lifecycle gates.
 - `orbit-execute-task`: Carry a change through implementation, validation, and review.
-- `orbit-pr`: Create, review, and discuss pull requests.
 - `orbit-track-issues`: Capture agent-discovered, self-reported friction as tracked tasks.
 - `orbit-graph`: Navigate or inspect the codebase via the knowledge graph when the activity allowlist includes graph tools.
 
