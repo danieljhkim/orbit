@@ -411,7 +411,7 @@ pub(crate) fn ensure_task_has_execution_plan(id: &str, plan: &str) -> Result<(),
 }
 
 pub(crate) fn in_progress_transition_requires_plan(from_status: TaskStatus) -> bool {
-    from_status != TaskStatus::Backlog
+    !matches!(from_status, TaskStatus::Backlog | TaskStatus::InProgress)
 }
 
 impl OrbitRuntime {
