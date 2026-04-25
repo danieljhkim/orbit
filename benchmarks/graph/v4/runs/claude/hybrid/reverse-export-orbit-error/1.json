@@ -1,0 +1,64 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "hybrid",
+  "task_id": "reverse-export-orbit-error",
+  "seed": 1,
+  "sweep_id": "20260425-012511-8881cb",
+  "run_order_index": 10,
+  "nonce": "fb38b8692df248edb2cb605fd11ad388",
+  "system_prompt_hash": "e014f6690bb282ff",
+  "fixture_path": "benchmarks/graph/v4/tasks/reverse-export-orbit-error.yaml",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "mcp__orbit-bench__orbit_graph_search",
+    "mcp__orbit-bench__orbit_graph_show",
+    "mcp__orbit-bench__orbit_graph_callers",
+    "mcp__orbit-bench__orbit_graph_implementors",
+    "mcp__orbit-bench__orbit_graph_refs",
+    "mcp__orbit-bench__orbit_graph_overview",
+    "mcp__orbit-bench__orbit_graph_deps",
+    "mcp__orbit-bench__orbit_graph_pack"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 9.51,
+  "turns": 3,
+  "input_tokens": 4,
+  "cache_read_tokens": 28496,
+  "cache_creation_tokens": 7678,
+  "output_tokens": 538,
+  "total_cost_usd": 0.0459883,
+  "tool_calls": {
+    "Grep": 2
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 470,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 19,
+      "cost_usd": 0.000565
+    },
+    "claude-sonnet-4-6": {
+      "input_tokens": 4,
+      "cache_read_tokens": 28496,
+      "cache_creation_tokens": 7678,
+      "output_tokens": 538,
+      "cost_usd": 0.0454233
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/hybrid/reverse-export-orbit-error/1.transcript.json",
+  "final_diff_path": null
+}

@@ -1,0 +1,57 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "no-graph",
+  "task_id": "const-value-extraction",
+  "seed": 2,
+  "sweep_id": "20260425-013339-cfac6a",
+  "run_order_index": 45,
+  "nonce": "f5e423f8863140719d7b8a7ffd5fdd5f",
+  "system_prompt_hash": "b29a54dc693095da",
+  "fixture_path": "benchmarks/graph/v4/tasks/const-value-extraction.yaml",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "fail",
+  "diagnostic": "oracle rejected final message: fail",
+  "wall_seconds": 11.95,
+  "turns": 4,
+  "input_tokens": 5,
+  "cache_read_tokens": 41558,
+  "cache_creation_tokens": 8546,
+  "output_tokens": 558,
+  "total_cost_usd": 0.0534739,
+  "tool_calls": {
+    "Glob": 1,
+    "Grep": 2
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 489,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 17,
+      "cost_usd": 0.000574
+    },
+    "claude-sonnet-4-6": {
+      "input_tokens": 5,
+      "cache_read_tokens": 41558,
+      "cache_creation_tokens": 8546,
+      "output_tokens": 558,
+      "cost_usd": 0.05289989999999999
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/no-graph/const-value-extraction/2.transcript.json",
+  "final_diff_path": null
+}

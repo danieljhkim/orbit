@@ -1,0 +1,63 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "graph-only",
+  "task_id": "module-surface-orbit-mcp",
+  "seed": 2,
+  "sweep_id": "20260425-013339-cfac6a",
+  "run_order_index": 47,
+  "nonce": "9bcd79fd827e490db45f01be27ceb4a8",
+  "system_prompt_hash": "4ae3836ac76f14a6",
+  "fixture_path": "benchmarks/graph/v4/tasks/module-surface-orbit-mcp.yaml",
+  "allowed_tools": [
+    "mcp__orbit-bench__orbit_graph_search",
+    "mcp__orbit-bench__orbit_graph_show",
+    "mcp__orbit-bench__orbit_graph_callers",
+    "mcp__orbit-bench__orbit_graph_implementors",
+    "mcp__orbit-bench__orbit_graph_refs",
+    "mcp__orbit-bench__orbit_graph_overview",
+    "mcp__orbit-bench__orbit_graph_deps",
+    "mcp__orbit-bench__orbit_graph_pack"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 70.49,
+  "turns": 8,
+  "input_tokens": 10,
+  "cache_read_tokens": 70092,
+  "cache_creation_tokens": 11508,
+  "output_tokens": 3710,
+  "total_cost_usd": 0.1204496,
+  "tool_calls": {
+    "ToolSearch": 1,
+    "mcp__orbit-bench__orbit_graph_search": 3,
+    "mcp__orbit-bench__orbit_graph_show": 3
+  },
+  "model_usage": {
+    "claude-sonnet-4-6": {
+      "input_tokens": 10,
+      "cache_read_tokens": 70092,
+      "cache_creation_tokens": 11508,
+      "output_tokens": 3710,
+      "cost_usd": 0.11986260000000001
+    },
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 492,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 19,
+      "cost_usd": 0.0005870000000000001
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/graph-only/module-surface-orbit-mcp/2.transcript.json",
+  "final_diff_path": null
+}

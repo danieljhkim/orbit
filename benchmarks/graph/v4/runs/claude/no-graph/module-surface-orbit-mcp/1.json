@@ -1,0 +1,57 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "no-graph",
+  "task_id": "module-surface-orbit-mcp",
+  "seed": 1,
+  "sweep_id": "20260425-013339-cfac6a",
+  "run_order_index": 63,
+  "nonce": "760c38cc3c064a42ba8ffececbc58183",
+  "system_prompt_hash": "04ea3122766a1cfa",
+  "fixture_path": "benchmarks/graph/v4/tasks/module-surface-orbit-mcp.yaml",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 43.7,
+  "turns": 5,
+  "input_tokens": 6,
+  "cache_read_tokens": 57386,
+  "cache_creation_tokens": 12163,
+  "output_tokens": 2279,
+  "total_cost_usd": 0.09761405,
+  "tool_calls": {
+    "Read": 3,
+    "Glob": 1
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 489,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 19,
+      "cost_usd": 0.000584
+    },
+    "claude-sonnet-4-6": {
+      "input_tokens": 6,
+      "cache_read_tokens": 57386,
+      "cache_creation_tokens": 12163,
+      "output_tokens": 2279,
+      "cost_usd": 0.09703004999999999
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/no-graph/module-surface-orbit-mcp/1.transcript.json",
+  "final_diff_path": null
+}

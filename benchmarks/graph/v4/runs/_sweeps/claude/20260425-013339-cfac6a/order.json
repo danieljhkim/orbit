@@ -1,0 +1,458 @@
+{
+  "provider": "claude",
+  "sweep_id": "20260425-013339-cfac6a",
+  "sweep_seed": 152346771,
+  "arms": [
+    "no-graph",
+    "graph-only"
+  ],
+  "tasks": [
+    "callers-2hop-graphbenchpolicy",
+    "const-value-extraction",
+    "construct-vs-match-benchevent-distinct",
+    "deps-downstream-orbit-knowledge",
+    "function-as-value-vs-direct-call",
+    "generic-dispatch-concrete-impl",
+    "impl-divergence-trait-method",
+    "implementors-benchsink-with-blanket",
+    "macro-expanded-callers",
+    "module-surface-orbit-mcp",
+    "references-vs-callers-tool-registry-register",
+    "reverse-export-orbit-error"
+  ],
+  "n": 3,
+  "order": [
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "references-vs-callers-tool-registry-register",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "deps-downstream-orbit-knowledge",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "impl-divergence-trait-method",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "callers-2hop-graphbenchpolicy",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "reverse-export-orbit-error",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "construct-vs-match-benchevent-distinct",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "construct-vs-match-benchevent-distinct",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "const-value-extraction",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "construct-vs-match-benchevent-distinct",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "module-surface-orbit-mcp",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "function-as-value-vs-direct-call",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "reverse-export-orbit-error",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "impl-divergence-trait-method",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "references-vs-callers-tool-registry-register",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "generic-dispatch-concrete-impl",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "const-value-extraction",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "reverse-export-orbit-error",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "function-as-value-vs-direct-call",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "deps-downstream-orbit-knowledge",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "implementors-benchsink-with-blanket",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "implementors-benchsink-with-blanket",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "callers-2hop-graphbenchpolicy",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "impl-divergence-trait-method",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "macro-expanded-callers",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "impl-divergence-trait-method",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "generic-dispatch-concrete-impl",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "implementors-benchsink-with-blanket",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "callers-2hop-graphbenchpolicy",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "deps-downstream-orbit-knowledge",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "const-value-extraction",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "macro-expanded-callers",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "callers-2hop-graphbenchpolicy",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "reverse-export-orbit-error",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "impl-divergence-trait-method",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "deps-downstream-orbit-knowledge",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "macro-expanded-callers",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "references-vs-callers-tool-registry-register",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "function-as-value-vs-direct-call",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "references-vs-callers-tool-registry-register",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "generic-dispatch-concrete-impl",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "reverse-export-orbit-error",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "generic-dispatch-concrete-impl",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "construct-vs-match-benchevent-distinct",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "deps-downstream-orbit-knowledge",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "references-vs-callers-tool-registry-register",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "const-value-extraction",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "function-as-value-vs-direct-call",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "module-surface-orbit-mcp",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "impl-divergence-trait-method",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "macro-expanded-callers",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "deps-downstream-orbit-knowledge",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "implementors-benchsink-with-blanket",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "implementors-benchsink-with-blanket",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "const-value-extraction",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "references-vs-callers-tool-registry-register",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "macro-expanded-callers",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "generic-dispatch-concrete-impl",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "module-surface-orbit-mcp",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "construct-vs-match-benchevent-distinct",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "function-as-value-vs-direct-call",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "callers-2hop-graphbenchpolicy",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "construct-vs-match-benchevent-distinct",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "implementors-benchsink-with-blanket",
+      "seed": 3
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "module-surface-orbit-mcp",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "reverse-export-orbit-error",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "macro-expanded-callers",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "function-as-value-vs-direct-call",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "module-surface-orbit-mcp",
+      "seed": 1
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "callers-2hop-graphbenchpolicy",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "module-surface-orbit-mcp",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "no-graph",
+      "task_id": "generic-dispatch-concrete-impl",
+      "seed": 2
+    },
+    {
+      "provider": "claude",
+      "arm": "graph-only",
+      "task_id": "const-value-extraction",
+      "seed": 2
+    }
+  ]
+}

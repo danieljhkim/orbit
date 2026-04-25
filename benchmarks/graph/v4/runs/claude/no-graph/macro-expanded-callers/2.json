@@ -1,0 +1,56 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "no-graph",
+  "task_id": "macro-expanded-callers",
+  "seed": 2,
+  "sweep_id": "20260425-013339-cfac6a",
+  "run_order_index": 65,
+  "nonce": "9db30b7aded94a148233eb70fe78b74a",
+  "system_prompt_hash": "7282b4be06ec97b2",
+  "fixture_path": "benchmarks/graph/v4/tasks/macro-expanded-callers.yaml",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 8.48,
+  "turns": 2,
+  "input_tokens": 3,
+  "cache_read_tokens": 9170,
+  "cache_creation_tokens": 15333,
+  "output_tokens": 157,
+  "total_cost_usd": 0.06326475000000001,
+  "tool_calls": {
+    "Read": 1
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 546,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 21,
+      "cost_usd": 0.000651
+    },
+    "claude-sonnet-4-6": {
+      "input_tokens": 3,
+      "cache_read_tokens": 9170,
+      "cache_creation_tokens": 15333,
+      "output_tokens": 157,
+      "cost_usd": 0.06261375
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/no-graph/macro-expanded-callers/2.transcript.json",
+  "final_diff_path": null
+}

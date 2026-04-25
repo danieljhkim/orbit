@@ -1,0 +1,57 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "no-graph",
+  "task_id": "references-vs-callers-tool-registry-register",
+  "seed": 1,
+  "sweep_id": "20260425-013339-cfac6a",
+  "run_order_index": 36,
+  "nonce": "f321955c0e8d4958a62e9eb4d5d2be65",
+  "system_prompt_hash": "072fef89a785263b",
+  "fixture_path": "benchmarks/graph/v4/tasks/references-vs-callers-tool-registry-register.yaml",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 76.41,
+  "turns": 24,
+  "input_tokens": 11,
+  "cache_read_tokens": 151702,
+  "cache_creation_tokens": 18539,
+  "output_tokens": 5285,
+  "total_cost_usd": 0.19491285000000003,
+  "tool_calls": {
+    "Grep": 18,
+    "Read": 5
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 498,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 15,
+      "cost_usd": 0.0005729999999999999
+    },
+    "claude-sonnet-4-6": {
+      "input_tokens": 11,
+      "cache_read_tokens": 151702,
+      "cache_creation_tokens": 18539,
+      "output_tokens": 5285,
+      "cost_usd": 0.19433985
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/no-graph/references-vs-callers-tool-registry-register/1.transcript.json",
+  "final_diff_path": null
+}

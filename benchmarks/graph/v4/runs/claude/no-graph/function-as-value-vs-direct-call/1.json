@@ -1,0 +1,57 @@
+{
+  "provider": "claude",
+  "requested_model": "sonnet",
+  "arm": "no-graph",
+  "task_id": "function-as-value-vs-direct-call",
+  "seed": 1,
+  "sweep_id": "20260425-013339-cfac6a",
+  "run_order_index": 66,
+  "nonce": "fdb9994555494f319f36500267ddb0ee",
+  "system_prompt_hash": "7f8d2a3ef78d57f5",
+  "fixture_path": "benchmarks/graph/v4/tasks/function-as-value-vs-direct-call.yaml",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob"
+  ],
+  "disallowed_tools_head": [
+    "Bash",
+    "Edit",
+    "Write",
+    "TodoWrite",
+    "WebSearch"
+  ],
+  "verdict": "pass",
+  "diagnostic": "oracle accepted final message",
+  "wall_seconds": 34.58,
+  "turns": 9,
+  "input_tokens": 8,
+  "cache_read_tokens": 84341,
+  "cache_creation_tokens": 11395,
+  "output_tokens": 2300,
+  "total_cost_usd": 0.10316955,
+  "tool_calls": {
+    "Grep": 3,
+    "Read": 5
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "input_tokens": 512,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "output_tokens": 20,
+      "cost_usd": 0.000612
+    },
+    "claude-sonnet-4-6": {
+      "input_tokens": 8,
+      "cache_read_tokens": 84341,
+      "cache_creation_tokens": 11395,
+      "output_tokens": 2300,
+      "cost_usd": 0.10255755
+    }
+  },
+  "permission_denials": [],
+  "command_failures": [],
+  "transcript_path": "benchmarks/graph/v4/runs/claude/no-graph/function-as-value-vs-direct-call/1.transcript.json",
+  "final_diff_path": null
+}

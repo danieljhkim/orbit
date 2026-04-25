@@ -1,37 +1,48 @@
-# Graph Token-Usage Benchmark - v4 Codex Results
+# Graph Token-Usage Benchmark - v4 Results
 
-**Status:** Codex provider complete. Claude is intentionally deferred until `T20260425-0739` is patched and the graph index is rebuilt.
+**Status:** Complete for Codex and Claude.
 **Sweep dates:** 2026-04-24 to 2026-04-25
-**Sweep IDs:** `20260424-230632-f36f84` (`no-graph`, `graph-only`), `20260425-001959-842b8c` (`hybrid`)
-**Sweep seeds:** `928176111` (`no-graph`, `graph-only`), `583229300` (`hybrid`)
-**Harness SHA at report write:** `b0ce189e7053409c8754865bd154cd20e1de66a6`
-**Scope:** Codex (`gpt-5.3-codex`) only: `no-graph` 12 fixtures x 3 seeds, `graph-only` 12 fixtures x 3 seeds, `hybrid` 8 fixtures x 3 seeds = 96 cells. No errored cells.
+**Codex sweep IDs:** `20260424-230632-f36f84` (`no-graph`, `graph-only`), `20260425-001959-842b8c` (`hybrid`)
+**Claude sweep IDs:** `20260425-013339-cfac6a` (`no-graph`, `graph-only`), `20260425-012511-8881cb` (`hybrid`)
+**Codex sweep seeds:** `928176111` (`no-graph`, `graph-only`), `583229300` (`hybrid`)
+**Claude sweep seeds:** `152346771` (`no-graph`, `graph-only`), `88160319` (`hybrid`)
+**Harness SHAs:** Codex report baseline `b0ce189e7053409c8754865bd154cd20e1de66a6`; Claude post-fix run/report update `65fc1a22888ac120c8185c891d23cc5c7bf1c07e`
+**Scope:** 192 cells total. Each provider ran `no-graph` 12 fixtures x 3 seeds, `graph-only` 12 fixtures x 3 seeds, and `hybrid` 8 fixtures x 3 seeds. No errored cells.
+
+**Important comparison caveat:** Codex is a pre-fix baseline. Claude ran after `T20260425-0729` (string-list input coercion) and `T20260425-0739` (pub-use re-export indexing) landed and the graph index was rebuilt. Treat Codex-vs-Claude deltas as diagnostic evidence about model behavior plus tool fixes, not a clean provider-only comparison.
 
 ---
 
 ## Headline
 
-1. **Codex no-graph stayed perfect:** 36/36 pass, median 11,446 total tokens.
-2. **Codex graph-only was mixed:** 30/36 pass, median 15,462 total tokens. All six failures came from two production fixtures: `module-surface-orbit-mcp` and `reverse-export-orbit-error`.
-3. **Codex hybrid was the strongest operating mode:** 24/24 pass on the hybrid-eligible subset, median 3,900 total tokens, with graph used in 11/24 runs.
-4. **Graph has clear wins when the tool matches the question:** `deps-downstream-orbit-knowledge` (0.14x no-graph tokens), `callers-2hop-graphbenchpolicy` (0.44x), `impl-divergence-trait-method` (0.48x), `macro-expanded-callers` (0.59x), and `implementors-benchsink-with-blanket` (0.64x).
-5. **The main graph-only losses expose a known graph bug, not just model confusion:** `T20260425-0739` tracks that `pub use` re-exports are dropped from graph file `exports` metadata. That bug directly explains `reverse-export-orbit-error` and likely contributes to `module-surface-orbit-mcp`.
-6. **Schema ergonomics remain costly:** 28 graph tool calls failed and were mostly recovered. The dominant shape was scalar string input for string-list parameters (`refs.include`, `pack.selectors`).
-
-**Known active bug:** `T20260425-0739` ("Graph parser misses pub-use re-exports in file exports metadata") means this Codex result is a pre-fix baseline for re-export/root-surface fixtures. Do not run or interpret the Claude v4 sweep until that bug is fixed and the graph index is regenerated.
+1. **Codex pre-fix:** `no-graph` passed 36/36, `graph-only` passed 30/36, and `hybrid` passed 24/24. All Codex graph-only failures came from `module-surface-orbit-mcp` and `reverse-export-orbit-error`, the two fixtures most exposed to the `T20260425-0739` re-export bug.
+2. **Claude post-fix:** `graph-only` passed 36/36, `hybrid` passed 24/24, and `no-graph` passed 34/36. The two Claude no-graph failures were both `const-value-extraction` runs that omitted `V2_TOOL_WILDCARD_ROOTS`.
+3. **The re-export fix appears load-bearing:** after `T20260425-0739`, Claude graph-only passed `reverse-export-orbit-error` and `module-surface-orbit-mcp` in all seeds. That does not retroactively make the Codex run comparable, but it strongly supports the earlier diagnosis that those Codex failures were graph metadata bugs.
+4. **Graph-only accuracy improved post-fix, but cost remains uneven:** Claude graph-only was perfect but costlier than Claude no-graph on 10/12 fixtures. Its only fixture-level token wins were `deps-downstream-orbit-knowledge` (0.83x no-graph) and `references-vs-callers-tool-registry-register` (0.89x).
+5. **Hybrid remains the practical operating mode, but providers route differently:** Codex hybrid used graph in 11/24 runs and passed all seeds. Claude hybrid used graph in only 3/24 runs, all on `deps-downstream-orbit-knowledge`, and passed the rest via shell/source fallback.
+6. **The remaining graph work is payload shaping and argument ergonomics:** after scalar string-list coercion landed, Claude still hit 9 failed graph calls from nested-list/invalid-selector shapes. Claude graph-only also triggered 7 primary payload-firehose flags.
 
 ---
 
 ## Arm Summary
 
-| arm | runs | pass | median_total_tokens | p90_total_tokens | graph_call_rate | graph_calls | failed_graph_calls | shell_or_fs_calls |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| no-graph | 36 | 36/36 | 11446 | 27792 | 0/36 | 0 | 0 | 197 |
-| graph-only | 36 | 30/36 | 15462 | 64877 | 36/36 | 334 | 25 | 0 |
-| hybrid | 24 | 24/24 | 3900 | 11048 | 11/24 | 40 | 3 | 61 |
+Token totals are `input_tokens + output_tokens`, matching the aggregator's marginal-token convention. Cached read tokens and Claude USD cost are reported separately by the raw records, but not included in the median-token columns.
 
-Hybrid only ran on the 8 graph-strength and precision-gap fixtures, per `METHOD.md`.
-On that same 24-run subset, medians were: no-graph 11,446, graph-only 15,114, hybrid 3,900.
+| provider | arm | runs | pass | median_total_tokens | p90_total_tokens | graph_call_rate | graph_calls | failed_graph_calls | shell_or_fs_calls |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| claude | no-graph | 36 | 34/36 | 713 | 3159 | 0/36 | 0 | 0 | 154 |
+| claude | graph-only | 36 | 36/36 | 2330 | 6866 | 36/36 | 436 | 9 | 0 |
+| claude | hybrid | 24 | 24/24 | 663 | 2449 | 3/24 | 3 | 0 | 45 |
+| codex | no-graph | 36 | 36/36 | 11446 | 27792 | 0/36 | 0 | 0 | 197 |
+| codex | graph-only | 36 | 30/36 | 15462 | 64877 | 36/36 | 334 | 25 | 0 |
+| codex | hybrid | 24 | 24/24 | 3900 | 11048 | 11/24 | 40 | 3 | 61 |
+
+Hybrid only ran on the 8 graph-strength and precision-gap fixtures, per `METHOD.md`. On that same 24-run subset:
+
+| provider | no-graph median | graph-only median | hybrid median |
+|---|---:|---:|---:|
+| claude | 491 | 1541 | 663 |
+| codex | 11446 | 15114 | 3900 |
 
 ---
 
@@ -47,6 +58,16 @@ GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/aggregate.py \
 
 | provider | arm | task_class | runs | pass_rate | median_total_tokens | p90_total_tokens | tokens_per_success | graph_calls | graph_call_rate | shell_or_fs_calls |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| claude | graph-only | graph-strength | 12 | 100% | 1310 | 3944 | 1871 | 77 | 12/12 = 100.0% | 0 |
+| claude | graph-only | payload-volume | 6 | 100% | 5128 | 11584 | 5636 | 201 | 6/6 = 100.0% | 0 |
+| claude | graph-only | precision-gap | 12 | 100% | 1854 | 4538 | 2252 | 90 | 12/12 = 100.0% | 0 |
+| claude | graph-only | selector-ambiguity | 6 | 100% | 3960 | 7645 | 4308 | 68 | 6/6 = 100.0% | 0 |
+| claude | hybrid | graph-strength | 12 | 100% | 669 | 1842 | 818 | 3 | 3/12 = 25.0% | 12 |
+| claude | hybrid | precision-gap | 12 | 100% | 468 | 2887 | 935 | 0 | 0/12 = 0.0% | 33 |
+| claude | no-graph | graph-strength | 12 | 100% | 536 | 1841 | 737 | 0 | 0/12 = 0.0% | 31 |
+| claude | no-graph | payload-volume | 6 | 67% | 1517 | 2508 | 2207 | 0 | 0/6 = 0.0% | 34 |
+| claude | no-graph | precision-gap | 12 | 100% | 343 | 3052 | 874 | 0 | 0/12 = 0.0% | 30 |
+| claude | no-graph | selector-ambiguity | 6 | 100% | 2677 | 5296 | 3188 | 0 | 0/6 = 0.0% | 59 |
 | codex | graph-only | graph-strength | 12 | 75% | 9352 | 78425 | 33907 | 115 | 12/12 = 100.0% | 0 |
 | codex | graph-only | payload-volume | 6 | 100% | 16855 | 101587 | 29067 | 57 | 6/6 = 100.0% | 0 |
 | codex | graph-only | precision-gap | 12 | 100% | 15450 | 24307 | 14631 | 91 | 12/12 = 100.0% | 0 |
@@ -62,33 +83,80 @@ GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/aggregate.py \
 
 ## Category Aggregate
 
-`median go/ng` compares aggregate category medians. `mean fixture go/ng` and `worst fixture go/ng` are per-fixture ratios and are the load-bearing cost readings.
+`median go/ng` compares aggregate category medians. `mean fixture go/ng` and `worst fixture go/ng` are per-fixture ratios and are the load-bearing cost readings. Lower ratios are better for graph-only.
 
-| category | no-graph pass | graph-only pass | pass delta | median go/ng | mean fixture go/ng | worst fixture go/ng | hybrid graph rate |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| graph-strength | 12/12 | 9/12 | -3 | 0.71x | 1.70x | 5.59x | 9/12 |
-| precision-gap | 12/12 | 12/12 | +0 | 1.38x | 2.15x | 5.41x | 2/12 |
-| payload-volume | 6/6 | 6/6 | +0 | 1.36x | 1.87x | 3.25x | n/a |
-| selector-ambiguity | 6/6 | 3/6 | -3 | 1.14x | 1.45x | 1.89x | n/a |
+| provider | category | no-graph pass | graph-only pass | pass delta | median go/ng | mean fixture go/ng | worst fixture go/ng | hybrid graph rate |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| claude | graph-strength | 12/12 | 12/12 | +0 | 2.44x | 3.72x | 6.73x | 3/12 |
+| claude | precision-gap | 12/12 | 12/12 | +0 | 5.41x | 4.65x | 7.61x | 0/12 |
+| claude | payload-volume | 4/6 | 6/6 | +2 | 3.38x | 5.68x | 9.71x | n/a |
+| claude | selector-ambiguity | 6/6 | 6/6 | +0 | 1.48x | 1.42x | 1.94x | n/a |
+| codex | graph-strength | 12/12 | 9/12 | -3 | 0.71x | 1.70x | 5.59x | 9/12 |
+| codex | precision-gap | 12/12 | 12/12 | +0 | 1.38x | 2.15x | 5.41x | 2/12 |
+| codex | payload-volume | 6/6 | 6/6 | +0 | 1.36x | 1.87x | 3.25x | n/a |
+| codex | selector-ambiguity | 6/6 | 3/6 | -3 | 1.14x | 1.45x | 1.89x | n/a |
 
 ---
 
 ## Production vs Synthetic
 
-| mode | arm | runs | pass | median_total_tokens | graph_call_rate | graph_calls | failed_graph_calls |
-|---|---|---:|---:|---:|---:|---:|---:|
-| production | no-graph | 21 | 21/21 | 14162 | 0/21 | 0 | 0 |
-| production | graph-only | 21 | 15/21 | 17847 | 21/21 | 222 | 18 |
-| production | hybrid | 9 | 9/9 | 4872 | 3/9 | 3 | 0 |
-| synthetic | no-graph | 15 | 15/15 | 11278 | 0/15 | 0 | 0 |
-| synthetic | graph-only | 15 | 15/15 | 14972 | 15/15 | 112 | 7 |
-| synthetic | hybrid | 15 | 15/15 | 3819 | 8/15 | 37 | 3 |
+| provider | mode | arm | runs | pass | median_total_tokens | graph_call_rate | graph_calls | failed_graph_calls |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| claude | production | no-graph | 21 | 19/21 | 1916 | 0/21 | 0 | 0 |
+| claude | production | graph-only | 21 | 21/21 | 3720 | 21/21 | 357 | 6 |
+| claude | production | hybrid | 9 | 9/9 | 1735 | 3/9 | 3 | 0 |
+| claude | synthetic | no-graph | 15 | 15/15 | 219 | 0/15 | 0 | 0 |
+| claude | synthetic | graph-only | 15 | 15/15 | 1283 | 15/15 | 79 | 3 |
+| claude | synthetic | hybrid | 15 | 15/15 | 318 | 0/15 | 0 | 0 |
+| codex | production | no-graph | 21 | 21/21 | 14162 | 0/21 | 0 | 0 |
+| codex | production | graph-only | 21 | 15/21 | 17847 | 21/21 | 222 | 18 |
+| codex | production | hybrid | 9 | 9/9 | 4872 | 3/9 | 3 | 0 |
+| codex | synthetic | no-graph | 15 | 15/15 | 11278 | 0/15 | 0 | 0 |
+| codex | synthetic | graph-only | 15 | 15/15 | 14972 | 15/15 | 112 | 7 |
+| codex | synthetic | hybrid | 15 | 15/15 | 3819 | 8/15 | 37 | 3 |
 
-The production split is the load-bearing product signal. It is also where graph-only lost accuracy: both failing fixtures are production-grounded.
+The production split is the load-bearing product signal. Codex graph-only lost accuracy only on production-grounded fixtures. Claude graph-only passed all production fixtures post-fix, while Claude no-graph missed `const-value-extraction` twice.
 
 ---
 
-## Per-Fixture Table
+## Claude Per-Fixture Table
+
+| fixture | class | mode | arm | pass | median_tokens | p90_tokens | graph_call_rate | graph_calls | failed_graph_calls | shell/fs_calls |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `callers-2hop-graphbenchpolicy` | graph-strength | synthetic | no-graph | 3/3 | 535 | 746 | 0/3 | 0 | 0 | 3 |
+| `callers-2hop-graphbenchpolicy` | graph-strength | synthetic | graph-only | 3/3 | 1016 | 1283 | 3/3 | 6 | 0 | 0 |
+| `callers-2hop-graphbenchpolicy` | graph-strength | synthetic | hybrid | 3/3 | 750 | 855 | 0/3 | 0 | 0 | 3 |
+| `const-value-extraction` | payload-volume | production | no-graph | 1/3 | 719 | 1198 | 0/3 | 0 | 0 | 14 |
+| `const-value-extraction` | payload-volume | production | graph-only | 3/3 | 6979 | 11584 | 3/3 | 158 | 0 | 0 |
+| `construct-vs-match-benchevent-distinct` | precision-gap | synthetic | no-graph | 3/3 | 481 | 699 | 0/3 | 0 | 0 | 3 |
+| `construct-vs-match-benchevent-distinct` | precision-gap | synthetic | graph-only | 3/3 | 2290 | 2370 | 3/3 | 30 | 0 | 0 |
+| `construct-vs-match-benchevent-distinct` | precision-gap | synthetic | hybrid | 3/3 | 719 | 732 | 0/3 | 0 | 0 | 3 |
+| `deps-downstream-orbit-knowledge` | graph-strength | production | no-graph | 3/3 | 1610 | 1940 | 0/3 | 0 | 0 | 19 |
+| `deps-downstream-orbit-knowledge` | graph-strength | production | graph-only | 3/3 | 1338 | 1959 | 3/3 | 3 | 0 | 0 |
+| `deps-downstream-orbit-knowledge` | graph-strength | production | hybrid | 3/3 | 1735 | 1888 | 3/3 | 3 | 0 | 0 |
+| `function-as-value-vs-direct-call` | precision-gap | production | no-graph | 3/3 | 2308 | 3371 | 0/3 | 0 | 0 | 21 |
+| `function-as-value-vs-direct-call` | precision-gap | production | graph-only | 3/3 | 4273 | 4652 | 3/3 | 24 | 0 | 0 |
+| `function-as-value-vs-direct-call` | precision-gap | production | hybrid | 3/3 | 2823 | 2915 | 0/3 | 0 | 0 | 24 |
+| `generic-dispatch-concrete-impl` | precision-gap | synthetic | no-graph | 3/3 | 197 | 219 | 0/3 | 0 | 0 | 3 |
+| `generic-dispatch-concrete-impl` | precision-gap | synthetic | graph-only | 3/3 | 864 | 1196 | 3/3 | 13 | 0 | 0 |
+| `generic-dispatch-concrete-impl` | precision-gap | synthetic | hybrid | 3/3 | 219 | 239 | 0/3 | 0 | 0 | 3 |
+| `impl-divergence-trait-method` | payload-volume | production | no-graph | 3/3 | 2004 | 2508 | 0/3 | 0 | 0 | 20 |
+| `impl-divergence-trait-method` | payload-volume | production | graph-only | 3/3 | 3332 | 3438 | 3/3 | 43 | 0 | 0 |
+| `implementors-benchsink-with-blanket` | graph-strength | synthetic | no-graph | 3/3 | 184 | 184 | 0/3 | 0 | 0 | 3 |
+| `implementors-benchsink-with-blanket` | graph-strength | synthetic | graph-only | 3/3 | 998 | 1537 | 3/3 | 7 | 0 | 0 |
+| `implementors-benchsink-with-blanket` | graph-strength | synthetic | hybrid | 3/3 | 318 | 327 | 0/3 | 0 | 0 | 3 |
+| `macro-expanded-callers` | precision-gap | synthetic | no-graph | 3/3 | 203 | 231 | 0/3 | 0 | 0 | 3 |
+| `macro-expanded-callers` | precision-gap | synthetic | graph-only | 3/3 | 1545 | 1558 | 3/3 | 23 | 3 | 0 |
+| `macro-expanded-callers` | precision-gap | synthetic | hybrid | 3/3 | 203 | 219 | 0/3 | 0 | 0 | 3 |
+| `module-surface-orbit-mcp` | selector-ambiguity | production | no-graph | 3/3 | 1916 | 2285 | 0/3 | 0 | 0 | 10 |
+| `module-surface-orbit-mcp` | selector-ambiguity | production | graph-only | 3/3 | 3720 | 4383 | 3/3 | 28 | 1 | 0 |
+| `references-vs-callers-tool-registry-register` | selector-ambiguity | production | no-graph | 3/3 | 4698 | 5296 | 0/3 | 0 | 0 | 49 |
+| `references-vs-callers-tool-registry-register` | selector-ambiguity | production | graph-only | 3/3 | 4201 | 7645 | 3/3 | 40 | 1 | 0 |
+| `reverse-export-orbit-error` | graph-strength | production | no-graph | 3/3 | 537 | 707 | 0/3 | 0 | 0 | 6 |
+| `reverse-export-orbit-error` | graph-strength | production | graph-only | 3/3 | 3613 | 4086 | 3/3 | 61 | 4 | 0 |
+| `reverse-export-orbit-error` | graph-strength | production | hybrid | 3/3 | 588 | 629 | 0/3 | 0 | 0 | 6 |
+
+## Codex Per-Fixture Table
 
 | fixture | class | mode | arm | pass | median_tokens | p90_tokens | graph_call_rate | graph_calls | failed_graph_calls | shell/fs_calls |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -127,7 +195,22 @@ The production split is the load-bearing product signal. It is also where graph-
 
 ---
 
-## Hybrid Utilization
+## Claude Hybrid Utilization
+
+| fixture | pass | median_tokens | graph_call_rate | graph_calls | shell/fs_calls | interpretation |
+|---|---:|---:|---:|---:|---:|---|
+| `callers-2hop-graphbenchpolicy` | 3/3 | 750 | 0/3 | 0 | 3 | Passed by shell/source fallback; graph avoided organically. |
+| `construct-vs-match-benchevent-distinct` | 3/3 | 719 | 0/3 | 0 | 3 | Passed by shell/source fallback; graph avoided organically. |
+| `deps-downstream-orbit-knowledge` | 3/3 | 1735 | 3/3 | 3 | 0 | Only Claude hybrid fixture that used graph; direct deps solved it cleanly. |
+| `function-as-value-vs-direct-call` | 3/3 | 2823 | 0/3 | 0 | 24 | Passed by source fallback with relatively heavy shell/read use. |
+| `generic-dispatch-concrete-impl` | 3/3 | 219 | 0/3 | 0 | 3 | Passed by direct source inspection; graph avoided organically. |
+| `implementors-benchsink-with-blanket` | 3/3 | 318 | 0/3 | 0 | 3 | Passed by direct source inspection; graph avoided organically. |
+| `macro-expanded-callers` | 3/3 | 203 | 0/3 | 0 | 3 | Passed by direct source inspection; graph avoided organically. |
+| `reverse-export-orbit-error` | 3/3 | 588 | 0/3 | 0 | 6 | Passed by shell/source fallback despite graph-only success post-fix. |
+
+Claude hybrid shows that neutral hybrid prompting does not guarantee graph selection. It mostly measures whether Claude can route to the cheapest available source strategy, and for this fixture set that was usually shell/source reading rather than graph.
+
+## Codex Hybrid Utilization
 
 | fixture | pass | median_tokens | graph_call_rate | graph_calls | shell/fs_calls | interpretation |
 |---|---:|---:|---:|---:|---:|---|
@@ -140,11 +223,30 @@ The production split is the load-bearing product signal. It is also where graph-
 | `macro-expanded-callers` | 3/3 | 2288 | 0/3 | 0 | 7 | Passed by shell fallback; graph avoided organically. |
 | `reverse-export-orbit-error` | 3/3 | 5830 | 0/3 | 0 | 15 | Passed by shell fallback; graph-only failed all seeds. |
 
-Hybrid's 24/24 pass rate is not proof that every hybrid-eligible fixture is graph-shaped. It is proof that Codex can route around graph gaps when shell/source tools are available.
+Codex hybrid's 24/24 pass rate is not proof that every hybrid-eligible fixture is graph-shaped. It is proof that Codex can route around graph gaps when shell/source tools are available.
 
 ---
 
-## Graph-Only Cost Ratios
+## Claude Graph-Only Cost Ratios
+
+| fixture | class | mode | no-graph median | graph-only median | go/ng | graph-only pass |
+|---|---|---|---:|---:|---:|---:|
+| `deps-downstream-orbit-knowledge` | graph-strength | production | 1610 | 1338 | 0.83x | 3/3 |
+| `references-vs-callers-tool-registry-register` | selector-ambiguity | production | 4698 | 4201 | 0.89x | 3/3 |
+| `impl-divergence-trait-method` | payload-volume | production | 2004 | 3332 | 1.66x | 3/3 |
+| `function-as-value-vs-direct-call` | precision-gap | production | 2308 | 4273 | 1.85x | 3/3 |
+| `callers-2hop-graphbenchpolicy` | graph-strength | synthetic | 535 | 1016 | 1.90x | 3/3 |
+| `module-surface-orbit-mcp` | selector-ambiguity | production | 1916 | 3720 | 1.94x | 3/3 |
+| `generic-dispatch-concrete-impl` | precision-gap | synthetic | 197 | 864 | 4.39x | 3/3 |
+| `construct-vs-match-benchevent-distinct` | precision-gap | synthetic | 481 | 2290 | 4.76x | 3/3 |
+| `implementors-benchsink-with-blanket` | graph-strength | synthetic | 184 | 998 | 5.42x | 3/3 |
+| `reverse-export-orbit-error` | graph-strength | production | 537 | 3613 | 6.73x | 3/3 |
+| `macro-expanded-callers` | precision-gap | synthetic | 203 | 1545 | 7.61x | 3/3 |
+| `const-value-extraction` | payload-volume | production | 719 | 6979 | 9.71x | 3/3 |
+
+Claude graph-only was excellent for accuracy after the graph fixes, but it was rarely the cheapest route. The `const-value-extraction` cell is the sharpest tradeoff: graph-only found the full set in every seed, while no-graph missed one constant twice, but graph-only used 9.71x the no-graph median tokens.
+
+## Codex Graph-Only Cost Ratios
 
 | fixture | class | mode | no-graph median | graph-only median | go/ng | graph-only pass |
 |---|---|---|---:|---:|---:|---:|
@@ -163,7 +265,35 @@ Hybrid's 24/24 pass rate is not proof that every hybrid-eligible fixture is grap
 
 ---
 
-## Tool Diagnostics
+## Claude Tool Diagnostics
+
+Per-tool response size is measured in response characters, not model tokens. The transcripts do not expose per-tool token attribution.
+
+| tool | invocations | succeeded | failed | success_rate | median_response_chars | p90_response_chars |
+|---|---:|---:|---:|---:|---:|---:|
+| callers | 7 | 4 | 3 | 57% | 1838 | 29660 |
+| refs | 14 | 10 | 4 | 71% | 3945 | 18990 |
+| implementors | 6 | 6 | 0 | 100% | 1122 | 1249 |
+| deps | 6 | 6 | 0 | 100% | 606 | 606 |
+| pack | 2 | 1 | 1 | 50% | 979 | 979 |
+| search | 80 | 80 | 0 | 100% | 212 | 1427 |
+| show | 324 | 323 | 1 | 100% | 762 | 2931 |
+| overview | 0 | 0 | 0 | n/a | - | - |
+
+Failed graph calls by message:
+
+| message | count | affected tools |
+|---|---:|---|
+| `invalid input: include entries must be code, doc, config, or all, got ["code"]` | 3 | `refs` |
+| `execution failed: selector BenchDerivedStruct::default:fn does not resolve to a node` | 2 | `callers` |
+| `execution failed: selector BenchDerivedStruct::default does not resolve to a node` | 1 | `callers` |
+| `invalid input: invalid selector ["file:crates/orbit-mcp/src/lib.rs"]` | 1 | `pack` |
+| `invalid input: selector file:crates/orbit-common/src/types.rs does not resolve to a node` | 1 | `show` |
+| `invalid input: include entries must be code, doc, config, or all, got ["code", "config"]` | 1 | `refs` |
+
+These failures are not the same shape as the pre-fix Codex scalar-list failures. The remaining Claude failures are nested-list/invalid-selector mistakes and a derive/default selector expectation that graph does not support.
+
+## Codex Tool Diagnostics
 
 Per-tool response size is measured in response characters, not model tokens. The transcripts do not expose per-tool token attribution.
 
@@ -187,7 +317,7 @@ Failed graph calls by message:
 | `invalid input: query must not be empty` | 1 | `search` |
 | `invalid input: invalid selector BenchAuditSink` | 1 | `implementors` |
 
-The `refs.include` and `pack.selectors` failures are addressed by follow-up task `T20260425-0729` (accept scalar string-list inputs across the tool surface).
+The `refs.include` and `pack.selectors` scalar-list failures were addressed by `T20260425-0729` before the Claude sweep.
 
 ---
 
@@ -195,19 +325,24 @@ The `refs.include` and `pack.selectors` failures are addressed by follow-up task
 
 Non-passing runs:
 
-| arm | fixture | seeds | classification | observed answer |
-|---|---|---|---|---|
-| graph-only | `module-surface-orbit-mcp` | 1, 2, 3 | known graph bug / root-surface gap (`T20260425-0739`) | returned `McpHost`, `serve_stdio`; excluded `OrbitToolServer` |
-| graph-only | `reverse-export-orbit-error` | 1, 2, 3 | known graph bug / re-export metadata gap (`T20260425-0739`) | returned `[]`; excluded the original definition |
+| provider | arm | fixture | seeds | classification | observed answer |
+|---|---|---|---|---|---|
+| claude | no-graph | `const-value-extraction` | 1, 2 | source-search miss | omitted `V2_TOOL_WILDCARD_ROOTS`; seed 3 found the full set |
+| codex | graph-only | `module-surface-orbit-mcp` | 1, 2, 3 | known graph bug / root-surface gap (`T20260425-0739`) | returned `McpHost`, `serve_stdio`; excluded `OrbitToolServer` |
+| codex | graph-only | `reverse-export-orbit-error` | 1, 2, 3 | known graph bug / re-export metadata gap (`T20260425-0739`) | returned `[]`; excluded the original definition |
 
-Anomaly flags:
+Anomaly flags are not mutually exclusive. `Primary` means the row count emitted by `aggregate.py`'s precedence-ordered taxonomy; `independent` means the flag was true even if another flag won precedence.
 
-| flag | runs | notes |
-|---|---:|---|
-| schema-coercion | 25 | 28 failed graph calls total; most were recovered by retrying with array-shaped args. |
-| payload-firehose | 6 | Independent flag. Primary taxonomy only shows 2 because schema-coercion wins precedence when both occur. |
-| wrong-tool | 6 | The six graph-only non-passing runs above. |
-| design-defect | 13 | Hybrid pass with zero graph calls. Interpret as "organic selection avoided graph", not as a correctness failure. |
+| provider | flag | runs | notes |
+|---|---|---:|---|
+| claude | schema-coercion | 8 primary | 9 failed graph calls total; all recovered. Remaining shapes are nested-list/invalid-selector errors, not the pre-fix scalar-list issue. |
+| claude | payload-firehose | 7 primary / 13 independent | Concentrated in graph-only `const-value-extraction`, `macro-expanded-callers`, `reverse-export-orbit-error`, `implementors-benchsink-with-blanket`, and one `generic-dispatch-concrete-impl` seed. |
+| claude | wrong-tool | 0 | No graph-only Claude run failed. |
+| claude | design-defect | 21 | Hybrid passed with zero graph calls. Interpret as "organic selection avoided graph", not as a correctness failure. |
+| codex | schema-coercion | 25 primary | 28 failed graph calls total; most were recovered by retrying with array-shaped args. |
+| codex | payload-firehose | 2 primary / 6 independent | Primary taxonomy hides several firehose runs behind schema-coercion. |
+| codex | wrong-tool | 6 | The six pre-fix graph-only non-passing runs above. |
+| codex | design-defect | 13 | Hybrid passed with zero graph calls. Interpret as "organic selection avoided graph", not as a correctness failure. |
 
 ---
 
@@ -215,34 +350,49 @@ Anomaly flags:
 
 Top graph-only wins by token reduction:
 
-| fixture | result |
-|---|---|
-| `deps-downstream-orbit-knowledge` | 3/3 pass, 0.14x no-graph tokens |
-| `callers-2hop-graphbenchpolicy` | 3/3 pass, 0.44x no-graph tokens |
-| `impl-divergence-trait-method` | 3/3 pass, 0.48x no-graph tokens |
+| provider | fixture | result |
+|---|---|---|
+| codex | `deps-downstream-orbit-knowledge` | 3/3 pass, 0.14x no-graph tokens |
+| codex | `callers-2hop-graphbenchpolicy` | 3/3 pass, 0.44x no-graph tokens |
+| codex | `impl-divergence-trait-method` | 3/3 pass, 0.48x no-graph tokens |
+| claude | `deps-downstream-orbit-knowledge` | 3/3 pass, 0.83x no-graph tokens |
+| claude | `references-vs-callers-tool-registry-register` | 3/3 pass, 0.89x no-graph tokens |
+
+Accuracy standouts:
+
+| provider | fixture | result |
+|---|---|---|
+| claude | `reverse-export-orbit-error` | graph-only 3/3 post-fix; Codex pre-fix graph-only was 0/3 |
+| claude | `module-surface-orbit-mcp` | graph-only 3/3 post-fix; Codex pre-fix graph-only was 0/3 |
+| claude | `const-value-extraction` | graph-only 3/3 while no-graph was 1/3 |
 
 Top graph-only losses:
 
-| fixture | result |
-|---|---|
-| `reverse-export-orbit-error` | 0/3 pass, 5.59x no-graph tokens |
-| `module-surface-orbit-mcp` | 0/3 pass, 1.89x no-graph tokens |
-| `construct-vs-match-benchevent-distinct` | 3/3 pass, but 5.41x no-graph tokens |
+| provider | fixture | result |
+|---|---|---|
+| claude | `const-value-extraction` | 3/3 pass, but 9.71x no-graph tokens |
+| claude | `macro-expanded-callers` | 3/3 pass, but 7.61x no-graph tokens |
+| claude | `reverse-export-orbit-error` | 3/3 pass post-fix, but 6.73x no-graph tokens |
+| codex | `reverse-export-orbit-error` | 0/3 pass pre-fix, 5.59x no-graph tokens |
+| codex | `construct-vs-match-benchevent-distinct` | 3/3 pass, but 5.41x no-graph tokens |
 
 ---
 
 ## Interpretation
 
-The Codex v4 result supports keeping graph as an optional navigation surface, not as a replacement for source reads. Graph is excellent when the question maps directly to a graph primitive (`deps`, bounded `callers`, implementor enumeration). Its current export-surface weakness is now tracked as `T20260425-0739`: the parser drops `pub use` re-exports from file `exports` metadata, making graph confidently incomplete on root-surface and re-export-chain queries.
+The full v4 result supports keeping graph as an optional navigation surface, not as a replacement for source reads. Graph is excellent when the question maps directly to a precise graph primitive, with `deps-downstream-orbit-knowledge` the cleanest repeated win across both providers.
 
-Hybrid is the practical success case: Codex used graph on 11/24 hybrid runs and passed every seed. The winning behavior was selective graph use, not blanket graph use. This suggests the next tool work should focus on making high-confidence graph queries cheaper and more precise, while preserving source fallback.
+`T20260425-0739` looks like the right diagnosis for the Codex graph-only failures: after the pub-use/re-export fix, Claude graph-only passed both `reverse-export-orbit-error` and `module-surface-orbit-mcp`. That said, Claude's post-fix run shows a different problem: graph-only can be correct and still too expensive, especially when agents enumerate through many `show` calls or use graph for source-body extraction tasks.
 
-The highest-leverage fixes before another round are:
+Hybrid is still the practical success case, but its meaning differs by provider. Codex selectively used graph and got the strongest overall cost/correctness profile on the hybrid subset. Claude mostly avoided graph in hybrid, so its 24/24 result is better read as "source fallback remains essential" than "graph was selected well."
 
-1. Implement scalar string-list coercion across graph tools (`T20260425-0729`), which directly addresses 26/28 failed graph calls.
-2. Fix `pub use` / re-export indexing and file metadata (`T20260425-0739`), then regenerate the graph index and rerun the affected graph-only fixtures before launching Claude.
-3. Add payload shaping for high-cardinality responses (`refs`, `overview`, `callers`) so a single query cannot dump 90k+ response characters.
-4. Keep fixture-level ratios as the main cost metric. Aggregate medians hide both the `deps` win and the `reverse-export` loss.
+The highest-leverage next steps are:
+
+1. Add payload shaping for high-cardinality responses (`refs`, `overview`, `callers`, and repeated `show`) so graph-only cannot spend 6x-10x tokens on enumeration.
+2. Tighten selector and argument affordances after `T20260425-0729`: scalar lists are fixed, but nested lists and JSON-array-as-string selectors still cause recoverable failures.
+3. Rerun Codex graph-only on the two re-export/root-surface fixtures, or rerun the full Codex graph-only arm post-fix, to separate provider behavior from the `T20260425-0739` tool fix.
+4. Add a small hybrid-selection round with explicit "prefer graph when it directly answers the relationship; fall back to source for bodies/values" guidance. Neutral hybrid prompts measure organic tool choice, and Claude's organic choice was mostly "do not use graph."
+5. Keep fixture-level ratios as the main cost metric. Aggregate medians hide both the `deps` win and the expensive-but-correct post-fix `reverse-export` result.
 
 ---
 
@@ -258,6 +408,8 @@ GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/aggregate.py \
 
 Completed Codex sweeps:
 
+These artifacts are pre-fix for `T20260425-0729` and `T20260425-0739`; rerunning at current HEAD will not reproduce the exact Codex graph-only failures.
+
 ```bash
 GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/sweep.py \
   --provider codex --arms no-graph graph-only --n 3
@@ -266,6 +418,22 @@ GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/sweep.py \
 ```bash
 GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/sweep.py \
   --provider codex --arms hybrid --n 3 \
+  --tasks callers-2hop-graphbenchpolicy construct-vs-match-benchevent-distinct \
+  deps-downstream-orbit-knowledge function-as-value-vs-direct-call \
+  generic-dispatch-concrete-impl implementors-benchsink-with-blanket \
+  macro-expanded-callers reverse-export-orbit-error
+```
+
+Completed Claude sweeps:
+
+```bash
+GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/sweep.py \
+  --provider claude --arms no-graph graph-only --n 3
+```
+
+```bash
+GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/sweep.py \
+  --provider claude --arms hybrid --n 3 \
   --tasks callers-2hop-graphbenchpolicy construct-vs-match-benchevent-distinct \
   deps-downstream-orbit-knowledge function-as-value-vs-direct-call \
   generic-dispatch-concrete-impl implementors-benchsink-with-blanket \
