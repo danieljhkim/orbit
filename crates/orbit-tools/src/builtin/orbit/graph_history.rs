@@ -11,7 +11,7 @@ use orbit_knowledge::graph::object_store::resolve_graph_read_target;
 use orbit_knowledge::{
     DEFAULT_STALENESS_THRESHOLD, HistoryQueryOptions, Selector, TaskIdPattern, query_task_history,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{Tool, ToolContext};
 
@@ -120,22 +120,7 @@ impl Tool for OrbitGraphHistoryTool {
             OrbitError::Execution(format!("orbit.graph.history failed: {error}"))
         })?;
 
-        let mut payload = json!({
-            "selector": result.selector,
-            "source": result.source,
-            "task_history": result.task_history,
-            "staleness": result.staleness,
-            "structural_conflict": result.structural_conflict,
-        });
-        // Match the CLI `--json` shape: emit `warnings` only when non-empty so
-        // default-pattern callers see an identical object across both
-        // surfaces (T20260426-0507 review).
-        if !result.warnings.is_empty()
-            && let Some(obj) = payload.as_object_mut()
-        {
-            obj.insert("warnings".to_string(), json!(result.warnings));
-        }
-        Ok(payload)
+        Ok(crate::graph::history_payload_from_result(&result))
     }
 }
 

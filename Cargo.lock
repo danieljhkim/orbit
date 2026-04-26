@@ -1534,7 +1534,6 @@ dependencies = [
  "csv",
  "orbit-common",
  "orbit-core",
- "orbit-knowledge",
  "orbit-mcp",
  "predicates",
  "regex",

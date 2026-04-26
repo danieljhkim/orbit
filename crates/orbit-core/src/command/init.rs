@@ -12,7 +12,7 @@ use crate::command::policy::seed_default_policies;
 use crate::command::skill::{
     default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
 };
-use orbit_common::utility::fs::{create_dir_symlink, remove_path_if_exists};
+use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink, remove_path_if_exists};
 
 use crate::config::{RuntimeConfig, seed_default_config};
 use crate::runtime::resolve_global_root;
@@ -218,6 +218,31 @@ pub fn init_workspace_at_root(
         refreshed_default_jobs,
         refreshed_default_executors,
         refreshed_default_policies,
+    })
+}
+
+pub fn seed_default_orbitignore(workspace_root: &Path) -> Result<bool, OrbitError> {
+    let orbitignore_path = workspace_root.join(".orbitignore");
+    if orbitignore_path.exists() {
+        return Ok(false);
+    }
+    let template = crate::command::graph::default_orbitignore_template();
+    atomic_write_text(&orbitignore_path, &template)
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    Ok(true)
+}
+
+pub fn build_initial_graph(
+    workspace_root: &Path,
+    orbit_dir: &Path,
+) -> Result<crate::command::graph::GraphBuildOutput, OrbitError> {
+    crate::command::graph::build_graph(crate::command::graph::GraphBuildOptions {
+        data_root: orbit_dir.to_path_buf(),
+        repo_override: Some(workspace_root.to_path_buf()),
+        ref_name: None,
+        task_id_pattern_flag: None,
+        task_id_pattern_config: None,
+        incremental: false,
     })
 }
 

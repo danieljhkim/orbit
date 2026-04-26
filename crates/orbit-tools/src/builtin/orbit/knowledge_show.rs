@@ -1,8 +1,7 @@
 use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
 use orbit_knowledge::Selector;
-use orbit_knowledge::graph::navigator::GraphNodeRef;
 use orbit_knowledge::service::GraphContextService;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{Tool, ToolContext};
 
@@ -65,58 +64,6 @@ impl Tool for OrbitKnowledgeShowTool {
             .bounded_context(node.id(), depth, max_siblings, max_children)
             .map_err(|e| OrbitError::Execution(e.to_string()))?;
 
-        Ok(build_json(&svc, &node_ctx))
+        Ok(crate::graph::node_context_payload(&svc, &node_ctx))
     }
-}
-
-fn build_json(
-    svc: &GraphContextService<'_>,
-    ctx: &orbit_knowledge::service::NodeContext<'_>,
-) -> Value {
-    let node = ctx.node;
-    let lineage: Vec<String> = ctx
-        .lineage
-        .iter()
-        .map(|n| svc.selector_for_node(*n))
-        .collect();
-    let siblings: Vec<String> = ctx
-        .siblings
-        .iter()
-        .map(|n| svc.selector_for_node(*n))
-        .collect();
-    let children: Vec<String> = ctx
-        .children
-        .iter()
-        .map(|n| svc.selector_for_node(*n))
-        .collect();
-
-    let mut value = json!({
-        "selector": svc.selector_for_node(node),
-        "lineage": lineage,
-        "siblings": siblings,
-        "children": children,
-    });
-
-    match node {
-        GraphNodeRef::Leaf(l) => {
-            let obj = value.as_object_mut().unwrap();
-            obj.insert("source".to_string(), json!(l.source));
-            obj.insert("lines".to_string(), json!([l.start_line, l.end_line]));
-        }
-        GraphNodeRef::File(f) => {
-            let obj = value.as_object_mut().unwrap();
-            if !f.imports.is_empty() {
-                obj.insert("imports".to_string(), json!(f.imports));
-            }
-            if !f.exports.is_empty() {
-                obj.insert("exports".to_string(), json!(f.exports));
-            }
-            if !f.re_exports.is_empty() {
-                obj.insert("re_exports".to_string(), json!(f.re_exports));
-            }
-        }
-        GraphNodeRef::Dir(_) => {}
-    }
-
-    value
 }

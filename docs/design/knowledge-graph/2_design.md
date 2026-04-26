@@ -181,6 +181,8 @@ orbit graph search --ref <name> <query>
 
 Graph build/update writes without `--ref` resolve the current git branch; build/update writes fail on detached HEAD rather than inventing a branch label. Reads fall back to the default branch when the current-branch ref does not yet exist, with a single stderr warning ([T20260421-0358]).
 
+The CLI does not import `orbit-knowledge` directly. `orbit-tools::graph` owns the graph use-case facade for build/update, show/search, history payloads, and the default `.orbitignore` template; `orbit-core::command::graph` re-exports that facade for clap command handlers and workspace init ([T20260426-2042]). This keeps CLI code focused on argument parsing and human output while preserving the same JSON payload builders used by the agent tool surface.
+
 ### 4.2 MCP tools
 
 The knowledge graph is exposed through `orbit-mcp` as a stable, read-only tool surface. Each tool accepts an optional `ref` and delegates to the services above:
@@ -285,5 +287,6 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 - **[T20260426-0220]** — Add exact `task_id` filtering to `orbit.graph.search`.
 - **[T20260426-0236]** — Add `make bench` graph build benchmark and `.orbit/state/scoreboard/graph_bench.json`.
 - **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface; use task lock reservations as preflight write guards.
+- **[T20260426-2042]** — Move graph CLI behavior behind the `orbit-tools::graph` facade and remove the direct `orbit-knowledge` dependency from `orbit-cli`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

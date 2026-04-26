@@ -321,6 +321,22 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-021 — Route graph CLI through the tools facade
+
+**Status:** Accepted · 2026-04 · [T20260426-2042]
+
+**Context.** `orbit-cli` imported `orbit-knowledge` directly for graph build/update, show/search, history payloads, workspace-init graph build, and `.orbitignore` defaults. That made clap command files a second graph application layer and duplicated JSON shaping already present in the agent tool surface.
+
+**Decision.** Move those graph use cases into `orbit-tools::graph`, re-export them from `orbit-core::command::graph`, and keep `orbit-cli` on clap parsing plus human output. `orbit-core` continues to avoid a direct `orbit-knowledge` dependency; `orbit-tools` remains the only upstream graph consumer.
+
+**Consequences.**
+- `orbit-cli` no longer declares or imports `orbit-knowledge`.
+- CLI and agent graph surfaces share the JSON payload builders for `show` and `history`.
+- Workspace init still seeds `.orbitignore` and attempts the initial graph build through explicit core helpers.
+- Cost: `orbit-tools` now contains a user-facing graph facade in addition to registered tools, so future maintainers must distinguish reusable use-case helpers from tool schemas and avoid accidentally registering CLI-only build/update behavior as agent tools.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -352,5 +368,6 @@ Tasks cited by ADRs above:
 - **[T20260426-0402]** — Land v3 retention decision in the ADR index.
 - **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and standardize on task lock reservations as preflight write guards.
 - **[T20260426-0507]** — Move `orbit task history` to `orbit graph history`; add configurable task-ID regex with manifest-recorded pattern, mismatch warning, and forced full backfill on pattern change; expose `orbit.graph.history` agent tool.
+- **[T20260426-2042]** — Move graph CLI behavior behind the `orbit-tools::graph` facade and remove the direct `orbit-knowledge` dependency from `orbit-cli`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

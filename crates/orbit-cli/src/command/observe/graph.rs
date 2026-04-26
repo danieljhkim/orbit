@@ -1,17 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use comfy_table::Cell;
+use orbit_core::command::graph as graph_service;
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_knowledge::graph::navigator::GraphNodeRef;
-use orbit_knowledge::graph::nodes::CodebaseGraphV1;
-use orbit_knowledge::graph::object_store::{RefName, resolve_graph_read_target};
-use orbit_knowledge::pipeline::context::BuildConfig;
-use orbit_knowledge::service::GraphContextService;
-use orbit_knowledge::{
-    DEFAULT_STALENESS_THRESHOLD, HistoryQueryOptions, Selector, TaskGraphScope, TaskGraphService,
-    TaskIdPattern, query_task_history,
-};
 use serde_json::json;
 
 use crate::command::Execute;
@@ -126,7 +118,7 @@ pub struct GraphHistoryArgs {
 
     /// Staleness threshold (commits). A warning is emitted to stderr when
     /// HEAD is more than this many commits ahead of the attribution cursor.
-    #[arg(long, default_value_t = DEFAULT_STALENESS_THRESHOLD)]
+    #[arg(long, default_value_t = graph_service::DEFAULT_STALENESS_THRESHOLD)]
     pub staleness_threshold: u64,
 
     /// Task-ID extraction regex override. Falls back to the workspace
@@ -212,27 +204,19 @@ impl Execute for GraphHistoryArgs {
 
 impl Execute for GraphShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let graph = load_graph(runtime, self.ref_name.as_deref())?;
-        let svc = GraphContextService::new(&graph);
-
-        let selector: Selector = self
-            .selector
-            .parse()
-            .map_err(|e| OrbitError::InvalidInput(format!("{e}")))?;
-
-        let node = svc
-            .resolve_selector(&selector)
-            .map_err(|e| OrbitError::InvalidInput(e.to_string()))?;
-
-        let ctx = svc
-            .bounded_context(node.id(), self.depth, self.siblings, self.children)
-            .map_err(|e| OrbitError::Execution(e.to_string()))?;
+        let output = graph_service::show_graph(graph_service::GraphShowOptions {
+            data_root: runtime.data_root(),
+            selector: self.selector,
+            depth: self.depth,
+            siblings: self.siblings,
+            children: self.children,
+            ref_name: self.ref_name,
+        })?;
 
         if self.json {
-            let value = node_context_to_json(&svc, &ctx);
-            crate::output::json::print_pretty(&value)?;
+            crate::output::json::print_pretty(&output.payload)?;
         } else {
-            print_node_context(&svc, &ctx);
+            print_node_context(&output);
         }
 
         Ok(())
@@ -241,33 +225,23 @@ impl Execute for GraphShowArgs {
 
 impl Execute for GraphSearchArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let graph = load_graph(runtime, self.ref_name.as_deref())?;
-        let svc = GraphContextService::new(&graph);
-
-        let type_refs: Vec<&str> = self.node_types.iter().map(String::as_str).collect();
-        let node_types = if type_refs.is_empty() {
-            None
-        } else {
-            Some(type_refs.as_slice())
-        };
-
-        let results = svc.search(
-            &self.query,
-            node_types,
-            self.prefix.as_deref(),
-            None,
-            self.limit,
-        );
+        let output = graph_service::search_graph(graph_service::GraphSearchOptions {
+            data_root: runtime.data_root(),
+            query: self.query,
+            node_types: self.node_types,
+            prefix: self.prefix,
+            limit: self.limit,
+            ref_name: self.ref_name,
+        })?;
 
         if self.json {
-            let items: Vec<String> = results.iter().map(|n| svc.selector_for_node(*n)).collect();
-            crate::output::json::print_pretty(&json!(items))?;
-        } else if results.is_empty() {
+            crate::output::json::print_pretty(&json!(output.selectors))?;
+        } else if output.selectors.is_empty() {
             println!("No results found.");
         } else {
             let mut table = build_table(&["SELECTOR"]);
-            for node in &results {
-                add_single_line_row(&mut table, vec![Cell::new(svc.selector_for_node(*node))]);
+            for selector in &output.selectors {
+                add_single_line_row(&mut table, vec![Cell::new(selector)]);
             }
             println!("{table}");
         }
@@ -280,17 +254,6 @@ impl Execute for GraphSearchArgs {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn load_graph(
-    runtime: &OrbitRuntime,
-    explicit_ref: Option<&str>,
-) -> Result<CodebaseGraphV1, OrbitError> {
-    let data_root = runtime.data_root();
-    let knowledge_dir = data_root.join("knowledge");
-    let repo_path = data_root.parent().unwrap_or_else(|| Path::new("."));
-    let service = TaskGraphService::new(knowledge_dir, TaskGraphScope::default());
-    service.read_graph(Some(repo_path), false, explicit_ref)
-}
-
 fn run_pipeline(
     runtime: &OrbitRuntime,
     repo_override: Option<PathBuf>,
@@ -298,79 +261,36 @@ fn run_pipeline(
     task_id_pattern_flag: Option<String>,
     incremental: bool,
 ) -> Result<(), OrbitError> {
-    let data_root = runtime.data_root();
-    let repo_path = repo_override.unwrap_or_else(|| {
-        data_root
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."))
-    });
-    let output_dir = data_root.join("knowledge");
-
-    let mode = if incremental { "update" } else { "build" };
-    eprintln!("knowledge {mode}: scanning {}", repo_path.display());
-
-    let task_id_pattern = resolve_task_id_pattern(runtime, task_id_pattern_flag.as_deref())?;
-    eprintln!(
-        "knowledge {mode}: task-ID pattern {}",
-        task_id_pattern.as_str()
-    );
-
-    let config = BuildConfig {
-        repo_path,
-        output_dir,
+    let resolved = graph_service::resolve_graph_build(graph_service::GraphBuildOptions {
+        data_root: runtime.data_root(),
+        repo_override,
+        ref_name,
+        task_id_pattern_flag,
+        task_id_pattern_config: runtime.task_id_pattern().map(ToOwned::to_owned),
         incremental,
-        ref_name: parse_ref_name(ref_name)?,
-        task_id_pattern: Some(task_id_pattern),
-    };
+    })?;
+    eprintln!(
+        "knowledge {}: scanning {}",
+        resolved.mode,
+        resolved.repo_path.display()
+    );
+    eprintln!(
+        "knowledge {}: task-ID pattern {}",
+        resolved.mode, resolved.task_id_pattern
+    );
 
-    let ctx = orbit_knowledge::pipeline::run_build(config)
-        .map_err(|e| OrbitError::Execution(format!("knowledge {mode} failed: {e}")))?;
+    let output = graph_service::run_resolved_graph_build(resolved)?;
 
     eprintln!(
-        "knowledge {mode}: {} dirs, {} files, {} leaves",
-        ctx.graph.dirs.len(),
-        ctx.graph.files.len(),
-        ctx.graph.leaves.len(),
+        "knowledge {}: {} dirs, {} files, {} leaves",
+        output.mode, output.dirs, output.files, output.leaves,
     );
-    eprintln!("knowledge {mode}: written to {}", ctx.output_dir.display());
-
+    eprintln!(
+        "knowledge {}: written to {}",
+        output.mode,
+        output.output_dir.display()
+    );
     Ok(())
-}
-
-/// Resolve the active task-ID pattern using the precedence:
-///
-/// 1. CLI flag (`--task-id-pattern`)
-/// 2. Workspace config (`knowledge.task_id_pattern`)
-/// 3. Orbit default
-///
-/// Invalid regex from any source surfaces as `OrbitError::InvalidInput`.
-fn resolve_task_id_pattern(
-    runtime: &OrbitRuntime,
-    flag: Option<&str>,
-) -> Result<TaskIdPattern, OrbitError> {
-    resolve_task_id_pattern_inner(flag, runtime.task_id_pattern())
-}
-
-/// Pure helper for [`resolve_task_id_pattern`] — separated for unit tests so
-/// the precedence logic does not require a full `OrbitRuntime`.
-fn resolve_task_id_pattern_inner(
-    flag: Option<&str>,
-    config: Option<&str>,
-) -> Result<TaskIdPattern, OrbitError> {
-    if let Some(raw) = flag {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err(OrbitError::InvalidInput(
-                "--task-id-pattern must not be empty".to_string(),
-            ));
-        }
-        return TaskIdPattern::new(trimmed).map_err(|error| OrbitError::InvalidInput(error.reason));
-    }
-    if let Some(raw) = config {
-        return TaskIdPattern::new(raw).map_err(|error| OrbitError::InvalidInput(error.reason));
-    }
-    Ok(TaskIdPattern::default())
 }
 
 fn run_history_query(
@@ -381,81 +301,41 @@ fn run_history_query(
     staleness_threshold: u64,
     task_id_pattern_flag: Option<&str>,
 ) -> Result<(), OrbitError> {
-    let selector: Selector =
-        raw_selector
-            .parse()
-            .map_err(|error: orbit_knowledge::SelectorParseError| {
-                OrbitError::InvalidInput(error.to_string())
-            })?;
-
-    let data_root = runtime.data_root();
-    let knowledge_dir = data_root.join("knowledge");
-    let repo_path = data_root
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    let read_target = resolve_graph_read_target(Some(&repo_path), explicit_ref)?;
-    let branch_ref = read_target.requested.clone();
-
-    let task_id_pattern = resolve_task_id_pattern(runtime, task_id_pattern_flag)?;
-
-    let options = HistoryQueryOptions {
-        knowledge_dir: &knowledge_dir,
-        repo_path: &repo_path,
-        branch_ref: &branch_ref,
-        selector: &selector,
+    let output = graph_service::history_graph(graph_service::GraphHistoryOptions {
+        data_root: runtime.data_root(),
+        selector: raw_selector.to_string(),
+        ref_name: explicit_ref.map(ToOwned::to_owned),
         staleness_threshold,
-        task_id_pattern: &task_id_pattern,
-    };
+        task_id_pattern_flag: task_id_pattern_flag.map(ToOwned::to_owned),
+        task_id_pattern_config: runtime.task_id_pattern().map(ToOwned::to_owned),
+    })?;
 
-    let result = query_task_history(&options)
-        .map_err(|error| OrbitError::Execution(format!("orbit graph history failed: {error}")))?;
-
-    for warning in &result.warnings {
+    for warning in &output.warnings {
         eprintln!("warning: {warning}");
     }
 
     if as_json {
-        let mut payload = json!({
-            "selector": result.selector,
-            "source": result.source,
-            "task_history": result.task_history,
-            "staleness": result.staleness,
-            "structural_conflict": result.structural_conflict,
-        });
-        // Match the agent-tool shape (T20260426-0507 review): emit `warnings`
-        // only when non-empty so default-pattern output stays unchanged.
-        if !result.warnings.is_empty()
-            && let Some(obj) = payload.as_object_mut()
-        {
-            obj.insert("warnings".to_string(), json!(result.warnings));
-        }
-        crate::output::json::print_pretty(&payload)?;
+        crate::output::json::print_pretty(&output.payload)?;
     } else {
-        print_history_human(&result);
+        print_history_human(&output);
     }
 
     Ok(())
 }
 
-fn print_history_human(result: &orbit_knowledge::TaskHistoryResult) {
+fn print_history_human(output: &graph_service::GraphHistoryOutput) {
     use crate::output::color::{bold, dimmed};
 
-    println!("{} {}", bold("Selector:"), result.selector);
-    println!(
-        "{} {}",
-        bold("Source:"),
-        format!("{:?}", result.source).to_lowercase()
-    );
-    if result.structural_conflict {
+    println!("{} {}", bold("Selector:"), output.selector);
+    println!("{} {}", bold("Source:"), output.source_label);
+    if output.structural_conflict {
         println!("{}", bold("Structural conflict: true"));
     }
-    if result.task_history.is_empty() {
+    if output.task_history.is_empty() {
         println!("{}", dimmed("No task IDs attributed to this node."));
         return;
     }
-    for entry in &result.task_history {
+    for entry in &output.task_history {
         println!("{} {}", bold("Task:"), entry.task_id);
         if entry.commits.is_empty() {
             println!("  {}", dimmed("(no commits found in sidecar)"));
@@ -468,202 +348,82 @@ fn print_history_human(result: &orbit_knowledge::TaskHistoryResult) {
     }
 }
 
-fn parse_ref_name(ref_name: Option<String>) -> Result<Option<RefName>, OrbitError> {
-    ref_name
-        .filter(|value| !value.trim().is_empty())
-        .map(RefName::new)
-        .transpose()
-        .map_err(|error| OrbitError::InvalidInput(error.to_string()))
-}
-
-fn node_context_to_json(
-    svc: &GraphContextService<'_>,
-    ctx: &orbit_knowledge::service::NodeContext<'_>,
-) -> serde_json::Value {
-    let node = ctx.node;
-
-    let lineage: Vec<String> = ctx
-        .lineage
-        .iter()
-        .map(|n| svc.selector_for_node(*n))
-        .collect();
-    let siblings: Vec<String> = ctx
-        .siblings
-        .iter()
-        .map(|n| svc.selector_for_node(*n))
-        .collect();
-    let children: Vec<String> = ctx
-        .children
-        .iter()
-        .map(|n| svc.selector_for_node(*n))
-        .collect();
-
-    let mut value = json!({
-        "selector": svc.selector_for_node(node),
-        "lineage": lineage,
-        "siblings": siblings,
-        "children": children,
-    });
-
-    match node {
-        GraphNodeRef::Leaf(l) => {
-            let obj = value.as_object_mut().unwrap();
-            obj.insert("source".to_string(), json!(l.source));
-            obj.insert("lines".to_string(), json!([l.start_line, l.end_line]));
-        }
-        GraphNodeRef::File(f) => {
-            let obj = value.as_object_mut().unwrap();
-            if !f.imports.is_empty() {
-                obj.insert("imports".to_string(), json!(f.imports));
-            }
-            if !f.exports.is_empty() {
-                obj.insert("exports".to_string(), json!(f.exports));
-            }
-            if !f.re_exports.is_empty() {
-                obj.insert("re_exports".to_string(), json!(f.re_exports));
-            }
-        }
-        GraphNodeRef::Dir(_) => {}
-    }
-
-    value
-}
-
-fn print_node_context(
-    svc: &GraphContextService<'_>,
-    ctx: &orbit_knowledge::service::NodeContext<'_>,
-) {
-    let node = ctx.node;
-    let sel = svc.selector_for_node(node);
-
-    println!("{sel}");
+fn print_node_context(output: &graph_service::GraphShowOutput) {
+    println!("{}", output.selector);
     println!();
 
-    // Lineage breadcrumb
-    if !ctx.lineage.is_empty() {
-        let breadcrumb: Vec<&str> = ctx
-            .lineage
-            .iter()
-            .map(|n| n.base().name.as_str())
-            .chain(std::iter::once(node.base().name.as_str()))
-            .collect();
-        println!("  Lineage: {}", breadcrumb.join(" > "));
+    if !output.lineage_names.is_empty() {
+        println!("  Lineage: {}", output.lineage_names.join(" > "));
     }
 
-    // Type-specific details
-    match node {
-        GraphNodeRef::Dir(d) => {
+    match &output.details {
+        graph_service::GraphNodeDetails::Dir {
+            parent,
+            dirs,
+            files,
+        } => {
             println!("  Type:    dir");
-            if let Some(pid) = node.parent_id()
-                && let Ok(parent) = svc.navigator().get_node(pid)
-            {
-                println!("  Parent:  {}", svc.selector_for_node(parent));
+            if let Some(parent) = parent {
+                println!("  Parent:  {parent}");
             }
-            println!(
-                "  Dirs:    {}  Files: {}",
-                d.dir_children.len(),
-                d.file_children.len()
-            );
+            println!("  Dirs:    {dirs}  Files: {files}");
         }
-        GraphNodeRef::File(f) => {
+        graph_service::GraphNodeDetails::File {
+            extension,
+            parent,
+            leaves,
+        } => {
             println!("  Type:    file");
-            if let Some(ext) = &f.extension {
-                println!("  Ext:     {ext}");
+            if let Some(extension) = extension {
+                println!("  Ext:     {extension}");
             }
-            if let Some(pid) = node.parent_id()
-                && let Ok(parent) = svc.navigator().get_node(pid)
-            {
-                println!("  Parent:  {}", svc.selector_for_node(parent));
+            if let Some(parent) = parent {
+                println!("  Parent:  {parent}");
             }
-            println!("  Leaves:  {}", f.leaf_children.len());
+            println!("  Leaves:  {leaves}");
         }
-        GraphNodeRef::Leaf(l) => {
-            println!("  Kind:    {}", l.kind);
-            if let (Some(s), Some(e)) = (l.start_line, l.end_line) {
-                println!("  Lines:   {s}..{e}");
+        graph_service::GraphNodeDetails::Leaf {
+            kind,
+            lines,
+            parent,
+            source,
+        } => {
+            println!("  Kind:    {kind}");
+            if let Some((start, end)) = lines {
+                println!("  Lines:   {start}..{end}");
             }
-            if let Some(pid) = node.parent_id()
-                && let Ok(parent) = svc.navigator().get_node(pid)
-            {
-                println!("  Parent:  {}", svc.selector_for_node(parent));
+            if let Some(parent) = parent {
+                println!("  Parent:  {parent}");
             }
-            if !l.source.is_empty() {
+            if !source.is_empty() {
                 println!();
                 println!("  Source:");
-                for line in l.source.lines() {
+                for line in source.lines() {
                     println!("    {line}");
                 }
             }
         }
     }
 
-    // Siblings
     println!();
-    if ctx.siblings.is_empty() {
+    if output.siblings.is_empty() {
         println!("  Siblings: (none)");
     } else {
-        println!("  Siblings ({}):", ctx.siblings.len());
-        for sib in &ctx.siblings {
-            println!("    {}", svc.selector_for_node(*sib));
+        println!("  Siblings ({}):", output.siblings.len());
+        for sibling in &output.siblings {
+            println!("    {sibling}");
         }
     }
 
-    // Children (skip for leaf nodes — methods are accessible via search/selectors)
-    if !matches!(node, GraphNodeRef::Leaf(_)) {
+    if !matches!(output.details, graph_service::GraphNodeDetails::Leaf { .. }) {
         println!();
-        if ctx.children.is_empty() {
+        if output.children.is_empty() {
             println!("  Children: (none)");
         } else {
-            println!("  Children ({}):", ctx.children.len());
-            for child in &ctx.children {
-                println!("    {}", svc.selector_for_node(*child));
+            println!("  Children ({}):", output.children.len());
+            for child in &output.children {
+                println!("    {child}");
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use orbit_knowledge::DEFAULT_TASK_ID_PATTERN;
-
-    #[test]
-    fn pattern_precedence_flag_wins_over_config_and_default() {
-        let pattern =
-            resolve_task_id_pattern_inner(Some(r"[A-Z]+-\d+"), Some(r"#(\d+)")).expect("ok");
-        assert_eq!(pattern.as_str(), r"[A-Z]+-\d+");
-    }
-
-    #[test]
-    fn pattern_precedence_config_wins_over_default() {
-        let pattern = resolve_task_id_pattern_inner(None, Some(r"#(\d+)")).expect("ok");
-        assert_eq!(pattern.as_str(), r"#(\d+)");
-    }
-
-    #[test]
-    fn pattern_precedence_default_when_neither_flag_nor_config() {
-        let pattern = resolve_task_id_pattern_inner(None, None).expect("ok");
-        assert_eq!(pattern.as_str(), DEFAULT_TASK_ID_PATTERN);
-    }
-
-    #[test]
-    fn pattern_rejects_invalid_regex_from_flag() {
-        let err = resolve_task_id_pattern_inner(Some("[unclosed"), None)
-            .expect_err("invalid regex must error");
-        assert!(matches!(err, OrbitError::InvalidInput(_)));
-    }
-
-    #[test]
-    fn pattern_rejects_empty_flag_value() {
-        let err =
-            resolve_task_id_pattern_inner(Some("   "), None).expect_err("empty flag must error");
-        assert!(matches!(err, OrbitError::InvalidInput(msg) if msg.contains("must not be empty")));
-    }
-
-    #[test]
-    fn pattern_rejects_invalid_regex_from_config_when_no_flag() {
-        let err = resolve_task_id_pattern_inner(None, Some("[unclosed"))
-            .expect_err("invalid regex must error");
-        assert!(matches!(err, OrbitError::InvalidInput(_)));
     }
 }

@@ -16,7 +16,7 @@ impl Tool for OrbitKnowledgeSearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.graph.search".to_string(),
-            description: "Locate selectors by name/path/source regex.".to_string(),
+            description: "Use when you need to locate selectors by name/path/source regex. Prefer over grep when text hits lose node type, task-id, or source-context filters.".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "query".to_string(),

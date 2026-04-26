@@ -33,7 +33,7 @@ orbit-common → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → o
 - **orbit-common**: leaf — no internal deps. `types::` owns shared domain types, `OrbitError`, ID generation, and activity/job schemas; `utility::` owns generic helpers like fs, redaction, logging, and blob storage.
 - **orbit-policy**: filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. Depends only on `orbit-common`.
 - **orbit-exec**: process / sandbox / supervision primitives for shell-command execution under an `FsProfile`. Depends only on `orbit-common`.
-- **orbit-knowledge**: knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript/TypeScript, Python). Depends on `orbit-common`; consumed by `orbit-tools` and `orbit-cli`.
+- **orbit-knowledge**: knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript/TypeScript, Python). Depends on `orbit-common`; consumed by `orbit-tools`, which exposes graph tool and CLI-use-case facades upstream.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`.
 - **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
 - **orbit-mcp**: Model Context Protocol adapter using `rmcp`. Depends only on `orbit-common`; consumed by `orbit-cli` via `orbit mcp serve`.
@@ -81,6 +81,7 @@ Follow the `## Task Quality Standards` section in `orbit-create-task` skill: exp
 - Use the agent commit identity (i.e. `codex` or `claude`) as author/committer when you make commits
 - Include the task ID in the commit message when the commit is associated with an Orbit task (e.g. `[T20260320-001234]`).
 - Use your model name (e.g. `claude-opus-4-7`, `gpt-5.4`, `gemini-3.1-pro`) when authoring tasks or docs.
+- Preserve the exact model version in all task provenance fields and tool inputs. Do not shorten versioned OpenAI model names: if the running model is `gpt-5.5`, record `model: gpt-5.5` and attribution values like `created_by: gpt-5.5`, never `gpt-5`.
 - When writing docs, cite relevant task IDs in the doc itself.
 - Feature design docs live under `docs/design/<feature>/` and follow [`docs/design/CONVENTIONS.md`](docs/design/CONVENTIONS.md) (folder layout, required sections, ADR format, glossary shape). Feature leads: `claude` owns `knowledge-graph/`; `codex` owns `activity-job/` and `groundhog/`.
 - When your change touches an owned feature's implementation, update that feature's design docs in the same PR: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `Last updated`, and add a new ADR for any non-obvious decision the change embodies. Stale docs are treated as a review blocker.

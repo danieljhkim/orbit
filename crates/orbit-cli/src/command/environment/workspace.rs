@@ -1,8 +1,9 @@
 use chrono::Utc;
 use clap::{Args, Subcommand};
 use orbit_common::types::{Workspace, WorkspaceStatus};
-use orbit_common::utility::fs::atomic_write_text;
-use orbit_core::command::init::{InitOptions, init_workspace_at_root};
+use orbit_core::command::init::{
+    InitOptions, build_initial_graph, init_workspace_at_root, seed_default_orbitignore,
+};
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
 
@@ -110,22 +111,12 @@ impl WorkspaceInitArgs {
             }
         }
 
-        // Build the knowledge graph
         eprintln!("graph build: scanning {}", init_result.root.display());
-        let config = orbit_knowledge::pipeline::context::BuildConfig {
-            repo_path: init_result.root.clone(),
-            output_dir: init_result.orbit_dir.join("knowledge"),
-            incremental: false,
-            ref_name: None,
-            task_id_pattern: None,
-        };
-        match orbit_knowledge::pipeline::run_build(config) {
-            Ok(ctx) => {
+        match build_initial_graph(&init_result.root, &init_result.orbit_dir) {
+            Ok(summary) => {
                 eprintln!(
                     "graph build: {} dirs, {} files, {} symbols",
-                    ctx.graph.dirs.len(),
-                    ctx.graph.files.len(),
-                    ctx.graph.leaves.len(),
+                    summary.dirs, summary.files, summary.leaves,
                 );
             }
             Err(e) => {
@@ -187,15 +178,6 @@ impl WorkspaceInitArgs {
     }
 }
 
-fn seed_default_orbitignore(workspace_root: &std::path::Path) -> Result<(), OrbitError> {
-    let orbitignore_path = workspace_root.join(".orbitignore");
-    if orbitignore_path.exists() {
-        return Ok(());
-    }
-    let template = orbit_knowledge::default_orbitignore_template();
-    atomic_write_text(&orbitignore_path, &template).map_err(|e| OrbitError::Io(e.to_string()))
-}
-
 struct WorkspaceInitResult {
     id: String,
     name: String,
@@ -210,6 +192,7 @@ mod tests {
 
     use tempfile::tempdir;
 
+    use orbit_core::command::graph::default_orbitignore_template;
     use orbit_core::workspace_registry;
 
     use super::WorkspaceInitArgs;
@@ -389,6 +372,15 @@ mod tests {
             std::fs::canonicalize(&workspace_record.orbit_dir).expect("canonical registered root"),
             std::fs::canonicalize(&custom_root).expect("canonical custom root")
         );
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join(".orbitignore"))
+                .expect("read workspace .orbitignore"),
+            default_orbitignore_template()
+        );
+        assert!(
+            !custom_root_parent.path().join(".orbitignore").exists(),
+            ".orbitignore belongs in the workspace root, not beside a custom Orbit root"
+        );
     }
 
     #[test]
@@ -427,7 +419,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(workspace.path().join(".orbitignore"))
                 .expect("read .orbitignore"),
-            orbit_knowledge::default_orbitignore_template()
+            default_orbitignore_template()
         );
     }
 
