@@ -13,7 +13,7 @@ See [docs/design/knowledge-graph/](../../docs/design/knowledge-graph/) for the g
 | [v1](./v1/) | Initial baseline | [RESULTS.md](./v1/RESULTS.md) |
 | [v2](./v2/) | Extended fixtures | [RESULTS.md](./v2/RESULTS.md) |
 | [v3](./v3/) | Calibrated cost; published null result | [RESULTS.md](./v3/RESULTS.md) |
-| [v4](./v4/) | Diagnostic round, 192 cells | [RESULTS.md](./v4/RESULTS.md) |
+| [v4](./v4/) | Diagnostic round, 192 planned cells plus Codex post-fix graph-only rerun | [RESULTS.md](./v4/RESULTS.md) |
 | [v5](./v5/) | Feature validation (`source_regex`), 9 cells | [RESULTS.md](./v5/RESULTS.md) |
 
 All rounds frozen.
@@ -60,6 +60,10 @@ benchmarks/graph/
 │   └── runs/        # per-cell records
 ├── v2/              # FROZEN round 2
 │   └── ...
-└── v3/              # LIVING
+├── v3/              # FROZEN round 3
+│   └── ...
+├── v4/              # FROZEN round 4
+│   └── ...
+└── v5/              # FROZEN round 5
     └── ...
 ```

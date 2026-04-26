@@ -1,12 +1,12 @@
 # v3 — Method & Caveats
 
-This file documents how the `graph_v3` sweep will be conducted. The report lands at `RESULTS.md` in this directory when the round freezes. Conventions governing this document's shape are in `benchmarks/CONVENTIONS.md`.
+This file documents how the `graph_v3` sweep was planned and conducted. The frozen report is [`RESULTS.md`](./RESULTS.md). Conventions governing this document's shape are in `benchmarks/CONVENTIONS.md`.
 
-v3 is explicitly scoped as the **last round** in this evidence series. `docs/design/knowledge-graph/5_null_result.md` gets a definitive entry from v3 regardless of outcome.
+v3 was originally scoped as the final disposition round in the evidence series. Its results instead motivated the v4 diagnostic round and the accepted null-result narrative in `docs/design/knowledge-graph/5_null_result.md`.
 
 ## Harness git SHA at freeze
 
-_TBD — populated at freeze._
+`a37f95cecca7d22711a4b47d9fddb7efed2a0f3b`
 
 ## Central intervention vs v2
 
@@ -32,7 +32,7 @@ This keeps v3's signal single-variable: *does giving codex MCP access flip the u
 
 ## Pre-registered disposition
 
-Pre-registered so v3 produces a decision, not another "inconclusive, design v4" outcome. Write this into `RESULTS.md` verbatim at freeze.
+Pre-registered so v3 would produce a decision, not another "inconclusive, design v4" outcome.
 
 **The agent-facing `orbit_graph_*` MCP surface survives v3 only if BOTH:**
 
@@ -50,8 +50,8 @@ Rationale: a schema-in-prompt overhead that agents don't use is pure cost; a too
 - **Fixtures:** 10 (same set as v2).
 - **Seeds:** 3 per (provider × arm × fixture) cell.
 - **Total runs:** 2 providers × 3 arms × 10 fixtures × 3 seeds = 180 cells.
-- **Sweep seed:** _TBD — populated at freeze from `runs/_sweeps/<provider>/<sweep_id>/order.json`._
-- **Sweep date:** _TBD — populated at freeze._
+- **Sweep IDs / seeds:** `20260423-194444-3b15a2` / `843516888` (Claude), `20260423-210616-9a7e7c` / `660936807` (Codex).
+- **Sweep date:** 2026-04-23.
 
 ## Fixture list
 

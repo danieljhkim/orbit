@@ -1,12 +1,13 @@
 # v4 — Method & Caveats
 
-This file documents how the `graph_v4` sweep will be conducted. The report lands at `RESULTS.md` in this directory when the round freezes. Conventions governing this document's shape are in `benchmarks/CONVENTIONS.md`.
+This file documents how the `graph_v4` sweep was planned and conducted. The frozen report is [`RESULTS.md`](./RESULTS.md). Conventions governing this document's shape are in `benchmarks/CONVENTIONS.md`.
 
 v4 is explicitly scoped as a **diagnostic round**, not a keep/cull round. v3 settled retention of the agent-facing `orbit_graph_*` MCP surface (see [`../../../docs/design/knowledge-graph/5_null_result.md`](../../../docs/design/knowledge-graph/5_null_result.md) §"Disposition"). v4 maps where the surface helps, where it hurts, and how it fails — with measured targets for future tool-shaping work (payload trimming, ref-kind precision, schema ergonomics).
 
-## Harness git SHA at freeze
+## Harness SHAs at freeze
 
-_TBD — populated at freeze._
+Codex pre-fix: `b0ce189e7053409c8754865bd154cd20e1de66a6`.
+Claude run and Codex graph-only post-fix rerun: `56a9c07b64479360f9a64ca94b40721f76226014` (contains both `T20260425-0729` and `T20260425-0739`).
 
 ## Frame: diagnostic, not gating
 
@@ -29,11 +30,11 @@ No v1/v2/v3 fixtures carry into v4. Past data is sufficient on those.
 - **Failure-classification column in `aggregate.py`.** Adds per-run categorisation of failed graph calls (`schema-coercion`, `args-out-of-range`, `server-error`) and per-run failure-mode classification (`schema-coercion`, `payload-firehose`, `wrong-tool`, `oracle-artifact`, `design-defect`). Backward-compatible: v1/v2/v3 records read identically; v4 records gain new columns.
 - **Per-tool token telemetry.** `aggregate.py` gains per-tool median/p90 output tokens by parsing tool-call result payloads from transcripts. Currently the aggregator counts invocations but not output volume per call.
 
-These extensions are pre-registered here so the v4 freeze is reproducible from this method statement. They land in the same patch series as the fixture YAMLs.
+These extensions were pre-registered here so the v4 freeze is reproducible from this method statement. They landed in the same patch series as the fixture YAMLs.
 
 ## Pre-registered report shape
 
-`RESULTS.md` will report (in this order):
+`RESULTS.md` reports (in this order):
 
 1. **Per-fixture × per-arm × per-provider** primary table: pass rate (3 seeds), median total tokens, p90 total tokens, graph-call rate, failed-graph-call count.
 
@@ -59,13 +60,14 @@ These extensions are pre-registered here so the v4 freeze is reproducible from t
 - **Fixtures:** 12 NEW (7 production, 5 synthetic)
 - **Seeds:** 3 per (provider × arm × fixture) cell
 - **Hybrid scope:** runs only on the 8 graph-strength + precision-gap fixtures. Selector-ambiguity and payload-volume fixtures are graph-only diagnostic targets; running hybrid on them would muddy the selection signal without adding capability information.
-- **Total runs:**
+- **Planned total runs:**
   - no-graph: 12 × 2 providers × 3 seeds = 72
   - graph-only: 12 × 2 providers × 3 seeds = 72
   - hybrid: 8 × 2 providers × 3 seeds = 48
   - **Total: 192 cells**
-- **Sweep seed:** _TBD — populated at freeze from `runs/_sweeps/<provider>/<sweep_id>/order.json`._
-- **Sweep date:** _TBD — populated at freeze._
+- **Post-fix rerun:** Codex graph-only was rerun after `T20260425-0729` and `T20260425-0739`, adding 12 × 3 = 36 cells for 228 recorded cells total. See [`RESULTS.md`](./RESULTS.md) for pre-fix/post-fix handling.
+- **Sweep IDs / seeds:** Codex `20260424-230632-f36f84` / `928176111` (`no-graph`, pre-fix `graph-only`), Codex `20260425-001959-842b8c` / `583229300` (`hybrid`), Codex `20260425-115117-21a938` / `142643867` (post-fix `graph-only`), Claude `20260425-013339-cfac6a` / `152346771` (`no-graph`, `graph-only`), Claude `20260425-012511-8881cb` / `88160319` (`hybrid`).
+- **Sweep dates:** 2026-04-24 to 2026-04-25.
 
 ## Fixture inventory
 
@@ -145,7 +147,7 @@ This replaces v3's substring-grep oracle, which produced false rejections on sem
 
 ## Failure-mode tracking
 
-`aggregate.py` will gain a v4-specific column for failed graph calls. Failures are classified by reason:
+`aggregate.py` gained a v4-specific column for failed graph calls. Failures are classified by reason:
 
 - `schema-coercion` — `include: "x"` instead of `include: ["x"]`, etc.
 - `args-out-of-range` — invalid symbol/path that the schema accepts but the server rejects
@@ -194,7 +196,9 @@ GRAPH_VERSION=v4 python3 benchmarks/graph/scripts/aggregate.py \
 
 ## Task References
 
-_TBD — task IDs created during fixture authoring._
+- **T20260425-0729** — scalar string-list coercion across graph inputs, discovered by v4 pre-fix runs.
+- **T20260425-0739** — pub-use re-export indexing in file exports metadata, discovered by v4 pre-fix runs.
+- **T20260425-2140** — `source_regex` follow-up motivated by v4 payload/call-count findings and validated in v5.
 
 ## Explicitly not in v4
 
