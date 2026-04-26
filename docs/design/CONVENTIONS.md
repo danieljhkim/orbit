@@ -177,5 +177,6 @@ Until those exist: cross-review is the enforcement mechanism. When one agent rev
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
 | Knowledge graph | [docs/design/knowledge-graph/](./knowledge-graph/) | claude |
 | Groundhog | [docs/design/groundhog/](./groundhog/) | codex |
+| Policy & Sandboxing | [docs/design/policy-sandbox/](./policy-sandbox/) | claude |
 
 Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for flipping ADR status when tasks ship, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.

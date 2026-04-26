@@ -276,7 +276,7 @@ Scoping rules:
 
 Orbit uses filesystem-scoped policies to control what agent execution can read and modify. Safe parallel execution is the core problem, not just prompt routing.
 
-A v2 activity can opt into a named filesystem profile with `fsProfile`; if it omits the field, Orbit resolves an implicit unrestricted profile and still applies global deny rules.
+A v2 activity can opt into a named filesystem profile with `fsProfile`; if it omits the field, Orbit resolves an implicit unrestricted profile and still applies global deny rules. Design docs: [docs/design/policy-sandbox/](docs/design/policy-sandbox/).
 
 ```yaml
 # activity
