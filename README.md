@@ -366,10 +366,10 @@ orbit mcp init --gemini
 orbit mcp remove --all
 
 # serve the safe default MCP surface
-orbit serve mcp
+orbit mcp serve
 
 # opt in experimental graph write tools
-orbit serve mcp --allow-write
+orbit mcp serve --allow-write
 ```
 
 MCP support is an integration layer, not Orbit's moat.

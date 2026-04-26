@@ -17,11 +17,11 @@ pub mod metrics;
 pub mod policy;
 pub mod run;
 pub mod scoreboard;
-pub mod serve;
 pub mod ship;
 pub mod skill;
 pub mod task;
 pub mod tool;
+pub mod web;
 pub mod workspace;
 
 use std::path::PathBuf;
@@ -33,6 +33,12 @@ pub trait Execute {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError>;
 }
 
+// Clap derive does not support per-variant subcommand `help_heading`
+// (`next_help_heading` is args-only; `subcommand_help_heading` only renames
+// the single `Commands:` block). To render grouped sections in `--help` we
+// hand-roll the template below. Keep the variant order and the template's
+// section order in sync when adding new commands — the variant order also
+// determines where a missing-from-template command would otherwise appear.
 #[derive(Parser)]
 #[command(name = "orbit")]
 #[command(about = "Orbit CLI", version)]
@@ -43,31 +49,31 @@ pub trait Execute {
 
 {usage-heading} {usage}
 
-Setup:
-  init       Initialize the global Orbit root (~/.orbit)
-  workspace  Initialize and manage workspaces
-  mcp        Manage MCP client integrations
-  config     Show or update Orbit configuration
+Environment:
+  init        Initialize the global Orbit root (~/.orbit)
+  workspace   Manage workspaces
+  config      Show or update Orbit configuration
 
-Resources:
-  task       Create, update, and manage tasks
-  activity   List activities
-  job        Define, list, and manage job workflows
-  policy     Manage filesystem profile policies and runtime scoping
-  executor   Manage executors
-  tool       Manage tools and external MCP plugins
+Operate:
+  run         Run a workflow (ship, ship-auto, duel-plan, job)
+  task        Create, update, and manage tasks
 
-Workflows:
-  run        Run a job workflow (supports run ship / ship-auto / duel-plan / job)
+Observe:
+  graph       Query the knowledge graph
+  audit       Query the audit event log
+  metrics     Show metrics
+  scoreboard  Show scoreboards (friction, duel-plan)
 
-Inspect:
-  audit      Query the audit event log
-  metrics    Inspect token, tool-call, and knowledge-pack metrics
-  scoreboard Generate read-only scoreboard summaries
-  graph      Query the knowledge graph
+Definitions:
+  activity    View activity definitions
+  job         View job definitions
+  tool        View tool registry
+  policy      View filesystem policies
+  executor    View executors
 
-Serve:
-  serve      Serve Orbit outward (serve web / serve mcp)
+Services:
+  mcp         Register MCP client integrations and run the MCP server
+  web         Run the Orbit dashboard
 
 Options:
 {options}"
@@ -83,31 +89,31 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    // ── setup ──
+    // ── Environment ──
     Init(init::InitCommand),
     Workspace(workspace::WorkspaceCommand),
-    Mcp(mcp::McpCommand),
     Config(config::ConfigCommand),
 
-    // ── resources ──
-    Task(task::TaskCommand),
-    Activity(activity::ActivityCommand),
-    Job(job::JobCommand),
-    Tool(tool::ToolCommand),
-    Executor(executor::ExecutorCommand),
-    Policy(policy::PolicyCommand),
-
-    // ── workflows ──
+    // ── Operate ──
     Run(run::RunCommand),
+    Task(task::TaskCommand),
 
-    // ── inspect ──
+    // ── Observe ──
+    Graph(graph::GraphCommand),
     Audit(audit::AuditCommand),
     Metrics(metrics::MetricsCommand),
     Scoreboard(scoreboard::ScoreboardCommand),
-    Graph(graph::GraphCommand),
 
-    // ── serve ──
-    Serve(serve::ServeCommand),
+    // ── Definitions ──
+    Activity(activity::ActivityCommand),
+    Job(job::JobCommand),
+    Tool(tool::ToolCommand),
+    Policy(policy::PolicyCommand),
+    Executor(executor::ExecutorCommand),
+
+    // ── Services ──
+    Mcp(mcp::McpCommand),
+    Web(web::WebCommand),
 
     // ── hidden compatibility commands ──
     #[command(hide = true)]
@@ -123,20 +129,20 @@ impl Execute for Commands {
         match self {
             Commands::Init(cmd) => cmd.execute(runtime),
             Commands::Workspace(cmd) => cmd.execute(runtime),
-            Commands::Mcp(cmd) => cmd.execute(runtime),
             Commands::Config(cmd) => cmd.execute(runtime),
-            Commands::Task(cmd) => cmd.execute(runtime),
-            Commands::Activity(cmd) => cmd.execute(runtime),
-            Commands::Job(cmd) => cmd.execute(runtime),
-            Commands::Tool(cmd) => cmd.execute(runtime),
-            Commands::Executor(cmd) => cmd.execute(runtime),
-            Commands::Policy(cmd) => cmd.execute(runtime),
             Commands::Run(cmd) => cmd.execute(runtime),
+            Commands::Task(cmd) => cmd.execute(runtime),
+            Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Metrics(cmd) => cmd.execute(runtime),
             Commands::Scoreboard(cmd) => cmd.execute(runtime),
-            Commands::Graph(cmd) => cmd.execute(runtime),
-            Commands::Serve(cmd) => cmd.execute(runtime),
+            Commands::Activity(cmd) => cmd.execute(runtime),
+            Commands::Job(cmd) => cmd.execute(runtime),
+            Commands::Tool(cmd) => cmd.execute(runtime),
+            Commands::Policy(cmd) => cmd.execute(runtime),
+            Commands::Executor(cmd) => cmd.execute(runtime),
+            Commands::Mcp(cmd) => cmd.execute(runtime),
+            Commands::Web(cmd) => cmd.execute(runtime),
             Commands::Skill(cmd) => cmd.execute(runtime),
             Commands::Logs(cmd) => cmd.execute(runtime),
             Commands::Artifacts(cmd) => cmd.execute(runtime),
@@ -148,10 +154,10 @@ impl Execute for Commands {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Commands, mcp::McpSubcommand};
+    use super::{Cli, Commands, mcp::McpSubcommand, web::WebSubcommand};
 
     #[test]
-    fn cli_parses_top_level_mcp_command() {
+    fn cli_parses_mcp_init() {
         let cli = Cli::parse_from(["orbit", "mcp", "init"]);
         match cli.command {
             Commands::Mcp(command) => match command.command {
@@ -160,6 +166,34 @@ mod tests {
             },
             _ => panic!("expected top-level mcp command"),
         }
+    }
+
+    #[test]
+    fn cli_parses_mcp_serve() {
+        let cli = Cli::parse_from(["orbit", "mcp", "serve"]);
+        match cli.command {
+            Commands::Mcp(command) => match command.command {
+                McpSubcommand::Serve(_) => {}
+                _ => panic!("expected mcp serve"),
+            },
+            _ => panic!("expected top-level mcp command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_web_serve() {
+        let cli = Cli::parse_from(["orbit", "web", "serve"]);
+        match cli.command {
+            Commands::Web(command) => match command.command {
+                WebSubcommand::Serve(_) => {}
+            },
+            _ => panic!("expected top-level web command"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_top_level_serve() {
+        assert!(Cli::try_parse_from(["orbit", "serve"]).is_err());
     }
 
     #[test]

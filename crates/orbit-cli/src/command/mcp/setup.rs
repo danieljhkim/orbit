@@ -421,8 +421,8 @@ fn claude_mcp_server_value(orbit_root: &Path) -> JsonValue {
         (
             "args".to_string(),
             JsonValue::Array(vec![
-                JsonValue::String("serve".to_string()),
                 JsonValue::String("mcp".to_string()),
+                JsonValue::String("serve".to_string()),
                 JsonValue::String("--root".to_string()),
                 JsonValue::String(orbit_root.display().to_string()),
             ]),
@@ -439,8 +439,8 @@ fn gemini_mcp_server_value(repo_root: &Path, orbit_root: &Path) -> JsonValue {
         (
             "args".to_string(),
             JsonValue::Array(vec![
-                JsonValue::String("serve".to_string()),
                 JsonValue::String("mcp".to_string()),
+                JsonValue::String("serve".to_string()),
                 JsonValue::String("--root".to_string()),
                 JsonValue::String(orbit_root.display().to_string()),
             ]),
@@ -461,8 +461,8 @@ fn codex_mcp_server_table(repo_root: &Path, orbit_root: &Path) -> TomlTable {
         (
             "args".to_string(),
             TomlValue::Array(vec![
-                TomlValue::String("serve".to_string()),
                 TomlValue::String("mcp".to_string()),
+                TomlValue::String("serve".to_string()),
                 TomlValue::String("--root".to_string()),
                 TomlValue::String(orbit_root.display().to_string()),
             ]),
@@ -994,8 +994,8 @@ mod tests {
         let table = codex_mcp_server_table(repo.path(), &orbit_root);
         let args = table["args"].as_array().expect("args array");
         assert_eq!(args.len(), 4);
-        assert_eq!(args[0].as_str(), Some("serve"));
-        assert_eq!(args[1].as_str(), Some("mcp"));
+        assert_eq!(args[0].as_str(), Some("mcp"));
+        assert_eq!(args[1].as_str(), Some("serve"));
         assert_eq!(args[2].as_str(), Some("--root"));
         assert_eq!(
             args[3].as_str(),
@@ -1010,8 +1010,8 @@ mod tests {
         let value = gemini_mcp_server_value(repo.path(), &orbit_root);
         let args = value["args"].as_array().expect("args array");
         assert_eq!(args.len(), 4);
-        assert_eq!(args[0].as_str(), Some("serve"));
-        assert_eq!(args[1].as_str(), Some("mcp"));
+        assert_eq!(args[0].as_str(), Some("mcp"));
+        assert_eq!(args[1].as_str(), Some("serve"));
         assert_eq!(args[2].as_str(), Some("--root"));
         assert_eq!(
             args[3].as_str(),

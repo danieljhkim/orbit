@@ -2,7 +2,7 @@
   "mcpServers": {
     "orbit-bench": {
       "command": "/Users/daniel/.cargo/bin/orbit",
-      "args": ["serve", "mcp"],
+      "args": ["mcp", "serve"],
       "env": {
         "ORBIT_DATA_ROOT": "/Users/daniel/.orbit"
       }

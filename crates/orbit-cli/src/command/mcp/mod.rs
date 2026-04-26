@@ -1,13 +1,12 @@
-//! Support for `orbit mcp` and `orbit serve mcp`.
+//! `orbit mcp` — MCP client integration and server.
 //!
 //! `orbit mcp init/remove` manages local client integration for Claude Code
-//! and Codex. `orbit serve mcp` serves the Orbit tool surface over MCP so
+//! and Codex. `orbit mcp serve` serves the Orbit tool surface over MCP so
 //! external clients can discover and invoke Orbit operations with typed JSON
 //! schemas.
 
 mod setup;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use clap::{Args, Subcommand};
@@ -95,7 +94,7 @@ fn ensure_mcp_tool_exposed(name: &str, allow_write: bool) -> Result<(), OrbitErr
 
 #[derive(Args)]
 #[command(
-    about = "Manage Orbit MCP client integrations",
+    about = "Register MCP client integrations and run the MCP server",
     arg_required_else_help = true,
     subcommand_required = true
 )]
@@ -104,15 +103,9 @@ pub struct McpCommand {
     pub command: McpSubcommand,
 }
 
-impl McpCommand {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        self.command.execute_without_runtime(root_override)
-    }
-}
-
 impl Execute for McpCommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        self.execute_without_runtime(None)
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        self.command.execute(runtime)
     }
 }
 
@@ -122,20 +115,21 @@ pub enum McpSubcommand {
     Init(InitArgs),
     /// Remove MCP client integration for the current workspace
     Remove(RemoveArgs),
-}
-
-impl McpSubcommand {
-    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> Result<(), OrbitError> {
-        match self {
-            Self::Init(args) => args.execute_without_runtime(root_override),
-            Self::Remove(args) => args.execute_without_runtime(root_override),
-        }
-    }
+    /// Serve the Orbit tool registry over Model Context Protocol
+    Serve(ServeArgs),
 }
 
 impl Execute for McpSubcommand {
-    fn execute(self, _runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        self.execute_without_runtime(None)
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            // `init` and `remove` are dispatched runtime-free via main.rs's
+            // pattern match before runtime initialization. They reach this
+            // path only if invoked indirectly (currently never), so use the
+            // same runtime-less call chain for safety.
+            Self::Init(args) => args.execute_without_runtime(None),
+            Self::Remove(args) => args.execute_without_runtime(None),
+            Self::Serve(args) => args.execute(runtime),
+        }
     }
 }
 

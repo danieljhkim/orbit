@@ -154,6 +154,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             let sub = match &cmd.command {
                 McpSubcommand::Init(_) => "init",
                 McpSubcommand::Remove(_) => "remove",
+                McpSubcommand::Serve(_) => "serve",
             };
             CommandMeta {
                 command: "mcp".to_string(),
@@ -427,7 +428,21 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             role: "admin".to_string(),
             arguments_json: None,
         },
-        Commands::Serve(cmd) => serve_command_meta(cmd),
+        Commands::Web(cmd) => {
+            use crate::command::web::WebSubcommand;
+            let sub = match &cmd.command {
+                WebSubcommand::Serve(_) => "serve",
+            };
+            CommandMeta {
+                command: "web".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("dashboard".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
         Commands::Workspace(cmd) => {
             use crate::command::workspace::WorkspaceSubcommand;
@@ -477,25 +492,6 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
         tool_name: None,
         target_type: target_type.map(String::from),
         target_id: target_id.map(String::from),
-        role: "admin".to_string(),
-        arguments_json: None,
-    }
-}
-
-fn serve_command_meta(cmd: &crate::command::serve::ServeCommand) -> CommandMeta {
-    use crate::command::serve::ServeSubcommand;
-
-    let (subcommand, target_type) = match &cmd.command {
-        ServeSubcommand::Web(_) => ("web", "dashboard"),
-        ServeSubcommand::Mcp(_) => ("mcp", "mcp"),
-    };
-
-    CommandMeta {
-        command: "serve".to_string(),
-        subcommand: Some(subcommand.to_string()),
-        tool_name: None,
-        target_type: Some(target_type.to_string()),
-        target_id: None,
         role: "admin".to_string(),
         arguments_json: None,
     }

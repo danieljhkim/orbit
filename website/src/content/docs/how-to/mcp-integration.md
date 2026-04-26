@@ -26,13 +26,13 @@ orbit mcp init --gemini
 Start the default safe MCP surface:
 
 ```bash
-orbit serve mcp
+orbit mcp serve
 ```
 
 The default surface includes task tools and graph read tools. Experimental graph write tools require explicit opt-in:
 
 ```bash
-orbit serve mcp --allow-write
+orbit mcp serve --allow-write
 ```
 
 ## Remove
