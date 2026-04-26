@@ -32,7 +32,7 @@ spec:
     - id: review_fix
       loop:
         max_iterations: 5
-        break_when: "{{ steps.review.output.decision == 'approved' }}"
+        break_when: "{{ steps.review.output.decision }} == approved"
         steps:
           - id: review
             target: activity:agent_review_diff
@@ -43,7 +43,7 @@ spec:
               iteration: "{{ iteration }}"
 
           - id: fix
-            when: "{{ steps.review.output.blocking_count > 0 }}"
+            when: "{{ steps.review.output.blocking_count }} != 0"
             target: activity:agent_apply_fixes
             default_input:
               findings: "{{ steps.review.output.findings }}"
@@ -67,7 +67,7 @@ spec:
     # auto_merge is opt-in per AC — default `false` at the job level keeps
     # PRs open for human review.
     - id: merge
-      when: "{{ input.auto_merge == true }}"
+      when: "{{ input.auto_merge }} == true"
       target: activity:git_merge
       default_input:
         batch_id: "{{ steps.worktree.output.batch_id }}"
@@ -76,7 +76,7 @@ spec:
 
     # Success terminal: promote agent-main once the merge lands cleanly.
     - id: promote
-      when: "{{ input.auto_merge == true }}"
+      when: "{{ input.auto_merge }} == true"
       target: activity:promote_agent_main
       default_input:
         target_branch: main
