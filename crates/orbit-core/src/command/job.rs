@@ -443,6 +443,34 @@ spec:
     }
 
     #[test]
+    fn local_task_pipeline_commits_before_merge() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
+            .expect("task local pipeline default exists");
+        let asset = load_job_asset(yaml).expect("parse task local pipeline");
+        let root_step_ids = asset
+            .spec
+            .steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        let commit_index = root_step_ids
+            .iter()
+            .position(|id| *id == "commit")
+            .expect("task local pipeline has commit step");
+        let merge_index = root_step_ids
+            .iter()
+            .position(|id| *id == "merge")
+            .expect("task local pipeline has merge step");
+        assert!(
+            commit_index < merge_index,
+            "task local pipeline must commit before merge"
+        );
+    }
+
+    #[test]
     fn default_job_conditions_keep_comparisons_outside_template_tokens() {
         for (name, yaml) in DEFAULT_JOB_FILES {
             let asset = load_job_asset(yaml).unwrap_or_else(|err| {

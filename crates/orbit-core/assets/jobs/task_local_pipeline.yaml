@@ -1,9 +1,10 @@
 # Task bundle local pipeline.
 #
-# Mid-bundle failure semantics:
+# Failure semantics:
 # - `implement_bundle` runs one task at a time in the shared worktree.
-# - If `implement_one` fails, earlier commits remain on the bundle branch.
-# - Tasks move to `review` only after the full bundle merges cleanly.
+# - If `implement_one` fails, pending changes remain in the shared worktree for inspection.
+# - If all implementations succeed, `commit` snapshots the bundle branch before merge.
+# - Tasks move to `review` only after the full bundle commits and merges cleanly.
 
 schemaVersion: 2
 kind: Job
@@ -35,6 +36,13 @@ spec:
             default_input:
               task_id: "{{ item }}"
               workspace_path: "{{ steps.worktree.output.workspace_path }}"
+
+    - id: commit
+      target: activity:git_commit
+      default_input:
+        batch_id: "{{ steps.worktree.output.batch_id }}"
+        scope: all
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
 
     - id: merge
       target: activity:git_merge

@@ -33,6 +33,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/git_merge.yaml"),
     ),
     (
+        "git_commit",
+        include_str!("../../assets/activities/git_commit.yaml"),
+    ),
+    (
         "git_push",
         include_str!("../../assets/activities/git_push.yaml"),
     ),
@@ -123,6 +127,24 @@ mod tests {
         match asset.spec.spec {
             ActivityV2Spec::Deterministic(spec) => {
                 assert_eq!(spec.action, "run_planning_duel");
+            }
+            other => panic!("expected deterministic activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seeded_activities_include_git_commit() {
+        let root = tempdir().expect("create tempdir");
+        let activities_dir = root.path().join("resources/activities");
+        seed_default_activities(&activities_dir, true).expect("seed default activities");
+
+        let yaml = std::fs::read_to_string(activities_dir.join("git_commit.yaml"))
+            .expect("read git commit activity");
+        let asset = load_activity_asset(&yaml).expect("parse git commit activity");
+        assert_eq!(asset.name, "git_commit");
+        match asset.spec.spec {
+            ActivityV2Spec::Deterministic(spec) => {
+                assert_eq!(spec.action, "git_commit");
             }
             other => panic!("expected deterministic activity, got {other:?}"),
         }

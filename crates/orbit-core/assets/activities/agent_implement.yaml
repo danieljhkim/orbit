@@ -46,7 +46,10 @@ spec:
     6. Respect repository instructions for validation. If tests are forbidden,
        do not add or run them. Use the smallest allowed validation that gives
        real confidence.
-    7. Return a short structured summary. Include a `diff` string only when you
+    7. Persist an execution summary when useful, but do not move the task to
+       `review`; the pipeline does that only after commit/merge or PR steps
+       succeed.
+    8. Return a short structured summary. Include a `diff` string only when you
        can produce it cheaply and accurately.
   tools:
     - orbit.task.*
