@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-26 (read-only public graph surface, [T20260426-0453])
 
 This document captures where the knowledge graph is headed: open questions, where it fits relative to prior art, and what may turn out to be distinctive about Orbit's shape. See [1_overview.md](./1_overview.md) for the system's purpose and [2_design.md](./2_design.md) for what exists today.
 
@@ -22,7 +22,7 @@ We attribute task IDs to nodes ([T20260421-0528]). Should we also attribute per-
 
 ### 1.3 Working-graph persistence on crash
 
-The working graph is currently in-memory ([T20260411-0424]). A long activity that crashes mid-edit loses its staging. Do we persist the working graph to disk under `.orbit/knowledge/working/<activity_id>/` and replay on restart? If so, how does the on-disk working copy interact with branch switches during recovery?
+The working graph is currently internal/deferred and in-memory ([T20260411-0424], [T20260426-0453]). If public graph mutation returns, a long activity that crashes mid-edit would lose its staging. Do we persist the working graph to disk under `.orbit/knowledge/working/<activity_id>/` and replay on restart? If so, how does the on-disk working copy interact with branch switches during recovery?
 
 ### 1.4 Semantic embeddings as an additional index
 
@@ -122,7 +122,7 @@ None of these rise to a research contribution. Treat the knowledge graph as prod
 - [1_overview.md](./1_overview.md) — motivation and core concepts
 - [2_design.md](./2_design.md) — current implementation
 - [specs/refs.md](./specs/refs.md) — ref resolution, migration, concurrency
-- [../activity-job/2_design.md](../activity-job/2_design.md) — the activity/job model that consumes the working graph
+- [../activity-job/2_design.md](../activity-job/2_design.md) — the activity/job model that coordinates task execution and preflight guards
 - `crates/orbit-knowledge/` — implementation
 
 ### External
@@ -142,7 +142,7 @@ None of these rise to a research contribution. Treat the knowledge graph as prod
 Tasks cited in this document (all as forward pointers or historical context; none are proposed work on this doc):
 
 - **[T20260408-0445]** (archived) — Earlier semantic-indexing attempt; context for §1.4.
-- **[T20260411-0424]** — Working-graph mutation tools and lock store; foundation for §1.3 and §1.8.
+- **[T20260411-0424]** — Working-graph mutation internals and lock store; foundation for §1.3 and §1.8.
 - **[T20260412-0645-3]** — Architectural graph navigation (`callers`, `implementors`, `deps`); foundation for §1.1.
 - **[T20260417-0301-2]** — Lock/write/read hardening.
 - **[T20260417-0639]** — Persistence-path speedup; related to §1.7.
@@ -150,6 +150,7 @@ Tasks cited in this document (all as forward pointers or historical context; non
 - **[T20260421-0343]** (archived) — Indexed task→symbol edges with rename survival; superseded by identity-match attribution.
 - **[T20260421-0358]** — Branch-scoped refs; foundation for §3's distinctiveness claim and §1.6.
 - **[T20260421-0528]** — History-walker + `task_ids` attribution; foundation for §1.2, §1.5, and §3.
+- **[T20260426-0453]** — Current public graph surface is read-only; write coordination uses task lock reservations.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
 

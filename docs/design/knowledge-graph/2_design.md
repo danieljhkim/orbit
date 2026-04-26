@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26 (parallel build stages, task-id search, and graph build benchmark, [T20260426-0139], [T20260426-0220], [T20260426-0236])
+**Last updated:** 2026-04-26 (read-only public graph surface, [T20260426-0453])
 
 This document specifies the knowledge graph as it exists today: on-disk layout, build pipeline, query services, Orbit integration, locking, and honest limitations. See [1_overview.md](./1_overview.md) for the "why" and [3_vision.md](./3_vision.md) for where it is headed. Task IDs are cited inline and collected at the end.
 
@@ -137,7 +137,7 @@ All tool inputs that reference a node accept a selector string.
 | Lineage | `render_lineage_pack(selector)` | — |
 | Pack | `pack_json(...)` | Agent-friendly field projection ships in the same era as [T20260411-0424] |
 
-All services are read-only against a resolved snapshot. Writes go through the working graph, never through the service.
+All services are read-only against a resolved snapshot. Graph mutation code remains internal/deferred; the current public surface does not expose graph write tools.
 
 Search accepts an optional task-id filter that exact-matches against the `task_ids` vector stored on every node ([T20260426-0220]). The filter composes with query text, node type, kind, prefix, and source regex by logical AND. When present, it is applied before source-regex matching so task-scoped regex searches do not spend their candidate budget on unrelated nodes. Missing or null `task_id` preserves the pre-existing search behavior.
 
@@ -162,11 +162,11 @@ orbit graph search --ref <name> <query>
 
 `show`/`search` subcommands and the `leaf` → `symbol` vocabulary rename landed under [T20260411-0424].
 
-Writes without `--ref` resolve the current git branch; writes fail on detached HEAD rather than inventing a branch label. Reads fall back to the default branch when the current-branch ref does not yet exist, with a single stderr warning ([T20260421-0358]).
+Graph build/update writes without `--ref` resolve the current git branch; build/update writes fail on detached HEAD rather than inventing a branch label. Reads fall back to the default branch when the current-branch ref does not yet exist, with a single stderr warning ([T20260421-0358]).
 
 ### 4.2 MCP tools
 
-The knowledge graph is exposed through `orbit-mcp` as a stable tool surface. Each tool accepts an optional `ref` and delegates to the services above:
+The knowledge graph is exposed through `orbit-mcp` as a stable, read-only tool surface. Each tool accepts an optional `ref` and delegates to the services above:
 
 - `orbit.graph.overview`
 - `orbit.graph.search` (optional `task_id`, validated as `T\d{8}-\d{4}`)
@@ -175,13 +175,14 @@ The knowledge graph is exposed through `orbit-mcp` as a stable tool surface. Eac
 - `orbit.graph.callers`
 - `orbit.graph.implementors`
 - `orbit.graph.refs`
-- `orbit.graph.add` / `orbit.graph.delete` / `orbit.graph.move` (working-graph mutators, [T20260411-0424])
 
 An explicit `ref` means "read the stored graph for this ref." It does not trigger a rebuild against whatever branch is currently checked out, and it does not overlay task-local working-graph edits onto that explicit historical ref. That is a subtle but load-bearing rule for historical queries.
 
 ### 4.3 Activity interaction
 
-Activities that mutate code load the working graph at start, apply edits through it, and either commit (merging into the branch snapshot and triggering an incremental rebuild) or discard on rollback. Activities that only read skip the working graph entirely and query the service directly.
+Activities use graph tools for inspection and prompt assembly only. Code-mutating workflows coordinate before dispatch with task `context_files` and `orbit.task.locks.reserve` preflight guards, then rely on optimistic integration/review checks to catch stale or overlapping edits. Activities that only read query the service directly.
+
+The working graph still exists in `crates/orbit-knowledge/src/working_graph`, but it is not a public agent-facing mutation API in this version. Branch-local graph refs are intentionally not used as distributed locks because agents commonly work in separate worktrees with separate refs.
 
 ---
 
@@ -192,7 +193,7 @@ Nodes carry `is_locked`, `lineage_locked`, `lock_owner`, and `lock_reason` on `B
 - **`is_locked`** — the node itself is frozen. Attempts to mutate it in the working graph produce a `WriteError`.
 - **`lineage_locked`** — the node's identity is frozen. Renames/re-identifications across builds are blocked; the identity key must survive rebuild.
 
-Locks are set explicitly via tools and survive rebuilds because they live on the node body (and therefore in the content-addressed object store). A locked node keeps its lock across branches until explicitly released.
+Graph-node locks survive rebuilds because they live on the node body (and therefore in the content-addressed object store), but they are not the current public write-admission mechanism. Public workflow coordination happens at the task plane through `orbit.task.locks.reserve`.
 
 The shared file-based lock store was introduced in [T20260411-0424] (replacing a removed `orbit-lock` crate) and further hardened in [T20260417-0301-2].
 
@@ -214,7 +215,7 @@ Hunk-to-symbol mapping uses line-range overlap against the symbol's span *at the
 
 ### 6.4 The graph is a snapshot, not a stream
 
-Queries answer "what does this branch look like as of the last build." Mid-edit state lives in the working graph; anything outside the working graph is stale relative to the filesystem until the next refresh. `ensure_fresh` narrows the gap but does not close it — a read right after an external edit and before a debounce window elapses can return pre-edit results.
+Queries answer "what does this branch look like as of the last build." Public file edits are stale relative to the graph until the next refresh; deferred/internal working-graph mutations are the only path that can model mid-edit state. `ensure_fresh` narrows the gap but does not close it — a read right after an external edit and before a debounce window elapses can return pre-edit results.
 
 ### 6.5 Branch-scoped refs do not solve worktree-local reads
 
@@ -249,7 +250,7 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 ## Task References
 
 - **[T20260411-0008]** — Extract `orbit-knowledge` crate from `orbit-tools`.
-- **[T20260411-0424]** — Consolidate `orbit-knowledge`; add graph editing tools (`add`/`delete`/`move`); introduce shared file-based lock store; add `show`/`search` CLI; rename `leaf` to `symbol` at the tool surface.
+- **[T20260411-0424]** — Consolidate `orbit-knowledge`; prototype graph editing internals (`add`/`delete`/`move`); introduce shared file-based lock store; add `show`/`search` CLI; rename `leaf` to `symbol` at the tool surface.
 - **[T20260412-0645-2]** — Compact `orbit.graph.overview` output for large repos.
 - **[T20260412-0645-3]** — Architectural graph navigation: `deps`, `implementors`, `callers`.
 - **[T20260416-0719]** — Recover from a corrupted default knowledge graph store.
@@ -265,5 +266,6 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 - **[T20260426-0141]** — Bounded `KnowledgeStore` LRU for graph objects and source blobs.
 - **[T20260426-0220]** — Add exact `task_id` filtering to `orbit.graph.search`.
 - **[T20260426-0236]** — Add `make bench` graph build benchmark and `.orbit/state/scoreboard/graph_bench.json`.
+- **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface; use task lock reservations as preflight write guards.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

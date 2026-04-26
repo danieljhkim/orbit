@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26 (ADR-018)
+**Last updated:** 2026-04-26 (ADR-019)
 
 ADR-style log of non-obvious design choices behind the knowledge graph. Each entry names the decision, the context that forced it, what we chose, and what we traded away. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -288,6 +288,22 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-019 — Keep the public graph surface read-only
+
+**Status:** Accepted · 2026-04 · [T20260426-0453]
+
+**Context.** Prototype graph mutation tools (`orbit.graph.add`, `orbit.graph.delete`, `orbit.graph.move`, and `orbit.graph.write`) implied that graph-node locks could coordinate write safety. That is not true for the workflow Orbit actually uses: agents commonly work in separate worktrees and branches, each with its own graph ref. A lock inside a branch-local graph snapshot cannot reliably serialize writes in another worktree.
+
+**Decision.** Remove graph mutation tools from the public tool/MCP surface. Keep the current agent-facing graph API read-only: overview, search, show, pack, refs, callers, implementors, and deps. Use task `context_files` plus `orbit.task.locks.reserve` as the version's preflight write guard, with optimistic integration/review checks as the final authority for stale or overlapping edits. Internal working-graph and operation-log code may remain as deferred implementation substrate, but it is not advertised as a current agent API.
+
+**Consequences.**
+- Agents no longer see graph writes as a supported coordination mechanism.
+- Write admission happens in a shared task/workflow plane rather than inside per-ref graph state, so it still has meaning before agents fan out into separate worktrees.
+- Graph refs remain a read/index/context artifact, which matches their branch-scoped storage model.
+- Cost: write guards are conservative at task context-file granularity, not precise at graph-node granularity. Fine-grained symbol-level mutation may return later only with a coordination story that works across worktrees.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -317,5 +333,6 @@ Tasks cited by ADRs above:
 - **[T20260423-0524]** — v3 graph MCP parity sweep (utilization & cost disposition).
 - **[T20260423-0607]** — Pointer-only graph reads (deferred; cited by ADR-018 consequences).
 - **[T20260426-0402]** — Land v3 retention decision in the ADR index.
+- **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and standardize on task lock reservations as preflight write guards.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

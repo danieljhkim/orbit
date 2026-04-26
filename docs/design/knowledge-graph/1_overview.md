@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26
+**Last updated:** 2026-04-26 (read-only public graph surface, [T20260426-0453])
 
 > *"Grep finds strings. An LSP finds symbols. A knowledge graph remembers what those symbols are, where they live, who touched them, and how they relate — in a form an agent can page into a 200k context window."*
 
@@ -68,11 +68,11 @@ Storage follows a git-style split:
 
 A rebuild writes new immutable objects/blobs and a fresh index, then atomically swings the branch ref. Refs are the only mutable surface, so concurrent builds on different worktrees cannot corrupt each other ([T20260421-0358]). See [specs/refs.md](./specs/refs.md) for the full resolution rules.
 
-### 2.4 Working graph
+### 2.4 Working graph and write guards
 
-Mutations during an activity do not touch the persisted store. They flow through an in-memory **working graph** (`crates/orbit-knowledge/src/working_graph`) that overlays the last committed snapshot for the activity's branch. Edits, moves, and version chains accumulate in the working copy; persistence happens at activity boundaries, not mid-turn. Graph editing tools (`orbit.graph.add`, `orbit.graph.delete`, `orbit.graph.move`) landed under [T20260411-0424].
+The current public graph surface is read-only. Agents use it to inspect, search, and pack context, while write coordination happens before dispatch through task `context_files` and `orbit.task.locks.reserve` preflight guards. Those guards operate at the workspace/task plane rather than inside a branch-local graph ref, which keeps them meaningful when agents work in separate worktrees.
 
-This keeps `refs/heads/<branch>.json` stable for the duration of the agent's reasoning window and makes every query inside an activity reproducible even while the agent is actively editing.
+The in-memory **working graph** (`crates/orbit-knowledge/src/working_graph`) remains an internal/deferred mutation substrate. Keeping graph refs stable for the duration of an agent's reasoning window is still the desired property, but public graph write tools are not part of this version because branch-local graph locks do not coordinate independent worktrees.
 
 ### 2.5 Attribution
 
@@ -98,7 +98,7 @@ Each node carries a `task_ids` list. These are populated by the history-walker s
 ## Task References
 
 - **[T20260411-0008]** — Extract `orbit-knowledge` crate from `orbit-tools`.
-- **[T20260411-0424]** — Consolidate `orbit-knowledge`; add graph editing tools (`add`/`delete`/`move`); introduce shared file-based lock store; add `show`/`search` CLI; rename `leaf` to `symbol` at the tool surface.
+- **[T20260411-0424]** — Consolidate `orbit-knowledge`; prototype graph editing internals (`add`/`delete`/`move`); introduce shared file-based lock store; add `show`/`search` CLI; rename `leaf` to `symbol` at the tool surface.
 - **[T20260412-0645-2]** — Add compact `orbit.graph.overview` output for large repos.
 - **[T20260412-0645-3]** — Architectural graph navigation: `deps`, `implementors`, `callers`.
 - **[T20260416-0719]** — Recover from a corrupted default knowledge graph store.
@@ -108,5 +108,6 @@ Each node carries a `task_ids` list. These are populated by the history-walker s
 - **[T20260421-0358]** — Scope graph refs by branch.
 - **[T20260421-0528]** — `task_ids` schema on every node + git history walker for attribution.
 - **[T20260426-0139]** — Parallelize per-file hashing and leaf extraction while preserving deterministic graph output.
+- **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and use task lock reservations as preflight write guards.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

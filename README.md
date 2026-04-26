@@ -16,7 +16,7 @@ Three features carry the product thesis. Everything else in Orbit is infrastruct
 
 ### Knowledge graph — *available today*
 
-Agents operate against a parsed, content-addressed graph of your codebase: directories, files, extracted symbols, import edges, trait implementors, call sites. Queries are token-budgeted packs shaped for prompt consumption, not LSP-style hover text. The graph is branch-scoped (two worktrees on two branches rebuild concurrently without corruption), attribute history from commit messages is carried on every node (`[T20260421-0528]`), and reads fall back to the default branch until a new branch has been built.
+Agents inspect a parsed, content-addressed graph of your codebase: directories, files, extracted symbols, import edges, crate dependencies, trait implementors, and signature-matched caller/reference indexes. Queries are token-budgeted packs shaped for prompt consumption, not LSP-style hover text. The public graph surface is read-only; write coordination happens before dispatch through task `context_files` and `orbit.task.locks.reserve` preflight guards. The graph is branch-scoped (two worktrees on two branches rebuild concurrently without corruption), task attribution from commit messages is carried on every node (`[T20260421-0528]`), and reads fall back to the default branch until a new branch has been built.
 
 This is the technical moat and the reason to pick Orbit over a generic agent framework. Design docs: [docs/design/knowledge-graph/](docs/design/knowledge-graph/).
 
@@ -350,7 +350,7 @@ Orbit exposes a safe MCP surface by default:
 
 - all `orbit.task.*` tools
 - graph read tools such as `orbit.graph.search`, `orbit.graph.show`, and `orbit.graph.pack`
-- no experimental graph write tools unless you opt in with `--allow-write`
+- no graph write tools; write coordination flows through task lock reservations such as `orbit.task.locks.reserve`
 
 Use `orbit mcp init` to seed client integrations for the current workspace. Auto mode targets Claude when the repo already has a `.claude/` directory, Gemini when the repo already has a `.gemini/` directory, and Codex when `~/.codex/config.toml` exists. `orbit workspace init` delegates to the same auto-detect path unless you pass `--no-mcp`.
 
@@ -367,9 +367,6 @@ orbit mcp remove --all
 
 # serve the safe default MCP surface
 orbit mcp serve
-
-# opt in experimental graph write tools
-orbit mcp serve --allow-write
 ```
 
 MCP support is an integration layer, not Orbit's moat.

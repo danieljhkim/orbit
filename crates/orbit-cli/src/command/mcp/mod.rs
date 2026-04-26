@@ -53,39 +53,19 @@ pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
     "orbit.graph.show",
 ];
 
-pub(crate) const GRAPH_WRITE_TOOL_NAMES: &[&str] = &[
-    "orbit.graph.add",
-    "orbit.graph.delete",
-    "orbit.graph.move",
-    "orbit.graph.write",
-];
-
-pub(crate) fn safe_mcp_tool_names(allow_write: bool) -> Vec<&'static str> {
-    let mut names = Vec::with_capacity(
-        TASK_TOOL_NAMES.len()
-            + GRAPH_READ_TOOL_NAMES.len()
-            + if allow_write {
-                GRAPH_WRITE_TOOL_NAMES.len()
-            } else {
-                0
-            },
-    );
+pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
+    let mut names = Vec::with_capacity(TASK_TOOL_NAMES.len() + GRAPH_READ_TOOL_NAMES.len());
     names.extend_from_slice(TASK_TOOL_NAMES);
     names.extend_from_slice(GRAPH_READ_TOOL_NAMES);
-    if allow_write {
-        names.extend_from_slice(GRAPH_WRITE_TOOL_NAMES);
-    }
     names
 }
 
-pub(crate) fn is_mcp_tool_exposed(name: &str, allow_write: bool) -> bool {
-    TASK_TOOL_NAMES.contains(&name)
-        || GRAPH_READ_TOOL_NAMES.contains(&name)
-        || (allow_write && GRAPH_WRITE_TOOL_NAMES.contains(&name))
+pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
+    TASK_TOOL_NAMES.contains(&name) || GRAPH_READ_TOOL_NAMES.contains(&name)
 }
 
-fn ensure_mcp_tool_exposed(name: &str, allow_write: bool) -> Result<(), OrbitError> {
-    if is_mcp_tool_exposed(name, allow_write) {
+fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
+    if is_mcp_tool_exposed(name) {
         Ok(())
     } else {
         Err(OrbitError::ToolNotFound(name.to_string()))
@@ -135,17 +115,12 @@ impl Execute for McpSubcommand {
 
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
-pub struct ServeArgs {
-    /// Expose experimental graph write tools in addition to the safe default surface.
-    #[arg(long)]
-    pub allow_write: bool,
-}
+pub struct ServeArgs {}
 
 impl Execute for ServeArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let host: Arc<dyn McpHost> = Arc::new(RuntimeMcpHost {
             runtime: runtime.clone(),
-            allow_write: self.allow_write,
         });
 
         let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
@@ -167,7 +142,6 @@ impl Execute for ServeArgs {
 /// the CLI `orbit tool run` path.
 struct RuntimeMcpHost {
     runtime: OrbitRuntime,
-    allow_write: bool,
 }
 
 impl McpHost for RuntimeMcpHost {
@@ -175,7 +149,7 @@ impl McpHost for RuntimeMcpHost {
         let tools = self.runtime.list_tools().unwrap_or_default();
         tools
             .into_iter()
-            .filter(|tool| tool.enabled && is_mcp_tool_exposed(&tool.name, self.allow_write))
+            .filter(|tool| tool.enabled && is_mcp_tool_exposed(&tool.name))
             .map(|tool| ToolSchema {
                 name: tool.name,
                 description: tool.description,
@@ -186,7 +160,7 @@ impl McpHost for RuntimeMcpHost {
     }
 
     fn call_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
-        ensure_mcp_tool_exposed(name, self.allow_write)?;
+        ensure_mcp_tool_exposed(name)?;
         self.runtime.execute_tool_command(name, input, None, None)
     }
 }
@@ -197,10 +171,7 @@ mod tests {
 
     use orbit_core::OrbitRuntime;
 
-    use super::{
-        GRAPH_READ_TOOL_NAMES, GRAPH_WRITE_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed,
-        safe_mcp_tool_names,
-    };
+    use super::{GRAPH_READ_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed, safe_mcp_tool_names};
 
     #[test]
     fn safe_surface_matches_runtime_graph_and_task_tools() {
@@ -211,11 +182,11 @@ mod tests {
             .into_iter()
             .map(|tool| tool.name)
             .collect();
-        let safe_names: BTreeSet<&str> = safe_mcp_tool_names(false).into_iter().collect();
+        let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
 
         for name in TASK_TOOL_NAMES {
             assert!(names.contains(*name), "missing runtime task tool: {name}");
-            assert!(is_mcp_tool_exposed(name, false));
+            assert!(is_mcp_tool_exposed(name));
         }
 
         for name in names.iter().filter(|name| name.starts_with("orbit.task.")) {
@@ -230,31 +201,23 @@ mod tests {
                 names.contains(*name),
                 "missing runtime graph read tool: {name}"
             );
-            assert!(is_mcp_tool_exposed(name, false));
+            assert!(is_mcp_tool_exposed(name));
         }
 
-        for name in GRAPH_WRITE_TOOL_NAMES {
+        for name in [
+            "orbit.graph.add",
+            "orbit.graph.delete",
+            "orbit.graph.move",
+            "orbit.graph.write",
+        ] {
             assert!(
-                names.contains(*name),
-                "missing runtime graph write tool: {name}"
+                !names.contains(name),
+                "runtime exposes graph write tool: {name}"
             );
-            assert!(!is_mcp_tool_exposed(name, false));
-            assert!(is_mcp_tool_exposed(name, true));
+            assert!(!is_mcp_tool_exposed(name));
         }
 
-        assert!(!is_mcp_tool_exposed("orbit.state.get", false));
-        assert!(!is_mcp_tool_exposed("demo.hello", false));
-    }
-
-    #[test]
-    fn allow_write_surface_adds_graph_write_tools() {
-        let safe = safe_mcp_tool_names(false);
-        let writable = safe_mcp_tool_names(true);
-
-        assert!(writable.len() > safe.len());
-        for name in GRAPH_WRITE_TOOL_NAMES {
-            assert!(!safe.contains(name));
-            assert!(writable.contains(name));
-        }
+        assert!(!is_mcp_tool_exposed("orbit.state.get"));
+        assert!(!is_mcp_tool_exposed("demo.hello"));
     }
 }

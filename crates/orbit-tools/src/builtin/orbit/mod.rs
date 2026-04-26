@@ -4,18 +4,22 @@ pub mod groundhog_checkpoint_deviate;
 pub mod groundhog_checkpoint_failure;
 pub mod groundhog_checkpoint_success;
 pub mod groundhog_side_effect;
-pub mod knowledge_add;
+#[allow(dead_code)]
+mod knowledge_add;
 pub mod knowledge_callers;
-pub mod knowledge_delete;
+#[allow(dead_code)]
+mod knowledge_delete;
 pub mod knowledge_deps;
 pub mod knowledge_implementors;
-pub mod knowledge_move;
+#[allow(dead_code)]
+mod knowledge_move;
 pub mod knowledge_overview;
 pub mod knowledge_pack;
 pub mod knowledge_refs;
 pub mod knowledge_search;
 pub mod knowledge_show;
-pub mod knowledge_write;
+#[allow(dead_code)]
+mod knowledge_write;
 pub mod pipeline_invoke;
 pub mod pipeline_wait;
 pub mod review_thread_add;
@@ -77,18 +81,14 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_update::OrbitTaskUpdateTool);
     registry.register(duel_plan_add::OrbitDuelPlanAddTool);
     registry.register(duel_plan_winner::OrbitDuelPlanWinnerTool);
-    registry.register(knowledge_add::OrbitKnowledgeAddTool);
     registry.register(knowledge_callers::OrbitKnowledgeCallersTool);
-    registry.register(knowledge_delete::OrbitKnowledgeDeleteTool);
     registry.register(knowledge_deps::OrbitKnowledgeDepsTool);
     registry.register(knowledge_implementors::OrbitKnowledgeImplementorsTool);
-    registry.register(knowledge_move::OrbitKnowledgeMoveTool);
     registry.register(knowledge_overview::OrbitKnowledgeOverviewTool);
     registry.register(knowledge_pack::OrbitKnowledgePackTool);
     registry.register(knowledge_refs::OrbitKnowledgeRefsTool);
     registry.register(knowledge_search::OrbitKnowledgeSearchTool);
     registry.register(knowledge_show::OrbitKnowledgeShowTool);
-    registry.register(knowledge_write::OrbitKnowledgeWriteTool);
     registry.register(pipeline_invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline_wait::OrbitPipelineWaitTool);
     registry.register(review_thread_add::OrbitReviewThreadAddTool);

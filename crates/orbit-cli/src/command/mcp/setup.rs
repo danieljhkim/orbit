@@ -476,7 +476,7 @@ fn codex_mcp_server_table(repo_root: &Path, orbit_root: &Path) -> TomlTable {
 }
 
 fn claude_safe_permissions() -> Vec<String> {
-    safe_mcp_tool_names(false)
+    safe_mcp_tool_names()
         .into_iter()
         .map(claude_permission_name)
         .collect()
