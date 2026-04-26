@@ -9,11 +9,8 @@ benchmarks/**
 # (the broad benchmarks/**/tasks/** + benchmarks/**/runs/** rules above cover
 # them even with the negations below). See benchmarks/graph/v4/METHOD.md
 # §"Synthetic-fixture indexer setup".
-!benchmarks/
-!benchmarks/graph/
-!benchmarks/graph/v4/
-!benchmarks/graph/v4/_fixture_code/
-!benchmarks/graph/v4/_fixture_code/**
+# !benchmarks/graph/v4/_fixture_code/**
+
 .git/**
 .orbit/**
 .claude/**
