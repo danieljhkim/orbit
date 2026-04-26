@@ -22,7 +22,7 @@
 //! mis-configures a provider.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest, parse_and_validate_response};
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{ExecutionResult, InvocationTrace};
+use orbit_common::utility::logging::redact_event_text;
 use orbit_common::utility::redaction::PatternRedactor;
 use serde_json::Value;
 
@@ -49,8 +50,6 @@ pub fn run_cli_backend(
     audit: Arc<V2AuditWriter>,
     input: &Value,
 ) -> Result<DispatchOutcome, DispatchError> {
-    let _ = run_id;
-
     let provider = spec.provider.as_str().to_string();
     let cli_executor = host.resolve_cli_executor(&provider)?;
     let prompt = user_prompt_from_input(input)?;
@@ -126,6 +125,9 @@ pub fn run_cli_backend(
         &subprocess_args,
         &invocation.stdin,
         wall_clock_timeout,
+        &provider,
+        run_id,
+        task_id_from_input(input),
     )
     .map_err(|err| DispatchError::CliInvocationFailed(err.to_string()))?;
 
@@ -222,6 +224,31 @@ fn user_prompt_from_input(input: &Value) -> Result<String, DispatchError> {
     }
 }
 
+fn task_id_from_input(input: &Value) -> Option<&str> {
+    fn non_empty(value: &str) -> Option<&str> {
+        if value.is_empty() { None } else { Some(value) }
+    }
+
+    input
+        .get("task_id")
+        .and_then(Value::as_str)
+        .and_then(non_empty)
+        .or_else(|| {
+            input
+                .get("task")
+                .and_then(|task| task.get("id"))
+                .and_then(Value::as_str)
+                .and_then(non_empty)
+        })
+        .or_else(|| {
+            input
+                .get("task_ids")
+                .and_then(Value::as_array)
+                .and_then(|items| items.iter().find_map(Value::as_str))
+                .and_then(non_empty)
+        })
+}
+
 type SpawnOutput = (Vec<u8>, Vec<u8>, Option<i32>, Duration, bool);
 
 fn spawn_with_timeout(
@@ -229,6 +256,9 @@ fn spawn_with_timeout(
     args: &[String],
     stdin_bytes: &[u8],
     timeout: Duration,
+    provider: &str,
+    job_run_id: &str,
+    task_id: Option<&str>,
 ) -> Result<SpawnOutput, String> {
     let started = Instant::now();
     let mut child: Child = Command::new(program)
@@ -248,22 +278,29 @@ fn spawn_with_timeout(
 
     let stdout_buf = Arc::new(Mutex::new(Vec::new()));
     let stderr_buf = Arc::new(Mutex::new(Vec::new()));
+    let dispatch = tracing::dispatcher::get_default(Clone::clone);
 
-    let stdout_reader = child.stdout.take().map(|mut handle| {
-        let buf = Arc::clone(&stdout_buf);
-        thread::spawn(move || {
-            let mut local = Vec::new();
-            let _ = std::io::copy(&mut handle, &mut local);
-            *buf.lock().expect("stdout buf poisoned") = local;
-        })
+    let stdout_reader = child.stdout.take().map(|handle| {
+        spawn_output_reader(
+            handle,
+            Arc::clone(&stdout_buf),
+            provider.to_string(),
+            "stdout",
+            job_run_id.to_string(),
+            task_id.map(ToString::to_string),
+            dispatch.clone(),
+        )
     });
-    let stderr_reader = child.stderr.take().map(|mut handle| {
-        let buf = Arc::clone(&stderr_buf);
-        thread::spawn(move || {
-            let mut local = Vec::new();
-            let _ = std::io::copy(&mut handle, &mut local);
-            *buf.lock().expect("stderr buf poisoned") = local;
-        })
+    let stderr_reader = child.stderr.take().map(|handle| {
+        spawn_output_reader(
+            handle,
+            Arc::clone(&stderr_buf),
+            provider.to_string(),
+            "stderr",
+            job_run_id.to_string(),
+            task_id.map(ToString::to_string),
+            dispatch,
+        )
     });
 
     let mut timed_out = false;
@@ -305,4 +342,446 @@ fn spawn_with_timeout(
     let exit_code = exit_status.as_ref().and_then(|s| s.code());
     let duration = started.elapsed();
     Ok((stdout, stderr, exit_code, duration, timed_out))
+}
+
+fn spawn_output_reader<R>(
+    handle: R,
+    buf: Arc<Mutex<Vec<u8>>>,
+    provider: String,
+    stream: &'static str,
+    job_run_id: String,
+    task_id: Option<String>,
+    dispatch: tracing::Dispatch,
+) -> thread::JoinHandle<()>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        tracing::dispatcher::with_default(&dispatch, || {
+            let mut reader = BufReader::new(handle);
+            let mut raw_line = Vec::new();
+            loop {
+                raw_line.clear();
+                match reader.read_until(b'\n', &mut raw_line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        buf.lock()
+                            .expect("subprocess output buf poisoned")
+                            .extend_from_slice(&raw_line);
+                        emit_output_line(
+                            &provider,
+                            stream,
+                            &job_run_id,
+                            task_id.as_deref(),
+                            &raw_line,
+                        );
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+    })
+}
+
+fn emit_output_line(
+    provider: &str,
+    stream: &str,
+    job_run_id: &str,
+    task_id: Option<&str>,
+    raw_line: &[u8],
+) {
+    let line = line_text(raw_line);
+    let line = redact_event_text(&line);
+    tracing::info!(
+        provider = provider,
+        stream = stream,
+        job_run_id = job_run_id,
+        task_id = task_id,
+        line = line.as_str()
+    );
+}
+
+fn line_text(raw_line: &[u8]) -> String {
+    let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    String::from_utf8_lossy(line).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::fmt;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
+    use orbit_common::types::activity_job::{Backend, OnDenial, Provider};
+    use orbit_tools::{FsAuditLogger, ToolContext};
+    use tempfile::tempdir;
+    use tracing::field::{Field, Visit};
+    use tracing::{Event, Metadata, Subscriber, span};
+
+    use super::*;
+    use crate::activity_job::dispatcher::ResolvedCliExecutor;
+
+    #[test]
+    fn spawn_with_timeout_emits_structured_stdout_and_stderr_events() {
+        let args = sh_args("printf '%s\\n' out-one out-two; printf '%s\\n' err-one >&2");
+        let (result, events) = capture_events(|| {
+            spawn_with_timeout(
+                "/bin/sh",
+                &args,
+                b"",
+                Duration::from_secs(5),
+                "codex",
+                "job-123",
+                Some("T123"),
+            )
+        });
+        let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
+
+        assert_eq!(stdout, b"out-one\nout-two\n");
+        assert_eq!(stderr, b"err-one\n");
+        assert_eq!(exit_code, Some(0));
+        assert!(!timed_out);
+        assert_eq!(events.len(), 3);
+
+        assert_event(&events, "stdout", "out-one");
+        assert_event(&events, "stdout", "out-two");
+        assert_event(&events, "stderr", "err-one");
+        for event in &events {
+            assert_eq!(event.field("provider"), Some("codex"));
+            assert_eq!(event.field("job_run_id"), Some("job-123"));
+            assert_eq!(event.field("task_id"), Some("T123"));
+            assert!(event.fields.contains_key("stream"));
+            assert!(event.fields.contains_key("line"));
+        }
+    }
+
+    #[test]
+    fn spawn_with_timeout_redacts_tracing_line_without_redacting_raw_stdout() {
+        let raw = "Authorization: Bearer abc123";
+        let expected = redact_event_text(raw);
+        assert_ne!(expected, raw);
+
+        let args = sh_args("printf '%s\\n' 'Authorization: Bearer abc123'");
+        let (result, events) = capture_events(|| {
+            spawn_with_timeout(
+                "/bin/sh",
+                &args,
+                b"",
+                Duration::from_secs(5),
+                "codex",
+                "job-redact",
+                Some("TRED"),
+            )
+        });
+        let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
+
+        assert_eq!(stdout, b"Authorization: Bearer abc123\n");
+        assert!(stderr.is_empty());
+        assert_eq!(exit_code, Some(0));
+        assert!(!timed_out);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].field("line"), Some(expected.as_str()));
+        assert!(!events[0].field("line").unwrap().contains("abc123"));
+    }
+
+    #[test]
+    fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
+        let temp = tempdir().expect("tempdir");
+        let script = temp.path().join("mock-agent");
+        write_executable(
+            &script,
+            "#!/bin/sh\nprintf '%s\\n' 'plain stdout'\nprintf '%s\\n' 'plain stderr' >&2\n",
+        );
+
+        let sink = Arc::new(RecordingSink::default());
+        let sink_for_writer: Arc<dyn AuditSink> = sink.clone();
+        let audit = Arc::new(V2AuditWriter::new(
+            "job-audit",
+            "codex:gpt-5.5",
+            sink_for_writer,
+        ));
+        let host = TestHost {
+            command: script.display().to_string(),
+        };
+        let spec = test_agent_loop_spec(Duration::from_secs(5));
+        let input = serde_json::json!({
+            "prompt": "do it",
+            "task_id": "TAUDIT"
+        });
+
+        let outcome = run_cli_backend(&host, &spec, "job-audit", audit.clone(), &input)
+            .expect("run succeeds");
+
+        assert!(outcome.success);
+        assert_eq!(outcome.output["stdout_text"], "plain stdout\n");
+        let events = audit.events_snapshot().expect("events snapshot");
+        let finished = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                V2AuditEventKind::CliInvocationFinished {
+                    provider,
+                    exit_code,
+                    stdout_blob_ref,
+                    stderr_blob_ref,
+                    timed_out,
+                    ..
+                } => Some((
+                    provider.as_str(),
+                    *exit_code,
+                    stdout_blob_ref.as_deref(),
+                    stderr_blob_ref.as_deref(),
+                    *timed_out,
+                )),
+                _ => None,
+            })
+            .expect("finished event");
+
+        assert_eq!(finished.0, "codex");
+        assert_eq!(finished.1, Some(0));
+        assert_eq!(finished.2, Some("blob-2"));
+        assert_eq!(finished.3, Some("blob-3"));
+        assert!(!finished.4);
+        assert_eq!(sink.blob("blob-2"), Some(b"plain stdout\n".to_vec()));
+        assert_eq!(sink.blob("blob-3"), Some(b"plain stderr\n".to_vec()));
+    }
+
+    #[test]
+    fn spawn_with_timeout_kills_timed_out_process_and_keeps_partial_output() {
+        let args = sh_args("printf '%s\\n' 'before timeout'; sleep 1; printf '%s\\n' after");
+        let (result, events) = capture_events(|| {
+            spawn_with_timeout(
+                "/bin/sh",
+                &args,
+                b"",
+                Duration::from_millis(75),
+                "codex",
+                "job-timeout",
+                Some("TTIME"),
+            )
+        });
+        let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
+
+        assert_eq!(stdout, b"before timeout\n");
+        assert!(stderr.is_empty());
+        assert_eq!(exit_code, None);
+        assert!(timed_out);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].field("stream"), Some("stdout"));
+        assert_eq!(events[0].field("line"), Some("before timeout"));
+    }
+
+    #[test]
+    fn task_id_from_input_reads_common_activity_shapes() {
+        assert_eq!(
+            task_id_from_input(&serde_json::json!({"task_id": "T1"})),
+            Some("T1")
+        );
+        assert_eq!(
+            task_id_from_input(&serde_json::json!({"task": {"id": "T2"}})),
+            Some("T2")
+        );
+        assert_eq!(
+            task_id_from_input(&serde_json::json!({"task_ids": ["T3", "T4"]})),
+            Some("T3")
+        );
+        assert_eq!(task_id_from_input(&serde_json::json!({})), None);
+    }
+
+    fn sh_args(script: &str) -> Vec<String> {
+        vec!["-c".to_string(), script.to_string()]
+    }
+
+    fn capture_events<F>(f: F) -> (Result<SpawnOutput, String>, Vec<CapturedEvent>)
+    where
+        F: FnOnce() -> Result<SpawnOutput, String>,
+    {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = CaptureSubscriber {
+            events: Arc::clone(&events),
+            next_span_id: AtomicU64::new(1),
+        };
+        let dispatch = tracing::Dispatch::new(subscriber);
+        let result = tracing::dispatcher::with_default(&dispatch, f);
+        let events = events.lock().expect("events lock").clone();
+        (result, events)
+    }
+
+    fn assert_event(events: &[CapturedEvent], stream: &str, line: &str) {
+        assert!(
+            events
+                .iter()
+                .any(|event| event.field("stream") == Some(stream)
+                    && event.field("line") == Some(line)),
+            "missing event stream={stream:?} line={line:?}; captured={events:?}"
+        );
+    }
+
+    #[derive(Debug, Clone)]
+    struct CapturedEvent {
+        fields: BTreeMap<String, String>,
+    }
+
+    impl CapturedEvent {
+        fn field(&self, name: &str) -> Option<&str> {
+            self.fields.get(name).map(String::as_str)
+        }
+    }
+
+    struct CaptureSubscriber {
+        events: Arc<Mutex<Vec<CapturedEvent>>>,
+        next_span_id: AtomicU64,
+    }
+
+    impl Subscriber for CaptureSubscriber {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
+            span::Id::from_u64(self.next_span_id.fetch_add(1, Ordering::Relaxed))
+        }
+
+        fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+
+        fn event(&self, event: &Event<'_>) {
+            let mut visitor = FieldCapture::default();
+            event.record(&mut visitor);
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(CapturedEvent {
+                    fields: visitor.fields,
+                });
+        }
+
+        fn enter(&self, _span: &span::Id) {}
+
+        fn exit(&self, _span: &span::Id) {}
+    }
+
+    #[derive(Default)]
+    struct FieldCapture {
+        fields: BTreeMap<String, String>,
+    }
+
+    impl Visit for FieldCapture {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.fields
+                .insert(field.name().to_string(), value.to_string());
+        }
+
+        fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+            self.fields
+                .insert(field.name().to_string(), format!("{value:?}"));
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingSink {
+        events: Mutex<Vec<LoopAuditEvent>>,
+        blobs: Mutex<Vec<(String, Vec<u8>)>>,
+    }
+
+    impl RecordingSink {
+        fn blob(&self, reference: &str) -> Option<Vec<u8>> {
+            self.blobs
+                .lock()
+                .expect("blobs lock")
+                .iter()
+                .find_map(|(id, bytes)| {
+                    if id == reference {
+                        Some(bytes.clone())
+                    } else {
+                        None
+                    }
+                })
+        }
+    }
+
+    impl AuditSink for RecordingSink {
+        fn emit(&self, event: &LoopAuditEvent) {
+            self.events.lock().expect("events lock").push(event.clone());
+        }
+
+        fn write_blob(&self, content: &[u8]) -> String {
+            let mut blobs = self.blobs.lock().expect("blobs lock");
+            let reference = format!("blob-{}", blobs.len() + 1);
+            blobs.push((reference.clone(), content.to_vec()));
+            reference
+        }
+    }
+
+    struct TestHost {
+        command: String,
+    }
+
+    impl V2RuntimeHost for TestHost {
+        fn run_deterministic(
+            &self,
+            _action: &str,
+            _config: &Value,
+            _input: &Value,
+            _tool_context: ToolContext,
+        ) -> Result<Value, DispatchError> {
+            unreachable!("not used by cli runner tests")
+        }
+
+        fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
+            Ok(String::new())
+        }
+
+        fn resolve_cli_executor(
+            &self,
+            _provider: &str,
+        ) -> Result<ResolvedCliExecutor, DispatchError> {
+            Ok(ResolvedCliExecutor {
+                command: self.command.clone(),
+                args: Vec::new(),
+            })
+        }
+
+        fn tool_context_for_activity(
+            &self,
+            _fs_profile: Option<&str>,
+            _fs_audit: Option<Arc<dyn FsAuditLogger>>,
+        ) -> ToolContext {
+            ToolContext::default()
+        }
+    }
+
+    fn test_agent_loop_spec(timeout: Duration) -> AgentLoopSpec {
+        AgentLoopSpec {
+            instruction: String::new(),
+            tools: Vec::new(),
+            on_denial: OnDenial::Terminate,
+            model: None,
+            max_iterations: 1,
+            backend: Backend::Cli,
+            provider: Provider::Codex,
+            wall_clock_timeout_seconds: timeout.as_secs(),
+        }
+    }
+
+    fn write_executable(path: &Path, contents: &str) {
+        fs::write(path, contents).expect("write script");
+        make_executable(path);
+    }
+
+    #[cfg(unix)]
+    fn make_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path).expect("script metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("script permissions");
+    }
+
+    #[cfg(not(unix))]
+    fn make_executable(_path: &Path) {}
 }

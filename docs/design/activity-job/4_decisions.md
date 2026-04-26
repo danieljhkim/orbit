@@ -269,6 +269,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - The `orbit run` inspection commands keep their existing history/state behavior.
 - Cost: scripts and muscle memory that used the removed aliases must migrate to the `orbit run` forms.
 
+## ADR-021 — CLI subprocess output is a live tracing stream and a retained audit blob
+
+**Status:** Accepted · 2026-04 · [T20260426-2313]
+
+**Context.** The CLI backend captured subprocess stdout/stderr as bulk buffers and surfaced them only after process exit through blob refs. That preserved auditability, but it left dashboard/log-feed work without a live structured signal for agent progress.
+
+**Decision.** Read CLI subprocess stdout and stderr line by line in the existing pipe-reader threads, append each raw line to the retained byte buffer, and emit one `tracing::info!` event per line with `provider`, `stream`, `job_run_id`, `task_id`, and redacted `line`. Keep `CliInvocationFinished` and its stdout/stderr blob refs on the same captured-byte path as before.
+
+**Consequences.**
+- Future tracing sinks can build a merged live feed without scraping subprocess blobs.
+- The audit/blob contract, exit-code handling, and timeout handling remain the durable completion record.
+- Cost: CLI output now has two observability paths; the tracing line text is UTF-8/lossy and newline-stripped while the retained blob bytes remain the archival source.
+
 ---
 
 ## Task References
@@ -298,5 +311,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
 - **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
 - **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
+- **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

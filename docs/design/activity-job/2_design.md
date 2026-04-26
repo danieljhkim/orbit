@@ -201,6 +201,8 @@ The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow i
 7. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
 8. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host.
 
+After [T20260426-2313], the subprocess stdout/stderr readers stream line-level `tracing::info!` events while the child is still running. Each event carries `provider`, `stream`, `job_run_id`, `task_id`, and `line`; the `line` field is scrubbed with `orbit_common::utility::logging::redact_event_text` before emission. The readers still retain the original stdout/stderr byte buffers and hand those buffers to the existing audit/blob path when `CliInvocationFinished` is emitted, so run-log readers keep following blob refs rather than the live tracing feed.
+
 Executor args are prepended before provider runtime args. For the seeded Codex executor, that means the subprocess starts as `codex exec --json --sandbox workspace-write ...`, not as the interactive `codex` TUI with piped stdin. This was tightened after a local ship run for [T20260423-0114] exposed that the earlier command-only boundary ignored executor args.
 
 The important retention boundary is that the older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers. They are the shipped implementation of `backend: cli`.
@@ -409,5 +411,6 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
 - **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
 - **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
+- **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
