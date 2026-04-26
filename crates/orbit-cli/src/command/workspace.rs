@@ -612,7 +612,7 @@ impl Execute for WorkspaceTeardownArgs {
             }
         }
 
-        // 2. Remove skill symlinks from .agents/skills/ and .claude/skills/
+        // 2. Remove legacy repo-local skill symlinks from .agents/skills/ and .claude/skills/
         for dir_name in &[".agents", ".claude"] {
             let skills_dir = repo_root.join(dir_name).join("skills");
             if skills_dir.is_dir() {

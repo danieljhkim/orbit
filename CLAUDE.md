@@ -50,7 +50,7 @@ orbit-common → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → o
 | Activities/Jobs | MergeByKey         | Global defaults + workspace overrides            |
 | Policies        | MergeByKey         | Workspace overrides profiles by name; global `denyRead` / `denyModify` rules accumulate |
 | Job Runs        | WorkspaceOnly      | Execution artifacts are workspace-local          |
-| Skills          | WorkspaceReplaces  | Workspace has full control over available skills |
+| Skills          | MergeByKey         | Global defaults in `~/.orbit/skills`; workspace overrides by skill name |
 | Command Audit   | GlobalOnly         | Single authoritative SQLite event trail          |
 | Run Traces      | WorkspaceOnly      | Per-repo activity/job JSONL and blob artifacts   |
 

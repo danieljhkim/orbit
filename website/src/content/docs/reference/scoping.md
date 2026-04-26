@@ -13,7 +13,7 @@ sidebar:
 | Activities and jobs | MergeByKey | Global defaults merge with workspace overrides by key. |
 | Policies | MergeByKey | Profiles override by name; global deny rules accumulate. |
 | Job runs | WorkspaceOnly | Run artifacts stay local to the workspace. |
-| Skills | WorkspaceReplaces | Workspace skills fully control the available set. |
+| Skills | MergeByKey | Global defaults in `~/.orbit/skills`; workspace entries override by skill name. |
 | Audit | GlobalOnly | One authoritative event trail. |
 
 ## Typical Workspace State

@@ -85,8 +85,8 @@ impl SkillCatalog {
         }
     }
 
-    /// Create a layered skill catalog. Skills are resolved workspace-first,
-    /// falling back to the global root when not found in the workspace.
+    /// Create a layered skill catalog. Skills use MergeByKey semantics:
+    /// workspace entries override same-named global defaults.
     pub fn layered(workspace_root: PathBuf, global_root: PathBuf) -> Self {
         Self {
             root: workspace_root,
@@ -99,9 +99,11 @@ impl SkillCatalog {
     }
 
     pub fn ensure_layout(&self) -> Result<(), OrbitError> {
-        fs::create_dir_all(&self.root).map_err(|e| OrbitError::Io(e.to_string()))?;
-        if let Some(ref global) = self.global_root {
-            fs::create_dir_all(global).map_err(|e| OrbitError::Io(e.to_string()))?;
+        if self.global_root.is_none() {
+            fs::create_dir_all(&self.root).map_err(|e| OrbitError::Io(e.to_string()))?;
+        }
+        if let Some(ref global_root) = self.global_root {
+            fs::create_dir_all(global_root).map_err(|e| OrbitError::Io(e.to_string()))?;
         }
         Ok(())
     }
@@ -146,8 +148,8 @@ impl SkillCatalog {
             ));
         }
 
-        // Skills use the WorkspaceReplaces strategy per `CLAUDE.md`: workspace
-        // wins if present, otherwise fall through to global.
+        // Skills use MergeByKey semantics: workspace wins for the named key,
+        // otherwise fall through to the global default.
         match resolve::<LoadedSkill, _>(self, skill_id)? {
             Some(skill) => Ok(skill),
             None => Err(OrbitError::SkillNotFound(skill_id.to_string())),
@@ -178,7 +180,7 @@ impl ScopedStore<LoadedSkill> for SkillCatalog {
     type Err = OrbitError;
 
     fn strategy(&self) -> ScopeStrategy {
-        ScopeStrategy::WorkspaceReplaces
+        ScopeStrategy::MergeByKey
     }
 
     fn get_workspace(&self, key: &str) -> Result<Option<LoadedSkill>, OrbitError> {
@@ -501,4 +503,60 @@ fn sha256_hex(bytes: &[u8]) -> String {
         output.push_str(&format!("{byte:02x}"));
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn layered_catalog_uses_merge_by_key_precedence() {
+        let workspace = tempdir().expect("workspace tempdir");
+        let global = tempdir().expect("global tempdir");
+
+        write_skill(global.path(), "orbit", "global skill");
+        write_skill(global.path(), "orbit-graph", "global graph");
+        write_skill(workspace.path(), "orbit", "workspace override");
+
+        let catalog =
+            SkillCatalog::layered(workspace.path().to_path_buf(), global.path().to_path_buf());
+
+        assert_eq!(catalog.strategy(), ScopeStrategy::MergeByKey);
+        assert_eq!(
+            catalog
+                .load("orbit")
+                .expect("load override")
+                .sections
+                .purpose,
+            "workspace override"
+        );
+        assert_eq!(
+            catalog
+                .load("orbit-graph")
+                .expect("load global fallback")
+                .sections
+                .purpose,
+            "global graph"
+        );
+
+        let ids = catalog
+            .list()
+            .expect("list skills")
+            .into_iter()
+            .map(|skill| skill.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["orbit", "orbit-graph"]);
+    }
+
+    fn write_skill(root: &Path, id: &str, purpose: &str) {
+        let dir = root.join(id);
+        fs::create_dir_all(&dir).expect("create skill dir");
+        fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {id}\ndescription: test skill\n---\n\n# Purpose\n\n{purpose}\n"),
+        )
+        .expect("write skill");
+    }
 }

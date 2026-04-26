@@ -85,7 +85,7 @@ git clone https://github.com/danieljhkim/orbit.git
 cd orbit
 make install
 
-# initialize global Orbit state (~/.orbit)
+# initialize global Orbit state (~/.orbit), global skills, and user-level skill links
 orbit init
 
 # initialize workspace-local Orbit state inside a repository
@@ -240,7 +240,7 @@ Orbit artifacts have two scopes: **global** (initialized via `orbit init`, under
 └── tasks/            # Durable task state
 ```
 
-Tasks, job runs, scoreboards, and run traces are workspace-local. Graph artifacts are workspace-local and branch-scoped. Activities, jobs, and policies merge global defaults with workspace overrides. Command audit events live globally in SQLite.
+Tasks, job runs, scoreboards, and run traces are workspace-local. Graph artifacts are workspace-local and branch-scoped. Activities, jobs, policies, and skills merge global defaults with workspace overrides. Default skills are initialized under `~/.orbit/skills` and linked into `~/.agents/skills` and `~/.claude/skills`. Command audit events live globally in SQLite.
 
 ### Filesystem guardrails
 

@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 
 /// Holds the resolved paths for all persistent artifact stores.
 ///
-/// - Tasks/Skills: workspace only
+/// - Tasks: workspace only
+/// - Skills: workspace override directory layered over global defaults
 /// - Activities/Jobs/Executors/Policies: global only
 /// - Audit: global only (single SQLite database)
 #[derive(Debug, Clone)]

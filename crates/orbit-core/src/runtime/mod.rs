@@ -2,9 +2,9 @@
 //!
 //! `OrbitRuntime` is initialized by locating two roots:
 //! 1. **Global root** — `~/.orbit/` (or `ORBIT_ROOT`): houses global config,
-//!    the audit SQLite database, and globally-scoped resources.
+//!    the audit SQLite database, skills, and globally-scoped resources.
 //! 2. **Workspace root** — the nearest ancestor `.orbit/` directory from cwd:
-//!    houses workspace-local tasks, knowledge, skills, and runtime state.
+//!    houses workspace-local tasks, knowledge, optional skill overrides, and runtime state.
 //!
 //! The `resolve` sub-module implements root discovery. The `builder` sub-module
 //! wires together stores, policy, tool registry, and event bus into a complete

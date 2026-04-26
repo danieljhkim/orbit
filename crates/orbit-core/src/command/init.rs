@@ -38,6 +38,8 @@ pub struct InitOptions {
     pub global_only: bool,
     /// Explicit global root to seed when preparing a workspace root.
     pub global_root_override: Option<PathBuf>,
+    /// When true, create/update user-level skill symlinks for global skills.
+    pub link_global_skills: bool,
 }
 
 impl OrbitRuntime {
@@ -88,6 +90,7 @@ pub fn init_global(
         &global_root,
         InitOptions {
             global_only: true,
+            link_global_skills: true,
             ..options
         },
     )
@@ -124,13 +127,17 @@ pub fn init_workspace_at_root(
     } else {
         prepare_workspace_root_layout(&orbit_root)?
     };
-    let skills_root = layout.skills_dir.clone();
+    let skills_root = if options.global_only {
+        global_skills_dir(&orbit_root)
+    } else {
+        layout.skills_dir.clone()
+    };
 
     let overwrite = options.force || options.refresh_defaults;
-    let refreshed_skill_files = if options.global_only {
-        0
-    } else {
+    let mut refreshed_skill_files = if options.global_only {
         seed_default_skills(&skills_root, &orbit_root, overwrite)?
+    } else {
+        0
     };
     let created_config = if options.global_only {
         let config_path = orbit_root.join("config.toml");
@@ -141,7 +148,7 @@ pub fn init_workspace_at_root(
 
     let skill_ids = default_skill_ids();
     let mut created_skills_symlink = false;
-    if !options.global_only {
+    if options.global_only && options.link_global_skills {
         for skills_links_root in &init_target.skills_links_roots {
             created_skills_symlink |=
                 ensure_skill_links(&skills_root, &skill_ids, skills_links_root, options.force)?;
@@ -180,9 +187,12 @@ pub fn init_workspace_at_root(
             InitOptions {
                 refresh_defaults: options.refresh_defaults,
                 global_only: true,
+                link_global_skills: options.link_global_skills || options.refresh_defaults,
                 ..Default::default()
             },
         )?;
+        refreshed_skill_files = global_result.refreshed_skill_files;
+        created_skills_symlink = global_result.created_skills_symlink;
         (
             global_result.refreshed_default_activities,
             global_result.refreshed_default_jobs,
@@ -207,6 +217,10 @@ pub fn init_workspace_at_root(
     })
 }
 
+pub(crate) fn global_skills_dir(global_root: &Path) -> PathBuf {
+    global_root.join("skills")
+}
+
 #[derive(Debug, Clone)]
 struct InitTarget {
     orbit_root: PathBuf,
@@ -215,14 +229,14 @@ struct InitTarget {
 
 fn resolve_init_target_from_root(orbit_root: &Path) -> InitTarget {
     let orbit_root = orbit_root.to_path_buf();
-    let skills_links_base = if let Some(repo_root) = find_git_repo_root(&orbit_root) {
-        repo_root
-    } else {
-        orbit_root
-            .parent()
-            .unwrap_or(orbit_root.as_path())
-            .to_path_buf()
-    };
+    let skills_links_base = crate::paths::home_dir()
+        .or_else(|| find_git_repo_root(&orbit_root))
+        .unwrap_or_else(|| {
+            orbit_root
+                .parent()
+                .unwrap_or(orbit_root.as_path())
+                .to_path_buf()
+        });
     let skills_links_roots = skill_link_roots(&skills_links_base);
 
     InitTarget {
@@ -285,7 +299,6 @@ fn prepare_global_root_layout(orbit_root: &Path) -> Result<WorkspacePaths, Orbit
 fn ensure_workspace_dirs(paths: &WorkspacePaths) -> Result<(), OrbitError> {
     for dir in [
         &paths.resources_dir,
-        &paths.skills_dir,
         &paths.state_dir,
         &paths.audit_dir,
         &paths.job_runs_dir,
@@ -307,6 +320,7 @@ fn ensure_global_dirs(paths: &WorkspacePaths) -> Result<(), OrbitError> {
         &paths.jobs_dir,
         &paths.executors_dir,
         &paths.policies_dir,
+        &global_skills_dir(&paths.orbit_dir),
     ] {
         fs::create_dir_all(dir).map_err(|e| OrbitError::Io(e.to_string()))?;
     }
@@ -422,10 +436,10 @@ pub struct UnlinkResult {
     pub cleaned_dirs: Vec<PathBuf>,
 }
 
-/// Re-create skill symlinks in `.agents/skills/` and `.claude/skills/`.
-pub fn link_skills(orbit_root: &Path) -> Result<LinkResult, OrbitError> {
-    let init_target = resolve_init_target_from_root(orbit_root);
-    let skills_root = orbit_layout_paths(&init_target.orbit_root).skills_dir;
+/// Re-create skill symlinks in `~/.agents/skills/` and `~/.claude/skills/`.
+pub fn link_skills(global_root: &Path) -> Result<LinkResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(global_root);
+    let skills_root = global_skills_dir(&init_target.orbit_root);
 
     if !skills_root.exists() {
         return Err(OrbitError::InvalidInput(format!(
@@ -452,10 +466,10 @@ pub fn link_skills(orbit_root: &Path) -> Result<LinkResult, OrbitError> {
     })
 }
 
-/// Remove skill symlinks from `.agents/skills/` and `.claude/skills/`.
+/// Remove skill symlinks from `~/.agents/skills/` and `~/.claude/skills/`.
 /// Only removes symlinks — regular files and directories are left intact.
-pub fn unlink_skills(orbit_root: &Path) -> Result<UnlinkResult, OrbitError> {
-    let init_target = resolve_init_target_from_root(orbit_root);
+pub fn unlink_skills(global_root: &Path) -> Result<UnlinkResult, OrbitError> {
+    let init_target = resolve_init_target_from_root(global_root);
     let mut removed_count = 0usize;
     let mut cleaned_dirs = Vec::new();
 
@@ -500,4 +514,124 @@ pub fn unlink_skills(orbit_root: &Path) -> Result<UnlinkResult, OrbitError> {
 fn dir_is_empty(path: &Path) -> Result<bool, OrbitError> {
     let mut entries = fs::read_dir(path).map_err(|e| OrbitError::Io(e.to_string()))?;
     Ok(entries.next().is_none())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use tempfile::tempdir;
+
+    use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn global_init_seeds_skills_and_home_level_links() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let home = tempdir().expect("home tempdir");
+        let previous_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let result = init_global(
+            None,
+            InitOptions {
+                refresh_defaults: true,
+                ..Default::default()
+            },
+        );
+
+        restore_home(previous_home);
+
+        let result = result.expect("init global");
+        assert_eq!(result.refreshed_skill_files, default_skill_ids().len());
+        assert!(result.created_skills_symlink);
+        assert!(
+            home.path()
+                .join(".orbit")
+                .join("skills")
+                .join("orbit")
+                .join("SKILL.md")
+                .exists()
+        );
+        assert!(
+            !home
+                .path()
+                .join(".orbit")
+                .join("resources")
+                .join("skills")
+                .join("orbit")
+                .join("SKILL.md")
+                .exists()
+        );
+        assert_skill_link_exists(home.path().join(".agents").join("skills").join("orbit"));
+        assert_skill_link_exists(home.path().join(".claude").join("skills").join("orbit"));
+    }
+
+    #[test]
+    fn workspace_init_leaves_repo_skills_unseeded() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let home = tempdir().expect("home tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        let previous_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let orbit_root = workspace.path().join(".orbit");
+        let result = init_workspace_at_root(
+            &orbit_root,
+            InitOptions {
+                refresh_defaults: true,
+                global_root_override: Some(home.path().join(".orbit")),
+                ..Default::default()
+            },
+        );
+
+        restore_home(previous_home);
+
+        let result = result.expect("init workspace");
+        assert_eq!(result.refreshed_skill_files, default_skill_ids().len());
+        assert!(result.created_skills_symlink);
+        assert!(
+            !orbit_root
+                .join("resources")
+                .join("skills")
+                .join("orbit")
+                .join("SKILL.md")
+                .exists()
+        );
+        assert!(
+            home.path()
+                .join(".orbit")
+                .join("skills")
+                .join("orbit")
+                .join("SKILL.md")
+                .exists()
+        );
+        assert_skill_link_exists(home.path().join(".claude").join("skills").join("orbit"));
+    }
+
+    fn assert_skill_link_exists(path: PathBuf) {
+        let metadata = fs::symlink_metadata(&path).expect("link metadata");
+        assert!(
+            metadata.file_type().is_symlink(),
+            "expected {} to be a symlink",
+            path.display()
+        );
+        assert!(path.join("SKILL.md").exists());
+    }
+
+    fn restore_home(previous_home: Option<std::ffi::OsString>) {
+        match previous_home {
+            Some(value) => unsafe {
+                std::env::set_var("HOME", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOME");
+            },
+        }
+    }
 }

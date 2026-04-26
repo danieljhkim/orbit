@@ -14,6 +14,7 @@ use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 
 use crate::OrbitContext;
+use crate::command::init::global_skills_dir;
 use crate::command::policy::seed_default_policies;
 use crate::config::RuntimeConfig;
 use crate::context::{
@@ -28,7 +29,8 @@ pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitCont
 }
 
 /// Two-root builder. Global root provides activities, jobs, executors, policies,
-/// config, and SQLite. Workspace root provides tasks, skills, and runtime state.
+/// config, global skills, and SQLite. Workspace root provides tasks,
+/// optional skill overrides, and runtime state.
 pub(crate) fn build_context_from_roots(
     global_root: &Path,
     workspace_root: &Path,
@@ -73,7 +75,10 @@ pub(crate) fn build_context_from_roots(
             ))
         })?;
 
-    let skill_catalog = SkillCatalog::new(persistence.skill_dir.clone());
+    let skill_catalog = SkillCatalog::layered(
+        persistence.skill_dir.clone(),
+        global_skills_dir(global_root),
+    );
     skill_catalog.ensure_layout()?;
 
     let mut registry = ToolRegistry::new();

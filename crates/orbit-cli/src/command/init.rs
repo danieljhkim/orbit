@@ -103,12 +103,12 @@ struct ReportedInitPaths {
 fn reported_init_paths(root_override: Option<&Path>) -> ReportedInitPaths {
     if root_override.is_some_and(|path| !is_global_orbit_root(path)) {
         ReportedInitPaths {
-            skills_root: "<custom orbit root>/resources/skills",
+            skills_root: "<custom orbit root>/skills",
             config_path: "<custom orbit root>/config.toml",
         }
     } else {
         ReportedInitPaths {
-            skills_root: "~/.orbit/resources/skills",
+            skills_root: "~/.orbit/skills",
             config_path: "~/.orbit/config.toml",
         }
     }

@@ -28,11 +28,8 @@ pub enum ScopeStrategy {
     /// Workspace layer only; global is ignored. Used for tasks and job runs.
     WorkspaceOnly,
     /// Global provides defaults; workspace entries with matching keys
-    /// override. Used for activities and jobs.
+    /// override. Used for activities, jobs, and skills.
     MergeByKey,
-    /// Workspace wins if a named entry exists; otherwise fall through to
-    /// global. Used for skills.
-    WorkspaceReplaces,
     /// Single authoritative layer (global); workspace is ignored. Used for
     /// the audit trail.
     GlobalOnly,
@@ -61,7 +58,7 @@ pub fn resolve<T, S: ScopedStore<T>>(store: &S, key: &str) -> Result<Option<T>, 
     match store.strategy() {
         ScopeStrategy::WorkspaceOnly => store.get_workspace(key),
         ScopeStrategy::GlobalOnly => store.get_global(key),
-        ScopeStrategy::WorkspaceReplaces | ScopeStrategy::MergeByKey => {
+        ScopeStrategy::MergeByKey => {
             // Workspace entries with matching keys override global defaults.
             // Callers that need a full merged listing (e.g. `list_all`) walk
             // both layers separately — resolve() is for single-key lookups.

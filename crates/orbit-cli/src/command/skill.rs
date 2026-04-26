@@ -28,9 +28,9 @@ pub enum SkillSubcommand {
     Show(SkillShowArgs),
     /// Validate skill health and configuration
     Doctor(SkillDoctorArgs),
-    /// Re-create skill symlinks in .agents/skills/ and .claude/skills/
+    /// Re-create skill symlinks in ~/.agents/skills/ and ~/.claude/skills/
     Link(SkillLinkArgs),
-    /// Remove skill symlinks from .agents/skills/ and .claude/skills/
+    /// Remove skill symlinks from ~/.agents/skills/ and ~/.claude/skills/
     Unlink(SkillUnlinkArgs),
 }
 
@@ -166,7 +166,7 @@ pub struct SkillLinkArgs {
 
 impl Execute for SkillLinkArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = orbit_core::command::init::link_skills(&runtime.data_root())?;
+        let result = orbit_core::command::init::link_skills(&runtime.global_root())?;
         if self.json {
             crate::output::json::print_pretty(&link_result_json(&result))
         } else {
@@ -191,7 +191,7 @@ pub struct SkillUnlinkArgs {
 
 impl Execute for SkillUnlinkArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = orbit_core::command::init::unlink_skills(&runtime.data_root())?;
+        let result = orbit_core::command::init::unlink_skills(&runtime.global_root())?;
         if self.json {
             crate::output::json::print_pretty(&unlink_result_json(&result))
         } else {

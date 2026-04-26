@@ -15,10 +15,10 @@ Orbit uses these scope strategies:
 | Activities and jobs | MergeByKey |
 | Policies | MergeByKey |
 | Job runs | WorkspaceOnly |
-| Skills | WorkspaceReplaces |
+| Skills | MergeByKey |
 | Audit | GlobalOnly |
 
-Use workspace-local state for work tied to a repository. Use global state only for shared defaults and the audit trail.
+Use workspace-local state for work tied to a repository. Use global state for shared defaults and the audit trail; skills use global defaults with optional workspace overrides by skill name.
 
 ## Filesystem Scope
 

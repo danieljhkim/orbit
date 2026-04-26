@@ -9,7 +9,7 @@ sidebar:
 
 | Command | Purpose |
 |---------|---------|
-| `orbit init` | Initialize the global Orbit root. |
+| `orbit init` | Initialize the global Orbit root, skills, and skill links. |
 | `orbit workspace` | Initialize and manage workspaces. |
 | `orbit config` | Show or update Orbit configuration. |
 
