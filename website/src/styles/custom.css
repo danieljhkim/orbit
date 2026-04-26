@@ -151,28 +151,67 @@ body {
   border-inline-start-color: var(--sl-color-accent);
 }
 
+/* Hide the auto-rendered Starlight title on the homepage so the canon hero
+   is the entrance to the page. Targets the title's content-panel only when
+   it is immediately followed by a panel containing .orbit-hero. */
+.content-panel:has(+ .content-panel .orbit-hero) {
+  display: none;
+}
+
 .orbit-hero {
   align-items: center;
   display: grid;
-  gap: 2rem;
-  grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
-  margin: 1.2rem 0 2rem;
+  gap: 2.5rem;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  margin: 0.5rem 0 4rem;
 }
 
-.orbit-hero-copy p {
+.orbit-hero-eyebrow {
+  color: var(--sl-color-text-accent);
+  font-family: var(--sl-font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+}
+
+.orbit-hero-headline {
+  color: var(--sl-color-white);
+  font-size: 2.75rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.05;
+  margin: 0 0 1rem;
+}
+
+.orbit-hero-lede {
   color: var(--sl-color-gray-2);
-  font-size: 1.05rem;
-  line-height: 1.7;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin: 0 0 1.5rem;
+  max-width: 32rem;
 }
 
 .orbit-hero-install {
+  align-items: center;
   background: var(--sl-color-bg-inline-code);
   border: 1px solid var(--sl-color-hairline-light);
   border-radius: 8px;
+  display: flex;
+  font-family: var(--sl-font-mono);
   font-size: 0.88rem;
-  margin: 1rem 0 0;
-  overflow-x: auto;
+  gap: 0.6rem;
+  margin: 0 0 1.25rem;
   padding: 0.7rem 0.9rem;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.orbit-hero-install-prompt {
+  color: var(--sl-color-gray-4);
+  flex: 0 0 auto;
 }
 
 .orbit-hero-install code {
@@ -181,6 +220,24 @@ body {
   color: var(--sl-color-text);
   font-family: var(--sl-font-mono);
   padding: 0;
+  white-space: nowrap;
+}
+
+.orbit-hero-install-copy {
+  background: transparent;
+  border: 0;
+  color: var(--sl-color-gray-4);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  margin-left: 1rem;
+  padding: 0;
+  flex: 0 0 auto;
+  transition: color 120ms ease;
+}
+
+.orbit-hero-install-copy:hover {
+  color: var(--sl-color-text-accent);
 }
 
 .orbit-hero-actions {
@@ -287,21 +344,64 @@ body {
   width: 0.55rem;
 }
 
+.orbit-section-title {
+  align-items: center;
+  color: var(--sl-color-gray-4);
+  display: flex;
+  font-size: 0.78rem;
+  font-weight: 600;
+  gap: 0.75rem;
+  letter-spacing: 0.1em;
+  margin: 3rem 0 1.25rem;
+  text-transform: uppercase;
+}
+
+.orbit-section-title::after {
+  background: var(--sl-color-hairline-light);
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
 .orbit-card-grid {
   display: grid;
-  gap: 0.8rem;
+  gap: 1rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 1.25rem 0 2rem;
+  margin: 0 0 2rem;
 }
 
 .orbit-card {
+  background: var(--sl-color-bg-inline-code);
   border: 1px solid var(--sl-color-hairline-light);
   border-radius: 8px;
   color: var(--sl-color-text);
   display: block;
-  padding: 1rem;
+  padding: 1.25rem;
+  position: relative;
   text-decoration: none;
   transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.orbit-card[data-tag]::before {
+  color: var(--sl-color-text-accent);
+  content: attr(data-tag);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  position: absolute;
+  right: 1.25rem;
+  top: 1.25rem;
+}
+
+.orbit-card-icon {
+  align-items: center;
+  color: var(--sl-color-text-accent);
+  display: flex;
+  height: 36px;
+  justify-content: flex-start;
+  margin-bottom: 0.75rem;
+  width: 36px;
 }
 
 .orbit-card:hover,
@@ -317,7 +417,9 @@ body {
 }
 
 .orbit-card h3 {
+  font-family: var(--sl-font);
   font-size: 1rem;
+  font-weight: 650;
   margin: 0 0 0.35rem;
   transition: color 120ms ease;
 }
@@ -325,7 +427,41 @@ body {
 .orbit-card p {
   color: var(--sl-color-gray-3);
   font-size: 0.92rem;
+  line-height: 1.5;
   margin: 0;
+}
+
+.orbit-design-notes {
+  align-items: stretch;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 2rem;
+}
+
+.orbit-design-note {
+  background: var(--sl-color-bg-inline-code);
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 1rem;
+}
+
+.orbit-design-note-key {
+  color: var(--sl-color-text-accent);
+  font-family: var(--sl-font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.orbit-design-note-value {
+  color: var(--sl-color-gray-3);
+  font-size: 0.92rem;
+  line-height: 1.55;
 }
 
 .orbit-footer {
@@ -388,11 +524,19 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .orbit-hero-headline {
+    font-size: 2.2rem;
+  }
+
   .orbit-hero-diagram {
     display: none;
   }
 
   .orbit-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .orbit-design-notes {
     grid-template-columns: 1fr;
   }
 }

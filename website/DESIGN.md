@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** daniel
-**Last updated:** 2026-04-23
+**Last updated:** 2026-04-26
 
 ---
 
@@ -86,6 +86,19 @@ Three-column, fixed:
 - Content column: max-width ~720px, measure 65–75ch for prose.
 - Right rail: sticky "On this page" TOC. Muted until the corresponding section is in view.
 - Top bar: logo, search, GitHub, theme toggle. Nothing else.
+
+### 3.5 Landing page
+
+The homepage uses an in-content hero in place of Starlight's auto-rendered title (which is hidden via a scoped CSS rule on the homepage only):
+
+- **Eyebrow** — mono uppercase tag (`v0.4 · early access`).
+- **Headline** — 2.75rem display heading. The only heading on the site that exceeds the body type scale.
+- **Lede + install bar + primary/secondary CTAs.** Install bar carries a `$` prompt and a Copy action.
+- **Orbit diagram** — single rotating ring in the hero column. Respects `prefers-reduced-motion`.
+
+Below the hero: a **Start here** 6-card grid (each card carries a mono numbered tag `01`–`06` and a thin SVG glyph — the only place glyphs appear in content) and a **Why Orbit** 2-column value-prop strip whose columns align to the card grid above. Mono uppercase keys, plain prose values.
+
+Other pages keep Starlight's default chrome (auto title, sidebar, TOC) unchanged.
 
 ---
 
