@@ -29,13 +29,18 @@ for (const file of await collectMarkdown(sourceRoot)) {
   const pageBody = rewriteMarkdownLinks(stripDesignMetadata(body), relative);
   const description = summarize(pageBody, title);
   const order = orderByFile.get(path.basename(relative));
+  const sidebarLabel = sidebarLabelFor(relative);
   const sourcePath = path.posix.join('docs/design', toPosix(relative));
+  const sidebarLines = [];
+  if (sidebarLabel || order) sidebarLines.push('sidebar:');
+  if (sidebarLabel) sidebarLines.push(`  label: ${JSON.stringify(sidebarLabel)}`);
+  if (order) sidebarLines.push(`  order: ${order}`);
   const frontmatter = [
     '---',
     `title: ${JSON.stringify(title)}`,
     `description: ${JSON.stringify(description)}`,
     `editUrl: ${JSON.stringify(editBaseUrl + sourcePath)}`,
-    ...(order ? [`sidebar:`, `  order: ${order}`] : []),
+    ...sidebarLines,
     '---',
     '',
   ].join('\n');
@@ -123,6 +128,16 @@ function summarize(body, title) {
     .slice(0, 156)
     .replace(/\s+\S*$/, '')
     .trim();
+}
+
+function sidebarLabelFor(relative) {
+  const base = path.basename(relative, '.md');
+  if (base.toLowerCase() === 'readme') return null;
+  const stripped = base.replace(/^\d+_/, '');
+  if (!stripped) return null;
+  return stripped
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function titleFromPath(relative) {

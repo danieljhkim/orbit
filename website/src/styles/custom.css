@@ -79,7 +79,7 @@ body {
 }
 
 .sl-markdown-content h2 {
-  border-top: 1px solid var(--sl-color-hairline-light);
+  border-top: 0px solid var(--sl-color-hairline-light);
   margin-top: 5rem;
   padding-top: 2rem;
   position: relative;
@@ -389,7 +389,7 @@ body {
   }
 
   .orbit-hero-diagram {
-    max-width: 16rem;
+    display: none;
   }
 
   .orbit-card-grid {
