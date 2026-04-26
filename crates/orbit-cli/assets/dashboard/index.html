@@ -10,16 +10,16 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
       :root {
-        --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+        --font-sans: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
         --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
         
-        --bg: #09090b; /* zinc-950 */
-        --bg-elev: #18181b; /* zinc-900 */
-        --border: #27272a; /* zinc-800 */
-        --fg: #fafafa; /* zinc-50 */
-        --fg-dim: #a1a1aa; /* zinc-400 */
-        --accent: #3b82f6; /* blue-500 */
-        --accent-hover: #60a5fa; /* blue-400 */
+        --bg: #000000;
+        --bg-elev: #0a0a0a;
+        --border: #333333;
+        --fg: #dcdcdc;
+        --fg-dim: #71717a;
+        --accent: #f59e0b; /* amber-500 */
+        --accent-hover: #fbbf24; /* amber-400 */
         
         --status-proposed: #f59e0b; /* amber-500 */
         --status-backlog: #71717a; /* zinc-500 */
@@ -59,14 +59,7 @@
         overflow-x: hidden;
       }
       
-      body::before {
-        content: "";
-        position: fixed;
-        top: 0; left: 0; right: 0; height: 300px;
-        background: radial-gradient(100% 100% at 50% 0%, rgba(59, 130, 246, 0.08) 0%, rgba(0, 0, 0, 0) 100%);
-        pointer-events: none;
-        z-index: -1;
-      }
+
 
       .mono { font-family: var(--font-mono); }
 
@@ -77,9 +70,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        background: rgba(9, 9, 11, 0.7);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
+        background: #000000;
         position: sticky;
         top: 0;
         z-index: 100;
@@ -107,8 +98,8 @@
         min-width: 74px;
         height: 30px;
         border: 1px solid var(--border);
-        border-radius: 6px;
-        background: rgba(255, 255, 255, 0.03);
+        border-radius: 2px;
+        background: var(--bg-elev);
         color: var(--fg);
         font: inherit;
         font-family: var(--font-sans);
@@ -150,8 +141,7 @@
       .panel {
         background: var(--bg-elev);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        border-radius: 2px;
         overflow: hidden;
       }
       
@@ -172,9 +162,9 @@
       
       .panel > header .count {
         color: var(--fg);
-        background: var(--border);
+        background: var(--bg);
         padding: 2px 8px;
-        border-radius: 12px;
+        border-radius: 2px;
         font-family: var(--font-mono);
         font-size: 11px;
         letter-spacing: 0;
@@ -206,7 +196,7 @@
         background: var(--bg);
         color: var(--fg);
         border: 1px solid var(--border);
-        border-radius: 6px;
+        border-radius: 2px;
         padding: 6px 12px;
         font: inherit;
         font-size: 13px;
@@ -216,7 +206,6 @@
       
       #task-search:focus {
         border-color: var(--accent);
-        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
       }
       
       #task-filter {
@@ -231,11 +220,11 @@
         font-size: 11px;
         padding: 4px 10px;
         border: 1px solid var(--border);
-        border-radius: 16px;
-        background: transparent;
+        border-radius: 2px;
+        background: var(--bg-elev);
         color: var(--fg-dim);
         cursor: pointer;
-        text-transform: lowercase;
+        text-transform: uppercase;
         transition: all 0.2s ease;
       }
       
@@ -248,7 +237,7 @@
       .chip.active {
         color: var(--fg);
         border-color: var(--accent);
-        background: rgba(59, 130, 246, 0.1);
+        background: rgba(245, 158, 11, 0.1);
       }
       
       .empty-state {
@@ -314,12 +303,12 @@
         grid-template-columns: 130px 1fr 80px 80px;
         gap: 12px;
         padding: 8px 16px;
-        margin: 2px 8px;
-        border-radius: 6px;
+        margin: 0;
+        border-radius: 0;
         align-items: baseline;
         cursor: pointer;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        border: 1px solid transparent;
+        border-bottom: 1px solid var(--border);
       }
       
       .row:hover { 
@@ -328,26 +317,24 @@
       }
       
       .row.expanded {
-        background: rgba(59, 130, 246, 0.05);
-        border-color: rgba(59, 130, 246, 0.2);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        background: rgba(245, 158, 11, 0.05);
+        border-color: var(--border);
       }
       
       .row .id { color: var(--fg-dim); font-size: 12px; transition: color 0.1s ease; }
       .row .id:hover { color: var(--accent); cursor: copy; }
-      .row .title { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+      .row .title { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 13px; }
       .row .priority, .row .type { font-size: 12px; color: var(--fg-dim); text-align: right; }
       
       .row-detail {
         padding: 16px 20px;
-        background: rgba(0, 0, 0, 0.2);
-        border-radius: 6px;
-        margin: 4px 8px 12px;
+        background: #050505;
+        border-radius: 0;
+        margin: 0;
         display: grid;
         gap: 16px;
         font-size: 13px;
-        border: 1px solid var(--border);
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-bottom: 1px solid var(--border);
         animation: fadeIn 0.3s ease;
       }
       
@@ -379,10 +366,9 @@
       .field-block {
         margin-bottom: 20px;
         padding: 16px 20px;
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 2px;
       }
       .field-block:last-child {
         margin-bottom: 0;
@@ -400,10 +386,10 @@
       }
       
       .markdown-body {
-        color: var(--fg);
+        color: #cecece;
         line-height: 1.6;
         font-family: var(--font-sans);
-        font-size: 13px;
+        font-size: 12px;
         word-break: break-word;
       }
       .markdown-body p { margin-top: 0; margin-bottom: 12px; }
@@ -595,11 +581,11 @@
         display: inline-flex;
         align-items: center;
         padding: 2px 8px;
-        border-radius: 12px;
+        border-radius: 2px;
         font-size: 11px;
         font-family: var(--font-mono);
         font-weight: 500;
-        background: rgba(255, 255, 255, 0.05);
+        background: var(--border);
       }
       
       .runs-row {
@@ -636,9 +622,7 @@
         gap: 8px;
         padding: 0 24px;
         border-bottom: 1px solid var(--border);
-        background: rgba(9, 9, 11, 0.7);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
+        background: #000000;
         position: sticky;
         top: 61px; /* Just below header */
         z-index: 90;
@@ -685,7 +669,7 @@
       table.scoreboard-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 13px;
+        font-size: 12px;
       }
       
       table.scoreboard-table th,
@@ -730,7 +714,7 @@
         gap: 4px;
         padding: 8px 16px;
         border-bottom: 1px solid var(--border);
-        background: rgba(24, 24, 27, 0.5);
+        background: #000000;
         position: relative;
       }
       
@@ -739,7 +723,7 @@
         color: var(--fg-dim);
         border: none;
         padding: 6px 12px;
-        border-radius: 4px;
+        border-radius: 2px;
         cursor: pointer;
         font: inherit;
         font-size: 12px;
@@ -751,7 +735,7 @@
       
       .subtab.active {
         color: var(--fg);
-        background: rgba(59, 130, 246, 0.15);
+        background: rgba(245, 158, 11, 0.15);
         color: var(--accent-hover);
       }
       
