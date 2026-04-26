@@ -7,9 +7,9 @@ spec:
   description: >
     Fold the orchestrator's final `state` snapshot into an audit-grade
     summary (counts + unfinished ids + one-line status message). Pure
-    aggregation — no I/O, no side effects. The orchestrator already
-    persists decision history in `orbit.state.*`; this step only
-    computes summary counters for the Run's `pipeline` output.
+    aggregation — no I/O, no side effects. The workflow obtains `state`
+    from deterministic task refresh output, not from the orchestrator's
+    final response.
   input_schema_json:
     type: object
     required: [state]

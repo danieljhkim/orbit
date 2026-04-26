@@ -9,22 +9,22 @@
 #
 # Cycle semantics
 # - `orchestrate_loop` wraps the `epic_orchestrator` activity. Each
-#   iteration is one cycle: read state, decide READY, dispatch bundles,
-#   wait, persist.
+#   iteration is one cycle: refresh task state, decide READY, dispatch
+#   bundles, wait, then refresh task state again.
 # - The inner step declares `session: epic_session`, so the agent's
 #   conversation history persists across iterations (executor session
 #   map, job_v2.rs TargetStep.session). The orchestrator can therefore
 #   reference its own prior reasoning.
-# - `break_when: "{{ steps.orchestrator_iter.output.all_terminal }} == true"`
-#   keys off the flag the agent emits in its final JSON turn each cycle.
+# - `break_when: "{{ steps.refresh_epic.output.all_terminal }} == true"`
+#   keys off deterministic task state, not the agent's final response.
 # - `max_iterations: 20` is the structural ceiling on cycles — a
 #   literal because `LoopBlock.max_iterations` is `u32` (not templated).
 #   Callers who need a different ceiling must fork this YAML.
 #
 # Output
-# - `orchestrator_iter.output.final_state` persists the last iteration's
-#   snapshot (loop semantics: last write wins on shared pipeline Arc),
-#   which the `summarize` step folds into pipeline-level counters.
+# - `refresh_epic.output.final_state` captures the last deterministic task
+#   snapshot (loop semantics: last write wins on shared pipeline Arc), which
+#   the `summarize` step folds into pipeline-level counters.
 #
 # Auditability (AC 9, 11)
 # - Per-iteration agent prompt, response, and tool-call envelope are
@@ -56,18 +56,28 @@ spec:
     - id: orchestrate_loop
       loop:
         max_iterations: 20
-        break_when: "{{ steps.orchestrator_iter.output.all_terminal }} == true"
+        break_when: "{{ steps.refresh_epic.output.all_terminal }} == true"
         steps:
+          - id: current_epic
+            target: activity:load_epic
+            default_input:
+              epic_task_id: "{{ input.epic_task_id }}"
+
           - id: orchestrator_iter
             session: epic_session
             target: activity:epic_orchestrator
             default_input:
-              epic: "{{ steps.load_epic.output.epic }}"
-              subtasks: "{{ steps.load_epic.output.subtasks }}"
+              epic: "{{ steps.current_epic.output.epic }}"
+              subtasks: "{{ steps.current_epic.output.subtasks }}"
               max_parallel_bundles: "{{ input.max_parallel_bundles }}"
               mode: "{{ input.mode }}"
+
+          - id: refresh_epic
+            target: activity:load_epic
+            default_input:
+              epic_task_id: "{{ input.epic_task_id }}"
 
     - id: summarize
       target: activity:summarize_epic
       default_input:
-        state: "{{ steps.orchestrator_iter.output.final_state }}"
+        state: "{{ steps.refresh_epic.output.final_state }}"

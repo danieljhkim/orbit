@@ -66,8 +66,8 @@ impl V2RuntimeHost for OrbitRuntime {
                         message: format!("{err}"),
                     })
             }
-            "git_merge" | "git_push" | "pr_open" | "run_planning_duel" | "update_task"
-            | "worktree_setup" => execute_deterministic_action(
+            "git_commit" | "git_merge" | "git_push" | "pr_open" | "run_planning_duel"
+            | "update_task" | "worktree_setup" => execute_deterministic_action(
                 self,
                 action,
                 input,
@@ -257,6 +257,8 @@ impl V2RuntimeHost for OrbitRuntime {
                 };
                 tasks.truncate(max_tasks);
                 let ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
+                let bundles: Vec<Vec<String>> =
+                    ids.iter().map(|task_id| vec![task_id.clone()]).collect();
                 let task_objs: Vec<Value> = tasks
                     .iter()
                     .map(|t| {
@@ -274,6 +276,7 @@ impl V2RuntimeHost for OrbitRuntime {
                     "task_count": task_objs.len(),
                     "task_ids": ids,
                     "tasks": task_objs,
+                    "bundles": bundles,
                 }))
             }
             // Materialize an epic's working set for the orchestrator:
@@ -310,7 +313,24 @@ impl V2RuntimeHost for OrbitRuntime {
                         action: action.to_string(),
                         message: format!("list subtasks of {epic_id}: {err}"),
                     })?;
-                let subtask_payload: Vec<Value> = subtasks
+                let final_subtasks = subtasks
+                    .iter()
+                    .map(|t| {
+                        (
+                            t.id.clone(),
+                            serde_json::json!({
+                                "state": epic_state_for_task_status(t.status),
+                                "status": t.status.to_string(),
+                                "title": t.title,
+                            }),
+                        )
+                    })
+                    .collect::<serde_json::Map<String, Value>>();
+                let open_subtasks = subtasks
+                    .iter()
+                    .filter(|task| !is_epic_terminal_status(task.status))
+                    .collect::<Vec<_>>();
+                let subtask_payload: Vec<Value> = open_subtasks
                     .iter()
                     .filter(|t| !matches!(t.status, TaskStatus::Done | TaskStatus::Archived))
                     .map(|t| {
@@ -333,12 +353,16 @@ impl V2RuntimeHost for OrbitRuntime {
                         "status": epic.status.to_string(),
                     },
                     "subtasks": subtask_payload,
+                    "all_terminal": open_subtasks.is_empty(),
+                    "final_state": {
+                        "epic_id": epic.id.clone(),
+                        "subtasks": final_subtasks,
+                    },
                 }))
             }
-            // Fold the orchestrator's final state snapshot into counters
+            // Fold the deterministic final task-state snapshot into counters
             // + a human-readable one-liner. Pure aggregation — the
-            // decision history already lives in `orbit.state` per the
-            // role prompt.
+            // orchestrator's final response is audit-only.
             "summarize_epic" => {
                 let state = input.get("state").cloned().unwrap_or(Value::Null);
                 let subtasks_map = state
@@ -794,6 +818,22 @@ fn active_task_lock_files<'a>(tasks: impl IntoIterator<Item = &'a Task>) -> BTre
         }
     }
     locked_files
+}
+
+fn is_epic_terminal_status(status: TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Done | TaskStatus::Blocked | TaskStatus::Archived | TaskStatus::Rejected
+    )
+}
+
+fn epic_state_for_task_status(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Done | TaskStatus::Archived => "done",
+        TaskStatus::Blocked | TaskStatus::Rejected => "blocked",
+        TaskStatus::InProgress | TaskStatus::Review => "in_flight",
+        TaskStatus::Proposed | TaskStatus::Backlog | TaskStatus::Someday => "pending",
+    }
 }
 
 fn task_overlaps_locked_files(task: &Task, locked_files: &BTreeSet<String>) -> bool {

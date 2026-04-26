@@ -5,11 +5,10 @@ metadata:
 spec:
   type: agent_loop
   description: >
-    Group a backlog of tasks into admission-safe bundles for the
-    auto-pipeline. Judgment-grade decision captured in the prompt /
-    response audit trail (§7 HTTP envelope). Deterministic gate
-    (`task_gate_pipeline`) handles the wait-and-reserve; this step
-    only decides bundle SHAPE.
+    Provide advisory backlog-grouping notes for the auto-pipeline. The
+    workflow no longer consumes this activity's final response as data;
+    deterministic singleton bundles from `list_backlog_tasks` drive
+    dispatch so malformed agent text cannot fail the job.
   input_schema_json:
     type: object
     required: [tasks, max_bundle_size]
@@ -24,7 +23,6 @@ spec:
         maximum: 20
   output_schema_json:
     type: object
-    required: [bundles, reasoning]
     properties:
       bundles:
         type: array
@@ -77,22 +75,11 @@ spec:
        task earlier in the `bundles` array so the fan_out starts the
        hot work first.
 
-    # Output shape (strict JSON, validated downstream)
+    # Audit note
 
-    ```json
-    {
-      "bundles": [
-        ["T20260401-0001", "T20260401-0002"],
-        ["T20260402-0003"]
-      ],
-      "reasoning": "Bundle 1: both touch crates/auth/. Bundle 2: unrelated; modifies crates/storage/."
-    }
-    ```
-
-    Every task_id in `bundles` must appear in the input `tasks` array.
-    No task_id may appear in more than one bundle. The `reasoning` field
-    is for the audit trail — one sentence per bundle, naming the shared
-    context files or the reason for isolation.
+    Your final response is audit-only. Prefer concise JSON with `bundles`
+    and `reasoning` when convenient, but the workflow does not consume it
+    and downstream dispatch must not depend on it.
   tools:
     - orbit.task.show
   on_denial: terminate

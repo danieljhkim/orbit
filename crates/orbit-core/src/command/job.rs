@@ -348,8 +348,12 @@ pub(crate) fn seed_default_jobs(jobs_dir: &Path, overwrite: bool) -> Result<usiz
 mod tests {
     use super::*;
 
-    use orbit_common::types::JobV2StepBody;
+    use orbit_common::types::{ActivityV2Spec, JobV2Step, JobV2StepBody, load_activity_asset};
+    use serde_json::Value;
+    use std::collections::BTreeSet;
     use tempfile::tempdir;
+
+    use crate::command::activity::DEFAULT_ACTIVITY_FILES;
 
     fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
         let root = tempdir().expect("create tempdir");
@@ -471,6 +475,45 @@ spec:
     }
 
     #[test]
+    fn default_jobs_do_not_template_agent_loop_outputs() {
+        let agent_activity_names = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .filter_map(|(name, yaml)| {
+                let asset = load_activity_asset(yaml).ok()?;
+                matches!(asset.spec.spec, ActivityV2Spec::AgentLoop(_)).then_some(*name)
+            })
+            .collect::<BTreeSet<_>>();
+
+        for (job_name, yaml) in DEFAULT_JOB_FILES {
+            let asset = load_job_asset(yaml)
+                .unwrap_or_else(|err| panic!("default job {job_name} should parse: {err}"));
+            let mut agent_step_ids = BTreeSet::new();
+            for step in &asset.spec.steps {
+                collect_agent_loop_step_ids(step, &agent_activity_names, &mut agent_step_ids);
+            }
+
+            if agent_step_ids.is_empty() {
+                continue;
+            }
+
+            let mut template_strings = Vec::new();
+            for step in &asset.spec.steps {
+                collect_template_strings(step, &mut template_strings);
+            }
+
+            for agent_step_id in agent_step_ids {
+                let forbidden = format!("steps.{agent_step_id}.output");
+                for template in &template_strings {
+                    assert!(
+                        !template.contains(&forbidden),
+                        "default job {job_name} templates from agent_loop output: {template}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn default_job_conditions_keep_comparisons_outside_template_tokens() {
         for (name, yaml) in DEFAULT_JOB_FILES {
             let asset = load_job_asset(yaml).unwrap_or_else(|err| {
@@ -479,6 +522,92 @@ spec:
             for step in &asset.spec.steps {
                 assert_step_condition_tokens_are_paths(step);
             }
+        }
+    }
+
+    fn collect_agent_loop_step_ids<'a>(
+        step: &'a JobV2Step,
+        agent_activity_names: &BTreeSet<&str>,
+        out: &mut BTreeSet<&'a str>,
+    ) {
+        match &step.body {
+            JobV2StepBody::TargetRef(target) => {
+                if let Some(activity_name) = target.target.strip_prefix("activity:")
+                    && agent_activity_names.contains(activity_name)
+                {
+                    out.insert(step.id.as_str());
+                }
+            }
+            JobV2StepBody::Target(target) => {
+                if matches!(target.spec, ActivityV2Spec::AgentLoop(_)) {
+                    out.insert(step.id.as_str());
+                }
+            }
+            JobV2StepBody::Parallel { parallel } => {
+                for child in &parallel.branches {
+                    collect_agent_loop_step_ids(child, agent_activity_names, out);
+                }
+            }
+            JobV2StepBody::FanOut { fan_out, .. } => {
+                collect_agent_loop_step_ids(&fan_out.worker, agent_activity_names, out);
+            }
+            JobV2StepBody::Loop { loop_ } => {
+                for child in &loop_.steps {
+                    collect_agent_loop_step_ids(child, agent_activity_names, out);
+                }
+            }
+        }
+    }
+
+    fn collect_template_strings<'a>(step: &'a JobV2Step, out: &mut Vec<&'a str>) {
+        if let Some(when) = &step.when {
+            out.push(when);
+        }
+
+        match &step.body {
+            JobV2StepBody::TargetRef(target) => {
+                collect_value_strings(target.default_input.as_ref(), out);
+            }
+            JobV2StepBody::Target(target) => {
+                collect_value_strings(target.default_input.as_ref(), out);
+            }
+            JobV2StepBody::Parallel { parallel } => {
+                for child in &parallel.branches {
+                    collect_template_strings(child, out);
+                }
+            }
+            JobV2StepBody::FanOut { fan_out, .. } => {
+                out.push(&fan_out.items);
+                collect_template_strings(&fan_out.worker, out);
+            }
+            JobV2StepBody::Loop { loop_ } => {
+                if let Some(items) = &loop_.items {
+                    out.push(items);
+                }
+                if let Some(break_when) = &loop_.break_when {
+                    out.push(break_when);
+                }
+                for child in &loop_.steps {
+                    collect_template_strings(child, out);
+                }
+            }
+        }
+    }
+
+    fn collect_value_strings<'a>(value: Option<&'a Value>, out: &mut Vec<&'a str>) {
+        match value {
+            Some(Value::String(text)) => out.push(text),
+            Some(Value::Array(items)) => {
+                for item in items {
+                    collect_value_strings(Some(item), out);
+                }
+            }
+            Some(Value::Object(map)) => {
+                for item in map.values() {
+                    collect_value_strings(Some(item), out);
+                }
+            }
+            _ => {}
         }
     }
 

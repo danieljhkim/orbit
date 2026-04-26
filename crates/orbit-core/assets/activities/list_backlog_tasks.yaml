@@ -6,7 +6,7 @@ spec:
   type: deterministic
   description: >
     Materialize the current workspace backlog as an ordered task list for
-    the auto-pipeline's `dispatch_agent` grouping step. In automatic mode it
+    the auto-pipeline. In automatic mode it
     filters to `status: backlog`, excludes `type: friction` (per CLAUDE.md,
     friction is reserved for agent self-reports, not shippable work), and
     drops any backlog parent/subtask group whose `context_files` overlap the
@@ -26,9 +26,11 @@ spec:
         type: array
         items:
           type: string
+    Also emits conservative singleton `bundles` so downstream dispatch can
+    proceed without depending on an agent's final response payload.
   output_schema_json:
     type: object
-    required: [tasks, task_ids, task_count]
+    required: [tasks, task_ids, task_count, bundles]
     properties:
       task_count:
         type: number
@@ -36,6 +38,12 @@ spec:
         type: array
         items:
           type: string
+      bundles:
+        type: array
+        items:
+          type: array
+          items:
+            type: string
       tasks:
         type: array
         items:

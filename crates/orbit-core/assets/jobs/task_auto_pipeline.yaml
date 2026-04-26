@@ -1,17 +1,15 @@
 # Auto-dispatch pipeline.
 #
-# Pulls the workspace backlog, asks `dispatch_agent` to group related tasks
-# into bundles, validates the grouping deterministically, then fans out
-# each bundle through `task_gate_pipeline` for admission-controlled
-# dispatch. `list_backlog` pre-filters backlog groups that already overlap
-# active task locks, so the gate layer sees fewer predictable starvation
-# cases. The gate layer is still deterministic (correct, auditable); this
-# workflow only decides bundle SHAPE.
+# Pulls the workspace backlog, asks `dispatch_agent` for advisory grouping
+# notes, then dispatches deterministic singleton bundles from `list_backlog`.
+# Downstream workflow inputs never depend on the agent's final response
+# payload, so malformed agent text cannot break the job. `list_backlog`
+# pre-filters backlog groups that already overlap active task locks, so the
+# gate layer sees fewer predictable starvation cases.
 #
 # Empty-backlog behavior
-# - `list_backlog` returns `tasks: []` and `bundles` comes back as `[]`
-#   from `dispatch_agent` per its short-circuit prompt. The fan_out over
-#   an empty list is a no-op and the Run succeeds with zero child Runs.
+# - `list_backlog` returns `tasks: []` and `bundles: []`. The fan_out over an
+#   empty list is a no-op and the Run succeeds with zero child Runs.
 #
 # Audit trail (AC 8)
 # - `dispatch_agent` runs as `type: agent_loop`, `backend: http`. Each
@@ -63,7 +61,7 @@ spec:
     - id: validate_bundles
       target: activity:validate_bundles
       default_input:
-        bundles: "{{ steps.dispatch_agent.output.bundles }}"
+        bundles: "{{ steps.list_backlog.output.bundles }}"
         max_bundle_size: "{{ input.max_bundle_size }}"
         known_task_ids: "{{ steps.list_backlog.output.task_ids }}"
 
