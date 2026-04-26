@@ -172,6 +172,7 @@ pub fn run_single_scenario(
         output_dir: options.knowledge_dir.clone(),
         incremental: scenario.incremental(),
         ref_name: None,
+        task_id_pattern: None,
     })?;
     let wall_time_ms = started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
 

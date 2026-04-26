@@ -110,6 +110,7 @@ mod tests {
             output_dir: repo.path().join(".knowledge"),
             incremental: false,
             ref_name: Some(RefName::new("main").expect("valid ref name")),
+            task_id_pattern: None,
         };
         PipelineContext::new(config, RefName::new("main").expect("valid ref name"), None)
     }

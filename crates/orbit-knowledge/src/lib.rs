@@ -41,6 +41,7 @@ pub mod pipeline;
 mod selector;
 pub mod service;
 mod store;
+mod task_id_pattern;
 pub mod working_graph;
 
 #[doc(hidden)]
@@ -63,6 +64,7 @@ pub use store::{
     SymbolSummary, load_task_working_graph, overlay_pack_with_working_graph,
     pack_from_working_graph, save_task_working_graph, task_working_graph_state_path,
 };
+pub use task_id_pattern::{DEFAULT_TASK_ID_PATTERN, TaskIdPattern};
 pub use working_graph::{
     LeafEdit, LeafVersionChain, MoveResult, WorkingGraph, WorkingLeaf, WriteError, WriteResult,
 };

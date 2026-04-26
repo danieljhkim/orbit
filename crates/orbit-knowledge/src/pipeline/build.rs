@@ -784,6 +784,7 @@ mod tests {
                 output_dir: self.knowledge.path().to_path_buf(),
                 incremental,
                 ref_name: Some(self.ref_name.clone()),
+                task_id_pattern: None,
             };
             let mut ctx = PipelineContext::new(config, self.ref_name.clone(), None);
             ctx.file_paths = file_paths;

@@ -112,6 +112,14 @@ pub trait OrbitToolHost: Send + Sync {
     ) -> Result<Value, OrbitError>;
 
     fn task_scope(&self) -> OrbitTaskScope;
+
+    /// Workspace-configured task-ID extraction regex (T20260426-0507). Returns
+    /// `None` when no workspace override is set, in which case callers should
+    /// fall back to the Orbit default. Default impl returns `None` so existing
+    /// host implementations (e.g. test mocks) compile unchanged.
+    fn task_id_pattern(&self) -> Option<String> {
+        None
+    }
 }
 
 pub trait GroundhogToolHost: Send + Sync {

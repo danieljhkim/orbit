@@ -14,7 +14,7 @@ use orbit_knowledge::Selector;
 use orbit_knowledge::graph::object_store::{GraphObjectStore, RefName};
 use orbit_knowledge::pipeline::context::BuildConfig;
 use orbit_knowledge::task_commits;
-use orbit_knowledge::{HistoryQueryOptions, query_task_history};
+use orbit_knowledge::{HistoryQueryOptions, TaskIdPattern, query_task_history};
 use tempfile::tempdir;
 
 fn run_git(repo: &Path, args: &[&str]) {
@@ -111,6 +111,7 @@ fn full_pipeline_attributes_task_ids_to_file_and_symbol() {
         output_dir: output_dir.clone(),
         incremental: false,
         ref_name: Some(RefName::new("main").unwrap()),
+        task_id_pattern: None,
     };
     let ctx = orbit_knowledge::pipeline::run_build(config).expect("pipeline runs");
 
@@ -159,12 +160,14 @@ fn full_pipeline_attributes_task_ids_to_file_and_symbol() {
     // Query API resolves the node's task IDs via the sidecar.
     let selector: Selector = "file:src/lib.rs".parse().expect("selector parses");
     let branch = RefName::new("main").unwrap();
+    let pattern = TaskIdPattern::default();
     let options = HistoryQueryOptions {
         knowledge_dir: &output_dir,
         repo_path: repo,
         branch_ref: &branch,
         selector: &selector,
         staleness_threshold: orbit_knowledge::DEFAULT_STALENESS_THRESHOLD,
+        task_id_pattern: &pattern,
     };
     let result = query_task_history(&options).expect("query succeeds");
     assert_eq!(result.task_history.len(), 1);
@@ -192,6 +195,7 @@ fn rebuild_is_idempotent_byte_for_byte() {
         output_dir: output_dir.clone(),
         incremental: false,
         ref_name: Some(RefName::new("main").unwrap()),
+        task_id_pattern: None,
     };
 
     orbit_knowledge::pipeline::run_build(make_config()).expect("first build");
@@ -228,12 +232,14 @@ fn selector_with_no_matching_node_falls_back_to_git_log() {
     // should kick in.
     let selector: Selector = "file:src/lib.rs".parse().unwrap();
     let branch = RefName::new("main").unwrap();
+    let pattern = TaskIdPattern::default();
     let options = HistoryQueryOptions {
         knowledge_dir: &output_dir,
         repo_path: repo,
         branch_ref: &branch,
         selector: &selector,
         staleness_threshold: orbit_knowledge::DEFAULT_STALENESS_THRESHOLD,
+        task_id_pattern: &pattern,
     };
     let result = query_task_history(&options).expect("fallback runs");
     assert!(matches!(

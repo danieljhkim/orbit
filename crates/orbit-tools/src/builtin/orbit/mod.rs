@@ -1,5 +1,6 @@
 pub mod duel_plan_add;
 pub mod duel_plan_winner;
+pub mod graph_history;
 pub mod groundhog_checkpoint_deviate;
 pub mod groundhog_checkpoint_failure;
 pub mod groundhog_checkpoint_success;
@@ -81,6 +82,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task_update::OrbitTaskUpdateTool);
     registry.register(duel_plan_add::OrbitDuelPlanAddTool);
     registry.register(duel_plan_winner::OrbitDuelPlanWinnerTool);
+    registry.register(graph_history::OrbitGraphHistoryTool);
     registry.register(knowledge_callers::OrbitKnowledgeCallersTool);
     registry.register(knowledge_deps::OrbitKnowledgeDepsTool);
     registry.register(knowledge_implementors::OrbitKnowledgeImplementorsTool);

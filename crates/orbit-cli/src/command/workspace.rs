@@ -117,6 +117,7 @@ impl WorkspaceInitArgs {
             output_dir: init_result.orbit_dir.join("knowledge"),
             incremental: false,
             ref_name: None,
+            task_id_pattern: None,
         };
         match orbit_knowledge::pipeline::run_build(config) {
             Ok(ctx) => {

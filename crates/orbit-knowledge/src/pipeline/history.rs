@@ -1,10 +1,10 @@
-//! Git-history walker for task-ID attribution (T20260421-0528).
+//! Git-history walker for task-ID attribution (T20260421-0528, T20260426-0507).
 //!
 //! Produces `CommitInfo` records from the commit DAG in topological, oldest-first
-//! order. Each record carries parsed task IDs (regex `\[T\d{8}-\d{4}(?:-\d+)?\]`),
-//! the commit's parent SHAs, the commit date, the subject line, and the per-file
-//! diff hunks. Consumers attribute task IDs to graph nodes by mapping hunks to
-//! extracted symbols in the tree at the commit.
+//! order. Each record carries parsed task IDs (configurable via
+//! [`TaskIdPattern`]), the commit's parent SHAs, the commit date, the subject
+//! line, and the per-file diff hunks. Consumers attribute task IDs to graph
+//! nodes by mapping hunks to extracted symbols in the tree at the commit.
 //!
 //! The walker shells out to `git` via `orbit_common::utility::git::run_git`.
 //! There is no in-process git library dependency.
@@ -13,13 +13,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_common::utility::git::run_git;
-use regex::Regex;
 
 use crate::error::KnowledgeError;
-
-/// Regex matching Orbit task-ID tags in commit messages, e.g. `[T20260421-0528]`
-/// or `[T20260421-0528-2]`. The brackets are stripped before storage.
-const TASK_ID_REGEX_STR: &str = r"\[T\d{8}-\d{4}(?:-\d+)?\]";
+use crate::task_id_pattern::TaskIdPattern;
 
 /// One commit's contribution to the history walk.
 #[derive(Debug, Clone)]
@@ -86,6 +82,7 @@ pub fn walk_commits(
     repo: &Path,
     from_exclusive: Option<&str>,
     to_inclusive: &str,
+    task_id_pattern: &TaskIdPattern,
 ) -> Result<Vec<CommitInfo>, KnowledgeError> {
     let range = match from_exclusive {
         Some(from) if !from.is_empty() => format!("{from}..{to_inclusive}"),
@@ -114,7 +111,7 @@ pub fn walk_commits(
 
     let mut commits = Vec::with_capacity(shas.len());
     for sha in &shas {
-        commits.push(commit_info(repo, sha)?);
+        commits.push(commit_info(repo, sha, task_id_pattern)?);
     }
     Ok(commits)
 }
@@ -216,24 +213,21 @@ pub fn show_file_at_commit(
     Ok(Some(output.stdout))
 }
 
-/// Parse task IDs out of a commit message. Deduplicated, sorted lexicographically.
-pub fn parse_task_ids(message: &str) -> Vec<String> {
-    let regex = Regex::new(TASK_ID_REGEX_STR).expect("task-ID regex compiles");
-    let mut ids: Vec<String> = Vec::new();
-    for found in regex.find_iter(message) {
-        let raw = found.as_str();
-        // strip `[` and `]`
-        ids.push(raw[1..raw.len() - 1].to_string());
-    }
-    ids.sort();
-    ids.dedup();
-    ids
+/// Parse task IDs out of a commit message under the given pattern.
+/// Deduplicated, sorted lexicographically. Honors the capture-group convention
+/// documented on [`TaskIdPattern`].
+pub fn parse_task_ids(message: &str, task_id_pattern: &TaskIdPattern) -> Vec<String> {
+    task_id_pattern.extract_ids(message)
 }
 
 /// Fetch a single commit's `CommitInfo` on demand. Used by Phase 4 to fill
 /// cache misses when a merge commit's ancestry chain extends before the
 /// walker's from-cursor.
-pub fn commit_info(repo: &Path, sha: &str) -> Result<CommitInfo, KnowledgeError> {
+pub fn commit_info(
+    repo: &Path,
+    sha: &str,
+    task_id_pattern: &TaskIdPattern,
+) -> Result<CommitInfo, KnowledgeError> {
     let meta_output = run_git(
         repo,
         &[
@@ -267,7 +261,7 @@ pub fn commit_info(repo: &Path, sha: &str) -> Result<CommitInfo, KnowledgeError>
         .with_timezone(&Utc);
     let summary = parts[3].to_string();
     let full_message = parts[4].trim_end_matches('\n').to_string();
-    let task_ids = parse_task_ids(&full_message);
+    let task_ids = parse_task_ids(&full_message, task_id_pattern);
 
     let files_changed = files_changed_for_commit(repo, &actual_sha, &parents)?;
 
@@ -440,35 +434,28 @@ mod tests {
 
     #[test]
     fn parse_task_ids_extracts_valid_tags() {
+        let pattern = TaskIdPattern::default();
         let msg = "[T20260421-0528] add task_ids\n\nCo-authored: foo";
-        assert_eq!(parse_task_ids(msg), vec!["T20260421-0528".to_string()]);
-    }
-
-    #[test]
-    fn parse_task_ids_handles_amended_suffix() {
-        let msg = "[T20260421-0528-2] incremental fix";
-        assert_eq!(parse_task_ids(msg), vec!["T20260421-0528-2".to_string()]);
-    }
-
-    #[test]
-    fn parse_task_ids_deduplicates_and_sorts() {
-        let msg = "[T20260421-0528] first\n[T20260421-0342] second\n[T20260421-0528] dup";
-        let got = parse_task_ids(msg);
         assert_eq!(
-            got,
-            vec!["T20260421-0342".to_string(), "T20260421-0528".to_string()]
+            parse_task_ids(msg, &pattern),
+            vec!["T20260421-0528".to_string()]
         );
     }
 
     #[test]
-    fn parse_task_ids_ignores_malformed_tags() {
-        let msg = "[T1234] wrong shape\n[T20260421-0528] right";
-        assert_eq!(parse_task_ids(msg), vec!["T20260421-0528".to_string()]);
+    fn parse_task_ids_with_custom_pattern_extracts_jira_ids() {
+        let pattern = TaskIdPattern::new(r"[A-Z]+-\d+").expect("jira regex compiles");
+        let msg = "PROJ-123 add task_ids; closes ENG-7";
+        assert_eq!(
+            parse_task_ids(msg, &pattern),
+            vec!["ENG-7".to_string(), "PROJ-123".to_string()]
+        );
     }
 
     #[test]
     fn parse_task_ids_empty_on_no_tags() {
-        assert!(parse_task_ids("merge pull request #42").is_empty());
+        let pattern = TaskIdPattern::default();
+        assert!(parse_task_ids("merge pull request #42", &pattern).is_empty());
     }
 
     #[test]

@@ -31,6 +31,7 @@ use crate::graph::object_store::GraphObjectStore;
 use crate::pipeline::context::PipelineContext;
 use crate::pipeline::history::{self, ChangeKind, CommitInfo};
 use crate::store::task_commits::{CommitSummary, TaskCommitsIndex};
+use crate::task_id_pattern::TaskIdPattern;
 
 /// Outputs of the attribution pass. Consumed downstream by persist.
 #[derive(Debug, Default)]
@@ -66,7 +67,12 @@ pub fn attribute_history(ctx: &mut PipelineContext) -> Result<AttributeOutcome, 
     // nodes in ctx.graph.
     hydrate_previous_attributions(ctx);
 
-    let commits = history::walk_commits(&ctx.repo_path, cursor.as_deref(), &head_sha)?;
+    let commits = history::walk_commits(
+        &ctx.repo_path,
+        cursor.as_deref(),
+        &head_sha,
+        &ctx.task_id_pattern,
+    )?;
 
     if commits.is_empty() {
         return Ok(AttributeOutcome {
@@ -176,6 +182,7 @@ pub fn attribute_history(ctx: &mut PipelineContext) -> Result<AttributeOutcome, 
         &dir_by_loc,
         &matcher,
         &registry,
+        &ctx.task_id_pattern,
     )?;
 
     // Phase D (write): apply structural_conflict marks.
@@ -315,6 +322,7 @@ fn detect_structural_conflict_ids(
     dir_by_loc: &HashMap<String, usize>,
     matcher: &IdentityMatcher,
     registry: &ExtractorRegistry,
+    task_id_pattern: &TaskIdPattern,
 ) -> Result<HashSet<String>, KnowledgeError> {
     let mut conflict_ids: HashSet<String> = HashSet::new();
 
@@ -340,6 +348,7 @@ fn detect_structural_conflict_ids(
             dir_by_loc,
             matcher,
             registry,
+            task_id_pattern,
         )?;
         let touched_b = union_touched_along_chain(
             repo_path,
@@ -350,6 +359,7 @@ fn detect_structural_conflict_ids(
             dir_by_loc,
             matcher,
             registry,
+            task_id_pattern,
         )?;
 
         for id in touched_a.intersection(&touched_b) {
@@ -370,6 +380,7 @@ fn union_touched_along_chain(
     dir_by_loc: &HashMap<String, usize>,
     matcher: &IdentityMatcher,
     registry: &ExtractorRegistry,
+    task_id_pattern: &TaskIdPattern,
 ) -> Result<HashSet<String>, KnowledgeError> {
     let mut union: HashSet<String> = HashSet::new();
     for sha in chain {
@@ -378,7 +389,7 @@ fn union_touched_along_chain(
             continue;
         }
         // Cache miss — commit is before the walker's cursor. Fetch + compute.
-        let commit = history::commit_info(repo_path, sha)?;
+        let commit = history::commit_info(repo_path, sha, task_id_pattern)?;
         let touched = collect_touched_for_commit(
             repo_path,
             graph,

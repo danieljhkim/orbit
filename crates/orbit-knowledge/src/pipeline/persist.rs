@@ -40,6 +40,7 @@ pub fn write_manifest(ctx: &PipelineContext) -> Result<(), KnowledgeError> {
         "graph": "graph/",
         "file_count": ctx.graph.files.len(),
         "leaf_count": ctx.graph.leaves.len(),
+        "task_id_pattern": ctx.task_id_pattern.as_str(),
     });
 
     let json = serde_json::to_string_pretty(&manifest)

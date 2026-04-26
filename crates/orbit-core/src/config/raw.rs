@@ -8,8 +8,17 @@ pub(super) struct RawRuntimeConfig {
     pub(super) task: Option<RawTaskSection>,
     pub(super) scoring: Option<RawScoringConfig>,
     pub(super) graph: Option<RawGraphConfig>,
+    pub(super) knowledge: Option<RawKnowledgeConfig>,
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawKnowledgeConfig {
+    /// `knowledge.task_id_pattern` — workspace override for the task-ID
+    /// extraction regex used by `orbit graph build` and `orbit graph history`.
+    /// `None` falls back to the Orbit default.
+    pub(super) task_id_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

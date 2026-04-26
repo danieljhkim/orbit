@@ -6,6 +6,7 @@
 
 - **Activity/job v1 retired**: `schemaVersion: 1` activity/job assets are rejected at load time, the old v1 reconcile/runtime/store paths were removed, and `schemaVersion: 2` is now the canonical activity/job surface ([T20260419-2156], [T20260420-0036])
 - **Workflow CLI surface reorganized**: workflows now use `orbit run ship <TASK_ID>...`, `orbit run ship --mode local <TASK_ID>...`, `orbit run ship-auto`, `orbit run duel-plan <TASK_ID>`, and `orbit run job <JOB_ID>`; workflow-specific `run ship list/show` and `run duel list/show` moved to the generic `orbit job history` / `orbit job run-state` inspection surface ([T20260417-0248], [T20260419-0355], [T20260425-2010])
+- **`orbit task history` moved to `orbit graph history`**: the task-ID attribution query is a graph operation (selectors, sidecar, manifest are graph-owned) and now lives next to `orbit graph search`/`show`. The `orbit task history rebuild` subsubcommand is gone — run `orbit graph build` directly. New `--task-id-pattern <regex>` flag on both `orbit graph build` and `orbit graph history` makes task-ID extraction configurable for non-Orbit codebases (Jira, Linear, GitHub-issue conventions); workspace config `knowledge.task_id_pattern` is the steady-state setting, with resolution order CLI flag > config > Orbit default. Pattern is recorded in `manifest.json`; mismatch triggers a stderr warning. New `orbit.graph.history` agent tool exposes the same query surface to MCP clients ([T20260426-0507])
 
 ### Features
 

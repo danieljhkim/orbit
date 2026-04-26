@@ -152,6 +152,7 @@ pub fn ensure_fresh(
         output_dir: knowledge_dir.to_path_buf(),
         incremental,
         ref_name: None,
+        task_id_pattern: None,
     };
     run_build_inner(config)
         .map_err(|e| KnowledgeError::knowledge_unavailable(format!("auto-refresh failed: {e}")))?;

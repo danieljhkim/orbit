@@ -7,6 +7,8 @@ use orbit_common::utility::redaction::redact_home_dir;
 
 use crate::paths;
 
+use regex::Regex;
+
 use super::persistence::PersistenceConfig;
 use super::raw::{
     RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig, RawTaskSection,
@@ -32,6 +34,10 @@ pub(crate) struct RuntimeConfig {
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `http` default.
     pub(crate) v2_backend: Option<String>,
+    /// `knowledge.task_id_pattern` — workspace override for the task-ID
+    /// extraction regex (T20260426-0507). Validated at load time; raw source
+    /// string only (avoids forcing an `orbit-knowledge` dep on `orbit-core`).
+    pub(crate) task_id_pattern: Option<String>,
 }
 
 impl Default for RuntimeConfig {
@@ -50,6 +56,7 @@ impl RuntimeConfig {
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
+            task_id_pattern: None,
         }
     }
 
@@ -123,6 +130,28 @@ impl RuntimeConfig {
             .as_ref()
             .and_then(|section| section.backend.clone());
 
+        let task_id_pattern = parsed
+            .knowledge
+            .as_ref()
+            .and_then(|section| section.task_id_pattern.clone())
+            .map(|raw| {
+                let trimmed = raw.trim().to_string();
+                if trimmed.is_empty() {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "knowledge.task_id_pattern in '{}' must not be empty",
+                        redact_home_dir(&config_path.display().to_string())
+                    )));
+                }
+                Regex::new(&trimmed).map_err(|err| {
+                    OrbitError::InvalidInput(format!(
+                        "knowledge.task_id_pattern in '{}' is not a valid regex: {err}",
+                        redact_home_dir(&config_path.display().to_string())
+                    ))
+                })?;
+                Ok::<String, OrbitError>(trimmed)
+            })
+            .transpose()?;
+
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_raw(
                 parsed.execution.clone().and_then(|v| v.env),
@@ -135,12 +164,19 @@ impl RuntimeConfig {
             scoring_enabled,
             graph_editing,
             v2_backend,
+            task_id_pattern,
         })
     }
 
     /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.v2_backend.as_deref()
+    }
+
+    /// Workspace-configured task-ID extraction regex (T20260426-0507). `None`
+    /// means callers should use the Orbit default.
+    pub(crate) fn task_id_pattern(&self) -> Option<&str> {
+        self.task_id_pattern.as_deref()
     }
 }
 
@@ -419,4 +455,72 @@ fn is_valid_env_var_name(value: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_config(dir: &Path, body: &str) {
+        std::fs::write(dir.join("config.toml"), body).expect("write config");
+    }
+
+    #[test]
+    fn task_id_pattern_loads_valid_regex_from_workspace_config() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            "[knowledge]\ntask_id_pattern = \"[A-Z]+-\\\\d+\"\n",
+        );
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+        assert_eq!(config.task_id_pattern(), Some(r"[A-Z]+-\d+"));
+    }
+
+    #[test]
+    fn task_id_pattern_rejects_invalid_regex_at_load_time() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            "[knowledge]\ntask_id_pattern = \"[unclosed\"\n",
+        );
+
+        let err = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("invalid regex must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("knowledge.task_id_pattern") && msg.contains("not a valid regex"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn task_id_pattern_rejects_empty_string() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), "[knowledge]\ntask_id_pattern = \"  \"\n");
+
+        let err = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("empty pattern must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("knowledge.task_id_pattern") && msg.contains("must not be empty"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn task_id_pattern_defaults_to_none_when_section_absent() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), "[scoring]\nenabled = true\n");
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+        assert_eq!(config.task_id_pattern(), None);
+    }
 }

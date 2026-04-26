@@ -281,6 +281,7 @@ impl TaskGraphService {
             output_dir: self.knowledge_dir.clone(),
             incremental,
             ref_name: None,
+            task_id_pattern: None,
         })
         .map_err(|error| error.to_string())?;
         Ok(true)

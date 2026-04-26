@@ -161,9 +161,12 @@ pub(crate) struct OrbitRuntimeSettings {
     graph_editing: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
+    /// Workspace-configured task-ID extraction regex (T20260426-0507).
+    task_id_pattern: Option<String>,
 }
 
 impl OrbitRuntimeSettings {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         persistence: PersistenceConfig,
         actor: ActorIdentity,
@@ -172,6 +175,7 @@ impl OrbitRuntimeSettings {
         scoring_enabled: bool,
         graph_editing: bool,
         v2_backend: Option<String>,
+        task_id_pattern: Option<String>,
     ) -> Self {
         Self {
             persistence,
@@ -181,11 +185,16 @@ impl OrbitRuntimeSettings {
             scoring_enabled,
             graph_editing,
             v2_backend,
+            task_id_pattern,
         }
     }
 
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.v2_backend.as_deref()
+    }
+
+    pub(crate) fn task_id_pattern(&self) -> Option<&str> {
+        self.task_id_pattern.as_deref()
     }
 }
 
@@ -279,6 +288,12 @@ impl OrbitContext {
     /// resolution precedence step 3). `None` means "not configured".
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.runtime.v2_backend()
+    }
+
+    /// Workspace-configured task-ID extraction regex (T20260426-0507). `None`
+    /// means callers should use the Orbit default.
+    pub(crate) fn task_id_pattern(&self) -> Option<&str> {
+        self.runtime.task_id_pattern()
     }
 }
 

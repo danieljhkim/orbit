@@ -76,6 +76,7 @@ fn build_config(repo_path: &Path, output_dir: &Path) -> BuildConfig {
         output_dir: output_dir.to_path_buf(),
         incremental: false,
         ref_name: Some(RefName::new("main").unwrap()),
+        task_id_pattern: None,
     }
 }
 

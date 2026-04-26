@@ -210,6 +210,12 @@ impl OrbitRuntime {
         self.context.v2_backend()
     }
 
+    /// Workspace-configured task-ID extraction regex (T20260426-0507).
+    /// Returns `None` when not set.
+    pub fn task_id_pattern(&self) -> Option<&str> {
+        self.context.task_id_pattern()
+    }
+
     /// Build the activity catalog for `target: activity:<name>` resolution
     /// (Phase 4). Loads from the layered Orbit data dirs using §9.1
     /// `MergeByKey` semantics — global provides defaults, workspace overrides.

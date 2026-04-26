@@ -1,18 +1,18 @@
-//! Task-history query service (T20260421-0528).
+//! Task-history query service (T20260421-0528, T20260426-0507).
 //!
-//! Resolves `orbit task history <selector>` queries against the branch-aware
+//! Resolves `orbit graph history <selector>` queries against the branch-aware
 //! knowledge graph. Prefers the graph-backed path (`task_ids` on the node +
 //! sidecar index); falls back to a `git log` + regex scan when either is
 //! missing.
 //!
 //! The service emits a structurally stable result across both paths so callers
 //! can rely on a single JSON shape regardless of whether the graph is
-//! available. Warnings (fallback, staleness) are surfaced on the caller side
-//! via the `warnings` field and must be routed to stderr by the CLI.
+//! available. Warnings (fallback, staleness, pattern-mismatch) are surfaced on
+//! the caller side via the `warnings` field and must be routed to stderr by
+//! the CLI.
 
 use std::path::{Path, PathBuf};
 
-use regex::Regex;
 use serde::Serialize;
 
 use crate::error::KnowledgeError;
@@ -21,8 +21,7 @@ use crate::pipeline::history;
 use crate::selector::Selector;
 use crate::store::KnowledgeStore;
 use crate::store::task_commits::{self, TaskCommitsIndex};
-
-const TASK_ID_REGEX_STR: &str = r"\[T\d{8}-\d{4}(?:-\d+)?\]";
+use crate::task_id_pattern::TaskIdPattern;
 
 /// Default threshold (in commits) past which the staleness warning fires.
 /// Overridable via `HistoryQueryOptions::staleness_threshold`.
@@ -35,6 +34,9 @@ pub struct HistoryQueryOptions<'a> {
     pub branch_ref: &'a RefName,
     pub selector: &'a Selector,
     pub staleness_threshold: u64,
+    /// Pattern used by the fallback git-log scan, and the basis of the
+    /// graph-vs-configured pattern mismatch warning.
+    pub task_id_pattern: &'a TaskIdPattern,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -169,6 +171,16 @@ fn try_graph_backed(options: &HistoryQueryOptions) -> Result<GraphBackedOutcome,
         ));
     }
 
+    if let Some(manifest_pattern) = read_manifest_task_id_pattern(options.knowledge_dir)
+        && manifest_pattern != options.task_id_pattern.as_str()
+    {
+        warnings.push(format!(
+            "task-ID pattern differs from graph manifest (manifest: \"{}\", configured: \"{}\"); run \"orbit graph build\"",
+            manifest_pattern,
+            options.task_id_pattern.as_str(),
+        ));
+    }
+
     let task_history = resolve_from_sidecar(&info.task_ids, &sidecar);
 
     Ok(GraphBackedOutcome::Hit(TaskHistoryResult {
@@ -281,7 +293,6 @@ fn fallback_git_log(
             output.stderr.trim()
         ));
     } else {
-        let regex = Regex::new(TASK_ID_REGEX_STR).expect("task-ID regex compiles");
         for record in output.stdout.split('\x1e') {
             let record = record.trim_matches('\n');
             if record.is_empty() {
@@ -296,9 +307,7 @@ fn fallback_git_log(
                 date: parts[1].to_string(),
                 summary: parts[2].to_string(),
             };
-            for m in regex.find_iter(parts[3]) {
-                let raw = m.as_str();
-                let task_id = raw[1..raw.len() - 1].to_string();
+            for task_id in options.task_id_pattern.extract_ids(parts[3]) {
                 let entry = task_history.entry(task_id).or_default();
                 if !entry.iter().any(|existing| existing.sha == summary.sha) {
                     entry.push(summary.clone());
@@ -335,6 +344,19 @@ fn git_default_ref(repo_path: &Path) -> Option<RefName> {
         .ok()
         .flatten()
         .and_then(|branch| RefName::new(branch).ok())
+}
+
+/// Read `manifest.json` and return the persisted `task_id_pattern` value, if
+/// present. Pre-T20260426-0507 manifests do not carry this field; we treat that
+/// as "unknown" rather than emit a spurious mismatch warning.
+fn read_manifest_task_id_pattern(knowledge_dir: &Path) -> Option<String> {
+    let path = knowledge_dir.join("manifest.json");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    value
+        .get("task_id_pattern")
+        .and_then(|v| v.as_str())
+        .map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
@@ -423,6 +445,7 @@ mod tests {
         repo_path: &'a Path,
         branch_ref: &'a RefName,
         selector: &'a Selector,
+        task_id_pattern: &'a TaskIdPattern,
     ) -> HistoryQueryOptions<'a> {
         HistoryQueryOptions {
             knowledge_dir,
@@ -430,6 +453,7 @@ mod tests {
             branch_ref,
             selector,
             staleness_threshold: DEFAULT_STALENESS_THRESHOLD,
+            task_id_pattern,
         }
     }
 
@@ -504,7 +528,8 @@ mod tests {
         let selector = Selector::File {
             path: "src/foo.rs".to_string(),
         };
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let reason = assert_fallback(try_graph_backed(&options).unwrap());
         assert!(
             reason.contains("knowledge graph directory not found"),
@@ -523,7 +548,8 @@ mod tests {
         let selector = Selector::File {
             path: "src/foo.rs".to_string(),
         };
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let reason = assert_fallback(try_graph_backed(&options).unwrap());
         assert!(
             reason.contains("knowledge graph ref"),
@@ -544,7 +570,8 @@ mod tests {
         };
         let branch = RefName::new("main").unwrap();
         let knowledge_dir = repo.path().join("knowledge");
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let result = fallback_git_log(&options, Some("test precursor".to_string()))
             .unwrap_or_else(|error| panic!("fallback should not error: {error}"));
         let warnings: Vec<&str> = result.warnings.iter().map(String::as_str).collect();
@@ -572,7 +599,8 @@ mod tests {
         };
         let branch = RefName::new("main").unwrap();
         let knowledge_dir = repo.path().join("knowledge");
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let result = fallback_git_log(&options, None).unwrap();
         assert!(
             !result
@@ -596,7 +624,8 @@ mod tests {
         let selector = Selector::File {
             path: "src/lib.rs".to_string(),
         };
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let reason = assert_fallback(try_graph_backed(&options).unwrap());
         assert!(
             reason.contains("task-commits sidecar missing"),
@@ -616,7 +645,8 @@ mod tests {
         let selector = Selector::File {
             path: "src/does_not_exist.rs".to_string(),
         };
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let reason = assert_fallback(try_graph_backed(&options).unwrap());
         assert!(
             reason.contains("not found in the knowledge graph"),
@@ -639,7 +669,8 @@ mod tests {
         let selector = Selector::File {
             path: "src/lib.rs".to_string(),
         };
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         match try_graph_backed(&options).unwrap() {
             GraphBackedOutcome::Hit(result) => {
                 assert_eq!(result.task_history.len(), 1);
@@ -655,6 +686,63 @@ mod tests {
     }
 
     #[test]
+    fn graph_backed_emits_warning_on_pattern_mismatch_with_manifest() {
+        let knowledge_root = tempdir().unwrap();
+        let knowledge_dir = knowledge_root.path().join("knowledge");
+        let repo = tempdir().unwrap();
+        let branch = RefName::new("main").unwrap();
+        write_fixture_graph(&knowledge_dir, &branch, vec!["T20260421-0528".to_string()]);
+
+        std::fs::write(
+            knowledge_dir.join("manifest.json"),
+            r#"{"generated_at":"2026-04-26T00:00:00Z","task_id_pattern":"[A-Z]+-\\d+"}"#,
+        )
+        .unwrap();
+        let sidecar_path = task_commits::sidecar_path(&knowledge_dir, branch.as_str());
+        task_commits::save(&sidecar_path, &TaskCommitsIndex::default()).unwrap();
+
+        let selector = Selector::File {
+            path: "src/lib.rs".to_string(),
+        };
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
+        let result = query_task_history(&options).expect("query succeeds");
+        assert!(
+            result.warnings.iter().any(|w| w
+                .contains("task-ID pattern differs from graph manifest")
+                && w.contains("orbit graph build")),
+            "expected mismatch warning, got: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn graph_backed_omits_pattern_warning_when_manifest_lacks_field() {
+        let knowledge_root = tempdir().unwrap();
+        let knowledge_dir = knowledge_root.path().join("knowledge");
+        let repo = tempdir().unwrap();
+        let branch = RefName::new("main").unwrap();
+        write_fixture_graph(&knowledge_dir, &branch, vec!["T20260421-0528".to_string()]);
+        let sidecar_path = task_commits::sidecar_path(&knowledge_dir, branch.as_str());
+        task_commits::save(&sidecar_path, &TaskCommitsIndex::default()).unwrap();
+
+        let selector = Selector::File {
+            path: "src/lib.rs".to_string(),
+        };
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
+        let result = query_task_history(&options).expect("query succeeds");
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|w| w.contains("task-ID pattern differs")),
+            "expected no mismatch warning, got: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
     fn fallback_includes_precursor_reason_when_provided() {
         let repo = tempdir().unwrap();
         let selector = Selector::File {
@@ -662,7 +750,8 @@ mod tests {
         };
         let branch = RefName::new("main").unwrap();
         let knowledge_dir = repo.path().join("knowledge");
-        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector);
+        let pattern = TaskIdPattern::default();
+        let options = make_options(&knowledge_dir, repo.path(), &branch, &selector, &pattern);
         let result = fallback_git_log(&options, Some("custom reason".to_string())).unwrap();
         assert_eq!(result.warnings[0], "custom reason");
     }

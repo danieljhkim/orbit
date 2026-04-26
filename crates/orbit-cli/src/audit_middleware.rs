@@ -251,7 +251,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 TaskSubcommand::Templates(_) => ("templates", None, None),
                 TaskSubcommand::ReviewThread(_) => ("review-thread", Some("task"), None),
                 TaskSubcommand::PruneContext(_) => ("prune-context", None, None),
-                TaskSubcommand::History(_) => ("history", None, None),
             };
             CommandMeta {
                 command: "task".to_string(),
@@ -381,6 +380,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 crate::command::graph::GraphSubcommand::Update(_) => "update",
                 crate::command::graph::GraphSubcommand::Show(_) => "show",
                 crate::command::graph::GraphSubcommand::Search(_) => "search",
+                crate::command::graph::GraphSubcommand::History(_) => "history",
             };
             CommandMeta {
                 command: "graph".to_string(),
