@@ -150,7 +150,7 @@ impl Execute for JobShowArgs {
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit job run task_auto_pipeline\n  orbit job run task_auto_pipeline --input mode=local\n  orbit job run crates/orbit-core/assets/jobs/task_pipeline.yaml --input task_id=T123\n"
+    after_help = "Examples:\n  orbit run job task_auto_pipeline\n  orbit run job task_auto_pipeline --input mode=local\n  orbit run job crates/orbit-core/assets/jobs/task_pipeline.yaml --input task_id=T123\n"
 )]
 pub struct JobRunArgs {
     /// Job ID from the catalog, or a direct path to a schemaVersion 2 job YAML.

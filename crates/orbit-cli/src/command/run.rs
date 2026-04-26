@@ -19,10 +19,6 @@ Workflow entrypoints:
   orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
-Direct form:
-  orbit run <job_id> [--input key=value] [--json] [--debug]
-    Equivalent to `orbit run job <job_id>`.
-
 Run history:
   orbit run history [--limit 50]
   orbit run history -j <job_id>
@@ -34,10 +30,10 @@ Run history:
 
 #[derive(Args)]
 #[command(
-    about = "Run a job workflow (supports run ship / ship-auto / duel-plan / job / run <id>)",
+    about = "Run a job workflow (supports run ship / ship-auto / duel-plan / job)",
     arg_required_else_help = true,
-    args_conflicts_with_subcommands = true,
-    override_usage = "orbit run <COMMAND>\n       orbit run <JOB_ID> [OPTIONS]",
+    subcommand_required = true,
+    override_usage = "orbit run <COMMAND>",
     after_help = RUN_AFTER_HELP,
     help_template = "\
 {about}
@@ -57,27 +53,18 @@ Audits:
   events     Show audit events recorded for a job run
   trace      Show audit event parent/child trace for a job run
 
-Arguments:
-{positionals}
-
 Options:
 {options}
 {after-help}"
 )]
 pub struct RunCommand {
     #[command(subcommand)]
-    pub command: Option<RunSubcommand>,
-
-    #[command(flatten)]
-    pub positional: PositionalJobArgs,
+    pub command: RunSubcommand,
 }
 
 impl Execute for RunCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        match self.command {
-            Some(command) => command.execute(runtime),
-            None => execute_positional_job(self.positional, runtime),
-        }
+        self.command.execute(runtime)
     }
 }
 
@@ -250,56 +237,6 @@ pub struct RunTraceArgs {
 impl Execute for RunTraceArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         print_run_trace(runtime, self.run_id.as_deref(), self.json)
-    }
-}
-
-#[derive(Args, Default)]
-pub struct PositionalJobArgs {
-    /// Run the named job directly (equivalent to `orbit run job <JOB_ID>`)
-    pub job_id: Option<String>,
-
-    /// Input key=value pairs passed to all job steps (repeatable)
-    #[arg(long)]
-    pub input: Vec<String>,
-
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-
-    /// Stream agent stderr to the terminal and tee stdout live for debugging
-    #[arg(long)]
-    pub debug: bool,
-}
-
-fn execute_positional_job(
-    args: PositionalJobArgs,
-    runtime: &OrbitRuntime,
-) -> Result<(), OrbitError> {
-    let Some(job_id) = args.job_id else {
-        return Err(OrbitError::InvalidInput(
-            "`orbit run` expects a workflow subcommand or job ID".to_string(),
-        ));
-    };
-
-    ensure_positional_job_exists(runtime, &job_id)?;
-
-    job::JobRunArgs {
-        job_id,
-        input: args.input,
-        backend: None,
-        json: args.json,
-        debug: args.debug,
-    }
-    .execute(runtime)
-}
-
-fn ensure_positional_job_exists(runtime: &OrbitRuntime, job_id: &str) -> Result<(), OrbitError> {
-    match runtime.show_job_catalog_entry(job_id) {
-        Ok(_) => Ok(()),
-        Err(OrbitError::JobNotFound(_)) => Err(OrbitError::InvalidInput(format!(
-            "unknown `orbit run` target `{job_id}`\navailable subcommands: ship, ship-auto, duel-plan, job\ntip: use `orbit job list` to discover valid job ids"
-        ))),
-        Err(error) => Err(error),
     }
 }
 
@@ -1094,7 +1031,7 @@ mod tests {
     #[test]
     fn parses_explicit_ship_defaults() {
         let command = parse_run(&["orbit", "run", "ship", "T1", "T2"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Ship(args) => {
                 assert_eq!(args.task_ids, vec!["T1", "T2"]);
                 assert_eq!(args.mode, ship::ShipMode::Pr);
@@ -1107,7 +1044,7 @@ mod tests {
     #[test]
     fn parses_explicit_ship_mode_and_base() {
         let command = parse_run(&["orbit", "run", "ship", "-m", "local", "-b", "main", "T1"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Ship(args) => {
                 assert_eq!(args.task_ids, vec!["T1"]);
                 assert_eq!(args.mode, ship::ShipMode::Local);
@@ -1120,7 +1057,7 @@ mod tests {
     #[test]
     fn parses_ship_auto_as_top_level_subcommand() {
         let command = parse_run(&["orbit", "run", "ship-auto", "-m", "pr", "-b", "main"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::ShipAuto(args) => {
                 assert_eq!(args.mode, ship::ShipMode::Pr);
                 assert_eq!(args.base, "main");
@@ -1132,7 +1069,7 @@ mod tests {
     #[test]
     fn parses_duel_plan_as_top_level_subcommand() {
         let command = parse_run(&["orbit", "run", "duel-plan", "T1", "-b", "main"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::DuelPlan(args) => {
                 assert_eq!(args.task_id, "T1");
                 assert_eq!(args.base, "main");
@@ -1144,7 +1081,7 @@ mod tests {
     #[test]
     fn parses_run_job_unchanged() {
         let command = parse_run(&["orbit", "run", "job", "task_auto_pipeline", "--json"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Job(args) => {
                 assert_eq!(args.job_id, "task_auto_pipeline");
                 assert!(args.json);
@@ -1154,20 +1091,14 @@ mod tests {
     }
 
     #[test]
-    fn parses_positional_job_fallback_unchanged() {
-        let command = parse_run(&["orbit", "run", "task_auto_pipeline", "--json"]);
-        assert!(command.command.is_none());
-        assert_eq!(
-            command.positional.job_id.as_deref(),
-            Some("task_auto_pipeline")
-        );
-        assert!(command.positional.json);
+    fn rejects_positional_job_fallback() {
+        assert!(Cli::try_parse_from(["orbit", "run", "task_auto_pipeline", "--json"]).is_err());
     }
 
     #[test]
     fn parses_run_history_defaults() {
         let command = parse_run(&["orbit", "run", "history"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::History(args) => {
                 assert_eq!(args.job_id, None);
                 assert_eq!(args.limit, DEFAULT_HISTORY_LIMIT);
@@ -1180,7 +1111,7 @@ mod tests {
     #[test]
     fn parses_run_history_job_filter() {
         let command = parse_run(&["orbit", "run", "history", "-j", "task_auto_pipeline"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::History(args) => {
                 assert_eq!(args.job_id.as_deref(), Some("task_auto_pipeline"));
                 assert_eq!(args.limit, DEFAULT_HISTORY_LIMIT);
@@ -1192,7 +1123,7 @@ mod tests {
     #[test]
     fn parses_run_show_latest() {
         let command = parse_run(&["orbit", "run", "show"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Show(args) => {
                 assert_eq!(args.run_id, None);
                 assert_eq!(args.step_id, None);
@@ -1204,7 +1135,7 @@ mod tests {
     #[test]
     fn parses_run_show_run_id() {
         let command = parse_run(&["orbit", "run", "show", "jrun-1"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Show(args) => {
                 assert_eq!(args.run_id.as_deref(), Some("jrun-1"));
                 assert_eq!(args.step_id, None);
@@ -1216,7 +1147,7 @@ mod tests {
     #[test]
     fn parses_run_show_step() {
         let command = parse_run(&["orbit", "run", "show", "jrun-1", "-s", "implement_one"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Show(args) => {
                 assert_eq!(args.run_id.as_deref(), Some("jrun-1"));
                 assert_eq!(args.step_id.as_deref(), Some("implement_one"));
@@ -1228,7 +1159,7 @@ mod tests {
     #[test]
     fn parses_run_logs_latest() {
         let command = parse_run(&["orbit", "run", "logs"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Logs(args) => {
                 assert_eq!(args.run_id, None);
                 assert_eq!(args.step_id, None);
@@ -1240,7 +1171,7 @@ mod tests {
     #[test]
     fn parses_run_logs_run_id() {
         let command = parse_run(&["orbit", "run", "logs", "jrun-1"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Logs(args) => {
                 assert_eq!(args.run_id.as_deref(), Some("jrun-1"));
                 assert_eq!(args.step_id, None);
@@ -1252,7 +1183,7 @@ mod tests {
     #[test]
     fn parses_run_logs_step() {
         let command = parse_run(&["orbit", "run", "logs", "jrun-1", "-s", "implement_one"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Logs(args) => {
                 assert_eq!(args.run_id.as_deref(), Some("jrun-1"));
                 assert_eq!(args.step_id.as_deref(), Some("implement_one"));
@@ -1264,7 +1195,7 @@ mod tests {
     #[test]
     fn parses_run_events_latest() {
         let command = parse_run(&["orbit", "run", "events"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Events(args) => {
                 assert_eq!(args.run_id, None);
                 assert_eq!(args.step_id, None);
@@ -1288,7 +1219,7 @@ mod tests {
             "cli.invocation.finished",
             "--json",
         ]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Events(args) => {
                 assert_eq!(args.run_id.as_deref(), Some("jrun-1"));
                 assert_eq!(args.step_id.as_deref(), Some("implement_one"));
@@ -1302,7 +1233,7 @@ mod tests {
     #[test]
     fn parses_run_trace_latest() {
         let command = parse_run(&["orbit", "run", "trace"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Trace(args) => {
                 assert_eq!(args.run_id, None);
                 assert!(!args.json);
@@ -1314,7 +1245,7 @@ mod tests {
     #[test]
     fn parses_run_trace_json() {
         let command = parse_run(&["orbit", "run", "trace", "jrun-1", "--json"]);
-        match command.command.expect("subcommand") {
+        match command.command {
             RunSubcommand::Trace(args) => {
                 assert_eq!(args.run_id.as_deref(), Some("jrun-1"));
                 assert!(args.json);

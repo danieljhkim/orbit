@@ -17,7 +17,6 @@ sidebar:
 
 | Command | Purpose |
 |---------|---------|
-| `orbit run <job_id>` | Run a job workflow. Direct shorthand for `orbit run job <job_id>`. |
 | `orbit run job <job_id>` | Run an arbitrary job by ID. |
 | `orbit run ship <task_id> ...` | Ship explicitly selected tasks through the PR pipeline by default. |
 | `orbit run ship --mode local <task_id> ...` | Run the local-only task path for explicitly selected tasks. |

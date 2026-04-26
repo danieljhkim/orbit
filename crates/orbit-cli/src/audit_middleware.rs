@@ -475,24 +475,21 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
     use crate::command::ship::ShipMode;
 
     let (subcommand, target_type, target_id) = match &cmd.command {
-        Some(RunSubcommand::Ship(command)) => {
+        RunSubcommand::Ship(command) => {
             let target_id = match command.mode {
                 ShipMode::Pr => "ship",
                 ShipMode::Local => "ship-local",
             };
             ("ship", Some("workflow"), Some(target_id))
         }
-        Some(RunSubcommand::ShipAuto(_)) => ("ship-auto", Some("workflow"), Some("ship-auto")),
-        Some(RunSubcommand::DuelPlan(args)) => {
-            ("duel-plan", Some("task"), Some(args.task_id.as_str()))
-        }
-        Some(RunSubcommand::History(args)) => ("history", Some("job_run"), args.job_id.as_deref()),
-        Some(RunSubcommand::Show(args)) => ("show", Some("job_run"), args.run_id.as_deref()),
-        Some(RunSubcommand::Logs(args)) => ("logs", Some("job_run"), args.run_id.as_deref()),
-        Some(RunSubcommand::Events(args)) => ("events", Some("job_run"), args.run_id.as_deref()),
-        Some(RunSubcommand::Trace(args)) => ("trace", Some("job_run"), args.run_id.as_deref()),
-        Some(RunSubcommand::Job(args)) => ("job", Some("job"), Some(args.job_id.as_str())),
-        None => ("job", Some("job"), cmd.positional.job_id.as_deref()),
+        RunSubcommand::ShipAuto(_) => ("ship-auto", Some("workflow"), Some("ship-auto")),
+        RunSubcommand::DuelPlan(args) => ("duel-plan", Some("task"), Some(args.task_id.as_str())),
+        RunSubcommand::History(args) => ("history", Some("job_run"), args.job_id.as_deref()),
+        RunSubcommand::Show(args) => ("show", Some("job_run"), args.run_id.as_deref()),
+        RunSubcommand::Logs(args) => ("logs", Some("job_run"), args.run_id.as_deref()),
+        RunSubcommand::Events(args) => ("events", Some("job_run"), args.run_id.as_deref()),
+        RunSubcommand::Trace(args) => ("trace", Some("job_run"), args.run_id.as_deref()),
+        RunSubcommand::Job(args) => ("job", Some("job"), Some(args.job_id.as_str())),
     };
 
     CommandMeta {
