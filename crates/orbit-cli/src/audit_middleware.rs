@@ -226,8 +226,14 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
         }
         Commands::Task(task_cmd) => {
             use crate::command::task::TaskSubcommand;
+            use crate::command::task::artifact::TaskArtifactSubcommand;
             let (sub, target_type, target_id) = match &task_cmd.command {
                 TaskSubcommand::Add(_) => ("add", Some("task"), None),
+                TaskSubcommand::Artifact(cmd) => match &cmd.command {
+                    TaskArtifactSubcommand::Put(args) => {
+                        ("artifact-put", Some("task"), Some(args.id.as_str()))
+                    }
+                },
                 TaskSubcommand::List(_) => ("list", None, None),
                 TaskSubcommand::Locks(_) => ("locks", None, None),
                 TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),

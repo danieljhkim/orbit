@@ -31,6 +31,7 @@ pub mod state_get;
 pub mod state_set;
 pub mod task_add;
 pub mod task_approve;
+pub mod task_artifact_put;
 pub mod task_delete;
 pub mod task_lint;
 pub mod task_list;
@@ -67,6 +68,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(groundhog_checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
     registry.register(groundhog_side_effect::OrbitGroundhogSideEffectTool);
     registry.register(task_add::OrbitTaskAddTool);
+    registry.register(task_artifact_put::OrbitTaskArtifactPutTool);
     registry.register(task_approve::OrbitTaskApproveTool);
     registry.register(task_delete::OrbitTaskDeleteTool);
     registry.register(task_lint::OrbitTaskLintTool);

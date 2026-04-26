@@ -23,6 +23,15 @@ orbit task show "$TASK_ID"
 orbit task lint "$TASK_ID"
 ```
 
+## Attach Artifacts
+
+Store generated notes, reports, or other UTF-8 task outputs with the task:
+
+```bash
+orbit task artifact put "$TASK_ID" ./summary.md --path reports/summary.md
+orbit artifacts "$TASK_ID" --task
+```
+
 ## Approve
 
 If the task is proposed, approve it:

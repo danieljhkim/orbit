@@ -29,6 +29,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
@@ -381,6 +382,62 @@ pub struct TaskArtifact {
     pub content: String,
 }
 
+impl TaskArtifact {
+    pub fn from_utf8_source_file(
+        source_path: &Path,
+        artifact_path: Option<&str>,
+    ) -> Result<Self, OrbitError> {
+        let metadata = std::fs::metadata(source_path).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "cannot read task artifact source '{}': {error}",
+                source_path.display()
+            ))
+        })?;
+        if !metadata.is_file() {
+            return Err(OrbitError::InvalidInput(format!(
+                "task artifact source '{}' must be a file",
+                source_path.display()
+            )));
+        }
+
+        let path = match artifact_path {
+            Some(path) => {
+                let trimmed = path.trim();
+                if trimmed.is_empty() {
+                    return Err(OrbitError::InvalidInput(
+                        "task artifact path must not be empty".to_string(),
+                    ));
+                }
+                trimmed.to_string()
+            }
+            None => infer_artifact_path_from_source(source_path)?,
+        };
+        let content = std::fs::read_to_string(source_path).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "task artifact source '{}' must be a UTF-8 text file; binary or invalid UTF-8 content is not supported: {error}",
+                source_path.display()
+            ))
+        })?;
+
+        Ok(Self { path, content })
+    }
+}
+
+fn infer_artifact_path_from_source(source_path: &Path) -> Result<String, OrbitError> {
+    let file_name = source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "cannot infer task artifact path from source '{}'; pass --path",
+                source_path.display()
+            ))
+        })?;
+    Ok(file_name.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedTaskDependency {
     pub id: OrbitId,
@@ -647,4 +704,61 @@ fn find_dependency_path(
     trail.pop();
     visiting.remove(current);
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskArtifact;
+
+    #[test]
+    fn artifact_from_source_defaults_to_file_name() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("summary.md");
+        std::fs::write(&source, "hello\n").expect("write source");
+
+        let artifact =
+            TaskArtifact::from_utf8_source_file(&source, None).expect("read artifact source");
+
+        assert_eq!(artifact.path, "summary.md");
+        assert_eq!(artifact.content, "hello\n");
+    }
+
+    #[test]
+    fn artifact_from_source_uses_explicit_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("summary.md");
+        std::fs::write(&source, "hello\n").expect("write source");
+
+        let artifact = TaskArtifact::from_utf8_source_file(&source, Some("reports/summary.md"))
+            .expect("read artifact source");
+
+        assert_eq!(artifact.path, "reports/summary.md");
+        assert_eq!(artifact.content, "hello\n");
+    }
+
+    #[test]
+    fn artifact_from_source_rejects_directories() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let error = TaskArtifact::from_utf8_source_file(dir.path(), None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("must be a file"));
+        assert!(error.contains(dir.path().to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn artifact_from_source_rejects_invalid_utf8() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("binary.bin");
+        std::fs::write(&source, [0xff, 0xfe, 0xfd]).expect("write source");
+
+        let error = TaskArtifact::from_utf8_source_file(&source, None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("UTF-8 text file"));
+        assert!(error.contains(source.to_string_lossy().as_ref()));
+    }
 }

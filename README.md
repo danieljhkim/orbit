@@ -214,6 +214,7 @@ orbit run trace [run_id]
 orbit task add
 orbit task list
 orbit task show <task_id>
+orbit task artifact put <task_id> <source_path>
 orbit task approve <task_id>
 ```
 

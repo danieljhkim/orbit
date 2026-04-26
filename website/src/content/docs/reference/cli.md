@@ -24,6 +24,7 @@ sidebar:
 | `orbit run ship-auto` | Auto-select backlog tasks and ship them through the task pipeline. |
 | `orbit run duel-plan <task_id>` | Run a planning duel for one task. |
 | `orbit task` | Create, update, and manage tasks. |
+| `orbit task artifact put <task_id> <source_path>` | Store a UTF-8 file under a task's artifacts directory. |
 
 ## Observe
 

@@ -4,6 +4,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 use crate::command::Execute;
 
 use super::add::TaskAddArgs;
+use super::artifact::TaskArtifactCommand;
 use super::lifecycle::{
     TaskApproveArgs, TaskArchiveArgs, TaskDeleteArgs, TaskRejectArgs, TaskSearchArgs,
     TaskStartArgs, TaskUnarchiveArgs,
@@ -33,6 +34,8 @@ impl Execute for TaskCommand {
 pub enum TaskSubcommand {
     /// Create a new task
     Add(TaskAddArgs),
+    /// Manage task artifact files
+    Artifact(TaskArtifactCommand),
     /// List tasks with optional filters
     List(TaskListArgs),
     /// Show files locked by active tasks
@@ -72,6 +75,7 @@ impl Execute for TaskSubcommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         match self {
             TaskSubcommand::Add(args) => args.execute(runtime),
+            TaskSubcommand::Artifact(cmd) => cmd.execute(runtime),
             TaskSubcommand::List(args) => args.execute(runtime),
             TaskSubcommand::Locks(args) => args.execute(runtime),
             TaskSubcommand::Show(args) => args.execute(runtime),

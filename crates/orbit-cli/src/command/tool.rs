@@ -318,6 +318,7 @@ fn should_project_minimal_task_output(tool_name: &str, input: &Value) -> bool {
             | "orbit.task.search"
             | "orbit.task.show"
             | "orbit.task.add"
+            | "orbit.task.artifact.put"
             | "orbit.task.update"
     ) {
         return false;
