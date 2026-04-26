@@ -14,7 +14,9 @@ spec:
     `task_ids` input is treated as an override and skips conflict filtering.
     Sorts critical → high → medium → low, then by `created_at` ascending so
     older high-priority work ships first. Caps at `max_tasks` (default 50) to
-    keep the agent's context window bounded.
+    keep the agent's context window bounded. Also emits conservative singleton
+    `bundles` so downstream dispatch can proceed without depending on an
+    agent's final response payload.
   input_schema_json:
     type: object
     properties:
@@ -26,8 +28,6 @@ spec:
         type: array
         items:
           type: string
-    Also emits conservative singleton `bundles` so downstream dispatch can
-    proceed without depending on an agent's final response payload.
   output_schema_json:
     type: object
     required: [tasks, task_ids, task_count, bundles]
