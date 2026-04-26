@@ -34,6 +34,7 @@ pub fn default_orbitignore_template() -> String {
 mod error;
 pub mod extract;
 pub mod graph;
+pub mod graph_bench;
 mod io;
 pub mod lock;
 pub mod pipeline;

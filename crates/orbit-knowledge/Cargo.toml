@@ -8,6 +8,7 @@ license.workspace = true
 chrono.workspace = true
 fs2.workspace = true
 ignore = "0.4.25"
+libc.workspace = true
 orbit-common = { path = "../orbit-common" }
 regex.workspace = true
 serde.workspace = true

@@ -1626,6 +1626,7 @@ dependencies = [
  "chrono",
  "fs2",
  "ignore",
+ "libc",
  "lru",
  "orbit-common",
  "rayon",

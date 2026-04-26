@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26 (ADR-016)
+**Last updated:** 2026-04-26 (ADR-017)
 
 ADR-style log of non-obvious design choices behind the knowledge graph. Each entry names the decision, the context that forced it, what we chose, and what we traded away. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -256,6 +256,21 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-017 — Local graph build benchmark scoreboard over CI regression gates
+
+**Status:** Accepted · 2026-04 · [T20260426-0236]
+
+**Context.** Recent graph-build performance work proved wins with one-off manual benchmarks in task execution summaries. Those summaries are hard to compare after the task scrolls away, and the hot path (`ensure_fresh` before pack/search) can regress through pipeline, persistence, or cache changes. Criterion-style microbenchmarks would miss the dominant disk I/O and tree-sitter costs.
+
+**Decision.** Add `make bench` as a local end-to-end graph build benchmark. The driver lives in `orbit-knowledge`, calls `pipeline::run_build` directly, runs a cold full build plus a warm incremental no-op build against the repo root by default, and appends wall time/RSS/count metrics to `.orbit/state/scoreboard/graph_bench.json` capped at 200 records.
+
+**Consequences.**
+- Developers can compare graph build trends with machine/core context and git SHA preserved beside the metrics.
+- No CI gate is introduced; shared-runner noise would make absolute thresholds misleading.
+- The default corpus is maintenance-free because it is the repo itself, but timings and counts move as the repo grows. Use the scoreboard for trend-watching, not cross-machine normalization.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -281,5 +296,6 @@ Tasks cited by ADRs above:
 - **[T20260426-0140]** — Changed-path incremental leaf reuse.
 - **[T20260426-0141]** — Store-scoped LRU for graph objects and blobs.
 - **[T20260426-0220]** — Exact task-id filtering through `orbit.graph.search`.
+- **[T20260426-0236]** — End-to-end graph build benchmark with scoreboard trend records.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

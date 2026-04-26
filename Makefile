@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci bench
 
 # ------------------------------------------------------------
 # Config
@@ -45,6 +45,7 @@ help:
 	@echo "  make fmt          Format code"
 	@echo "  make fmt-check    Check formatting"
 	@echo "  make clippy       Lint with clippy (deny warnings)"
+	@echo "  make bench        Run graph build benchmark (ARGS=... optional)"
 	@echo "  make audit        Cargo audit (security)"
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass"
@@ -89,6 +90,9 @@ fmt-check:
 
 clippy:
 	$(CARGO) clippy $(WORKSPACE) --all-targets -- -D warnings
+
+bench:
+	$(CARGO) run -p orbit-knowledge --example graph_build --release -- $(ARGS)
 
 # Security audit (requires cargo-audit)
 audit:

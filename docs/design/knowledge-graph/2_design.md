@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26 (parallel build stages and task-id search, [T20260426-0139], [T20260426-0220])
+**Last updated:** 2026-04-26 (parallel build stages, task-id search, and graph build benchmark, [T20260426-0139], [T20260426-0220], [T20260426-0236])
 
 This document specifies the knowledge graph as it exists today: on-disk layout, build pipeline, query services, Orbit integration, locking, and honest limitations. See [1_overview.md](./1_overview.md) for the "why" and [3_vision.md](./3_vision.md) for where it is headed. Task IDs are cited inline and collected at the end.
 
@@ -95,6 +95,17 @@ That split is structural on purpose. The knowledge-graph crate depends only on `
 The default `.orbitignore` baseline excludes common generated or runtime-owned trees (`.orbit/`, `node_modules/`, `target/`, `dist/`, `build/`, `.venv/`, `venv/`, `__pycache__/`, `*.egg-info/`). `orbit workspace init` seeds the same list into a visible workspace-root `.orbitignore` file so users can edit the defaults without discovering the behavior by reading source first.
 
 The same path may legitimately appear in both layers with different intent. For example, `benchmarks/graph_v1/runs/**` is excluded from graph indexing via `.orbitignore` so frozen benchmark transcripts do not pollute `orbit.graph.search`, while a policy profile could still allow or deny runtime reads to that subtree depending on the activity. Likewise, `.orbit/` is excluded from indexing because it is runtime state, and a policy may independently deny modification of `.orbit/**` during normal agent execution.
+
+### 2.4 Build benchmark scoreboard
+
+`make bench` runs the `orbit-knowledge` example driver `examples/graph_build.rs` as an end-to-end benchmark for the build pipeline ([T20260426-0236]). The driver calls `pipeline::run_build` directly rather than shelling out to `orbit graph build`, so it measures the pipeline plus object persistence without CLI dispatch overhead.
+
+Each invocation runs two scenarios against the workspace root by default:
+
+- **`cold_build`** — delete `.orbit/knowledge/`, run a full non-incremental build, and record wall time, best-effort peak RSS, file count, leaf count, and dir count.
+- **`warm_incremental_noop`** — reuse the cold build output, run an incremental build with no file changes, and record the same metrics.
+
+Results append to `.orbit/state/scoreboard/graph_bench.json` as an ordered JSON array capped at 200 records. Each record includes timestamp, git SHA, hostname, logical core count, and the per-scenario metrics. The scoreboard is a developer-machine trend aid, not a CI gate; shared runners are too noisy for absolute thresholds, and the default corpus grows as the repo grows.
 
 ---
 
@@ -229,6 +240,10 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 
 `compute_hashes` and `build_graph_leaves` use worker threads for per-file work, but content-addressed graph stability depends on reassembling results in canonical scan/file order ([T20260426-0139]). Any future stage that pushes directly from workers into `ctx.graph.leaves`, `FileNode.leaf_children`, or serialized hash output would make root object hashes scheduler-dependent.
 
+### 6.11 Benchmark numbers are trend data, not portable truth
+
+`graph_bench.json` records wall time and peak RSS from the local machine that ran `make bench` ([T20260426-0236]). The default corpus is the Orbit repo itself, so counts and timings move with checked-in source and benchmark fixtures. Compare records as local trend signals and include the machine/core context when using them in reviews.
+
 ---
 
 ## Task References
@@ -249,5 +264,6 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 - **[T20260426-0140]** — Reuse prior file and leaf snapshots for unchanged paths during incremental graph rebuilds.
 - **[T20260426-0141]** — Bounded `KnowledgeStore` LRU for graph objects and source blobs.
 - **[T20260426-0220]** — Add exact `task_id` filtering to `orbit.graph.search`.
+- **[T20260426-0236]** — Add `make bench` graph build benchmark and `.orbit/state/scoreboard/graph_bench.json`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
