@@ -6,7 +6,7 @@ Use it as a decision lens. When a design debate feels like it's really about *wh
 
 ## Who Orbit is for
 
-**The staff engineer or platform lead at a team of ~3–50 engineers who wants to run agent automation against their team's real codebase.**
+**The staff engineer or platform lead at a team of ~10–50 engineers who wants to run agent automation against their team's real codebase.**
 
 They are not writing an agent for a demo. They are not a solo developer augmenting their own workflow. They are not a Fortune 500 buyer looking for a vendor. They are an engineer with authority over their team's tooling who has decided that LLM-driven automation — PR review, refactor passes, backlog execution, cross-cutting migrations — is worth running at team scale, and wants infrastructure they can actually rely on.
 
