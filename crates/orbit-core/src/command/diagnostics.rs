@@ -75,8 +75,8 @@ fn read_jsonl_month<T: DeserializeOwned>(
             if line.is_empty() {
                 continue;
             }
-            match serde_json::from_str::<T>(line) {
-                Ok(entry) => entries.push(entry),
+            match parse_jsonl_values::<T>(line) {
+                Ok(parsed) => entries.extend(parsed),
                 Err(err) => {
                     tracing::warn!(
                         target: "orbit::diagnostics",
@@ -127,8 +127,15 @@ fn read_jsonl_month_limited<T: DeserializeOwned>(
             if line.is_empty() {
                 continue;
             }
-            match serde_json::from_str::<T>(line) {
-                Ok(entry) => entries.push(entry),
+            match parse_jsonl_values::<T>(line) {
+                Ok(parsed) => {
+                    for entry in parsed.into_iter().rev() {
+                        entries.push(entry);
+                        if entries.len() >= limit {
+                            return Ok(entries);
+                        }
+                    }
+                }
                 Err(err) => {
                     tracing::warn!(
                         target: "orbit::diagnostics",
@@ -139,10 +146,50 @@ fn read_jsonl_month_limited<T: DeserializeOwned>(
                     );
                 }
             }
-            if entries.len() >= limit {
-                return Ok(entries);
-            }
         }
     }
     Ok(entries)
+}
+
+fn parse_jsonl_values<T: DeserializeOwned>(line: &str) -> Result<Vec<T>, serde_json::Error> {
+    match serde_json::from_str::<T>(line) {
+        Ok(entry) => return Ok(vec![entry]),
+        Err(single_value_error) => {
+            let mut values = Vec::new();
+            let stream = serde_json::Deserializer::from_str(line).into_iter::<T>();
+            for result in stream {
+                match result {
+                    Ok(entry) => values.push(entry),
+                    Err(_) => return Err(single_value_error),
+                }
+            }
+
+            if values.len() > 1 {
+                Ok(values)
+            } else {
+                Err(single_value_error)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::parse_jsonl_values;
+
+    #[test]
+    fn parse_jsonl_values_recovers_concatenated_objects() {
+        let values = parse_jsonl_values::<Value>(r#"{"step":"one"}{"step":"two"}"#).unwrap();
+
+        assert_eq!(values, vec![json!({"step": "one"}), json!({"step": "two"})]);
+    }
+
+    #[test]
+    fn parse_jsonl_values_rejects_trailing_garbage() {
+        let err = parse_jsonl_values::<Value>(r#"{"step":"one"}oops"#).unwrap_err();
+
+        assert!(err.to_string().contains("trailing characters"));
+    }
 }
