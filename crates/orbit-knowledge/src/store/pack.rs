@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde_json::Value;
 
 use crate::error::KnowledgeError;
@@ -13,8 +11,6 @@ const FILE_SOURCE_HINT: &str = "File selectors return metadata only. Use `orbit.
 
 impl KnowledgeStore {
     pub fn pack(&self, selectors: &[Selector]) -> Result<KnowledgePack, KnowledgeError> {
-        let mut object_cache = HashMap::<String, Value>::new();
-        let mut blob_cache = HashMap::<String, String>::new();
         let mut entries = Vec::with_capacity(selectors.len());
         let mut unresolved_selectors = Vec::new();
 
@@ -35,11 +31,11 @@ impl KnowledgeStore {
             let object = read_graph_object(
                 &self.knowledge_dir,
                 &index_entry.object_hash,
-                &mut object_cache,
+                self.graph_object_cache(),
             )?;
             let node = object.get("node");
             let source = if index_entry.node_type == "leaf" {
-                extract_leaf_source(&self.knowledge_dir, &object, &mut blob_cache)?
+                extract_leaf_source(&self.knowledge_dir, &object, self.graph_object_cache())?
             } else {
                 None
             };

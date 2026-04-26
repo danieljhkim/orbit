@@ -4,6 +4,8 @@ mod graph_io;
 mod history_query;
 #[path = "store/leaf_data.rs"]
 mod leaf_data;
+#[path = "store/object_cache.rs"]
+mod object_cache;
 #[path = "store/open.rs"]
 mod open;
 #[path = "store/pack.rs"]
@@ -21,6 +23,9 @@ use std::path::PathBuf;
 use crate::selector::SelectorLookupKey;
 
 pub use history_query::NodeTaskInfo;
+pub use object_cache::{
+    DEFAULT_BLOB_CACHE_CAPACITY, DEFAULT_OBJECT_CACHE_CAPACITY, GraphObjectCache,
+};
 pub use task_state::{
     load_task_working_graph, overlay_pack_with_working_graph, pack_from_working_graph,
     save_task_working_graph, task_working_graph_state_path,
@@ -36,4 +41,11 @@ pub struct KnowledgeStore {
     graph_index: GraphIndexFile,
     selector_index: HashMap<SelectorLookupKey, String>,
     dir_children_index: HashMap<String, Vec<String>>,
+    graph_object_cache: GraphObjectCache,
+}
+
+impl KnowledgeStore {
+    pub fn graph_object_cache(&self) -> &GraphObjectCache {
+        &self.graph_object_cache
+    }
 }

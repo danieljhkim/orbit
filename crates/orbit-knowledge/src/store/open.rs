@@ -9,6 +9,7 @@ use crate::selector::SelectorLookupKey;
 
 use super::KnowledgeStore;
 use super::graph_io::read_json_file;
+use super::object_cache::GraphObjectCache;
 use super::types::SymbolSummary;
 
 impl KnowledgeStore {
@@ -53,6 +54,7 @@ impl KnowledgeStore {
             graph_index,
             selector_index,
             dir_children_index,
+            graph_object_cache: GraphObjectCache::new(),
         })
     }
 

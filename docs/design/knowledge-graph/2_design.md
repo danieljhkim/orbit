@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-23 (`.orbitignore` scan exclusions, [T20260423-0452])
+**Last updated:** 2026-04-26 (object/blob read cache, [T20260426-0141])
 
 This document specifies the knowledge graph as it exists today: on-disk layout, build pipeline, query services, Orbit integration, locking, and honest limitations. See [1_overview.md](./1_overview.md) for the "why" and [3_vision.md](./3_vision.md) for where it is headed. Task IDs are cited inline and collected at the end.
 
@@ -123,6 +123,12 @@ All tool inputs that reference a node accept a selector string.
 
 All services are read-only against a resolved snapshot. Writes go through the working graph, never through the service.
 
+### 3.3 Object/blob read cache
+
+`KnowledgeStore` owns a bounded `GraphObjectCache` for selector-oriented reads ([T20260426-0141]). The cache keeps two LRU sets: graph node objects keyed by object hash and source blobs keyed by blob hash. Default capacities are 10,000 objects and 2,000 blobs, enforced by the `lru` crate.
+
+Object and blob hashes are content-addressed, so a cache hit can trust the value already verified on insertion. `read_graph_object` and `extract_leaf_source` verify SHA-256 integrity only on cache miss, then insert the verified value. The cache is scoped to a `KnowledgeStore` instance rather than a global singleton so separate workspaces and tests cannot cross-contaminate.
+
 ---
 
 ## 4. Orbit Integration
@@ -208,6 +214,10 @@ Objects and blobs accumulate forever. There is no `orbit graph gc` today — aba
 
 `task_ids` on a node today is a flat union ([T20260421-0528]). A node touched by a reverted task and by a shipped task shows both IDs with no way to distinguish "this change is live" from "this change was tried and backed out." Consumers that want shipped-only signal have to join against task status externally.
 
+### 6.9 Object/blob cache lifetime is store-scoped
+
+The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-running services that retain a store instance benefit across repeated selector reads, and tests get simple isolation. Short-lived CLI invocations that open a fresh store for each process do not share cache entries across process boundaries.
+
 ---
 
 ## Task References
@@ -224,5 +234,6 @@ Objects and blobs accumulate forever. There is no `orbit graph gc` today — aba
 - **[T20260421-0528]** — `task_ids` schema on every node + git history walker for attribution.
 - **[T20260422-1540]** — Extend extraction to markdown sections, top-level config keys, and CSV/TSV columns via `FileKind`-dispatched extractors (`FileExtractor` trait, replacing `LanguageExtractor`).
 - **[T20260423-0452]** — `.orbitignore` scan exclusions, nested composition, default ignore baseline, and workspace-init seeding.
+- **[T20260426-0141]** — Bounded `KnowledgeStore` LRU for graph objects and source blobs.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

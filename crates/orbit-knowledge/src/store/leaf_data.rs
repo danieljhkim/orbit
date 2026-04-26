@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde_json::Value;
 
 use crate::selector::SelectorLookupKey;
@@ -11,8 +9,6 @@ use super::types::LeafData;
 impl KnowledgeStore {
     pub(crate) fn leaf_data(&self) -> Vec<(SelectorLookupKey, LeafData)> {
         let mut result = Vec::new();
-        let mut object_cache = HashMap::<String, Value>::new();
-        let mut blob_cache = HashMap::<String, String>::new();
 
         for entry in self.graph_index.nodes.values() {
             if entry.node_type != "leaf" {
@@ -23,12 +19,14 @@ impl KnowledgeStore {
                 None => continue,
             };
 
-            let object =
-                match read_graph_object(&self.knowledge_dir, &entry.object_hash, &mut object_cache)
-                {
-                    Ok(value) => value,
-                    Err(_) => continue,
-                };
+            let object = match read_graph_object(
+                &self.knowledge_dir,
+                &entry.object_hash,
+                self.graph_object_cache(),
+            ) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
             let Some(node) = object.get("node") else {
                 continue;
             };
@@ -45,10 +43,11 @@ impl KnowledgeStore {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let source = extract_leaf_source(&self.knowledge_dir, &object, &mut blob_cache)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
+            let source =
+                extract_leaf_source(&self.knowledge_dir, &object, self.graph_object_cache())
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
 
             let Some((file_path, qualified_name)) = entry.location.split_once('#') else {
                 continue;

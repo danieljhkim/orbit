@@ -57,6 +57,7 @@ pub use service::history::{
 };
 pub use service::{TaskGraphScope, TaskGraphService, default_knowledge_dir};
 pub use store::{
+    DEFAULT_BLOB_CACHE_CAPACITY, DEFAULT_OBJECT_CACHE_CAPACITY, GraphObjectCache,
     KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry, KnowledgeStore, LeafData, NodeTaskInfo,
     SymbolSummary, load_task_working_graph, overlay_pack_with_working_graph,
     pack_from_working_graph, save_task_working_graph, task_working_graph_state_path,

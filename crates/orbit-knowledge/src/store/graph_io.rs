@@ -8,13 +8,15 @@ use sha2::{Digest, Sha256};
 
 use crate::error::KnowledgeError;
 
+use super::object_cache::GraphObjectCache;
+
 pub(super) fn read_graph_object(
     knowledge_dir: &Path,
     object_hash: &str,
-    cache: &mut HashMap<String, Value>,
+    cache: &GraphObjectCache,
 ) -> Result<Value, KnowledgeError> {
-    if let Some(value) = cache.get(object_hash) {
-        return Ok(value.clone());
+    if let Some(value) = cache.get_object(object_hash) {
+        return Ok(value);
     }
 
     let path = knowledge_dir
@@ -34,14 +36,14 @@ pub(super) fn read_graph_object(
             path.display()
         )));
     }
-    cache.insert(object_hash.to_string(), value.clone());
+    cache.insert_object(object_hash.to_string(), value.clone());
     Ok(value)
 }
 
 pub(super) fn extract_leaf_source(
     knowledge_dir: &Path,
     object: &Value,
-    blob_cache: &mut HashMap<String, String>,
+    cache: &GraphObjectCache,
 ) -> Result<Option<String>, KnowledgeError> {
     if let Some(source) = object
         .get("node")
@@ -60,8 +62,8 @@ pub(super) fn extract_leaf_source(
         return Ok(None);
     };
 
-    if let Some(source) = blob_cache.get(blob_hash) {
-        return Ok(Some(source.clone()));
+    if let Some(source) = cache.get_blob(blob_hash) {
+        return Ok(Some(source));
     }
 
     let path = knowledge_dir
@@ -81,7 +83,7 @@ pub(super) fn extract_leaf_source(
             path.display()
         )));
     }
-    blob_cache.insert(blob_hash.to_string(), source.clone());
+    cache.insert_blob(blob_hash.to_string(), source.clone());
     Ok(Some(source))
 }
 

@@ -5,8 +5,6 @@
 //! [`crate::service::history`] to answer `orbit task history <selector>`
 //! without re-parsing the full graph.
 
-use std::collections::HashMap;
-
 use serde_json::Value;
 
 use crate::error::KnowledgeError;
@@ -40,8 +38,11 @@ impl KnowledgeStore {
             KnowledgeError::invalid_data(format!("graph index entry disappeared for `{node_id}`"))
         })?;
 
-        let mut cache: HashMap<String, Value> = HashMap::new();
-        let object = read_graph_object(&self.knowledge_dir, &index_entry.object_hash, &mut cache)?;
+        let object = read_graph_object(
+            &self.knowledge_dir,
+            &index_entry.object_hash,
+            self.graph_object_cache(),
+        )?;
         let node_value = object.get("node").cloned().unwrap_or(Value::Null);
 
         let task_ids = node_value
