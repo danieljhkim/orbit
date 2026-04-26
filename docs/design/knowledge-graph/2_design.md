@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26 (read-only public graph surface, [T20260426-0453])
+**Last updated:** 2026-04-26 (configurable task-ID pattern + `orbit graph history` surface, [T20260426-0507])
 
 This document specifies the knowledge graph as it exists today: on-disk layout, build pipeline, query services, Orbit integration, locking, and honest limitations. See [1_overview.md](./1_overview.md) for the "why" and [3_vision.md](./3_vision.md) for where it is headed. Task IDs are cited inline and collected at the end.
 
@@ -75,13 +75,30 @@ After the structural build, the history walker (`pipeline::history`, [T20260421-
 
 1. Resolve HEAD → last-attributed commit from the previous ref (or full history on first build).
 2. `git log --reverse --topo-order` over the new commits.
-3. Per commit: parse task IDs (regex `\[T\d{8}-\d{4}(?:-\d+)?\]`), diff against first parent (`--unified=0 --first-parent -m`), map hunks to leaves by line-range overlap.
+3. Per commit: parse task IDs via the active [`TaskIdPattern`](#23-configurable-task-id-extraction-t20260426-0507), diff against first parent (`--unified=0 --first-parent -m`), map hunks to leaves by line-range overlap.
 4. Union task IDs onto touched leaves; set `structural_conflict` on two-sided merges.
 5. Write `last_attributed_commit` back into the ref.
 
 The walker shells out to `git` via `orbit_common::utility::git::run_git`. There is no in-process git library dependency — operational simplicity and behavioral parity with the CLI outweigh the per-commit process cost at current repo sizes.
 
-### 2.3 Inclusion vs Access: `.orbitignore` vs Policy
+### 2.3 Configurable task-ID extraction ([T20260426-0507])
+
+The attribution pass and the history fallback share a single extraction pattern. The pattern is a `TaskIdPattern` (validated regex wrapper in `orbit-knowledge/src/task_id_pattern.rs`) with a capture-group convention: when the regex has at least one capture group, group 1 is the task ID; otherwise the whole match is the ID. This lets the Orbit default `\[(T\d{8}-\d{4}(?:-\d+)?)\]` strip surrounding brackets via the regex itself rather than bespoke string slicing, and keeps stored task IDs byte-identical to pre-T20260426-0507 graphs.
+
+Pattern resolution at `orbit graph build` / `orbit graph history` time follows a strict precedence:
+
+1. CLI flag `--task-id-pattern <regex>`.
+2. Workspace config field `knowledge.task_id_pattern` in `config.toml` (validated at `RuntimeConfig::load_layered`; invalid regex or empty string is rejected at startup with `OrbitError::InvalidInput`).
+3. Orbit default `\[(T\d{8}-\d{4}(?:-\d+)?)\]`.
+
+The active pattern is recorded in `manifest.json` under `task_id_pattern`. Two consequences:
+
+- `orbit graph history` compares the configured pattern against the manifest pattern and surfaces a stderr warning of the form `task-ID pattern differs from graph manifest (manifest: "X", configured: "Y"); run "orbit graph build"` when they disagree.
+- The attribution pass detects the same mismatch and forces a full-history backfill (cursor reset to `None` and prior `task_ids` hydration skipped) so a `--task-id-pattern` change cannot silently leave node `task_ids` stale or empty.
+
+This is the only configurable knob that changes the attribution-input format; existing build-cache invariants (per-branch refs, sidecar layout, identity matcher) are unchanged.
+
+### 2.4 Inclusion vs Access: `.orbitignore` vs Policy
 
 The scan stage now evaluates two inclusion layers before a file ever reaches the parser:
 
@@ -96,7 +113,7 @@ The default `.orbitignore` baseline excludes common generated or runtime-owned t
 
 The same path may legitimately appear in both layers with different intent. For example, `benchmarks/graph_v1/runs/**` is excluded from graph indexing via `.orbitignore` so frozen benchmark transcripts do not pollute `orbit.graph.search`, while a policy profile could still allow or deny runtime reads to that subtree depending on the activity. Likewise, `.orbit/` is excluded from indexing because it is runtime state, and a policy may independently deny modification of `.orbit/**` during normal agent execution.
 
-### 2.4 Build benchmark scoreboard
+### 2.5 Build benchmark scoreboard
 
 `make bench` runs the `orbit-knowledge` example driver `examples/graph_build.rs` as an end-to-end benchmark for the build pipeline ([T20260426-0236]). The driver calls `pipeline::run_build` directly rather than shelling out to `orbit graph build`, so it measures the pipeline plus object persistence without CLI dispatch overhead.
 
@@ -175,6 +192,7 @@ The knowledge graph is exposed through `orbit-mcp` as a stable, read-only tool s
 - `orbit.graph.callers`
 - `orbit.graph.implementors`
 - `orbit.graph.refs`
+- `orbit.graph.history` (task-ID attribution per selector with optional `task_id_pattern` override; same JSON shape as `orbit graph history --json`, [T20260426-0507])
 
 An explicit `ref` means "read the stored graph for this ref." It does not trigger a rebuild against whatever branch is currently checked out, and it does not overlay task-local working-graph edits onto that explicit historical ref. That is a subtle but load-bearing rule for historical queries.
 

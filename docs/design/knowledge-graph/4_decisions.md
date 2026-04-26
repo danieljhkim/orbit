@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-26 (ADR-019)
+**Last updated:** 2026-04-26 (ADR-020)
 
 ADR-style log of non-obvious design choices behind the knowledge graph. Each entry names the decision, the context that forced it, what we chose, and what we traded away. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -304,6 +304,23 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-020 — Configurable task-ID extraction with manifest-driven backfill
+
+**Status:** Accepted · 2026-04 · [T20260426-0507]
+
+**Context.** Task-ID attribution was hardcoded to the Orbit format `\[T\d{8}-\d{4}(?:-\d+)?\]` in two places (`pipeline/history.rs` and `service/history.rs`). Codebases using Jira (`PROJ-123`), Linear (`ENG-123`), or GitHub-issue (`#123`) conventions saw empty graph-backed results and a silently empty fallback — the feature was unusable outside Orbit's own repo. The same `orbit task history` CLI surface also lived under the wrong subcommand: it never touches task lifecycle, only the graph.
+
+**Decision.** Move the CLI to `orbit graph history <selector>` (drop the redundant `rebuild` subsubcommand; `orbit graph build` does the same job). Introduce a single `TaskIdPattern` accessor in `orbit-knowledge` consumed by both the build-time attribution pass and the history fallback. Expose configuration through `--task-id-pattern <regex>` on `orbit graph build` / `orbit graph history` and `knowledge.task_id_pattern` in workspace `config.toml`, with strict precedence CLI flag > config > Orbit default. Adopt a capture-group convention (group 1 if present, else whole match) so the default Orbit pattern strips brackets in-regex instead of bespoke string slicing — the stored task IDs stay byte-identical to pre-T20260426-0507 graphs. Persist the pattern in `manifest.json`. When the configured pattern differs from the manifest pattern, `orbit graph history` emits a stderr warning, and the attribution pass forces a full-history backfill (cursor reset, prior task_ids hydration skipped) so the new pattern repopulates every node. Also add `orbit.graph.history` as an MCP/agent tool returning the same JSON shape as the CLI's `--json`.
+
+**Consequences.**
+- Non-Orbit codebases can now use the feature without forking; orbit's own repo gets identical output to before.
+- A pattern change is safe: a subsequent `orbit graph build` is guaranteed to backfill correctly rather than silently leave stale `task_ids` from the prior pattern.
+- The agent tool surface stays in sync with the CLI: a future schema change must update both.
+- Cost: a pattern change incurs a full-history walk on next build. This is the right default — silently skipping history would be the worse failure mode.
+- Cost: validating regex twice (orbit-core config + orbit-knowledge consumer) — accepted to keep `orbit-core` free of the `orbit-knowledge` dep.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -334,5 +351,6 @@ Tasks cited by ADRs above:
 - **[T20260423-0607]** — Pointer-only graph reads (deferred; cited by ADR-018 consequences).
 - **[T20260426-0402]** — Land v3 retention decision in the ADR index.
 - **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and standardize on task lock reservations as preflight write guards.
+- **[T20260426-0507]** — Move `orbit task history` to `orbit graph history`; add configurable task-ID regex with manifest-recorded pattern, mismatch warning, and forced full backfill on pattern change; expose `orbit.graph.history` agent tool.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

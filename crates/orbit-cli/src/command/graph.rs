@@ -417,13 +417,20 @@ fn run_history_query(
     }
 
     if as_json {
-        let payload = json!({
+        let mut payload = json!({
             "selector": result.selector,
             "source": result.source,
             "task_history": result.task_history,
             "staleness": result.staleness,
             "structural_conflict": result.structural_conflict,
         });
+        // Match the agent-tool shape (T20260426-0507 review): emit `warnings`
+        // only when non-empty so default-pattern output stays unchanged.
+        if !result.warnings.is_empty()
+            && let Some(obj) = payload.as_object_mut()
+        {
+            obj.insert("warnings".to_string(), json!(result.warnings));
+        }
         crate::output::json::print_pretty(&payload)?;
     } else {
         print_history_human(&result);

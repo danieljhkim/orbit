@@ -120,14 +120,22 @@ impl Tool for OrbitGraphHistoryTool {
             OrbitError::Execution(format!("orbit.graph.history failed: {error}"))
         })?;
 
-        Ok(json!({
+        let mut payload = json!({
             "selector": result.selector,
             "source": result.source,
             "task_history": result.task_history,
             "staleness": result.staleness,
             "structural_conflict": result.structural_conflict,
-            "warnings": result.warnings,
-        }))
+        });
+        // Match the CLI `--json` shape: emit `warnings` only when non-empty so
+        // default-pattern callers see an identical object across both
+        // surfaces (T20260426-0507 review).
+        if !result.warnings.is_empty()
+            && let Some(obj) = payload.as_object_mut()
+        {
+            obj.insert("warnings".to_string(), json!(result.warnings));
+        }
+        Ok(payload)
     }
 }
 

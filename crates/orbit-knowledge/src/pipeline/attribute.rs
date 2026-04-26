@@ -57,15 +57,31 @@ pub fn attribute_history(ctx: &mut PipelineContext) -> Result<AttributeOutcome, 
         return Ok(AttributeOutcome::default());
     };
 
-    let cursor = read_previous_cursor(ctx);
+    // T20260426-0507: when the configured task-ID pattern differs from the
+    // pattern that built the previous graph, the prior cursor and node
+    // task_ids are stale (they were extracted with a different regex). Force a
+    // full-history backfill and skip hydration so the new pattern repopulates
+    // every commit in the range.
+    let pattern_changed = previous_manifest_pattern(&ctx.output_dir)
+        .map(|prev| prev != ctx.task_id_pattern.as_str())
+        .unwrap_or(false);
+
+    let cursor = if pattern_changed {
+        None
+    } else {
+        read_previous_cursor(ctx)
+    };
     let was_full_backfill = cursor.is_none();
 
     // Hydrate task_ids and structural_conflict from the previous ref so that a
     // repeat rebuild on the same HEAD (cursor == HEAD → no commits walked) is
     // byte-identical to the first rebuild. Without this, task_ids set in an
     // earlier rebuild would be dropped when `build_graph_*` produces fresh
-    // nodes in ctx.graph.
-    hydrate_previous_attributions(ctx);
+    // nodes in ctx.graph. When the pattern changed the prior task_ids are
+    // stale, so we deliberately skip the hydrate.
+    if !pattern_changed {
+        hydrate_previous_attributions(ctx);
+    }
 
     let commits = history::walk_commits(
         &ctx.repo_path,
@@ -580,6 +596,18 @@ fn inspect_operation_log(operations_dir: &Path, sha: &str) -> OperationLogStatus
     }
 }
 
+/// Read `task_id_pattern` from a previously-written `manifest.json`, if any.
+/// Used to detect a pattern change between rebuilds (T20260426-0507) so the
+/// attribution pass can force a full backfill instead of an incremental walk.
+fn previous_manifest_pattern(output_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(output_dir.join("manifest.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    value
+        .get("task_id_pattern")
+        .and_then(|v| v.as_str())
+        .map(ToOwned::to_owned)
+}
+
 fn read_previous_cursor(ctx: &PipelineContext) -> Option<String> {
     let store = GraphObjectStore::new(ctx.graph_dir());
     store
@@ -656,6 +684,37 @@ mod tests {
     use super::*;
     use crate::graph::nodes::{BaseNodeFields, DirNode, FileNode, LeafKind, LeafNode};
     use tempfile::tempdir;
+
+    #[test]
+    fn previous_manifest_pattern_returns_none_when_manifest_missing() {
+        let dir = tempdir().unwrap();
+        assert!(previous_manifest_pattern(dir.path()).is_none());
+    }
+
+    #[test]
+    fn previous_manifest_pattern_reads_recorded_value() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("manifest.json"),
+            r#"{"task_id_pattern":"[A-Z]+-\\d+"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            previous_manifest_pattern(dir.path()).as_deref(),
+            Some(r"[A-Z]+-\d+"),
+        );
+    }
+
+    #[test]
+    fn previous_manifest_pattern_returns_none_when_field_absent() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("manifest.json"),
+            r#"{"generated_at":"2026-04-26T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert!(previous_manifest_pattern(dir.path()).is_none());
+    }
 
     fn leaf(location: &str, name: &str, kind: LeafKind) -> LeafNode {
         LeafNode {

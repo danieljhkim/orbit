@@ -152,7 +152,7 @@ fn try_graph_backed(options: &HistoryQueryOptions) -> Result<GraphBackedOutcome,
         return Ok(GraphBackedOutcome::Fallback {
             reason: format!(
                 "task-commits sidecar missing at {} — falling back to `git log`; run \
-                 `orbit task history rebuild` to repopulate",
+                 `orbit graph build` to repopulate",
                 sidecar_path.display()
             ),
         });
@@ -243,7 +243,7 @@ fn detect_staleness(
         commits_behind: gap,
         cursor: Some(cursor),
         head,
-        remediation: "orbit task history rebuild".to_string(),
+        remediation: "orbit graph build".to_string(),
     }))
 }
 
