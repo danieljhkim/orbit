@@ -17,7 +17,11 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use orbit_core::command::job_run::JobRunListParams;
-use orbit_core::{AuditEventStatus, JobRunState, OrbitRuntime, Task, TaskStatus};
+use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
+use orbit_core::{
+    AuditEventStatus, JobRunState, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus,
+    TaskType,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -172,8 +176,8 @@ async fn require_localhost_origin(request: Request<Body>, next: Next) -> Respons
 
 pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
     Router::new()
-        .route("/tasks", get(list_tasks))
-        .route("/tasks/:id", get(get_task))
+        .route("/tasks", get(list_tasks).post(create_task_action))
+        .route("/tasks/:id", get(get_task).patch(update_task_action))
         .route("/tasks/:id/approve", post(approve_task_action))
         .route("/tasks/:id/reject", post(reject_task_action))
         .route("/tasks/:id/archive", post(archive_task_action))
@@ -203,6 +207,72 @@ pub(super) struct RejectBody {
     note: String,
     #[serde(default)]
     comment: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct CreateTaskBody {
+    title: String,
+    description: String,
+    #[serde(default)]
+    acceptance_criteria: Vec<String>,
+    #[serde(default)]
+    dependencies: Vec<String>,
+    #[serde(default)]
+    plan: String,
+    #[serde(default)]
+    comment: Option<String>,
+    #[serde(default)]
+    context_files: Vec<String>,
+    #[serde(default)]
+    workspace_path: Option<String>,
+    #[serde(default = "default_priority")]
+    priority: TaskPriority,
+    #[serde(default)]
+    complexity: Option<TaskComplexity>,
+    #[serde(default = "default_task_type")]
+    task_type: TaskType,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    source_task_id: Option<String>,
+}
+
+fn default_priority() -> TaskPriority {
+    TaskPriority::Medium
+}
+
+fn default_task_type() -> TaskType {
+    TaskType::Task
+}
+
+/// Partial-update body for `PATCH /tasks/:id`. Each field is `Option<...>`;
+/// fields absent from the JSON body remain unchanged.
+///
+/// Note: `pr_number`, `pr_status`, and `batch_id` are intentionally omitted
+/// from this v1 surface. They use `Option<Option<String>>` in
+/// `TaskUpdateParams` to distinguish absent vs. clear; the dashboard does not
+/// currently need to set them. Add them via a `deserialize_with` adapter when
+/// a UI use case appears.
+#[derive(Deserialize, Default)]
+pub(super) struct UpdateTaskBody {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    acceptance_criteria: Option<Vec<String>>,
+    #[serde(default)]
+    dependencies: Option<Vec<String>>,
+    #[serde(default)]
+    plan: Option<String>,
+    #[serde(default)]
+    execution_summary: Option<String>,
+    #[serde(default)]
+    comment: Option<String>,
+    #[serde(default)]
+    status: Option<TaskStatus>,
+    #[serde(default)]
+    context_files: Option<Vec<String>>,
 }
 
 async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
@@ -241,6 +311,65 @@ fn bounded_limit(requested: Option<usize>, default: usize) -> usize {
 
 async fn get_task(State(runtime): State<Arc<OrbitRuntime>>, Path(id): Path<String>) -> Response {
     match runtime.get_task(&id) {
+        Ok(task) => match dashboard_status_index(&runtime) {
+            Ok(status_by_id) => Json(task_to_json(&task, &status_by_id)).into_response(),
+            Err(e) => server_error(e),
+        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+async fn create_task_action(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Json(body): Json<CreateTaskBody>,
+) -> Response {
+    let params = TaskAddParams {
+        parent_id: body.parent_id,
+        title: body.title,
+        description: body.description,
+        acceptance_criteria: body.acceptance_criteria,
+        dependencies: body.dependencies,
+        plan: body.plan,
+        comment: body.comment,
+        context_files: body.context_files,
+        workspace_path: body.workspace_path,
+        priority: body.priority,
+        complexity: body.complexity,
+        task_type: body.task_type,
+        system_created: false,
+        source_task_id: body.source_task_id,
+    };
+    match runtime.add_task_with_identity(params, None, None) {
+        Ok(task) => match dashboard_status_index(&runtime) {
+            Ok(status_by_id) => Json(task_to_json(&task, &status_by_id)).into_response(),
+            Err(e) => server_error(e),
+        },
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+async fn update_task_action(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateTaskBody>,
+) -> Response {
+    let params = TaskUpdateParams {
+        title: body.title,
+        description: body.description,
+        acceptance_criteria: body.acceptance_criteria,
+        dependencies: body.dependencies,
+        plan: body.plan,
+        execution_summary: body.execution_summary,
+        comment: body.comment,
+        status: body.status,
+        pr_number: None,
+        pr_status: None,
+        batch_id: None,
+        context_files: body.context_files,
+        upsert_artifacts: Vec::new(),
+        append_review_threads: Vec::new(),
+    };
+    match runtime.update_task_with_identity(&id, params, None, None) {
         Ok(task) => match dashboard_status_index(&runtime) {
             Ok(status_by_id) => Json(task_to_json(&task, &status_by_id)).into_response(),
             Err(e) => server_error(e),
