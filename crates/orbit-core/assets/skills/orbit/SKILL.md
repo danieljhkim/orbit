@@ -9,7 +9,7 @@ description: Entry point for Orbit workflow. Covers lifecycle, invocation patter
 
 This skill orients agents working with Orbit. Orbit operations should go through the registered Orbit tool surface.
 
-When invoking `orbit tool run` directly, include the exact `model` in the input JSON. Orbit infers the agent family from known model names. The legacy `agent` field is still accepted for compatibility, but do not include it in normal examples.
+When invoking `orbit tool run` directly, include the exact `model` in the input JSON.
 
 ```json
 {

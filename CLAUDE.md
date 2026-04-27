@@ -89,7 +89,6 @@ Follow the `## Task Quality Standards` section in `orbit-create-task` skill: exp
 - Use the agent commit identity (i.e. `codex` or `claude`) as author/committer when you make commits
 - Include the task ID in the commit message when the commit is associated with an Orbit task (e.g. `[T20260320-001234]`).
 - Use your model name (e.g. `claude-opus-4-7`, `gpt-5.5`, `gemini-3.1-pro`) when authoring tasks or docs.
-- Preserve the exact model version in all task provenance fields and tool inputs. Do not shorten versioned OpenAI model names: if the running model is `gpt-5.5`, record `model: gpt-5.5` and attribution values like `created_by: gpt-5.5`, never `gpt-5`.
 - When writing docs, cite relevant task IDs in the doc itself.
 - When your change touches an owned feature's implementation, update that feature's design docs in the same PR: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `Last updated`, and add a new ADR for any non-obvious decision the change embodies. Stale docs are treated as a review blocker.
 

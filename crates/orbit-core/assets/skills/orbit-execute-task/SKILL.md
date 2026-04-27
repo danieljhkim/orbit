@@ -13,7 +13,7 @@ Handle a human-requested engineering task or existing Orbit task from intent to 
 
 All agent Orbit interactions go through `orbit tool run`. Never use `orbit task ...` directly — it skips agent provenance. Never guess tool names — run `orbit tool list` to see all registered tools.
 
-When invoking `orbit tool run` directly, include the exact `model` in the input JSON. Orbit infers the agent family from known model names. The legacy `agent` field is still accepted for compatibility, but do not include it in normal examples.
+When invoking `orbit tool run` directly, include the exact `model` in the input JSON.
 
 ```json
 {
