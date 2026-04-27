@@ -106,9 +106,10 @@ TASK_ID=$(orbit task add \
   --workspace .)
 echo "$TASK_ID"
 
-# review the created backlog task
-orbit task list
+# review and approve the created proposed task
+orbit task list --status proposed
 orbit task show "$TASK_ID"
+orbit task approve "$TASK_ID"
 
 # run the default PR-based execution path
 orbit run ship "$TASK_ID"
@@ -218,7 +219,7 @@ orbit task artifact put <task_id> <source_path>
 orbit task approve <task_id>
 ```
 
-Tasks are the durable unit of work. Direct human-created tasks enter the backlog; `approve` is for proposal and review gates.
+Tasks are the durable unit of work. Newly created tasks enter `proposed`; `approve` moves proposed work into the backlog and approves completed review work into done.
 
 ### Audit and Observability
 

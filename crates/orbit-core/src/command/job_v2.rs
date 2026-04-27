@@ -19,6 +19,7 @@ use orbit_store::JobRunStepParams;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::command::SYSTEM_AUDIT_IDENTITY;
 
 #[derive(Debug, Clone)]
 pub struct V2JobRunResult {
@@ -179,12 +180,11 @@ impl OrbitRuntime {
         });
 
         let audit_root = self.paths().audit_dir.clone();
-        let agent_identity = self.actor().label.clone();
         let workspace_path = self.paths().repo_root.clone();
         let writer = V2AuditWriter::with_disk_sinks(
             &audit_root,
             &run_id,
-            agent_identity,
+            SYSTEM_AUDIT_IDENTITY,
             Some(workspace_path.as_path()),
         )
         .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
@@ -415,6 +415,20 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
             .join(format!("{}.jsonl", result.run_id));
         assert_eq!(audit_jsonl, &expected_audit_jsonl);
         assert!(expected_audit_jsonl.exists());
+        let first_line = std::fs::read_to_string(&expected_audit_jsonl)
+            .expect("read audit jsonl")
+            .lines()
+            .next()
+            .expect("audit jsonl has a first event")
+            .to_string();
+        let first_event: serde_json::Value =
+            serde_json::from_str(&first_line).expect("parse first audit event");
+        assert_eq!(
+            first_event
+                .get("agent_identity")
+                .and_then(serde_json::Value::as_str),
+            Some(SYSTEM_AUDIT_IDENTITY)
+        );
         assert!(
             repo_root
                 .join(".orbit/state/audit/loop")

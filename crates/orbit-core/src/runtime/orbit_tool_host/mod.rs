@@ -1010,4 +1010,27 @@ mod tests {
         assert!(ids.contains(&title_match.id.as_str()));
         assert!(ids.contains(&description_match.id.as_str()));
     }
+
+    #[test]
+    fn task_add_tool_creates_proposed_tasks_for_agents() {
+        let (_root, runtime, _repo_root) = test_runtime();
+
+        let output = runtime
+            .execute_tool_command(
+                "orbit.task.add",
+                json!({
+                    "title": "Propose task from tool",
+                    "description": "Exercise the agent-facing task creation path.",
+                    "workspace": ".",
+                }),
+                Some("codex".to_string()),
+                Some("gpt-5.5".to_string()),
+            )
+            .expect("task add tool succeeds");
+
+        assert_eq!(
+            output.get("status").and_then(Value::as_str),
+            Some("proposed")
+        );
+    }
 }

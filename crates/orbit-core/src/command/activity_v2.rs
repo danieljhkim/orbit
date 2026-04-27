@@ -18,6 +18,7 @@ use orbit_engine::activity_job::{V2AuditWriter, V2DispatchInput, dispatch_v2_act
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::command::SYSTEM_AUDIT_IDENTITY;
 
 pub struct V2ActivityRunResult {
     pub activity_name: String,
@@ -71,12 +72,11 @@ impl OrbitRuntime {
         );
 
         let audit_root = self.paths().audit_dir.clone();
-        let agent_identity = self.actor().label.clone();
         let workspace_path = self.paths().repo_root.clone();
         let writer = V2AuditWriter::with_disk_sinks(
             &audit_root,
             &run_id,
-            agent_identity,
+            SYSTEM_AUDIT_IDENTITY,
             Some(workspace_path.as_path()),
         )
         .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
@@ -139,5 +139,68 @@ impl OrbitRuntime {
             }),
             Err(err) => Err(OrbitError::Execution(format!("v2 dispatch: {err}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf) {
+        let root = tempdir().expect("create tempdir");
+        let global_root = root.path().join("global");
+        let repo_root = root.path().join("repo");
+        let workspace_root = repo_root.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("create global root");
+        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+        (root, runtime, repo_root)
+    }
+
+    fn write_activity(path: &Path, name: &str) {
+        let yaml = format!(
+            r#"schemaVersion: 2
+kind: Activity
+metadata:
+  name: {name}
+spec:
+  type: deterministic
+  description: Test deterministic sleep.
+  action: sleep
+  config: {{}}
+"#
+        );
+        std::fs::write(path, yaml).expect("write activity yaml");
+    }
+
+    #[test]
+    fn direct_activity_run_uses_system_audit_identity() {
+        let (_root, runtime, repo_root) = test_runtime();
+        let yaml_path = repo_root.join("qa_activity_sleep.yaml");
+        write_activity(&yaml_path, "qa_activity_sleep");
+
+        let result = runtime
+            .run_activity_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
+            .expect("direct activity run succeeds");
+
+        let audit_jsonl = result.audit_jsonl.as_ref().expect("audit jsonl path");
+        let first_line = std::fs::read_to_string(audit_jsonl)
+            .expect("read audit jsonl")
+            .lines()
+            .next()
+            .expect("audit jsonl has a first event")
+            .to_string();
+        let first_event: serde_json::Value =
+            serde_json::from_str(&first_line).expect("parse first audit event");
+        assert_eq!(
+            first_event
+                .get("agent_identity")
+                .and_then(serde_json::Value::as_str),
+            Some(SYSTEM_AUDIT_IDENTITY)
+        );
     }
 }

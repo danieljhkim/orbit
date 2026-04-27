@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-26
+**Last updated:** 2026-04-27
 
 This document describes the shipped Activity / Job substrate as it exists today across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, load-time normalization, dispatch boundaries, backend semantics, DAG execution, audit, and the legacy edges that still matter. See [1_overview.md](./1_overview.md) for the feature's purpose and [3_vision.md](./3_vision.md) for forward-looking questions.
 
@@ -105,7 +105,7 @@ For direct single-activity execution inside runtime helpers:
 1. Read YAML from disk.
 2. Parse via `load_activity_asset(...)`.
 3. Resolve `backend: auto` to a concrete backend.
-4. Build audit sinks and run id.
+4. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
 5. Dispatch the concrete `ActivityV2Spec`.
 
 For a job run:
@@ -116,7 +116,7 @@ For a job run:
 4. Resolve every `target: activity:<name>` into a concrete `TargetStep`.
 5. Resolve every `backend: auto` in the now-concrete step tree.
 6. Reject loop-body `session:` bindings that resolve to `backend: cli`.
-7. Build audit sinks and run id.
+7. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
 8. Execute the normalized `JobV2`.
 
 The target-ref pass was added in [T20260418-2019]. The concrete backend resolution and `run-v2` entrypoints were wired in [T20260418-2143]. The CLI backend path and the HTTP-only loop/session rejection tightened this load-time contract in [T20260419-0104].

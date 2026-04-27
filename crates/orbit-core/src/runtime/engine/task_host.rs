@@ -172,6 +172,16 @@ mod tests {
         (root, runtime)
     }
 
+    fn approve_for_execution(runtime: &OrbitRuntime, task: &Task) -> Task {
+        runtime
+            .approve_task(
+                &task.id,
+                Some("approve for test execution".to_string()),
+                None,
+            )
+            .expect("approve task")
+    }
+
     #[test]
     fn automation_can_restamp_in_progress_task_without_plan() {
         let (_root, runtime) = test_runtime();
@@ -183,10 +193,11 @@ mod tests {
                 ..Default::default()
             })
             .expect("add task");
+        let task = approve_for_execution(&runtime, &task);
 
         assert!(task.plan.is_empty());
         let started = runtime
-            .start_task(&task.id, Some("start from backlog".to_string()), None)
+            .start_task(&task.id, Some("start approved task".to_string()), None)
             .expect("start backlog task without plan");
         assert_eq!(started.status, TaskStatus::InProgress);
 
@@ -222,6 +233,7 @@ mod tests {
                 ..Default::default()
             })
             .expect("add task");
+        let task = approve_for_execution(&runtime, &task);
         runtime
             .start_task(&task.id, Some("human starts work".to_string()), None)
             .expect("start task");
@@ -275,6 +287,7 @@ mod tests {
                 ..Default::default()
             })
             .expect("add task");
+        let task = approve_for_execution(&runtime, &task);
 
         runtime
             .update_task_from_activity(
@@ -308,6 +321,7 @@ mod tests {
                 ..Default::default()
             })
             .expect("add task");
+        let task = approve_for_execution(&runtime, &task);
         runtime
             .start_task(&task.id, Some("human starts work".to_string()), None)
             .expect("start task");
@@ -382,6 +396,7 @@ mod tests {
                 ..Default::default()
             })
             .expect("add task");
+        let task = approve_for_execution(&runtime, &task);
 
         orbit_engine::execute_deterministic_action(
             &runtime,

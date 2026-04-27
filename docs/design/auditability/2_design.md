@@ -42,6 +42,8 @@ The table and indexes live in `crates/orbit-store/migrations/0001_init.sql`, and
 
 The CLI path is an RAII guard in `crates/orbit-cli/src/audit_middleware.rs`. `AuditGuard` defaults to failure, marks success or denial explicitly, and writes one row in `Drop`. This means early returns still write an audit record as long as stack unwinding reaches the guard.
 
+For `orbit tool run`, the command-audit role is resolved from `agent` / `model` fields in `--input` or `--input-file`, then explicit `--agent` / `--model` flags, then `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL`. If none are present, the row uses `agent` as the fallback role because the tool-dispatch command surface is agent-facing by default. Direct non-tool CLI commands continue to use `admin`.
+
 `crates/orbit-cli/src/main.rs` wraps non-audit commands in that guard after runtime initialization. Direct `orbit audit ...` commands are deliberately outside the guard today, so querying the audit log does not itself emit another command audit row.
 
 ---
@@ -85,7 +87,7 @@ The body is a tagged `V2AuditEventKind`. Current event families include:
 - tool denial
 - CLI-backend allowlist delegation and subprocess lifecycle
 
-`crates/orbit-engine/src/activity_job/audit_writer.rs` owns `V2AuditWriter`. It assigns event ids, stores parent stacks per thread, emits JSONL through `V2JsonlSink`, keeps an in-memory snapshot for smoke verification, and exposes the inner loop sink so provider/tool events can live beneath the envelope tree.
+`crates/orbit-engine/src/activity_job/audit_writer.rs` owns `V2AuditWriter`. It assigns event ids, stores parent stacks per thread, emits JSONL through `V2JsonlSink`, keeps an in-memory snapshot for smoke verification, and exposes the inner loop sink so provider/tool events can live beneath the envelope tree. CLI-launched v2 activity/job runs stamp envelope `agent_identity` as `system` because these records describe Orbit's workflow orchestration; concrete agent/provider identity is carried by activity configuration, CLI invocation events, and invocation metrics.
 
 `crates/orbit-engine/src/activity_job/jsonl_sink.rs` writes one JSON object per line under `v2_loop/`, append-only for the life of a run and flushed per write.
 
@@ -129,14 +131,14 @@ The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies that
 Orbit currently carries identity through several related fields:
 
 - CLI runtime actor identity defaults direct CLI commands to `human`.
-- `orbit tool run` paths carry explicit `agent` and `model` inputs for provenance.
-- `V2AuditEnvelope.agent_identity` records the actor label used for an activity/job run.
+- `orbit tool run` paths carry explicit `agent` and `model` inputs for provenance, and command audit rows project that identity into the `role` column for audit filtering.
+- `V2AuditEnvelope.agent_identity` records the workflow-envelope actor. CLI-launched v2 runs use `system`; concrete agent activity is recorded in provider-specific event bodies and invocation metrics.
 - Task records carry `created_by`, `planned_by`, `implemented_by`, `agent`, and `model` fields.
 - Invocation metrics record agent and model beside job run and activity ids.
 
 The core design requirement is not that all of these fields collapse into one value. It is that a reviewer can follow the chain from task state, command rows, v2 run envelope, provider/tool trace, and metrics record back to a concrete human or model identity.
 
-This area is still uneven. Some paths store role strings such as `admin`; some store actor labels; some normalize model names into attribution labels. The design intent is clear, but a unified identity glossary and query join story remain open.
+This area is still uneven. Direct command rows still store role strings such as `admin`; agent-facing tool rows store resolved actor labels; some task paths normalize model names into attribution labels. The design intent is clear, but a unified identity glossary and query join story remain open.
 
 ---
 

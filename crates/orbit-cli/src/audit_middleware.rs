@@ -1,8 +1,10 @@
 use std::time::Instant;
 
+use orbit_common::types::normalize_optional_attribution_label;
 use orbit_core::{
     AuditEventInsertParams, AuditEventStatus, OrbitError, OrbitRuntime, redact_sensitive_env_text,
 };
+use serde_json::Value;
 
 use crate::command::Commands;
 
@@ -214,13 +216,17 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 ),
                 ToolSubcommand::Doctor => ("doctor", None, None, None),
             };
+            let role = match &tool_cmd.command {
+                ToolSubcommand::Run(args) => tool_run_actor_role(args),
+                _ => "admin".to_string(),
+            };
             CommandMeta {
                 command: "tool".to_string(),
                 subcommand: Some(sub.to_string()),
                 tool_name,
                 target_type,
                 target_id,
-                role: "admin".to_string(),
+                role,
                 arguments_json: None,
             }
         }
@@ -512,6 +518,59 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
     }
 }
 
+fn tool_run_actor_role(args: &crate::command::tool::ToolRunArgs) -> String {
+    let (input_agent, input_model) = tool_run_input_identity(args);
+    let env_agent = std::env::var("ORBIT_AGENT_NAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let env_model = std::env::var("ORBIT_AGENT_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let agent = input_agent
+        .as_deref()
+        .or(args.agent.as_deref())
+        .or(env_agent.as_deref());
+    let model = input_model
+        .as_deref()
+        .or(args.model.as_deref())
+        .or(env_model.as_deref());
+
+    normalize_optional_attribution_label(model.or(agent), model)
+        .unwrap_or_else(|| "agent".to_string())
+}
+
+fn tool_run_input_identity(
+    args: &crate::command::tool::ToolRunArgs,
+) -> (Option<String>, Option<String>) {
+    let value = args
+        .input
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .or_else(|| {
+            args.input_file.as_deref().and_then(|path| {
+                std::fs::read_to_string(path)
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            })
+        });
+
+    match value {
+        Some(Value::Object(map)) => (
+            map.get("agent")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned),
+            map.get("model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned),
+        ),
+        _ => (None, None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -555,5 +614,63 @@ mod tests {
         assert_eq!(meta.subcommand.as_deref(), Some("duel-plan"));
         assert_eq!(meta.target_type.as_deref(), Some("task"));
         assert_eq!(meta.target_id.as_deref(), Some("T1"));
+    }
+
+    #[test]
+    fn tool_run_audit_meta_uses_agent_flags_for_role() {
+        let meta = meta_for(&[
+            "orbit",
+            "tool",
+            "run",
+            "orbit.graph.search",
+            "--agent",
+            "codex",
+            "--model",
+            "gpt-5.5",
+        ]);
+
+        assert_eq!(meta.command, "tool");
+        assert_eq!(meta.subcommand.as_deref(), Some("run"));
+        assert_eq!(meta.tool_name.as_deref(), Some("orbit.graph.search"));
+        assert_eq!(meta.role, "gpt-5.5");
+    }
+
+    #[test]
+    fn tool_run_audit_meta_uses_input_identity_for_role() {
+        let meta = meta_for(&[
+            "orbit",
+            "tool",
+            "run",
+            "orbit.graph.search",
+            "--input",
+            r#"{"query":"actor","agent":"codex","model":"gpt-5.5"}"#,
+        ]);
+
+        assert_eq!(meta.role, "gpt-5.5");
+    }
+
+    #[test]
+    fn tool_run_audit_meta_prefers_input_identity_over_flags() {
+        let meta = meta_for(&[
+            "orbit",
+            "tool",
+            "run",
+            "orbit.graph.search",
+            "--agent",
+            "codex",
+            "--model",
+            "gpt-5.5",
+            "--input",
+            r#"{"query":"actor","agent":"claude","model":"opus-4.6"}"#,
+        ]);
+
+        assert_eq!(meta.role, "opus-4.6");
+    }
+
+    #[test]
+    fn tool_run_audit_meta_uses_agent_role_without_identity() {
+        let meta = meta_for(&["orbit", "tool", "run", "orbit.graph.search"]);
+
+        assert_eq!(meta.role, "agent");
     }
 }

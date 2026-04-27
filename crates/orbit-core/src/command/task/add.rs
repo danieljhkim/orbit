@@ -5,7 +5,6 @@ use orbit_common::types::{
 use orbit_store::{TaskCreateParams as StoreTaskCreateParams, friction_bounty};
 
 use crate::OrbitRuntime;
-use crate::context::ActorKind;
 use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{authored_role_value, build_task_comments, effective_actor_label};
@@ -35,14 +34,11 @@ impl OrbitRuntime {
             canonical_agent.as_deref(),
             canonical_model.as_deref(),
         );
-        let default_status =
-            if actor.kind == ActorKind::Agent && self.task_approval_required_for_agent() {
-                TaskStatus::Proposed
-            } else {
-                TaskStatus::Backlog
-            };
-        let (task_type, initial_status) =
-            infer_task_create_type_and_status(params.task_type, params.status, default_status)?;
+        let (task_type, initial_status) = infer_task_create_type_and_status(
+            params.task_type,
+            params.status,
+            TaskStatus::Proposed,
+        )?;
         let uses_system_identity = params.system_created;
         let create_label = if uses_system_identity {
             "system".to_string()
@@ -213,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn human_task_add_enters_backlog_and_starts_without_proposal_approval() {
+    fn task_add_enters_proposed_and_requires_approval_before_backlog() {
         let (_root, runtime) = test_runtime();
 
         let task = runtime
@@ -226,19 +222,15 @@ mod tests {
             })
             .expect("human task add succeeds");
 
-        assert_eq!(task.status, TaskStatus::Backlog);
+        assert_eq!(task.status, TaskStatus::Proposed);
 
-        let err = runtime
+        let approved = runtime
             .approve_task(&task.id, Some("LGTM".to_string()), None)
-            .expect_err("backlog task should not use proposal approval");
-        assert!(
-            err.to_string()
-                .contains("approve requires 'proposed', 'friction', or 'review'"),
-            "{err}"
-        );
+            .expect("proposed task can be approved into backlog");
+        assert_eq!(approved.status, TaskStatus::Backlog);
 
         let started = runtime
-            .start_task(&task.id, Some("start backlog task".to_string()), None)
+            .start_task(&task.id, Some("start approved task".to_string()), None)
             .expect("backlog task starts directly");
         assert_eq!(started.status, TaskStatus::InProgress);
     }

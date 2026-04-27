@@ -10,6 +10,8 @@
 //! Default YAML assets (e.g., sample skills, config templates) are embedded
 //! at compile time via `include_str!` and seeded to disk on first `orbit init`.
 
+pub(crate) const SYSTEM_AUDIT_IDENTITY: &str = "system";
+
 pub mod activity;
 pub mod activity_v2;
 pub mod audit_event;
