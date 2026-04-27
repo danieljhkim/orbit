@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
@@ -54,6 +55,15 @@ pub trait V2RuntimeHost: Send + Sync {
     /// Returning an error is the structured failure path when a provider has no
     /// CLI mapping (e.g. `openai_compat` which is HTTP-only).
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError>;
+
+    /// Return provider-specific CLI runtime config for `backend: cli`.
+    ///
+    /// Most providers ignore this today. Codex uses it for sandbox,
+    /// approval-policy, and writable-directory arguments that must stay dynamic
+    /// rather than living in the static executor definition.
+    fn provider_cli_config(&self, _provider: &str) -> HashMap<String, String> {
+        HashMap::new()
+    }
 
     fn tool_context_for_activity(
         &self,

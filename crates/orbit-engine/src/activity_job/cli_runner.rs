@@ -21,7 +21,6 @@
 //! pattern covering provider keys that may appear in argv when a user
 //! mis-configures a provider.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -75,10 +74,11 @@ pub fn run_cli_backend(
     let envelope_json = serde_json::to_vec(&envelope)
         .map_err(|err| DispatchError::CliInvocationFailed(format!("serialize envelope: {err}")))?;
 
+    let provider_config = host.provider_cli_config(&provider);
     let config = AgentConfig::from_cli_config(
         cli_executor.command.clone(),
         spec.model.as_deref(),
-        &HashMap::new(),
+        &provider_config,
     )
     .map_err(|err| DispatchError::CliInvocationFailed(format!("agent config: {err}")))?;
     let agent = Agent::new(&config)
@@ -408,6 +408,7 @@ fn line_text(raw_line: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
     use std::fmt;
     use std::fs;
     use std::io::{self, Write};
@@ -490,7 +491,7 @@ mod tests {
     #[test]
     fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
         let temp = tempdir().expect("tempdir");
-        let script = temp.path().join("mock-agent");
+        let script = temp.path().join("codex");
         write_executable(
             &script,
             "#!/bin/sh\nprintf '%s\\n' 'plain stdout'\nprintf '%s\\n' 'plain stderr' >&2\n",
@@ -505,6 +506,7 @@ mod tests {
         ));
         let host = TestHost {
             command: script.display().to_string(),
+            provider_config: HashMap::new(),
         };
         let spec = test_agent_loop_spec(Duration::from_secs(5));
         let input = serde_json::json!({
@@ -546,6 +548,70 @@ mod tests {
         assert!(!finished.4);
         assert_eq!(sink.blob("blob-2"), Some(b"plain stdout\n".to_vec()));
         assert_eq!(sink.blob("blob-3"), Some(b"plain stderr\n".to_vec()));
+    }
+
+    #[test]
+    fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
+        let temp = tempdir().expect("tempdir");
+        let script = temp.path().join("codex");
+        write_executable(
+            &script,
+            "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+        );
+
+        let sink = Arc::new(RecordingSink::default());
+        let sink_for_writer: Arc<dyn AuditSink> = sink;
+        let audit = Arc::new(V2AuditWriter::new(
+            "job-config",
+            "codex:gpt-5.5",
+            sink_for_writer,
+        ));
+        let mut provider_config = HashMap::new();
+        provider_config.insert("sandbox".to_string(), "danger-full-access".to_string());
+        provider_config.insert("approval_policy".to_string(), "never".to_string());
+        provider_config.insert(
+            "writable_dirs_json".to_string(),
+            r#"["/tmp/orbit-a","/tmp/orbit-b"]"#.to_string(),
+        );
+        let host = TestHost {
+            command: script.display().to_string(),
+            provider_config,
+        };
+        let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+        let outcome = run_cli_backend(
+            &host,
+            &spec,
+            "job-config",
+            audit.clone(),
+            &serde_json::json!({ "prompt": "do it" }),
+        )
+        .expect("run succeeds");
+
+        assert!(outcome.success);
+        let events = audit.events_snapshot().expect("events snapshot");
+        let argv = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                V2AuditEventKind::CliInvocationStarted { argv_redacted, .. } => Some(argv_redacted),
+                _ => None,
+            })
+            .expect("cli.invocation.started event");
+
+        assert_eq!(
+            argv,
+            &vec![
+                script.display().to_string(),
+                "--config".to_string(),
+                "approval_policy=\"never\"".to_string(),
+                "--sandbox".to_string(),
+                "danger-full-access".to_string(),
+                "--add-dir".to_string(),
+                "/tmp/orbit-a".to_string(),
+                "--add-dir".to_string(),
+                "/tmp/orbit-b".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -776,6 +842,7 @@ mod tests {
 
     struct TestHost {
         command: String,
+        provider_config: HashMap<String, String>,
     }
 
     impl V2RuntimeHost for TestHost {
@@ -801,6 +868,10 @@ mod tests {
                 command: self.command.clone(),
                 args: Vec::new(),
             })
+        }
+
+        fn provider_cli_config(&self, _provider: &str) -> HashMap<String, String> {
+            self.provider_config.clone()
         }
 
         fn tool_context_for_activity(

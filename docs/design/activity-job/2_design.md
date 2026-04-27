@@ -205,6 +205,8 @@ After [T20260426-2313], the subprocess stdout/stderr readers stream line-level `
 
 Executor args are prepended before provider runtime args. For the seeded Codex executor, that means the subprocess starts as `codex exec --json --sandbox workspace-write ...`, not as the interactive `codex` TUI with piped stdin. This was tightened after a local ship run for [T20260423-0114] exposed that the earlier command-only boundary ignored executor args.
 
+After [T20260427-48], provider runtime args also receive the runtime's provider config through the same `V2RuntimeHost` boundary. Static executor definitions keep command-shape flags such as `exec --json`; dynamic provider settings such as Codex sandbox mode, writable side directories, and approval policy stay in the retained provider runtime. Codex approval policy is passed as an exec-compatible config override rather than as the interactive-only `--ask-for-approval` flag after `exec`.
+
 The important retention boundary is that the older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers. They are the shipped implementation of `backend: cli`.
 
 Just as important, Orbit does not enforce tool allowlists on this path today. It records the declared tool set as an advisory and delegates enforcement to the provider harness. This is a real semantic gap between `backend: http` and `backend: cli`.
@@ -419,5 +421,6 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
 - **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
 - **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
+- **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

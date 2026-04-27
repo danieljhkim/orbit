@@ -321,6 +321,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - The automation no longer mutates whichever branch happens to be checked out in the repo root just to refresh base state.
 - Cost: default shipping workflows now require the configured base branch to be fetchable from `origin`; callers that intentionally operate without a remote must opt into `base_sync: local`.
 
+## ADR-025 — Codex CLI dynamic flags stay in provider runtime config
+
+**Status:** Accepted · 2026-04 · [T20260427-48]
+
+**Context.** The seeded Codex executor needs `exec --json` as static command shape, but sandbox mode, writable side directories, and approval policy are runtime choices. A stale split meant the v2 CLI runner built Codex runtime args from an empty provider config, and approval policy could be appended after `exec` as `--ask-for-approval`, which current Codex CLI rejects in that position.
+
+**Decision.** Keep `crates/orbit-core/assets/executors/codex.yaml` limited to static mode flags, thread provider config through `V2RuntimeHost` into the retained CLI runtime, and pass Codex approval policy as an exec-compatible config override.
+
+**Consequences.**
+- Codex `backend: cli` runs now source sandbox and `--add-dir` arguments from Orbit runtime config.
+- Codex approval policy no longer depends on an interactive-only flag position after `exec`.
+- Cost: the v2 host boundary exposes a provider-config map, so backend CLI dispatch remains aware of provider-specific runtime settings.
+
 ---
 
 ## Task References
@@ -354,5 +367,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
 - **[T20260427-33]** — Remove the audit-only `dispatch_agent` step from `task_auto_pipeline`.
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.
+- **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

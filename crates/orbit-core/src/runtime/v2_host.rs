@@ -21,7 +21,7 @@ use orbit_common::types::{InvocationTrace, Task};
 use orbit_common::utility::path::workspace_relative_paths_overlap;
 use orbit_common::utility::selector::canonical_selector_in_workspace;
 use orbit_engine::activity_job::{DispatchError, ResolvedCliExecutor, V2RuntimeHost};
-use orbit_engine::{StateExecutionContext, execute_deterministic_action};
+use orbit_engine::{EnvironmentHost, StateExecutionContext, execute_deterministic_action};
 use orbit_store::{AuditEventInsertParams, InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ToolContext};
 use serde_json::Value;
@@ -691,6 +691,10 @@ impl V2RuntimeHost for OrbitRuntime {
 
     fn resolve_cli_executor(&self, provider: &str) -> Result<ResolvedCliExecutor, DispatchError> {
         resolve_cli_executor(self, provider)
+    }
+
+    fn provider_cli_config(&self, _provider: &str) -> HashMap<String, String> {
+        EnvironmentHost::agent_provider_config(self)
     }
 
     fn tool_context_for_activity(
