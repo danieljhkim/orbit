@@ -76,6 +76,12 @@ pub(super) struct AuditQuery {
     status: Option<String>,
     #[serde(default)]
     role: Option<String>,
+    /// Filters audit events by orbit invocation id. The SQLite `audit_events`
+    /// schema has no `run_id` column; `run_id` here is a backward-compat alias
+    /// of `execution_id` (T20260427-26). When both are supplied, `execution_id`
+    /// takes precedence.
+    #[serde(default)]
+    execution_id: Option<String>,
     #[serde(default)]
     run_id: Option<String>,
     #[serde(default)]
@@ -352,7 +358,11 @@ async fn list_audit(
         Err(e) => return server_error(e),
     };
 
-    let run_id_filter = q.run_id.as_deref().filter(|s| !s.is_empty());
+    let exec_id_filter = q
+        .execution_id
+        .as_deref()
+        .or(q.run_id.as_deref())
+        .filter(|s| !s.is_empty());
     let profile_filter = q
         .profile
         .as_deref()
@@ -368,8 +378,8 @@ async fn list_audit(
     let mut filtered: Vec<_> = events
         .into_iter()
         .filter(|e| {
-            if let Some(rid) = run_id_filter
-                && e.execution_id != rid
+            if let Some(eid) = exec_id_filter
+                && e.execution_id != eid
             {
                 return false;
             }

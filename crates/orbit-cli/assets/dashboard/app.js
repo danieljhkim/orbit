@@ -46,7 +46,10 @@ let auditFilter = {
   q: "",
   tool: null,
   role: null,
-  run_id: null,
+  // Filters audit Events by `execution_id` (the orbit invocation id). The CLI
+  // SQLite audit table has no real `run_id` field, so this never identifies a
+  // JobRun — see T20260427-26.
+  execution_id: null,
   profile: null,
   // Time-window filter for the Events sub-tab. Accepts the same shorthands as
   // the API (`24h`, `7d`, `1w`, RFC3339); null means the API-side default.
@@ -738,7 +741,10 @@ function setActiveTab(raw, opts = {}) {
     auditFilter.status = query.get("status") || null;
     auditFilter.tool = query.get("tool") || null;
     auditFilter.role = query.get("role") || null;
-    auditFilter.run_id = query.get("run_id") || null;
+    // Accept legacy `run_id=` URLs as an alias of `execution_id=`. The CLI
+    // audit table never had a real run_id; both names point at execution_id.
+    auditFilter.execution_id =
+      query.get("execution_id") || query.get("run_id") || null;
     auditFilter.profile = query.get("profile") || null;
     auditFilter.q = query.get("q") || "";
     auditFilter.since = query.get("since") || null;
@@ -778,7 +784,7 @@ function buildAuditHash() {
     if (auditFilter.status) sp.set("status", auditFilter.status);
     if (auditFilter.tool) sp.set("tool", auditFilter.tool);
     if (auditFilter.role) sp.set("role", auditFilter.role);
-    if (auditFilter.run_id) sp.set("run_id", auditFilter.run_id);
+    if (auditFilter.execution_id) sp.set("execution_id", auditFilter.execution_id);
     if (auditFilter.profile) sp.set("profile", auditFilter.profile);
     if (auditFilter.q) sp.set("q", auditFilter.q);
   }
@@ -1110,7 +1116,7 @@ function fetchAndRenderAudit() {
   if (auditFilter.status) sp.set("status", auditFilter.status);
   if (auditFilter.tool) sp.set("tool", auditFilter.tool);
   if (auditFilter.role) sp.set("role", auditFilter.role);
-  if (auditFilter.run_id) sp.set("run_id", auditFilter.run_id);
+  if (auditFilter.execution_id) sp.set("execution_id", auditFilter.execution_id);
   if (auditFilter.profile) sp.set("profile", auditFilter.profile);
   if (auditFilter.q) sp.set("q", auditFilter.q);
   return fetchJson(`/api/audit?${sp.toString()}`).then((events) => {
@@ -1190,7 +1196,9 @@ function renderSparkline(buckets) {
 const POLICY_TABLES = [
   { id: "by_profile", label: "By Profile",  nameField: "name",   filterKey: "profile" },
   { id: "by_target",  label: "By Target",   nameField: "name",   filterKey: null },
-  { id: "by_run",     label: "By Run",      nameField: "run_id", filterKey: "run_id" },
+  // Real JobRun ids from the v2 audit envelope. Click routes to Run Detail
+  // rather than filtering Events (audit Events only knows execution_id).
+  { id: "by_run",     label: "By Run",      nameField: "run_id", navigateTo: "run" },
   { id: "by_agent",   label: "By Agent",    nameField: "agent",  filterKey: "role" },
 ];
 
@@ -1265,7 +1273,10 @@ function buildPolicyTable(spec, rows, sortMode) {
       const tr = el("tr", { title: name });
       tr.appendChild(el("td", { class: "value-name", text: name }));
       tr.appendChild(el("td", { class: "num", text: String(row.count || 0) }));
-      if (spec.filterKey) {
+      if (spec.navigateTo === "run") {
+        tr.style.cursor = "pointer";
+        tr.addEventListener("click", () => navigateToRun(name));
+      } else if (spec.filterKey) {
         tr.style.cursor = "pointer";
         tr.addEventListener("click", () => {
           auditFilter[spec.filterKey] = name;
@@ -1302,7 +1313,7 @@ function navigateToRole(role) {
     q: "",
     tool: null,
     role,
-    run_id: null,
+    execution_id: null,
     profile: null,
     since: null,
     policyKind: null,
@@ -1365,7 +1376,7 @@ const AUDIT_COLUMNS = [
   { key: "status", label: "status" },
   { key: "exit", label: "exit", num: true },
   { key: "duration", label: "duration", num: true },
-  { key: "run_id", label: "run id" },
+  { key: "execution_id", label: "execution id" },
 ];
 
 function renderAudit(events) {
@@ -1489,17 +1500,6 @@ function buildAuditDetailRow(ev) {
     block.appendChild(el("pre", { text: ev.error_message }));
     td.appendChild(block);
   }
-
-  const actions = el("div", { class: "audit-detail-actions" });
-  if (ev.execution_id) {
-    const btn = el("button", { class: "link-action", text: "View run" });
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      navigateToRun(ev.execution_id);
-    });
-    actions.appendChild(btn);
-  }
-  td.appendChild(actions);
 
   tr.appendChild(td);
   return tr;
@@ -1939,7 +1939,7 @@ async function refreshDashboard() {
   if (btn) btn.disabled = false;
   isRefreshing = false;
   
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,jobs,job-runs,audit?since|tool|status|role|run_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,scoreboard,diagnostics/{metrics,friction,denials?since|kind|profile|agent}}`;
+  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,scoreboard,diagnostics/{metrics,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();
