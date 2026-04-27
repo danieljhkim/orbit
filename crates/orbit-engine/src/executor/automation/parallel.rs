@@ -386,7 +386,7 @@ fn ensure_shared_worktree(
             "-b",
             worktree_branch,
             &worktree_path.to_string_lossy(),
-            &start_point,
+            start_point,
         ],
     )
 }

@@ -1541,6 +1541,7 @@ dependencies = [
  "colored",
  "comfy-table",
  "csv",
+ "futures-core",
  "orbit-common",
  "orbit-core",
  "orbit-mcp",

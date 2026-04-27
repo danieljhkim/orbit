@@ -1,3 +1,4 @@
+pub mod format;
 pub mod tail;
 
 use clap::{Args, Subcommand};

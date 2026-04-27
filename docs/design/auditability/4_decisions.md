@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-27 (T20260427-43)
+**Last updated:** 2026-04-27 (T20260427-44, T20260427-46)
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -171,6 +171,19 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - Scoreboard refreshes can repair stale increment files because task history is the source of truth for triage outcomes.
 - Cost: legacy untriaged friction tasks need a file-store migration from `proposed/` to `friction/`, and already-triaged legacy histories remain dependent on their existing transition records.
 
+## ADR-013 — Unified log feed exposes shared backend surfaces for dashboard UI
+
+**Status:** Accepted · 2026-04 · [T20260427-44], [T20260427-46]
+
+**Context.** ADR-011 made `orbit log tail` the first-class terminal reader for the global JSONL tracing feed. The dashboard needs the same source/code/message semantics without copying formatter logic into browser JavaScript, and the UI feature is owned separately from the backend/API slice.
+
+**Decision.** Extract the CLI tail formatter/filter/path-resolution logic into a shared `orbit-cli` log module and expose two read-only dashboard backend endpoints: `/api/log` for a bounded initial snapshot and `/api/log/stream` for Server-Sent Events from newly appended JSONL lines. Both endpoints resolve the same log path as `orbit log tail`, accept the same target/level/since filters, and render `message_html` server-side with dynamic field values HTML-escaped before adding emphasis markup. The Tasks-tab DOM/CSS/JS panel remains a Gemini-owned follow-up task that consumes this API contract rather than duplicating log semantics.
+
+**Consequences.**
+- CLI, dashboard backend, and dashboard UI share one log vocabulary for source labels, short codes, level filtering, and high-value target messages.
+- Browser clients receive pre-rendered, escaped message HTML while keeping dynamic labels and classes outside formatter templates.
+- Cost: the backend stream still follows the v1 append-only file model; rotation/truncation handling is best-effort and the visual panel ships separately under the UI-owned task.
+
 ---
 
 ## Task References
@@ -187,5 +200,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260427-0023]** — Project policy denials and friction task submissions into the global tracing feed.
 - **[T20260427-27]** — Close out the unified-log story: job lifecycle dual-write, library print migration with workspace lint gate, and `orbit log tail` reader CLI.
 - **[T20260427-43]** — Add `status: friction`, creation-time type/status inference, migration, and history-derived friction bounty refresh.
+- **[T20260427-44]** — Add shared log formatter extraction and dashboard backend `/api/log` snapshot/SSE endpoints.
+- **[T20260427-46]** — Implement the Gemini-owned Tasks-tab `orbit.log` panel using the shared dashboard backend API.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
