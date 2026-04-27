@@ -5,8 +5,8 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Validate the `dispatch_agent`'s bundle output before the fan_out
-    dispatch. Fails the Run with a structured error if any bundle
+    Validate the auto-dispatch bundle list before the fan_out dispatch.
+    Fails the Run with a structured error if any bundle
     exceeds `max_bundle_size`, contains a duplicate task_id across
     bundles, or references an id not present in the input `known_task_ids`
     set. Pass-through on success so the fan_out can consume the same

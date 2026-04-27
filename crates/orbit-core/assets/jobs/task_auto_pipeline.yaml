@@ -1,23 +1,13 @@
 # Auto-dispatch pipeline.
 #
-# Pulls the workspace backlog, asks `dispatch_agent` for advisory grouping
-# notes, then dispatches deterministic singleton bundles from `list_backlog`.
-# Downstream workflow inputs never depend on the agent's final response
-# payload, so malformed agent text cannot break the job. `list_backlog`
-# pre-filters backlog groups that already overlap active task locks, so the
-# gate layer sees fewer predictable starvation cases.
+# Pulls the workspace backlog and dispatches deterministic singleton bundles
+# from `list_backlog`. `list_backlog` pre-filters backlog groups that already
+# overlap active task locks, so the gate layer sees fewer predictable
+# starvation cases.
 #
 # Empty-backlog behavior
 # - `list_backlog` returns `tasks: []` and `bundles: []`. The fan_out over an
 #   empty list is a no-op and the Run succeeds with zero child Runs.
-#
-# Audit trail (AC 8)
-# - `dispatch_agent` runs as `type: agent_loop`, `backend: http`. Each
-#   Run emits `ActivityStarted` / `ActivityFinished` events at the v2
-#   layer; the underlying loop engine emits `http.*` and `tool.call.*`
-#   events referenced via `parent_event_id`. The full prompt, tool
-#   calls, and model response are therefore recoverable from the audit
-#   trail for the Run.
 #
 # Concurrency cap (AC 7)
 # - `fan_out.max_workers` bounds the number of in-flight child gate
@@ -51,12 +41,6 @@ spec:
       default_input:
         max_tasks: "{{ input.max_tasks }}"
         task_ids: "{{ input.task_ids }}"
-
-    - id: dispatch_agent
-      target: activity:dispatch_agent
-      default_input:
-        tasks: "{{ steps.list_backlog.output.tasks }}"
-        max_bundle_size: "{{ input.max_bundle_size }}"
 
     - id: validate_bundles
       target: activity:validate_bundles

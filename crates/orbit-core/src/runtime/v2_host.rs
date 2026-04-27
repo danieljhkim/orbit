@@ -176,7 +176,7 @@ impl V2RuntimeHost for OrbitRuntime {
                     "slept_seconds": started_at.elapsed().as_secs_f64(),
                 }))
             }
-            // Materialize the workspace backlog for `dispatch_agent`.
+            // Materialize the workspace backlog for auto-dispatch.
             // Filters `status: backlog`, excludes `type: friction`
             // (per CLAUDE.md: friction is reserved for agent self-reports,
             // not shippable work), and in automatic mode drops any backlog
@@ -420,7 +420,7 @@ impl V2RuntimeHost for OrbitRuntime {
                     "message": message,
                 }))
             }
-            // Guard the `dispatch_agent`'s bundle output before fan_out.
+            // Guard the auto-dispatch bundle output before fan_out.
             // Rejects duplicated task_ids, unknown ids, and oversize
             // bundles with a structured error so a misgrouped backlog
             // never silently dispatches.

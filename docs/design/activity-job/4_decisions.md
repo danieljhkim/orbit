@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-26
+**Last updated:** 2026-04-27
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -295,6 +295,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - The live tracing stream is redacted while `CliInvocationFinished` blob refs still point at the original captured bytes.
 - Cost: tests that inspect tracing safety must capture formatted subscriber output, not raw `Event` fields.
 
+## ADR-023 — Auto-dispatch uses deterministic backlog bundles only
+
+**Status:** Accepted · 2026-04 · [T20260427-33]
+
+**Context.** `task_auto_pipeline` included an audit-only `dispatch_agent` HTTP step, but downstream dispatch already consumed deterministic singleton bundles from `list_backlog_tasks`. Missing provider credentials could therefore fail `orbit run ship-auto` before any required workflow data was produced.
+
+**Decision.** Remove `dispatch_agent` from `task_auto_pipeline` and keep the auto-dispatch path deterministic from backlog listing through bundle validation and gate fan-out.
+
+**Consequences.**
+- `orbit run ship-auto` no longer requires Claude HTTP credentials for an advisory step.
+- The pipeline has fewer moving parts before dispatching child gate runs.
+- Cost: the auto-dispatch audit trail no longer contains a model-authored advisory grouping note.
+
 ---
 
 ## Task References
@@ -326,5 +339,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
 - **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
 - **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
+- **[T20260427-33]** — Remove the audit-only `dispatch_agent` step from `task_auto_pipeline`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
