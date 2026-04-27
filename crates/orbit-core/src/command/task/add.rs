@@ -34,9 +34,11 @@ impl OrbitRuntime {
             canonical_agent.as_deref(),
             canonical_model.as_deref(),
         );
-        let default_status = TaskStatus::Proposed;
-        let (task_type, initial_status) =
-            infer_task_create_type_and_status(params.task_type, params.status, default_status)?;
+        let (task_type, initial_status) = infer_task_create_type_and_status(
+            params.task_type,
+            params.status,
+            TaskStatus::Proposed,
+        )?;
         let uses_system_identity = params.system_created;
         let create_label = if uses_system_identity {
             "system".to_string()

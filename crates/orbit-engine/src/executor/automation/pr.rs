@@ -347,7 +347,7 @@ fn build_batch_pr_body(
 ) -> String {
     let task_sections = tasks
         .iter()
-        .map(render_task_line)
+        .map(render_task_section)
         .collect::<Vec<_>>()
         .join("\n");
     let changed_files_section = changed_files
@@ -371,6 +371,18 @@ fn build_batch_pr_body(
     }
 
     body
+}
+
+fn render_task_section(task: &Task) -> String {
+    let line = render_task_line(task);
+    let execution_summary = task.execution_summary.trim();
+    if execution_summary.is_empty() {
+        return line;
+    }
+
+    format!(
+        "{line}\n  <details><summary>Execution Summary</summary>\n\n{execution_summary}\n\n  </details>"
+    )
 }
 
 fn render_task_line(task: &Task) -> String {
@@ -417,4 +429,103 @@ fn task_required_revision(task: &Task) -> bool {
         .review_threads
         .iter()
         .any(|thread| thread.status == ReviewThreadStatus::Resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use orbit_common::types::{TaskPriority, TaskType};
+
+    use super::super::freshness::BranchFreshness;
+    use super::*;
+
+    fn task(id: &str, title: &str, execution_summary: &str) -> Task {
+        let now = Utc::now();
+        Task {
+            id: id.to_string(),
+            parent_id: None,
+            title: title.to_string(),
+            description: String::new(),
+            acceptance_criteria: Vec::new(),
+            dependencies: Vec::new(),
+            plan: String::new(),
+            execution_summary: execution_summary.to_string(),
+            context_files: Vec::new(),
+            workspace_path: None,
+            repo_root: None,
+            created_by: Some("gpt-5.5".to_string()),
+            planned_by: None,
+            implemented_by: None,
+            agent: None,
+            model: None,
+            status: TaskStatus::Review,
+            priority: TaskPriority::Medium,
+            complexity: None,
+            task_type: TaskType::Task,
+            pr_number: None,
+            pr_status: None,
+            source_task_id: None,
+            batch_id: None,
+            comments: Vec::new(),
+            history: Vec::new(),
+            review_threads: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn freshness() -> BranchFreshness {
+        BranchFreshness {
+            base_ref: "main".to_string(),
+            head_ref: "feature/task".to_string(),
+            commits_behind: 0,
+            commits_ahead: 2,
+        }
+    }
+
+    #[test]
+    fn default_pr_body_includes_non_empty_execution_summary() {
+        let body = build_batch_pr_body(
+            &[task(
+                "T20260427-24",
+                "System attribution fix",
+                "## Status\nsuccess\n\n## Summary of Changes\n- Routed automation updates through system.",
+            )],
+            &freshness(),
+            &["crates/orbit-core/src/runtime/engine/task_host.rs"],
+        );
+
+        assert!(body.contains("- [T20260427-24] System attribution fix"));
+        assert!(body.contains("<details><summary>Execution Summary</summary>"));
+        assert!(body.contains("## Status\nsuccess"));
+        assert!(body.contains("- Routed automation updates through system."));
+    }
+
+    #[test]
+    fn default_pr_body_omits_empty_execution_summary_block() {
+        let body = build_batch_pr_body(
+            &[task("T20260427-32", "Include execution summaries", "   \n")],
+            &freshness(),
+            &[],
+        );
+
+        assert!(body.contains("- [T20260427-32] Include execution summaries"));
+        assert!(!body.contains("<details><summary>Execution Summary</summary>"));
+    }
+
+    #[test]
+    fn default_pr_body_keeps_existing_sections_and_signature() {
+        let body = build_batch_pr_body(
+            &[task("T20260427-32", "Include execution summaries", "done")],
+            &freshness(),
+            &["crates/orbit-engine/src/executor/automation/pr.rs"],
+        );
+
+        assert!(body.contains("## Branch Freshness"));
+        assert!(body.contains("- Base ref: `main`"));
+        assert!(body.contains("- Head ref: `feature/task`"));
+        assert!(body.contains("## Files Changed"));
+        assert!(body.contains("- `crates/orbit-engine/src/executor/automation/pr.rs`"));
+        assert!(body.contains("*authored by: gpt-5.5*"));
+    }
 }
