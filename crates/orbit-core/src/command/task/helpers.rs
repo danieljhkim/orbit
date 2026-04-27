@@ -4,6 +4,8 @@ use orbit_common::types::{
     normalize_optional_attribution_label,
 };
 
+pub(crate) const SYSTEM_ACTOR_LABEL: &str = "system";
+
 pub(super) fn build_task_comments(
     message: Option<String>,
     by: &str,

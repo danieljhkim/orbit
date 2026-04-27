@@ -13,6 +13,8 @@ use crate::context::{TaskAutomationUpdate, TaskHost};
 use super::input::required_input_string;
 use super::parallel::{parse_parallelism, tasks_conflict};
 
+const SYSTEM_ACTOR_LABEL: &str = "system";
+
 pub(super) fn dispatch_batch<H: TaskHost + ?Sized>(
     host: &H,
     input: &Value,
@@ -240,7 +242,7 @@ fn tag_task<H: TaskHost + ?Sized>(
             batch_id: Some(run_id.to_string()),
             append_comments: vec![TaskComment {
                 at: Utc::now(),
-                by: "agent".to_string(),
+                by: SYSTEM_ACTOR_LABEL.to_string(),
                 message: format!("Batch dispatched: {rationale}"),
             }],
             ..TaskAutomationUpdate::default()

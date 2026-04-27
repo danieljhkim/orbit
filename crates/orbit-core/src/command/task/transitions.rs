@@ -7,7 +7,9 @@ use orbit_store::friction_bounty;
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
 
-use super::helpers::{build_task_comments, effective_actor_label, implementation_label};
+use super::helpers::{
+    SYSTEM_ACTOR_LABEL, build_task_comments, effective_actor_label, implementation_label,
+};
 
 const UNAUTHORED_TASK_PLAN_PLACEHOLDER: &str = "To be authored by executing agent at start time.";
 
@@ -103,7 +105,7 @@ impl OrbitRuntime {
         note: Option<String>,
         comment: Option<String>,
     ) -> Result<Task, OrbitError> {
-        self.start_task_with_identity(id, note, comment, None, None)
+        self.start_task_with_actor_label_override(id, note, comment, None, None, None)
     }
 
     pub fn start_task_with_identity(
@@ -114,6 +116,34 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
+        self.start_task_with_actor_label_override(id, note, comment, agent, model, None)
+    }
+
+    pub(crate) fn start_task_as_system(
+        &self,
+        id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        self.start_task_with_actor_label_override(
+            id,
+            note,
+            comment,
+            None,
+            None,
+            Some(SYSTEM_ACTOR_LABEL.to_string()),
+        )
+    }
+
+    fn start_task_with_actor_label_override(
+        &self,
+        id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
+        actor_label_override: Option<String>,
+    ) -> Result<Task, OrbitError> {
         let (canonical_agent, canonical_model) =
             self.canonical_agent_model_identity(agent.as_deref(), model.as_deref());
         let task = self.get_task(id)?;
@@ -123,11 +153,13 @@ impl OrbitRuntime {
             ensure_task_has_execution_plan(id, task.plan.as_str())?;
         }
         let actor = self.actor().clone();
-        let effective_label = effective_actor_label(
-            &actor.label,
-            canonical_agent.as_deref(),
-            canonical_model.as_deref(),
-        );
+        let effective_label = actor_label_override.unwrap_or_else(|| {
+            effective_actor_label(
+                &actor.label,
+                canonical_agent.as_deref(),
+                canonical_model.as_deref(),
+            )
+        });
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
         let dependency_warning = (!unmet_dependencies.is_empty()).then(|| {
             format!(

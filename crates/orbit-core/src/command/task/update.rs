@@ -7,7 +7,8 @@ use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams;
 
 use super::helpers::{
-    build_task_comments, effective_actor_label, implementation_label, task_comment_history_entries,
+    SYSTEM_ACTOR_LABEL, build_task_comments, effective_actor_label, implementation_label,
+    task_comment_history_entries,
 };
 use super::params::TaskUpdateParams;
 use super::paths::{
@@ -40,7 +41,7 @@ impl OrbitRuntime {
         comment: Option<String>,
         note: Option<String>,
     ) -> Result<Task, OrbitError> {
-        self.update_task_with_status_note(
+        self.update_task_with_status_note_and_identity(
             id,
             TaskUpdateParams {
                 execution_summary,
@@ -49,16 +50,9 @@ impl OrbitRuntime {
                 ..Default::default()
             },
             note,
+            Some(SYSTEM_ACTOR_LABEL.to_string()),
+            None,
         )
-    }
-
-    fn update_task_with_status_note(
-        &self,
-        id: &str,
-        params: TaskUpdateParams,
-        status_note: Option<String>,
-    ) -> Result<Task, OrbitError> {
-        self.update_task_with_status_note_and_identity(id, params, status_note, None, None)
     }
 
     fn update_task_with_status_note_and_identity(

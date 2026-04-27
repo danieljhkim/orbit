@@ -48,7 +48,7 @@ impl OrbitRuntime {
             effective_label.clone()
         };
         let planned_by = authored_role_value(params.plan.as_str(), &create_label);
-        let comments = build_task_comments(params.comment.clone(), effective_label.as_str())?;
+        let comments = build_task_comments(params.comment.clone(), create_label.as_str())?;
         let workspace_path =
             normalize_workspace_path(&self.paths().repo_root, params.workspace_path.as_deref())?;
         let dependencies = normalize_task_dependencies(params.dependencies.clone())?;
