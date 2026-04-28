@@ -26,9 +26,10 @@ use chrono::{DateTime, Duration, Timelike, Utc};
 use futures_core::Stream;
 use orbit_core::command::job_run::JobRunListParams;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
+use orbit_core::runtime::run_audit::RunAuditStep;
 use orbit_core::{
-    AuditEventStatus, JobRunState, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus,
-    TaskType,
+    AuditEventStatus, JobRun, JobRunState, OrbitRuntime, Task, TaskComplexity, TaskPriority,
+    TaskStatus, TaskType,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -858,22 +859,127 @@ mod tests {
         assert!(frame.contains("\"source\":\"job\""));
         assert!(frame.contains("build"));
     }
+
+    #[test]
+    fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let run_id = "jrun-web-audit-step";
+        let audit_dir = runtime.data_root().join("state/audit/v2_loop");
+        std::fs::create_dir_all(&audit_dir).expect("create audit dir");
+        write_lines(
+            &audit_dir.join(format!("{run_id}.jsonl")),
+            &[
+                json!({
+                    "schemaVersion": 1,
+                    "event_type": "step.started",
+                    "event_id": "evt-step-started",
+                    "ts": "2026-04-28T00:00:01Z",
+                    "run_id": run_id,
+                    "agent_identity": "system",
+                    "body_kind": "step_started",
+                    "step_id": "build"
+                })
+                .to_string(),
+                json!({
+                    "schemaVersion": 1,
+                    "event_type": "step.finished",
+                    "event_id": "evt-step-finished",
+                    "ts": "2026-04-28T00:00:03Z",
+                    "run_id": run_id,
+                    "agent_identity": "system",
+                    "body_kind": "step_finished",
+                    "step_id": "build",
+                    "outcome": "success"
+                })
+                .to_string(),
+            ],
+        );
+        let scheduled_at = chrono::DateTime::parse_from_rfc3339("2026-04-28T00:00:00Z")
+            .expect("parse scheduled")
+            .with_timezone(&Utc);
+        let run = orbit_core::JobRun {
+            run_id: run_id.to_string(),
+            job_id: "job-web".to_string(),
+            attempt: 1,
+            state: JobRunState::Success,
+            scheduled_at,
+            started_at: Some(scheduled_at),
+            finished_at: Some(scheduled_at),
+            duration_ms: Some(2_000),
+            created_at: scheduled_at,
+            pid: None,
+            pid_start_time: None,
+            input: None,
+            retry_source_run_id: None,
+            knowledge_metrics: None,
+            steps: Vec::new(),
+        };
+
+        let detail = job_run_detail_to_json(&runtime, &run);
+        let steps = detail["steps"].as_array().expect("steps array");
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0]["step_index"], 0);
+        assert_eq!(steps[0]["target_type"], "activity");
+        assert_eq!(steps[0]["target_id"], "build");
+        assert_eq!(steps[0]["state"], "success");
+        assert_eq!(steps[0]["duration_ms"], 2_000);
+    }
 }
 
 async fn get_run(State(runtime): State<Arc<OrbitRuntime>>, Path(id): Path<String>) -> Response {
     match runtime.show_job_run(&id) {
-        Ok(run) => {
-            let mut full = job_run_to_json(&run);
-            // Reshape into `{run, steps}` per the dashboard contract: peel the
-            // `steps` array off the flat `job_run_to_json` output.
-            let steps = full
-                .as_object_mut()
-                .and_then(|m| m.remove("steps"))
-                .unwrap_or(Value::Array(Vec::new()));
-            Json(json!({ "run": full, "steps": steps })).into_response()
-        }
+        Ok(run) => Json(job_run_detail_to_json(&runtime, &run)).into_response(),
         Err(e) => map_runtime_error(e),
     }
+}
+
+fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Value {
+    let mut full = job_run_to_json(run);
+    // Reshape into `{run, steps}` per the dashboard contract: peel the
+    // `steps` array off the flat `job_run_to_json` output.
+    let stored_steps = full
+        .as_object_mut()
+        .and_then(|m| m.remove("steps"))
+        .unwrap_or(Value::Array(Vec::new()));
+
+    let audit_steps = runtime
+        .collect_run_audit_steps(&run.run_id)
+        .unwrap_or_default();
+    let steps = if audit_steps.is_empty() {
+        stored_steps
+    } else {
+        Value::Array(audit_steps.iter().map(audit_step_to_json).collect())
+    };
+
+    json!({ "run": full, "steps": steps })
+}
+
+fn audit_step_to_json(step: &RunAuditStep) -> Value {
+    let duration_ms = match (step.started_at, step.finished_at) {
+        (Some(started), Some(finished)) => Some(
+            finished
+                .signed_duration_since(started)
+                .num_milliseconds()
+                .max(0) as u64,
+        ),
+        _ => None,
+    };
+
+    json!({
+        "step_index": step.step_index,
+        "target_type": "activity",
+        "target_id": step.step_id,
+        "state": step.state.as_deref().unwrap_or("running"),
+        "started_at": step.started_at.map(|v| v.to_rfc3339()),
+        "finished_at": step.finished_at.map(|v| v.to_rfc3339()),
+        "duration_ms": duration_ms,
+        "exit_code": null,
+        "agent_response_json": null,
+        "error_code": null,
+        "error_message": step.error_message,
+        "outcome": step.outcome,
+    })
 }
 
 async fn list_run_events(
