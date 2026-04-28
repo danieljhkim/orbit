@@ -11,6 +11,7 @@ This document details the active implementation of the Orbit UI, covering the vi
 The dashboard prioritizes maximizing data density while maintaining structural clarity. We employ a modular grid system that packs tabular data, telemetry feeds, and state indicators into a single view without scrolling where possible. 
 - Elements use standardized, subtle border radii (`4px` for small elements, `6px` for panels).
 - Expandable rows use sunken backgrounds (`--bg-sunk`) to nest detailed hierarchies without sacrificing the root tabular view.
+- The scoreboard table collapses companion metrics into compact pairs where scan quality improves: tokens render as `total/output`, tools render as `failed/total`, and planning duels render as `wins/participated`. Friction triage outcomes stay out of the primary table; the visible friction column is reported count only [T20260428-15].
 
 ## 2. Layered Dark Palette
 
@@ -44,5 +45,6 @@ Dashboard summary tiles and drill-down panels must be backed by compatible data 
 
 - [T20260427-29]
 - [T20260428-13]
+- [T20260428-15]
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

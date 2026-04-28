@@ -511,6 +511,30 @@ function fmtDuration(ms) {
   return `${Math.floor(ms / 60000)}m${Math.floor((ms % 60000) / 1000)}s`;
 }
 
+const compactCountFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+function asScoreboardNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function fmtScoreboardCount(value) {
+  const num = asScoreboardNumber(value);
+  return Math.abs(num) < 1000 ? String(num) : compactCountFormatter.format(num);
+}
+
+function formatScoreboardPair(agent, col) {
+  const left = asScoreboardNumber(readPath(agent, col.left));
+  const right = asScoreboardNumber(readPath(agent, col.right));
+  return {
+    text: `${fmtScoreboardCount(left)}/${fmtScoreboardCount(right)}`,
+    zero: left === 0 && right === 0,
+    title: `${col.title}: ${left} / ${right}`,
+  };
+}
+
 function renderRuns(runs) {
   const body = $("runs-body");
   const frag = document.createDocumentFragment();
@@ -569,14 +593,34 @@ function renderRuns(runs) {
 const SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   { key: "tasks_completed", label: "tasks", num: true },
-  { key: "tokens.total", label: "tokens", num: true },
-  { key: "tokens.output", label: "out", num: true },
-  { key: "tool_calls", label: "tools", num: true },
-  { key: "duels.wins", label: "duel w", num: true },
-  { key: "duels.losses", label: "duel l", num: true },
+  {
+    key: "tokens",
+    label: "tokens",
+    num: true,
+    format: "pair",
+    left: "tokens.total",
+    right: "tokens.output",
+    title: "total / output tokens",
+  },
+  {
+    key: "tools",
+    label: "tool fail/all",
+    num: true,
+    format: "pair",
+    left: "failed_tool_calls",
+    right: "tool_calls",
+    title: "failed / total tool calls",
+  },
+  {
+    key: "duels",
+    label: "duel w/all",
+    num: true,
+    format: "pair",
+    left: "duels.wins",
+    right: "duels.participated",
+    title: "wins / participated duels",
+  },
   { key: "friction.reported", label: "frict r", num: true },
-  { key: "friction.accepted", label: "frict a", num: true },
-  { key: "friction.rejected", label: "frict rej", num: true },
   { key: "avg_step_duration_ms", label: "avg step", num: true, format: "duration" },
   { key: "p95_wall_clock_ms", label: "p95 wall", num: true, format: "duration" },
 ];
@@ -642,14 +686,20 @@ function renderScoreboard(summary) {
         titleText = `${name} — click to filter audit by role`;
         extra = " clickable";
       } else {
-        const v = readPath(agent, col.key);
-        const num = typeof v === "number" ? v : 0;
-        if (col.format === "duration") {
+        if (col.format === "pair") {
+          const pair = formatScoreboardPair(agent, col);
+          cellText = pair.text;
+          titleText = pair.title;
+          if (pair.zero) extra = " zero";
+        } else if (col.format === "duration") {
+          const num = asScoreboardNumber(readPath(agent, col.key));
           cellText = num === 0 ? "0" : fmtDuration(num);
+          if (num === 0) extra = " zero";
         } else {
-          cellText = String(num);
+          const num = asScoreboardNumber(readPath(agent, col.key));
+          cellText = fmtScoreboardCount(num);
+          if (num === 0) extra = " zero";
         }
-        if (num === 0) extra = " zero";
       }
       const cellClass =
         (col.num ? "num" : col.key === "agent" ? "agent" : "") + extra;

@@ -32,9 +32,23 @@ This document records the architectural and design decisions for the Orbit User 
 - Operators can inspect direct `orbit tool run` policy denials without switching to the raw audit events table.
 - Cost: The endpoint carries a small translation layer for SQLite audit rows because that schema does not store typed denial fields like `profile` and `path`.
 
+## ADR-003 — Compact Scoreboard Ratio Columns
+
+**Status:** Accepted · 2026-04 · [T20260428-15]
+
+**Context.** The dashboard scoreboard accumulated separate columns for output tokens, tool calls, duel wins/losses, and friction triage outcomes. After failed tool calls became a first-class summary field, keeping raw counters split across the table made the reliability signal harder to scan and pushed lower-priority triage details into the primary view.
+
+**Decision.** Render companion metrics as compact display pairs in the scoreboard table: `tokens` shows `total/output`, `tool fail/all` shows failed tool calls over total tool calls, and `duel w/all` shows wins over participated duels. Keep only friction reports in the primary table for now, leaving accepted and rejected friction counts to detailed or future drill-down surfaces.
+
+**Consequences.**
+- The scoreboard keeps the same backing JSON fields while presenting reliability and participation context in fewer columns.
+- `0/N` tool failures remains visually meaningful instead of being dimmed as missing data.
+- Cost: Users who want friction accepted/rejected counts or raw duel losses must inspect the underlying summary JSON or a future detail view rather than the primary table.
+
 ## Task References
 
 - [T20260427-29]
 - [T20260428-13]
+- [T20260428-15]
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
