@@ -24,7 +24,7 @@
 //! → `orbit-core` → orbit-cli
 
 pub mod command;
-mod config;
+pub mod config;
 pub mod context;
 mod paths;
 pub mod runtime;

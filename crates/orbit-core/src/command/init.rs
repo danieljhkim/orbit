@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,7 @@ use crate::command::skill::{
 };
 use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink, remove_path_if_exists};
 
-use crate::config::{RuntimeConfig, seed_default_config};
+use crate::config::{RawAgentRoleConfig, RuntimeConfig, seed_default_config};
 use crate::runtime::resolve_global_root;
 
 const LEGACY_WORKSPACE_SEEDED_SKILL_IDS: [&str; 2] = ["orbit-approve-task", "orbit-pr"];
@@ -44,6 +45,12 @@ pub struct InitOptions {
     pub global_root_override: Option<PathBuf>,
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
+    /// Per-role agent settings to embed in the freshly seeded `config.toml`
+    /// as `[agent.<role>]` blocks. Keyed by role name (`reviewer`,
+    /// `implementer`, `planner`). `None` and an empty map both mean "leave
+    /// `[agent.*]` unset". Ignored when config.toml already exists — init
+    /// remains idempotent.
+    pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
 }
 
 impl OrbitRuntime {
@@ -145,7 +152,7 @@ pub fn init_workspace_at_root(
     };
     let created_config = if options.global_only {
         let config_path = orbit_root.join("config.toml");
-        seed_default_config(&config_path)?
+        seed_default_config(&config_path, options.role_settings.as_ref())?
     } else {
         false
     };
@@ -192,6 +199,7 @@ pub fn init_workspace_at_root(
                 refresh_defaults: options.refresh_defaults,
                 global_only: true,
                 link_global_skills: options.link_global_skills || options.refresh_defaults,
+                role_settings: options.role_settings.clone(),
                 ..Default::default()
             },
         )?;
@@ -706,6 +714,163 @@ mod tests {
                 .exists()
         );
         assert_skill_link_exists(home.path().join(".claude").join("skills").join("orbit"));
+    }
+
+    #[test]
+    fn global_init_writes_role_settings_to_config_toml() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let home = tempdir().expect("home tempdir");
+        let previous_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let mut roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
+        roles.insert(
+            "reviewer".into(),
+            RawAgentRoleConfig {
+                provider: Some("claude".into()),
+                backend: Some("cli".into()),
+                model: Some("claude-opus-4-7".into()),
+            },
+        );
+        roles.insert(
+            "implementer".into(),
+            RawAgentRoleConfig {
+                provider: Some("codex".into()),
+                backend: Some("cli".into()),
+                model: Some("gpt-5.5".into()),
+            },
+        );
+        roles.insert(
+            "planner".into(),
+            RawAgentRoleConfig {
+                provider: Some("gemini".into()),
+                backend: Some("http".into()),
+                model: None,
+            },
+        );
+
+        let result = init_global(
+            None,
+            InitOptions {
+                refresh_defaults: true,
+                role_settings: Some(roles),
+                ..Default::default()
+            },
+        );
+
+        restore_home(previous_home);
+
+        let result = result.expect("init global with role settings");
+        assert!(result.created_config);
+
+        let config_path = home.path().join(".orbit").join("config.toml");
+        let contents = fs::read_to_string(&config_path).expect("read config");
+        assert!(contents.contains("[agent.reviewer]"));
+        assert!(contents.contains("[agent.implementer]"));
+        assert!(contents.contains("[agent.planner]"));
+        assert!(contents.contains("provider = \"codex\""));
+        assert!(contents.contains("model = \"claude-opus-4-7\""));
+
+        // Round-trips through toml: agent table contains all three roles.
+        let parsed: toml::Value = toml::from_str(&contents).expect("parse");
+        let agent = parsed
+            .get("agent")
+            .and_then(|v| v.as_table())
+            .expect("agent table");
+        assert_eq!(agent.len(), 3);
+        let reviewer = agent
+            .get("reviewer")
+            .and_then(|v| v.as_table())
+            .expect("reviewer table");
+        assert_eq!(
+            reviewer.get("provider").and_then(|v| v.as_str()),
+            Some("claude")
+        );
+        let planner = agent
+            .get("planner")
+            .and_then(|v| v.as_table())
+            .expect("planner table");
+        // None model field → absent from TOML.
+        assert!(planner.get("model").is_none());
+    }
+
+    #[test]
+    fn global_init_with_existing_config_does_not_overwrite_role_settings() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let home = tempdir().expect("home tempdir");
+        let previous_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        // Pre-seed config.toml with user content.
+        let orbit_root = home.path().join(".orbit");
+        fs::create_dir_all(&orbit_root).expect("mkdir .orbit");
+        let config_path = orbit_root.join("config.toml");
+        let user_content = "# pre-existing user config\n";
+        fs::write(&config_path, user_content).expect("preseed");
+
+        let mut roles: BTreeMap<String, RawAgentRoleConfig> = BTreeMap::new();
+        roles.insert(
+            "reviewer".into(),
+            RawAgentRoleConfig {
+                provider: Some("claude".into()),
+                backend: Some("cli".into()),
+                model: None,
+            },
+        );
+
+        let result = init_global(
+            None,
+            InitOptions {
+                refresh_defaults: true,
+                role_settings: Some(roles),
+                ..Default::default()
+            },
+        );
+
+        restore_home(previous_home);
+
+        let result = result.expect("init global");
+        assert!(!result.created_config);
+        let final_contents = fs::read_to_string(&config_path).expect("read config");
+        assert_eq!(final_contents, user_content);
+    }
+
+    #[test]
+    fn global_init_without_role_settings_writes_clean_template() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let home = tempdir().expect("home tempdir");
+        let previous_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let result = init_global(
+            None,
+            InitOptions {
+                refresh_defaults: true,
+                role_settings: None,
+                ..Default::default()
+            },
+        );
+
+        restore_home(previous_home);
+
+        let result = result.expect("init global");
+        assert!(result.created_config);
+        let config_path = home.path().join(".orbit").join("config.toml");
+        let contents = fs::read_to_string(&config_path).expect("read config");
+        // Commented documentation block is allowed; an actual `[agent.<role>]`
+        // section header (uncommented) must NOT appear.
+        for line in contents.lines() {
+            assert!(
+                !line.trim_start().starts_with("[agent."),
+                "unexpected uncommented agent section: {line}",
+            );
+        }
     }
 
     fn assert_skill_link_exists(path: PathBuf) {

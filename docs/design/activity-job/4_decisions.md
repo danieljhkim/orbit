@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-28
+**Last updated:** 2026-04-28 (ADR-027 added)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -348,6 +348,26 @@ This ADR log records the decisions that define the current Activity / Job substr
 - Planning-duel output now reports `task_status: "in-progress"` instead of claiming the task status stayed unchanged.
 - Cost: task lifecycle semantics are no longer uniform across all status mutation surfaces; reviewers must distinguish workflow admission from ordinary task updates.
 
+## ADR-027 — `orbit init` is the writer for per-role agent settings
+
+**Status:** Accepted · 2026-04 · [T20260428-9]
+
+**Context.** Provider, model, and backend choices for `agent_loop` activities live inline on each YAML today (`crates/orbit-common/src/types/activity_job/activity_v2.rs`). Users who wanted to pick a different combination per agent role had to edit YAML by hand — there was no centrally controlled surface keyed by role. The team picked three roles (`reviewer`, `implementer`, `planner`) and decided to make `orbit init` the place to choose, with `config.toml` as the persistence target.
+
+**Decision.** Land the writer half first as a self-contained slice. `RawRuntimeConfig` (`crates/orbit-core/src/config/raw.rs`) gains `agent: Option<BTreeMap<String, RawAgentRoleConfig>>`. `orbit init` runs interactive prompts (provider → backend → model) for each role, with detection-derived defaults that the user accepts by pressing Enter. The collected map is appended to a fresh `config.toml` as `[agent.<role>]` blocks. The reader half — wiring resolved settings into agent dispatch via a `role:` field on activity/job specs and a resolver — is deferred to a follow-up.
+
+**Detection rules.** `crates/orbit-core/src/config/agent_detect.rs` walks PATH for `claude`/`codex`/`gemini`/`ollama` and reads `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`. The default provider is the first detected CLI (in that order), else the first detected API key (`anthropic→claude`, `openai→codex`, `gemini→gemini`), else `claude`. Default backend is `cli` when the matching CLI is on PATH, else `http`. Default model comes from a hardcoded `provider → latest-known-good model` registry (`claude→claude-opus-4-7`, `codex→gpt-5.5`, `gemini→gemini-3-pro`). Probing is gated by `AgentEnvProbe` so unit tests simulate environments without touching real PATH/env.
+
+**Prompt UX.** `crates/orbit-core/src/config/agent_prompt.rs` issues three prompts per role in fixed order: `agent.<role>.provider`, `agent.<role>.backend`, `agent.<role>.model`. The default value derived from detection is shown in brackets; empty input accepts it. `--non-interactive` short-circuits the collector entirely so CI runs do not hang. `orbit init` is also idempotent over an existing `config.toml`: when one is already present (and `--force` is unset), prompts are skipped and the file is left as-is.
+
+**Consequences.**
+- A first-time `orbit init` records per-role agent preferences to a single, user-readable file with no YAML editing required.
+- The detection probe is reusable by the consumer-side resolver in [T20260428-12], where the same trait will be invoked at dispatch time as a fallback layer behind config.toml.
+- The default-config.toml asset documents the schema as a commented block; users who skipped prompts can drop in their own values without re-running init.
+- Cost: until [T20260428-12] lands, the values written to `config.toml` are inert — they round-trip but do not influence dispatch. Reviewers and users should treat the documented behaviour as half-shipped during this window.
+
+**Follow-up.** [T20260428-12] consumes `[agent.<role>]` at dispatch time: adds `role: Option<AgentRole>` to `AgentLoopSpec`/`GroundhogSpec`/`TargetStep`, introduces a resolver behind `EnvironmentHost::agent_role_config`, and applies the resolved `(provider, model, backend)` to the cloned activity spec before dispatch.
+
 ---
 
 ## Task References
@@ -383,5 +403,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260428-8]** — Add workflow-specific task admission for task-starting workflows.
+- **[T20260428-9]** — `orbit init` writes per-role agent settings to `[agent.<role>]` in `config.toml`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

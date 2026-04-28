@@ -13,6 +13,8 @@
 //! The `raw` module holds the serde-deserializable structs.
 //! The `persistence` and `runtime` modules derive strongly-typed config views.
 
+pub mod agent_detect;
+pub mod agent_prompt;
 mod bootstrap;
 mod persistence;
 mod raw;
@@ -20,4 +22,5 @@ mod runtime;
 
 pub(crate) use bootstrap::seed_default_config;
 pub(crate) use persistence::PersistenceConfig;
+pub use raw::RawAgentRoleConfig;
 pub(crate) use runtime::{CodexExecutionPolicy, ExecutionEnvPolicy, RuntimeConfig};

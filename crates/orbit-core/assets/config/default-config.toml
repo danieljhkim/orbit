@@ -25,3 +25,28 @@ enabled = true
 
 [graph]
 editing = false
+
+# [agent.<role>] — per-role agent settings written by `orbit init`.
+#
+# Roles: reviewer, implementer, planner. Each table accepts:
+#   provider — claude | codex | gemini | ollama | openai_compat
+#   backend  — cli | http
+#   model    — provider-specific model name (e.g. claude-opus-4-7, gpt-5.5)
+#
+# `orbit init` collects these interactively and rewrites this file. Edit the
+# values below, or re-run `orbit init --force` to start fresh.
+#
+# [agent.reviewer]
+# provider = "claude"
+# backend = "cli"
+# model = "claude-opus-4-7"
+#
+# [agent.implementer]
+# provider = "codex"
+# backend = "cli"
+# model = "gpt-5.5"
+#
+# [agent.planner]
+# provider = "claude"
+# backend = "cli"
+# model = "claude-opus-4-7"
