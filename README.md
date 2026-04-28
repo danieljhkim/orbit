@@ -80,6 +80,11 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | 
 # or install via Homebrew (macOS)
 brew install danieljhkim/tap/orbit
 
+# or, if you use Claude Code: install the plugin (it registers MCP + skills
+# and downloads the native binary on first use; requires Node 18+)
+#   /plugin marketplace add danieljhkim/orbit
+#   /plugin install orbit
+
 # or build from source
 git clone https://github.com/danieljhkim/orbit.git
 cd orbit

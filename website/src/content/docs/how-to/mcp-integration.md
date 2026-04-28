@@ -5,7 +5,18 @@ sidebar:
   order: 5
 ---
 
-## Initialize
+## Claude Code (plugin path)
+
+For Claude Code, the simplest setup is the official plugin — it registers the MCP server, skills, and subagents in one step and pulls the native binary via the `@orbit-dev/cli` npm proxy:
+
+```text
+/plugin marketplace add danieljhkim/orbit
+/plugin install orbit
+```
+
+Requires Node 18+ on `PATH`. Skip the rest of this page if you go this route; the plugin handles registration. Use the manual flow below for Codex, Gemini, or a Claude Code install you want to wire by hand.
+
+## Initialize (manual)
 
 Use auto-detection:
 

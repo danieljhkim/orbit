@@ -23,6 +23,15 @@ Homebrew (macOS, Linuxbrew):
 brew install danieljhkim/tap/orbit
 ```
 
+Claude Code plugin (skips the install script, downloads the binary on first MCP call):
+
+```text
+/plugin marketplace add danieljhkim/orbit
+/plugin install orbit
+```
+
+The plugin registers Orbit's MCP server, skills, and orchestration subagents in Claude Code, and pulls the matching native `orbit` binary through the [`@orbit-dev/cli`](https://www.npmjs.com/package/@orbit-dev/cli) npm proxy on first invocation. Requires Node 18+ on `PATH`. To get the `orbit` CLI on your shell as well: `npm install -g @orbit-dev/cli`.
+
 From source (requires Rust toolchain):
 
 ```bash
