@@ -308,6 +308,8 @@ mod tests {
     use serde_json::json;
     use tempfile::tempdir;
 
+    use crate::command::task::TaskAddParams;
+
     fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
         let root = tempdir().expect("create tempdir");
         let global_root = root.path().join("global");
@@ -493,11 +495,18 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
 
         let yaml_path = repo_root.join("qa_cli_metrics.yaml");
         write_cli_metrics_job(&yaml_path, "qa_cli_metrics");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Metrics fixture".to_string(),
+                description: "Task fixture for CLI invocation metrics.".to_string(),
+                ..Default::default()
+            })
+            .expect("seed task for CLI envelope");
 
         let result = runtime
             .run_job_v2_from_yaml(
                 &yaml_path,
-                json!({"prompt": "collect metrics", "task_id": "TTEST-1"}),
+                json!({"prompt": "collect metrics", "task_id": task.id.clone()}),
                 None,
             )
             .expect("cli metrics job succeeds");
@@ -517,7 +526,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
         assert_eq!(record.input_tokens, 100);
         assert_eq!(record.cache_read_tokens, 25);
         assert_eq!(record.output_tokens, 12);
-        assert_eq!(record.task_ids, ["TTEST-1"]);
+        assert_eq!(record.task_ids, vec![task.id]);
         assert_eq!(record.tool_call_count, 1);
         assert_eq!(record.tool_calls[0].tool_name, "command_execution");
 

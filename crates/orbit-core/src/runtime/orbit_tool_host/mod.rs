@@ -315,6 +315,16 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                 ))
             }
             OrbitBuiltinAction::TaskLocks => {
+                let reservation_result = self
+                    .runtime
+                    .stores()
+                    .task_reservations()
+                    .list_active(&workspace_orbit_dir(&self.runtime))?;
+                emit_expired_reservation_events(
+                    &self.runtime,
+                    &reservation_result.expired_reservations,
+                )?;
+
                 let mut tasks: Vec<_> = self
                     .runtime
                     .list_tasks()?
@@ -334,13 +344,35 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                 let locked_files: BTreeSet<String> = tasks
                     .iter()
                     .flat_map(|task| existing_context_files(&self.runtime, task))
+                    .chain(
+                        reservation_result
+                            .reservations
+                            .iter()
+                            .flat_map(|reservation| reservation.files.iter().cloned()),
+                    )
                     .collect();
+                let by_reservation = reservation_result
+                    .reservations
+                    .iter()
+                    .map(|reservation| {
+                        json!({
+                            "reservation_id": reservation.reservation_id.clone(),
+                            "task_ids": reservation.task_ids.clone(),
+                            "files": reservation.files.clone(),
+                            "actor": reservation.actor.clone(),
+                            "created_at": reservation.created_at.clone(),
+                            "expires_at": reservation.expires_at.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
 
                 Ok(json!({
                     "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
                     "by_task": tasks.iter().map(task_lock_to_json).collect::<Vec<_>>(),
+                    "by_reservation": by_reservation,
                     "total_locked": locked_files.len(),
                     "total_tasks": tasks.len(),
+                    "total_reservations": reservation_result.reservations.len(),
                 }))
             }
             OrbitBuiltinAction::TaskLocksRelease => {
@@ -988,6 +1020,112 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn reservation_conflicts_clear_immediately_after_release() {
+        let (_root, runtime, repo_root) = test_runtime();
+        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
+        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
+            .expect("write source file");
+
+        let first = create_context_task(
+            &runtime,
+            &repo_root,
+            TaskStatus::Backlog,
+            &["file:src/lib.rs"],
+        );
+        let second = create_context_task(
+            &runtime,
+            &repo_root,
+            TaskStatus::Backlog,
+            &["file:src/lib.rs"],
+        );
+
+        let first_reserve = runtime
+            .execute_tool_command(
+                "orbit.task.locks.reserve",
+                json!({
+                    "task_ids": [first.id.clone()],
+                    "ttl_seconds": 3600,
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("reserve first task");
+        let reservation_id = first_reserve
+            .get("reservation_id")
+            .and_then(Value::as_str)
+            .expect("reservation id is present")
+            .to_string();
+
+        let locks = runtime
+            .execute_tool_command("orbit.task.locks", json!({}), None, None)
+            .expect("list locks");
+        assert_eq!(locks["total_reservations"], 1);
+        assert_eq!(
+            locks["by_reservation"][0]["reservation_id"],
+            reservation_id.as_str()
+        );
+        assert_eq!(locks["by_reservation"][0]["task_ids"], json!([first.id]));
+        assert_eq!(
+            locks["by_reservation"][0]["files"],
+            json!(["file:src/lib.rs"])
+        );
+        assert!(
+            locks["by_reservation"][0]["expires_at"].is_string(),
+            "reservation visibility should include expiration"
+        );
+
+        let blocked = runtime
+            .execute_tool_command(
+                "orbit.task.locks.reserve",
+                json!({
+                    "task_ids": [second.id.clone()],
+                    "ttl_seconds": 3600,
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("second reservation returns conflict");
+        assert_eq!(blocked["reserved"], false);
+        assert_eq!(
+            blocked["conflicts"],
+            json!([{
+                "file": "file:src/lib.rs",
+                "held_by": "reservation",
+                "held_by_id": reservation_id.clone(),
+            }])
+        );
+
+        let release = runtime
+            .execute_tool_command(
+                "orbit.task.locks.release",
+                json!({
+                    "reservation_id": reservation_id,
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("release reservation");
+        assert_eq!(release["released"], true);
+
+        let second_reserve = runtime
+            .execute_tool_command(
+                "orbit.task.locks.reserve",
+                json!({
+                    "task_ids": [second.id],
+                    "ttl_seconds": 3600,
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("second reservation succeeds after release");
+        assert_eq!(second_reserve["reserved"], true);
     }
 
     #[test]

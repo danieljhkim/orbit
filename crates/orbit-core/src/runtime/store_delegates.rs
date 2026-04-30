@@ -8,10 +8,10 @@ use orbit_store::{
     JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
     TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
     TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationReleaseParams,
-    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
-    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
-    ToolStoreBackend,
+    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
+    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
+    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
 };
 
 use crate::context::OrbitStores;
@@ -262,6 +262,14 @@ impl TaskRecords<'_> {
 }
 
 impl TaskReservationRecords<'_> {
+    pub(crate) fn list_active(
+        &self,
+        workspace_orbit_dir: &str,
+    ) -> Result<TaskReservationListResult, OrbitError> {
+        self.store
+            .list_active_task_reservations(workspace_orbit_dir)
+    }
+
     pub(crate) fn check(
         &self,
         params: TaskReservationCheckParams,

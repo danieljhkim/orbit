@@ -487,6 +487,66 @@ spec:
     }
 
     #[test]
+    fn gate_pipeline_releases_reservation_after_child_terminal_wait() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
+            .expect("task gate pipeline default exists");
+        let asset = load_job_asset(yaml).expect("parse task gate pipeline");
+        let root_step_ids = asset
+            .spec
+            .steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        let dispatch_index = root_step_ids
+            .iter()
+            .position(|id| *id == "dispatch_child")
+            .expect("task gate pipeline has child dispatch step");
+        let release_index = root_step_ids
+            .iter()
+            .position(|id| *id == "release_reservation")
+            .expect("task gate pipeline has reservation release step");
+        assert!(
+            dispatch_index < release_index,
+            "reservation must release only after invoke_and_wait returns"
+        );
+
+        let dispatch = &asset.spec.steps[dispatch_index];
+        match &dispatch.body {
+            JobV2StepBody::TargetRef(target) => {
+                assert_eq!(target.target, "activity:invoke_and_wait");
+                let input = target.default_input.as_ref().expect("dispatch input");
+                assert_eq!(
+                    input["job_name"],
+                    Value::String("task_{{ input.mode }}_pipeline".to_string())
+                );
+            }
+            other => panic!("expected dispatch target ref, got {other:?}"),
+        }
+
+        let release = &asset.spec.steps[release_index];
+        assert_eq!(
+            release.when.as_deref(),
+            Some(
+                "{{ steps.dispatch_child.output.status }} != timeout && {{ steps.dispatch_child.output.status }} != pending && {{ steps.dispatch_child.output.status }} != running"
+            )
+        );
+        match &release.body {
+            JobV2StepBody::TargetRef(target) => {
+                assert_eq!(target.target, "activity:release_locks");
+                let input = target.default_input.as_ref().expect("release input");
+                assert_eq!(
+                    input["reservation_id"],
+                    Value::String("{{ steps.reserve.output.reservation_id }}".to_string())
+                );
+            }
+            other => panic!("expected release target ref, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn default_jobs_do_not_template_agent_loop_outputs() {
         let agent_activity_names = DEFAULT_ACTIVITY_FILES
             .iter()

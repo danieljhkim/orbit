@@ -61,6 +61,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/reserve_locks.yaml"),
     ),
     (
+        "release_locks",
+        include_str!("../../assets/activities/release_locks.yaml"),
+    ),
+    (
         "run_planning_duel",
         include_str!("../../assets/activities/run_planning_duel.yaml"),
     ),
@@ -189,6 +193,24 @@ mod tests {
                 );
             }
             other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seeded_activities_include_release_locks() {
+        let root = tempdir().expect("create tempdir");
+        let activities_dir = root.path().join("resources/activities");
+        seed_default_activities(&activities_dir, true).expect("seed default activities");
+
+        let yaml = std::fs::read_to_string(activities_dir.join("release_locks.yaml"))
+            .expect("read release locks activity");
+        let asset = load_activity_asset(&yaml).expect("parse release locks activity");
+        assert_eq!(asset.name, "release_locks");
+        match asset.spec.spec {
+            ActivityV2Spec::Deterministic(spec) => {
+                assert_eq!(spec.action, "release_locks");
+            }
+            other => panic!("expected deterministic activity, got {other:?}"),
         }
     }
 }

@@ -98,14 +98,15 @@ pub mod token_scoreboard {
 use chrono::{DateTime, Utc};
 
 pub use backend::{
-    AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationReleaseParams,
-    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
-    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
-    ToolStoreBackend, WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
+    ActiveTaskReservation, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
+    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
+    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict,
+    TaskLockHolder, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationListResult, TaskReservationReleaseParams, TaskReservationReleaseResult,
+    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
+    TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
     global_policy_def_store, layered_policy_def_store, task_reservation_store_sqlite,
     tool_store_sqlite, workspace_job_run_store, workspace_policy_def_store,
     workspace_task_backends,

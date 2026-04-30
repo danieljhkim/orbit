@@ -6,12 +6,65 @@ use orbit_common::utility::path::workspace_relative_paths_overlap;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 
 use crate::{
-    ExpiredTaskReservation, Store, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
-    TaskReservationCheckResult, TaskReservationReleaseParams, TaskReservationReleaseResult,
-    TaskReservationReserveParams, TaskReservationReserveResult,
+    ActiveTaskReservation, ExpiredTaskReservation, Store, TaskLockConflict, TaskLockHolder,
+    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
+    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult,
 };
 
 impl Store {
+    pub fn list_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+    ) -> Result<TaskReservationListResult, OrbitError> {
+        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            let now = crate::now_string();
+            let expired_reservations = expire_reservations(tx, workspace_orbit_dir, &now)?;
+            let mut stmt = tx
+                .tx
+                .prepare(
+                    "SELECT reservation_id, task_ids_json, files_json, actor, created_at, expires_at
+                     FROM task_reservations
+                     WHERE workspace_orbit_dir = ?1
+                       AND released_at IS NULL
+                       AND expires_at > ?2
+                     ORDER BY created_at ASC, reservation_id ASC",
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            let rows = stmt
+                .query_map(params![workspace_orbit_dir, now], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+
+            let mut reservations = Vec::new();
+            for row in rows {
+                let (reservation_id, task_ids_json, files_json, actor, created_at, expires_at) =
+                    row.map_err(|error| OrbitError::Store(error.to_string()))?;
+                reservations.push(ActiveTaskReservation {
+                    reservation_id,
+                    task_ids: parse_string_list(&task_ids_json)?,
+                    files: parse_string_list(&files_json)?,
+                    actor,
+                    created_at,
+                    expires_at,
+                });
+            }
+
+            Ok(TaskReservationListResult {
+                reservations,
+                expired_reservations,
+            })
+        })
+    }
+
     pub fn check_task_reservation_conflicts(
         &self,
         params: &TaskReservationCheckParams,

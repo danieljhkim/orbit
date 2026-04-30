@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (ADR-034 added)
+**Last updated:** 2026-04-30 (ADR-035 added)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -458,6 +458,20 @@ This ADR log records the decisions that define the current Activity / Job substr
 - Child gate waits are visible from the command that submitted them, including run IDs for follow-up inspection.
 - Cost: the CLI formatter now knows selected fields from `task_auto_pipeline` state, so future pipeline key renames must either preserve compatibility or update the operator summary parser.
 
+## ADR-035 — Gate reservations release after terminal child waits
+
+**Status:** Accepted · 2026-04 · [T20260430-26]
+
+**Context.** `task_gate_pipeline` used task-lock reservation TTL as both crash cleanup and normal completion cleanup. That kept overlapping gates blocked after a child shipment run had already reached terminal state, turning the 30-minute TTL into artificial queue latency.
+
+**Decision.** Keep TTL as the abandoned/crashed-run fallback, but release normal gate reservations explicitly. The gate now dispatches the selected shipment workflow through one `invoke_and_wait` step, keeps the reservation active while that child run is waiting, and runs the deterministic `release_locks` activity only after the wait result is terminal rather than `timeout`, `pending`, or `running`. `orbit.task.locks` also reports active reservations with reservation id, task ids, files, actor, and expiration so gate conflicts are inspectable.
+
+**Consequences.**
+- Overlapping task bundles remain serialized while a child shipment run is actually active.
+- Completed, failed, or cancelled child runs free their admission reservation immediately instead of waiting for TTL expiration.
+- Operators can distinguish task-held locks from reservation-held locks without reading raw SQLite state.
+- Cost: `task_gate_pipeline` now relies on the dynamic `task_{{ input.mode }}_pipeline` job-name convention, so future gate modes must either follow that naming convention or refactor the dispatch selector.
+
 ---
 
 ## Task References
@@ -501,6 +515,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260430-14]** — Make default step recovery agent-driven and step-scoped.
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
+- **[T20260430-26]** — Release task-gate reservations after terminal child shipment runs and expose active reservations through the lock view.
 - **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

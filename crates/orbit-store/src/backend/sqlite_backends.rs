@@ -3,8 +3,9 @@ use orbit_common::types::{AuditEvent, OrbitError, StoredTool};
 
 use super::contracts::{
     AuditEventStoreBackend, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, ToolStoreBackend,
+    TaskReservationListResult, TaskReservationReleaseParams, TaskReservationReleaseResult,
+    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
+    ToolStoreBackend,
 };
 use crate::Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
@@ -126,6 +127,14 @@ pub(crate) struct SqliteTaskReservationStoreBackend {
 }
 
 impl TaskReservationStoreBackend for SqliteTaskReservationStoreBackend {
+    fn list_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+    ) -> Result<TaskReservationListResult, OrbitError> {
+        self.store
+            .list_active_task_reservations(workspace_orbit_dir)
+    }
+
     fn check_task_reservation_conflicts(
         &self,
         params: TaskReservationCheckParams,

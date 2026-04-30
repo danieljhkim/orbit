@@ -569,6 +569,19 @@ impl V2RuntimeHost for OrbitRuntime {
                     action: action.to_string(),
                     message: format!("{err}"),
                 }),
+            // Thin passthrough over `orbit.task.locks.release` so workflows
+            // can free admission-window reservations after child runs finish.
+            "release_locks" => self
+                .run_tool_with_context_and_role(
+                    "orbit.task.locks.release",
+                    input.clone(),
+                    Role::Admin,
+                    tool_context,
+                )
+                .map_err(|err| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("{err}"),
+                }),
             // Submit a child v2 Job and block on its terminal state.
             // Chains `orbit.pipeline.invoke` + `orbit.pipeline.wait` so
             // workflows can model "dispatch and join" as a single step

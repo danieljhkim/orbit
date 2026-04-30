@@ -9,7 +9,9 @@ impl Tool for OrbitTaskLocksTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.task.locks".to_string(),
-            description: "List files currently locked by active Orbit tasks as JSON.".to_string(),
+            description:
+                "List files currently locked by active Orbit tasks and reservations as JSON."
+                    .to_string(),
             parameters: vec![],
             builtin: true,
         }

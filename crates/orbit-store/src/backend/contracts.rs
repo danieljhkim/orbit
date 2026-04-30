@@ -168,6 +168,22 @@ pub struct TaskReservationReleaseResult {
     pub expired_reservations: Vec<ExpiredTaskReservation>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveTaskReservation {
+    pub reservation_id: String,
+    pub task_ids: Vec<String>,
+    pub files: Vec<String>,
+    pub actor: String,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationListResult {
+    pub reservations: Vec<ActiveTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct JobRunQuery {
     pub job_id: Option<String>,
@@ -225,6 +241,11 @@ pub trait TaskArtifactStoreBackend: Send + Sync {
 }
 
 pub trait TaskReservationStoreBackend: Send + Sync {
+    fn list_active_task_reservations(
+        &self,
+        workspace_orbit_dir: &str,
+    ) -> Result<TaskReservationListResult, OrbitError>;
+
     fn check_task_reservation_conflicts(
         &self,
         params: TaskReservationCheckParams,
