@@ -29,7 +29,7 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         .or_else(|| input_string_field(input, "run_id"))
         .ok_or_else(|| OrbitError::InvalidInput("missing required input.run_id".to_string()))?;
 
-    host.admit_task_for_workflow(task_id, "duel-plan")?;
+    let _ = host.get_task(task_id)?;
 
     artifacts::cleanup_stale_planning_duel_artifacts(host, task_id)?;
 
@@ -117,7 +117,7 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         ),
     ]);
 
-    let _ = artifacts::writeback_planning_duel_task(
+    let writeback = artifacts::writeback_planning_duel_task(
         host,
         &json!({
             "task_id": task_id,
@@ -136,9 +136,421 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     Ok(json!({
         "task_id": task_id,
         "run_id": job_run_id,
-        "task_status": "in-progress",
+        "task_status": writeback["task_status"].clone(),
         "winner_agent_cli": winner.winner_agent_cli,
         "winner_model": winner.winner_model,
         "recorded": true,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    use chrono::Utc;
+    use orbit_common::types::{
+        Activity, InvocationTrace, Job, JobTargetType, OrbitEvent, PlanningRoleAssignment, Role,
+        Task, TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType,
+    };
+    use orbit_store::{InvocationQuery, InvocationRecord};
+    use orbit_tools::ToolContext;
+    use serde_json::{Value, json};
+    use tempfile::TempDir;
+
+    use crate::context::{
+        ActivityInvocationResult, JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskReadHost,
+        TaskWriteHost,
+    };
+    use crate::executor::registry::ActivityExecutorRegistry;
+
+    use super::run_planning_duel;
+
+    struct PlanningDuelHost {
+        task: Mutex<Task>,
+        artifacts: Mutex<Vec<TaskArtifact>>,
+        data_root: PathBuf,
+        scoreboard_dir: PathBuf,
+        _tempdir: TempDir,
+        workflow_admissions: AtomicUsize,
+        task_starts: AtomicUsize,
+    }
+
+    impl PlanningDuelHost {
+        fn new(status: TaskStatus) -> Self {
+            let tempdir = tempfile::tempdir().expect("tempdir");
+            let data_root = tempdir.path().join(".orbit");
+            let scoreboard_dir = data_root.join("state").join("scoreboard");
+            std::fs::create_dir_all(&scoreboard_dir).expect("scoreboard dir");
+
+            Self {
+                task: Mutex::new(task_with_status(status)),
+                artifacts: Mutex::new(Vec::new()),
+                data_root,
+                scoreboard_dir,
+                _tempdir: tempdir,
+                workflow_admissions: AtomicUsize::new(0),
+                task_starts: AtomicUsize::new(0),
+            }
+        }
+
+        fn task_status(&self) -> TaskStatus {
+            self.task.lock().expect("task lock").status
+        }
+
+        fn admission_count(&self) -> usize {
+            self.workflow_admissions.load(Ordering::SeqCst)
+        }
+
+        fn start_count(&self) -> usize {
+            self.task_starts.load(Ordering::SeqCst)
+        }
+    }
+
+    impl TaskReadHost for PlanningDuelHost {
+        fn get_task(&self, task_id: &str) -> Result<Task, orbit_common::types::OrbitError> {
+            let task = self.task.lock().expect("task lock").clone();
+            if task.id == task_id {
+                Ok(task)
+            } else {
+                Err(orbit_common::types::OrbitError::TaskNotFound(
+                    task_id.to_string(),
+                ))
+            }
+        }
+
+        fn get_task_artifacts(
+            &self,
+            _task_id: &str,
+        ) -> Result<Vec<TaskArtifact>, orbit_common::types::OrbitError> {
+            Ok(self.artifacts.lock().expect("artifacts lock").clone())
+        }
+
+        fn list_tasks_filtered(
+            &self,
+            _status: Option<TaskStatus>,
+            _priority: Option<TaskPriority>,
+            _parent_id: Option<&str>,
+            _batch_id: Option<&str>,
+        ) -> Result<Vec<Task>, orbit_common::types::OrbitError> {
+            Ok(vec![self.task.lock().expect("task lock").clone()])
+        }
+    }
+
+    impl TaskWriteHost for PlanningDuelHost {
+        fn start_task(
+            &self,
+            _task_id: &str,
+            _note: Option<String>,
+            _comment: Option<String>,
+        ) -> Result<Task, orbit_common::types::OrbitError> {
+            self.task_starts.fetch_add(1, Ordering::SeqCst);
+            Err(orbit_common::types::OrbitError::Execution(
+                "planning duel must not start tasks".to_string(),
+            ))
+        }
+
+        fn admit_task_for_workflow(
+            &self,
+            _task_id: &str,
+            _workflow: &str,
+        ) -> Result<Task, orbit_common::types::OrbitError> {
+            self.workflow_admissions.fetch_add(1, Ordering::SeqCst);
+            Err(orbit_common::types::OrbitError::Execution(
+                "planning duel must not admit tasks for workflow execution".to_string(),
+            ))
+        }
+
+        fn update_task_from_activity(
+            &self,
+            _task_id: &str,
+            _status: TaskStatus,
+            _execution_summary: Option<String>,
+            _comment: Option<String>,
+            _note: Option<String>,
+        ) -> Result<Task, orbit_common::types::OrbitError> {
+            Err(orbit_common::types::OrbitError::Execution(
+                "planning duel must not update task status from activity".to_string(),
+            ))
+        }
+
+        fn apply_task_automation_update(
+            &self,
+            _task_id: &str,
+            update: TaskAutomationUpdate,
+        ) -> Result<(), orbit_common::types::OrbitError> {
+            if update.status.is_some() {
+                return Err(orbit_common::types::OrbitError::Execution(
+                    "planning duel writeback must not include a status update".to_string(),
+                ));
+            }
+            let mut task = self.task.lock().expect("task lock");
+            if let Some(plan) = update.plan {
+                task.plan = plan;
+            }
+            task.comments.extend(update.append_comments);
+            task.agent = update.agent;
+            task.model = update.model;
+            task.updated_at = Utc::now();
+            Ok(())
+        }
+    }
+
+    impl RuntimeHost for PlanningDuelHost {
+        fn record_event(&self, _event: OrbitEvent) -> Result<(), orbit_common::types::OrbitError> {
+            Ok(())
+        }
+
+        fn repo_root(&self) -> Result<String, orbit_common::types::OrbitError> {
+            Ok(self.data_root.display().to_string())
+        }
+
+        fn data_root(&self) -> &Path {
+            &self.data_root
+        }
+
+        fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
+            static REGISTRY: OnceLock<ActivityExecutorRegistry> = OnceLock::new();
+            REGISTRY.get_or_init(ActivityExecutorRegistry::new)
+        }
+
+        fn run_job_now_with_input_debug(
+            &self,
+            _job_id: &str,
+            _input: Value,
+            _debug: bool,
+        ) -> Result<JobRunResult, orbit_common::types::OrbitError> {
+            Err(orbit_common::types::OrbitError::Execution(
+                "not used by planning duel test".to_string(),
+            ))
+        }
+
+        fn validate_activity_target_exists(
+            &self,
+            _target_type: JobTargetType,
+            _target_id: &str,
+        ) -> Result<Activity, orbit_common::types::OrbitError> {
+            Err(orbit_common::types::OrbitError::Execution(
+                "not used by planning duel test".to_string(),
+            ))
+        }
+
+        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, orbit_common::types::OrbitError> {
+            Ok(None)
+        }
+
+        fn invocation_records(
+            &self,
+            _query: InvocationQuery,
+        ) -> Result<Vec<InvocationRecord>, orbit_common::types::OrbitError> {
+            Ok(Vec::new())
+        }
+
+        fn run_tool_with_context_and_role(
+            &self,
+            _name: &str,
+            _input: Value,
+            _role: Role,
+            _tool_context: ToolContext,
+        ) -> Result<Value, orbit_common::types::OrbitError> {
+            Err(orbit_common::types::OrbitError::Execution(
+                "stale artifact cleanup should not run tools in this test".to_string(),
+            ))
+        }
+
+        fn invoke_activity(
+            &self,
+            activity: Activity,
+            agent_cli: &str,
+            model: Option<&str>,
+            _input: Value,
+            _timeout_seconds: u64,
+            _debug: bool,
+        ) -> Result<ActivityInvocationResult, orbit_common::types::OrbitError> {
+            let model = model.unwrap_or("unknown-model");
+            match activity.id.as_str() {
+                "propose_duel_plan" => {
+                    self.artifacts
+                        .lock()
+                        .expect("artifacts lock")
+                        .push(TaskArtifact {
+                            path: format!("planning-duel/{agent_cli}-{model}.md"),
+                            content: format!(
+                                "*authored by: {agent_cli} / {model}*\n## Plan\nPreserve task status.\n"
+                            ),
+                        });
+                }
+                "arbitrate_duel_plan" => {
+                    let winner =
+                        first_planner_assignment(&self.artifacts.lock().expect("artifacts lock"))?;
+                    self.artifacts
+                        .lock()
+                        .expect("artifacts lock")
+                        .push(TaskArtifact {
+                            path: "planning-duel/winner.json".to_string(),
+                            content: json!({
+                                "winner_agent_cli": winner.agent,
+                                "winner_model": winner.model,
+                                "arbiter_rationale": "Preserves lifecycle state."
+                            })
+                            .to_string(),
+                        });
+                }
+                other => {
+                    return Err(orbit_common::types::OrbitError::Execution(format!(
+                        "unexpected activity '{other}'"
+                    )));
+                }
+            }
+
+            Ok(ActivityInvocationResult {
+                response_json: Some(json!({})),
+                invocation_trace: InvocationTrace::default(),
+                exit_code: Some(0),
+                duration_ms: 1,
+            })
+        }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<(), orbit_common::types::OrbitError> {
+            Ok(())
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            true
+        }
+
+        fn graph_editing(&self) -> bool {
+            false
+        }
+
+        fn scoreboard_dir(&self) -> &Path {
+            &self.scoreboard_dir
+        }
+    }
+
+    fn first_planner_assignment(
+        artifacts: &[TaskArtifact],
+    ) -> Result<PlanningRoleAssignment, orbit_common::types::OrbitError> {
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| {
+                artifact.path.starts_with("planning-duel/") && artifact.path.ends_with(".md")
+            })
+            .ok_or_else(|| {
+                orbit_common::types::OrbitError::Execution("missing planner artifact".to_string())
+            })?;
+        let name = artifact
+            .path
+            .strip_prefix("planning-duel/")
+            .and_then(|value| value.strip_suffix(".md"))
+            .ok_or_else(|| {
+                orbit_common::types::OrbitError::Execution(
+                    "invalid planner artifact path".to_string(),
+                )
+            })?;
+        let (agent, model) = name.split_once('-').ok_or_else(|| {
+            orbit_common::types::OrbitError::Execution(
+                "invalid planner artifact signature".to_string(),
+            )
+        })?;
+        Ok(PlanningRoleAssignment {
+            agent: agent.to_string(),
+            model: model.to_string(),
+        })
+    }
+
+    fn task_with_status(status: TaskStatus) -> Task {
+        let now = Utc::now();
+        Task {
+            id: "T20260430-STATUS".to_string(),
+            parent_id: None,
+            title: "Planning duel status preservation".to_string(),
+            description: "Exercise planning duel without lifecycle admission.".to_string(),
+            acceptance_criteria: Vec::new(),
+            dependencies: Vec::new(),
+            plan: String::new(),
+            execution_summary: String::new(),
+            context_files: Vec::new(),
+            workspace_path: None,
+            repo_root: None,
+            created_by: Some("test".to_string()),
+            planned_by: None,
+            implemented_by: None,
+            agent: None,
+            model: None,
+            status,
+            priority: TaskPriority::Medium,
+            complexity: None,
+            task_type: TaskType::Bug,
+            pr_number: None,
+            pr_status: None,
+            source_task_id: None,
+            batch_id: None,
+            comments: Vec::<TaskComment>::new(),
+            history: Vec::new(),
+            review_threads: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn run_planning_duel_preserves_existing_task_status() {
+        for status in [
+            TaskStatus::Proposed,
+            TaskStatus::Friction,
+            TaskStatus::Backlog,
+            TaskStatus::Rejected,
+            TaskStatus::Archived,
+            TaskStatus::InProgress,
+        ] {
+            let host = PlanningDuelHost::new(status);
+            let output = run_planning_duel(
+                &host,
+                &json!({
+                    "task_id": "T20260430-STATUS",
+                    "run_id": format!("jrun-{status}")
+                }),
+                false,
+            )
+            .expect("planning duel succeeds without lifecycle admission");
+
+            let expected_status = status.to_string();
+            let task = host
+                .get_task("T20260430-STATUS")
+                .expect("task remains readable");
+            let comment = task.comments.last().expect("planning duel comment");
+            assert_eq!(host.task_status(), status, "{status}");
+            assert_eq!(
+                output["task_status"].as_str(),
+                Some(expected_status.as_str()),
+                "{status}"
+            );
+            assert!(
+                comment
+                    .message
+                    .contains(&format!("Task status remains {expected_status}.")),
+                "{status}: {}",
+                comment.message
+            );
+            assert!(
+                !comment
+                    .message
+                    .contains("Task status is in-progress for workflow execution."),
+                "{status}: {}",
+                comment.message
+            );
+            assert_eq!(host.admission_count(), 0, "{status}");
+            assert_eq!(host.start_count(), 0, "{status}");
+        }
+    }
 }

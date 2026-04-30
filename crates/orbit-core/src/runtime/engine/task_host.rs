@@ -434,66 +434,6 @@ mod tests {
     }
 
     #[test]
-    fn duel_plan_admission_accepts_all_workflow_start_statuses() {
-        let (_root, runtime) = test_runtime();
-        let proposed = runtime
-            .add_task(TaskAddParams {
-                title: "Duel proposed".to_string(),
-                description: "Planning duel starts proposed.".to_string(),
-                workspace_path: Some(".".to_string()),
-                ..Default::default()
-            })
-            .expect("create proposed task");
-        let friction = runtime
-            .add_task(TaskAddParams {
-                title: "Duel friction".to_string(),
-                description: "Planning duel starts friction.".to_string(),
-                status: Some(TaskStatus::Friction),
-                workspace_path: Some(".".to_string()),
-                ..Default::default()
-            })
-            .expect("create friction task");
-        let backlog = approve_for_execution(
-            &runtime,
-            &runtime
-                .add_task(TaskAddParams {
-                    title: "Duel backlog".to_string(),
-                    description: "Planning duel starts backlog.".to_string(),
-                    workspace_path: Some(".".to_string()),
-                    ..Default::default()
-                })
-                .expect("create backlog candidate"),
-        );
-        let rejected = runtime
-            .add_task(TaskAddParams {
-                title: "Duel rejected".to_string(),
-                description: "Planning duel starts rejected.".to_string(),
-                workspace_path: Some(".".to_string()),
-                ..Default::default()
-            })
-            .expect("create rejected candidate");
-        let rejected = runtime
-            .reject_task(&rejected.id, "exercise duel admission".to_string(), None)
-            .expect("reject task");
-        let archived = runtime
-            .add_task(TaskAddParams {
-                title: "Duel archived".to_string(),
-                description: "Planning duel starts archived.".to_string(),
-                workspace_path: Some(".".to_string()),
-                ..Default::default()
-            })
-            .expect("create archived candidate");
-        runtime.archive_task(&archived.id).expect("archive task");
-
-        for task in [proposed, friction, backlog, rejected, archived] {
-            let admitted = runtime
-                .admit_task_for_workflow_as_system(&task.id, "duel-plan")
-                .expect("duel-plan admits workflow-startable status");
-            assert_eq!(admitted.status, TaskStatus::InProgress, "{}", task.id);
-        }
-    }
-
-    #[test]
     fn update_task_automation_records_status_history_as_system() {
         let (_root, runtime) = test_runtime();
         let task = runtime

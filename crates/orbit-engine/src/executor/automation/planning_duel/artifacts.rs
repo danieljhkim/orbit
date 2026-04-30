@@ -395,6 +395,7 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
     input: &Value,
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
+    let current_status = host.get_task(task_id)?.status.to_string();
     let artifacts = host.get_task_artifacts(task_id)?;
     let roles = input
         .get("planning_duel_roles")
@@ -432,7 +433,7 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
         winner_assignment.agent, winner_assignment.model
     );
     let comment_message = format!(
-        "Planning duel resolved.\n\nWinner: {winner_label} ({}/{})\n\nRationale: {}\n\nWinning plan persisted to task.plan. Task status is in-progress for workflow execution.",
+        "Planning duel resolved.\n\nWinner: {winner_label} ({}/{})\n\nRationale: {}\n\nWinning plan persisted to task.plan. Task status remains {current_status}.",
         winner_assignment.agent, winner_assignment.model, winner.arbiter_rationale
     );
 
@@ -458,7 +459,7 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
 
     Ok(json!({
         "task_id": task_id,
-        "task_status": "in-progress",
+        "task_status": host.get_task(task_id)?.status.to_string(),
         "winner_agent_cli": winner_assignment.agent,
         "winner_model": winner_assignment.model,
     }))
