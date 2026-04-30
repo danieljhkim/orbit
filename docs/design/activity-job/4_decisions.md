@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30
+**Last updated:** 2026-04-30 (ADR-034 added)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -445,6 +445,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - The output deliberately does not attribute friction filtering or `max_tasks` truncation, keeping `excluded` scoped to context-lock behavior.
 - Cost: the Rust serializer and seeded activity YAML schema now duplicate the exclusion shape and must be kept in sync.
 
+## ADR-034 — `ship-auto` reports operator workflow status from durable pipeline state
+
+**Status:** Accepted · 2026-04 · [T20260430-27]
+
+**Context.** `orbit run ship-auto` can succeed as a parent workflow even when it dispatched no bundles because every backlog candidate was excluded by `list_backlog_tasks`, or when child gate runs are still waiting behind active reservations. A bare `state=succeeded` line made these cases look like ordinary successful shipment.
+
+**Decision.** Keep the workflow exit code tied to parent run execution, but derive an explicit operator `workflow_status` from the persisted `task_auto_pipeline` snapshot. The status labels are `empty_backlog`, `gated_noop`, `gate_waiting`, `gate_failed`, and `completed`; text and JSON output include bundle counts, exclusion counts/reasons, blocker holders, and child gate run status when available.
+
+**Consequences.**
+- Operators and scripts can distinguish true empty backlog from lock-gated no-op without running `orbit run show`.
+- Child gate waits are visible from the command that submitted them, including run IDs for follow-up inspection.
+- Cost: the CLI formatter now knows selected fields from `task_auto_pipeline` state, so future pipeline key renames must either preserve compatibility or update the operator summary parser.
+
 ---
 
 ## Task References
@@ -488,5 +501,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260430-14]** — Make default step recovery agent-driven and step-scoped.
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
+- **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

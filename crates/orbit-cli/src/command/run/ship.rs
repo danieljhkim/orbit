@@ -69,7 +69,7 @@ impl Execute for ShipCommand {
 #[command(
     about = "Auto-select backlog tasks and ship them through the task pipeline",
     override_usage = "orbit run ship-auto [OPTIONS]",
-    after_help = "Examples:\n  orbit run ship-auto\n  orbit run ship-auto --mode local\n  orbit run ship-auto --base main\n\nRun history moved to `orbit run history -j task_auto_pipeline`."
+    after_help = "Examples:\n  orbit run ship-auto\n  orbit run ship-auto --mode local\n  orbit run ship-auto --base main\n\nOutput status labels: empty_backlog, gated_noop, gate_waiting, gate_failed, completed. Gated/no-op statuses keep exit code 0 and are reported explicitly in text and JSON output.\n\nRun history moved to `orbit run history -j task_auto_pipeline`."
 )]
 pub struct ShipAutoCommand {
     /// Pipeline mode for auto-selected task bundles.
