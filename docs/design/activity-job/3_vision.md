@@ -2,9 +2,9 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-30
 
-This document captures where the Activity / Job substrate may go next. It starts from the current v2 runtime shipped across [T20260418-2010], [T20260418-2018], [T20260418-2143], [T20260418-2210], [T20260419-0104], and [T20260419-2156], and treats everything below as pressure-testing rather than commitment. [2_design.md](./2_design.md) is the current contract; this file is where we ask which parts of that contract should harden, collapse, or disappear.
+This document pressure-tests where the Activity / Job substrate may go next. It starts from the v2 runtime shipped across [T20260418-2010], [T20260418-2018], [T20260418-2143], [T20260418-2210], [T20260419-0104], and [T20260419-2156]. [2_design.md](./2_design.md) is the current contract; this file asks what should harden, collapse, or disappear.
 
 ---
 
@@ -12,11 +12,11 @@ This document captures where the Activity / Job substrate may go next. It starts
 
 ### 1.1 How much of Activity / Job should remain public?
 
-README already frames tasks, jobs, and activities as substrate rather than the long-term product story. Should Orbit eventually keep this layer mostly internal, with goals/sessions/locks becoming the user-facing API, or does a durable local system still need a first-class human-editable workflow substrate?
+README frames tasks, jobs, and activities as substrate. Should Orbit keep this layer mostly internal, with goals/sessions/locks as the API, or does a durable local system still need human-editable workflows?
 
 ### 1.2 Should `target:` grow beyond `activity:<name>`?
 
-`TargetRef` is namespace-prefixed on purpose. Right now only `activity:<name>` exists, from [T20260418-2019]. Do we want nested job refs, reusable subroutine refs, or cross-workspace refs, or is that the point where this layer turns back into a generic workflow engine?
+`TargetRef` is namespace-prefixed, but only `activity:<name>` exists after [T20260418-2019]. Do nested job refs, subroutine refs, or cross-workspace refs help, or would they turn this layer into a generic workflow engine?
 
 ### 1.3 Is the provider model too closed-set?
 
@@ -24,29 +24,29 @@ The schema names multiple providers, but the HTTP transport path is still effect
 
 ### 1.4 Should Orbit enforce tool allowlists on the CLI backend?
 
-The current gap from [T20260419-0104] is honest but significant: HTTP enforces, CLI advises. Is that acceptable long term, or does `backend: cli` need a stricter wrapper so the meaning of `tools:` stops depending on transport choice?
+The gap from [T20260419-0104] is significant: HTTP enforces, CLI advises. Does `backend: cli` need a wrapper so `tools:` means the same thing everywhere?
 
 ### 1.5 Which limits should stay structural literals?
 
-Real shipped jobs like `task_auto_pipeline` and `task_epic_pipeline` rely on literal `max_workers` and `max_iterations`. Should those remain static authoring-time choices, or do we need templated numerics and dynamically computed ceilings?
+`task_auto_pipeline` and `task_epic_pipeline` rely on literal `max_workers` and `max_iterations`. Should those stay static, or do we need templated numerics?
 
 ### 1.6 What is the right audit landing zone?
 
-The v2 envelope from [T20260419-0002] is useful because it makes runs traversable by step/activity structure, but the full HTTP transcript still lives in the sibling loop sink. Should the reviewer-facing story converge on one query surface even if the files remain separate?
+The v2 envelope from [T20260419-0002] makes runs traversable, but the full HTTP transcript still lives in the sibling loop sink. Should review converge on one query surface even if files remain separate?
 
 ### 1.7 How much more special-casing belongs in ActivityV2?
 
-Groundhog's dedicated activity kind from [T20260420-0510-2] is justified today. If more execution modes arrive, do we keep adding sibling variants, or is there a point where "activity kind explosion" means the underlying abstraction has gone stale?
+Groundhog's dedicated kind from [T20260420-0510-2] is justified today. If more modes arrive, do we keep adding variants, or is that a sign the abstraction is stale?
 
 ### 1.8 What should become the canonical reference corpus?
 
-The seeded assets added in [T20260419-2347] and extended in [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] already function as executable docs. Should Orbit lean into that and treat seeded jobs as the main reference set, or do we need smaller spec-only exemplars for every construct?
+Seeded assets added in [T20260419-2347] and extended in [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] already act as executable docs. Should they become the main reference set, or do we need smaller spec-only exemplars?
 
 ---
 
 ## 2. Prior Work
 
-Activity / Job is a productization of familiar ideas, not a novel research primitive. The interesting question is whether Orbit's combination is locally inspectable and agent-friendly enough to matter in practice.
+Activity / Job productizes familiar ideas. The interesting question is whether Orbit's mix is local, inspectable, and agent-friendly enough to matter.
 
 ### 2.1 Durable workflow engines
 
@@ -61,7 +61,7 @@ Activity / Job borrows the idea that orchestration must survive outside one mode
 - **Claude Code**, **Codex**, **Gemini CLI**, and similar tools normalize the "agent loop plus tools" model.
 - **OpenAI-compatible** and provider-native HTTP APIs normalize direct transport-level loops.
 
-Orbit's difference is not that it can run a tool-using loop. It is that the loop is one typed activity inside a larger durable runtime with local audit, policy, and job control-flow.
+Orbit's difference is that a tool loop is one typed activity inside a durable runtime with local audit, policy, and job control-flow.
 
 ### 2.3 Policy-aware execution substrates
 
@@ -74,7 +74,7 @@ Orbit's `fsProfile` attachment and the HTTP/CLI enforcement split make this conc
 
 - Mature workflow systems almost always ship example pipelines, starter templates, or scaffolded defaults.
 
-Orbit's seeded activities and jobs from [T20260419-2347] are already acting as more than examples. They are the closest thing the project has to an executable specification corpus.
+Orbit's seeded activities and jobs from [T20260419-2347] are already more than examples; they are the closest thing to an executable spec corpus.
 
 ---
 
@@ -87,7 +87,7 @@ Soft claims only:
 - **A two-layer audit tree tied to repo provenance.** The v2 envelope from [T20260419-0002] gives runs, steps, activities, and workspace origin a stable skeleton while still preserving the underlying loop transcript and blobs.
 - **Seeded workflows as load-bearing contracts.** The shipped jobs from [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] are not toy examples; they are how the control-flow substrate proves itself against real Orbit work.
 
-None of these are research contributions. If Activity / Job earns its keep, it will be because the layer stays understandable, local, and inspectable while the product around it evolves.
+None of these are research contributions. Activity / Job earns its keep only if it stays understandable, local, and inspectable while the product evolves.
 
 ---
 
@@ -127,5 +127,6 @@ None of these are research contributions. If Activity / Job earns its keep, it w
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -2,24 +2,22 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-30
 
-> *"Activities are Orbit's executable verbs. Jobs are the control-flow grammar that composes those verbs into durable, inspectable runs."*
+Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions.
 
-Activity / Job is Orbit's current execution substrate. An activity describes one runnable unit. A job describes how activities compose: sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving upward toward goals, graphs, sessions, and locks, but this layer remains the load-bearing runtime underneath. [2_design.md](./2_design.md) describes the current implementation; [3_vision.md](./3_vision.md) captures the open questions and the likely simplifications ahead.
-
-> **v1 release scope.** v1 ships `backend: cli` as the only supported agent invocation path. The HTTP `LoopTransport` (`backend: http`) and the Groundhog activity kind exist in this design and in code, and are exercised in tests, but are **not** part of the v1 release surface. This document continues to describe both for architectural completeness; treat HTTP/Groundhog references as preview-only until v2.
+> **v1 release scope.** v1 ships `backend: cli` as the supported agent invocation path. HTTP `LoopTransport` (`backend: http`) and Groundhog exist in code and tests, but remain preview-only until v2.
 
 ---
 
 ## 1. Motivation
 
-Orbit needs a runtime layer that is explicit enough for humans to inspect and rigid enough for code to execute. Activity / Job exists to solve four practical problems:
+Orbit needs a runtime layer that humans can inspect and code can execute. Activity / Job solves four practical problems:
 
-1. **Give agent work a typed execution surface.** Orbit needs more than "run a prompt." It needs agent loops, deterministic actions, shell steps, and now Groundhog attempts, all represented in one schema family. The first v2 activity runtime scaffolding landed in [T20260418-2010].
-2. **Make control flow durable and local.** Retry, parallelism, fan-out, and bounded loops must survive outside a single model turn. Phase 3's `JobV2` DAG constructs landed in [T20260418-2018] for exactly this reason.
-3. **Keep core/runtime boundaries honest.** orbit-core should coordinate runs without naming `orbit-agent` internals. The `V2RuntimeHost` boundary was wired in [T20260418-2143] and tightened in [T20260418-2210].
-4. **Retire the older mixed runtime without guessing at migration.** `schemaVersion: 1` assets now fail load-time parsing after [T20260419-2156], so this v2 surface is no longer "the new path"; it is the canonical one.
+1. **Typed execution.** Agent loops, deterministic actions, shell steps, and Groundhog attempts share one schema family after [T20260418-2010].
+2. **Durable local control flow.** Retry, parallelism, fan-out, and loops survive outside one model turn via `JobV2` DAG constructs from [T20260418-2018].
+3. **Clean runtime boundaries.** orbit-core coordinates runs without naming `orbit-agent` internals through the `V2RuntimeHost` work in [T20260418-2143] and [T20260418-2210].
+4. **One canonical schema.** `schemaVersion: 1` assets fail load-time parsing after [T20260419-2156].
 
 ---
 
@@ -27,14 +25,14 @@ Orbit needs a runtime layer that is explicit enough for humans to inspect and ri
 
 ### 2.1 Activities are the runnable units
 
-An `ActivityV2` carries shared metadata plus one concrete runtime spec:
+An `ActivityV2` carries shared metadata plus one runtime spec:
 
 - `agent_loop`
 - `groundhog`
 - `deterministic`
 - `shell`
 
-The shared shape and first dispatcher path shipped in [T20260418-2010]. Groundhog joined as a sibling activity kind in [T20260420-0510-2], rather than becoming another `agent_loop` flag.
+The shared shape shipped in [T20260418-2010]. Groundhog became a sibling activity kind in [T20260420-0510-2], not another `agent_loop` flag.
 
 ### 2.2 Jobs are the orchestration grammar
 
@@ -52,14 +50,14 @@ That grammar landed in [T20260418-2018], with `workflow` / `subroutine` job kind
 
 ### 2.3 Load-time normalization is part of the contract
 
-The Activity / Job layer does real work before a run starts. orbit-core:
+orbit-core normalizes assets before a run starts:
 
 - loads YAML through a two-pass schema loader
 - resolves `target: activity:<name>` references for jobs
 - rewrites `backend: auto` to a concrete backend once per run
 - rejects loop/session/backend combinations that cannot execute safely
 
-The job-side name-resolution pass arrived in [T20260418-2019]. The concrete backend resolution and `run-v2` entrypoints were wired in [T20260418-2143], and CLI backend support followed in [T20260419-0104].
+Name resolution arrived in [T20260418-2019]. Backend resolution and `run-v2` entrypoints came in [T20260418-2143]; CLI backend support followed in [T20260419-0104].
 
 ### 2.4 Backends and providers are separate choices
 
@@ -68,17 +66,17 @@ For `agent_loop`, Orbit distinguishes:
 - **backend**: `http`, `cli`, or `auto`
 - **provider**: `claude`, `codex`, `gemini`, `ollama`, or `openai_compat`
 
-That distinction matters operationally. `backend: auto` resolves once, at load time. `backend: http` against an unwired provider fails structurally rather than silently falling back. `backend: cli` retains the older CLI-provider runtimes on purpose, per [T20260419-0104] and the boundary cleanup in [T20260418-2210].
+`backend: auto` resolves once at load time. `backend: http` against an unwired provider fails structurally instead of falling back. `backend: cli` intentionally retains the older CLI-provider runtimes per [T20260419-0104] and [T20260418-2210].
 
 ### 2.5 Audit, policy, and seeded assets make the runtime inspectable
 
-This layer is not just types plus executors. It also owns:
+This layer also owns:
 
 - `fsProfile` attachment on activities and target steps
 - the v2 audit envelope with `workspace_path` provenance
 - seeded reference assets and pipeline jobs used by `orbit init`
 
-`workspace_path` entered the envelope in [T20260419-0002]. Runtime/CLI `fsProfile` enforcement landed in [T20260419-0503]. Seeding the activity/job assets on init landed in [T20260419-2347].
+`workspace_path` entered the envelope in [T20260419-0002], runtime/CLI `fsProfile` enforcement landed in [T20260419-0503], and init seeding landed in [T20260419-2347].
 
 ---
 
@@ -118,5 +116,6 @@ This layer is not just types plus executors. It also owns:
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

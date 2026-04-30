@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (ADR-033 added)
+**Last updated:** 2026-04-30
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -352,21 +352,15 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Status:** Accepted · 2026-04 · [T20260428-9]
 
-**Context.** Provider, model, and backend choices for `agent_loop` activities live inline on each YAML today (`crates/orbit-common/src/types/activity_job/activity_v2.rs`). Users who wanted to pick a different combination per agent role had to edit YAML by hand — there was no centrally controlled surface keyed by role. The team picked three roles (`reviewer`, `implementer`, `planner`) and decided to make `orbit init` the place to choose, with `config.toml` as the persistence target.
+**Context.** Provider, model, and backend choices for `agent_loop` activities lived inline in YAML, so users had to edit assets to choose different stacks per role. The team chose three roles (`reviewer`, `implementer`, `planner`) and made `orbit init` write those preferences to `config.toml`.
 
-**Decision.** Land the writer half first as a self-contained slice. `RawRuntimeConfig` (`crates/orbit-core/src/config/raw.rs`) gains `agent: Option<BTreeMap<String, RawAgentRoleConfig>>`. `orbit init` runs interactive prompts (provider → backend → model) for each role, with detection-derived defaults that the user accepts by pressing Enter. The collected map is appended to a fresh `config.toml` as `[agent.<role>]` blocks. The reader half — wiring resolved settings into agent dispatch via a `role:` field on activity/job specs and a resolver — is deferred to a follow-up.
-
-**Detection rules.** `crates/orbit-core/src/config/agent_detect.rs` walks PATH for `claude`/`codex`/`gemini`/`ollama` and reads `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`. The default provider is the first detected CLI (in that order), else the first detected API key (`anthropic→claude`, `openai→codex`, `gemini→gemini`), else `claude`. Default backend is `cli` when the matching CLI is on PATH, else `http`. Default model comes from a hardcoded `provider → latest-known-good model` registry (`claude→claude-opus-4-7`, `codex→gpt-5.5`, `gemini→gemini-3-pro`). Probing is gated by `AgentEnvProbe` so unit tests simulate environments without touching real PATH/env.
-
-**Prompt UX.** `crates/orbit-core/src/config/agent_prompt.rs` issues three prompts per role in fixed order: `agent.<role>.provider`, `agent.<role>.backend`, `agent.<role>.model`. The default value derived from detection is shown in brackets; empty input accepts it. `--non-interactive` short-circuits the collector entirely so CI runs do not hang. `orbit init` is also idempotent over an existing `config.toml`: when one is already present (and `--force` is unset), prompts are skipped and the file is left as-is.
+**Decision.** Land the writer half first. `RawRuntimeConfig` gains `agent: Option<BTreeMap<String, RawAgentRoleConfig>>`; `orbit init` prompts provider → backend → model for each role and writes `[agent.<role>]` blocks. Detection in `agent_detect.rs` checks PATH for `claude`/`codex`/`gemini`/`ollama`, then relevant API keys, derives provider/backend/model defaults, and is testable through `AgentEnvProbe`. Prompting is fixed-order, accepts defaults on empty input, skips under `--non-interactive`, and leaves an existing `config.toml` untouched unless `--force` is set. The dispatch reader half was deferred and later landed in [T20260428-12].
 
 **Consequences.**
 - A first-time `orbit init` records per-role agent preferences to a single, user-readable file with no YAML editing required.
 - The detection probe is reusable by the consumer-side resolver in [T20260428-12], where the same trait will be invoked at dispatch time as a fallback layer behind config.toml.
 - The default-config.toml asset documents the schema as a commented block; users who skipped prompts can drop in their own values without re-running init.
-- Cost: until [T20260428-12] lands, the values written to `config.toml` are inert — they round-trip but do not influence dispatch. Reviewers and users should treat the documented behaviour as half-shipped during this window.
-
-**Follow-up.** Landed as [ADR-031](#adr-031--agentrole-config-overrides-inline-agentloop-settings-at-dispatch) ([T20260428-12]).
+- Cost: until [T20260428-12] landed, the values written to `config.toml` were inert — they round-tripped but did not influence dispatch, so reviewers had to treat the behavior as half-shipped during that window.
 
 ## ADR-028 — Job-level recovery activity handles retry-exhausted step errors
 
@@ -374,11 +368,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Context.** Some v2 workflow failures are recoverable only after a remediation pass, not through immediate retry. For example, a deterministic merge action can fail because the base checkout is dirty; retrying the same action without cleanup fails identically. Orbit needed a bounded hook that lets a workspace-authored activity inspect and repair the state before the workflow gives up.
 
-**Decision.** Add an optional job-level `recovery_activity: <name>` field to `JobV2`. Catalog resolution validates the name and caches the resolved activity spec before dispatch. When a step exhausts its normal retry attempts with a retryable `DispatchError`, the executor invokes that recovery activity once, passing only `failed_step_id`, `activity_name`, `error_message`, `attempt`, and `max_attempts`. If recovery succeeds, the executor performs exactly one post-recovery attempt of the original step body. If recovery fails or that post-recovery attempt fails, the executor returns the original pre-recovery `DispatchError` unchanged. Non-retryable errors, as classified by `DispatchError::is_non_retryable()`, bypass recovery entirely.
-
-**Scope.** The hook is job-level by design: one recovery activity applies uniformly to every step in the job. Recovery dispatch inherits the failing step's resolved `FsProfile`, emits one `StepRecoveryAttempted` audit event, and does not write a normal step output into the pipeline.
-
-**Deferred.** Per-step recovery handlers and failure-class registries are intentionally deferred until real workflows show that one generic job-level hook creates too much duplication or ambiguity.
+**Decision.** Add optional job-level `recovery_activity: <name>` to `JobV2`. Catalog resolution validates and caches it before dispatch. When a step exhausts normal retries with a retryable `DispatchError`, the executor invokes recovery once with `failed_step_id`, `activity_name`, `error_message`, `attempt`, and `max_attempts`; success grants exactly one post-recovery attempt, while recovery failure or post-recovery failure returns the original error. Non-retryable errors bypass recovery. The hook inherits the failing step's resolved `FsProfile`, emits `StepRecoveryAttempted`, and does not write normal step output into the pipeline.
 
 **Consequences.**
 - Workflows get a bounded remediation point without making retry semantics unbounded.
@@ -406,15 +396,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Context.** The first seeded recovery policy in [T20260430-12] was too weak: a deterministic cooldown could only help timing flakes, and wiring recovery at the workflow root made every retryable step inherit the same recovery policy. The intended default is for an agent to manually inspect the failed step and make bounded repairs only where that specific step benefits.
 
-**Decision.** Add optional step-level `recovery_activity: <name>` to `JobV2Step`. Catalog resolution validates each step-level recovery name and caches the resolved activity spec before dispatch; backend resolution also normalizes those cached specs. During retry exhaustion, the executor prefers a step-level recovery activity and falls back to the existing job-level recovery activity only when the step does not declare one.
-
-Seed `step_failure_recovery` as a CLI-backed `agent_loop` activity using provider `codex`. Its instruction tells the agent to inspect the five recovery-hook fields, perform conservative manual recovery, avoid rerunning the failed step, and return before the executor performs the single post-recovery attempt. The recovery input contract from ADR-028 remains unchanged: `failed_step_id`, `activity_name`, `error_message`, `attempt`, and `max_attempts`.
-
-**Workflow wiring.** Attach `recovery_activity: step_failure_recovery` to direct task-shipment steps that benefit from manual recovery:
-- `task_local_pipeline`: `implement_one`, `commit`, `merge`, and conditional `push`.
-- `task_pr_pipeline`: `implement_one`, `push`, and `pr_open`.
-
-Do not attach it to `worktree_setup`, task lifecycle marking, or higher-level orchestration workflows (`task_gate_pipeline`, `task_auto_pipeline`, `task_epic_pipeline`, `job_duel_plan_pipeline`). Those surfaces either lack enough established context for safe repair or dispatch child orchestration where a generic recovery agent could duplicate work.
+**Decision.** Add optional step-level `recovery_activity: <name>` to `JobV2Step`. Catalog resolution validates and caches each step-level activity, backend resolution normalizes the cached specs, and retry exhaustion prefers step-level recovery before falling back to job-level recovery. Seed `step_failure_recovery` as a CLI-backed Codex `agent_loop` that inspects the unchanged ADR-028 input fields, performs conservative repair, avoids rerunning the failed step, and returns before the executor's single post-recovery attempt. Wire it only to direct task-shipment steps: `task_local_pipeline`'s `implement_one`, `commit`, `merge`, and conditional `push`; `task_pr_pipeline`'s `implement_one`, `push`, and `pr_open`.
 
 **Consequences.**
 - Recovery policy is explicit at the step that needs it instead of inherited by the whole workflow.
@@ -428,17 +410,7 @@ Do not attach it to `worktree_setup`, task lifecycle marking, or higher-level or
 
 **Context.** ADR-027 ([T20260428-9]) shipped the writer half of per-role agent settings: `orbit init` collects provider/backend/model per role and persists them to `[agent.<role>]` blocks in `config.toml`. Until now nothing read those values — they round-tripped on disk but had no effect on dispatch. The follow-up needed to wire the values through to `agent_loop` dispatch without forcing every YAML author to know the per-role mapping inline, and without leaking provider-credential or config-source concerns into `orbit-common`.
 
-**Decision.** Tag activities and job steps with an optional `AgentRole` and let the engine override the inline `(provider, model, backend)` triple from `[agent.<role>]` at dispatch time. Specifically:
-
-1. `AgentRole` (`Reviewer | Implementer | Planner`, serde lowercase) lives in `orbit-common` so `orbit-common` specs and `orbit-core` config both reference the same closed-set enum.
-2. `AgentLoopSpec` and `GroundhogSpec` carry `role: Option<AgentRole>`; `TargetStep` and `TargetRef` carry the same field at the step level. `TargetRef → TargetStep` resolution preserves the role.
-3. `EnvironmentHost::agent_role_config(role) -> Option<AgentRoleConfig>` is the host seam (with default `None`). The same method is mirrored on `V2RuntimeHost` because the v2 dispatcher receives only `&dyn V2RuntimeHost`, and forcing every test/example mock to also implement `EnvironmentHost`'s six unrelated env-config methods would have a much wider blast radius. orbit-core implements both methods by reading from `RawRuntimeConfig.agent` and parsing string fields into the typed `Provider`/`Backend` enums; unrecognized strings yield `None` for that field with a warn-log.
-4. The resolver `resolve_agent_settings(role, host, &inline)` in `orbit-engine::activity_job::agent_role` collapses the host's optional `AgentRoleConfig` against the inline activity values field-by-field. Each of `provider`, `model`, and `backend` independently falls back to the inline value when the corresponding role-config field is absent.
-5. At dispatch in `crate::activity_job::job_executor::run_target`, `step.role.or(activity.role)` selects the effective role. When `Some`, the executor clones the inline `AgentLoopSpec`, applies the resolver output in place, and dispatches with the cloned spec. The override is applied in both AgentLoop branches — session-bound and non-session — and runs **before** the `replay_active()` short-circuit so HTTP replay continues to switch the Session provider to `"replay"` regardless of any role-driven override.
-
-**Precedence.** Per field: `[agent.<role>].<field>` from `config.toml` if present, else the inline value on the activity. Per scope: step-level `role:` on `TargetStep` wins over activity-level `role:` on `AgentLoopSpec`. An activity or step without any role declaration dispatches with inline values unchanged — a regression-tested no-op path.
-
-**Out of scope.** An env-var override layer (e.g. `ORBIT_AGENT_IMPLEMENTER_PROVIDER=...`) is intentionally deferred. Per-step-type role inference (e.g. "all `agent_review` steps default to `Reviewer`") is also deferred; today the role tag is opt-in and explicit.
+**Decision.** Tag activities and job steps with optional `AgentRole` (`Reviewer | Implementer | Planner`, serde lowercase) in `orbit-common`, and let dispatch override inline `(provider, model, backend)` from `[agent.<role>]` field by field. `AgentLoopSpec`, `GroundhogSpec`, `TargetStep`, and `TargetRef` all carry the role, and `TargetRef → TargetStep` preserves it. `EnvironmentHost::agent_role_config` and the mirrored `V2RuntimeHost` method expose parsed role config; `resolve_agent_settings` combines it with inline values. At dispatch, `step.role.or(activity.role)` selects the effective role, step role wins over activity role, absent fields fall back inline, absent roles are a no-op, and replay still switches the HTTP session provider to `"replay"`. Env-var overrides and role inference remain deferred.
 
 **Consequences.**
 - `orbit init`-written role preferences now have effect at dispatch without any YAML edits — a workspace can flip `[agent.implementer].provider` and every `role: implementer` step picks it up on the next run.
@@ -515,5 +487,6 @@ Do not attach it to `worktree_setup`, task lifecycle marking, or higher-level or
 - **[T20260430-12]** — Ship a generic deterministic recovery activity for direct task shipment workflows.
 - **[T20260430-14]** — Make default step recovery agent-driven and step-scoped.
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
+- **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

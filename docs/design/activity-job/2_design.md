@@ -4,7 +4,7 @@
 **Owner:** codex
 **Last updated:** 2026-04-30
 
-This document describes the shipped Activity / Job substrate as it exists today across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, load-time normalization, dispatch boundaries, backend semantics, DAG execution, audit, and the legacy edges that still matter. See [1_overview.md](./1_overview.md) for the feature's purpose and [3_vision.md](./3_vision.md) for forward-looking questions.
+This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
 ---
 
@@ -16,9 +16,7 @@ Activity / Job assets are `schemaVersion: 2` YAML envelopes with:
 - `metadata.name`
 - typed `spec`
 
-The loader in `crates/orbit-common/src/types/activity_job/asset_loader.rs` reads the schema header first, then parses the full envelope into `ActivityV2` or `JobV2`. That two-pass shape arrived with the first v2 activity runtime scaffolding in [T20260418-2010].
-
-The important current contract is that `schemaVersion: 1` is not "legacy but tolerated." It is retired. The loader returns a structural error for version 1 after [T20260419-2156]. `kind` mismatches are also structural errors, so an activity file can never accidentally dispatch as a job or vice versa.
+The loader in `crates/orbit-common/src/types/activity_job/asset_loader.rs` reads the schema header first, then parses the full envelope into `ActivityV2` or `JobV2`; that shape arrived in [T20260418-2010]. `schemaVersion: 1` is retired after [T20260419-2156], and `kind` mismatches are structural errors, so an activity cannot dispatch as a job or vice versa.
 
 ---
 
@@ -49,7 +47,7 @@ The common `agent_loop` fields are:
 - `provider`
 - `wall_clock_timeout_seconds`
 
-Groundhog intentionally does not reuse the exact serialized `AgentLoopSpec` shape. It has its own `GroundhogSpec`, but `as_agent_loop_spec()` projects it into an HTTP-backed agent loop when the runner needs the shared transport path. That sibling activity kind landed in [T20260420-0510-2].
+Groundhog has its own `GroundhogSpec`, but `as_agent_loop_spec()` projects it into an HTTP-backed agent loop when the runner needs the shared transport path. That sibling kind landed in [T20260420-0510-2].
 
 `DeterministicSpec` is just `{ action, config }`. `ShellSpec` is a direct subprocess surface with `program`, `args`, `allowed_programs`, `timeout_seconds`, and `expected_exit_codes`.
 
@@ -82,25 +80,25 @@ The body is one of:
 
 `TargetStep` is the executor-facing form. It inlines an `ActivityV2Spec` plus optional `fsProfile`, `default_input`, `timeout_seconds`, and optional `session`. `TargetRef` is the authoring-facing form: `target: activity:<name>`. It is resolved away before execution.
 
-Phase 3 also made step-local input layering explicit, but the shipped behavior changed in [T20260423-0445]. Job-level `default_input` now behaves as follows:
+Step-local input layering landed earlier, but the shipped job-level `default_input` behavior changed in [T20260423-0445]:
 
 - if the caller passes `null`, the run input becomes `job.default_input`
 - if both the caller input and `job.default_input` are JSON objects, Orbit performs a shallow merge and caller-supplied keys win on conflict
 - if the caller input is any non-object JSON value, it replaces `job.default_input` entirely
 
-Step-level `default_input` is still recursively template-rendered before dispatch. Support for step default inputs landed earlier in [T20260413-0141] and was pulled into the v2 DAG path in [T20260418-2018]; [T20260423-0445] corrected the job-level merge contract so seeded workflows like `task_auto_pipeline` can rely on omitted keys inheriting defaults.
+Step-level `default_input` is still recursively template-rendered before dispatch. Support landed in [T20260413-0141], entered the v2 DAG path in [T20260418-2018], and was corrected for job-level merges in [T20260423-0445].
 
 ---
 
 ## 4. Load-Time Normalization Pipeline
 
-The code does not dispatch the raw YAML shape. orbit-core normalizes it first.
+orbit-core normalizes raw YAML before dispatch.
 
 Catalog-discovered v2 jobs use `MergeByKey` precedence after [T20260425-0204]: `ORBIT_JOB_DIR` / `ORBIT_V2_JOB_DIR` entries first, then workspace jobs, then global seeded jobs. The first valid `metadata.name` wins, so a workspace `task_auto_pipeline` overrides the global default without making `orbit run ship` fail. Duplicate names inside one directory tree remain invalid because that single layer would otherwise be ambiguous.
 
 Activity catalogs follow the same first-wins rule after [T20260426-0047]: `ORBIT_ACTIVITY_DIR` / `ORBIT_V2_CATALOG_DIR` entries first, then workspace activities, then global seeded activities. This lets a workspace carry an override such as `pr_open` without `orbit activity list --ops` failing on the duplicate global default. Duplicate names inside one activity directory tree remain invalid.
 
-For direct single-activity execution inside runtime helpers:
+Direct single-activity runtime helpers:
 
 1. Read YAML from disk.
 2. Parse via `load_activity_asset(...)`.
@@ -108,7 +106,7 @@ For direct single-activity execution inside runtime helpers:
 4. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
 5. Dispatch the concrete `ActivityV2Spec`.
 
-For a job run:
+Job runs:
 
 1. Read YAML from disk.
 2. Parse via `load_job_asset(...)`.
@@ -119,15 +117,15 @@ For a job run:
 7. Build audit sinks and run id with `system` as the v2 envelope `agent_identity`.
 8. Execute the normalized `JobV2`.
 
-The target-ref pass was added in [T20260418-2019]. The concrete backend resolution and `run-v2` entrypoints were wired in [T20260418-2143]. The CLI backend path and the HTTP-only loop/session rejection tightened this load-time contract in [T20260419-0104].
+The target-ref pass was added in [T20260418-2019], backend resolution and `run-v2` entrypoints in [T20260418-2143], and CLI backend plus HTTP-only loop/session rejection in [T20260419-0104].
 
 The public CLI now executes activity assets through jobs rather than exposing a standalone `orbit activity run` subcommand. `orbit activity` is an inspection/catalog surface; `orbit job run` and workflow aliases under `orbit run` are the public execution surfaces after [T20260426-0047].
 
-One nuance worth naming: some module comments still describe older Phase ordering. The authoritative behavior is the orbit-core call path above in `crates/orbit-core/src/command/job_v2.rs`.
+Some module comments still describe older phase ordering; the authoritative behavior is the orbit-core call path in `crates/orbit-core/src/command/job_v2.rs`.
 
-Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. That default activity is a CLI-backed `agent_loop`: it receives only the executor-provided recovery keys, manually inspects the failed step, makes bounded repairs when safe, and returns before the executor makes its single post-recovery attempt. Higher-level orchestration workflows (`task_gate_pipeline`, `task_auto_pipeline`, `task_epic_pipeline`, and `job_duel_plan_pipeline`) do not enable the generic hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action.
+Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. The CLI-backed recovery agent receives only the executor-provided recovery keys, inspects the failed step, makes bounded repairs when safe, and returns before the executor's single post-recovery attempt. Higher-level orchestration workflows do not enable the hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action.
 
-The seeded `list_backlog_tasks` deterministic activity is the first `task_auto_pipeline` step. In automatic mode it emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for backlog tasks filtered before gate dispatch because their context files overlap `in-progress` or `review` task locks. The exclusion entries are only for that lock-overlap filter: friction filtering and `max_tasks` truncation remain silent, and explicit `task_ids` override mode omits `excluded` because it skips the filter entirely. This attribution contract was added in [T20260421-0542-2].
+The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; friction filtering and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2].
 
 ---
 
@@ -140,11 +138,11 @@ The seeded `list_backlog_tasks` deterministic activity is the first `task_auto_p
 3. `[runtime] backend = "<value>"` in config
 4. hard-coded fallback `http`
 
-If any intermediate tier literally says `auto`, the resolver folds it to the hard-coded fallback so the dispatcher only sees `http` or `cli`. That "resolve once, dispatch concrete" rule was introduced with the `run-v2` entrypoints in [T20260418-2143] and hardened for the CLI path in [T20260419-0104].
+If any intermediate tier says `auto`, the resolver folds it to the hard-coded fallback so dispatch only sees `http` or `cli`. That rule arrived with `run-v2` in [T20260418-2143] and was hardened for CLI in [T20260419-0104].
 
-The second rule is the HTTP-only feature constraint. Today the only public item in that list is loop-body cross-iteration `session:` binding. `validate_job_loop_session_backends(...)` rejects a step inside `loop:` that declares `session:` while resolving to `backend: cli`. The error text intentionally names the feature and the fix, because the job has not started yet; there is no useful retry path.
+The second rule is the HTTP-only feature constraint. Today that means loop-body cross-iteration `session:` binding: `validate_job_loop_session_backends(...)` rejects a `loop:` step with `session:` when it resolves to `backend: cli`.
 
-The third rule is no silent provider fallback. `backend: http` against an unwired provider fails as `UnwiredHttpTransport` rather than quietly launching a CLI runtime. That choice matters because providers and backends are separate choices in the schema, not aliases.
+The third rule is no silent provider fallback. `backend: http` against an unwired provider fails as `UnwiredHttpTransport` rather than launching a CLI runtime; providers and backends are separate schema choices.
 
 The prescriptive contract for this area lives in [specs/backend-resolution.md](./specs/backend-resolution.md).
 
@@ -152,7 +150,7 @@ The prescriptive contract for this area lives in [specs/backend-resolution.md](.
 
 ## 6. Engine-Core Boundary
 
-Activity / Job is the seam where orbit-core hands work to orbit-engine without taking a dependency on `orbit-agent` types.
+Activity / Job is where orbit-core hands work to orbit-engine without depending on `orbit-agent` types.
 
 `V2RuntimeHost` is the key boundary. orbit-core implements it and supplies five services back into the engine:
 
@@ -162,7 +160,7 @@ Activity / Job is the seam where orbit-core hands work to orbit-engine without t
 - build `ToolContext` for an activity, including policy and filesystem audit hooks
 - persist invocation traces for completed agent-loop work
 
-That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] made the boundary primitive on purpose: the engine receives strings, `Value`, and `ToolContext`, not `orbit-agent` transport objects.
+That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] kept the boundary primitive: strings, `Value`, and `ToolContext`, not `orbit-agent` transport objects.
 
 `dispatch_v2_activity(...)` is the central per-activity entry. It emits `ActivityStarted` / `ActivityFinished` envelope events, then delegates by spec kind:
 
@@ -171,7 +169,7 @@ That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] ma
 - `deterministic` → host callback
 - `shell` → direct subprocess execution
 
-That makes the dispatch tree readable in one place while keeping provider/session construction below the boundary.
+That keeps the dispatch tree readable while provider/session construction stays below the boundary.
 
 ---
 
@@ -186,11 +184,11 @@ The HTTP path is driven by `agent_loop_driver.rs`. It:
 - chooses a transport
 - runs `orbit-agent`'s `AgentLoop`
 
-Today that transport path is narrower than the schema surface suggests. `Provider::has_http_transport()` currently returns true only for `claude`, so the non-replay path uses `AnthropicMessagesTransport`. `ORBIT_V2_REPLAY` and `ORBIT_V2_REPLAY_FIXTURE` provide a scripted replay transport for smoke runs and loop convergence tests.
+This path is narrower than the schema: `Provider::has_http_transport()` currently returns true only for `claude`, so non-replay uses `AnthropicMessagesTransport`. `ORBIT_V2_REPLAY` and `ORBIT_V2_REPLAY_FIXTURE` provide scripted replay.
 
 The allowlist is enforced in the loop engine on this path. A denied tool becomes a structural `DispatchError::ToolDenied` so the job retry wrapper can classify it as non-retryable.
 
-After [T20260426-0526], completed HTTP loop outcomes are converted into `InvocationTrace` records and persisted through the host under the job run ID and step ID. That includes loop-body `session:` steps, which use a separate session-aware executor path but feed the same invocation metrics store.
+After [T20260426-0526], completed HTTP loop outcomes become `InvocationTrace` records under the job run ID and step ID, including loop-body `session:` steps.
 
 ### 7.2 CLI path
 
@@ -205,17 +203,17 @@ The CLI path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow i
 7. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
 8. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host.
 
-After [T20260426-2313], the subprocess stdout/stderr readers stream line-level `tracing::info!` events while the child is still running. Each event carries `provider`, `stream`, `job_run_id`, `task_id`, and `line`; after [T20260426-2349], the reader emits the raw newline-stripped line and the default tracing subscriber redacts string field values and `Debug`-formatted field values before stderr or JSONL output is written. The readers still retain the original stdout/stderr byte buffers and hand those buffers to the existing audit/blob path when `CliInvocationFinished` is emitted, so run-log readers keep following blob refs rather than the live tracing feed.
+After [T20260426-2313], stdout/stderr readers emit line-level `tracing::info!` events while the child runs, carrying `provider`, `stream`, `job_run_id`, `task_id`, and `line`. After [T20260426-2349], the default tracing subscriber redacts formatted output. The readers still retain original bytes for the existing audit/blob path, so run logs follow blob refs rather than the live feed.
 
-Executor args are prepended before provider runtime args. For the seeded Codex executor, that means the subprocess starts as `codex exec --json ...`, not as the interactive `codex` TUI with piped stdin. This was tightened after a local ship run for [T20260423-0114] exposed that the earlier command-only boundary ignored executor args.
+Executor args are prepended before provider runtime args. For seeded Codex, the subprocess starts as `codex exec --json ...`, not the interactive TUI. [T20260423-0114] exposed the earlier command-only boundary.
 
-After [T20260427-48], provider runtime args also receive the runtime's provider config through the same `V2RuntimeHost` boundary. Static executor definitions keep command-shape flags such as `exec --json`; dynamic provider settings such as Codex sandbox mode, writable side directories, and approval policy stay in the retained provider runtime. Codex approval policy is passed as an exec-compatible config override rather than as the interactive-only `--ask-for-approval` flag after `exec`.
+After [T20260427-48], provider runtime args receive provider config through `V2RuntimeHost`. Static executor definitions keep command-shape flags (`exec --json`); dynamic Codex settings such as sandbox mode, side-write roots, and approval policy stay in the retained provider runtime. Codex approval policy is an exec-compatible config override, not the interactive-only `--ask-for-approval` flag.
 
-After [T20260427-51], macOS CLI invocations whose executor declares `sandbox: macos-sandbox-exec` are wrapped as `sandbox-exec -f <profile.sb> <provider> ...`. In that mode Orbit treats the outer SBPL profile as the filesystem authority and neutralizes provider-native sandbox flags: Codex is pinned to `--sandbox danger-full-access`, and Gemini's sandbox toggle is removed. After [T20260428-10], the generated profile also grants the Codex state directory (`$CODEX_HOME`, or `$HOME/.codex` when unset) so Codex can initialize before reading Orbit's envelope. Codex side-write roots from runtime provider config (the same roots passed as `--add-dir`, today workspace `.orbit` and global `.orbit`) are appended after policy denies so inherited Orbit subprocesses can persist workflow state while ordinary project-content writes remain governed by the resolved `fsProfile`.
+After [T20260427-51], macOS CLI invocations declaring `sandbox: macos-sandbox-exec` run under `sandbox-exec -f <profile.sb> <provider> ...`. Orbit treats that SBPL profile as filesystem authority and neutralizes provider-native sandbox flags. After [T20260428-10], the profile grants Codex state (`$CODEX_HOME` or `$HOME/.codex`) plus side-write roots from provider config so inherited Orbit subprocesses can persist workflow state while project writes remain governed by `fsProfile`.
 
-After [T20260430-15], the CLI agent stdin envelope carries the rendered activity input and durable `run_id` alongside the activity instruction, prompt, tools, and model. When that input identifies a single task, orbit-core also embeds a canonical task snapshot (`id`, title, description, acceptance criteria, plan, pr number, and context files) with `input.workspace_path` / `input.repo_root` taking precedence over the stored task paths. This keeps task executors from having to infer the target task from ambient run history when the human-facing prompt string is empty or generic.
+After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths.
 
-The important retention boundary is that the older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers. They are the shipped implementation of `backend: cli`.
+The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped `backend: cli` implementation.
 
 Just as important, Orbit does not enforce tool allowlists on this path today. It records the declared tool set as an advisory and delegates enforcement to the provider harness. This is a real semantic gap between `backend: http` and `backend: cli`.
 
@@ -225,15 +223,15 @@ Just as important, Orbit does not enforce tool allowlists on this path today. It
 
 ### 8.1 Template rendering and pipeline context
 
-The executor wraps pipeline outputs so templates read them as `{{ steps.<id>.output.* }}`. The initial pipeline context starts from the merged run input contract described in §3: object-valued caller input overlays object-valued `job.default_input`, while `null` and non-object inputs keep their special-case behavior. Step `default_input` is rendered recursively through the template engine; strings that parse as JSON are converted back into `Value`, so booleans, numbers, arrays, and objects can flow forward without remaining strings.
+The executor exposes outputs as `{{ steps.<id>.output.* }}`. Initial context follows the §3 merge contract: object caller input overlays object `job.default_input`, while `null` and non-object inputs keep their special cases. Step `default_input` is rendered recursively; strings that parse as JSON convert back into `Value`.
 
-`fan_out` workers additionally see `{{ item }}` / `{{ input.item }}`. Loop bodies additionally see `{{ input.iteration }}`.
+`fan_out` workers see `{{ item }}` / `{{ input.item }}`. Loop bodies see `{{ input.iteration }}`.
 
 ### 8.2 `when` and `retry`
 
 `when` is evaluated once, before retry. A skipped step is a successful no-op and does not retry.
 
-The retry wrapper re-runs the whole step body up to `max_attempts`, using exponential or linear backoff. Some errors bypass retry entirely:
+The retry wrapper re-runs the whole step body up to `max_attempts`, with exponential or linear backoff. Some errors bypass retry:
 
 - tool denial
 - unknown deterministic action
@@ -245,19 +243,19 @@ That rule comes straight from `DispatchError::is_non_retryable()`.
 
 ### 8.3 `parallel`
 
-Parallel branches run under `std::thread::scope`. The join policy is one of:
+Parallel branches run under `std::thread::scope`. Join policy is:
 
 - `all`
 - `any`
 - `quorum { n }`
 
-The executor emits a `StepJoin` event with per-branch outcomes. If the join policy fails and at least one branch produced a structural error, the first error is surfaced instead of returning only `success: false`.
+The executor emits `StepJoin` with per-branch outcomes. If the join policy fails and any branch produced a structural error, the first error is surfaced instead of only `success: false`.
 
 ### 8.4 `fan_out` / `fan_in`
 
 `fan_out.items` is template-rendered into an array. Workers run concurrently behind a counting semaphore, so `max_workers` is a true concurrency bound, not just metadata. `fan_in.collect` can persist the ordered worker outputs under a separate pipeline key in addition to the step id itself.
 
-Workers execute with isolated pipeline/session maps. That isolation is why the validator rejects any worker template that names a `session:` binding: concurrent workers would otherwise share one mutable `Session`.
+Workers use isolated pipeline/session maps. The validator rejects any worker template with `session:` because concurrent workers would otherwise share one mutable `Session`.
 
 ### 8.5 `loop`
 
@@ -266,77 +264,75 @@ A loop runs either:
 - once per rendered `items` entry
 - or up to `max_iterations` when `items` is absent
 
-The loop body runs before `break_when` is evaluated, so body steps can populate the pipeline fields the break expression reads. If `items` expands beyond `max_iterations`, the executor fails structurally instead of silently truncating the iteration set.
+The body runs before `break_when`, so steps can populate fields the break expression reads. If `items` exceeds `max_iterations`, execution fails structurally instead of truncating.
 
 ### 8.6 Persisted state for v2 job runs
 
-Persisted pipeline runs (`orbit run ship`, `orbit run ship-auto`, `orbit run duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) are stored through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create a durable `JobRun` bundle after [T20260423-2004-4], using the same workspace-local `state/job-runs/<job_id>/<run_id>/` layout so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned run ID. The workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level inspection aliases were removed in [T20260426-0742], so history inspection has one public surface.
+Persisted pipeline runs (`orbit run ship`, `ship-auto`, `duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
 
-Before [T20260423-0445], a v2 workflow that failed before any concrete step file was written could leave behind a failed `JobRun` with `steps: []` and no surfaced `error_message`, even when the underlying executor had a concrete reason.
-
-The current contract is:
+Before [T20260423-0445], early v2 failures could leave `steps: []` and no surfaced `error_message`. The current contract is:
 
 - if a persisted v2 pipeline fails and no recorded step already carries error detail, the pipeline worker writes a synthetic failed `JobRunStep`
 - if a direct v2 run succeeds, the direct-run wrapper writes a synthetic successful `JobRunStep` containing the final pipeline snapshot
 - that synthetic step uses `target_type: job` and `target_id: <job_id>`
 - the step's `error_message` carries the concrete executor error (or a fallback `success=false` summary for message-carrying non-success results)
 
-This is intentionally an operator-surface repair, not a new execution primitive. It keeps `orbit run ship --json`, direct `orbit job run` output, `orbit run history`, and `orbit run show` actionable without introducing a second run-level error channel in `JobRun`.
+This operator-surface repair keeps `orbit run ship --json`, direct `orbit job run`, `orbit run history`, and `orbit run show` actionable without adding a second run-level error channel.
 
-The loop shares the same pipeline map and session map across iterations. That is what makes cross-iteration `session:` binding meaningful in the first place.
+The loop shares one pipeline map and session map across iterations, which makes cross-iteration `session:` meaningful.
 
 ### 8.7 Invocation metrics
 
-The `orbit metrics` command reads knowledge usage from job-run state and agent/tool usage from the SQLite invocation store. It does not scrape `.orbit/state/audit/v2_loop/` or the diagnostics JSONL stream.
+`orbit metrics` reads knowledge usage from job-run state and agent/tool usage from the SQLite invocation store. It does not scrape `.orbit/state/audit/v2_loop/` or diagnostics JSONL.
 
-V2 jobs therefore persist invocation traces as an explicit execution side effect after [T20260426-0526]. The engine carries optional trace data on `DispatchOutcome`, the job executor associates it with the durable run ID and step ID, and orbit-core inserts it into the invocation store with canonical agent/model names plus task IDs extracted from the rendered step input. The same persistence hook refreshes the token scoreboard.
+V2 jobs persist invocation traces explicitly after [T20260426-0526]. `DispatchOutcome` carries optional trace data; the executor attaches run and step IDs; orbit-core stores canonical agent/model names plus task IDs from rendered input and refreshes the token scoreboard.
 
 For `backend: cli`, the trace comes from the provider's structured stdout using the same parser that validates Orbit response envelopes. For the HTTP loop path, the trace is derived from `LoopOutcome` usage and tool-call names.
 
 ### 8.8 Run trace inspection
 
-`orbit run show`, `orbit run logs`, `orbit run events`, and `orbit run trace` are the operator surfaces for already-scheduled runs. They all resolve an omitted run ID to the most recently scheduled run.
+`orbit run show`, `logs`, `events`, and `trace` inspect already-scheduled runs and resolve an omitted run ID to the most recent run.
 
-After [T20260426-0709], `orbit run show <run> -s <id>` treats the v2 audit envelope's activity DAG `step.id` as the primary identifier. That matters because durable v2 runs may store a synthetic job-level `JobRunStep` whose `target_id` is the job ID, while the audit envelope still records the actual YAML step IDs. The legacy `JobRunStep.target_id` and numeric `step_index` remain fallback selectors.
+After [T20260426-0709], `orbit run show <run> -s <id>` treats the v2 envelope's activity DAG `step.id` as primary. This matters because durable v2 runs may store a synthetic job-level `JobRunStep`, while the envelope records actual YAML step IDs. `JobRunStep.target_id` and numeric `step_index` remain fallbacks.
 
-After [T20260426-0705], `orbit run events <run>` reads the v2 envelope chronologically and can filter by activity step ID or event type. `orbit run trace <run>` renders the parent/child tree from `event_id` and `parent_event_id`. JSON mode for both commands returns deterministic structures for tests and downstream tooling.
+After [T20260426-0705], `orbit run events <run>` reads the v2 envelope chronologically and filters by step ID or event type. `orbit run trace <run>` renders the parent/child tree from `event_id` and `parent_event_id`. JSON mode is deterministic.
 
-The CLI does not own the envelope storage layout. `orbit-core` exposes runtime accessors for v2 audit events and CLI invocation records, including derived step IDs and blob-backed stdout/stderr. This keeps `.orbit/state/audit/v2_loop/` and `.orbit/state/audit/blobs/` knowledge with the runtime layer that also builds the activity/job audit sinks.
+The CLI does not own envelope storage. `orbit-core` exposes accessors for v2 audit events and CLI invocation records, including derived step IDs and blob-backed stdout/stderr, keeping storage knowledge with the runtime layer.
 
 ### 8.9 Workflow worktree base synchronization
 
-Task-shipping workflows that create worktrees (`task_pr_pipeline`, `task_local_pipeline`, and callers such as `task_auto_pipeline`) default `base_sync` to `remote` after [T20260427-45]. In that mode the deterministic worktree automation fetches `origin/<base_branch>` and creates, resets, compares, and rebases task branches against that fetched remote-tracking ref. It does not run `git pull --rebase` from the repo root checkout, and it does not silently prefer a stale local base branch.
+Task-shipping workflows that create worktrees (`task_pr_pipeline`, `task_local_pipeline`, and callers such as `task_auto_pipeline`) default `base_sync` to `remote` after [T20260427-45]. Remote mode fetches `origin/<base_branch>` and creates, resets, compares, and rebases task branches against that remote-tracking ref; it does not mutate the repo root checkout or prefer stale local base branches.
 
-Direct job callers can set `base_sync: local` when they intentionally need a local-only repository or an unpublished base branch. That mode resolves the local base ref and skips the origin fetch; it is an explicit escape hatch rather than the default shipping behavior.
+Direct callers can set `base_sync: local` for local-only repos or unpublished base branches. That mode resolves the local base ref and skips origin fetch.
 
 ### 8.10 Workflow task admission
 
-After [T20260428-8], task-starting workflows own an explicit admission step instead of relying on generic task update semantics. `worktree_setup` and `run_planning_duel` accept tasks in `proposed`, `friction`, `backlog`, `rejected`, and `archived`, and move them to `in-progress` before implementation or planner activity runs. Existing `in-progress` tasks are treated as idempotent retry inputs.
+After [T20260428-8], task-starting workflows own explicit admission instead of relying on generic task updates. `worktree_setup` and `run_planning_duel` accept `proposed`, `friction`, `backlog`, `rejected`, and `archived` tasks into `in-progress`; existing `in-progress` tasks are idempotent retry inputs.
 
-This admission path is intentionally narrower than `orbit.task.update` or generic deterministic metadata stamping. Direct task updates still keep their non-empty-plan guard when moving unplanned non-backlog work to `in-progress`, and `apply_task_automation_update` does not become a blanket archived-task resurrection surface. Workflow admission records the lifecycle transition under the system actor and preserves friction-bounty accounting for `friction -> in-progress`.
+This path stays separate from `orbit.task.update` and generic deterministic metadata stamping. Direct task updates keep the non-empty-plan guard, and workflow admission records system-actor lifecycle history while preserving friction-bounty accounting for `friction -> in-progress`.
 
-Planning-duel writeback now reports `task_status: "in-progress"` rather than the former `status_unchanged` signal. The task plan artifact still lands through `planning_duel_resolved`; only the lifecycle expectation changed.
+Planning-duel writeback now reports `task_status: "in-progress"` instead of `status_unchanged`; the plan artifact still lands through `planning_duel_resolved`.
 
 ---
 
 ## 9. Filesystem Policy and `fsProfile`
 
-Both `ActivityV2` and `TargetStep` can attach an `fsProfile`. orbit-core uses `tool_context_for_activity(...)` to build the policy-aware `ToolContext`, and `V2AuditWriter` can attach a filesystem audit logger so read/write denials are reflected in the envelope event stream.
+Both `ActivityV2` and `TargetStep` can attach an `fsProfile`. orbit-core uses `tool_context_for_activity(...)` to build the policy-aware `ToolContext`, and `V2AuditWriter` can attach filesystem audit logging so read/write denials appear in the envelope.
 
-The runtime/CLI enforcement tightening landed in [T20260419-0503]. The practical effect is that `fsProfile` is part of the activity/job contract, not an optional CLI presentation detail.
+Runtime/CLI enforcement landed in [T20260419-0503]. `fsProfile` is therefore part of the activity/job contract, not a CLI presentation detail.
 
 One subtlety: profile attachment happens at two layers.
 
 - An activity asset may declare its own `fsProfile`.
 - A target step may override or supply one around an inlined activity spec.
 
-This is useful, but it means readers have to distinguish "profile on the reusable activity" from "profile on the place this activity is called."
+Readers must distinguish "profile on the reusable activity" from "profile on this call site."
 
 ---
 
 ## 10. Legacy Surfaces and Retention Boundaries
 
-This feature spans a migration, so the docs need to say plainly what is gone, what is still intentionally present, and why.
+This feature spans a migration, so the retained surfaces are explicit.
 
 ### 10.1 Retention Table
 
@@ -352,20 +348,20 @@ This feature spans a migration, so the docs need to say plainly what is gone, wh
 
 ### 10.2 Seeded Assets in Practice
 
-The seeded asset set is part of the design, not just repo clutter. Today it includes:
+Seeded assets are part of the design. Today they include:
 
 - small reference activities such as `agent_loop_reference` and `agent_loop_cli_reference`
 - control-plane jobs such as `task_gate_pipeline`
 - higher-level dispatch workflows such as `task_auto_pipeline`, `task_epic_pipeline`, and `job_duel_plan_pipeline`
 
-The gate/auto/epic assets added in [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] are especially useful because they exercise the real v2 constructs instead of describing them abstractly:
+The gate/auto/epic assets from [T20260419-0622-3], [T20260419-0623], and [T20260419-0623-2] exercise real v2 constructs:
 
 - `loop + break_when`
 - `fan_out + fan_in`
 - cross-iteration `session:` binding
 - deterministic child-job dispatch
 
-That seeded corpus is the closest thing Activity / Job has to executable reference documentation.
+That seeded corpus is Activity / Job's executable reference documentation.
 
 ---
 
@@ -373,35 +369,35 @@ That seeded corpus is the closest thing Activity / Job has to executable referen
 
 ### 11.1 Provider typing is broader than provider wiring
 
-The `Provider` enum names `claude`, `codex`, `gemini`, `ollama`, and `openai_compat`, but the HTTP transport path currently wires only `claude`. The schema reads more general than the runtime is.
+The `Provider` enum names `claude`, `codex`, `gemini`, `ollama`, and `openai_compat`, but HTTP transport currently wires only `claude`. The schema is broader than the runtime.
 
 ### 11.2 Tool enforcement differs materially by backend
 
-HTTP agent loops enforce the tool allowlist inside Orbit. CLI agent loops emit an advisory event and rely on the provider harness. Same field, different enforcement model.
+HTTP agent loops enforce the tool allowlist inside Orbit. CLI agent loops emit an advisory event and rely on the provider harness.
 
 ### 11.3 Some structural controls are still literals
 
-`LoopBlock.max_iterations` and `FanOutBlock.max_workers` are structural `u32`s, not templated expressions. Real workflows like `task_auto_pipeline` therefore have to fork YAML to change those limits dynamically.
+`LoopBlock.max_iterations` and `FanOutBlock.max_workers` are structural `u32`s, not templated expressions, so workflows must fork YAML to change them dynamically.
 
 ### 11.4 Validation is split across phases
 
-Some bad shapes are rejected at load time, some at job preflight validation, and some during dispatch. This is pragmatic, but it means the "where will this fail?" answer is not yet uniform.
+Some bad shapes fail at load time, some at job preflight, and some during dispatch. The "where will this fail?" answer is not yet uniform.
 
 ### 11.5 The audit story is powerful but split
 
-The v2 envelope tree lives in `.orbit/state/audit/v2_loop/`. The loop-engine HTTP details live in the sibling `.orbit/state/audit/loop/` sink, and verbatim payload blobs live under `.orbit/state/audit/blobs/`. That split is intentional, but reviewers still need to know two related layouts. [T20260426-0519] moved these file-backed run traces under `.orbit/state/` so the top-level `.orbit/` directory remains reserved for configuration, resources, tasks, graph artifacts, and the SQLite command-audit database.
+The v2 envelope tree lives in `.orbit/state/audit/v2_loop/`, HTTP loop details in `.orbit/state/audit/loop/`, and payload blobs in `.orbit/state/audit/blobs/`. Reviewers still need to know the split layout. [T20260426-0519] moved these traces under `.orbit/state/` so top-level `.orbit/` stays for config, resources, tasks, graph artifacts, and the SQLite command-audit database.
 
 ### 11.6 The substrate still leaks into the public product story
 
-README already frames tasks, jobs, and activities as substrate rather than the long-term product interface. The code agrees, but the CLI and seeded assets still expose this layer directly because Orbit needs it to operate today.
+README frames tasks, jobs, and activities as substrate. The CLI and seeded assets still expose this layer because Orbit needs it to operate today.
 
 ### 11.7 Nearby comments still carry migration-era drift
 
-Most code comments are accurate, but some module prose still reflects earlier phase names or pass ordering. When there is tension, orbit-core entrypoints and executor behavior are the authoritative source.
+Some module prose still reflects earlier phase names or pass ordering. orbit-core entrypoints and executor behavior are authoritative.
 
 ### 11.8 Historical run inspection belongs to the run surface
 
-Read-only history surfaces do not always have the same dependency shape as live execution. [T20260423-0447] proved that retired workflow runs can remain observable without live assets, [T20260425-2010] removed workflow-specific history browsers, and [T20260426-0742] removed the duplicate job-level inspection aliases. Current public inspection belongs to `orbit run history -j <job_id>` and `orbit run show <run_id>`, while `orbit job` is reserved for job catalog browsing and direct job execution.
+Read-only history does not need the same dependencies as live execution. [T20260423-0447] kept retired workflow runs observable without live assets, [T20260425-2010] removed workflow-specific history browsers, and [T20260426-0742] removed duplicate job-level inspection aliases. Current inspection belongs to `orbit run history -j <job_id>` and `orbit run show <run_id>`; `orbit job` is for catalog browsing and direct execution.
 
 ---
 
@@ -444,5 +440,6 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260428-8]** — Add explicit workflow admission for task-starting workflows and remove the plan prerequisite from those workflow starts.
 - **[T20260428-10]** — Allow Codex CLI state writes under the macOS sandbox.
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
+- **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
