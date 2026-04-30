@@ -164,6 +164,27 @@ pub(super) fn identity_params() -> Vec<ToolParam> {
     ]
 }
 
+pub(super) fn scored_identity_params() -> Vec<ToolParam> {
+    vec![
+        ToolParam {
+            name: "agent".to_string(),
+            description:
+                "Deprecated compatibility field. Prefer `model`; Orbit infers the agent family from known model names."
+                    .to_string(),
+            param_type: "string".to_string(),
+            required: false,
+        },
+        ToolParam {
+            name: "model".to_string(),
+            description:
+                "Required provenance field. Exact LLM model identifier used to infer agent family (e.g. opus, gpt-5.4, gemini-3.1-pro-preview). Pass `human` for human-authored review feedback to opt out of scoreboard scoring."
+                    .to_string(),
+            param_type: "string".to_string(),
+            required: true,
+        },
+    ]
+}
+
 pub(super) fn graph_ref_param() -> ToolParam {
     ToolParam {
         name: "ref".to_string(),

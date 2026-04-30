@@ -177,6 +177,7 @@ Command surface determines provenance by default:
 
 - `orbit-create-task`: Create a new task with description, acceptance criteria, and context.
 - `orbit-execute-task`: Carry a change through implementation, validation, and review.
+- `orbit-review-task`: Review someone else's work and file findings as review threads, without transitioning the task.
 - `orbit-track-issues`: Capture agent-discovered, self-reported friction as tracked tasks.
 - `orbit-graph`: Navigate or inspect the codebase via the knowledge graph when the activity allowlist includes graph tools.
 

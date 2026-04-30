@@ -20,7 +20,7 @@ impl Tool for OrbitReviewThreadReplyTool {
             param_type: "string".to_string(),
             required: true,
         });
-        parameters.extend(super::identity_params());
+        parameters.extend(super::scored_identity_params());
 
         ToolSchema {
             name: "orbit.task.review_thread.reply".to_string(),

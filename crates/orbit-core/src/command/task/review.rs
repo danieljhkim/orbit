@@ -1,5 +1,7 @@
 use chrono::Utc;
-use orbit_common::types::{OrbitError, ReviewMessage, ReviewThread, ReviewThreadStatus};
+use orbit_common::types::{
+    OrbitError, ReviewMessage, ReviewThread, ReviewThreadStatus, infer_agent_family_from_model,
+};
 use orbit_store::task_review_scoreboard;
 
 use crate::OrbitRuntime;
@@ -199,6 +201,9 @@ impl OrbitRuntime {
         let Some(model) = model else {
             return;
         };
+        if infer_agent_family_from_model(model).is_none() {
+            return;
+        }
         if let Err(error) =
             task_review_scoreboard::record_task_review_message(&self.paths().scoreboard_dir, model)
         {
@@ -330,5 +335,49 @@ mod tests {
             .expect("add review thread");
 
         assert!(!scoreboard_dir.join("task_review.json").exists());
+    }
+
+    #[test]
+    fn non_model_labels_do_not_score_local_review_messages() {
+        let (_root, runtime) = test_runtime();
+        let scoreboard_dir = runtime.data_root().join("state").join("scoreboard");
+        fs::create_dir_all(&scoreboard_dir).expect("create scoreboard dir");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Non-model review".to_string(),
+                description: "Exercise non-model label scoring skip.".to_string(),
+                workspace_path: Some(".".to_string()),
+                ..Default::default()
+            })
+            .expect("add task");
+
+        runtime
+            .add_review_thread(
+                &task.id,
+                "Human-attributed review.".to_string(),
+                None,
+                None,
+                None,
+                Some("human".to_string()),
+            )
+            .expect("add review thread with model=human");
+
+        runtime
+            .add_review_thread(
+                &task.id,
+                "Person-attributed review.".to_string(),
+                None,
+                None,
+                None,
+                Some("daniel".to_string()),
+            )
+            .expect("add review thread with model=daniel");
+
+        assert!(!scoreboard_dir.join("task_review.json").exists());
+
+        let updated = runtime.get_task(&task.id).expect("reload task");
+        assert_eq!(updated.review_threads.len(), 2);
+        assert_eq!(updated.review_threads[0].messages[0].by, "human");
+        assert_eq!(updated.review_threads[1].messages[0].by, "daniel");
     }
 }

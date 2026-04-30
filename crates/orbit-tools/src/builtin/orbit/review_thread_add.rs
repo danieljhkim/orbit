@@ -26,7 +26,7 @@ impl Tool for OrbitReviewThreadAddTool {
             param_type: "string".to_string(),
             required: false,
         });
-        parameters.extend(super::identity_params());
+        parameters.extend(super::scored_identity_params());
 
         ToolSchema {
             name: "orbit.task.review_thread.add".to_string(),
