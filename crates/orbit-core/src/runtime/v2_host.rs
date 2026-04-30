@@ -8,7 +8,7 @@
 //! HTTP agent-loop transport and CLI subprocess execution both live in
 //! `orbit-engine`, so this module never names orbit-agent types.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,6 +29,7 @@ use orbit_engine::{
 };
 use orbit_store::{AuditEventInsertParams, InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ToolContext};
+use serde::Serialize;
 use serde_json::Value;
 
 use super::orbit_tool_host::{
@@ -205,7 +206,7 @@ impl V2RuntimeHost for OrbitRuntime {
                             .collect()
                     })
                     .unwrap_or_default();
-                let mut tasks = if explicit_task_ids.is_empty() {
+                let (mut tasks, excluded_entries) = if explicit_task_ids.is_empty() {
                     let all_tasks = self.stores().tasks().list().map_err(|err| {
                         DispatchError::DeterministicActionFailed {
                             action: action.to_string(),
@@ -217,7 +218,7 @@ impl V2RuntimeHost for OrbitRuntime {
                         .cloned()
                         .map(|task| (task.id.clone(), task))
                         .collect();
-                    let locked_files = active_task_lock_files(task_lookup.values());
+                    let lock_holders = active_task_lock_holders(task_lookup.values());
                     let mut backlog: Vec<Task> = all_tasks
                         .into_iter()
                         .filter(|task| {
@@ -235,21 +236,56 @@ impl V2RuntimeHost for OrbitRuntime {
                             .cmp(&rank(b.priority))
                             .then(a.created_at.cmp(&b.created_at))
                     });
-                    if !locked_files.is_empty() {
-                        let tainted_roots: BTreeSet<String> = backlog
+                    let mut excluded = Vec::new();
+                    if !lock_holders.is_empty() {
+                        let direct_conflicts: BTreeMap<String, Vec<BacklogTaskConflict>> = backlog
                             .iter()
-                            .filter(|task| task_overlaps_locked_files(task, &locked_files))
-                            .map(|task| task_root_id(task, &task_lookup))
+                            .filter_map(|task| {
+                                let conflicts = task_overlap_conflicts(task, &lock_holders);
+                                (!conflicts.is_empty()).then(|| (task.id.clone(), conflicts))
+                            })
                             .collect();
-                        if !tainted_roots.is_empty() {
-                            backlog.retain(|task| {
-                                !tainted_roots.contains(&task_root_id(task, &task_lookup))
-                            });
+                        let mut root_trigger: BTreeMap<String, Vec<BacklogTaskConflict>> =
+                            BTreeMap::new();
+                        for task in &backlog {
+                            if let Some(conflicts) = direct_conflicts.get(&task.id) {
+                                let root_id = task_root_id(task, &task_lookup);
+                                // Backlog is already priority/age sorted; the first direct
+                                // conflict in that order supplies group-member attribution.
+                                root_trigger
+                                    .entry(root_id)
+                                    .or_insert_with(|| conflicts.clone());
+                            }
+                        }
+                        if !root_trigger.is_empty() {
+                            let mut kept = Vec::new();
+                            for task in backlog {
+                                let root_id = task_root_id(&task, &task_lookup);
+                                if let Some(trigger_conflicts) = root_trigger.get(&root_id) {
+                                    if let Some(conflicts) = direct_conflicts.get(&task.id) {
+                                        excluded.push(BacklogTaskExclusion {
+                                            id: task.id.clone(),
+                                            reason: BacklogTaskExclusionReason::ContextLockConflict,
+                                            conflicts: conflicts.clone(),
+                                        });
+                                    } else {
+                                        excluded.push(BacklogTaskExclusion {
+                                            id: task.id.clone(),
+                                            reason: BacklogTaskExclusionReason::GroupMemberConflict,
+                                            conflicts: trigger_conflicts.clone(),
+                                        });
+                                    }
+                                } else {
+                                    kept.push(task);
+                                }
+                            }
+                            excluded.sort_by(|a, b| a.id.cmp(&b.id));
+                            backlog = kept;
                         }
                     }
-                    backlog
+                    (backlog, Some(excluded))
                 } else {
-                    explicit_task_ids
+                    let tasks = explicit_task_ids
                         .iter()
                         .map(|task_id| {
                             self.get_task(task_id).map_err(|err| {
@@ -259,7 +295,8 @@ impl V2RuntimeHost for OrbitRuntime {
                                 }
                             })
                         })
-                        .collect::<Result<Vec<_>, _>>()?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    (tasks, None)
                 };
                 tasks.truncate(max_tasks);
                 let ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
@@ -278,12 +315,25 @@ impl V2RuntimeHost for OrbitRuntime {
                         })
                     })
                     .collect();
-                Ok(serde_json::json!({
-                    "task_count": task_objs.len(),
-                    "task_ids": ids,
-                    "tasks": task_objs,
-                    "bundles": bundles,
-                }))
+                let mut payload = serde_json::Map::new();
+                payload.insert("task_count".to_string(), Value::from(task_objs.len()));
+                payload.insert("task_ids".to_string(), serde_json::json!(ids));
+                payload.insert("tasks".to_string(), serde_json::json!(task_objs));
+                payload.insert("bundles".to_string(), serde_json::json!(bundles));
+                // Keep this Rust serialization contract in sync with
+                // crates/orbit-core/assets/activities/list_backlog_tasks.yaml.
+                if let Some(excluded) = excluded_entries {
+                    payload.insert(
+                        "excluded".to_string(),
+                        serde_json::to_value(excluded).map_err(|err| {
+                            DispatchError::DeterministicActionFailed {
+                                action: action.to_string(),
+                                message: format!("serialize excluded backlog tasks: {err}"),
+                            }
+                        })?,
+                    );
+                }
+                Ok(Value::Object(payload))
             }
             // Materialize an epic's working set for the orchestrator:
             // the epic task itself plus non-terminal subtasks
@@ -1028,14 +1078,42 @@ fn resolve_cli_executor(
 
 const MAX_TASK_PARENT_CHAIN_DEPTH: usize = 32;
 
-fn active_task_lock_files<'a>(tasks: impl IntoIterator<Item = &'a Task>) -> BTreeSet<String> {
-    let mut locked_files = BTreeSet::new();
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct BacklogTaskExclusion {
+    id: String,
+    reason: BacklogTaskExclusionReason,
+    conflicts: Vec<BacklogTaskConflict>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum BacklogTaskExclusionReason {
+    ContextLockConflict,
+    GroupMemberConflict,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+struct BacklogTaskConflict {
+    requested_file: String,
+    locking_task_id: String,
+}
+
+fn active_task_lock_holders<'a>(
+    tasks: impl IntoIterator<Item = &'a Task>,
+) -> BTreeMap<String, Vec<String>> {
+    let mut holders: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for task in tasks {
         if matches!(task.status, TaskStatus::InProgress | TaskStatus::Review) {
-            locked_files.extend(existing_lock_context_files(task));
+            for file in existing_lock_context_files(task) {
+                holders.entry(file).or_default().push(task.id.clone());
+            }
         }
     }
-    locked_files
+    for locking_task_ids in holders.values_mut() {
+        locking_task_ids.sort();
+        locking_task_ids.dedup();
+    }
+    holders
 }
 
 fn is_epic_terminal_status(status: TaskStatus) -> bool {
@@ -1056,14 +1134,26 @@ fn epic_state_for_task_status(status: TaskStatus) -> &'static str {
     }
 }
 
-fn task_overlaps_locked_files(task: &Task, locked_files: &BTreeSet<String>) -> bool {
-    existing_lock_context_files(task)
-        .iter()
-        .any(|requested_file| {
-            locked_files
-                .iter()
-                .any(|held_file| workspace_relative_paths_overlap(requested_file, held_file))
-        })
+fn task_overlap_conflicts(
+    task: &Task,
+    holders: &BTreeMap<String, Vec<String>>,
+) -> Vec<BacklogTaskConflict> {
+    let mut conflicts = Vec::new();
+    for requested_file in existing_lock_context_files(task) {
+        for (held_file, locking_task_ids) in holders {
+            if workspace_relative_paths_overlap(&requested_file, held_file) {
+                for locking_task_id in locking_task_ids {
+                    conflicts.push(BacklogTaskConflict {
+                        requested_file: requested_file.clone(),
+                        locking_task_id: locking_task_id.clone(),
+                    });
+                }
+            }
+        }
+    }
+    conflicts.sort();
+    conflicts.dedup();
+    conflicts
 }
 
 fn existing_lock_context_files(task: &Task) -> Vec<String> {
@@ -1237,12 +1327,12 @@ fn task_root_id(task: &Task, task_lookup: &BTreeMap<String, Task>) -> String {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use orbit_common::types::{ExecutorDef, ExecutorType};
+    use orbit_common::types::{ExecutorDef, ExecutorType, TaskPriority};
     use orbit_engine::activity_job::V2RuntimeHost;
     use orbit_tools::ToolContext;
     use serde_json::json;
     use std::collections::HashMap;
-    #[cfg(target_os = "macos")]
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     use crate::command::task::TaskAddParams;
@@ -1341,15 +1431,362 @@ mod tests {
         runtime
     }
 
-    #[cfg(target_os = "macos")]
-    fn runtime_with_workspace_layout() -> (tempfile::TempDir, OrbitRuntime) {
+    fn runtime_with_workspace_layout() -> (tempfile::TempDir, OrbitRuntime, PathBuf) {
         let root = tempdir().expect("create tempdir");
         let global = root.path().join("home/.orbit");
         let workspace = root.path().join("repo/.orbit");
         std::fs::create_dir_all(&global).expect("global orbit dir");
         std::fs::create_dir_all(&workspace).expect("workspace orbit dir");
         let runtime = OrbitRuntime::from_roots(&global, &workspace).expect("build runtime");
-        (root, runtime)
+        let repo_root = root.path().join("repo");
+        (root, runtime, repo_root)
+    }
+
+    fn write_workspace_file(repo_root: &Path, relative_path: &str) {
+        let path = repo_root.join(relative_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dir");
+        }
+        std::fs::write(path, "test fixture\n").expect("write workspace file");
+    }
+
+    fn seed_list_backlog_task(
+        runtime: &OrbitRuntime,
+        title: &str,
+        status: TaskStatus,
+        priority: TaskPriority,
+        task_type: TaskType,
+        parent_id: Option<String>,
+        context_files: Vec<&str>,
+    ) -> Task {
+        runtime
+            .add_task(TaskAddParams {
+                parent_id,
+                title: title.to_string(),
+                description: format!("Fixture task: {title}"),
+                acceptance_criteria: vec!["Fixture task is observable.".to_string()],
+                plan: "Fixture plan.".to_string(),
+                context_files: context_files.into_iter().map(str::to_string).collect(),
+                workspace_path: Some(".".to_string()),
+                priority,
+                task_type: Some(task_type),
+                status: Some(status),
+                ..Default::default()
+            })
+            .expect("seed task")
+    }
+
+    fn list_backlog_tasks(runtime: &OrbitRuntime, input: Value) -> Value {
+        runtime
+            .run_deterministic(
+                "list_backlog_tasks",
+                &json!({}),
+                &input,
+                ToolContext::default(),
+            )
+            .expect("list backlog tasks")
+    }
+
+    fn excluded_entry<'a>(output: &'a Value, task_id: &str) -> &'a Value {
+        output["excluded"]
+            .as_array()
+            .expect("excluded array")
+            .iter()
+            .find(|entry| entry["id"] == task_id)
+            .expect("excluded entry")
+    }
+
+    #[test]
+    fn list_backlog_tasks_preserves_existing_fields_without_conflicts() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/alpha/src/lib.rs");
+        write_workspace_file(&repo_root, "crates/beta/src/lib.rs");
+        let medium = seed_list_backlog_task(
+            &runtime,
+            "Medium backlog",
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/alpha/src/lib.rs"],
+        );
+        let high = seed_list_backlog_task(
+            &runtime,
+            "High backlog",
+            TaskStatus::Backlog,
+            TaskPriority::High,
+            TaskType::Task,
+            None,
+            vec!["crates/beta/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(output["task_count"], json!(2));
+        assert_eq!(output["task_ids"], json!([high.id, medium.id]));
+        assert_eq!(
+            output["tasks"],
+            json!([
+                {
+                    "id": high.id,
+                    "title": "High backlog",
+                    "type": "task",
+                    "priority": "high",
+                    "context_files": high.context_files,
+                    "parent_id": null
+                },
+                {
+                    "id": medium.id,
+                    "title": "Medium backlog",
+                    "type": "task",
+                    "priority": "medium",
+                    "context_files": medium.context_files,
+                    "parent_id": null
+                }
+            ])
+        );
+        assert_eq!(output["excluded"], json!([]));
+    }
+
+    #[test]
+    fn list_backlog_tasks_reports_direct_context_lock_conflicts() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/foo/src/lib.rs");
+        let locking = seed_list_backlog_task(
+            &runtime,
+            "Locking task",
+            TaskStatus::InProgress,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+        let backlog = seed_list_backlog_task(
+            &runtime,
+            "Backlog task",
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(output["task_count"], json!(0));
+        assert_eq!(output["task_ids"], json!([]));
+        assert_eq!(output["tasks"], json!([]));
+        assert_eq!(output["bundles"], json!([]));
+        assert_eq!(
+            output["excluded"],
+            json!([{
+                "id": backlog.id,
+                "reason": "context_lock_conflict",
+                "conflicts": [{
+                    "requested_file": backlog.context_files[0],
+                    "locking_task_id": locking.id
+                }]
+            }])
+        );
+    }
+
+    #[test]
+    fn list_backlog_tasks_reports_group_member_conflicts_with_trigger_conflicts() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "docs/parent.md");
+        write_workspace_file(&repo_root, "crates/foo/src/lib.rs");
+        write_workspace_file(&repo_root, "crates/bar/src/lib.rs");
+        let foo_lock = seed_list_backlog_task(
+            &runtime,
+            "Foo lock",
+            TaskStatus::InProgress,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+        let bar_lock = seed_list_backlog_task(
+            &runtime,
+            "Bar lock",
+            TaskStatus::InProgress,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/bar/src/lib.rs"],
+        );
+        let parent = seed_list_backlog_task(
+            &runtime,
+            "Parent",
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["docs/parent.md"],
+        );
+        let low_child = seed_list_backlog_task(
+            &runtime,
+            "Low child",
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Task,
+            Some(parent.id.clone()),
+            vec!["crates/foo/src/lib.rs"],
+        );
+        let high_child = seed_list_backlog_task(
+            &runtime,
+            "High child",
+            TaskStatus::Backlog,
+            TaskPriority::High,
+            TaskType::Task,
+            Some(parent.id.clone()),
+            vec!["crates/bar/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(output["task_count"], json!(0));
+        assert_eq!(output["excluded"].as_array().expect("excluded").len(), 3);
+        assert_eq!(
+            excluded_entry(&output, &parent.id),
+            &json!({
+                "id": parent.id,
+                "reason": "group_member_conflict",
+                "conflicts": [{
+                    "requested_file": high_child.context_files[0],
+                    "locking_task_id": bar_lock.id
+                }]
+            })
+        );
+        assert_eq!(
+            excluded_entry(&output, &high_child.id),
+            &json!({
+                "id": high_child.id,
+                "reason": "context_lock_conflict",
+                "conflicts": [{
+                    "requested_file": high_child.context_files[0],
+                    "locking_task_id": bar_lock.id
+                }]
+            })
+        );
+        assert_eq!(
+            excluded_entry(&output, &low_child.id),
+            &json!({
+                "id": low_child.id,
+                "reason": "context_lock_conflict",
+                "conflicts": [{
+                    "requested_file": low_child.context_files[0],
+                    "locking_task_id": foo_lock.id
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn list_backlog_tasks_does_not_report_friction_tasks_as_excluded() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/foo/src/lib.rs");
+        let locking = seed_list_backlog_task(
+            &runtime,
+            "Locking task",
+            TaskStatus::InProgress,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+        let friction = seed_list_backlog_task(
+            &runtime,
+            "Friction task",
+            TaskStatus::Friction,
+            TaskPriority::Medium,
+            TaskType::Friction,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+        let backlog = seed_list_backlog_task(
+            &runtime,
+            "Backlog task",
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(
+            output["excluded"],
+            json!([{
+                "id": backlog.id,
+                "reason": "context_lock_conflict",
+                "conflicts": [{
+                    "requested_file": backlog.context_files[0],
+                    "locking_task_id": locking.id
+                }]
+            }])
+        );
+        assert!(
+            output["excluded"]
+                .as_array()
+                .expect("excluded")
+                .iter()
+                .all(|entry| entry["id"] != friction.id)
+        );
+    }
+
+    #[test]
+    fn list_backlog_tasks_does_not_report_max_tasks_truncation_as_excluded() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        for index in 0..3 {
+            let path = format!("docs/task-{index}.md");
+            write_workspace_file(&repo_root, &path);
+            seed_list_backlog_task(
+                &runtime,
+                &format!("Task {index}"),
+                TaskStatus::Backlog,
+                TaskPriority::Medium,
+                TaskType::Task,
+                None,
+                vec![&path],
+            );
+        }
+
+        let output = list_backlog_tasks(&runtime, json!({ "max_tasks": 2 }));
+
+        assert_eq!(output["task_count"], json!(2));
+        assert_eq!(output["task_ids"].as_array().expect("task_ids").len(), 2);
+        assert_eq!(output["excluded"], json!([]));
+    }
+
+    #[test]
+    fn list_backlog_tasks_omits_excluded_for_explicit_task_ids() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/foo/src/lib.rs");
+        seed_list_backlog_task(
+            &runtime,
+            "Locking task",
+            TaskStatus::InProgress,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+        let backlog = seed_list_backlog_task(
+            &runtime,
+            "Backlog task",
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/foo/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({ "task_ids": [backlog.id] }));
+
+        assert_eq!(output["task_count"], json!(1));
+        assert_eq!(output["task_ids"], json!([backlog.id]));
+        assert!(output.get("excluded").is_none());
     }
 
     #[test]
@@ -1393,7 +1830,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn resolve_executor_sandbox_appends_codex_side_write_roots_after_policy_denies() {
-        let (_root, runtime) = runtime_with_workspace_layout();
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
         seed_executor(
             &runtime,
             "codex",

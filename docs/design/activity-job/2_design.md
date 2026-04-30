@@ -127,6 +127,8 @@ One nuance worth naming: some module comments still describe older Phase orderin
 
 Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. That default activity is a CLI-backed `agent_loop`: it receives only the executor-provided recovery keys, manually inspects the failed step, makes bounded repairs when safe, and returns before the executor makes its single post-recovery attempt. Higher-level orchestration workflows (`task_gate_pipeline`, `task_auto_pipeline`, `task_epic_pipeline`, and `job_duel_plan_pipeline`) do not enable the generic hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action.
 
+The seeded `list_backlog_tasks` deterministic activity is the first `task_auto_pipeline` step. In automatic mode it emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for backlog tasks filtered before gate dispatch because their context files overlap `in-progress` or `review` task locks. The exclusion entries are only for that lock-overlap filter: friction filtering and `max_tasks` truncation remain silent, and explicit `task_ids` override mode omits `excluded` because it skips the filter entirely. This attribution contract was added in [T20260421-0542-2].
+
 ---
 
 ## 5. Backend Resolution and Constraint Rules
@@ -421,6 +423,7 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260421-0542-2]** — Add pre-gate lock-overlap exclusion attribution to `list_backlog_tasks`.
 - **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.

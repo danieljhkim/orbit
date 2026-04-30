@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (ADR-032 added)
+**Last updated:** 2026-04-30 (ADR-033 added)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -460,6 +460,19 @@ Do not attach it to `worktree_setup`, task lifecycle marking, or higher-level or
 - The engine/core boundary stays primitive: orbit-engine asks for optional JSON task context through `V2RuntimeHost`, and orbit-core owns task loading and context-file pruning.
 - Cost: CLI stdin blobs now contain more task prose, so audit blob readers should continue treating those blobs as diagnostic artifacts rather than small control messages.
 
+## ADR-033 — Auto-backlog lock exclusions are structured output
+
+**Status:** Accepted · 2026-04 · [T20260421-0542-2]
+
+**Context.** `task_auto_pipeline` starts with the deterministic `list_backlog_tasks` activity. After the context-lock filter landed, automatic dispatch could silently drop backlog tasks whose context overlapped `in-progress` or `review` work, leaving operators to reconstruct the reason by reading task state after the fact.
+
+**Decision.** Keep the lock-overlap filter in `list_backlog_tasks`, but make automatic mode emit an additive `excluded` array. Each entry names the excluded task, whether it directly overlapped a lock or was dropped because a sibling under the same root ancestor tainted the group, and the requested-file / locking-task attribution. Explicit `task_ids` override mode omits the field because that path intentionally skips the filter.
+
+**Consequences.**
+- Auto-dispatch traces now contain a durable pre-gate reason for lock-overlap exclusions without changing the existing `task_count`, `task_ids`, `tasks`, or `bundles` fields.
+- The output deliberately does not attribute friction filtering or `max_tasks` truncation, keeping `excluded` scoped to context-lock behavior.
+- Cost: the Rust serializer and seeded activity YAML schema now duplicate the exclusion shape and must be kept in sync.
+
 ---
 
 ## Task References
@@ -477,6 +490,7 @@ Do not attach it to `worktree_setup`, task lifecycle marking, or higher-level or
 - **[T20260419-2156]** — Retire v1 assets and drop the transitional v2 naming.
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
+- **[T20260421-0542-2]** — Add structured `list_backlog_tasks` output for context-lock exclusions.
 - **[T20260423-0114]** — Expose the `backend: cli` executor-args gap during a local task ship run.
 - **[T20260423-0445]** — Merge object-valued job defaults over explicit run input and persist synthetic failed job steps for early v2 pipeline failures.
 - **[T20260423-0447]** — Restore usable `orbit run duel` read-only surfaces after duel workflow retirement.
