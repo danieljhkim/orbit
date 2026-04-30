@@ -1,6 +1,6 @@
 use chrono::Utc;
 use orbit_common::types::{
-    OrbitError, ReviewMessage, ReviewThread, ReviewThreadStatus, infer_agent_family_from_model,
+    OrbitError, ReviewMessage, ReviewThread, ReviewThreadStatus, all_agent_families,
 };
 use orbit_store::task_review_scoreboard;
 
@@ -201,11 +201,11 @@ impl OrbitRuntime {
         let Some(model) = model else {
             return;
         };
-        if infer_agent_family_from_model(model).is_none() {
+        let Some(model) = self.scoreable_task_review_model(model) else {
             return;
-        }
+        };
         if let Err(error) =
-            task_review_scoreboard::record_task_review_message(&self.paths().scoreboard_dir, model)
+            task_review_scoreboard::record_task_review_message(&self.paths().scoreboard_dir, &model)
         {
             tracing::warn!(
                 target: "orbit.scoreboard.task_review",
@@ -214,6 +214,24 @@ impl OrbitRuntime {
                 "failed to record task review scoreboard message",
             );
         }
+    }
+
+    fn scoreable_task_review_model(&self, model: &str) -> Option<String> {
+        let model = model.trim();
+        if model.is_empty() {
+            return None;
+        }
+
+        all_agent_families().into_iter().find_map(|family| {
+            let pair = self.configured_agent_model_pair(family)?;
+            if model.eq_ignore_ascii_case(&pair.orchestrator) {
+                return Some(pair.orchestrator);
+            }
+            if model.eq_ignore_ascii_case(&pair.helper) {
+                return Some(pair.helper);
+            }
+            None
+        })
     }
 }
 
@@ -272,7 +290,7 @@ mod tests {
                 Some("src/lib.rs".to_string()),
                 Some(12),
                 Some("codex".to_string()),
-                Some("gpt-reviewer".to_string()),
+                Some("gpt-5.4".to_string()),
             )
             .expect("add review thread");
         runtime
@@ -281,13 +299,13 @@ mod tests {
                 &thread.thread_id,
                 "Follow-up review note.".to_string(),
                 Some("codex".to_string()),
-                Some("gpt-reviewer".to_string()),
+                Some("gpt-5.4".to_string()),
             )
             .expect("reply review thread");
 
         let scoreboard = read_task_review_scoreboard(&runtime);
         assert_eq!(
-            scoreboard["task-review-messages"]["gpt-reviewer"],
+            scoreboard["task-review-messages"]["gpt-5.4"],
             Value::from(2)
         );
         let updated = runtime.get_task(&task.id).expect("reload task");
@@ -295,18 +313,72 @@ mod tests {
             .messages
             .first()
             .expect("first review message");
-        assert_eq!(first_message.by, "gpt-reviewer");
+        assert_eq!(first_message.by, "gpt-5.4");
         assert!(first_message.github_comment_id.is_none());
 
         let summary = runtime
             .generate_scoreboard_summary()
             .expect("generate scoreboard summary");
-        let reviewer = summary
-            .agents
-            .get("gpt-reviewer")
-            .expect("reviewer summary");
+        let reviewer = summary.agents.get("gpt-5.4").expect("reviewer summary");
         assert_eq!(reviewer.task_review.messages, 2);
         assert_eq!(reviewer.pr.review_comments, 0);
+    }
+
+    #[test]
+    fn typo_prefixed_models_do_not_score_local_review_messages() {
+        let (_root, runtime) = test_runtime();
+        let scoreboard_dir = runtime.data_root().join("state").join("scoreboard");
+        fs::create_dir_all(&scoreboard_dir).expect("create scoreboard dir");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Typo review scoring".to_string(),
+                description: "Exercise typo-prefixed local review scoring skip.".to_string(),
+                workspace_path: Some(".".to_string()),
+                ..Default::default()
+            })
+            .expect("add task");
+
+        runtime
+            .add_review_thread(
+                &task.id,
+                "Typo-prefixed review note.".to_string(),
+                None,
+                None,
+                None,
+                Some("gpt-typo".to_string()),
+            )
+            .expect("add review thread with typo model");
+        runtime
+            .add_review_thread(
+                &task.id,
+                "Claude typo-prefixed review note.".to_string(),
+                None,
+                None,
+                None,
+                Some("opus-handle".to_string()),
+            )
+            .expect("add review thread with claude typo model");
+
+        assert!(!scoreboard_dir.join("task_review.json").exists());
+
+        runtime
+            .add_review_thread(
+                &task.id,
+                "Configured review note.".to_string(),
+                None,
+                None,
+                Some("codex".to_string()),
+                Some("gpt-5.4".to_string()),
+            )
+            .expect("add review thread with configured model");
+
+        let scoreboard = read_task_review_scoreboard(&runtime);
+        assert_eq!(
+            scoreboard["task-review-messages"]["gpt-5.4"],
+            Value::from(1)
+        );
+        assert!(scoreboard["task-review-messages"]["gpt-typo"].is_null());
+        assert!(scoreboard["task-review-messages"]["opus-handle"].is_null());
     }
 
     #[test]

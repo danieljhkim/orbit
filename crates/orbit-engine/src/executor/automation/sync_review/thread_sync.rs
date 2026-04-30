@@ -1,8 +1,7 @@
 use serde_json::{Value, json};
 
 use orbit_common::types::{
-    AgentModelPair, OrbitError, ReviewThread, infer_agent_family_from_model,
-    normalize_attribution_label,
+    AgentModelPair, OrbitError, ReviewThread, all_agent_families, normalize_attribution_label,
 };
 use orbit_store::pr_scoreboard;
 
@@ -274,13 +273,25 @@ fn scoreable_review_model<H: RuntimeHost + ?Sized>(host: &H, label: &str) -> Opt
         return None;
     }
     let model = normalize_attribution_label(label, None);
-    let family = infer_agent_family_from_model(&model)?;
-    scoreable_configured_model(host.resolved_agent_model_pair(&family), &model)
+    scoreable_known_model(host, &model)
+}
+
+fn scoreable_known_model<H: RuntimeHost + ?Sized>(host: &H, model: &str) -> Option<String> {
+    all_agent_families().into_iter().find_map(|family| {
+        scoreable_configured_model(host.resolved_agent_model_pair(family), model)
+    })
 }
 
 fn scoreable_configured_model(pair: Option<AgentModelPair>, model: &str) -> Option<String> {
     let pair = pair?;
-    (model == pair.orchestrator || model == pair.helper).then(|| model.to_string())
+    let model = model.trim();
+    if model.eq_ignore_ascii_case(&pair.orchestrator) {
+        return Some(pair.orchestrator);
+    }
+    if model.eq_ignore_ascii_case(&pair.helper) {
+        return Some(pair.helper);
+    }
+    None
 }
 
 fn render_general_comment_body(path: Option<&str>, line: Option<u64>, body: &str) -> String {
@@ -460,8 +471,8 @@ mod tests {
 
         fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
             match agent_cli {
-                "codex" => Some(AgentModelPair::new("gpt-5.5", "gpt-5.4-mini")),
-                "claude" => Some(AgentModelPair::new("claude-opus-4-7", "claude-sonnet-4-6")),
+                "codex" => Some(AgentModelPair::new("gpt-5.4", "gpt-5.4-mini")),
+                "claude" => Some(AgentModelPair::new("opus-4.6", "sonnet-4.6")),
                 "gemini" => Some(AgentModelPair::new(
                     "gemini-3.1-pro-preview",
                     "gemini-3-flash-preview",
@@ -571,11 +582,11 @@ mod tests {
             context_files: Vec::new(),
             workspace_path: Some(repo_root.to_string_lossy().to_string()),
             repo_root: Some(repo_root.to_string_lossy().to_string()),
-            created_by: Some("gpt-5.5".to_string()),
+            created_by: Some("gpt-5.4".to_string()),
             planned_by: None,
             implemented_by: None,
             agent: Some("codex".to_string()),
-            model: Some("gpt-5.5".to_string()),
+            model: Some("gpt-5.4".to_string()),
             status: TaskStatus::Review,
             priority: TaskPriority::Medium,
             complexity: None,
@@ -594,7 +605,7 @@ mod tests {
                 messages: vec![ReviewMessage {
                     message_id: "rm-test".to_string(),
                     at: now,
-                    by: "gpt-5.5".to_string(),
+                    by: "gpt-5.4".to_string(),
                     body: "Review note.".to_string(),
                     github_comment_id: None,
                 }],
@@ -618,7 +629,7 @@ mod tests {
         // orbit-core covers `add_review_thread` persisting this model-only,
         // pending-sync shape. orbit-engine starts from the persisted shape to
         // avoid a reverse dependency on orbit-core in this crate.
-        task_review_scoreboard::record_task_review_message(&scoreboard_dir, "gpt-5.5")
+        task_review_scoreboard::record_task_review_message(&scoreboard_dir, "gpt-5.4")
             .expect("seed local review score");
 
         let task = fixture_task(temp.path());
@@ -631,26 +642,26 @@ mod tests {
 
         let task_review = read_scoreboard(&scoreboard_dir, "task_review.json");
         assert_eq!(
-            task_review["task-review-messages"]["gpt-5.5"],
+            task_review["task-review-messages"]["gpt-5.4"],
             Value::from(1)
         );
         let pr = read_scoreboard(&scoreboard_dir, "pr.json");
-        assert_eq!(pr["pr-review-comments"]["gpt-5.5"], Value::from(1));
+        assert_eq!(pr["pr-review-comments"]["gpt-5.4"], Value::from(1));
 
         let synced_again =
             sync_task_review_to_github_with_client(&host, &gh, "T-review-sync").expect("resync");
         assert_eq!(synced_again, 0);
         let task_review = read_scoreboard(&scoreboard_dir, "task_review.json");
         assert_eq!(
-            task_review["task-review-messages"]["gpt-5.5"],
+            task_review["task-review-messages"]["gpt-5.4"],
             Value::from(1)
         );
         let pr = read_scoreboard(&scoreboard_dir, "pr.json");
-        assert_eq!(pr["pr-review-comments"]["gpt-5.5"], Value::from(1));
+        assert_eq!(pr["pr-review-comments"]["gpt-5.4"], Value::from(1));
     }
 
     #[test]
-    fn scoreable_review_model_accepts_model_only_labels() {
+    fn scoreable_review_model_only_scores_configured_models() {
         let temp = tempdir().expect("create tempdir");
         let host = TestHost::new(
             fixture_task(temp.path()),
@@ -659,10 +670,16 @@ mod tests {
         );
 
         assert_eq!(
-            scoreable_review_model(&host, "gpt-5.5").as_deref(),
-            Some("gpt-5.5")
+            scoreable_review_model(&host, "gpt-5.4").as_deref(),
+            Some("gpt-5.4")
+        );
+        assert_eq!(
+            scoreable_review_model(&host, "codex / gpt-5.4").as_deref(),
+            Some("gpt-5.4")
         );
         assert_eq!(scoreable_review_model(&host, "gpt-typo"), None);
+        assert_eq!(scoreable_review_model(&host, "opus-handle"), None);
+        assert_eq!(scoreable_review_model(&host, "codex / gpt-typo"), None);
         assert_eq!(scoreable_review_model(&host, "human"), None);
         assert_eq!(scoreable_review_model(&host, "system"), None);
         assert_eq!(scoreable_review_model(&host, "daniel"), None);

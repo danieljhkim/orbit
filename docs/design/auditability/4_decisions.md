@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-28 (T20260428-17)
+**Last updated:** 2026-04-30 (T20260430-5)
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -260,7 +260,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 **Context.** Orbit task review threads are the local review surface, while GitHub PR review comments are an external PR workflow artifact. Counting local-only review-thread messages directly in `pr.review_comments` would make the PR scoreboard ambiguous for tasks that never opened or synced a pull request.
 
-**Decision.** Keep `pr.review_comments` limited to comments that enter the PR/GitHub review flow, including Orbit review-thread messages after successful GitHub sync. Score local Orbit review-thread messages in a separate `task-review-messages` metric stored in `task_review.json` and surfaced in compact summaries as `task_review.messages`. GitHub sync attribution accepts legacy `agent / model` labels plus model-only labels that exactly match the configured orchestrator/helper model for an inferred agent family; it does not score arbitrary bare human labels.
+**Decision.** Keep `pr.review_comments` limited to comments that enter the PR/GitHub review flow, including Orbit review-thread messages after successful GitHub sync. Score local Orbit review-thread messages in a separate `task-review-messages` metric stored in `task_review.json` and surfaced in compact summaries as `task_review.messages`. Both local task-review scoring and GitHub sync scoring require the message model label to resolve to an exact configured orchestrator/helper model from the active executor catalog, falling back to Orbit's built-in `resolve_agent_model_pair` defaults when no host-specific model pair exists. Prefix-only family inference such as `gpt-typo` or `opus-handle` is not a scoring identity.
 
 **Consequences.**
 - Local code-review feedback earns scoreboard credit immediately when a scored agent creates or replies to an Orbit task review thread.
@@ -293,5 +293,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260428-7]** — Correlate command-audit rows with originating run/task/activity: add nullable `task_id` / `job_run_id` / `activity_id` / `step_index` columns, thread context through engine env vars, populate at the runtime dispatch seam, surface on the dashboard.
 - **[T20260428-11]** — Derive compact scoreboard all/failed tool-call counts from command-audit tool-run rows.
 - **[T20260428-17]** — Split local Orbit task-review scoring from PR review-comment scoring and surface both in compact scoreboards.
+- **[T20260430-5]** — Tighten task and PR review-message scoring so only exact configured orchestrator/helper model identities score; typo-prefixed labels are ignored.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
