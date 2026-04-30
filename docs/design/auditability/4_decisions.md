@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-28 (T20260428-11)
+**Last updated:** 2026-04-28 (T20260428-17)
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -254,6 +254,21 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - The existing `tool_calls` JSON field keeps its name and now represents all known tool-run attempts rather than only invocation-trace tool-call summaries.
 - Cost: the max overlay is conservative, not a perfect dedupe. If invocation traces contain tool calls that are genuinely absent from command audit while audit rows also exist for the same model, the summary may undercount the mathematical union until both streams share a common invocation id.
 
+## ADR-019 — Task-review feedback scores separately from PR review comments
+
+**Status:** Accepted · 2026-04 · [T20260428-17]
+
+**Context.** Orbit task review threads are the local review surface, while GitHub PR review comments are an external PR workflow artifact. Counting local-only review-thread messages directly in `pr.review_comments` would make the PR scoreboard ambiguous for tasks that never opened or synced a pull request.
+
+**Decision.** Keep `pr.review_comments` limited to comments that enter the PR/GitHub review flow, including Orbit review-thread messages after successful GitHub sync. Score local Orbit review-thread messages in a separate `task-review-messages` metric stored in `task_review.json` and surfaced in compact summaries as `task_review.messages`. GitHub sync attribution accepts legacy `agent / model` labels plus model-only labels that exactly match the configured orchestrator/helper model for an inferred agent family; it does not score arbitrary bare human labels.
+
+**Consequences.**
+- Local code-review feedback earns scoreboard credit immediately when a scored agent creates or replies to an Orbit task review thread.
+- The dashboard can show local review feedback beside PR review feedback without renaming or overloading the existing PR fields.
+- A review-thread message that is created locally and later synced to GitHub can appear once in `task_review.messages` and once in `pr.review_comments`; those are intentionally distinct workflow metrics, not one mixed counter.
+- `summary.json` schema version 2 adds `task_review.messages`; consumers that only understand schema version 1 can ignore the additional field.
+- Cost: review productivity now has two counters. Readers need to compare both fields for a full picture of review activity, and future aggregate views must avoid adding them together without a clear label.
+
 ---
 
 ## Task References
@@ -277,5 +292,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260428-4]** — Record audit events for MCP tool invocations: move tool-invocation audit into the runtime, add the `ToolEntryPoint` discriminator, and bracket MCP preflight + dispatch in `audited_mcp_call`.
 - **[T20260428-7]** — Correlate command-audit rows with originating run/task/activity: add nullable `task_id` / `job_run_id` / `activity_id` / `step_index` columns, thread context through engine env vars, populate at the runtime dispatch seam, surface on the dashboard.
 - **[T20260428-11]** — Derive compact scoreboard all/failed tool-call counts from command-audit tool-run rows.
+- **[T20260428-17]** — Split local Orbit task-review scoring from PR review-comment scoring and surface both in compact scoreboards.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -302,6 +302,11 @@ fn seed_scoreboard_templates(orbit_root: &Path) -> Result<(), OrbitError> {
         fs::write(&pr_path, "{}\n").map_err(|e| OrbitError::Io(e.to_string()))?;
     }
 
+    let task_review_path = scoreboard_dir.join("task_review.json");
+    if !task_review_path.exists() {
+        fs::write(&task_review_path, "{}\n").map_err(|e| OrbitError::Io(e.to_string()))?;
+    }
+
     let friction_path = scoreboard_dir.join("friction_bounty.json");
     if !friction_path.exists() {
         fs::write(&friction_path, "{}\n").map_err(|e| OrbitError::Io(e.to_string()))?;

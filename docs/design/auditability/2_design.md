@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-28 (T20260428-11)
+**Last updated:** 2026-04-28 (T20260428-17)
 
 This document describes Orbit's shipped auditability implementation across command audit rows, activity/job envelopes, loop-level provider/tool traces, blob storage, redaction, identity attribution, metrics-adjacent invocation records, and the current limitations that still need design attention. See [1_overview.md](./1_overview.md) for the feature's purpose and [3_vision.md](./3_vision.md) for forward-looking questions.
 
@@ -175,6 +175,8 @@ Invocation metrics are surfaced through metrics and scoreboard commands. They ar
 
 After [T20260428-11], `summary.json` uses command-audit rows as the source for all audited Orbit tool-run attempts and failed tool-run attempts. The query counts `command: tool` rows with `subcommand: "run"` or `"run-mcp"` and a concrete `tool_name`, grouped by normalized role/model. `tool_calls` remains the public all-call field; `failed_tool_calls` counts non-success tool-run rows (`failure` and `denied`). Token totals still come from the invocation/token scoreboard, and legacy token-scoreboard tool-call totals remain a fallback through a max overlay rather than an additive merge to avoid obvious double counting between model traces and command-audit rows.
 
+After [T20260428-17], local Orbit task review feedback and GitHub PR review feedback are separate scoreboard inputs. Creating or replying to a local task review thread records `task-review-messages` in `.orbit/state/scoreboard/task_review.json`; successful GitHub sync of pending review-thread messages records `pr-review-comments` in `.orbit/state/scoreboard/pr.json`. GitHub sync accepts legacy `agent / model` labels plus model-only labels that exactly match the configured orchestrator/helper model for an inferred agent family; it skips `human`, `system`, and arbitrary bare labels. `summary.json` schema version 2 exposes those counters as `task_review.messages` and `pr.review_comments` respectively so dashboards can show both without mixing local review activity with PR review activity.
+
 After [T20260427-43], the friction bounty scoreboard is refreshed from task history rather than trusted only as an increment log. `type: friction` tasks are counted as reported, `status: friction` exits to `backlog`, `in-progress`, or `done` count as accepted, and `status: friction` exits to `rejected` count as rejected. The task store migration that moves legacy untriaged friction reports from `proposed/` into `friction/` keeps the scoreboard derivation tied to lifecycle history instead of current status alone.
 
 ---
@@ -221,5 +223,6 @@ This channel is global rather than workspace-local because `orbit-cli` initializ
 - **[T20260427-47]** — Allow explicit task attribution correction for `planned_by` and `implemented_by` through task update paths.
 - **[T20260428-4]** — Move tool-invocation audit ownership into the runtime, add the `ToolEntryPoint` discriminator (`run` / `run-mcp`), bracket MCP preflight + dispatch in `audited_mcp_call`, and add the per-thread CLI dedup signal so every tool invocation produces exactly one audit row from the right origin.
 - **[T20260428-11]** — Derive `summary.json` all/failed tool-call counts from command-audit tool-run rows while keeping invocation/token scoreboard data as the token source.
+- **[T20260428-17]** — Split local Orbit task-review scoring from PR review-comment scoring and surface both in compact scoreboards.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

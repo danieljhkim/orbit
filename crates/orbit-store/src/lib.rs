@@ -52,10 +52,15 @@ pub mod pr_scoreboard {
     };
 }
 
+pub mod task_review_scoreboard {
+    pub use crate::file::task_review_scoreboard::record_task_review_message;
+}
+
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard_summary::{
-        AgentSummary, DuelSummary, FrictionSummary, PrSummary, ScoreboardSummary, TokenSummary,
-        generate_summary, generate_summary_with_audit_tool_calls, summary_path, write_summary,
+        AgentSummary, DuelSummary, FrictionSummary, PrSummary, ScoreboardSummary,
+        TaskReviewSummary, TokenSummary, generate_summary, generate_summary_with_audit_tool_calls,
+        summary_path, write_summary,
     };
 }
 

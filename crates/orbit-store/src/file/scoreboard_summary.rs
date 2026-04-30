@@ -15,7 +15,8 @@ use crate::AuditToolCallCountsByRole;
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
 const SUMMARY_FILENAME: &str = "summary.json";
-const CURRENT_SCHEMA_VERSION: u32 = 1;
+// v2 adds `task_review.messages`; v1 readers can ignore the extra field.
+const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 type ModelScoreboard = BTreeMap<String, BTreeMap<String, u64>>;
 
@@ -47,12 +48,19 @@ pub struct PrSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskReviewSummary {
+    pub messages: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSummary {
     pub tasks_completed: u64,
     pub friction: FrictionSummary,
     pub tokens: TokenSummary,
     pub duels: DuelSummary,
     pub pr: PrSummary,
+    #[serde(default)]
+    pub task_review: TaskReviewSummary,
     pub tool_calls: u64,
     #[serde(default)]
     pub failed_tool_calls: u64,
@@ -143,6 +151,16 @@ pub fn generate_summary_with_audit_tool_calls(
         "pr-count-with-revision",
         |summary, value| {
             summary.pr.merged_with_revision = summary.pr.merged_with_revision.saturating_add(value);
+        },
+    );
+
+    let task_review = read_model_scoreboard(scoreboard_dir, "task_review.json")?;
+    overlay_nested_metric(
+        &mut agents,
+        &task_review,
+        "task-review-messages",
+        |summary, value| {
+            summary.task_review.messages = summary.task_review.messages.saturating_add(value);
         },
     );
 
@@ -463,5 +481,31 @@ mod tests {
         assert_eq!(gpt5.tokens.output, 4);
         assert_eq!(gpt5.tool_calls, 7);
         assert_eq!(gpt5.failed_tool_calls, 3);
+    }
+
+    #[test]
+    fn summary_exposes_task_review_messages_separately_from_pr_comments() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        fs::create_dir_all(temp.path()).expect("create scoreboard dir");
+        fs::write(
+            temp.path().join("task_review.json"),
+            r#"{"task-review-messages":{"gpt-reviewer":2}}"#,
+        )
+        .expect("write task review scoreboard");
+        fs::write(
+            temp.path().join("pr.json"),
+            r#"{"pr-review-comments":{"gpt-reviewer":1}}"#,
+        )
+        .expect("write pr scoreboard");
+
+        let summary = generate_summary(temp.path(), &[]).expect("generate summary");
+
+        assert_eq!(summary.schema_version, 2);
+        let reviewer = summary
+            .agents
+            .get("gpt-reviewer")
+            .expect("reviewer summary");
+        assert_eq!(reviewer.task_review.messages, 2);
+        assert_eq!(reviewer.pr.review_comments, 1);
     }
 }

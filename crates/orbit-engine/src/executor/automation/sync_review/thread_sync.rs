@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 
-use orbit_common::types::{OrbitError, ReviewThread};
+use orbit_common::types::{
+    AgentModelPair, OrbitError, ReviewThread, infer_agent_family_from_model,
+    normalize_attribution_label,
+};
 use orbit_store::pr_scoreboard;
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
@@ -96,11 +99,17 @@ fn sync_task_review_to_github_with_client<
 
         if host.scoring_enabled() {
             for label in pending_labels {
-                if let Some((agent, model)) = parse_agent_model_label(&label) {
-                    let model = host
-                        .canonical_model_name(agent, Some(model))
-                        .unwrap_or_else(|| model.to_string());
-                    let _ = pr_scoreboard::record_pr_review_comment(host.scoreboard_dir(), &model);
+                if let Some(model) = scoreable_review_model(host, &label) {
+                    if let Err(error) =
+                        pr_scoreboard::record_pr_review_comment(host.scoreboard_dir(), &model)
+                    {
+                        tracing::warn!(
+                            target: "orbit.scoreboard.pr",
+                            model = %model,
+                            error = %error,
+                            "failed to record PR review comment scoreboard message",
+                        );
+                    }
                 }
             }
         }
@@ -250,9 +259,413 @@ fn parse_agent_model_label(label: &str) -> Option<(&str, &str)> {
     Some((agent, model))
 }
 
+fn scoreable_review_model<H: RuntimeHost + ?Sized>(host: &H, label: &str) -> Option<String> {
+    if let Some((agent, model)) = parse_agent_model_label(label) {
+        let model = host
+            .canonical_model_name(agent, Some(model))
+            .unwrap_or_else(|| model.to_string());
+        return scoreable_configured_model(host.resolved_agent_model_pair(agent), &model);
+    }
+
+    let label = label.trim();
+    if label.is_empty()
+        || label.eq_ignore_ascii_case("human")
+        || label.eq_ignore_ascii_case("system")
+    {
+        return None;
+    }
+    let model = normalize_attribution_label(label, None);
+    let family = infer_agent_family_from_model(&model)?;
+    scoreable_configured_model(host.resolved_agent_model_pair(&family), &model)
+}
+
+fn scoreable_configured_model(pair: Option<AgentModelPair>, model: &str) -> Option<String> {
+    let pair = pair?;
+    (model == pair.orchestrator || model == pair.helper).then(|| model.to_string())
+}
+
 fn render_general_comment_body(path: Option<&str>, line: Option<u64>, body: &str) -> String {
     match (path, line) {
         (Some(path), Some(line)) => format!("On `{path}:{line}`:\n\n{body}"),
         _ => body.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use chrono::Utc;
+    use orbit_common::types::{
+        Activity, Job, JobTargetType, OrbitEvent, Role, Task, TaskArtifact, TaskPriority,
+        TaskStatus, TaskType,
+    };
+    use orbit_common::types::{ReviewMessage, ReviewThread, ReviewThreadStatus};
+    use orbit_store::task_review_scoreboard;
+    use orbit_tools::ToolContext;
+    use serde_json::Value;
+    use tempfile::tempdir;
+
+    use crate::context::{JobRunResult, RuntimeHost, TaskReadHost, TaskWriteHost};
+    use crate::executor::registry::ActivityExecutorRegistry;
+
+    use super::*;
+
+    struct TestHost {
+        task: RefCell<Task>,
+        data_root: PathBuf,
+        scoreboard_dir: PathBuf,
+        registry: ActivityExecutorRegistry,
+    }
+
+    impl TestHost {
+        fn new(task: Task, data_root: PathBuf, scoreboard_dir: PathBuf) -> Self {
+            Self {
+                task: RefCell::new(task),
+                data_root,
+                scoreboard_dir,
+                registry: ActivityExecutorRegistry::default(),
+            }
+        }
+    }
+
+    impl TaskReadHost for TestHost {
+        fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+            let task = self.task.borrow();
+            if task.id == task_id {
+                Ok(task.clone())
+            } else {
+                Err(OrbitError::InvalidInput(format!(
+                    "unknown task '{task_id}'"
+                )))
+            }
+        }
+
+        fn get_task_artifacts(&self, _task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
+            Ok(Vec::new())
+        }
+
+        fn list_tasks_filtered(
+            &self,
+            _status: Option<TaskStatus>,
+            _priority: Option<TaskPriority>,
+            _parent_id: Option<&str>,
+            _batch_id: Option<&str>,
+        ) -> Result<Vec<Task>, OrbitError> {
+            Ok(vec![self.task.borrow().clone()])
+        }
+    }
+
+    impl TaskWriteHost for TestHost {
+        fn start_task(
+            &self,
+            _task_id: &str,
+            _note: Option<String>,
+            _comment: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!("not needed by review sync tests")
+        }
+
+        fn admit_task_for_workflow(
+            &self,
+            _task_id: &str,
+            _workflow: &str,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!("not needed by review sync tests")
+        }
+
+        fn update_task_from_activity(
+            &self,
+            _task_id: &str,
+            _status: TaskStatus,
+            _execution_summary: Option<String>,
+            _comment: Option<String>,
+            _note: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            unimplemented!("not needed by review sync tests")
+        }
+
+        fn apply_task_automation_update(
+            &self,
+            _task_id: &str,
+            update: TaskAutomationUpdate,
+        ) -> Result<(), OrbitError> {
+            if let Some(review_threads) = update.review_threads {
+                self.task.borrow_mut().review_threads = review_threads;
+            }
+            Ok(())
+        }
+    }
+
+    impl RuntimeHost for TestHost {
+        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn repo_root(&self) -> Result<String, OrbitError> {
+            Ok(self.data_root.to_str().expect("utf-8 temp dir").to_string())
+        }
+
+        fn data_root(&self) -> &Path {
+            &self.data_root
+        }
+
+        fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
+            &self.registry
+        }
+
+        fn run_job_now_with_input_debug(
+            &self,
+            _job_id: &str,
+            _input: Value,
+            _debug: bool,
+        ) -> Result<JobRunResult, OrbitError> {
+            unimplemented!("not needed by review sync tests")
+        }
+
+        fn validate_activity_target_exists(
+            &self,
+            _target_type: JobTargetType,
+            _target_id: &str,
+        ) -> Result<Activity, OrbitError> {
+            unimplemented!("not needed by review sync tests")
+        }
+
+        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
+            Ok(None)
+        }
+
+        fn run_tool_with_context_and_role(
+            &self,
+            _name: &str,
+            _input: Value,
+            _role: Role,
+            _tool_context: ToolContext,
+        ) -> Result<Value, OrbitError> {
+            unimplemented!("not needed by review sync tests")
+        }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+            match agent_cli {
+                "codex" => Some(AgentModelPair::new("gpt-5.5", "gpt-5.4-mini")),
+                "claude" => Some(AgentModelPair::new("claude-opus-4-7", "claude-sonnet-4-6")),
+                "gemini" => Some(AgentModelPair::new(
+                    "gemini-3.1-pro-preview",
+                    "gemini-3-flash-preview",
+                )),
+                _ => None,
+            }
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            true
+        }
+
+        fn graph_editing(&self) -> bool {
+            false
+        }
+
+        fn scoreboard_dir(&self) -> &Path {
+            &self.scoreboard_dir
+        }
+    }
+
+    struct TestGhClient {
+        next_id: Cell<u64>,
+    }
+
+    impl TestGhClient {
+        fn new() -> Self {
+            Self {
+                next_id: Cell::new(10),
+            }
+        }
+
+        fn next_comment_id(&self) -> u64 {
+            let id = self.next_id.get();
+            self.next_id.set(id + 1);
+            id
+        }
+    }
+
+    impl GhClient for TestGhClient {
+        fn get_owner_repo(&self, _repo_root: &str) -> Result<String, OrbitError> {
+            Ok("owner/repo".to_string())
+        }
+
+        fn get_pr_head_sha(
+            &self,
+            _repo_root: &str,
+            _pr_number: &str,
+        ) -> Result<String, OrbitError> {
+            Ok("abc123".to_string())
+        }
+
+        fn load_pr_file_patches(
+            &self,
+            _repo_root: &str,
+            _owner_repo: &str,
+            _pr_number: &str,
+        ) -> Result<PrFilePatchMap, OrbitError> {
+            Ok(PrFilePatchMap::default())
+        }
+
+        fn create_inline_review_comment(
+            &self,
+            _repo_root: &str,
+            _owner_repo: &str,
+            _pr_number: &str,
+            _commit_id: &str,
+            _path: &str,
+            _line: u64,
+            _body: &str,
+        ) -> Result<u64, OrbitError> {
+            Ok(self.next_comment_id())
+        }
+
+        fn create_general_comment(
+            &self,
+            _repo_root: &str,
+            _pr_number: &str,
+            _body: &str,
+        ) -> Result<u64, OrbitError> {
+            Ok(self.next_comment_id())
+        }
+
+        fn create_reply_comment(
+            &self,
+            _repo_root: &str,
+            _owner_repo: &str,
+            _pr_number: &str,
+            _parent_comment_id: u64,
+            _body: &str,
+        ) -> Result<u64, OrbitError> {
+            Ok(self.next_comment_id())
+        }
+    }
+
+    fn fixture_task(repo_root: &Path) -> Task {
+        let now = Utc::now();
+        Task {
+            id: "T-review-sync".to_string(),
+            parent_id: None,
+            title: "Review sync".to_string(),
+            description: String::new(),
+            acceptance_criteria: Vec::new(),
+            dependencies: Vec::new(),
+            plan: String::new(),
+            execution_summary: String::new(),
+            context_files: Vec::new(),
+            workspace_path: Some(repo_root.to_string_lossy().to_string()),
+            repo_root: Some(repo_root.to_string_lossy().to_string()),
+            created_by: Some("gpt-5.5".to_string()),
+            planned_by: None,
+            implemented_by: None,
+            agent: Some("codex".to_string()),
+            model: Some("gpt-5.5".to_string()),
+            status: TaskStatus::Review,
+            priority: TaskPriority::Medium,
+            complexity: None,
+            task_type: TaskType::Task,
+            pr_number: Some("42".to_string()),
+            pr_status: None,
+            source_task_id: None,
+            batch_id: None,
+            comments: Vec::new(),
+            history: Vec::new(),
+            review_threads: vec![ReviewThread {
+                thread_id: "rt-test".to_string(),
+                path: None,
+                line: None,
+                status: ReviewThreadStatus::Open,
+                messages: vec![ReviewMessage {
+                    message_id: "rm-test".to_string(),
+                    at: now,
+                    by: "gpt-5.5".to_string(),
+                    body: "Review note.".to_string(),
+                    github_comment_id: None,
+                }],
+                github_thread_id: None,
+            }],
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn read_scoreboard(scoreboard_dir: &Path, file_name: &str) -> Value {
+        let raw = fs::read_to_string(scoreboard_dir.join(file_name)).expect("read scoreboard");
+        serde_json::from_str(&raw).expect("parse scoreboard")
+    }
+
+    #[test]
+    fn github_sync_counts_pr_review_without_incrementing_task_review_again() {
+        let temp = tempdir().expect("create tempdir");
+        let scoreboard_dir = temp.path().join("scoreboard");
+        fs::create_dir_all(&scoreboard_dir).expect("create scoreboard dir");
+        // orbit-core covers `add_review_thread` persisting this model-only,
+        // pending-sync shape. orbit-engine starts from the persisted shape to
+        // avoid a reverse dependency on orbit-core in this crate.
+        task_review_scoreboard::record_task_review_message(&scoreboard_dir, "gpt-5.5")
+            .expect("seed local review score");
+
+        let task = fixture_task(temp.path());
+        let host = TestHost::new(task, temp.path().to_path_buf(), scoreboard_dir.clone());
+        let gh = TestGhClient::new();
+
+        let synced =
+            sync_task_review_to_github_with_client(&host, &gh, "T-review-sync").expect("sync");
+        assert_eq!(synced, 1);
+
+        let task_review = read_scoreboard(&scoreboard_dir, "task_review.json");
+        assert_eq!(
+            task_review["task-review-messages"]["gpt-5.5"],
+            Value::from(1)
+        );
+        let pr = read_scoreboard(&scoreboard_dir, "pr.json");
+        assert_eq!(pr["pr-review-comments"]["gpt-5.5"], Value::from(1));
+
+        let synced_again =
+            sync_task_review_to_github_with_client(&host, &gh, "T-review-sync").expect("resync");
+        assert_eq!(synced_again, 0);
+        let task_review = read_scoreboard(&scoreboard_dir, "task_review.json");
+        assert_eq!(
+            task_review["task-review-messages"]["gpt-5.5"],
+            Value::from(1)
+        );
+        let pr = read_scoreboard(&scoreboard_dir, "pr.json");
+        assert_eq!(pr["pr-review-comments"]["gpt-5.5"], Value::from(1));
+    }
+
+    #[test]
+    fn scoreable_review_model_accepts_model_only_labels() {
+        let temp = tempdir().expect("create tempdir");
+        let host = TestHost::new(
+            fixture_task(temp.path()),
+            temp.path().to_path_buf(),
+            temp.path().join("scoreboard"),
+        );
+
+        assert_eq!(
+            scoreable_review_model(&host, "gpt-5.5").as_deref(),
+            Some("gpt-5.5")
+        );
+        assert_eq!(scoreable_review_model(&host, "gpt-typo"), None);
+        assert_eq!(scoreable_review_model(&host, "human"), None);
+        assert_eq!(scoreable_review_model(&host, "system"), None);
+        assert_eq!(scoreable_review_model(&host, "daniel"), None);
     }
 }

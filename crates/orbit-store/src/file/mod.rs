@@ -20,5 +20,6 @@ pub(crate) mod pr_scoreboard;
 pub(crate) mod scoreboard_summary;
 pub(crate) mod skill_store;
 pub(crate) mod sort;
+pub(crate) mod task_review_scoreboard;
 pub(crate) mod task_store;
 pub(crate) mod yaml_doc;
