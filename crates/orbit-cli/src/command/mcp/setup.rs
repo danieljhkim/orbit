@@ -408,11 +408,10 @@ impl ConfigTarget {
 fn vscode_home_user_dir(home: &Path) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
-        return home
-            .join("Library")
+        home.join("Library")
             .join("Application Support")
             .join("Code")
-            .join("User");
+            .join("User")
     }
     #[cfg(target_os = "windows")]
     {
