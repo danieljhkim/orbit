@@ -283,6 +283,8 @@ The current contract is:
 
 This is intentionally an operator-surface repair, not a new execution primitive. It keeps `orbit run ship --json`, direct `orbit job run` output, `orbit run history`, and `orbit run show` actionable without introducing a second run-level error channel in `JobRun`.
 
+After [T20260430-27], `orbit run ship-auto` also interprets the parent `task_auto_pipeline` snapshot for operator output. Text and JSON modes keep the persisted run state and exit-code semantics, but add `workflow_status` labels: `empty_backlog`, `gated_noop`, `gate_waiting`, `gate_failed`, and `completed`. `empty_backlog` means no candidates and no exclusions. `gated_noop` means zero dispatched bundles with one or more `list_backlog.excluded` entries. `gate_waiting` means a child `task_gate_pipeline` run is still pending/running or the parent wait timed out while the child remains active. `gate_failed` means a child gate run reached a failed or cancelled state. The output also carries dispatched bundle count, excluded task count, exclusion reasons, blocker summaries, and child gate run status so operators do not have to run `orbit run show` merely to tell no backlog from lock-gated work.
+
 The loop shares the same pipeline map and session map across iterations. That is what makes cross-iteration `session:` binding meaningful in the first place.
 
 ### 8.7 Invocation metrics
@@ -444,5 +446,6 @@ Read-only history surfaces do not always have the same dependency shape as live 
 - **[T20260428-8]** — Add explicit workflow admission for task-starting workflows and remove the plan prerequisite from those workflow starts.
 - **[T20260428-10]** — Allow Codex CLI state writes under the macOS sandbox.
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
+- **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
