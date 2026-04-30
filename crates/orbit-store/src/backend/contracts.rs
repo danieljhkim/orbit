@@ -287,6 +287,12 @@ pub trait JobRunStoreBackend: Send + Sync {
         finished_at: DateTime<Utc>,
         duration_ms: Option<u64>,
     ) -> Result<bool, OrbitError>;
+    fn repair_terminal_job_run_timing(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
+        duration_ms: Option<u64>,
+    ) -> Result<bool, OrbitError>;
     fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError>;
     fn archive_job_run(&self, run_id: &str) -> Result<String, OrbitError>;
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError>;

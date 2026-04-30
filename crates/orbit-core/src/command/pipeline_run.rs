@@ -78,6 +78,7 @@ impl OrbitRuntime {
                 .jobs()
                 .write_run_state(&run.run_id, &initial_state)?;
 
+            self.reconcile_stale_job_runs(Some(job_name))?;
             let active_runs = self.stores().jobs().list_pending_or_running(job_name)?;
             let queued = !pipeline_run_is_runnable(&active_runs, &run.run_id, spec.max_active_runs);
 
@@ -190,6 +191,7 @@ impl OrbitRuntime {
                 )));
             }
 
+            self.reconcile_stale_job_runs(Some(&run.job_id))?;
             let active_runs = self.stores().jobs().list_pending_or_running(&run.job_id)?;
             if !pipeline_run_is_runnable(&active_runs, &run.run_id, spec.max_active_runs) {
                 thread::sleep(Duration::from_secs(PIPELINE_WAIT_MIN_POLL_SECONDS));
@@ -359,14 +361,18 @@ impl OrbitRuntime {
         run_ids
             .iter()
             .map(|run_id| {
-                let Some(run) = self.stores().jobs().get_run(run_id)? else {
-                    return Ok(PipelineWaitEntry {
-                        run_id: run_id.clone(),
-                        status: "failed".to_string(),
-                        finished_at: None,
-                        pipeline: None,
-                        error: Some("unknown run".to_string()),
-                    });
+                let run = match self.show_job_run(run_id) {
+                    Ok(run) => run,
+                    Err(OrbitError::JobRunNotFound(_)) => {
+                        return Ok(PipelineWaitEntry {
+                            run_id: run_id.clone(),
+                            status: "failed".to_string(),
+                            finished_at: None,
+                            pipeline: None,
+                            error: Some("unknown run".to_string()),
+                        });
+                    }
+                    Err(error) => return Err(error),
                 };
 
                 let terminal = match run.state {

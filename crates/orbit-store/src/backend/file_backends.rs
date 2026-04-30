@@ -197,6 +197,15 @@ impl JobRunStoreBackend for JobFileStore {
         self.finalize_job_run(run_id, state, finished_at, duration_ms)
     }
 
+    fn repair_terminal_job_run_timing(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
+        duration_ms: Option<u64>,
+    ) -> Result<bool, OrbitError> {
+        self.repair_terminal_job_run_timing(run_id, finished_at, duration_ms)
+    }
+
     fn archive_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
         self.archive_run(run_id)
     }

@@ -194,6 +194,34 @@ impl JobFileStore {
         Ok(true)
     }
 
+    pub(crate) fn repair_terminal_job_run_timing(
+        &self,
+        run_id: &str,
+        finished_at: DateTime<Utc>,
+        duration_ms: Option<u64>,
+    ) -> Result<bool, OrbitError> {
+        let Some((job_id, run_dir)) = self.find_run_path(run_id)? else {
+            return Ok(false);
+        };
+        let mut run = self.read_run_at(&run_dir)?;
+        if !run.state.is_terminal() {
+            return Ok(false);
+        }
+        let mut changed = false;
+        if run.finished_at.is_none() {
+            run.finished_at = Some(finished_at);
+            changed = true;
+        }
+        if run.duration_ms.is_none() {
+            run.duration_ms = duration_ms;
+            changed = true;
+        }
+        if changed {
+            self.write_run(&job_id, &run)?;
+        }
+        Ok(changed)
+    }
+
     pub(crate) fn read_runs_for_activity(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
         let dir = self.run_dir(job_id);
         if !dir.exists() {

@@ -377,6 +377,16 @@ impl JobRecords<'_> {
             .finalize_job_run(run_id, state, finished_at, duration_ms)
     }
 
+    pub(crate) fn repair_terminal_run_timing(
+        &self,
+        run_id: &str,
+        finished_at: chrono::DateTime<chrono::Utc>,
+        duration_ms: Option<u64>,
+    ) -> Result<bool, OrbitError> {
+        self.run
+            .repair_terminal_job_run_timing(run_id, finished_at, duration_ms)
+    }
+
     pub(crate) fn get_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
         self.run.get_job_run(run_id)
     }
