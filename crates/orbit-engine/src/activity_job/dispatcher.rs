@@ -234,7 +234,24 @@ impl DispatchError {
 /// Dispatch a v2 activity by type. Emits §7 activity.started/finished
 /// events around the per-type runner and nests the runner's events beneath.
 pub fn dispatch_v2_activity(input: V2DispatchInput<'_>) -> Result<DispatchOutcome, DispatchError> {
-    let activity_input = inject_run_id(&input.input, input.run_id);
+    dispatch_v2_activity_inner(input, true)
+}
+
+pub(crate) fn dispatch_v2_activity_without_run_id_injection(
+    input: V2DispatchInput<'_>,
+) -> Result<DispatchOutcome, DispatchError> {
+    dispatch_v2_activity_inner(input, false)
+}
+
+fn dispatch_v2_activity_inner(
+    input: V2DispatchInput<'_>,
+    inject_run_id_into_input: bool,
+) -> Result<DispatchOutcome, DispatchError> {
+    let activity_input = if inject_run_id_into_input {
+        inject_run_id(&input.input, input.run_id)
+    } else {
+        input.input.clone()
+    };
     let activity_type = match input.spec {
         ActivityV2Spec::AgentLoop(_) => "agent_loop",
         ActivityV2Spec::Groundhog(_) => "groundhog",

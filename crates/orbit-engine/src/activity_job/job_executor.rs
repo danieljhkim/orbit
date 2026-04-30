@@ -32,7 +32,7 @@ use orbit_agent::loop_engine::Session;
 use orbit_common::types::activity_job::{
     ActivityV2Spec, AgentLoopSpec, BackoffStrategy, BranchOutcome, FanInSpec, FanOutBlock, JobV2,
     JobV2Step, JobV2StepBody, JoinMode, LoopBlock, ParallelBlock, RetrySpec, TargetStep,
-    V2AuditEventKind,
+    V2ActivityCatalog, V2AuditEventKind, resolve_job_target_refs,
 };
 use serde_json::Value;
 
@@ -41,7 +41,10 @@ use crate::template::{self, TemplateContext};
 
 use super::agent_loop_driver::drive_agent_loop_with_session;
 use super::audit_writer::{V2AuditWriter, WriteError};
-use super::dispatcher::{DispatchError, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity};
+use super::dispatcher::{
+    DispatchError, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
+    dispatch_v2_activity_without_run_id_injection,
+};
 
 const DEFAULT_MODEL_FOR_SESSION: &str = "claude-sonnet-4-5";
 
@@ -51,6 +54,20 @@ pub struct JobOutcome {
     pub success: bool,
     pub pipeline: Value,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedRecoveryActivity {
+    name: String,
+    spec: ActivityV2Spec,
+}
+
+pub fn resolve_job_catalog_refs_for_execution(
+    job: &mut JobV2,
+    catalog: &V2ActivityCatalog,
+) -> Result<(), DispatchError> {
+    resolve_job_target_refs(job, catalog)
+        .map_err(|err| DispatchError::JobValidation(err.to_string()))
 }
 
 /// Execute a v2 Job against the given host. Mutates pipeline context across
@@ -66,6 +83,13 @@ pub fn execute_job(
     validate_job(job)?;
 
     let base_input = merge_job_input(job.default_input.as_ref(), &input);
+    let recovery_activity = match (&job.recovery_activity, &job.resolved_recovery_activity) {
+        (Some(name), Some(activity)) => Some(ResolvedRecoveryActivity {
+            name: name.clone(),
+            spec: activity.spec.clone(),
+        }),
+        _ => None,
+    };
 
     let ctx = ExecCtx {
         run_id: run_id.to_string(),
@@ -74,6 +98,7 @@ pub fn execute_job(
         input: base_input.clone(),
         pipeline: Arc::new(Mutex::new(HashMap::new())),
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        recovery_activity,
         item: None,
         iteration: None,
     };
@@ -210,6 +235,33 @@ fn emit_job_tracing(job_run_id: &str, task_id: Option<&str>, kind: &V2AuditEvent
                 "step retry",
             );
         }
+        V2AuditEventKind::StepRecoveryAttempted {
+            step_id,
+            recovery_activity,
+            recovery_succeeded,
+        } => {
+            if *recovery_succeeded {
+                tracing::info!(
+                    target: "orbit.job.step_recovery_attempted",
+                    job_run_id = job_run_id,
+                    task_id = task_id,
+                    step_id = step_id.as_str(),
+                    recovery_activity = recovery_activity.as_str(),
+                    recovery_succeeded = *recovery_succeeded,
+                    "step recovery attempted",
+                );
+            } else {
+                tracing::warn!(
+                    target: "orbit.job.step_recovery_attempted",
+                    job_run_id = job_run_id,
+                    task_id = task_id,
+                    step_id = step_id.as_str(),
+                    recovery_activity = recovery_activity.as_str(),
+                    recovery_succeeded = *recovery_succeeded,
+                    "step recovery attempted",
+                );
+            }
+        }
         V2AuditEventKind::StepDenied { step_id, reason } => {
             tracing::error!(
                 target: "orbit.job.step_denied",
@@ -343,6 +395,7 @@ struct ExecCtx<'a> {
     input: Value,
     pipeline: Arc<Mutex<HashMap<String, Value>>>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    recovery_activity: Option<ResolvedRecoveryActivity>,
     /// `Some(value)` inside a fan-out worker. Rendered into template context
     /// as `{{ item }}`.
     item: Option<Value>,
@@ -469,12 +522,13 @@ fn run_step_with_retry(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
                 emit_denied_if_applicable(&err, &step.id, &ctx.audit, ctx.task_id());
                 Err(err)
             }
-            Err(err) => Err(err),
+            Err(err) => recover_or_return_original(step, ctx, err, 1, 1),
         };
     };
 
     let mut last_err: Option<DispatchError> = None;
-    for attempt in 0..retry.max_attempts.max(1) {
+    let max_attempts = retry.max_attempts.max(1);
+    for attempt in 0..max_attempts {
         match run_step_body(step, ctx) {
             Ok(outcome) => {
                 if outcome.success {
@@ -492,7 +546,7 @@ fn run_step_with_retry(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
                 last_err = Some(err);
             }
         }
-        if attempt + 1 >= retry.max_attempts {
+        if attempt + 1 >= max_attempts {
             break;
         }
         let backoff_ms = compute_backoff_ms(retry, attempt);
@@ -509,13 +563,113 @@ fn run_step_with_retry(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
     }
 
     match last_err {
-        Some(err) => Err(err),
+        Some(err) => recover_or_return_original(step, ctx, err, max_attempts, max_attempts),
         None => Ok(StepOutcome {
             success: false,
             output: Value::Null,
             message: None,
             skipped: false,
         }),
+    }
+}
+
+fn recover_or_return_original(
+    step: &JobV2Step,
+    ctx: &ExecCtx<'_>,
+    original_err: DispatchError,
+    attempt: u32,
+    max_attempts: u32,
+) -> Result<StepOutcome, DispatchError> {
+    let Some(recovery) = &ctx.recovery_activity else {
+        return Err(original_err);
+    };
+
+    if attempt_recovery_activity(step, ctx, recovery, &original_err, attempt, max_attempts) {
+        match run_step_body(step, ctx) {
+            Ok(outcome) if outcome.success => return Ok(outcome),
+            Ok(_) | Err(_) => {}
+        }
+    }
+
+    Err(original_err)
+}
+
+fn attempt_recovery_activity(
+    step: &JobV2Step,
+    ctx: &ExecCtx<'_>,
+    recovery: &ResolvedRecoveryActivity,
+    original_err: &DispatchError,
+    attempt: u32,
+    max_attempts: u32,
+) -> bool {
+    let input = serde_json::json!({
+        "failed_step_id": step.id,
+        "activity_name": step_activity_name(step),
+        "error_message": original_err.to_string(),
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+    });
+    let dispatch = dispatch_v2_activity_without_run_id_injection(V2DispatchInput {
+        activity_name: &recovery.name,
+        spec: &recovery.spec,
+        fs_profile: step_fs_profile(step),
+        input: input.clone(),
+        audit: ctx.audit.clone(),
+        run_id: &ctx.run_id,
+        host: Some(ctx.host),
+    });
+
+    let recovery_succeeded = match dispatch {
+        Ok(dispatch) if dispatch.success => {
+            let _ = persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
+            true
+        }
+        Ok(dispatch) => {
+            let _ = persist_dispatch_invocation(ctx, &recovery.name, &input, &dispatch);
+            false
+        }
+        Err(_) => false,
+    };
+
+    let _ = emit_job_event(
+        &ctx.audit,
+        ctx.task_id(),
+        V2AuditEventKind::StepRecoveryAttempted {
+            step_id: step.id.clone(),
+            recovery_activity: recovery.name.clone(),
+            recovery_succeeded,
+        },
+    );
+
+    recovery_succeeded
+}
+
+fn step_fs_profile(step: &JobV2Step) -> Option<&str> {
+    match &step.body {
+        JobV2StepBody::Target(target) => target.fs_profile.as_deref(),
+        _ => None,
+    }
+}
+
+fn step_activity_name(step: &JobV2Step) -> String {
+    match &step.body {
+        JobV2StepBody::Target(target) => target
+            .activity_name
+            .clone()
+            .unwrap_or_else(|| target_activity_label(target)),
+        JobV2StepBody::TargetRef(target) => target.target.clone(),
+        JobV2StepBody::Parallel { .. } => "parallel".to_string(),
+        JobV2StepBody::FanOut { .. } => "fan_out".to_string(),
+        JobV2StepBody::Loop { .. } => "loop".to_string(),
+    }
+}
+
+fn target_activity_label(target: &TargetStep) -> String {
+    match &target.spec {
+        ActivityV2Spec::AgentLoop(_) => "agent_loop".to_string(),
+        ActivityV2Spec::Groundhog(_) => "groundhog".to_string(),
+        ActivityV2Spec::Deterministic(spec) => spec.action.clone(),
+        ActivityV2Spec::Shell(spec) => format!("shell:{}", spec.program),
     }
 }
 
@@ -1025,6 +1179,7 @@ fn run_fan_out(
                     input: base_input,
                     pipeline: Arc::new(Mutex::new(pipeline_snapshot)),
                     sessions: Arc::new(Mutex::new(HashMap::new())),
+                    recovery_activity: ctx.recovery_activity.clone(),
                     item: Some(item),
                     iteration: Some(idx),
                 };
@@ -1165,6 +1320,7 @@ fn run_loop(
             input: ctx.input.clone(),
             pipeline: ctx.pipeline.clone(),
             sessions: ctx.sessions.clone(),
+            recovery_activity: ctx.recovery_activity.clone(),
             item: loop_items
                 .as_ref()
                 .and_then(|items| items.get(iteration_index as usize).cloned()),
@@ -1242,6 +1398,14 @@ fn run_loop(
 /// concurrent siblings must not name the same `session:` binding — `Session`
 /// is `!Sync` and sharing it would race on history_mut.
 pub fn validate_job(job: &JobV2) -> Result<(), DispatchError> {
+    if let Some(name) = &job.recovery_activity
+        && job.resolved_recovery_activity.is_none()
+    {
+        return Err(DispatchError::JobValidation(format!(
+            "job recovery_activity `{name}` was not resolved — caller must run \
+             `resolve_job_catalog_refs_for_execution` at load time before dispatch"
+        )));
+    }
     for step in &job.steps {
         validate_step(step)?;
     }
@@ -1376,18 +1540,26 @@ fn _unused_timing(_: Instant) {}
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap, VecDeque};
     use std::fmt;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use orbit_agent::loop_engine::audit::{AuditSink, NullSink};
-    use orbit_common::types::activity_job::{BranchOutcome, V2AuditEventKind};
-    use serde_json::json;
+    use orbit_common::types::JobScheduleState;
+    use orbit_common::types::activity_job::{
+        ActivityV2, ActivityV2Spec, BackoffStrategy, BranchOutcome, DeterministicSpec, JobKind,
+        JobV2, JobV2Step, JobV2StepBody, RetrySpec, TargetStep, V2ActivityCatalog, V2AuditEvent,
+        V2AuditEventKind, load_job_asset,
+    };
+    use serde_json::{Value, json};
     use tracing::field::{Field, Visit};
     use tracing::{Event, Level, Metadata, Subscriber, span};
 
-    use super::{V2AuditWriter, emit_job_event, merge_job_input};
+    use super::{
+        DispatchError, V2AuditWriter, V2RuntimeHost, emit_job_event, execute_job, merge_job_input,
+        resolve_job_catalog_refs_for_execution,
+    };
 
     #[test]
     fn merges_object_defaults_with_explicit_object_input() {
@@ -1735,6 +1907,411 @@ mod tests {
             value
         };
         assert_eq!(stripped(dual_json), stripped(direct_json));
+    }
+
+    #[test]
+    fn recovery_success_runs_one_post_recovery_attempt_with_exact_input_and_fs_profile() {
+        let original_error = retryable_error("flaky", "dirty checkout");
+        let host = RecoveryHost::new([
+            (
+                "flaky",
+                vec![
+                    Err(original_error.clone()),
+                    Err(original_error.clone()),
+                    Ok(json!({"fixed": true})),
+                ],
+            ),
+            ("recover", vec![Ok(json!({"recovered": true}))]),
+        ]);
+        let job = recovery_job(Some("recover"), Some("wide"), "flaky", Some("narrow"), 2);
+        let writer = std::sync::Arc::new(test_writer("run-recovery-success"));
+
+        let outcome = execute_job(
+            &job,
+            Value::Null,
+            "run-recovery-success",
+            writer.clone(),
+            &host,
+        )
+        .expect("job should recover");
+
+        assert!(outcome.success);
+        assert_eq!(host.actions(), vec!["flaky", "flaky", "recover", "flaky"]);
+        assert_eq!(host.action_count("recover"), 1);
+        assert_eq!(
+            host.input_for_action("recover"),
+            Some(json!({
+                "failed_step_id": "build",
+                "activity_name": "flaky",
+                "error_message": original_error.to_string(),
+                "attempt": 2,
+                "max_attempts": 2
+            }))
+        );
+        assert_eq!(
+            host.fs_profile_for_action("recover"),
+            Some(Some("narrow".to_string()))
+        );
+
+        let events = writer.events_snapshot().expect("audit snapshot");
+        let recovery_events = recovery_events(&events);
+        assert_eq!(recovery_events.len(), 1);
+        assert!(matches!(
+            recovery_events[0].kind,
+            V2AuditEventKind::StepRecoveryAttempted {
+                ref step_id,
+                ref recovery_activity,
+                recovery_succeeded: true,
+            } if step_id == "build" && recovery_activity == "recover"
+        ));
+    }
+
+    #[test]
+    fn recovery_success_with_post_recovery_failure_returns_original_error_text() {
+        let original_error = retryable_error("flaky", "first failure");
+        let post_recovery_error = retryable_error("flaky", "post recovery still failing");
+        let host = RecoveryHost::new([
+            (
+                "flaky",
+                vec![
+                    Err(original_error.clone()),
+                    Err(original_error.clone()),
+                    Err(post_recovery_error),
+                ],
+            ),
+            ("recover", vec![Ok(json!({"recovered": true}))]),
+        ]);
+        let job = recovery_job(Some("recover"), None, "flaky", None, 2);
+        let writer = std::sync::Arc::new(test_writer("run-post-recovery-failure"));
+
+        let err = execute_job(
+            &job,
+            Value::Null,
+            "run-post-recovery-failure",
+            writer.clone(),
+            &host,
+        )
+        .expect_err("post-recovery failure should surface original error");
+
+        assert_eq!(err.to_string(), original_error.to_string());
+        assert_eq!(host.action_count("recover"), 1);
+        assert_eq!(recovery_events(&writer.events_snapshot().unwrap()).len(), 1);
+    }
+
+    #[test]
+    fn recovery_activity_error_returns_original_error_text() {
+        let original_error = retryable_error("flaky", "precondition failed");
+        let host = RecoveryHost::new([
+            ("flaky", vec![Err(original_error.clone())]),
+            (
+                "recover",
+                vec![Err(retryable_error("recover", "could not fix"))],
+            ),
+        ]);
+        let job = recovery_job(Some("recover"), None, "flaky", None, 1);
+        let writer = std::sync::Arc::new(test_writer("run-recovery-error"));
+
+        let err = execute_job(
+            &job,
+            Value::Null,
+            "run-recovery-error",
+            writer.clone(),
+            &host,
+        )
+        .expect_err("recovery error should surface original error");
+
+        assert_eq!(err.to_string(), original_error.to_string());
+        assert_eq!(host.action_count("recover"), 1);
+        let events = writer.events_snapshot().expect("audit snapshot");
+        assert!(matches!(
+            recovery_events(&events)[0].kind,
+            V2AuditEventKind::StepRecoveryAttempted {
+                recovery_succeeded: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn non_retryable_failure_skips_recovery_and_audit_event() {
+        let host = RecoveryHost::new([
+            (
+                "flaky",
+                vec![Err(DispatchError::ToolDenied {
+                    tool_name: "fs.write".to_string(),
+                    iteration: 1,
+                })],
+            ),
+            ("recover", vec![Ok(json!({"recovered": true}))]),
+        ]);
+        let job = recovery_job(Some("recover"), None, "flaky", None, 2);
+        let writer = std::sync::Arc::new(test_writer("run-non-retryable"));
+
+        let err = execute_job(
+            &job,
+            Value::Null,
+            "run-non-retryable",
+            writer.clone(),
+            &host,
+        )
+        .expect_err("tool denial should bypass recovery");
+
+        assert!(matches!(err, DispatchError::ToolDenied { .. }));
+        assert_eq!(host.action_count("recover"), 0);
+        assert!(recovery_events(&writer.events_snapshot().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn no_recovery_activity_preserves_success_and_failure_paths() {
+        let original_error = retryable_error("flaky", "still failing");
+        let failing_host = RecoveryHost::new([("flaky", vec![Err(original_error.clone())])]);
+        let failing_job = recovery_job(None, None, "flaky", None, 1);
+        let failing_writer = std::sync::Arc::new(test_writer("run-no-recovery-failure"));
+
+        let err = execute_job(
+            &failing_job,
+            Value::Null,
+            "run-no-recovery-failure",
+            failing_writer.clone(),
+            &failing_host,
+        )
+        .expect_err("retryable failure should remain the original error");
+
+        assert_eq!(err.to_string(), original_error.to_string());
+        assert!(recovery_events(&failing_writer.events_snapshot().unwrap()).is_empty());
+
+        let success_host = RecoveryHost::new([("stable", vec![Ok(json!({"ok": true}))])]);
+        let success_job = recovery_job(None, None, "stable", None, 1);
+        let success_writer = std::sync::Arc::new(test_writer("run-no-recovery-success"));
+
+        let outcome = execute_job(
+            &success_job,
+            Value::Null,
+            "run-no-recovery-success",
+            success_writer.clone(),
+            &success_host,
+        )
+        .expect("success path should remain unchanged");
+
+        assert!(outcome.success);
+        assert!(recovery_events(&success_writer.events_snapshot().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn unknown_recovery_activity_name_is_job_validation_during_catalog_resolution() {
+        let yaml = r#"
+schemaVersion: 2
+kind: Job
+metadata:
+  name: missing_recovery
+spec:
+  state: enabled
+  recovery_activity: missing
+  steps:
+    - id: build
+      spec:
+        type: deterministic
+        action: flaky
+"#;
+        let mut job = load_job_asset(yaml).expect("job yaml").spec;
+        let catalog = V2ActivityCatalog::new();
+
+        let err = resolve_job_catalog_refs_for_execution(&mut job, &catalog)
+            .expect_err("missing recovery activity should fail resolution");
+
+        assert!(matches!(
+            err,
+            DispatchError::JobValidation(ref message)
+                if message.contains("recovery_activity `missing` not found")
+        ));
+    }
+
+    fn recovery_job(
+        recovery_name: Option<&str>,
+        recovery_fs_profile: Option<&str>,
+        step_action: &str,
+        step_fs_profile: Option<&str>,
+        max_attempts: u32,
+    ) -> JobV2 {
+        JobV2 {
+            state: JobScheduleState::Enabled,
+            default_input: None,
+            recovery_activity: recovery_name.map(str::to_string),
+            resolved_recovery_activity: recovery_name
+                .map(|name| deterministic_activity(name, recovery_fs_profile)),
+            max_active_runs: 1,
+            kind: JobKind::Workflow,
+            steps: vec![JobV2Step {
+                id: "build".to_string(),
+                when: None,
+                retry: Some(RetrySpec {
+                    max_attempts,
+                    initial_backoff_ms: 0,
+                    backoff_cap_ms: 0,
+                    backoff_strategy: BackoffStrategy::Linear,
+                }),
+                body: JobV2StepBody::Target(TargetStep {
+                    spec: deterministic_activity(step_action, None).spec,
+                    activity_name: None,
+                    fs_profile: step_fs_profile.map(str::to_string),
+                    default_input: None,
+                    timeout_seconds: 0,
+                    session: None,
+                }),
+            }],
+        }
+    }
+
+    fn deterministic_activity(action: &str, fs_profile: Option<&str>) -> ActivityV2 {
+        ActivityV2 {
+            description: format!("deterministic {action}"),
+            input_schema_json: json!({}),
+            output_schema_json: json!({}),
+            fs_profile: fs_profile.map(str::to_string),
+            spec: ActivityV2Spec::Deterministic(DeterministicSpec {
+                action: action.to_string(),
+                config: Value::Null,
+            }),
+        }
+    }
+
+    fn retryable_error(action: &str, message: &str) -> DispatchError {
+        DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: message.to_string(),
+        }
+    }
+
+    fn recovery_events(events: &[V2AuditEvent]) -> Vec<&V2AuditEvent> {
+        events
+            .iter()
+            .filter(|event| matches!(event.kind, V2AuditEventKind::StepRecoveryAttempted { .. }))
+            .collect()
+    }
+
+    #[derive(Debug, Clone)]
+    struct DeterministicCall {
+        action: String,
+        input: Value,
+        fs_profile: Option<String>,
+    }
+
+    struct RecoveryHost {
+        responses: StdMutex<HashMap<String, VecDeque<Result<Value, DispatchError>>>>,
+        calls: StdMutex<Vec<DeterministicCall>>,
+        pending_fs_profiles: StdMutex<VecDeque<Option<String>>>,
+    }
+
+    impl RecoveryHost {
+        fn new<const N: usize>(responses: [(&str, Vec<Result<Value, DispatchError>>); N]) -> Self {
+            Self {
+                responses: StdMutex::new(
+                    responses
+                        .into_iter()
+                        .map(|(action, outcomes)| {
+                            (action.to_string(), outcomes.into_iter().collect())
+                        })
+                        .collect(),
+                ),
+                calls: StdMutex::new(Vec::new()),
+                pending_fs_profiles: StdMutex::new(VecDeque::new()),
+            }
+        }
+
+        fn actions(&self) -> Vec<String> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .iter()
+                .map(|call| call.action.clone())
+                .collect()
+        }
+
+        fn action_count(&self, action: &str) -> usize {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .iter()
+                .filter(|call| call.action == action)
+                .count()
+        }
+
+        fn input_for_action(&self, action: &str) -> Option<Value> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .iter()
+                .find(|call| call.action == action)
+                .map(|call| call.input.clone())
+        }
+
+        fn fs_profile_for_action(&self, action: &str) -> Option<Option<String>> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .iter()
+                .find(|call| call.action == action)
+                .map(|call| call.fs_profile.clone())
+        }
+    }
+
+    impl V2RuntimeHost for RecoveryHost {
+        fn run_deterministic(
+            &self,
+            action: &str,
+            _config: &Value,
+            input: &Value,
+            _tool_context: orbit_tools::ToolContext,
+        ) -> Result<Value, DispatchError> {
+            let fs_profile = self
+                .pending_fs_profiles
+                .lock()
+                .expect("fs profiles lock")
+                .pop_front()
+                .unwrap_or(None);
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(DeterministicCall {
+                    action: action.to_string(),
+                    input: input.clone(),
+                    fs_profile,
+                });
+
+            self.responses
+                .lock()
+                .expect("responses lock")
+                .get_mut(action)
+                .and_then(VecDeque::pop_front)
+                .unwrap_or_else(|| Ok(json!({"action": action})))
+        }
+
+        fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
+            Err(DispatchError::AgentLoopFailed(
+                "test host: no credentials".into(),
+            ))
+        }
+
+        fn resolve_cli_executor(
+            &self,
+            _provider: &str,
+        ) -> Result<super::super::dispatcher::ResolvedCliExecutor, DispatchError> {
+            Err(DispatchError::CliInvocationFailed(
+                "test host: no CLI mapping".into(),
+            ))
+        }
+
+        fn tool_context_for_activity(
+            &self,
+            fs_profile: Option<&str>,
+            _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        ) -> orbit_tools::ToolContext {
+            self.pending_fs_profiles
+                .lock()
+                .expect("fs profiles lock")
+                .push_back(fs_profile.map(str::to_string));
+            orbit_tools::ToolContext::default()
+        }
     }
 
     fn test_writer(run_id: &str) -> V2AuditWriter {

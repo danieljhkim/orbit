@@ -67,6 +67,9 @@ pub fn resolve_activity_backends(activity: &mut ActivityV2, resolved: Backend) {
 /// (including parallel branches, fan-out workers, and loop bodies) to the
 /// resolved concrete backend.
 pub fn resolve_job_backends(job: &mut JobV2, resolved: Backend) {
+    if let Some(activity) = &mut job.resolved_recovery_activity {
+        resolve_activity_backends(activity, resolved);
+    }
     for step in &mut job.steps {
         resolve_step_backends(step, resolved);
     }

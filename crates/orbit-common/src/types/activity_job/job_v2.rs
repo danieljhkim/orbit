@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::types::JobScheduleState;
 
-use super::activity_v2::ActivityV2Spec;
+use super::activity_v2::{ActivityV2, ActivityV2Spec};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -29,6 +29,10 @@ pub struct JobV2 {
     pub state: JobScheduleState,
     #[serde(default)]
     pub default_input: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_activity: Option<String>,
+    #[serde(skip)]
+    pub resolved_recovery_activity: Option<ActivityV2>,
     #[serde(default = "default_max_active_runs")]
     pub max_active_runs: u32,
     #[serde(default)]
@@ -161,6 +165,10 @@ impl<'de> Deserialize<'de> for JobV2Step {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TargetStep {
     pub spec: ActivityV2Spec,
+    /// Original catalog activity name when this target was produced from
+    /// `target: activity:<name>`. Inline specs have no catalog name.
+    #[serde(skip)]
+    pub activity_name: Option<String>,
     #[serde(rename = "fsProfile", default, skip_serializing_if = "Option::is_none")]
     pub fs_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

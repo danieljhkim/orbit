@@ -65,6 +65,11 @@ pub enum V2AuditEventKind {
         attempt: u32,
         next_backoff_ms: u64,
     },
+    StepRecoveryAttempted {
+        step_id: String,
+        recovery_activity: String,
+        recovery_succeeded: bool,
+    },
     StepDenied {
         step_id: String,
         reason: String,

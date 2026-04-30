@@ -8,13 +8,15 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::activity_job::{
-    Backend, V2AuditEventKind, load_job_asset, resolve_job_backends, resolve_job_target_refs,
+    Backend, V2AuditEventKind, load_job_asset, resolve_job_backends,
     validate_job_loop_session_backends,
 };
 use orbit_common::types::{
     JobRun, JobRunState, JobTargetType, OrbitError, OrbitEvent, PipelineState,
 };
-use orbit_engine::activity_job::{JobOutcome, V2AuditWriter, execute_job};
+use orbit_engine::activity_job::{
+    DispatchError, JobOutcome, V2AuditWriter, execute_job, resolve_job_catalog_refs_for_execution,
+};
 use orbit_store::JobRunStepParams;
 use serde_json::Value;
 
@@ -159,8 +161,12 @@ impl OrbitRuntime {
         let catalog = self
             .v2_activity_catalog()
             .map_err(|err| OrbitError::InvalidInput(format!("build activity catalog: {err}")))?;
-        resolve_job_target_refs(&mut asset.spec, &catalog)
-            .map_err(|err| OrbitError::InvalidInput(format!("{err}")))?;
+        resolve_job_catalog_refs_for_execution(&mut asset.spec, &catalog).map_err(
+            |err| match err {
+                DispatchError::JobValidation(message) => OrbitError::JobValidation(message),
+                other => OrbitError::InvalidInput(format!("{other}")),
+            },
+        )?;
 
         // §3.1 resolution: replace every `Auto` with a concrete backend.
         let resolution = self.resolve_v2_backend(backend_flag);

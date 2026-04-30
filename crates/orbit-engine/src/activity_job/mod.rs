@@ -24,7 +24,9 @@ pub use dispatcher::{
     DispatchError, DispatchOutcome, ResolvedCliExecutor, ResolvedSandbox, V2DispatchInput,
     V2RuntimeHost, dispatch_v2_activity,
 };
-pub use job_executor::{JobOutcome, execute_job, validate_job};
+pub use job_executor::{
+    JobOutcome, execute_job, resolve_job_catalog_refs_for_execution, validate_job,
+};
 pub use jsonl_sink::V2JsonlSink;
 pub use orbit_tool_executor::OrbitToolCallExecutor;
 pub use tool_enforcement::{EnforcedAuditSink, EnforcementDecision};

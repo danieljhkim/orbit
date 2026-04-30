@@ -280,6 +280,7 @@ fn event_type_of(kind: &V2AuditEventKind) -> &'static str {
         V2AuditEventKind::StepFinished { .. } => "step.finished",
         V2AuditEventKind::StepSkipped { .. } => "step.skipped",
         V2AuditEventKind::StepRetry { .. } => "step.retry",
+        V2AuditEventKind::StepRecoveryAttempted { .. } => "step.recovery_attempted",
         V2AuditEventKind::StepDenied { .. } => "step.denied",
         V2AuditEventKind::StepJoin { .. } => "step.join",
         V2AuditEventKind::FanoutDispatched { .. } => "fanout.dispatched",

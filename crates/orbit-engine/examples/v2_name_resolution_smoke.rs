@@ -386,6 +386,8 @@ fn synthetic_job_using_ref(target_name: &str) -> JobV2 {
     JobV2 {
         state: JobScheduleState::Enabled,
         default_input: None,
+        recovery_activity: None,
+        resolved_recovery_activity: None,
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![JobV2Step {
@@ -417,6 +419,8 @@ fn pipeline_with_reviewer_loop() -> JobV2 {
     JobV2 {
         state: JobScheduleState::Enabled,
         default_input: None,
+        recovery_activity: None,
+        resolved_recovery_activity: None,
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![JobV2Step {

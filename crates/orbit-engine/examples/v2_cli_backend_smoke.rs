@@ -493,6 +493,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 provider: Provider::Claude,
                 wall_clock_timeout_seconds: 30,
             }),
+            activity_name: None,
             fs_profile: None,
             default_input: None,
             timeout_seconds: 0,
@@ -515,6 +516,8 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
     JobV2 {
         state: JobScheduleState::Enabled,
         default_input: None,
+        recovery_activity: None,
+        resolved_recovery_activity: None,
         max_active_runs: 1,
         kind: JobKind::Workflow,
         steps: vec![loop_step],

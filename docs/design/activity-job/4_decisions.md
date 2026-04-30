@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-28 (ADR-027 added)
+**Last updated:** 2026-04-30 (ADR-028 added)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -368,6 +368,23 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Follow-up.** [T20260428-12] consumes `[agent.<role>]` at dispatch time: adds `role: Option<AgentRole>` to `AgentLoopSpec`/`GroundhogSpec`/`TargetStep`, introduces a resolver behind `EnvironmentHost::agent_role_config`, and applies the resolved `(provider, model, backend)` to the cloned activity spec before dispatch.
 
+## ADR-028 — Job-level recovery activity handles retry-exhausted step errors
+
+**Status:** Accepted · 2026-04 · [T20260430-9]
+
+**Context.** Some v2 workflow failures are recoverable only after a remediation pass, not through immediate retry. For example, a deterministic merge action can fail because the base checkout is dirty; retrying the same action without cleanup fails identically. Orbit needed a bounded hook that lets a workspace-authored activity inspect and repair the state before the workflow gives up.
+
+**Decision.** Add an optional job-level `recovery_activity: <name>` field to `JobV2`. Catalog resolution validates the name and caches the resolved activity spec before dispatch. When a step exhausts its normal retry attempts with a retryable `DispatchError`, the executor invokes that recovery activity once, passing only `failed_step_id`, `activity_name`, `error_message`, `attempt`, and `max_attempts`. If recovery succeeds, the executor performs exactly one post-recovery attempt of the original step body. If recovery fails or that post-recovery attempt fails, the executor returns the original pre-recovery `DispatchError` unchanged. Non-retryable errors, as classified by `DispatchError::is_non_retryable()`, bypass recovery entirely.
+
+**Scope.** The hook is job-level by design: one recovery activity applies uniformly to every step in the job. Recovery dispatch inherits the failing step's resolved `FsProfile`, emits one `StepRecoveryAttempted` audit event, and does not write a normal step output into the pipeline.
+
+**Deferred.** Per-step recovery handlers and failure-class registries are intentionally deferred until real workflows show that one generic job-level hook creates too much duplication or ambiguity.
+
+**Consequences.**
+- Workflows get a bounded remediation point without making retry semantics unbounded.
+- Recovery activities use the existing activity dispatch, audit, run-trace, and policy plumbing.
+- Cost: job authors must make the recovery activity generic enough for every retryable step in that job.
+
 ---
 
 ## Task References
@@ -404,5 +421,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260428-8]** — Add workflow-specific task admission for task-starting workflows.
 - **[T20260428-9]** — `orbit init` writes per-role agent settings to `[agent.<role>]` in `config.toml`.
+- **[T20260430-9]** — Add a job-level recovery activity hook for retry-exhausted v2 step failures.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
