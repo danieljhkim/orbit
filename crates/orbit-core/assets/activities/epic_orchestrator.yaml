@@ -5,19 +5,18 @@ metadata:
 spec:
   type: agent_loop
   description: >
-    Judgment-grade orchestrator for epic-sized tasks. One invocation =
-    one cycle: read state, decide READY subtasks, decide SEQUENTIAL vs
-    PARALLEL, dispatch `task_gate_pipeline` per bundle, wait for
-    results, and leave a concise audit note. The enclosing workflow
-    refreshes task state deterministically after this activity and uses
-    that snapshot to decide loop exit; this activity's final response is
-    not a workflow data handoff. Conversation history persists
-    across iterations when the enclosing workflow step declares
-    `session: <name>`, so the orchestrator can reference its own prior
-    reasoning.
+    Judgment-grade orchestrator for epic-sized tasks. One invocation = one
+    cycle: read state, decide READY subtasks, decide SEQUENTIAL vs PARALLEL,
+    dispatch `task_gate_pipeline` per bundle, wait for results, and leave a
+    concise audit note. The enclosing workflow refreshes task state
+    deterministically after this activity and uses that snapshot to decide loop
+    exit; this activity's final response is not a workflow data handoff.
+    Conversation history persists across iterations when the enclosing workflow
+    step declares `session: <name>`, so the orchestrator can reference its own
+    prior reasoning.
   input_schema_json:
     type: object
-    required: [epic, subtasks]
+    required: [ epic, subtasks ]
     properties:
       epic:
         type: object
@@ -27,7 +26,7 @@ spec:
         type: number
       mode:
         type: string
-        enum: [pr, local]
+        enum: [ pr, local ]
   output_schema_json:
     type: object
     properties:
@@ -99,11 +98,10 @@ spec:
     remains in conversation history. Treat the `subtasks` input as the
     current deterministic task snapshot for this cycle.
   tools:
-    - orbit.task.list
-    - orbit.task.search
-    - orbit.task.show
+    - orbit.task.*
     - orbit.pipeline.invoke
     - orbit.pipeline.wait
+    - orbit.graph.*
   on_denial: terminate
   max_iterations: 8
   backend: http

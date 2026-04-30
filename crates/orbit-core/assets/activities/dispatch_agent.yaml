@@ -5,13 +5,13 @@ metadata:
 spec:
   type: agent_loop
   description: >
-    Provide advisory backlog-grouping notes for the auto-pipeline. The
-    workflow no longer consumes this activity's final response as data;
-    deterministic singleton bundles from `list_backlog_tasks` drive
-    dispatch so malformed agent text cannot fail the job.
+    Provide advisory backlog-grouping notes for the auto-pipeline. The workflow
+    no longer consumes this activity's final response as data; deterministic
+    singleton bundles from `list_backlog_tasks` drive dispatch so malformed
+    agent text cannot fail the job.
   input_schema_json:
     type: object
-    required: [tasks, max_bundle_size]
+    required: [ tasks, max_bundle_size ]
     properties:
       tasks:
         type: array
@@ -81,9 +81,10 @@ spec:
     and `reasoning` when convenient, but the workflow does not consume it
     and downstream dispatch must not depend on it.
   tools:
-    - orbit.task.show
+    - orbit.task.*
+    - orbit.graph.*
   on_denial: terminate
   max_iterations: 8
-  backend: http
+  backend: cli
   provider: claude
   wall_clock_timeout_seconds: 300
