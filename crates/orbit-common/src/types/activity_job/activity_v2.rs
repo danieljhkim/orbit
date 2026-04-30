@@ -70,6 +70,12 @@ pub struct AgentLoopSpec {
     /// where the loop engine applies its own timeout.
     #[serde(default = "default_cli_wall_clock_timeout_seconds")]
     pub wall_clock_timeout_seconds: u64,
+    /// Optional role tag (ADR-029). When set, the engine consults
+    /// `[agent.<role>]` in `config.toml` and overrides `provider`/`model`/
+    /// `backend` field-by-field at dispatch time. The step-level role on
+    /// `TargetStep` takes precedence over this activity-level role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<AgentRole>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -99,6 +105,9 @@ pub struct GroundhogSpec {
     /// Fallback attempt budget when a checkpoint omits `attempt_budget`.
     #[serde(default = "default_groundhog_attempt_budget")]
     pub attempt_budget_default: u32,
+    /// Optional role tag (ADR-029). Mirrors `AgentLoopSpec::role`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<AgentRole>,
 }
 
 impl GroundhogSpec {
@@ -112,6 +121,7 @@ impl GroundhogSpec {
             backend: Backend::Http,
             provider: self.provider,
             wall_clock_timeout_seconds: self.wall_clock_timeout_seconds,
+            role: self.role,
         }
     }
 }
@@ -206,6 +216,38 @@ pub struct ShellSpec {
     pub expected_exit_codes: Vec<i32>,
 }
 
+/// Role tag for an `agent_loop` / `groundhog` activity (ADR-029). Maps to
+/// `[agent.<role>]` blocks in `config.toml`; the dispatcher resolves the
+/// effective role to a `(provider, model, backend)` triple before invoking
+/// the runner. The set is closed because `orbit init` only prompts for these
+/// three roles today; widening it requires a config-schema change.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentRole {
+    Reviewer,
+    Implementer,
+    Planner,
+}
+
+impl AgentRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentRole::Reviewer => "reviewer",
+            AgentRole::Implementer => "implementer",
+            AgentRole::Planner => "planner",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "reviewer" => Some(AgentRole::Reviewer),
+            "implementer" => Some(AgentRole::Implementer),
+            "planner" => Some(AgentRole::Planner),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OnDenial {
@@ -230,4 +272,37 @@ const fn default_cli_wall_clock_timeout_seconds() -> u64 {
 
 const fn default_groundhog_attempt_budget() -> u32 {
     3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_role_serde_roundtrips_lowercase() {
+        for (value, expected) in [
+            (AgentRole::Reviewer, "\"reviewer\""),
+            (AgentRole::Implementer, "\"implementer\""),
+            (AgentRole::Planner, "\"planner\""),
+        ] {
+            let serialized = serde_json::to_string(&value).expect("serialize role");
+            assert_eq!(serialized, expected);
+            let parsed: AgentRole = serde_json::from_str(expected).expect("deserialize role");
+            assert_eq!(parsed, value);
+        }
+    }
+
+    #[test]
+    fn agent_loop_spec_yaml_includes_role_when_present() {
+        let yaml = "instruction: hi\nrole: implementer\n";
+        let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+        assert_eq!(parsed.role, Some(AgentRole::Implementer));
+    }
+
+    #[test]
+    fn agent_loop_spec_yaml_role_is_optional() {
+        let yaml = "instruction: hi\n";
+        let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+        assert_eq!(parsed.role, None);
+    }
 }

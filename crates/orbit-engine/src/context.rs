@@ -1,5 +1,6 @@
 use crate::executor::registry::ActivityExecutorRegistry;
 use orbit_agent::AgentConfig;
+use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
 use orbit_common::types::{
     Activity, AgentModelPair, ExecutorDef, InvocationTrace, Job, JobRun, JobRunState,
     JobTargetType, KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, ReviewThread, Role,
@@ -296,6 +297,22 @@ pub trait AgentProtocolHost {
     ) -> Result<Vec<u8>, OrbitError>;
 }
 
+/// Resolved `[agent.<role>]` block from `config.toml` (ADR-029). Each field
+/// is independently optional — the resolver in
+/// `crate::activity_job::agent_role` falls back to the inline activity value
+/// for any field the config does not specify.
+///
+/// String fields from the on-disk `RawAgentRoleConfig` are parsed into the
+/// strongly-typed activity-job enums at the orbit-core boundary; an
+/// unrecognized provider/backend yields `None` for that field rather than
+/// silently coercing dispatch to a wrong runtime.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentRoleConfig {
+    pub provider: Option<Provider>,
+    pub model: Option<String>,
+    pub backend: Option<Backend>,
+}
+
 pub trait EnvironmentHost {
     // ── Config accessors (implementors provide these) ──────────────────
 
@@ -308,6 +325,16 @@ pub trait EnvironmentHost {
     fn orbit_root(&self) -> Option<String>;
     fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)>;
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String>;
+
+    /// Resolved `[agent.<role>]` block from the active workspace's
+    /// `config.toml`, if any (ADR-029). The default returns `None`, which
+    /// means dispatch falls back to the inline `provider`/`model`/`backend`
+    /// on the activity. orbit-core's implementation reads
+    /// `RawRuntimeConfig.agent` (written by `orbit init` per ADR-027) and
+    /// parses the string fields into the strongly-typed activity-job enums.
+    fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
+        None
+    }
 
     // ── Default implementations (use accessors above) ──────────────────
 
@@ -554,6 +581,10 @@ impl EnvironmentHost for AgentExecutorHost<'_> {
         self.environment
             .missing_required_environment_vars(required_env_vars)
     }
+
+    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
+        self.environment.agent_role_config(role)
+    }
 }
 
 impl AgentProtocolHost for AgentExecutorHost<'_> {
@@ -623,6 +654,10 @@ impl EnvironmentHost for CliCommandExecutorHost<'_> {
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
         self.environment
             .missing_required_environment_vars(required_env_vars)
+    }
+
+    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
+        self.environment.agent_role_config(role)
     }
 }
 
@@ -720,6 +755,10 @@ impl EnvironmentHost for AutomationExecutorHost<'_> {
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
         self.environment
             .missing_required_environment_vars(required_env_vars)
+    }
+
+    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
+        self.environment.agent_role_config(role)
     }
 }
 

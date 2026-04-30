@@ -16,10 +16,8 @@ pub(super) struct RawRuntimeConfig {
     /// (`reviewer`, `implementer`, `planner`, or any free-form string the
     /// resolver chooses to honour). Values supply optional `provider`,
     /// `model`, and `backend` overrides per role. Written by `orbit init`
-    /// from interactive prompts (T20260428-9). The consumer side (resolver,
-    /// dispatch override) is the follow-up T20260428-12 — until that lands,
-    /// the field is parsed but unread.
-    #[allow(dead_code)]
+    /// from interactive prompts (T20260428-9) and consumed at v2 dispatch
+    /// time per ADR-029 / T20260428-12.
     pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
 }
 

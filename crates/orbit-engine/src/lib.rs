@@ -36,8 +36,8 @@ pub use checkpoint_verifier::{
 pub use context::{
     ACTIVITY_EXECUTION_FAILED, AGENT_COMMIT_FAILED, AGENT_INVOCATION_FAILED,
     AGENT_PROTOCOL_VIOLATION, AGENT_TIMEOUT, ActivityInvocationResult, AgentProtocolHost,
-    AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost, ExecutionContext,
-    ExecutorHost, ExecutorLookupHost, JobRunHost, JobRunResult, RuntimeHost,
+    AgentRoleConfig, AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost,
+    ExecutionContext, ExecutorHost, ExecutorLookupHost, JobRunHost, JobRunResult, RuntimeHost,
     STALE_RUN_GRACE_SECONDS, TaskAutomationUpdate, TaskHost, TaskReadHost, TaskWriteHost,
     execution_working_directory, execution_working_directory_with_task, input_workspace_path,
     redact_attempt_outcome,

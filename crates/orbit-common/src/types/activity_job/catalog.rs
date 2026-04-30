@@ -252,6 +252,7 @@ fn resolve_step(step: &mut JobV2Step, catalog: &V2ActivityCatalog) -> Result<(),
                     default_input: None,
                     timeout_seconds: 0,
                     session: None,
+                    role: None,
                 }),
             );
             let JobV2StepBody::TargetRef(r) = old else {
@@ -304,5 +305,6 @@ fn resolve_ref(
         default_input: r.default_input,
         timeout_seconds: r.timeout_seconds,
         session: r.session,
+        role: r.role,
     })
 }

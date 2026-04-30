@@ -5,6 +5,7 @@
 //! engine's executor infrastructure and to the loop-engine audit pipeline.
 
 pub mod agent_loop_driver;
+pub mod agent_role;
 pub mod audit_writer;
 pub mod cli_runner;
 pub mod dispatcher;
@@ -18,6 +19,7 @@ pub use agent_loop_driver::{
     drive_agent_loop, drive_agent_loop_with_session, drive_agent_loop_with_tool_context,
     reset_replay_transport,
 };
+pub use agent_role::{ResolvedAgentSettings, apply_resolved_settings, resolve_agent_settings};
 pub use audit_writer::{V2AuditWriter, WriteError};
 pub use cli_runner::run_cli_backend;
 pub use dispatcher::{

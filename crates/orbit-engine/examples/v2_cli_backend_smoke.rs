@@ -425,6 +425,7 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         backend: Backend::Cli,
         provider: provider.unwrap_or(Provider::Claude),
         wall_clock_timeout_seconds: 30,
+        role: None,
     }
 }
 
@@ -492,12 +493,14 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 backend: Backend::Cli,
                 provider: Provider::Claude,
                 wall_clock_timeout_seconds: 30,
+                role: None,
             }),
             activity_name: None,
             fs_profile: None,
             default_input: None,
             timeout_seconds: 0,
             session: Some("reviewer".to_string()),
+            role: None,
         }),
     };
     let loop_step = JobV2Step {

@@ -10,8 +10,8 @@ pub mod schema_header;
 pub mod tool_allowlist;
 
 pub use activity_v2::{
-    ActivityV2, ActivityV2Spec, AgentLoopSpec, Backend, DeterministicSpec, GroundhogSpec, OnDenial,
-    Provider, ShellSpec,
+    ActivityV2, ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec,
+    GroundhogSpec, OnDenial, Provider, ShellSpec,
 };
 pub use asset_loader::{
     ActivityAsset, AssetLoadError, JobAsset, load_activity_asset, load_job_asset,

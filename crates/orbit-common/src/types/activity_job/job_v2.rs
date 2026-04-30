@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::types::JobScheduleState;
 
-use super::activity_v2::{ActivityV2, ActivityV2Spec};
+use super::activity_v2::{ActivityV2, ActivityV2Spec, AgentRole};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
@@ -179,6 +179,13 @@ pub struct TargetStep {
     /// map (loop body only), conversation history persists across iterations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// Step-level role tag (ADR-029). Wins over the activity-level role on
+    /// `AgentLoopSpec`/`GroundhogSpec` when both are present. The dispatcher
+    /// resolves the effective role to a `(provider, model, backend)` triple
+    /// from `[agent.<role>]` in `config.toml` and overrides the inline values
+    /// on the cloned spec before invoking the runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<AgentRole>,
 }
 
 /// Named target reference — `target: activity:<name>` in YAML. Phase 4
@@ -200,6 +207,10 @@ pub struct TargetRef {
     pub timeout_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// Step-level role carried through to [`TargetStep::role`] when the ref
+    /// is resolved against the workspace catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<AgentRole>,
 }
 
 /// Retry modifier (§4.1). Applied per-step wrapper; counts re-runs of the
@@ -319,4 +330,54 @@ const fn default_backoff_cap_ms() -> u64 {
 
 const fn default_max_workers() -> u32 {
     4
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_step_yaml_carries_step_level_role() {
+        let yaml = r#"
+id: my_step
+role: implementer
+spec:
+  type: agent_loop
+  instruction: hi
+"#;
+        let parsed: JobV2Step = serde_yaml::from_str(yaml).expect("parse step");
+        let JobV2StepBody::Target(target) = parsed.body else {
+            panic!("expected inline target body, got {:?}", parsed.body);
+        };
+        assert_eq!(target.role, Some(AgentRole::Implementer));
+    }
+
+    #[test]
+    fn target_ref_yaml_carries_step_level_role() {
+        let yaml = r#"
+id: my_step
+role: planner
+target: activity:something
+"#;
+        let parsed: JobV2Step = serde_yaml::from_str(yaml).expect("parse step");
+        let JobV2StepBody::TargetRef(target_ref) = parsed.body else {
+            panic!("expected target ref body, got {:?}", parsed.body);
+        };
+        assert_eq!(target_ref.role, Some(AgentRole::Planner));
+    }
+
+    #[test]
+    fn target_step_yaml_without_role_defaults_to_none() {
+        let yaml = r#"
+id: my_step
+spec:
+  type: agent_loop
+  instruction: hi
+"#;
+        let parsed: JobV2Step = serde_yaml::from_str(yaml).expect("parse step");
+        let JobV2StepBody::Target(target) = parsed.body else {
+            panic!("expected inline target body, got {:?}", parsed.body);
+        };
+        assert_eq!(target.role, None);
+    }
 }

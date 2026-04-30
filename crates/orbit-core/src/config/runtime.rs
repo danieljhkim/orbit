@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -11,7 +11,8 @@ use regex::Regex;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
-    RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig, RawTaskSection,
+    RawAgentRoleConfig, RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig,
+    RawTaskSection,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -38,6 +39,10 @@ pub(crate) struct RuntimeConfig {
     /// extraction regex (T20260426-0507). Validated at load time; raw source
     /// string only (avoids forcing an `orbit-knowledge` dep on `orbit-core`).
     pub(crate) task_id_pattern: Option<String>,
+    /// `[agent.<role>]` role-keyed overrides written by `orbit init` per
+    /// ADR-027 and consumed at v2 dispatch time per ADR-029. Empty when no
+    /// `[agent.*]` block is present.
+    pub(crate) agent_roles: BTreeMap<String, RawAgentRoleConfig>,
 }
 
 impl Default for RuntimeConfig {
@@ -57,6 +62,7 @@ impl RuntimeConfig {
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
             task_id_pattern: None,
+            agent_roles: BTreeMap::new(),
         }
     }
 
@@ -152,6 +158,8 @@ impl RuntimeConfig {
             })
             .transpose()?;
 
+        let agent_roles = parsed.agent.clone().unwrap_or_default();
+
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_raw(
                 parsed.execution.clone().and_then(|v| v.env),
@@ -165,6 +173,7 @@ impl RuntimeConfig {
             graph_editing,
             v2_backend,
             task_id_pattern,
+            agent_roles,
         })
     }
 

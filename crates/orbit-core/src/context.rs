@@ -163,6 +163,9 @@ pub(crate) struct OrbitRuntimeSettings {
     v2_backend: Option<String>,
     /// Workspace-configured task-ID extraction regex (T20260426-0507).
     task_id_pattern: Option<String>,
+    /// `[agent.<role>]` overrides written by `orbit init` (ADR-027) and
+    /// consumed at v2 dispatch time (ADR-029).
+    agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
 }
 
 impl OrbitRuntimeSettings {
@@ -176,6 +179,7 @@ impl OrbitRuntimeSettings {
         graph_editing: bool,
         v2_backend: Option<String>,
         task_id_pattern: Option<String>,
+        agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
     ) -> Self {
         Self {
             persistence,
@@ -186,6 +190,7 @@ impl OrbitRuntimeSettings {
             graph_editing,
             v2_backend,
             task_id_pattern,
+            agent_roles,
         }
     }
 
@@ -195,6 +200,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn task_id_pattern(&self) -> Option<&str> {
         self.task_id_pattern.as_deref()
+    }
+
+    pub(crate) fn agent_role(&self, role: &str) -> Option<&crate::config::RawAgentRoleConfig> {
+        self.agent_roles.get(role)
     }
 }
 
@@ -294,6 +303,13 @@ impl OrbitContext {
     /// means callers should use the Orbit default.
     pub(crate) fn task_id_pattern(&self) -> Option<&str> {
         self.runtime.task_id_pattern()
+    }
+
+    /// `[agent.<role>]` lookup written by `orbit init` and consumed at v2
+    /// dispatch time (ADR-029). `None` means no `[agent.<role>]` block was
+    /// present for this role name.
+    pub(crate) fn agent_role(&self, role: &str) -> Option<&crate::config::RawAgentRoleConfig> {
+        self.runtime.agent_role(role)
     }
 }
 

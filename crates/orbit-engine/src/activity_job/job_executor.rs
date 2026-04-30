@@ -40,6 +40,7 @@ use crate::job_runner::evaluate_bool_expr;
 use crate::template::{self, TemplateContext};
 
 use super::agent_loop_driver::drive_agent_loop_with_session;
+use super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::audit_writer::{V2AuditWriter, WriteError};
 use super::dispatcher::{
     DispatchError, V2DispatchInput, V2RuntimeHost, dispatch_v2_activity,
@@ -732,8 +733,15 @@ fn run_target(
     let tctx = ctx.template_ctx();
     let rendered_input = render_input(t.default_input.as_ref(), &ctx.input, &tctx)?;
 
+    // Role override (ADR-029) — `step.role` (TargetStep) wins over
+    // `activity.role` (AgentLoopSpec) when both are set. We only need to
+    // synthesize a substitute spec when the matched arm is AgentLoop *and*
+    // an effective role is present.
+    let role_override = role_overridden_spec(t, ctx);
     match (&t.spec, &t.session) {
-        (ActivityV2Spec::AgentLoop(agent_spec), Some(binding)) => {
+        (ActivityV2Spec::AgentLoop(inline_spec), Some(binding)) => {
+            let agent_spec_owned = role_override.clone();
+            let agent_spec = agent_spec_owned.as_ref().unwrap_or(inline_spec);
             // Sessions only bind in HTTP mode; the loader rejects `loop +
             // session + cli` via `validate_job_loop_session_backends`, but we
             // also guard structurally here in case a flat (non-loop) target
@@ -777,13 +785,19 @@ fn run_target(
                 ctx,
             )
         }
-        (ActivityV2Spec::AgentLoop(_agent_spec), None) => {
+        (ActivityV2Spec::AgentLoop(_inline_spec), None) => {
             // Route through the backend-aware dispatcher so a step with
             // `backend: cli` lands on the CLI runner rather than the HTTP
-            // driver.
+            // driver. When an effective role is present, swap the spec for
+            // the resolver-overridden one before dispatch so the runner sees
+            // `[agent.<role>]` values instead of inline ones.
+            let dispatched_spec_storage = role_override
+                .as_ref()
+                .map(|spec| ActivityV2Spec::AgentLoop(spec.clone()));
+            let dispatched_spec = dispatched_spec_storage.as_ref().unwrap_or(&t.spec);
             let dispatch = dispatch_v2_activity(V2DispatchInput {
                 activity_name: &step.id,
-                spec: &t.spec,
+                spec: dispatched_spec,
                 fs_profile: t.fs_profile.as_deref(),
                 input: rendered_input.clone(),
                 audit: ctx.audit.clone(),
@@ -889,6 +903,22 @@ fn run_agent_loop_outcome(
 
 fn replay_active() -> bool {
     std::env::var("ORBIT_V2_REPLAY").is_ok() || std::env::var("ORBIT_V2_REPLAY_FIXTURE").is_ok()
+}
+
+/// Build a role-overridden clone of an [`AgentLoopSpec`] when the step or
+/// inline activity declares a role and the host has a matching
+/// `[agent.<role>]` entry. Returns `None` for non-`AgentLoop` specs and for
+/// the path where no effective role is set — the caller can then dispatch
+/// against the inline spec without paying for a clone.
+fn role_overridden_spec(t: &TargetStep, ctx: &ExecCtx<'_>) -> Option<AgentLoopSpec> {
+    let ActivityV2Spec::AgentLoop(inline_spec) = &t.spec else {
+        return None;
+    };
+    let effective_role = t.role.or(inline_spec.role)?;
+    let resolved = resolve_agent_settings(effective_role, ctx.host, inline_spec);
+    let mut spec = inline_spec.clone();
+    apply_resolved_settings(&mut spec, &resolved);
+    Some(spec)
 }
 
 fn render_input(
@@ -2157,6 +2187,7 @@ spec:
                     default_input: None,
                     timeout_seconds: 0,
                     session: None,
+                    role: None,
                 }),
             }],
         }
@@ -2427,5 +2458,275 @@ spec:
             self.fields
                 .insert(field.name().to_string(), format!("{value:?}"));
         }
+    }
+
+    // ----- Role override regression tests (ADR-029, T20260428-12) ---------
+
+    use orbit_common::types::activity_job::{
+        AgentLoopSpec, AgentRole, Backend, OnDenial, Provider,
+    };
+    use std::sync::Mutex as RoleHostMutex;
+
+    use crate::AgentRoleConfig;
+
+    use super::role_overridden_spec;
+
+    /// Minimal `V2RuntimeHost` mock used only by the role-override tests.
+    /// Records every `agent_role_config` lookup so tests can assert the
+    /// dispatcher consulted the right role, and otherwise refuses every
+    /// other dispatch path so a stray dispatch surfaces immediately.
+    struct RoleHost {
+        config: HashMap<AgentRole, AgentRoleConfig>,
+        observed: RoleHostMutex<Vec<AgentRole>>,
+    }
+
+    impl RoleHost {
+        fn new(config: HashMap<AgentRole, AgentRoleConfig>) -> Self {
+            Self {
+                config,
+                observed: RoleHostMutex::new(Vec::new()),
+            }
+        }
+
+        fn observed_lookups(&self) -> Vec<AgentRole> {
+            self.observed.lock().expect("observed lock").clone()
+        }
+    }
+
+    impl V2RuntimeHost for RoleHost {
+        fn run_deterministic(
+            &self,
+            _action: &str,
+            _config: &Value,
+            _input: &Value,
+            _tool_context: orbit_tools::ToolContext,
+        ) -> Result<Value, DispatchError> {
+            Err(DispatchError::DeterministicActionNotRegistered(
+                "role host: not used".into(),
+            ))
+        }
+
+        fn api_key_for(&self, _provider: &str) -> Result<String, DispatchError> {
+            Err(DispatchError::AgentLoopFailed(
+                "role host: no credentials".into(),
+            ))
+        }
+
+        fn resolve_cli_executor(
+            &self,
+            _provider: &str,
+        ) -> Result<super::super::dispatcher::ResolvedCliExecutor, DispatchError> {
+            Err(DispatchError::CliInvocationFailed(
+                "role host: no CLI mapping".into(),
+            ))
+        }
+
+        fn tool_context_for_activity(
+            &self,
+            _fs_profile: Option<&str>,
+            _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        ) -> orbit_tools::ToolContext {
+            orbit_tools::ToolContext::default()
+        }
+
+        fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
+            self.observed.lock().expect("observed lock").push(role);
+            self.config.get(&role).cloned()
+        }
+    }
+
+    fn inline_agent_loop_spec() -> AgentLoopSpec {
+        AgentLoopSpec {
+            instruction: "inline".to_string(),
+            tools: Vec::new(),
+            on_denial: OnDenial::Terminate,
+            model: Some("claude-opus-4-7".to_string()),
+            max_iterations: 1,
+            backend: Backend::Cli,
+            provider: Provider::Claude,
+            wall_clock_timeout_seconds: 30,
+            role: None,
+        }
+    }
+
+    fn target_step_with_role(spec: AgentLoopSpec, role: Option<AgentRole>) -> super::TargetStep {
+        super::TargetStep {
+            spec: super::ActivityV2Spec::AgentLoop(spec),
+            activity_name: None,
+            fs_profile: None,
+            default_input: None,
+            timeout_seconds: 0,
+            session: None,
+            role,
+        }
+    }
+
+    fn role_host_for_implementer_codex() -> RoleHost {
+        let mut map = HashMap::new();
+        map.insert(
+            AgentRole::Implementer,
+            AgentRoleConfig {
+                provider: Some(Provider::Codex),
+                model: None,
+                backend: None,
+            },
+        );
+        RoleHost::new(map)
+    }
+
+    fn exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> super::ExecCtx<'a> {
+        let writer = test_writer("run-role-override");
+        super::ExecCtx {
+            run_id: "run-role-override".to_string(),
+            audit: std::sync::Arc::new(writer),
+            host,
+            input: json!({}),
+            pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            recovery_activity: None,
+            item: None,
+            iteration: None,
+        }
+    }
+
+    #[test]
+    fn role_override_pulls_provider_from_host_for_step_role() {
+        let host = role_host_for_implementer_codex();
+        let ctx = exec_ctx(&host);
+        let target = target_step_with_role(inline_agent_loop_spec(), Some(AgentRole::Implementer));
+
+        let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+        assert_eq!(overridden.provider, Provider::Codex);
+        // Field-by-field fallback: model and backend stay inline.
+        assert_eq!(overridden.model.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(overridden.backend, Backend::Cli);
+        assert_eq!(host.observed_lookups(), vec![AgentRole::Implementer]);
+    }
+
+    #[test]
+    fn role_override_step_role_wins_over_activity_role() {
+        let host = role_host_for_implementer_codex();
+        let ctx = exec_ctx(&host);
+        // Activity declares Planner, but the step declares Implementer —
+        // step wins.
+        let mut spec = inline_agent_loop_spec();
+        spec.role = Some(AgentRole::Planner);
+        let target = target_step_with_role(spec, Some(AgentRole::Implementer));
+
+        let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+        assert_eq!(overridden.provider, Provider::Codex);
+        // Only Implementer was looked up; Planner was never queried.
+        assert_eq!(host.observed_lookups(), vec![AgentRole::Implementer]);
+    }
+
+    #[test]
+    fn role_override_falls_back_to_activity_role_when_step_role_absent() {
+        let host = role_host_for_implementer_codex();
+        let ctx = exec_ctx(&host);
+        let mut spec = inline_agent_loop_spec();
+        spec.role = Some(AgentRole::Implementer);
+        let target = target_step_with_role(spec, None);
+
+        let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+        assert_eq!(overridden.provider, Provider::Codex);
+        assert_eq!(host.observed_lookups(), vec![AgentRole::Implementer]);
+    }
+
+    #[test]
+    fn role_override_returns_none_when_no_role_anywhere() {
+        let host = role_host_for_implementer_codex();
+        let ctx = exec_ctx(&host);
+        let target = target_step_with_role(inline_agent_loop_spec(), None);
+
+        // Inline activity role is also None — no override should be built and
+        // the host should not be queried at all.
+        assert!(role_overridden_spec(&target, &ctx).is_none());
+        assert!(host.observed_lookups().is_empty());
+    }
+
+    #[test]
+    fn role_override_returns_none_when_host_has_no_matching_entry() {
+        // Host returns Some(empty AgentRoleConfig) → resolver still falls back
+        // to inline values for every field, but `role_overridden_spec` clones
+        // and applies, leaving the spec semantically equal to the inline one.
+        // For the "no entry" case we simulate via an empty host map.
+        let host = RoleHost::new(HashMap::new());
+        let ctx = exec_ctx(&host);
+        let target = target_step_with_role(inline_agent_loop_spec(), Some(AgentRole::Reviewer));
+
+        let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+        assert_eq!(overridden.provider, Provider::Claude);
+        assert_eq!(overridden.model.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(overridden.backend, Backend::Cli);
+        assert_eq!(host.observed_lookups(), vec![AgentRole::Reviewer]);
+    }
+
+    #[test]
+    fn role_override_does_not_apply_to_non_agent_loop_specs() {
+        let host = role_host_for_implementer_codex();
+        let ctx = exec_ctx(&host);
+        // A deterministic target with a step-level role is meaningless for
+        // dispatch but must not panic or reach the role host.
+        let target = super::TargetStep {
+            spec: super::ActivityV2Spec::Deterministic(DeterministicSpec {
+                action: "noop".to_string(),
+                config: Value::Null,
+            }),
+            activity_name: None,
+            fs_profile: None,
+            default_input: None,
+            timeout_seconds: 0,
+            session: None,
+            role: Some(AgentRole::Implementer),
+        };
+        assert!(role_overridden_spec(&target, &ctx).is_none());
+        assert!(host.observed_lookups().is_empty());
+    }
+
+    /// Replay short-circuit regression (AC #9). The override is applied
+    /// before session creation, so `replay_active()` must continue to see
+    /// the env var and return `true` regardless of the override.
+    #[test]
+    fn role_override_does_not_disable_replay_short_circuit() {
+        // Use a unique env var name to avoid stomping other tests; we restore
+        // it on drop.
+        struct EnvGuard {
+            key: &'static str,
+            prior: Option<String>,
+        }
+        impl EnvGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                let prior = std::env::var(key).ok();
+                // SAFETY: tests touching env vars must coordinate; we use a
+                // dedicated key and restore on drop, and replay_active() is
+                // a pure read of two specific keys so no other thread races
+                // it for the duration of this test.
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+                Self { key, prior }
+            }
+        }
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                // SAFETY: see EnvGuard::set.
+                unsafe {
+                    match &self.prior {
+                        Some(value) => std::env::set_var(self.key, value),
+                        None => std::env::remove_var(self.key),
+                    }
+                }
+            }
+        }
+
+        let _guard = EnvGuard::set("ORBIT_V2_REPLAY", "1");
+        let host = role_host_for_implementer_codex();
+        let ctx = exec_ctx(&host);
+        let target = target_step_with_role(inline_agent_loop_spec(), Some(AgentRole::Implementer));
+
+        let overridden = role_overridden_spec(&target, &ctx).expect("override expected");
+        assert_eq!(overridden.provider, Provider::Codex);
+        // Replay short-circuit still triggers — independent of the override.
+        assert!(super::replay_active());
     }
 }

@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
     AuditEventStatus, ExecutorSandboxKind, ExecutorType, ResolvedFsProfile, Role, TaskStatus,
     TaskType, UNRESTRICTED_FS_PROFILE, prune_missing_context_files,
@@ -23,7 +24,9 @@ use orbit_common::utility::selector::canonical_selector_in_workspace;
 use orbit_engine::activity_job::{
     DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost,
 };
-use orbit_engine::{EnvironmentHost, StateExecutionContext, execute_deterministic_action};
+use orbit_engine::{
+    AgentRoleConfig, EnvironmentHost, StateExecutionContext, execute_deterministic_action,
+};
 use orbit_store::{AuditEventInsertParams, InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ToolContext};
 use serde_json::Value;
@@ -808,6 +811,10 @@ impl V2RuntimeHost for OrbitRuntime {
         }
 
         Ok(())
+    }
+
+    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
+        EnvironmentHost::agent_role_config(self, role)
     }
 
     fn api_key_for(&self, provider: &str) -> Result<String, DispatchError> {

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (ADR-028 added)
+**Last updated:** 2026-04-30 (ADR-029 added)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -366,7 +366,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 - The default-config.toml asset documents the schema as a commented block; users who skipped prompts can drop in their own values without re-running init.
 - Cost: until [T20260428-12] lands, the values written to `config.toml` are inert — they round-trip but do not influence dispatch. Reviewers and users should treat the documented behaviour as half-shipped during this window.
 
-**Follow-up.** [T20260428-12] consumes `[agent.<role>]` at dispatch time: adds `role: Option<AgentRole>` to `AgentLoopSpec`/`GroundhogSpec`/`TargetStep`, introduces a resolver behind `EnvironmentHost::agent_role_config`, and applies the resolved `(provider, model, backend)` to the cloned activity spec before dispatch.
+**Follow-up.** Landed as [ADR-029](#adr-029--agentrole-config-overrides-inline-agentloop-settings-at-dispatch) ([T20260428-12]).
 
 ## ADR-028 — Job-level recovery activity handles retry-exhausted step errors
 
@@ -384,6 +384,31 @@ This ADR log records the decisions that define the current Activity / Job substr
 - Workflows get a bounded remediation point without making retry semantics unbounded.
 - Recovery activities use the existing activity dispatch, audit, run-trace, and policy plumbing.
 - Cost: job authors must make the recovery activity generic enough for every retryable step in that job.
+
+## ADR-029 — `[agent.<role>]` config overrides inline `agent_loop` settings at dispatch
+
+**Status:** Accepted · 2026-04 · [T20260428-12]
+
+**Context.** ADR-027 ([T20260428-9]) shipped the writer half of per-role agent settings: `orbit init` collects provider/backend/model per role and persists them to `[agent.<role>]` blocks in `config.toml`. Until now nothing read those values — they round-tripped on disk but had no effect on dispatch. The follow-up needed to wire the values through to `agent_loop` dispatch without forcing every YAML author to know the per-role mapping inline, and without leaking provider-credential or config-source concerns into `orbit-common`.
+
+**Decision.** Tag activities and job steps with an optional `AgentRole` and let the engine override the inline `(provider, model, backend)` triple from `[agent.<role>]` at dispatch time. Specifically:
+
+1. `AgentRole` (`Reviewer | Implementer | Planner`, serde lowercase) lives in `orbit-common` so `orbit-common` specs and `orbit-core` config both reference the same closed-set enum.
+2. `AgentLoopSpec` and `GroundhogSpec` carry `role: Option<AgentRole>`; `TargetStep` and `TargetRef` carry the same field at the step level. `TargetRef → TargetStep` resolution preserves the role.
+3. `EnvironmentHost::agent_role_config(role) -> Option<AgentRoleConfig>` is the host seam (with default `None`). The same method is mirrored on `V2RuntimeHost` because the v2 dispatcher receives only `&dyn V2RuntimeHost`, and forcing every test/example mock to also implement `EnvironmentHost`'s six unrelated env-config methods would have a much wider blast radius. orbit-core implements both methods by reading from `RawRuntimeConfig.agent` and parsing string fields into the typed `Provider`/`Backend` enums; unrecognized strings yield `None` for that field with a warn-log.
+4. The resolver `resolve_agent_settings(role, host, &inline)` in `orbit-engine::activity_job::agent_role` collapses the host's optional `AgentRoleConfig` against the inline activity values field-by-field. Each of `provider`, `model`, and `backend` independently falls back to the inline value when the corresponding role-config field is absent.
+5. At dispatch in `crate::activity_job::job_executor::run_target`, `step.role.or(activity.role)` selects the effective role. When `Some`, the executor clones the inline `AgentLoopSpec`, applies the resolver output in place, and dispatches with the cloned spec. The override is applied in both AgentLoop branches — session-bound and non-session — and runs **before** the `replay_active()` short-circuit so HTTP replay continues to switch the Session provider to `"replay"` regardless of any role-driven override.
+
+**Precedence.** Per field: `[agent.<role>].<field>` from `config.toml` if present, else the inline value on the activity. Per scope: step-level `role:` on `TargetStep` wins over activity-level `role:` on `AgentLoopSpec`. An activity or step without any role declaration dispatches with inline values unchanged — a regression-tested no-op path.
+
+**Out of scope.** An env-var override layer (e.g. `ORBIT_AGENT_IMPLEMENTER_PROVIDER=...`) is intentionally deferred. Per-step-type role inference (e.g. "all `agent_review` steps default to `Reviewer`") is also deferred; today the role tag is opt-in and explicit.
+
+**Consequences.**
+- `orbit init`-written role preferences now have effect at dispatch without any YAML edits — a workspace can flip `[agent.implementer].provider` and every `role: implementer` step picks it up on the next run.
+- Activities can stay role-tagged without committing to a particular provider, which makes the seeded YAML reusable across workspaces with different provider stacks.
+- The resolver is pure and field-by-field, so partial role-config (e.g. only `provider`) does not silently overwrite a model the activity author chose deliberately.
+- Cost: dispatch now has one more clone-and-mutate path per role-tagged step. The same role might get queried multiple times within one job run; if that ever shows up in profiles, memoize at the executor level rather than in the host trait.
+- Cost: the `V2RuntimeHost` seam now has a method that is purely a config-config concern. Tests that build their own mock host get a free `None` default, but a host that wants to exercise the override path has to opt in explicitly.
 
 ---
 
@@ -421,6 +446,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260428-8]** — Add workflow-specific task admission for task-starting workflows.
 - **[T20260428-9]** — `orbit init` writes per-role agent settings to `[agent.<role>]` in `config.toml`.
+- **[T20260428-12]** — Wire `[agent.<role>]` config into `agent_loop` dispatch via the `role:` field and a host-backed resolver.
 - **[T20260430-9]** — Add a job-level recovery activity hook for retry-exhausted v2 step failures.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

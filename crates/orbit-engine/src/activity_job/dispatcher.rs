@@ -5,8 +5,10 @@ use std::time::Instant;
 
 use orbit_common::types::activity_job::V2AuditEventKind;
 use orbit_common::types::activity_job::{
-    ActivityV2Spec, AgentLoopSpec, Backend, DeterministicSpec, ShellSpec,
+    ActivityV2Spec, AgentLoopSpec, AgentRole, Backend, DeterministicSpec, ShellSpec,
 };
+
+use crate::context::AgentRoleConfig;
 use orbit_common::types::{
     ExecutorSandboxKind, InvocationTrace, OrbitError, ResolvedFsProfile, TokenUsage, ToolCallTrace,
 };
@@ -114,6 +116,17 @@ pub trait V2RuntimeHost: Send + Sync {
         _trace: &InvocationTrace,
     ) -> Result<(), DispatchError> {
         Ok(())
+    }
+
+    /// Resolve `[agent.<role>]` from the active workspace's `config.toml`.
+    /// Mirrors [`crate::context::EnvironmentHost::agent_role_config`]; the
+    /// engine's job dispatcher receives only `&dyn V2RuntimeHost`, so this
+    /// method is the seam dispatch consults at run time. Default returns
+    /// `None`, which makes the resolver fall through to inline activity
+    /// values (preserving pre-ADR-029 dispatch behaviour for tests and other
+    /// hosts that have no role-config layer).
+    fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
+        None
     }
 }
 
