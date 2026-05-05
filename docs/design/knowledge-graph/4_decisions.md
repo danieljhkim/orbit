@@ -385,6 +385,22 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
+## ADR-025 — Pack favors prompt-time responsiveness over inline refresh
+
+**Status:** Accepted · 2026-05 · [T20260505-5]
+**Author:** gpt-5.5
+
+**Context.** Agents use `orbit.graph.pack` at the start of execution to turn task context selectors into prompt material. Letting that call trigger an unbounded inline graph refresh can make the selector-first workflow appear hung, with no partial selector results or timeout hint.
+
+**Decision.** Make `orbit.graph.pack` read the existing graph snapshot by default and return an `auto_refresh.skipped` diagnostic that names the explicit refresh path. Add a `refresh: true` opt-in for callers that accept a potentially slow inline refresh, and add `timeout_ms` so selector projection can return unresolved entries for selectors not reached before the budget expires.
+
+**Consequences.**
+- Context-gathering agents get prompt-visible guidance instead of a silent rebuild when the snapshot is stale.
+- Timed-out pack calls can still return the selectors already projected plus unresolved entries for the remainder.
+- Cost: default pack reads can be stale until a separate `orbit graph build` or an opt-in refresh updates the branch ref.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -421,6 +437,7 @@ Tasks cited by ADRs above:
 - **[T20260428-3]** — Expose the full read-only graph tool set through the MCP safe surface for Codex and Gemini.
 - **[T20260430-22]** — Compact the knowledge-graph design docs and fold the obsolete evidence log into ADR-018.
 - **[T20260505-1]** — Require auto-refresh freshness checks to materialize missing current-branch graph refs before returning fresh.
+- **[T20260505-5]** — Bound `orbit.graph.pack` selector gathering and skip inline refresh by default.
 - **[T20260505-11]** — Add TypeScript and TSX classification, extraction, graph search/pack coverage, and symbol-level history attribution.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

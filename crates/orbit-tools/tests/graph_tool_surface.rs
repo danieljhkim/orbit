@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use orbit_common::types::OrbitError;
 use orbit_knowledge::graph::object_store::RefName;
@@ -629,6 +630,85 @@ fn pack_defaults_to_summary_without_leaf_bodies() {
 }
 
 #[test]
+fn pack_timeout_returns_unresolved_entries_for_unprocessed_selectors() {
+    let impl_leaf = leaf_node(
+        "src/runtime.rs",
+        "AgentRuntimeImpl",
+        LeafKind::Impl,
+        "impl AgentRuntime for CodexRuntime {\n    fn run(&self) {}\n}\n",
+    );
+    let fixture = write_graph_fixture(graph_with_root(
+        vec![attach_leaf(
+            file_node("src/runtime.rs", "rust", Some("rs"), vec![]),
+            &impl_leaf,
+        )],
+        vec![impl_leaf],
+    ));
+
+    let response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({
+            "selectors": [
+                "symbol:src/runtime.rs#AgentRuntimeImpl:impl",
+                "file:src/runtime.rs"
+            ],
+            "timeout_ms": 0
+        }),
+    );
+
+    assert_eq!(response["timeout"]["timeout_ms"], 0);
+    assert_eq!(response["timeout"]["processed_selectors"], 0);
+    assert_eq!(response["timeout"]["total_selectors"], 2);
+    assert_eq!(response["total_nodes"], 0);
+    assert_eq!(
+        response["unresolved_selectors"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(response["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(response["entries"][0]["kind"], "unresolved");
+    assert!(
+        response["entries"][0]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("timed out")
+    );
+}
+
+#[test]
+fn pack_skips_inline_refresh_by_default_with_diagnostic() {
+    let impl_leaf = leaf_node(
+        "src/runtime.rs",
+        "AgentRuntimeImpl",
+        LeafKind::Impl,
+        "impl AgentRuntime for CodexRuntime {\n    fn run(&self) {}\n}\n",
+    );
+    let fixture = write_graph_fixture(graph_with_root(
+        vec![attach_leaf(
+            file_node("src/runtime.rs", "rust", Some("rs"), vec![]),
+            &impl_leaf,
+        )],
+        vec![impl_leaf],
+    ));
+    init_git_repo(fixture.path());
+
+    let response = execute_graph_tool_unpinned(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({"selectors":["symbol:src/runtime.rs#AgentRuntimeImpl:impl"]}),
+    );
+
+    assert_eq!(response["diagnostics"]["auto_refresh"]["status"], "skipped");
+    assert!(
+        response["diagnostics"]["auto_refresh"]["remediation"]
+            .as_str()
+            .unwrap()
+            .contains("refresh: true")
+    );
+    assert_eq!(response["entries"][0]["kind"], "leaf");
+}
+
+#[test]
 fn pack_rejects_invalid_selector_shapes() {
     let impl_leaf = leaf_node(
         "src/runtime.rs",
@@ -658,6 +738,65 @@ fn pack_rejects_invalid_selector_shapes() {
     .unwrap_err()
     .to_string();
     assert!(object_shape.contains("`selectors` must be a string or array of strings"));
+
+    let timeout_shape = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({"selectors":["symbol:src/runtime.rs#AgentRuntimeImpl:impl"],"timeout_ms":"15s"}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(timeout_shape.contains("`timeout_ms` must be a non-negative integer"));
+
+    let refresh_shape = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.pack",
+        json!({"selectors":["symbol:src/runtime.rs#AgentRuntimeImpl:impl"],"refresh":"yes"}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(refresh_shape.contains("`refresh` must be a boolean"));
+}
+
+#[test]
+fn pack_schema_exposes_timeout_and_refresh_controls() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.graph.pack")
+        .expect("pack schema registered");
+    let timeout = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "timeout_ms")
+        .expect("timeout_ms parameter present");
+    assert!(!timeout.required);
+    assert_eq!(timeout.param_type, "number");
+
+    let refresh = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "refresh")
+        .expect("refresh parameter present");
+    assert!(!refresh.required);
+    assert_eq!(refresh.param_type, "boolean");
+}
+
+fn execute_graph_tool_unpinned(repo_root: &Path, tool_name: &str, input: Value) -> Value {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    registry
+        .execute(
+            tool_name,
+            &ToolContext {
+                workspace_root: Some(repo_root.to_path_buf()),
+                ..ToolContext::default()
+            },
+            input,
+        )
+        .unwrap_or_else(|error| panic!("tool `{tool_name}` failed: {error}"))
 }
 
 fn execute_graph_tool(repo_root: &Path, tool_name: &str, input: Value) -> Value {
@@ -708,6 +847,19 @@ fn write_repo_file(repo_root: &Path, rel: &str, content: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, content).unwrap();
+}
+
+fn init_git_repo(repo_root: &Path) {
+    let output = Command::new("git")
+        .args(["init", "-b", GRAPH_REF])
+        .current_dir(repo_root)
+        .output()
+        .expect("run git init");
+    assert!(
+        output.status.success(),
+        "git init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn write_graph_fixture(graph: CodebaseGraphV1) -> TempDir {

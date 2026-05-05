@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use serde_json::Value;
 
 use crate::error::KnowledgeError;
@@ -5,16 +7,40 @@ use crate::selector::Selector;
 
 use super::KnowledgeStore;
 use super::graph_io::{extract_leaf_source, read_graph_object};
-use super::types::{KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry};
+use super::types::{KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry, KnowledgePackTimeout};
 
 const FILE_SOURCE_HINT: &str = "File selectors return metadata only. Use `orbit.graph.show` or `symbol:` selectors when you need source.";
+const SELECTOR_TIMEOUT_HINT: &str = "Selector packing timed out before this selector was resolved; retry with a larger `timeout_ms` or read this selector directly.";
 
 impl KnowledgeStore {
     pub fn pack(&self, selectors: &[Selector]) -> Result<KnowledgePack, KnowledgeError> {
+        self.pack_with_timeout(selectors, None)
+    }
+
+    pub fn pack_with_timeout(
+        &self,
+        selectors: &[Selector],
+        timeout_ms: Option<u64>,
+    ) -> Result<KnowledgePack, KnowledgeError> {
         let mut entries = Vec::with_capacity(selectors.len());
         let mut unresolved_selectors = Vec::new();
+        let timeout = timeout_ms.map(Duration::from_millis);
+        let started_at = Instant::now();
+        let mut timed_out_after = None;
 
-        for selector in selectors {
+        for (index, selector) in selectors.iter().enumerate() {
+            if timeout.is_some_and(|timeout| started_at.elapsed() >= timeout) {
+                timed_out_after = Some(index);
+                for remaining in &selectors[index..] {
+                    let selector_string = remaining.to_string();
+                    unresolved_selectors.push(selector_string.clone());
+                    let mut entry = unresolved_entry(selector_string);
+                    entry.hint = Some(SELECTOR_TIMEOUT_HINT.to_string());
+                    entries.push(entry);
+                }
+                break;
+            }
+
             let selector_string = selector.to_string();
             let Some(node_id) = self.selector_index.get(&selector.lookup_key()).cloned() else {
                 unresolved_selectors.push(selector_string.clone());
@@ -65,10 +91,17 @@ impl KnowledgeStore {
         }
 
         let total_nodes = entries.iter().filter(|entry| entry.resolved).count();
+        let timeout = timed_out_after.map(|processed_selectors| KnowledgePackTimeout {
+            timeout_ms: timeout_ms.unwrap_or_default(),
+            processed_selectors,
+            total_selectors: selectors.len(),
+            hint: SELECTOR_TIMEOUT_HINT.to_string(),
+        });
         Ok(KnowledgePack {
             knowledge_dir: self.knowledge_dir.display().to_string(),
             manifest_generated_at: self.manifest.generated_at.clone(),
             unresolved_selectors,
+            timeout,
             total_nodes,
             entries,
         })

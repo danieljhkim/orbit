@@ -2,11 +2,14 @@ use orbit_common::types::{
     OrbitError, ToolParam, ToolSchema, optional_string, optional_string_list_alias,
 };
 use orbit_knowledge::{Selector, TaskGraphService};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{Tool, ToolContext};
 
 pub struct OrbitKnowledgePackTool;
+
+const DEFAULT_PACK_TIMEOUT_MS: u64 = 15_000;
+const MAX_PACK_TIMEOUT_MS: u64 = 300_000;
 
 impl Tool for OrbitKnowledgePackTool {
     fn schema(&self) -> ToolSchema {
@@ -25,6 +28,18 @@ impl Tool for OrbitKnowledgePackTool {
                 ToolParam {
                     name: "summary".to_string(),
                     description: "Default true; drop leaf bodies.".to_string(),
+                    param_type: "boolean".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "timeout_ms".to_string(),
+                    description: "Maximum selector-packing time in milliseconds. Default 15000; returns partial unresolved selector entries on timeout.".to_string(),
+                    param_type: "number".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "refresh".to_string(),
+                    description: "Default false; use the existing graph snapshot instead of doing an inline auto-refresh. Set true only when a potentially slow refresh is acceptable.".to_string(),
                     param_type: "boolean".to_string(),
                     required: false,
                 },
@@ -48,16 +63,27 @@ impl Tool for OrbitKnowledgePackTool {
             .get("summary")
             .and_then(Value::as_bool)
             .unwrap_or(true);
+        let selector_timeout_ms = parse_timeout_ms(&input)?;
+        let refresh = parse_refresh(&input)?;
         let knowledge_dir = super::knowledge_write::resolve_knowledge_dir(ctx, &input)?;
         let explicit_ref = super::optional_string(&input, "ref")?;
+        let explicit_knowledge_dir = super::has_explicit_knowledge_dir(&input);
+        let skip_auto_refresh = !refresh || explicit_knowledge_dir;
         let service =
             TaskGraphService::new(knowledge_dir, super::knowledge_write::task_graph_scope(ctx));
-        let pack = service.pack_json(
+        let mut pack = service.pack_json(
             &selectors,
             ctx.workspace_root.as_deref(),
-            super::has_explicit_knowledge_dir(&input),
+            skip_auto_refresh,
             explicit_ref.as_deref(),
+            Some(selector_timeout_ms),
         )?;
+        add_refresh_diagnostics(
+            &mut pack,
+            refresh,
+            explicit_ref.as_deref(),
+            explicit_knowledge_dir,
+        );
 
         Ok(if summary {
             summarize_pack_json(pack)
@@ -86,6 +112,63 @@ fn parse_selector_strings(input: &Value) -> Result<Vec<String>, OrbitError> {
         ));
     }
     Ok(selectors)
+}
+
+fn parse_timeout_ms(input: &Value) -> Result<u64, OrbitError> {
+    let Some(value) = input.get("timeout_ms") else {
+        return Ok(DEFAULT_PACK_TIMEOUT_MS);
+    };
+    if value.is_null() {
+        return Ok(DEFAULT_PACK_TIMEOUT_MS);
+    }
+    let Some(timeout_ms) = value.as_u64() else {
+        return Err(OrbitError::InvalidInput(
+            "`timeout_ms` must be a non-negative integer".to_string(),
+        ));
+    };
+    if timeout_ms > MAX_PACK_TIMEOUT_MS {
+        return Err(OrbitError::InvalidInput(format!(
+            "`timeout_ms` must be <= {MAX_PACK_TIMEOUT_MS}"
+        )));
+    }
+    Ok(timeout_ms)
+}
+
+fn parse_refresh(input: &Value) -> Result<bool, OrbitError> {
+    let Some(value) = input.get("refresh") else {
+        return Ok(false);
+    };
+    if value.is_null() {
+        return Ok(false);
+    }
+    value
+        .as_bool()
+        .ok_or_else(|| OrbitError::InvalidInput("`refresh` must be a boolean".to_string()))
+}
+
+fn add_refresh_diagnostics(
+    pack: &mut Value,
+    refresh: bool,
+    explicit_ref: Option<&str>,
+    explicit_knowledge_dir: bool,
+) {
+    if refresh || explicit_ref.is_some() || explicit_knowledge_dir {
+        return;
+    }
+    let Some(obj) = pack.as_object_mut() else {
+        return;
+    };
+
+    obj.insert(
+        "diagnostics".to_string(),
+        json!({
+            "auto_refresh": {
+                "status": "skipped",
+                "reason": "orbit.graph.pack reads the existing graph snapshot by default so selector gathering returns promptly.",
+                "remediation": "Run `orbit graph build` for an explicit refresh, or pass `refresh: true` when an inline refresh is acceptable."
+            }
+        }),
+    );
 }
 
 fn summarize_pack_json(mut pack: Value) -> Value {

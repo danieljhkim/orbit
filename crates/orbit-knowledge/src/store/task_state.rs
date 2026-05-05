@@ -118,6 +118,7 @@ pub fn pack_from_working_graph(
         knowledge_dir: knowledge_dir.display().to_string(),
         manifest_generated_at: String::new(),
         unresolved_selectors,
+        timeout: None,
         total_nodes,
         entries,
     }

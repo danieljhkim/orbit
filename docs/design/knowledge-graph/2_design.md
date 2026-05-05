@@ -150,7 +150,7 @@ All tool inputs that reference a node accept a selector string.
 | Implementors | `trait_implementors(trait)` | [T20260412-0645-3] |
 | Dependencies | `crate_dependencies(crate)` | [T20260412-0645-3] |
 | Lineage | `render_lineage_pack(selector)` | — |
-| Pack | `pack_json(...)` | Agent-friendly field projection ships in the same era as [T20260411-0424] |
+| Pack | `pack_json(...)` | Agent-friendly field projection ships in the same era as [T20260411-0424]; selector packing is bounded and prompt-first by default after [T20260505-5] |
 
 All services are read-only against a resolved snapshot. Graph mutation code remains internal/deferred; the current public surface does not expose graph write tools.
 
@@ -196,6 +196,8 @@ The knowledge graph is exposed through `orbit-mcp` as a stable, read-only tool s
 
 An explicit `ref` means "read the stored graph for this ref." It does not trigger a rebuild against whatever branch is currently checked out, and it does not overlay task-local working-graph edits onto that explicit historical ref. That is a subtle but load-bearing rule for historical queries.
 
+`orbit.graph.pack` optimizes for the agent context-gathering path. It reads the existing graph snapshot by default instead of starting an inline auto-refresh, and returns an `auto_refresh.skipped` diagnostic with remediation guidance. Callers that deliberately want the old inline refresh path pass `refresh: true`. The packer also accepts `timeout_ms` (default 15000) for selector projection; when the budget is exhausted between selectors, remaining selectors are returned as unresolved entries with timeout hints rather than withholding all results ([T20260505-5]).
+
 ### 4.3 Activity interaction
 
 Activities use graph tools for inspection and prompt assembly only. Code-mutating workflows coordinate before dispatch with task `context_files` and `orbit.task.locks.reserve` preflight guards, then rely on optimistic integration/review checks to catch stale or overlapping edits. Activities that only read query the service directly.
@@ -233,7 +235,7 @@ Hunk-to-symbol mapping uses line-range overlap against the symbol span *at the c
 
 ### 6.4 The graph is a snapshot, not a stream
 
-Queries answer "what does this branch look like as of the last build." Public file edits are stale relative to the graph until the next refresh; deferred/internal working-graph mutations are the only path that can model mid-edit state. `ensure_fresh` narrows the gap but does not close it — a read right after an external edit and before a debounce window elapses can return pre-edit results.
+Queries answer "what does this branch look like as of the last build." Public file edits are stale relative to the graph until the next refresh; deferred/internal working-graph mutations are the only path that can model mid-edit state. `ensure_fresh` narrows the gap but does not close it — a read right after an external edit and before a debounce window elapses can return pre-edit results. `orbit.graph.pack` is intentionally more conservative than the other read tools: it skips inline refresh by default so task context selection cannot disappear into a rebuild without prompt-visible timeout guidance ([T20260505-5]).
 
 ### 6.5 Branch-scoped refs do not solve worktree-local reads
 
@@ -289,5 +291,6 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 - **[T20260428-1]** — Align graph task-ID attribution/search with current unpadded task IDs.
 - **[T20260430-22]** — Compact the knowledge-graph design docs and remove duplicate top-level narrative.
 - **[T20260505-11]** — Add TypeScript and TSX extraction coverage, documented by gpt-5.5.
+- **[T20260505-5]** — Bound `orbit.graph.pack` selector gathering and skip inline refresh by default, documented by gpt-5.5.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

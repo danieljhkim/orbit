@@ -45,6 +45,7 @@ impl TaskGraphService {
         workspace_root: Option<&Path>,
         explicit_knowledge_dir: bool,
         explicit_ref: Option<&str>,
+        selector_timeout_ms: Option<u64>,
     ) -> Result<Value, OrbitError> {
         if explicit_ref.is_none() {
             self.maybe_refresh_knowledge_graph(workspace_root, explicit_knowledge_dir);
@@ -67,7 +68,7 @@ impl TaskGraphService {
                 read_target.fallback.as_ref(),
                 read_target.default.as_ref(),
             )?;
-            store.pack(selectors)
+            store.pack_with_timeout(selectors, selector_timeout_ms)
         };
 
         let pack = match pack_result() {

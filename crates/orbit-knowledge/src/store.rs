@@ -30,7 +30,10 @@ pub use task_state::{
     load_task_working_graph, overlay_pack_with_working_graph, pack_from_working_graph,
     save_task_working_graph, task_working_graph_state_path,
 };
-pub use types::{KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry, LeafData, SymbolSummary};
+pub use types::{
+    KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry, KnowledgePackTimeout, LeafData,
+    SymbolSummary,
+};
 
 use graph_io::{GraphIndexFile, ManifestFile};
 
