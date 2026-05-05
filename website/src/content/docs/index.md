@@ -6,7 +6,7 @@ tableOfContents: false
 
 <section class="orbit-hero">
   <div class="orbit-hero-copy">
-    <div class="orbit-hero-eyebrow">v0.4 · early access</div>
+    <div class="orbit-hero-eyebrow">v0.3 · early access</div>
     <h1 class="orbit-hero-headline">An agent runtime for engineering work.</h1>
     <p class="orbit-hero-lede">Define a task, attach activities, dispatch agents in parallel. Every run is replayable and bounded by policies you wrote — with OS-level <code>sandbox-exec</code> isolation on macOS.</p>
     <div class="orbit-hero-install">
