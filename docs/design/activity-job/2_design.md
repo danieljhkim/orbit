@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-05
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -317,6 +317,10 @@ This path stays separate from `orbit.task.update` and generic deterministic meta
 
 Planning-duel writeback now reports `task_status: "in-progress"` instead of `status_unchanged`; the plan artifact still lands through `planning_duel_resolved`.
 
+### 8.11 Task PR handoff summaries
+
+`task_pr_pipeline` sends the selected task IDs to `pr_open` as `completed_task_ids`. Before `pr_open` pushes or creates the pull request, the deterministic action reloads each task record, checks that the task still belongs to the batch, confirms it can enter review, and requires a meaningful persisted `execution_summary` for every completed task. Empty, whitespace-only, and explicit placeholder summaries fail the PR step with an error naming the task id; generated default PR bodies also omit placeholder summary details blocks. When callers pass a non-empty `body`, `pr_open` preserves that body verbatim after the same durable-summary guard passes. This handoff contract was tightened in [T20260430-31].
+
 ---
 
 ## 9. Filesystem Policy and `fsProfile`
@@ -448,5 +452,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260430-26]** — Release task-gate reservations after terminal child shipment runs and expose active reservations through the lock view.
 - **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 - **[T20260430-30]** — Make `ship-auto` default text output human-readable while preserving JSON fields.
+- **[T20260430-31]** — Require populated execution summaries before opening task PRs.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (ADR-034 text output clarified)
+**Last updated:** 2026-05-05 (ADR-036 task PR summaries)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -472,6 +472,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - Operators can distinguish task-held locks from reservation-held locks without reading raw SQLite state.
 - Cost: `task_gate_pipeline` now relies on the dynamic `task_{{ input.mode }}_pipeline` job-name convention, so future gate modes must either follow that naming convention or refactor the dispatch selector.
 
+## ADR-036 — Task PRs require durable execution summaries
+
+**Status:** Accepted · 2026-05 · [T20260430-31]
+
+**Context.** `task_pr_pipeline` generated pull request bodies from persisted task records, but `pr_open` could still create a PR with an empty or placeholder `Execution Summary` disclosure. That made reviewer handoff look complete while forcing reviewers to reconstruct implementation results from logs or history.
+
+**Decision.** Treat each completed task's persisted `execution_summary` as required PR handoff data. `pr_open` reloads every `completed_task_ids` task, rejects empty, whitespace-only, and explicit placeholder summaries before creating the PR, and preserves non-empty caller-provided `body` text only after that durable-summary guard passes. Generated default PR bodies render summary details blocks only for meaningful summaries.
+
+**Consequences.**
+- A task-shipment PR cannot be opened until every participating task has a durable implementation handoff on the task record.
+- Multi-task bundles include one populated summary per completed task in generated PR bodies.
+- Cost: manual or custom-body shipment paths must still persist task summaries before opening the PR, even when the caller already prepared a complete body.
+
 ---
 
 ## Task References
@@ -518,5 +531,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260430-26]** — Release task-gate reservations after terminal child shipment runs and expose active reservations through the lock view.
 - **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 - **[T20260430-30]** — Make `ship-auto` default text output human-readable while preserving JSON fields.
+- **[T20260430-31]** — Require populated execution summaries before opening task PRs.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
