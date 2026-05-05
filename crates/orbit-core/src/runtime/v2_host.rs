@@ -184,13 +184,13 @@ impl V2RuntimeHost for OrbitRuntime {
                 }))
             }
             // Materialize the workspace backlog for auto-dispatch.
-            // Filters `status: backlog`, excludes `type: friction`
-            // (per CLAUDE.md: friction is reserved for agent self-reports,
-            // not shippable work), and in automatic mode drops any backlog
-            // task group whose context overlaps files already held by
-            // `in-progress`/`review` tasks. Sorts critical → high → medium →
-            // low then by `created_at` ascending so older high-priority work
-            // ships first. Caps at `max_tasks` (default 50).
+            // Filters by `status: backlog`; accepted friction reports keep
+            // `type: friction` and ship like other backlog tasks, while
+            // untriaged `status: friction` reports remain absent. In automatic
+            // mode, drops any backlog task group whose context overlaps files
+            // already held by `in-progress`/`review` tasks. Sorts critical →
+            // high → medium → low then by `created_at` ascending so older
+            // high-priority work ships first. Caps at `max_tasks` (default 50).
             "list_backlog_tasks" => {
                 let max_tasks = input
                     .get("max_tasks")
@@ -221,9 +221,7 @@ impl V2RuntimeHost for OrbitRuntime {
                     let lock_holders = active_task_lock_holders(task_lookup.values());
                     let mut backlog: Vec<Task> = all_tasks
                         .into_iter()
-                        .filter(|task| {
-                            task.status == TaskStatus::Backlog && !task.task_type.is_friction()
-                        })
+                        .filter(|task| task.status == TaskStatus::Backlog)
                         .collect();
                     backlog.sort_by(|a, b| {
                         let rank = |p: orbit_common::types::TaskPriority| match p {
@@ -1489,6 +1487,30 @@ mod tests {
             .expect("seed task")
     }
 
+    fn seed_accepted_friction_task(
+        runtime: &OrbitRuntime,
+        title: &str,
+        priority: TaskPriority,
+        context_files: Vec<&str>,
+    ) -> Task {
+        let report = seed_list_backlog_task(
+            runtime,
+            title,
+            TaskStatus::Friction,
+            priority,
+            TaskType::Friction,
+            None,
+            context_files,
+        );
+        runtime
+            .approve_task(
+                &report.id,
+                Some("Accepted friction report.".to_string()),
+                None,
+            )
+            .expect("accept friction task")
+    }
+
     fn list_backlog_tasks(runtime: &OrbitRuntime, input: Value) -> Value {
         runtime
             .run_deterministic(
@@ -1559,6 +1581,67 @@ mod tests {
             ])
         );
         assert_eq!(output["excluded"], json!([]));
+    }
+
+    #[test]
+    fn list_backlog_tasks_includes_accepted_friction_reports() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/friction/src/lib.rs");
+        let friction = seed_accepted_friction_task(
+            &runtime,
+            "Accepted friction",
+            TaskPriority::Medium,
+            vec!["crates/friction/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(output["task_count"], json!(1));
+        assert_eq!(output["task_ids"], json!([friction.id]));
+        assert_eq!(output["bundles"], json!([[friction.id]]));
+        assert_eq!(
+            output["tasks"],
+            json!([{
+                "id": friction.id,
+                "title": "Accepted friction",
+                "type": "friction",
+                "priority": "medium",
+                "context_files": friction.context_files,
+                "parent_id": null
+            }])
+        );
+        assert_eq!(output["excluded"], json!([]));
+    }
+
+    #[test]
+    fn list_backlog_tasks_omits_untriaged_friction_reports() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/friction/src/lib.rs");
+        let friction = seed_list_backlog_task(
+            &runtime,
+            "Untriaged friction",
+            TaskStatus::Friction,
+            TaskPriority::Medium,
+            TaskType::Friction,
+            None,
+            vec!["crates/friction/src/lib.rs"],
+        );
+        let friction_id = friction.id.clone();
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(output["task_count"], json!(0));
+        assert_eq!(output["task_ids"], json!([]));
+        assert_eq!(output["tasks"], json!([]));
+        assert_eq!(output["bundles"], json!([]));
+        assert_eq!(output["excluded"], json!([]));
+        assert!(
+            output["task_ids"]
+                .as_array()
+                .expect("task_ids")
+                .iter()
+                .all(|task_id| task_id != &json!(friction_id))
+        );
     }
 
     #[test]
@@ -1695,7 +1778,46 @@ mod tests {
     }
 
     #[test]
-    fn list_backlog_tasks_does_not_report_friction_tasks_as_excluded() {
+    fn list_backlog_tasks_reports_accepted_friction_context_lock_conflicts() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/friction/src/lib.rs");
+        let locking = seed_list_backlog_task(
+            &runtime,
+            "Locking task",
+            TaskStatus::InProgress,
+            TaskPriority::Medium,
+            TaskType::Task,
+            None,
+            vec!["crates/friction/src/lib.rs"],
+        );
+        let friction = seed_accepted_friction_task(
+            &runtime,
+            "Accepted friction",
+            TaskPriority::Medium,
+            vec!["crates/friction/src/lib.rs"],
+        );
+
+        let output = list_backlog_tasks(&runtime, json!({}));
+
+        assert_eq!(output["task_count"], json!(0));
+        assert_eq!(output["task_ids"], json!([]));
+        assert_eq!(output["tasks"], json!([]));
+        assert_eq!(output["bundles"], json!([]));
+        assert_eq!(
+            output["excluded"],
+            json!([{
+                "id": friction.id,
+                "reason": "context_lock_conflict",
+                "conflicts": [{
+                    "requested_file": friction.context_files[0],
+                    "locking_task_id": locking.id
+                }]
+            }])
+        );
+    }
+
+    #[test]
+    fn list_backlog_tasks_does_not_report_untriaged_friction_tasks_as_excluded() {
         let (_root, runtime, repo_root) = runtime_with_workspace_layout();
         write_workspace_file(&repo_root, "crates/foo/src/lib.rs");
         let locking = seed_list_backlog_task(

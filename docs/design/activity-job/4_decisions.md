@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-05 (ADR-036 task PR summaries)
+**Last updated:** 2026-05-05 (ADR-037 accepted friction backlog admission)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -442,7 +442,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 **Consequences.**
 - Auto-dispatch traces now contain a durable pre-gate reason for lock-overlap exclusions without changing the existing `task_count`, `task_ids`, `tasks`, or `bundles` fields.
-- The output deliberately does not attribute friction filtering or `max_tasks` truncation, keeping `excluded` scoped to context-lock behavior.
+- The output deliberately does not attribute status-based admission or `max_tasks` truncation, keeping `excluded` scoped to context-lock behavior.
 - Cost: the Rust serializer and seeded activity YAML schema now duplicate the exclusion shape and must be kept in sync.
 
 ## ADR-034 — `ship-auto` reports operator workflow status from durable pipeline state
@@ -484,6 +484,19 @@ This ADR log records the decisions that define the current Activity / Job substr
 - A task-shipment PR cannot be opened until every participating task has a durable implementation handoff on the task record.
 - Multi-task bundles include one populated summary per completed task in generated PR bodies.
 - Cost: manual or custom-body shipment paths must still persist task summaries before opening the PR, even when the caller already prepared a complete body.
+
+## ADR-037 — Accepted friction reports enter auto-backlog by status
+
+**Status:** Accepted · 2026-05 · [T20260505-2]
+
+**Context.** Friction reports keep `type: friction` for lifecycle history and friction-bounty accounting even after triage accepts them into `status: backlog`. `list_backlog_tasks` previously filtered automatic mode by both `status: backlog` and `type != friction`, so accepted friction work could only ship through explicit task IDs or manual paths.
+
+**Decision.** Make automatic `list_backlog_tasks` admission status-only: `status: backlog` tasks are candidates regardless of type, while untriaged `status: friction` reports remain absent because they are not backlog. Accepted friction reports participate in the same context-lock exclusion pass as any other backlog task, and explicit `task_ids` override mode remains unchanged.
+
+**Consequences.**
+- Accepted friction work can move through `task_auto_pipeline` without losing its `type: friction` audit and scoreboard identity.
+- The `excluded` array remains scoped to context-lock conflicts; it reports accepted friction tasks only when they are otherwise admitted backlog candidates and overlap active locks.
+- Cost: reviewers must read friction eligibility as a status rule, not a task-type rule.
 
 ---
 
@@ -532,5 +545,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 - **[T20260430-30]** — Make `ship-auto` default text output human-readable while preserving JSON fields.
 - **[T20260430-31]** — Require populated execution summaries before opening task PRs.
+- **[T20260505-2]** — Admit accepted backlog friction reports in automatic backlog listing.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

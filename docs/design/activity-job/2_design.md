@@ -125,7 +125,7 @@ Some module comments still describe older phase ordering; the authoritative beha
 
 Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. The CLI-backed recovery agent receives only the executor-provided recovery keys, inspects the failed step, makes bounded repairs when safe, and returns before the executor's single post-recovery attempt. Higher-level orchestration workflows do not enable the hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action.
 
-The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; friction filtering and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2].
+The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`, including accepted friction reports whose `type` remains `friction`, while untriaged `status: friction` reports stay out. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2] and the friction admission rule was updated in [T20260505-2].
 
 `task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation remains active for the whole child run, so another gate run with overlapping selectors continues to receive a `reservation` conflict while the child is running. After `invoke_and_wait` returns a terminal child-run status (`succeeded`, `failed`, or `cancelled`), the seeded deterministic `release_locks` activity calls `orbit.task.locks.release` with the recorded reservation id. A wait-side `timeout` does not release the reservation because the child run may still be active; the original TTL remains the abandoned/crashed-run cleanup path. This lifecycle was tightened in [T20260430-26].
 
@@ -453,5 +453,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
 - **[T20260430-30]** — Make `ship-auto` default text output human-readable while preserving JSON fields.
 - **[T20260430-31]** — Require populated execution summaries before opening task PRs.
+- **[T20260505-2]** — Admit accepted backlog friction reports in automatic backlog listing.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

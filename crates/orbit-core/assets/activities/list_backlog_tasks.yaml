@@ -7,12 +7,13 @@ spec:
   description: >
     Materialize the current workspace backlog as an ordered task list for
     the auto-pipeline. In automatic mode it
-    filters to `status: backlog`, excludes `type: friction` (per CLAUDE.md,
-    friction is reserved for agent self-reports, not shippable work), and
+    filters to `status: backlog`, including accepted friction reports whose
+    `type` remains `friction` while leaving untriaged `status: friction`
+    reports out, and
     drops any backlog parent/subtask group whose `context_files` overlap the
     active task-lock surface from `in-progress` or `review` tasks. Automatic
     mode includes an `excluded` array that attributes those pre-gate lock
-    exclusions; it does not report friction filtering or `max_tasks`
+    exclusions; it does not report status-based admission or `max_tasks`
     truncation. Explicit `task_ids` input is treated as an override, skips
     conflict filtering, and omits `excluded`.
     Sorts critical → high → medium → low, then by `created_at` ascending so
