@@ -12,6 +12,7 @@
 /// Supported source-code languages with tree-sitter extractors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Language {
+    C,
     Rust,
     Python,
     Go,
@@ -25,6 +26,7 @@ pub enum Language {
 impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext {
+            "c" | "h" => Some(Self::C),
             "rs" => Some(Self::Rust),
             "py" => Some(Self::Python),
             "go" => Some(Self::Go),
@@ -41,6 +43,7 @@ impl Language {
 
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::C => "c",
             Self::Rust => "rust",
             Self::Python => "python",
             Self::Go => "go",
@@ -128,6 +131,8 @@ mod tests {
 
     #[test]
     fn from_extension_classifies_code() {
+        assert_eq!(FileKind::from_extension("c"), FileKind::Code(Language::C));
+        assert_eq!(FileKind::from_extension("h"), FileKind::Code(Language::C));
         assert_eq!(
             FileKind::from_extension("rs"),
             FileKind::Code(Language::Rust)
@@ -187,6 +192,7 @@ mod tests {
         );
         assert_eq!(FileKind::from_extension("ts").as_str(), "typescript");
         assert_eq!(FileKind::from_extension("tsx").as_str(), "tsx");
+        assert_eq!(FileKind::from_extension("h").as_str(), "c");
         assert_eq!(FileKind::from_extension("rb").as_str(), "ruby");
     }
 

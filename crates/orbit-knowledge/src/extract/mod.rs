@@ -9,6 +9,7 @@
 //! dispatch under `FileKind::Code(Language)` without changing extractor
 //! internals.
 
+mod c;
 mod common;
 mod config;
 mod go;
@@ -28,6 +29,7 @@ pub use common::{
 };
 pub use language::{ConfigFormat, DocFormat, FileKind, Language, TableFormat};
 
+use c::CExtractor;
 use config::ConfigExtractor;
 use go::GoExtractor;
 use java::JavaExtractor;
@@ -59,6 +61,7 @@ impl ExtractorRegistry {
     pub fn new() -> Self {
         Self {
             extractors: vec![
+                Box::new(CExtractor),
                 Box::new(RustExtractor),
                 Box::new(PythonExtractor),
                 Box::new(RubyExtractor),

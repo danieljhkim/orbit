@@ -43,11 +43,11 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ## ADR-003 — Tree-sitter extractors over an LSP backend
 
-**Status:** Accepted · 2026-04 · [T20260406-0455-3], [T20260416-0352], [T20260505-11], [T20260505-15]
+**Status:** Accepted · 2026-04 · [T20260406-0455-3], [T20260416-0352], [T20260505-11], [T20260505-15], [T20260505-16]
 
-**Context.** Reference resolution is strongest via a language server, but LSPs are stateful long-running processes tuned for interactive UX. Agent tools want bulk, structured, token-budgeted output and low lifecycle overhead. The Rust extractor landed first ([T20260406-0455-3], hardened in [T20260409-0550]); Go, Java, and JavaScript followed in [T20260416-0352], TypeScript/TSX followed in [T20260505-11], and Ruby followed in [T20260505-15].
+**Context.** Reference resolution is strongest via a language server, but LSPs are stateful long-running processes tuned for interactive UX. Agent tools want bulk, structured, token-budgeted output and low lifecycle overhead. The Rust extractor landed first ([T20260406-0455-3], hardened in [T20260409-0550]); Go, Java, and JavaScript followed in [T20260416-0352], TypeScript/TSX followed in [T20260505-11], Ruby followed in [T20260505-15], and C followed in [T20260505-16].
 
-**Decision.** Use tree-sitter grammars with per-language extractors (`rust`, `python`, `go`, `java`, `javascript`, `typescript`, `tsx`, `ruby`) producing structural symbols only. Defer cross-file reference resolution indefinitely. See [3_vision.md §1.1] for the open question of re-introducing LSP as a pluggable backend.
+**Decision.** Use tree-sitter grammars with per-language extractors (`c`, `rust`, `python`, `go`, `java`, `javascript`, `typescript`, `tsx`, `ruby`) producing structural symbols only. Defer cross-file reference resolution indefinitely. See [3_vision.md §1.1] for the open question of re-introducing LSP as a pluggable backend.
 
 **Consequences.**
 - Fast, deterministic extraction with no per-query process lifecycle.
@@ -399,6 +399,20 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - Timed-out pack calls can still return the selectors already projected plus unresolved entries for the remainder.
 - Cost: default pack reads can be stale until a separate `orbit graph build` or an opt-in refresh updates the branch ref.
 
+## ADR-026 — C source and headers share one extractor
+
+**Status:** Accepted · 2026-05 · [T20260505-16]
+**Author:** gpt-5
+
+**Context.** C source and header files use the same grammar, and the graph layer classifies files by language rather than by downstream role. Function prototypes are common in `.h` files but can also appear in `.c` files.
+
+**Decision.** Classify both `.c` and `.h` as `Language::C` and route both through the `tree-sitter-c` extractor. Emit function definitions as `function` leaves and prototypes as `function_declaration` leaves so callers can distinguish declarations without header/source inference; add explicit leaf kinds for C macros and globals instead of collapsing them into functions.
+
+**Consequences.**
+- Agents can search C systems code and headers through the same graph surface.
+- The extractor stays syntax-only and avoids guessing whether a header is public, private, generated, or included.
+- Cost: `.h` files that are C++-shaped are treated as C until a separate C++ classifier/extractor lands.
+
 ---
 
 ## Task References
@@ -440,5 +454,6 @@ Tasks cited by ADRs above:
 - **[T20260505-5]** — Bound `orbit.graph.pack` selector gathering and skip inline refresh by default.
 - **[T20260505-11]** — Add TypeScript and TSX classification, extraction, graph search/pack coverage, and symbol-level history attribution.
 - **[T20260505-15]** — Add Ruby classification, tree-sitter extraction, graph search coverage, and Ruby symbol kinds.
+- **[T20260505-16]** — Add C and header classification, tree-sitter extraction, and graph search coverage.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

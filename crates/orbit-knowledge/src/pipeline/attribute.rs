@@ -888,6 +888,10 @@ mod tests {
     fn leaf_kind_to_str_matches_extractor_lowercase() {
         assert_eq!(leaf_kind_to_str(&LeafKind::Function), "function");
         assert_eq!(
+            leaf_kind_to_str(&LeafKind::FunctionDeclaration),
+            "function_declaration"
+        );
+        assert_eq!(
             leaf_kind_to_str(&LeafKind::SingletonMethod),
             "singleton_method"
         );
@@ -897,6 +901,8 @@ mod tests {
             "singleton_class"
         );
         assert_eq!(leaf_kind_to_str(&LeafKind::Constant), "constant");
+        assert_eq!(leaf_kind_to_str(&LeafKind::Global), "global");
+        assert_eq!(leaf_kind_to_str(&LeafKind::Macro), "macro");
         assert_eq!(leaf_kind_to_str(&LeafKind::Trait), "trait");
     }
 

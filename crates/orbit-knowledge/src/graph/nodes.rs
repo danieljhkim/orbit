@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum LeafKind {
     Function,
+    FunctionDeclaration,
     Method,
     SingletonMethod,
     Class,
@@ -22,6 +23,8 @@ pub enum LeafKind {
     Trait,
     Impl,
     Field,
+    Global,
+    Macro,
     Constant,
     Module,
     /// Markdown ATX heading (`#`–`######`). `depth` is 1–6. Added T20260422-1540.
@@ -39,6 +42,7 @@ impl fmt::Display for LeafKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Self::Function => "function",
+            Self::FunctionDeclaration => "function_declaration",
             Self::Method => "method",
             Self::SingletonMethod => "singleton_method",
             Self::Class => "class",
@@ -50,6 +54,8 @@ impl fmt::Display for LeafKind {
             Self::Trait => "trait",
             Self::Impl => "impl",
             Self::Field => "field",
+            Self::Global => "global",
+            Self::Macro => "macro",
             Self::Constant => "constant",
             Self::Module => "module",
             Self::Section { .. } => "section",

@@ -564,6 +564,7 @@ fn apply_extracted_file(ctx: &mut PipelineContext, file_idx: usize, extracted: E
 fn parse_leaf_kind(s: &str, depth: Option<u8>) -> LeafKind {
     match s {
         "function" => LeafKind::Function,
+        "function_declaration" => LeafKind::FunctionDeclaration,
         "method" => LeafKind::Method,
         "singleton_method" => LeafKind::SingletonMethod,
         "class" => LeafKind::Class,
@@ -575,6 +576,8 @@ fn parse_leaf_kind(s: &str, depth: Option<u8>) -> LeafKind {
         "trait" => LeafKind::Trait,
         "impl" => LeafKind::Impl,
         "field" => LeafKind::Field,
+        "global" => LeafKind::Global,
+        "macro" => LeafKind::Macro,
         "constant" => LeafKind::Constant,
         "module" => LeafKind::Module,
         "section" => LeafKind::Section {
