@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
 use rmcp::ErrorData as McpError;
@@ -21,14 +22,67 @@ use crate::error::tool_error_result;
 /// fans into the host's synchronous executor via [`tokio::task::spawn_blocking`]
 /// because Orbit tool implementations issue blocking filesystem, git, and
 /// SQLite calls.
+///
+/// Orbit's canonical tool names use dots (`orbit.task.add`), but several MCP
+/// clients (Cursor, VS Code) reject names containing characters outside
+/// `[a-z0-9_-]` and refuse to load the tool. The adapter sanitizes names by
+/// replacing dots with underscores when advertising over MCP and translates
+/// inbound `tools/call` names back to canonical form before dispatch. The
+/// `name_map` is rebuilt from the host on every `tools/list` and refreshed
+/// lazily on a `tools/call` cache miss so legacy dotted names from older
+/// clients still dispatch correctly.
 pub struct OrbitToolServer {
     host: Arc<dyn McpHost>,
+    name_map: RwLock<HashMap<String, String>>,
 }
 
 impl OrbitToolServer {
     pub fn new(host: Arc<dyn McpHost>) -> Self {
-        Self { host }
+        Self {
+            host,
+            name_map: RwLock::new(HashMap::new()),
+        }
     }
+
+    fn refresh_name_map(&self, schemas: &[ToolSchema]) {
+        let map = build_name_map(schemas);
+        if let Ok(mut guard) = self.name_map.write() {
+            *guard = map;
+        }
+    }
+
+    fn canonical_name(&self, advertised: &str) -> String {
+        if let Ok(guard) = self.name_map.read()
+            && let Some(name) = guard.get(advertised)
+        {
+            return name.clone();
+        }
+        let schemas = self.host.list_tool_schemas();
+        let map = build_name_map(&schemas);
+        let resolved = map.get(advertised).cloned();
+        if let Ok(mut guard) = self.name_map.write() {
+            *guard = map;
+        }
+        resolved.unwrap_or_else(|| advertised.to_string())
+    }
+}
+
+/// Sanitize an Orbit tool name into the character set MCP clients accept.
+///
+/// Cursor enforces `[a-zA-Z0-9_]` and VS Code enforces `[a-z0-9_-]`. Replacing
+/// `.` with `_` keeps Orbit's existing names within the intersection of both
+/// rule sets without renaming any internal canonical identifier.
+fn sanitize_tool_name(name: &str) -> String {
+    name.replace('.', "_")
+}
+
+fn build_name_map(schemas: &[ToolSchema]) -> HashMap<String, String> {
+    let mut map = HashMap::with_capacity(schemas.len());
+    for schema in schemas {
+        let advertised = sanitize_tool_name(&schema.name);
+        map.insert(advertised, schema.name.clone());
+    }
+    map
 }
 
 impl ServerHandler for OrbitToolServer {
@@ -51,6 +105,7 @@ impl ServerHandler for OrbitToolServer {
     ) -> Result<ListToolsResult, McpError> {
         let mut schemas = self.host.list_tool_schemas();
         schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        self.refresh_name_map(&schemas);
         let tools = schemas.into_iter().map(schema_to_tool).collect();
         Ok(ListToolsResult::with_all_items(tools))
     }
@@ -60,14 +115,15 @@ impl ServerHandler for OrbitToolServer {
         req: CallToolRequestParams,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let name = req.name.to_string();
+        let inbound = req.name.to_string();
+        let canonical = self.canonical_name(&inbound);
         let input = req
             .arguments
             .map(Value::Object)
             .unwrap_or_else(|| Value::Object(Map::new()));
 
         let host = Arc::clone(&self.host);
-        let exec_name = name.clone();
+        let exec_name = canonical.clone();
         let join = tokio::task::spawn_blocking(move || host.call_tool(&exec_name, input)).await;
 
         match join {
@@ -75,7 +131,7 @@ impl ServerHandler for OrbitToolServer {
             Ok(Err(orbit_err)) => Ok(tool_error_result(&orbit_err)),
             Err(join_err) => {
                 let err = OrbitError::Execution(format!(
-                    "tool '{name}' worker panicked or was cancelled: {join_err}"
+                    "tool '{canonical}' worker panicked or was cancelled: {join_err}"
                 ));
                 Ok(tool_error_result(&err))
             }
@@ -86,7 +142,8 @@ impl ServerHandler for OrbitToolServer {
 fn schema_to_tool(schema: ToolSchema) -> Tool {
     let description = schema.description.clone();
     let input_schema = build_input_schema(&schema.name, &schema.parameters);
-    Tool::new(schema.name, description, Arc::new(input_schema))
+    let advertised_name = sanitize_tool_name(&schema.name);
+    Tool::new(advertised_name, description, Arc::new(input_schema))
 }
 
 fn build_input_schema(tool_name: &str, params: &[ToolParam]) -> JsonObject {
@@ -250,6 +307,91 @@ mod tests {
             .as_array()
             .expect("status enum");
         assert!(status_enum.iter().any(|value| value == "friction"));
+    }
+
+    #[test]
+    fn sanitize_tool_name_replaces_dots_with_underscores() {
+        assert_eq!(sanitize_tool_name("orbit.task.add"), "orbit_task_add");
+        assert_eq!(
+            sanitize_tool_name("orbit.task.review_thread.add"),
+            "orbit_task_review_thread_add"
+        );
+        assert_eq!(sanitize_tool_name("orbit_task_add"), "orbit_task_add");
+    }
+
+    #[test]
+    fn build_name_map_keys_are_advertised_names() {
+        let schemas = vec![
+            ToolSchema {
+                name: "orbit.task.add".to_string(),
+                description: String::new(),
+                parameters: Vec::new(),
+                builtin: true,
+            },
+            ToolSchema {
+                name: "orbit.task.review_thread.add".to_string(),
+                description: String::new(),
+                parameters: Vec::new(),
+                builtin: true,
+            },
+        ];
+        let map = build_name_map(&schemas);
+        assert_eq!(
+            map.get("orbit_task_add").map(String::as_str),
+            Some("orbit.task.add")
+        );
+        assert_eq!(
+            map.get("orbit_task_review_thread_add").map(String::as_str),
+            Some("orbit.task.review_thread.add")
+        );
+    }
+
+    struct StubHost {
+        schemas: Vec<ToolSchema>,
+    }
+
+    impl crate::McpHost for StubHost {
+        fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+            self.schemas.clone()
+        }
+
+        fn call_tool(&self, _name: &str, _input: Value) -> Result<Value, OrbitError> {
+            Ok(Value::Null)
+        }
+    }
+
+    #[test]
+    fn canonical_name_translates_advertised_back_to_dotted() {
+        let host = Arc::new(StubHost {
+            schemas: vec![ToolSchema {
+                name: "orbit.task.add".to_string(),
+                description: String::new(),
+                parameters: Vec::new(),
+                builtin: true,
+            }],
+        });
+        let server = OrbitToolServer::new(host);
+        // Cache miss path: refreshes from host on first lookup.
+        assert_eq!(server.canonical_name("orbit_task_add"), "orbit.task.add");
+        // Cache hit path: same answer, served from in-memory map.
+        assert_eq!(server.canonical_name("orbit_task_add"), "orbit.task.add");
+    }
+
+    #[test]
+    fn canonical_name_passes_through_unknown_or_legacy_dotted_names() {
+        let host = Arc::new(StubHost {
+            schemas: vec![ToolSchema {
+                name: "orbit.task.add".to_string(),
+                description: String::new(),
+                parameters: Vec::new(),
+                builtin: true,
+            }],
+        });
+        let server = OrbitToolServer::new(host);
+        // Legacy dotted name from an older client falls through unchanged so
+        // the host's own ToolNotFound handling still runs.
+        assert_eq!(server.canonical_name("orbit.task.add"), "orbit.task.add");
+        assert_eq!(server.canonical_name("totally.unknown"), "totally.unknown");
     }
 
     #[test]
