@@ -124,6 +124,26 @@ pub struct ExpiredTaskReservation {
     pub expired_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskReservationReleaseReason {
+    Explicit,
+    RunTerminal,
+    StaleRunReconciled,
+    TtlExpired,
+}
+
+impl TaskReservationReleaseReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::RunTerminal => "run_terminal",
+            Self::StaleRunReconciled => "stale_run_reconciled",
+            Self::TtlExpired => "ttl_expired",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TaskReservationCheckParams {
     pub workspace_orbit_dir: String,
@@ -143,6 +163,8 @@ pub struct TaskReservationReserveParams {
     pub requested_files: Vec<String>,
     pub actor: String,
     pub ttl_seconds: u32,
+    pub owner_run_id: Option<String>,
+    pub owner_metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,12 +181,15 @@ pub struct TaskReservationReserveResult {
 pub struct TaskReservationReleaseParams {
     pub workspace_orbit_dir: String,
     pub reservation_id: String,
+    pub release_reason: TaskReservationReleaseReason,
+    pub release_metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskReservationReleaseResult {
     pub released: bool,
     pub released_at: Option<String>,
+    pub reservation: Option<ReleasedTaskReservation>,
     pub expired_reservations: Vec<ExpiredTaskReservation>,
 }
 
@@ -176,10 +201,54 @@ pub struct ActiveTaskReservation {
     pub actor: String,
     pub created_at: String,
     pub expires_at: String,
+    pub owner_run_id: Option<String>,
+    pub owner_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasedTaskReservation {
+    pub reservation_id: String,
+    pub task_ids: Vec<String>,
+    pub files: Vec<String>,
+    pub actor: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub released_at: String,
+    pub owner_run_id: Option<String>,
+    pub owner_metadata_json: Option<String>,
+    pub release_reason: TaskReservationReleaseReason,
+    pub release_metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskReservationListResult {
+    pub reservations: Vec<ActiveTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationReleaseByOwnerParams {
+    pub workspace_orbit_dir: String,
+    pub owner_run_id: String,
+    pub release_reason: TaskReservationReleaseReason,
+    pub release_metadata_json: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationReleaseByOwnerResult {
+    pub released_reservations: Vec<ReleasedTaskReservation>,
+    pub expired_reservations: Vec<ExpiredTaskReservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskReservationOwnedConflictsParams {
+    pub workspace_orbit_dir: String,
+    pub requested_files: Vec<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskReservationOwnedConflictsResult {
     pub reservations: Vec<ActiveTaskReservation>,
     pub expired_reservations: Vec<ExpiredTaskReservation>,
 }
@@ -260,6 +329,16 @@ pub trait TaskReservationStoreBackend: Send + Sync {
         &self,
         params: TaskReservationReleaseParams,
     ) -> Result<TaskReservationReleaseResult, OrbitError>;
+
+    fn release_task_reservations_by_owner_run_id(
+        &self,
+        params: TaskReservationReleaseByOwnerParams,
+    ) -> Result<TaskReservationReleaseByOwnerResult, OrbitError>;
+
+    fn list_owned_task_reservation_conflicts(
+        &self,
+        params: TaskReservationOwnedConflictsParams,
+    ) -> Result<TaskReservationOwnedConflictsResult, OrbitError>;
 }
 
 pub trait JobRunStoreBackend: Send + Sync {

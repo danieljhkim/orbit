@@ -223,6 +223,7 @@ pub fn spawn_under_macos_sandbox(
     profile_text: &str,
     program: &str,
     args: &[String],
+    env: &[(String, String)],
     stdin: Stdio,
     stdout: Stdio,
     stderr: Stdio,
@@ -252,6 +253,7 @@ pub fn spawn_under_macos_sandbox(
         .arg(&profile_path)
         .arg(program)
         .args(args)
+        .envs(env.iter().map(|(key, value)| (key, value)))
         .stdin(stdin)
         .stdout(stdout)
         .stderr(stderr);

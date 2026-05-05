@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-05 (ADR-037 accepted friction backlog admission)
+**Last updated:** 2026-05-05 (ADR-039 run-owned task-lock cleanup)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -460,7 +460,7 @@ This ADR log records the decisions that define the current Activity / Job substr
 
 ## ADR-035 — Gate reservations release after terminal child waits
 
-**Status:** Accepted · 2026-04 · [T20260430-26]
+**Status:** Accepted; normal-cleanup rule superseded by ADR-039 · 2026-04 · [T20260430-26]
 
 **Context.** `task_gate_pipeline` used task-lock reservation TTL as both crash cleanup and normal completion cleanup. That kept overlapping gates blocked after a child shipment run had already reached terminal state, turning the 30-minute TTL into artificial queue latency.
 
@@ -511,6 +511,20 @@ This ADR log records the decisions that define the current Activity / Job substr
 - `JobRunCancelled` audit payloads carry previous/final state, actor/source, signal-attempted flag, and signal outcome.
 - Cost: direct in-process job runs still cannot safely self-signal; dashboard cancellation is primarily the durable pipeline-worker/operator path.
 
+## ADR-039 — Run-owned task-lock reservations clean up at owner terminal
+
+**Status:** Accepted · 2026-05 · [T20260505-10]
+
+**Context.** ADR-035 made the seeded gate release path explicit, but correctness still depended on workflow YAML preserving `release_locks`. A stale or workspace-overridden `task_gate_pipeline` could omit that step, letting a completed gate-owned reservation block overlapping work until TTL. Orbit needed the invariant that a reservation owned by a job run does not outlive that owner run.
+
+**Decision.** Persist nullable reservation ownership (`owner_run_id` plus minimal metadata) and treat ownership itself as terminal-cleanup eligibility. `ToolContext` carries trusted reservation-owner metadata from v2 deterministic/agent-loop dispatch and from Orbit-managed CLI subprocess environments; `orbit.task.locks.reserve` ignores caller-supplied owner-looking fields. When a job run finalizes to a terminal state, orbit-core best-effort releases active reservations whose `owner_run_id` exactly matches that run id. The seeded `release_locks` activity remains an early-release optimization, not the correctness mechanism. Reserve pressure also triggers bounded, opportunistic reconciliation for overlapping owned reservations whose owner run is terminal or stale; it is not a background sweeper.
+
+**Consequences.**
+- Parent/child ownership stays precise: a child shipment run cannot release a parent gate run's reservation unless the IDs match.
+- TTL is now only the fallback for unowned/manual reservations, abandoned owned reservations with no terminal/reconciliation trigger, and ordinary expiration.
+- Release audit events stay on the existing task-lock audit surface and distinguish `explicit`, `run_terminal`, `stale_run_reconciled`, and TTL expiration reasons.
+- Cost: job-run finalization and reservation reserve paths are more coupled, so new terminal run paths must route through the cleanup helper rather than writing directly to the job-run store.
+
 ---
 
 ## Task References
@@ -560,5 +574,6 @@ This ADR log records the decisions that define the current Activity / Job substr
 - **[T20260430-31]** — Require populated execution summaries before opening task PRs.
 - **[T20260505-2]** — Admit accepted backlog friction reports in automatic backlog listing.
 - **[T20260505-8]** — Add dashboard/runtime controls to cancel active job runs.
+- **[T20260505-10]** — Release run-owned task lock reservations through engine-owned terminal cleanup and reserve-pressure reconciliation.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

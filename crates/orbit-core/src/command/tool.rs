@@ -7,13 +7,15 @@ use orbit_common::types::{
     normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
 use orbit_store::AuditEventInsertParams;
-use orbit_tools::ToolContext;
+use orbit_tools::{ReservationOwnerContext, ToolContext};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::redact_sensitive_env_text;
 
 pub use crate::runtime::pipeline::DryRunResult;
+
+const ORBIT_MANAGED_RUN_CONTEXT_ENV: &str = "ORBIT_MANAGED_RUN_CONTEXT";
 
 #[derive(Debug, Clone)]
 pub struct ToolInfo {
@@ -147,6 +149,7 @@ impl OrbitRuntime {
                 model_name,
                 workspace_root: None,
                 proc_allowed_programs,
+                reservation_owner: reservation_owner_from_env(),
                 ..Default::default()
             };
             self.run_tool_with_context_and_role(name, input, Role::Admin, tool_context)
@@ -262,6 +265,29 @@ fn resolve_audit_context(input: &Value) -> AuditContext {
             .and_then(Value::as_i64)
             .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
     }
+}
+
+fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
+    let managed_context = std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"));
+    if !managed_context {
+        return None;
+    }
+
+    std::env::var("ORBIT_RUN_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|owner_run_id| ReservationOwnerContext {
+            owner_metadata_json: Some(
+                serde_json::json!({
+                    "source": "orbit_cli",
+                })
+                .to_string(),
+            ),
+            owner_run_id,
+        })
 }
 
 fn read_agent_identity_from_env() -> (Option<String>, Option<String>) {
@@ -847,6 +873,7 @@ mod audit_tests {
         unsafe {
             std::env::remove_var("ORBIT_TASK_ID");
             std::env::remove_var("ORBIT_RUN_ID");
+            std::env::remove_var(ORBIT_MANAGED_RUN_CONTEXT_ENV);
             std::env::remove_var("ORBIT_ACTIVITY_ID");
             std::env::remove_var("ORBIT_STEP_INDEX");
         }
@@ -899,6 +926,40 @@ mod audit_tests {
         clear_audit_context_env();
         let ctx = resolve_audit_context(&json!({ "run_id": "jrun-aliased" }));
         assert_eq!(ctx.job_run_id.as_deref(), Some("jrun-aliased"));
+    }
+
+    #[test]
+    fn reservation_owner_context_ignores_unmanaged_orbit_run_env() {
+        let _g = env_guard();
+        clear_audit_context_env();
+        // SAFETY: tests serialize through `env_guard()` before mutating env.
+        unsafe {
+            std::env::set_var("ORBIT_RUN_ID", "jrun-env-owner");
+        }
+
+        assert_eq!(reservation_owner_from_env(), None);
+        clear_audit_context_env();
+    }
+
+    #[test]
+    fn reservation_owner_context_comes_from_managed_orbit_run_env() {
+        let _g = env_guard();
+        clear_audit_context_env();
+        // SAFETY: tests serialize through `env_guard()` before mutating env.
+        unsafe {
+            std::env::set_var("ORBIT_RUN_ID", "jrun-env-owner");
+            std::env::set_var(ORBIT_MANAGED_RUN_CONTEXT_ENV, "1");
+        }
+        let owner = reservation_owner_from_env().expect("owner from managed env");
+        clear_audit_context_env();
+
+        assert_eq!(owner.owner_run_id, "jrun-env-owner");
+        assert!(
+            owner
+                .owner_metadata_json
+                .as_deref()
+                .is_some_and(|raw| { raw.contains("\"source\":\"orbit_cli\"") })
+        );
     }
 
     #[test]

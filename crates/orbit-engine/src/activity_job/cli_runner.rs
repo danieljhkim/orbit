@@ -135,10 +135,15 @@ pub fn run_cli_backend(
         wall_clock_timeout_ms: wall_clock_timeout.as_millis() as u64,
     });
 
+    let child_env = vec![
+        ("ORBIT_RUN_ID".to_string(), run_id.to_string()),
+        ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
+    ];
     let (stdout, stderr, exit_code, duration, timed_out) = spawn_with_timeout(
         &invocation.program,
         &subprocess_args,
         &invocation.stdin,
+        &child_env,
         wall_clock_timeout,
         SpawnTraceContext {
             provider: &provider,
@@ -379,19 +384,25 @@ struct SpawnedChild {
 fn spawn_child_with_optional_sandbox(
     program: &str,
     args: &[String],
+    env: &[(String, String)],
     sandbox: Option<&ResolvedSandbox>,
 ) -> Result<SpawnedChild, OrbitError> {
     match sandbox {
         Some(sb) if sb.kind == ExecutorSandboxKind::MacosSandboxExec => {
-            spawn_macos_sandboxed(program, args, sb)
+            spawn_macos_sandboxed(program, args, env, sb)
         }
-        Some(_) | None => spawn_bare(program, args),
+        Some(_) | None => spawn_bare(program, args, env),
     }
 }
 
-fn spawn_bare(program: &str, args: &[String]) -> Result<SpawnedChild, OrbitError> {
+fn spawn_bare(
+    program: &str,
+    args: &[String],
+    env: &[(String, String)],
+) -> Result<SpawnedChild, OrbitError> {
     let child = Command::new(program)
         .args(args)
+        .envs(env.iter().map(|(key, value)| (key, value)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -406,9 +417,10 @@ fn spawn_bare(program: &str, args: &[String]) -> Result<SpawnedChild, OrbitError
 fn spawn_macos_sandboxed(
     program: &str,
     args: &[String],
+    env: &[(String, String)],
     sandbox: &ResolvedSandbox,
 ) -> Result<SpawnedChild, OrbitError> {
-    spawn_macos_sandboxed_with(program, args, sandbox, sandbox_exec_available())
+    spawn_macos_sandboxed_with(program, args, env, sandbox, sandbox_exec_available())
 }
 
 /// Test-friendly variant of [`spawn_macos_sandboxed`]: callers pass an
@@ -419,6 +431,7 @@ fn spawn_macos_sandboxed(
 fn spawn_macos_sandboxed_with(
     program: &str,
     args: &[String],
+    env: &[(String, String)],
     sandbox: &ResolvedSandbox,
     sandbox_exec_present: bool,
 ) -> Result<SpawnedChild, OrbitError> {
@@ -429,7 +442,7 @@ fn spawn_macos_sandboxed_with(
                 program = program,
                 "sandbox-exec not available on PATH; falling back to bare exec because executor declares allow_fallback"
             );
-            return spawn_bare(program, args);
+            return spawn_bare(program, args, env);
         }
         return Err(OrbitError::Execution(
             "sandbox-exec not available on PATH; declare allow_fallback: true to permit bare exec"
@@ -446,6 +459,7 @@ fn spawn_macos_sandboxed_with(
         &profile_text,
         program,
         args,
+        env,
         Stdio::piped(),
         Stdio::piped(),
         Stdio::piped(),
@@ -466,6 +480,7 @@ fn spawn_with_timeout(
     program: &str,
     args: &[String],
     stdin_bytes: &[u8],
+    env: &[(String, String)],
     timeout: Duration,
     trace: SpawnTraceContext<'_>,
     sandbox: Option<&ResolvedSandbox>,
@@ -475,7 +490,7 @@ fn spawn_with_timeout(
         mut child,
         // The temp profile must outlive the child — drop it after wait.
         _profile_temp,
-    } = spawn_child_with_optional_sandbox(program, args, sandbox)
+    } = spawn_child_with_optional_sandbox(program, args, env, sandbox)
         .map_err(|err| format!("spawn {program}: {err}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -672,6 +687,7 @@ mod tests {
                 "/bin/sh",
                 &args,
                 b"",
+                &[],
                 Duration::from_secs(5),
                 SpawnTraceContext {
                     provider: "codex",
@@ -709,6 +725,7 @@ mod tests {
                 "/bin/sh",
                 &args,
                 b"",
+                &[],
                 Duration::from_secs(5),
                 SpawnTraceContext {
                     provider: "codex",
@@ -899,6 +916,7 @@ mod tests {
                 "/bin/sh",
                 &args,
                 b"",
+                &[],
                 Duration::from_millis(75),
                 SpawnTraceContext {
                     provider: "codex",
@@ -1022,7 +1040,7 @@ mod tests {
     #[test]
     fn spawn_macos_sandboxed_returns_error_when_sandbox_exec_missing_and_fallback_disabled() {
         let sandbox = sandbox_for_test();
-        let err = spawn_macos_sandboxed_with("/bin/sh", &[], &sandbox, false)
+        let err = spawn_macos_sandboxed_with("/bin/sh", &[], &[], &sandbox, false)
             .expect_err("expected fallback-disabled error");
         match err {
             OrbitError::Execution(msg) => {
@@ -1044,6 +1062,7 @@ mod tests {
         let mut spawned = spawn_macos_sandboxed_with(
             "/bin/sh",
             &["-c".to_string(), "exit 0".to_string()],
+            &[],
             &sandbox,
             false,
         )
@@ -1577,6 +1596,7 @@ mod tests {
 
         fn tool_context_for_activity(
             &self,
+            _run_id: Option<&str>,
             _fs_profile: Option<&str>,
             _fs_audit: Option<Arc<dyn FsAuditLogger>>,
         ) -> ToolContext {

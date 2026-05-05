@@ -200,7 +200,13 @@ pub(super) fn execute_host_action(
     action: OrbitBuiltinAction,
 ) -> Result<Value, OrbitError> {
     let identity = resolve_identity(ctx, &input)?;
-    require_orbit_host(ctx)?.execute(action, input, identity.agent, identity.model)
+    require_orbit_host(ctx)?.execute(
+        action,
+        input,
+        identity.agent,
+        identity.model,
+        ctx.reservation_owner.clone(),
+    )
 }
 
 pub(super) fn task_scope(ctx: &ToolContext) -> OrbitTaskScope {

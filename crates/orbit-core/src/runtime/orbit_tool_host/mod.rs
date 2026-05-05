@@ -15,10 +15,11 @@ use orbit_common::types::{
 };
 use orbit_common::utility::path::workspace_relative_paths_overlap;
 use orbit_store::{
-    ExpiredTaskReservation, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
-    TaskReservationReleaseParams, TaskReservationReserveParams, state_io,
+    ExpiredTaskReservation, ReleasedTaskReservation, TaskLockConflict, TaskLockHolder,
+    TaskReservationCheckParams, TaskReservationReleaseParams, TaskReservationReleaseReason,
+    TaskReservationReserveParams, state_io,
 };
-use orbit_tools::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost};
+use orbit_tools::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext};
 use serde_json::{Value, json};
 
 use self::input::{
@@ -60,6 +61,7 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
         input: Value,
         agent: Option<String>,
         model: Option<String>,
+        reservation_owner: Option<ReservationOwnerContext>,
     ) -> Result<Value, OrbitError> {
         let (agent, model) = self
             .runtime
@@ -362,6 +364,8 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                             "actor": reservation.actor.clone(),
                             "created_at": reservation.created_at.clone(),
                             "expires_at": reservation.expires_at.clone(),
+                            "owner_run_id": reservation.owner_run_id.clone(),
+                            "owner_metadata_json": reservation.owner_metadata_json.clone(),
                         })
                     })
                     .collect::<Vec<_>>();
@@ -385,6 +389,17 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                     TaskReservationReleaseParams {
                         workspace_orbit_dir: workspace_orbit_dir(&self.runtime),
                         reservation_id: reservation_id.clone(),
+                        release_reason: TaskReservationReleaseReason::Explicit,
+                        release_metadata_json: Some(
+                            json!({
+                                "released_by": reservation_actor_label(
+                                    &self.runtime,
+                                    agent.as_deref(),
+                                    model.as_deref(),
+                                ),
+                            })
+                            .to_string(),
+                        ),
                     },
                 )?;
                 emit_expired_reservation_events(&self.runtime, &result.expired_reservations)?;
@@ -397,6 +412,11 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                         AuditEventStatus::Success,
                         json!({
                             "reservation_id": reservation_id,
+                            "owner_run_id": result
+                                .reservation
+                                .as_ref()
+                                .and_then(|reservation| reservation.owner_run_id.clone()),
+                            "release_reason": TaskReservationReleaseReason::Explicit.as_str(),
                             "released_at": result.released_at,
                             "released_by": reservation_actor_label(
                                 &self.runtime,
@@ -422,6 +442,8 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                 let actor =
                     reservation_actor_label(&self.runtime, agent.as_deref(), model.as_deref());
                 let requested_files = requested_task_files(&self.runtime, &task_ids)?;
+                self.runtime
+                    .reconcile_stale_owned_reservations_for_files(&requested_files, 32)?;
                 let mut conflicts =
                     task_lock_conflicts(&self.runtime, &task_ids, &requested_files)?;
 
@@ -446,6 +468,12 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                             requested_files: requested_files.clone(),
                             actor: actor.clone(),
                             ttl_seconds,
+                            owner_run_id: reservation_owner
+                                .as_ref()
+                                .map(|owner| owner.owner_run_id.clone()),
+                            owner_metadata_json: reservation_owner
+                                .as_ref()
+                                .and_then(|owner| owner.owner_metadata_json.clone()),
                         },
                     )?
                 } else {
@@ -490,6 +518,9 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
                             "files": reservation_result.reserved_files.clone(),
                             "expires_at": reservation_result.expires_at.clone(),
                             "actor": actor,
+                            "owner_run_id": reservation_owner
+                                .as_ref()
+                                .map(|owner| owner.owner_run_id.clone()),
                         }),
                     )?;
                     Ok(json!({
@@ -790,6 +821,26 @@ pub(crate) fn emit_expired_reservation_events(
     Ok(())
 }
 
+pub(crate) fn emit_task_lock_release_event(
+    runtime: &OrbitRuntime,
+    reservation: &ReleasedTaskReservation,
+    release_reason: TaskReservationReleaseReason,
+) -> Result<(), OrbitError> {
+    record_task_lock_audit_event(
+        runtime,
+        "task.locks.reserve.released",
+        "orbit.task.locks.release",
+        Some(reservation.reservation_id.as_str()),
+        AuditEventStatus::Success,
+        json!({
+            "reservation_id": reservation.reservation_id,
+            "owner_run_id": reservation.owner_run_id,
+            "release_reason": release_reason.as_str(),
+            "released_at": reservation.released_at,
+        }),
+    )
+}
+
 fn reservation_actor_label(
     runtime: &OrbitRuntime,
     agent: Option<&str>,
@@ -799,7 +850,7 @@ fn reservation_actor_label(
         .unwrap_or_else(|| runtime.actor_label().to_string())
 }
 
-fn record_task_lock_audit_event(
+pub(crate) fn record_task_lock_audit_event(
     runtime: &OrbitRuntime,
     command: &str,
     tool_name: &str,

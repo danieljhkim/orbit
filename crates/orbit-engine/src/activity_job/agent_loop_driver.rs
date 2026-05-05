@@ -48,8 +48,11 @@ pub fn drive_agent_loop(
     let model = resolve_model(spec);
     let provider = expected_provider();
     let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
-    let tool_ctx =
-        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
+    let tool_ctx = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        Some(v2_fs_audit_logger(audit.clone())),
+    );
     drive_inner(spec, api_key, run_id, audit, &mut session, input, tool_ctx)
 }
 
@@ -69,8 +72,11 @@ pub fn drive_agent_loop_with_session(
     host: &dyn V2RuntimeHost,
     fs_profile: Option<&str>,
 ) -> Result<LoopOutcome, DispatchError> {
-    let tool_ctx =
-        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
+    let tool_ctx = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        Some(v2_fs_audit_logger(audit.clone())),
+    );
     drive_inner(spec, api_key, run_id, audit, session, input, tool_ctx)
 }
 

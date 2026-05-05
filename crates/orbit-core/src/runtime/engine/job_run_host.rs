@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{JobRun, JobRunState, KnowledgeRunMetrics, OrbitError};
 use orbit_engine::JobRunHost;
-use orbit_store::JobRunStepParams;
+use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
 
 use crate::OrbitRuntime;
 
@@ -90,9 +90,13 @@ impl JobRunHost for OrbitRuntime {
         finished_at: DateTime<Utc>,
         duration_ms: Option<u64>,
     ) -> Result<bool, OrbitError> {
-        self.stores()
-            .jobs()
-            .finalize_run(run_id, state, finished_at, duration_ms)
+        self.finalize_job_run_with_reservation_cleanup(
+            run_id,
+            state,
+            finished_at,
+            duration_ms,
+            TaskReservationReleaseReason::RunTerminal,
+        )
     }
 
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {

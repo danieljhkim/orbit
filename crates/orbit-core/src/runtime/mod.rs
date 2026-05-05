@@ -21,6 +21,7 @@ pub mod pipeline;
 mod resolve;
 pub mod run_audit;
 mod store_delegates;
+mod task_reservation_cleanup;
 mod v2_host;
 
 use std::path::{Path, PathBuf};

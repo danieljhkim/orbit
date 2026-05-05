@@ -110,6 +110,7 @@ pub trait V2RuntimeHost: Send + Sync {
 
     fn tool_context_for_activity(
         &self,
+        run_id: Option<&str>,
         fs_profile: Option<&str>,
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
     ) -> ToolContext;
@@ -326,6 +327,7 @@ fn dispatch_v2_activity_inner(
         ActivityV2Spec::Deterministic(spec) => match input.host {
             Some(host) => run_deterministic(
                 host,
+                input.run_id,
                 spec,
                 input.fs_profile,
                 input.audit.clone(),
@@ -367,13 +369,17 @@ fn inject_run_id(input: &Value, run_id: &str) -> Value {
 
 fn run_deterministic(
     host: &dyn V2RuntimeHost,
+    run_id: &str,
     spec: &DeterministicSpec,
     fs_profile: Option<&str>,
     audit: Arc<V2AuditWriter>,
     input: &Value,
 ) -> Result<DispatchOutcome, DispatchError> {
-    let tool_context =
-        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
+    let tool_context = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        Some(v2_fs_audit_logger(audit.clone())),
+    );
     let output = host.run_deterministic(&spec.action, &spec.config, input, tool_context)?;
     Ok(DispatchOutcome {
         success: true,

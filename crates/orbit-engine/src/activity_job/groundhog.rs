@@ -38,7 +38,7 @@ pub fn run_groundhog_activity(
     fs_profile: Option<&str>,
 ) -> Result<DispatchOutcome, DispatchError> {
     let task_id = required_input_string(input, "task_id")?;
-    let tool_ctx = host.tool_context_for_activity(fs_profile, None);
+    let tool_ctx = host.tool_context_for_activity(Some(run_id), fs_profile, None);
     let task = load_task(host, &tool_ctx, &task_id)?;
     let plan = parse_groundhog_plan(&task.plan, &task_id)?;
     let workspace_path = resolve_workspace_path(input, &tool_ctx, &task.workspace_path)?;
@@ -278,8 +278,11 @@ fn run_attempt(
     latest_failure_report: Option<&FailureReport>,
     groundhog_host: Arc<AttemptGroundhogHost>,
 ) -> Result<AttemptResult, DispatchError> {
-    let mut tool_ctx =
-        host.tool_context_for_activity(fs_profile, Some(v2_fs_audit_logger(audit.clone())));
+    let mut tool_ctx = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        Some(v2_fs_audit_logger(audit.clone())),
+    );
     tool_ctx.groundhog_host = Some(groundhog_host.clone());
 
     let loop_input = json!({

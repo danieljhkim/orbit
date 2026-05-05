@@ -9,6 +9,8 @@ use orbit_store::{
     TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
     TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
     TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
+    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
+    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
     TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
     TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
     TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
@@ -289,6 +291,20 @@ impl TaskReservationRecords<'_> {
         params: TaskReservationReleaseParams,
     ) -> Result<TaskReservationReleaseResult, OrbitError> {
         self.store.release_task_reservation(params)
+    }
+
+    pub(crate) fn release_by_owner_run_id(
+        &self,
+        params: TaskReservationReleaseByOwnerParams,
+    ) -> Result<TaskReservationReleaseByOwnerResult, OrbitError> {
+        self.store.release_task_reservations_by_owner_run_id(params)
+    }
+
+    pub(crate) fn list_owned_conflicts(
+        &self,
+        params: TaskReservationOwnedConflictsParams,
+    ) -> Result<TaskReservationOwnedConflictsResult, OrbitError> {
+        self.store.list_owned_task_reservation_conflicts(params)
     }
 }
 
