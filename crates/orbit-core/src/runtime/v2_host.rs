@@ -28,7 +28,7 @@ use orbit_engine::{
     AgentRoleConfig, EnvironmentHost, StateExecutionContext, execute_deterministic_action,
 };
 use orbit_store::{AuditEventInsertParams, InvocationInsertParams, Store, token_scoreboard};
-use orbit_tools::{FsAuditLogger, ToolContext};
+use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -136,6 +136,11 @@ impl V2RuntimeHost for OrbitRuntime {
                     }
                 })?;
                 let task_conflicts = task_lock_conflicts(self, &task_ids, &requested_files)
+                    .map_err(|error| DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: error.to_string(),
+                    })?;
+                self.reconcile_stale_owned_reservations_for_files(&requested_files, 32)
                     .map_err(|error| DispatchError::DeterministicActionFailed {
                         action: action.to_string(),
                         message: error.to_string(),
@@ -818,6 +823,7 @@ impl V2RuntimeHost for OrbitRuntime {
 
     fn tool_context_for_activity(
         &self,
+        run_id: Option<&str>,
         fs_profile: Option<&str>,
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
     ) -> ToolContext {
@@ -835,6 +841,18 @@ impl V2RuntimeHost for OrbitRuntime {
             policy_engine: Some(Arc::new(self.policy_engine().clone())),
             fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string()),
             fs_audit,
+            reservation_owner: run_id.map(str::trim).filter(|value| !value.is_empty()).map(
+                |owner_run_id| ReservationOwnerContext {
+                    owner_run_id: owner_run_id.to_string(),
+                    owner_metadata_json: Some(
+                        serde_json::json!({
+                            "source": "v2_activity",
+                            "fs_profile": fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE),
+                        })
+                        .to_string(),
+                    ),
+                },
+            ),
             orbit_host: Some(build_orbit_tool_host(self, None)),
             ..Default::default()
         }

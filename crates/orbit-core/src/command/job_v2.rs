@@ -17,7 +17,7 @@ use orbit_common::types::{
 use orbit_engine::activity_job::{
     DispatchError, JobOutcome, V2AuditWriter, execute_job, resolve_job_catalog_refs_for_execution,
 };
-use orbit_store::JobRunStepParams;
+use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -106,11 +106,12 @@ impl OrbitRuntime {
                     let _ =
                         self.record_pipeline_failure_step(&run, started_at, finished_at, message);
                 }
-                self.stores().jobs().finalize_run(
+                self.finalize_job_run_with_reservation_cleanup(
                     &run.run_id,
                     final_state,
                     finished_at,
                     duration_ms,
+                    TaskReservationReleaseReason::RunTerminal,
                 )?;
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
@@ -126,11 +127,12 @@ impl OrbitRuntime {
                     finished_at,
                     &error.to_string(),
                 );
-                self.stores().jobs().finalize_run(
+                self.finalize_job_run_with_reservation_cleanup(
                     &run.run_id,
                     JobRunState::Failed,
                     finished_at,
                     duration_ms,
+                    TaskReservationReleaseReason::RunTerminal,
                 )?;
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),

@@ -89,6 +89,7 @@ pub(super) fn run_command<H: RuntimeHost + TaskHost + EnvironmentHost + ?Sized>(
         )
     {
         proc_env.insert("ORBIT_RUN_ID".to_string(), run_id.clone());
+        proc_env.insert("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string());
         proc_env.insert("ORBIT_STEP_INDEX".to_string(), step_index.to_string());
         proc_env.insert(
             "ORBIT_STATE_DIR".to_string(),

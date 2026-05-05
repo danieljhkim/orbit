@@ -1005,6 +1005,7 @@ pub fn state_env_vars(execution: &ExecutionContext) -> Vec<(String, String)> {
         execution.state_dir.as_ref(),
     ) {
         vars.push(("ORBIT_RUN_ID".to_string(), run_id.clone()));
+        vars.push(("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()));
         vars.push(("ORBIT_STEP_INDEX".to_string(), step_index.to_string()));
         vars.push((
             "ORBIT_STATE_DIR".to_string(),

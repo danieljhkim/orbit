@@ -127,7 +127,9 @@ Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) 
 
 The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`, including accepted friction reports whose `type` remains `friction`, while untriaged `status: friction` reports stay out. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2] and the friction admission rule was updated in [T20260505-2].
 
-`task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation remains active for the whole child run, so another gate run with overlapping selectors continues to receive a `reservation` conflict while the child is running. After `invoke_and_wait` returns a terminal child-run status (`succeeded`, `failed`, or `cancelled`), the seeded deterministic `release_locks` activity calls `orbit.task.locks.release` with the recorded reservation id. A wait-side `timeout` does not release the reservation because the child run may still be active; the original TTL remains the abandoned/crashed-run cleanup path. This lifecycle was tightened in [T20260430-26].
+`task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation owner is the gate run that executed `reserve_locks`, not the child shipment run. Owned reservations are engine-cleaned when that owner run reaches a terminal state (`success`, `failed`, `cancelled`, or `timeout`), so correctness does not depend on every workspace override preserving a YAML release step. The seeded deterministic `release_locks` activity still calls `orbit.task.locks.release` after a terminal child wait as an early-release optimization; idempotent terminal cleanup then finds nothing left to release. Unowned/manual reservations remain explicit-release-or-TTL only. TTL is the fallback for abandoned/manual reservations or cases where no terminal cleanup or reserve-pressure reconciliation trigger runs. This lifecycle was tightened in [T20260430-26] and made engine-owned in [T20260505-10].
+
+Reserve conflict checking also performs bounded, opportunistic stale-owned-reservation reconciliation before reporting reservation conflicts. It inspects only overlapping owned reservations under current reserve pressure; it is not a background sweeper. Existing job-run list/show reconciliation remains in place, and both paths release run-owned reservations with `release_reason: stale_run_reconciled` when they prove the owner is already terminal or stale. Release audit rows use the task-lock audit surface and include `reservation_id`, `owner_run_id` when present, and `release_reason` (`explicit`, `run_terminal`, `stale_run_reconciled`, or TTL expiration).
 
 ---
 
@@ -159,7 +161,7 @@ Activity / Job is where orbit-core hands work to orbit-engine without depending 
 - run a deterministic action by name
 - source an API key for a provider
 - resolve a provider's CLI executor command plus static args
-- build `ToolContext` for an activity, including policy and filesystem audit hooks
+- build `ToolContext` for an activity, including policy, filesystem audit hooks, and trusted reservation-owner context from the active run id
 - persist invocation traces for completed agent-loop work
 
 That host wiring arrived in [T20260418-2143]. The cleanup in [T20260418-2210] kept the boundary primitive: strings, `Value`, and `ToolContext`, not `orbit-agent` transport objects.
@@ -213,7 +215,7 @@ After [T20260427-48], provider runtime args receive provider config through `V2R
 
 After [T20260427-51], macOS CLI invocations declaring `sandbox: macos-sandbox-exec` run under `sandbox-exec -f <profile.sb> <provider> ...`. Orbit treats that SBPL profile as filesystem authority and neutralizes provider-native sandbox flags. After [T20260428-10], the profile grants Codex state (`$CODEX_HOME` or `$HOME/.codex`) plus side-write roots from provider config so inherited Orbit subprocesses can persist workflow state while project writes remain governed by `fsProfile`.
 
-After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths.
+After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
 
 The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped `backend: cli` implementation.
 
@@ -457,5 +459,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260430-31]** — Require populated execution summaries before opening task PRs.
 - **[T20260505-2]** — Admit accepted backlog friction reports in automatic backlog listing.
 - **[T20260505-8]** — Add dashboard/runtime controls to cancel active job runs.
+- **[T20260505-10]** — Release run-owned task lock reservations through engine-owned terminal cleanup and reserve-pressure reconciliation.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

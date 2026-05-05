@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{JobRun, JobRunState, OrbitError, OrbitEvent, PipelineState};
-use orbit_store::JobRunQuery;
+use orbit_store::{JobRunQuery, TaskReservationReleaseReason};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
@@ -52,14 +52,23 @@ impl OrbitRuntime {
             .map_err(|msg| {
                 OrbitError::JobValidation(format!("cannot cancel job run '{}': {}", run_id, msg))
             })?;
+        let signal_attempted = run.state == JobRunState::Running && run.pid.is_some();
+        let signal_outcome = if signal_attempted {
+            Some(signal_run_owner_process(&run)?)
+        } else {
+            None
+        };
         let now = chrono::Utc::now();
         let duration_ms = run
             .started_at
             .map(|s| now.signed_duration_since(s).num_milliseconds().max(0) as u64);
-        let signal_attempted = run.state == JobRunState::Running && run.pid.is_some();
-        self.stores()
-            .jobs()
-            .finalize_run(run_id, JobRunState::Cancelled, now, duration_ms)?;
+        self.finalize_job_run_with_reservation_cleanup(
+            run_id,
+            JobRunState::Cancelled,
+            now,
+            duration_ms,
+            TaskReservationReleaseReason::RunTerminal,
+        )?;
         let cancelled_run = self
             .get_job_run_backend(run_id)?
             .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))?;
@@ -80,11 +89,6 @@ impl OrbitRuntime {
             )));
         }
         self.mark_cancelled_pipeline_state(&cancelled_run)?;
-        let signal_outcome = if signal_attempted {
-            Some(signal_run_owner_process(&run)?)
-        } else {
-            None
-        };
         self.record_event(OrbitEvent::JobRunCancelled {
             job_id: run.job_id.clone(),
             run_id: run_id.to_string(),
@@ -273,7 +277,7 @@ impl OrbitRuntime {
         Ok(reconciled)
     }
 
-    fn reconcile_stale_job_run(&self, run: &JobRun) -> Result<bool, OrbitError> {
+    pub(crate) fn reconcile_stale_job_run(&self, run: &JobRun) -> Result<bool, OrbitError> {
         if terminal_run_timing_is_incomplete(run) {
             return self.repair_terminal_job_run_timing(run);
         }
@@ -288,11 +292,12 @@ impl OrbitRuntime {
                 .num_milliseconds()
                 .max(0) as u64
         });
-        let changed = self.stores().jobs().finalize_run(
+        let changed = self.finalize_job_run_with_reservation_cleanup(
             &run.run_id,
             JobRunState::Failed,
             finished_at,
             duration_ms,
+            TaskReservationReleaseReason::StaleRunReconciled,
         )?;
         if !changed {
             return Ok(false);
@@ -391,7 +396,7 @@ impl OrbitRuntime {
         self.stores().jobs().list_runs_filtered(query)
     }
 
-    fn get_job_run_backend(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
+    pub(crate) fn get_job_run_backend(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
         self.stores().jobs().get_run(run_id)
     }
 }

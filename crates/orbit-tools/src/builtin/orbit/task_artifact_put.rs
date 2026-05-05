@@ -113,6 +113,7 @@ mod tests {
             input: Value,
             agent: Option<String>,
             model: Option<String>,
+            _reservation_owner: Option<crate::ReservationOwnerContext>,
         ) -> Result<Value, OrbitError> {
             *self.call.lock().expect("record call") = Some(RecordedCall {
                 action,

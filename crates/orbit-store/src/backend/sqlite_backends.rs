@@ -3,9 +3,11 @@ use orbit_common::types::{AuditEvent, OrbitError, StoredTool};
 
 use super::contracts::{
     AuditEventStoreBackend, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationReleaseParams, TaskReservationReleaseResult,
-    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
-    ToolStoreBackend,
+    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
+    TaskReservationStoreBackend, ToolStoreBackend,
 };
 use crate::Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
@@ -154,5 +156,20 @@ impl TaskReservationStoreBackend for SqliteTaskReservationStoreBackend {
         params: TaskReservationReleaseParams,
     ) -> Result<TaskReservationReleaseResult, OrbitError> {
         self.store.release_task_reservation(&params)
+    }
+
+    fn release_task_reservations_by_owner_run_id(
+        &self,
+        params: TaskReservationReleaseByOwnerParams,
+    ) -> Result<TaskReservationReleaseByOwnerResult, OrbitError> {
+        self.store
+            .release_task_reservations_by_owner_run_id(&params)
+    }
+
+    fn list_owned_task_reservation_conflicts(
+        &self,
+        params: TaskReservationOwnedConflictsParams,
+    ) -> Result<TaskReservationOwnedConflictsResult, OrbitError> {
+        self.store.list_owned_task_reservation_conflicts(&params)
     }
 }

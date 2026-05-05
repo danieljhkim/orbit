@@ -8,7 +8,7 @@ use orbit_common::types::{
     AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, OrbitError, OrbitEvent,
     PipelineState,
 };
-use orbit_store::{AuditEventInsertParams, JobRunStepParams};
+use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -268,11 +268,12 @@ impl OrbitRuntime {
                         self.record_pipeline_failure_step(run, started_at, finished_at, message);
                     JobRunState::Failed
                 };
-                self.stores().jobs().finalize_run(
+                self.finalize_job_run_with_reservation_cleanup(
                     &run.run_id,
                     final_state,
                     finished_at,
                     duration_ms,
+                    TaskReservationReleaseReason::RunTerminal,
                 )?;
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
@@ -288,11 +289,12 @@ impl OrbitRuntime {
                     finished_at,
                     &error.to_string(),
                 );
-                self.stores().jobs().finalize_run(
+                self.finalize_job_run_with_reservation_cleanup(
                     &run.run_id,
                     JobRunState::Failed,
                     finished_at,
                     duration_ms,
+                    TaskReservationReleaseReason::RunTerminal,
                 )?;
                 self.record_event(OrbitEvent::JobRunCompleted {
                     job_id: run.job_id.clone(),
