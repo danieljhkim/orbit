@@ -122,6 +122,9 @@ TASK_ID=$(orbit task add \
   --workspace .)
 echo "$TASK_ID"
 
+# or simply ask an agent to create a task
+"create an orbit task for ..."
+
 # review and approve the created proposed task
 orbit task list --status proposed
 orbit task show "$TASK_ID"
@@ -212,6 +215,8 @@ orbit run ship --mode local <task_id> ...
 orbit run ship-auto
 orbit run duel-plan <task_id>
 orbit run job <job_id>
+
+# audits and observability
 orbit run show [run_id]
 orbit run logs [run_id]
 orbit run events [run_id]
