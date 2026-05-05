@@ -104,6 +104,7 @@ spec:
     - orbit.graph.*
   on_denial: terminate
   max_iterations: 8
+  role: planner
   backend: http
   provider: claude
   wall_clock_timeout_seconds: 1800

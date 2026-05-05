@@ -59,6 +59,7 @@ spec:
     - proc.spawn
   on_denial: terminate
   max_iterations: 25
+  role: implementer
   backend: cli
   provider: codex
   wall_clock_timeout_seconds: 5400
