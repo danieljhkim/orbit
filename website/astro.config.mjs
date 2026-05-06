@@ -56,7 +56,7 @@ export default defineConfig({
             { slug: 'getting-started', label: 'Overview' },
             { slug: 'getting-started/install', label: 'Install Orbit' },
             { slug: 'getting-started/first-task', label: 'First Task' },
-            { slug: 'getting-started/first-activity-run', label: 'First Activity Run' },
+            { slug: 'getting-started/workflows', label: 'Default Workflows' },
           ],
         },
         {

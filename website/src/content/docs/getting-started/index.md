@@ -18,9 +18,9 @@ Use this section when you are setting up Orbit for the first time.
     <h3>First Task</h3>
     <p>Create a task, inspect it, and ship it.</p>
   </a>
-  <a class="orbit-card" href="./first-activity-run/">
-    <h3>Activity Catalog</h3>
-    <p>List the schema v2 activities available to jobs.</p>
+  <a class="orbit-card" href="./workflows/">
+    <h3>Default Workflows</h3>
+    <p>Run ship, ship-auto, and duel-plan.</p>
   </a>
 </div>
 

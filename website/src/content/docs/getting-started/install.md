@@ -69,6 +69,10 @@ Pass `--mcp` to also auto-detect and set up MCP client integrations during works
 orbit workspace init --mcp
 ```
 
+## Configure Orbit
+
+`orbit init` seeds `~/.orbit/config.toml` and prompts for per-role agent settings (reviewer, implementer, planner). See [Configuration](../../reference/config/) for file locations, shape, and backend precedence.
+
 ## Update the Graph
 
 `orbit workspace init` builds the initial repository graph automatically. Refresh it incrementally as the codebase changes:

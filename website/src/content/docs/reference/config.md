@@ -1,9 +1,53 @@
 ---
 title: Configuration
-description: "Runtime configuration surfaces and backend precedence."
+description: "config.toml file locations, shape, and backend precedence."
 sidebar:
   order: 5
 ---
+
+## File Locations
+
+| Path | Scope |
+|------|-------|
+| `~/.orbit/config.toml` | Global defaults |
+| `.orbit/config.toml` | Workspace-local |
+
+The workspace config **replaces** the global config when present — it does not merge. Move settings into the workspace file or rely on the global file alone.
+
+`orbit init` seeds the global config and prompts for per-role agent settings interactively. Re-run `orbit init --force` for a fresh prompt; edit the file directly to tweak values without re-prompting.
+
+## Shape
+
+```toml
+[execution.env]
+inherit = false
+pass = ["HOME", "PATH", "CODEX_HOME", "TMPDIR", "USER"]
+
+[task.approval]
+required_for_agent = true
+delegate_approval = true
+
+[graph]
+editing = false
+
+# Per-role agent settings (provider: claude | codex | gemini)
+[agent.reviewer]
+provider = "claude"
+backend = "cli"
+model = "claude-opus-4-7"
+
+[agent.implementer]
+provider = "codex"
+backend = "cli"
+model = "gpt-5.5"
+
+[agent.planner]
+provider = "claude"
+backend = "cli"
+model = "claude-opus-4-7"
+```
+
+The three roles — `reviewer`, `implementer`, and `planner` — are referenced by the seeded workflows. `backend = "cli"` is the only release-supported value in v1.
 
 ## Root Override
 
@@ -25,7 +69,7 @@ For `agent_loop` execution, backend selection resolves once before dispatch.
 **v1 release scope.** v1 supports `backend: cli` only, but the hard-coded fallback is `http` — so omitting all four tiers will silently land on the preview HTTP transport. Pin `cli` explicitly:
 
 ```toml
-# orbit.toml
+# config.toml
 [runtime]
 backend = "cli"
 ```
