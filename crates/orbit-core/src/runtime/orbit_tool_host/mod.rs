@@ -648,10 +648,6 @@ impl OrbitToolHost for RuntimeOrbitToolHost {
     fn task_scope(&self) -> OrbitTaskScope {
         self.task_scope.clone()
     }
-
-    fn task_id_pattern(&self) -> Option<String> {
-        self.runtime.task_id_pattern().map(ToString::to_string)
-    }
 }
 
 fn require_review_model(model: Option<&str>, tool_name: &str) -> Result<(), OrbitError> {

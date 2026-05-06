@@ -2,9 +2,9 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-06
 
-The knowledge graph is Orbit's durable, queryable codebase map: a content-addressed, branch-scoped tree of directories, files, and extracted symbols annotated with task history. It sits between raw files and the agent prompt so agents can ask *"where is `AgentRuntime` defined?"* or *"which symbols did task [T20260421-0528] touch?"* without re-reading the repo from scratch. This compaction pass [T20260430-22] keeps the overview focused on entry-point concepts and leaves mechanism detail to [2_design.md](./2_design.md).
+The knowledge graph is Orbit's durable, queryable codebase map: a content-addressed, branch-scoped tree of directories, files, and extracted symbols. It sits between raw files and the agent prompt so agents can ask *"where is `AgentRuntime` defined?"* without re-reading the repo from scratch. Task attribution was removed in [T20260506-11]; task IDs now remain local commit-search keys rather than graph fields. This compaction pass [T20260430-22] keeps the overview focused on entry-point concepts and leaves mechanism detail to [2_design.md](./2_design.md).
 
 This document is the entry point. [2_design.md](./2_design.md) specifies the current implementation in detail; [3_vision.md](./3_vision.md) captures open questions and direction.
 
@@ -34,7 +34,7 @@ The graph has three node kinds:
 - **`FileNode`** — a source file with extracted leaves plus a `source_blob_hash`.
 - **`LeafNode`** — an extracted symbol or doc/config/table leaf with source span, hash, signature fields, and history.
 
-All three share `BaseNodeFields`: `id`, `identity_key`, `location`, `language`, `description`, `parent_id`, lock state, and a sorted, deduplicated `task_ids` list attributed from commit history ([T20260421-0528]).
+All three share `BaseNodeFields`: `id`, `identity_key`, `location`, `language`, `description`, `parent_id`, and lock state. Historical `task_ids` attribution fields were removed in [T20260506-11].
 
 The rename from `leaf` to `symbol` at the tool surface happened under [T20260411-0424]; the in-code type is still `LeafNode` because the internal vocabulary predates that decision and the rename has not yet reached the type name.
 
@@ -70,9 +70,9 @@ The current public graph surface is read-only. Agents use it to inspect, search,
 
 The in-memory **working graph** (`crates/orbit-knowledge/src/working_graph`) remains an internal/deferred mutation substrate. Public graph write tools are absent because branch-local graph locks do not coordinate independent worktrees.
 
-### 2.5 Attribution
+### 2.5 Task IDs
 
-Each node carries a `task_ids` list. These are populated by the history-walker stage (`pipeline::history`, introduced in [T20260421-0528]) which parses `\[T\d{8}-\d+(?:-\d+)*\]` tags out of commit messages, maps hunks to symbols at the commit's tree, and accumulates the result onto the current graph. A merge commit where both sides touched the same symbol sets `structural_conflict: true` — informational only; git already resolved the textual conflict.
+The graph no longer stores task attribution. `[T...]` commit tags remain useful for local forward lookup with `git log --grep`, but reverse lookup from graph node to task was removed in [T20260506-11] after a 10-day audit found 0 uses across 961 graph tool calls.
 
 ---
 
@@ -83,7 +83,7 @@ Each node carries a `task_ids` list. These are populated by the history-walker s
 | Crate boundary | `crates/orbit-knowledge` | [T20260411-0008], [T20260411-0424] |
 | Storage layout | `src/graph/object_store.rs` | [T20260421-0358] |
 | Build pipeline | `src/pipeline/` | [T20260411-0424], [T20260417-0639], [T20260426-0139] |
-| History attribution | `src/pipeline/history.rs` | [T20260421-0528] |
+| Historical task attribution removal | `src/pipeline/` | [T20260506-11] |
 | Query services | `src/service/` | [T20260412-0645-2], [T20260412-0645-3] |
 | Working graph | `src/working_graph/` | [T20260411-0424] |
 | Locking | `src/lock.rs` | [T20260411-0424], [T20260417-0301-2] |
@@ -102,10 +102,11 @@ Each node carries a `task_ids` list. These are populated by the history-walker s
 - **[T20260417-0307]** — Gate and guard graph refresh/search hot paths.
 - **[T20260417-0639]** — Speed up workspace-init graph persistence hot path.
 - **[T20260421-0358]** — Scope graph refs by branch.
-- **[T20260421-0528]** — `task_ids` schema on every node + git history walker for attribution.
+- **[T20260421-0528]** — Historical `task_ids` schema on every node + git history walker for attribution; removed by [T20260506-11].
 - **[T20260426-0139]** — Parallelize per-file hashing and leaf extraction while preserving deterministic graph output.
 - **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and use task lock reservations as preflight write guards.
-- **[T20260428-1]** — Align graph task-ID attribution/search with current unpadded task IDs.
+- **[T20260428-1]** — Historical graph task-ID attribution/search alignment; superseded by [T20260506-11].
+- **[T20260506-11]** — Remove knowledge-graph task attribution; preserve task IDs as local commit-search keys.
 - **[T20260430-22]** — Compact the knowledge-graph design docs and remove duplicate top-level narrative.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

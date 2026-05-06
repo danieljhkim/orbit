@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06
 
 ADR-style log of non-obvious knowledge-graph decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -73,6 +73,8 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Status:** Accepted · 2026-04 · [T20260421-0528]
 
+**Superseded by:** ADR-029 / [T20260506-11].
+
 **Context.** The history walker diffs every new commit against its first parent, parses unified diffs, and resolves trees. An in-process git library (`gix`, `git2`) would avoid per-commit fork cost.
 
 **Decision.** Shell out to `git` via `orbit_common::utility::git::run_git`. No in-process git dependency.
@@ -103,7 +105,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Status:** Accepted · 2026-04 · [T20260421-0528]
 
-**Context.** `git log --follow` chases renames through history but at non-trivial per-hop cost. Hunk coordinates have to be re-mapped after every rename hop. At commit volumes typical of this repo, follow mode compounds into minutes of extra walker time.
+**Context.** `git log --follow` chases renames through history but at non-trivial per-hop cost. Hunk coordinates have to be re-mapped after every rename hop. At commit volumes typical of this repo, follow mode compounds into minutes of extra walker time. This decision described the now-removed attribution walker.
 
 **Decision.** Map hunks to leaves by line-range overlap against the symbol's span *at the commit's tree*. Do not chase renames. A symbol moved across files gets attribution from post-move commits only.
 
@@ -117,6 +119,8 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 ## ADR-007 — Task-ID attribution is a flat union, not state-aware
 
 **Status:** Accepted (with open question) · 2026-04 · [T20260421-0528]
+
+**Superseded by:** ADR-029 / [T20260506-11].
 
 **Context.** A leaf touched by a reverted task and by a shipped task currently carries both IDs with no distinction. Consumers that want "which change is live" signal have to join against task status externally.
 
@@ -161,16 +165,16 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 ## ADR-010 — Orbit-owned symbol-level write operations
 
 **Status:** Proposed · 2026-04 · [T20260421-0543]
+**Superseded by:** [T20260506-11] for graph task-attribution preservation.
 
-**Context.** The identity matcher from [T20260421-0528] is the accepted limit of what `task_ids` attribution can recover from a refactor — it loses history on every rename, cross-file move, and split because its keys (`path`, `qualified_name`, `kind`) are exactly what those refactors change. The long-term shape aligned with the owner is that Orbit itself performs refactors through a symbol-level API and records the operation as a sidecar the rebuilder consumes; the read-side hook was already reserved in `pipeline/attribute.rs`.
+**Context.** This ADR was written when `task_ids` attribution was still a graph feature. That feature was removed in ADR-029 / [T20260506-11], so the attribution-preservation motivation is historical. The remaining symbol-operation taxonomy may still inform future graph write tools, but it no longer has an attribution consumer.
 
 **Decision.** Formalize the contract that hook validates against via [specs/graph-operations.md](./specs/graph-operations.md). Eight-op taxonomy (`create`, `delete`, `rename`, `move`, `change_signature`, `change_body`, `split`, `merge`), each atomic per entry — compound refactors emit multiple entries rather than a single "relocate" primitive. Address symbols by a graph-level **stable ID** (`stable_id: node:<nanoid-21>`) persisted on every node; rejected pre/post address pairs because disambiguation under simultaneous axis changes and N-ary ops (`split`/`merge`) requires a subject handle equivalent to a stable ID under a different name. Operations are **advisory-authoritative**: accepted when consistent with the commit's tree diff, ignored with a warning otherwise — the tree is always ground truth.
 
 **Consequences.**
-- `stable_id` preserves `task_ids` exactly across any refactor Orbit authors; the matcher remains the reconciliation layer for non-Orbit writes.
 - The taxonomy is deliberately small — eight ops cover every refactor shape Orbit intends to own without requiring compound primitives.
-- Divergence policy is asymmetric: ops can enrich attribution, never override. A producer bug cannot silently rewrite history; worst case is a fallback to the pre-producer behavior.
-- Cost: `stable_id` is a new field on `BaseNodeFields` — schema bump on first rebuild after producer lands, and a one-time reallocation of object hashes for every existing node. Also: status stays `Proposed` until the producer ships; flip to `Accepted` + the producer's task ID at that time.
+- Any future producer needs a new consumer and migration story; attribution preservation is no longer enough rationale.
+- Cost: `stable_id` would still be a new field on `BaseNodeFields` if revived — schema bump on first rebuild after producer lands, and a one-time reallocation of object hashes for every existing node. Also: status stays `Proposed` until the producer ships; flip to `Accepted` + the producer's task ID at that time.
 
 ---
 
@@ -180,10 +184,10 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Context.** Tree-sitter extractors covered five source-code languages; every other file landed in the graph as a leafless `FileNode`. Design docs under `docs/design/` and scoreboard/config files under `.orbit/` were load-bearing context but invisible to graph queries at sub-file granularity. The `LanguageExtractor` trait was the natural extension point — a pluggable design without plugins. Implementing a parallel system for non-code files would duplicate the registry and the pipeline dispatch.
 
-**Decision.** Rename `LanguageExtractor` → `FileExtractor` and switch its discriminator from `Language` to a new `FileKind { Code(Language), Doc(DocFormat), Config(ConfigFormat), Table(TableFormat), Unknown }`. Add exactly three `LeafKind` variants: `Section { depth: u8 }` (markdown heading), `ConfigKey` (top-level key in YAML/JSON/TOML), `Column` (header cell in CSV/TSV). Ship shallow extractors only: ATX headings (not frontmatter, not fenced blocks), top-level map entries (not nested paths), first-row cells (not row-level nodes). 1 MiB size cap on tabular extraction short-circuits before parsing. Extraction is the only pipeline path that changes — `FileKind::from_extension` replaces `Language::from_extension` at build-time and attribute-time dispatch sites.
+**Decision.** Rename `LanguageExtractor` → `FileExtractor` and switch its discriminator from `Language` to a new `FileKind { Code(Language), Doc(DocFormat), Config(ConfigFormat), Table(TableFormat), Unknown }`. Add exactly three `LeafKind` variants: `Section { depth: u8 }` (markdown heading), `ConfigKey` (top-level key in YAML/JSON/TOML), `Column` (header cell in CSV/TSV). Ship shallow extractors only: ATX headings (not frontmatter, not fenced blocks), top-level map entries (not nested paths), first-row cells (not row-level nodes). 1 MiB size cap on tabular extraction short-circuits before parsing. Extraction is the only pipeline path that changes — `FileKind::from_extension` replaces `Language::from_extension` at build time.
 
 **Consequences.**
-- Markdown section anchors, top-level config keys, and CSV columns are now first-class graph nodes with `task_ids` attribution flowing through the existing history walker (byte-range overlap is kind-agnostic).
+- Markdown section anchors, top-level config keys, and CSV columns are now first-class graph nodes.
 - Stored index-file `kind` field switches from direct enum serialization to `LeafKind::to_string()` — required because `Section { depth }` serializes as `{"section": {"depth": 1}}` and the index's `kind: Option<String>` consumer expects bare strings. The full depth payload lives in the object body.
 - Per-format map order for config keys is not part of the extractor contract — TOML is alphabetical, YAML/JSON are insertion-order. Consumers that care about order must sort.
 - Cost: `LeafKind` JSON shape becomes heterogeneous (some variants are bare strings, `Section { depth }` is an externally-tagged object). Acceptable because no consumer pins the full LeafKind JSON string; `#[non_exhaustive]` not yet set on the enum — future LeafKind additions remain a breaking change for downstream exhaustive matches.
@@ -216,7 +220,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Consequences.**
 - Single-file edits reduce extraction work from the whole repo to the changed path set.
-- Zero-change incremental rebuilds can reproduce the previous root object hash byte-for-byte because reused leaves preserve IDs, identity keys, source hashes, and attribution fields.
+- Zero-change incremental rebuilds can reproduce the previous root object hash byte-for-byte because reused leaves preserve IDs, identity keys, and source hashes.
 - Deleted or newly ignored files naturally disappear because reuse only considers files in the current scan.
 - Cost: extractor improvements do not automatically reparse unchanged files during an incremental rebuild; users need a full `orbit graph build` when extractor semantics, not file contents, are what changed.
 
@@ -257,6 +261,8 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 ## ADR-016 — Task-id graph search as a scan filter, not a sidecar index
 
 **Status:** Accepted · 2026-04 · [T20260426-0220]
+
+**Superseded by:** ADR-029 / [T20260506-11].
 
 **Context.** Nodes already carry `task_ids` from the attribution pass, but agents had no inverse lookup for "which selectors did this task touch?" A dedicated sidecar index could make that lookup faster, but it would add another persisted source of truth before usage patterns justify it.
 
@@ -323,6 +329,8 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Status:** Accepted · 2026-04 · [T20260426-0507]
 
+**Superseded by:** ADR-029 / [T20260506-11].
+
 **Context.** Task-ID attribution was hardcoded to the Orbit format `\[T\d{8}-\d{4}(?:-\d+)?\]` in two places (`pipeline/history.rs` and `service/history.rs`). Codebases using Jira (`PROJ-123`), Linear (`ENG-123`), or GitHub-issue (`#123`) conventions saw empty graph-backed results and a silently empty fallback — the feature was unusable outside Orbit's own repo. The same `orbit task history` CLI surface also lived under the wrong subcommand: it never touches task lifecycle, only the graph.
 
 **Decision.** Move the CLI to `orbit graph history <selector>` (drop the redundant `rebuild` subsubcommand; `orbit graph build` does the same job). Introduce a single `TaskIdPattern` accessor in `orbit-knowledge` consumed by both the build-time attribution pass and the history fallback. Expose configuration through `--task-id-pattern <regex>` on `orbit graph build` / `orbit graph history` and `knowledge.task_id_pattern` in workspace `config.toml`, with strict precedence CLI flag > config > Orbit default. Adopt a capture-group convention (group 1 if present, else whole match) so the default Orbit pattern strips brackets in-regex instead of bespoke string slicing — the stored task IDs stay byte-identical to pre-T20260426-0507 graphs. Persist the pattern in `manifest.json`. When the configured pattern differs from the manifest pattern, `orbit graph history` emits a stderr warning, and the attribution pass forces a full-history backfill (cursor reset, prior task_ids hydration skipped) so the new pattern repopulates every node. Also add `orbit.graph.history` as an MCP/agent tool returning the same JSON shape as the CLI's `--json`.
@@ -356,6 +364,8 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Status:** Accepted · 2026-04 · [T20260428-1]
 
+**Superseded by:** ADR-029 / [T20260506-11].
+
 **Context.** `orbit.graph.search` added an exact `task_id` filter in [T20260426-0220], but its input validator hardcoded `T\d{8}-\d{4}`. The task store now creates unpadded daily suffixes such as `T20260428-1`, while historical graph/task references also include amended numeric suffixes such as `T20260412-0645-2`. The graph attribution default still only matched the older four-digit base suffix, so a selector-first task lookup could fail before search, or miss current task IDs after a rebuild.
 
 **Decision.** Treat the bare Orbit task-ID body accepted by graph attribution/search as `T\d{8}-\d+(?:-\d+)*`. Keep the configurable `TaskIdPattern` mechanism from ADR-020; this change only updates Orbit's default pattern and the agent-facing `orbit.graph.search` input validator.
@@ -377,7 +387,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Consequences.**
 - Codex, Gemini, and other MCP clients discover the same read-only graph capabilities that `orbit tool list` reports as active.
-- The history tool no longer requires a shell fallback when agents need task-ID attribution by selector.
+- The history tool is now a compatibility stub after ADR-029; agents should use `git log --grep '[T<task-id>]'` for local forward lookup.
 - Cost: the MCP schema payload gains one more graph tool, so the provider-dependent schema-cache caveat from ADR-018 still applies.
 
 ---
@@ -428,6 +438,24 @@ Folded into ADR-003's per-language coverage table. See that entry for the curren
 
 ---
 
+## ADR-029 — Remove graph task attribution
+
+**Status:** Accepted · 2026-05 · [T20260506-11]
+**Author:** gpt-5
+
+**Context.** Orbit carried a task attribution pipeline that parsed task IDs from commit messages, mapped hunks back to graph nodes, persisted `task_ids`/`structural_conflict` fields, wrote a task-commits sidecar, and exposed reverse lookup through `orbit.graph.search task_id` and `orbit.graph.history`. A 10-day audit window from 2026-04-26 to 2026-05-06 found 961 `orbit.graph.*` tool calls and 0 uses of the reverse-lookup parameters. The forward lookup users actually need is already native git text search: `git log --grep '[T<task-id>]'`. Separately, the task-sync doctrine now treats Orbit `task_id` as local-only; cross-engineer references go through `external_refs`.
+
+**Decision.** Remove graph task attribution. Delete the attribution pipeline, `TaskIdPattern`, task-id search/history parameters, node attribution fields, sidecar persistence, and manifest/config plumbing. Keep `orbit.graph.history` as a compatibility stub that returns a clear removal message and points to `git log --grep`. Preserve commit-message `[T...]` convention as a local search key.
+
+**Consequences.**
+- Graph build no longer pays attribution-walker cost or persists unread reverse-lookup data.
+- Legacy graph objects and refs that still contain attribution fields load through serde unknown-field tolerance; the fields disappear on rebuild.
+- `knowledge.task_id_pattern` is deprecated and ignored with a one-line warning instead of failing old configs.
+- Cross-engineer task references are explicit through `external_refs`, not inferred from local Orbit task IDs.
+- Cost: users who depended on reverse lookup from selector to tasks lose that graph query. The documented replacement only covers forward lookup from task ID to commits.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -445,30 +473,31 @@ Tasks cited by ADRs above:
 - **[T20260417-0307]** — Gate and guard graph refresh hot paths.
 - **[T20260417-0639]** — Speed up workspace-init graph persistence.
 - **[T20260421-0358]** — Branch-scoped refs.
-- **[T20260421-0528]** — `task_ids` schema + git history walker.
+- **[T20260421-0528]** — Historical `task_ids` schema + git history walker; removed by ADR-029 / [T20260506-11].
 - **[T20260421-0543]** — Orbit-owned symbol-level write operation schema ([specs/graph-operations.md](./specs/graph-operations.md)).
 - **[T20260422-1540]** — Non-code extraction via `FileKind`-dispatched extractors (markdown, YAML/JSON/TOML, CSV/TSV).
 - **[T20260423-0452]** — `.orbitignore` scan exclusions and separation from runtime policy access.
 - **[T20260426-0139]** — Parallel per-file hashing and leaf extraction with ordered graph merge.
 - **[T20260426-0140]** — Changed-path incremental leaf reuse.
 - **[T20260426-0141]** — Store-scoped LRU for graph objects and blobs.
-- **[T20260426-0220]** — Exact task-id filtering through `orbit.graph.search`.
+- **[T20260426-0220]** — Historical exact task-id filtering through `orbit.graph.search`; removed by ADR-029 / [T20260506-11].
 - **[T20260426-0236]** — End-to-end graph build benchmark with scoreboard trend records.
 - **[T20260423-0524]** — v3 graph MCP parity sweep (utilization & cost disposition).
 - **[T20260423-0607]** — Pointer-only graph reads (deferred; cited by ADR-018 consequences).
 - **[T20260426-0402]** — Land v3 retention decision in the ADR index.
 - **[T20260426-0453]** — Remove graph write operations from the public tool/MCP surface and standardize on task lock reservations as preflight write guards.
-- **[T20260426-0507]** — Move `orbit task history` to `orbit graph history`; add configurable task-ID regex with manifest-recorded pattern, mismatch warning, and forced full backfill on pattern change; expose `orbit.graph.history` agent tool.
+- **[T20260426-0507]** — Historical `orbit graph history` and configurable task-ID regex; attribution behavior removed by ADR-029 / [T20260506-11].
 - **[T20260426-2042]** — Move graph CLI behavior behind the `orbit-tools::graph` facade and remove the direct `orbit-knowledge` dependency from `orbit-cli`.
-- **[T20260428-1]** — Align graph task-ID attribution/search with current unpadded task IDs.
+- **[T20260428-1]** — Historical graph task-ID attribution/search alignment; removed by ADR-029 / [T20260506-11].
 - **[T20260428-3]** — Expose the full read-only graph tool set through the MCP safe surface for Codex and Gemini.
 - **[T20260430-22]** — Compact the knowledge-graph design docs and fold the obsolete evidence log into ADR-018.
 - **[T20260505-1]** — Require auto-refresh freshness checks to materialize missing current-branch graph refs before returning fresh.
 - **[T20260505-5]** — Bound `orbit.graph.pack` selector gathering and skip inline refresh by default.
-- **[T20260505-11]** — Add TypeScript and TSX classification, extraction, graph search/pack coverage, and symbol-level history attribution.
+- **[T20260505-11]** — Add TypeScript and TSX classification, extraction, and graph search/pack coverage.
 - **[T20260505-13]** — Add C# classification, tree-sitter extraction, and graph search coverage for .NET workspaces.
 - **[T20260505-14]** — Add Kotlin classification, tree-sitter extraction, and graph search coverage for mixed Java/Kotlin workspaces.
 - **[T20260505-15]** — Add Ruby classification, tree-sitter extraction, graph search coverage, and Ruby symbol kinds.
 - **[T20260505-16]** — Add C and header classification, tree-sitter extraction, and graph search coverage.
+- **[T20260506-11]** — Remove graph task attribution after audited reverse-lookup usage was 0/961; preserve `[T...]` as a local commit-search key.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

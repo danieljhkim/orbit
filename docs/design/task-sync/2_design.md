@@ -15,7 +15,7 @@ In scope for task sync:
 - Task YAML bundles (`task.yaml`).
 - Companion files: `plan.md`, `execution-summary.md`.
 - Task artifacts under `<task-id>/artifacts/**`.
-- ID allocation against the registry's view of state, with the format `T<YYYYMMDD>-<N>` preserved.
+- ID allocation against the registry's view of state, with the format `T<YYYYMMDD>-<N>` preserved for the future sync registry. Current v1 Orbit `task_id` values remain local-only search keys after [T20260506-11]; cross-engineer references use `external_refs`.
 
 Out of scope (with rationale in [§7](#7-concerns--honest-limitations)):
 
@@ -293,7 +293,7 @@ Task sync inherits whatever auth posture the team uses for `git push`. If a team
 ## Task References
 
 - [T20260505-12] — Design git-orphan-branch task sync (v2 feature). The task that produced this folder.
-- [T20260421-0528] — Knowledge-graph task attribution. Cited as the canonical example of `T<YYYYMMDD>-<N>` IDs being load-bearing.
+- [T20260421-0528] — Historical knowledge-graph task attribution. Superseded as a canonical load-bearing ID example by [T20260506-11].
 - [T20260506-9] — Adds first-class task `external_refs` metadata and documents the task-sync merge rule.
 - [T20260506-13] — Rejected follow-up; no standalone task-sync replay implementation is currently required for `external_refs`.
 

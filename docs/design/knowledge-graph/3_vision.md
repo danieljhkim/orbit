@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-06
 
 This document captures open questions, prior art, and what may be distinctive about Orbit's knowledge graph. The [T20260430-22] cleanup keeps it forward-looking; current contracts belong in [2_design.md](./2_design.md).
 
@@ -18,7 +18,7 @@ Is it worth a per-language type checker pass? Or is the right shape a pluggable 
 
 ### 1.2 Structural diff surface
 
-We attribute task IDs to nodes ([T20260421-0528]). Should we also attribute per-node *change kind* — added / modified / deleted per commit — as a first-class field, so `orbit.graph.show` can render a symbol's recent evolution without re-walking git?
+Node-level task attribution was removed in [T20260506-11]. If a future structural diff surface returns, it should be justified as code-history UX, not as task attribution, and should not make local Orbit task IDs cross-machine references.
 
 ### 1.3 Working-graph persistence on crash
 
@@ -28,9 +28,9 @@ The working graph is currently internal/deferred and in-memory ([T20260411-0424]
 
 The graph is symbolic and structural. Natural-language queries ("where do we handle auth failures") today degrade to substring search. Is there a clean way to layer embedding vectors onto leaves without coupling to a specific provider, and without duplicating the content-addressed store? An earlier attempt at semantic indexing ([T20260408-0445], archived) staged the shape of this but was parked when structural queries proved sufficient for the current agent workloads.
 
-### 1.5 Rename tracking across history
+### 1.5 Rename-aware code history
 
-§6.3 in [2_design.md](./2_design.md) — accept the current best-effort, or invest in `--follow`-equivalent hunk re-mapping? The cost compounds with every rename hop, which is why the walker in [T20260421-0528] opted out. Two archived predecessors ([T20260421-0342], [T20260421-0343]) explored persistent task→symbol edges with rename survival and were parked in favor of the identity-match-only approach that shipped; revisit them if rename blindness proves material.
+With graph task attribution removed, rename tracking is no longer needed for task-to-symbol reverse lookup. It may still matter for a future code-history view, but that design should start from current user demand rather than revive the old attribution walker.
 
 ### 1.6 Cross-workspace graph sharing
 
@@ -52,9 +52,9 @@ Today a modified file re-extracts every leaf. For large files (think 3000-line m
 
 §6.7 in [2_design.md](./2_design.md) — what's the right reachability definition, and who triggers GC (background, explicit `orbit gc`, on-demand during build)?
 
-### 1.11 Shipped-vs-WIP attribution
+### 1.11 Task visibility
 
-§6.8 in [2_design.md](./2_design.md). The flat union of `task_ids` on a node loses the signal that matters most: *which task that touched this symbol actually shipped*. Cleanest shape is probably to filter at query time from task status, but that requires the graph to depend on task state, which is a layering decision.
+§6.8 in [2_design.md](./2_design.md). The graph no longer stores `task_ids` on nodes. Future task visibility should flow through task state, task sync, or external trackers, not through a restored graph attribution field.
 
 ---
 
@@ -65,7 +65,7 @@ The graph combines known patterns tuned for agent prompt assembly and git-native
 ### 2.1 Code graphs for static analysis
 
 - **GitHub CodeQL / Semmle** — relational code graphs with strong semantic fidelity and heavy per-language extractor investment.
-- **Sourcegraph SCIP / LSIF** — language-agnostic indexes for cross-repo navigation; SCIP's diff-friendly index shape informed Orbit's attribution pass ([T20260421-0528]).
+- **Sourcegraph SCIP / LSIF** — language-agnostic indexes for cross-repo navigation; SCIP's diff-friendly index shape informed Orbit's now-removed attribution pass ([T20260421-0528], removed by [T20260506-11]).
 - **Glean (Meta)** — production graph store for code facts over many languages. Shares the "content-addressed facts + query layer" shape.
 
 Orbit's graph is structurally simpler than any of these — directory/file/leaf with signatures, not full type-resolved references. The trade is extractor maintenance cost vs. query precision.
@@ -84,7 +84,7 @@ Nothing in the extractor layer is novel; we use it as off-the-shelf infrastructu
 
 ### 2.4 Agent-oriented code indexes
 
-- **Cursor / Continue / Cline repo maps** — prompt-oriented repo summaries; generally one-shot rather than branch-scoped, incremental, or history-attributed.
+- **Cursor / Continue / Cline repo maps** — prompt-oriented repo summaries; generally one-shot rather than branch-scoped or incremental.
 - **Aider repo map** — ranked file/symbol summary generated per request. Cheaper than a full graph, less precise; no persistence across sessions.
 - **Sweep / CodePlan / Agentless** — research agents that build ad-hoc code graphs before planning. Each rebuilds from scratch; none persist a ref model.
 - **Symbex / Chapter** — local semantic search over code. Symbol-level but embedding-first rather than structure-first.
@@ -109,7 +109,7 @@ A future reference-provider abstraction (§1.1) could make LSP an optional backe
 Softened claims after survey:
 
 - **Branch-scoped refs over a shared content-addressed store** ([T20260421-0358]). This specific combination — multi-worktree safe, concurrent-build safe, read-on-missing-ref-falls-back-to-default — is not something we have seen packaged in an agent-facing code graph. Close analogs (SCIP, Glean) are server-backed; Orbit does it file-on-disk.
-- **Task-ID attribution as a first-class node field** ([T20260421-0528]). Most code graphs index *authors* and *timestamps*. Keying to a task identifier is Orbit-specific and load-bearing for the lifecycle scoreboard.
+- **Task-ID attribution as a first-class node field** ([T20260421-0528]) was removed in [T20260506-11] after audited reverse-lookup usage was 0/961. It is no longer a distinctive current claim.
 - **Working-graph overlay as the mutation surface** ([T20260411-0424]). Separating "the published graph that all reads see" from "the in-flight edits of a single activity" is a clean shape; whether it survives contact with long, crash-prone activities is an open question (§1.3).
 
 None of these rise to a research contribution. Treat the knowledge graph as productization of known primitives, with opinionated defaults for an agent-execution context.
@@ -146,10 +146,11 @@ Tasks cited in this document (all as forward pointers or historical context; non
 - **[T20260412-0645-3]** — Architectural graph navigation (`callers`, `implementors`, `deps`); foundation for §1.1.
 - **[T20260417-0301-2]** — Lock/write/read hardening.
 - **[T20260417-0639]** — Persistence-path speedup; related to §1.7.
-- **[T20260421-0342]** (archived) — Symbol-level git-log-based task lookup; superseded by attribution-on-node.
-- **[T20260421-0343]** (archived) — Indexed task→symbol edges with rename survival; superseded by identity-match attribution.
+- **[T20260421-0342]** (archived) — Historical symbol-level git-log-based task lookup; the current doctrine keeps only local forward lookup.
+- **[T20260421-0343]** (archived) — Historical indexed task→symbol edges with rename survival; superseded by removal of graph attribution.
 - **[T20260421-0358]** — Branch-scoped refs; foundation for §3's distinctiveness claim and §1.6.
-- **[T20260421-0528]** — History-walker + `task_ids` attribution; foundation for §1.2, §1.5, and §3.
+- **[T20260421-0528]** — Historical history-walker + `task_ids` attribution; removed by [T20260506-11].
+- **[T20260506-11]** — Remove graph task attribution and keep `[T...]` as a local commit-search key.
 - **[T20260426-0453]** — Current public graph surface is read-only; write coordination uses task lock reservations.
 - **[T20260430-22]** — Compact the knowledge-graph design docs and remove duplicate top-level narrative.
 

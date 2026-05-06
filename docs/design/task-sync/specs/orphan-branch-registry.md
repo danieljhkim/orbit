@@ -57,7 +57,7 @@ Where:
 - `agent` records the agent role/model that produced the operation (matches the `agent` provenance in audit events).
 - `host` is the hostname for attribution; not used for routing or ACL.
 - `parent` is the parent commit's short hash (redundant with git's parent edge but human-useful when reading messages).
-- The bracketed `[T<task-id>]` line at the end is the standard task-attribution suffix ([README](../../../../README.md) §Knowledge graph).
+- The bracketed `[T<task-id>]` line at the end is the standard local commit search key. It is not a graph-attribution reference and is not intended to resolve on another engineer's machine; cross-engineer references use `external_refs`.
 
 Commits are signed with the operator's git config. The agent identity is in the structured body, not the commit author — author/committer remain the human operator's git identity.
 

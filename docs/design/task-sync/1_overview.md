@@ -2,9 +2,11 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06
 
 Task sync is an opt-in, git-orphan-branch task registry that lets engineers on the same team see each other's tasks without running a shared Orbit instance. **Sync is a v2 feature.** v1 ships per-engineer per the [README](../../../README.md) and [POSITIONING](../../POSITIONING.md) doctrines — each operator runs Orbit on their own machine, with tasks, locks, and audit DB local to that machine. This document captures the v2 design now while context is fresh; the implementation lands as a separate sequence of tasks once the design is Accepted.
+
+**2026-05-06 note ([T20260506-11]).** The prior cross-machine `task_id` motivation has been retired for v1. Orbit task IDs remain local search keys for the author (`git log --grep '[T...]'`); cross-engineer task references go through `external_refs`. This task-sync design remains a future v2 registry proposal, not a statement that today's `task_id` is globally resolvable.
 
 This document is the entry point. [2_design.md](./2_design.md) specifies the mechanism, call sites, and migration paths in detail; [3_vision.md](./3_vision.md) names open questions and prior work; [4_decisions.md](./4_decisions.md) is the ADR log.
 
@@ -76,6 +78,6 @@ This design exists in v1 as a docs-only artifact. v1 ships with `[task.sync] ena
 ## Task References
 
 - [T20260505-12] — Design git-orphan-branch task sync (v2 feature). The task that produced this folder.
-- [T20260421-0528] — Knowledge-graph task attribution. Cited as evidence the `T<YYYYMMDD>-<N>` ID format is load-bearing across the system.
+- [T20260421-0528] — Historical knowledge-graph task attribution work. Superseded as evidence that `T<YYYYMMDD>-<N>` must be load-bearing across machines by [T20260506-11].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

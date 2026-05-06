@@ -256,6 +256,7 @@ impl V2RuntimeHost for EchoHost {
 
     fn tool_context_for_activity(
         &self,
+        _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
     ) -> orbit_tools::ToolContext {

@@ -248,8 +248,6 @@ pub fn build_initial_graph(
         data_root: orbit_dir.to_path_buf(),
         repo_override: Some(workspace_root.to_path_buf()),
         ref_name: None,
-        task_id_pattern_flag: None,
-        task_id_pattern_config: None,
         incremental: false,
     })
 }

@@ -1,5 +1,4 @@
 use orbit_common::types::{OrbitError, ToolParam, ToolSchema, optional_raw_string};
-use orbit_knowledge::ORBIT_TASK_ID_PATTERN;
 use orbit_knowledge::graph::navigator::GraphNodeRef;
 use orbit_knowledge::service::{GraphContextService, SearchHit};
 use regex::Regex;
@@ -16,7 +15,7 @@ impl Tool for OrbitKnowledgeSearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.graph.search".to_string(),
-            description: "Use when you need to locate selectors by name/path/source regex. Prefer over grep when text hits lose node type, task-id, or source-context filters.".to_string(),
+            description: "Use when you need to locate selectors by name/path/source regex. Prefer over grep when text hits lose node type or source-context filters.".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "query".to_string(),
@@ -39,12 +38,6 @@ impl Tool for OrbitKnowledgeSearchTool {
                 ToolParam {
                     name: "prefix".to_string(),
                     description: "Prefix.".to_string(),
-                    param_type: "string".to_string(),
-                    required: false,
-                },
-                ToolParam {
-                    name: "task_id".to_string(),
-                    description: "Exact task ID.".to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
@@ -87,8 +80,6 @@ impl Tool for OrbitKnowledgeSearchTool {
         let node_type = super::optional_string(&input, "type")?;
         let kind_filter = super::optional_string(&input, "kind")?;
         let prefix = super::optional_string(&input, "prefix")?;
-        let task_id = super::optional_string(&input, "task_id")?;
-        validate_task_id(task_id.as_deref())?;
         let source_regex_text = super::optional_string(&input, "source_regex")?;
         let limit_provided = input.get("limit").is_some();
         let limit = input
@@ -139,7 +130,6 @@ impl Tool for OrbitKnowledgeSearchTool {
                 node_types,
                 prefix.as_deref(),
                 kind_filter.as_deref(),
-                task_id.as_deref(),
                 source_regex.as_ref(),
                 search_limit,
                 candidate_scan_limit,
@@ -220,48 +210,6 @@ impl Tool for OrbitKnowledgeSearchTool {
                 "results": items,
             }))
         }
-    }
-}
-
-fn validate_task_id(task_id: Option<&str>) -> Result<(), OrbitError> {
-    let Some(task_id) = task_id else {
-        return Ok(());
-    };
-
-    if matches_orbit_task_id(task_id) {
-        Ok(())
-    } else {
-        Err(OrbitError::InvalidInput(format!(
-            "`task_id` must match {ORBIT_TASK_ID_PATTERN}"
-        )))
-    }
-}
-
-fn matches_orbit_task_id(task_id: &str) -> bool {
-    let bytes = task_id.as_bytes();
-    if bytes.len() < 11 || bytes[0] != b'T' {
-        return false;
-    }
-    if !bytes[1..9].iter().all(u8::is_ascii_digit) || bytes[9] != b'-' {
-        return false;
-    }
-
-    let mut index = 10;
-    loop {
-        let segment_start = index;
-        while index < bytes.len() && bytes[index].is_ascii_digit() {
-            index += 1;
-        }
-        if segment_start == index {
-            return false;
-        }
-        if index == bytes.len() {
-            return true;
-        }
-        if bytes[index] != b'-' {
-            return false;
-        }
-        index += 1;
     }
 }
 

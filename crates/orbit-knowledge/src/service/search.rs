@@ -13,7 +13,6 @@ struct SearchCriteria<'q> {
     node_types: Option<&'q [&'q str]>,
     location_prefix: Option<&'q str>,
     kind_filter: Option<&'q str>,
-    task_id: Option<&'q str>,
     source_regex: Option<&'q Regex>,
     matched_line_limit: usize,
     candidate_scan_limit: Option<usize>,
@@ -55,7 +54,6 @@ impl<'a> GraphContextService<'a> {
             node_types,
             location_prefix,
             kind_filter,
-            None,
             source_regex,
             limit,
             None,
@@ -70,7 +68,6 @@ impl<'a> GraphContextService<'a> {
         node_types: Option<&[&str]>,
         location_prefix: Option<&str>,
         kind_filter: Option<&str>,
-        task_id: Option<&str>,
         source_regex: Option<&Regex>,
         limit: usize,
         candidate_scan_limit: Option<usize>,
@@ -82,7 +79,6 @@ impl<'a> GraphContextService<'a> {
             node_types,
             location_prefix,
             kind_filter,
-            task_id,
             source_regex,
             matched_line_limit: DEFAULT_MATCHED_LINE_LIMIT,
             candidate_scan_limit,
@@ -256,12 +252,6 @@ impl<'a> GraphContextService<'a> {
                 _ => return false,
             }
         }
-        if let Some(task_id) = criteria.task_id
-            && !node.base().task_ids.iter().any(|value| value == task_id)
-        {
-            return false;
-        }
-
         criteria.browse
             || node
                 .base()
@@ -419,127 +409,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn task_id_filter_returns_only_nodes_with_exact_task_id() {
-        let graph = graph_with_task_ids();
-        let service = GraphContextService::new(&graph);
-
-        let (total, hits) = service
-            .search_hits_with_total_bounded(
-                "",
-                Some(&["symbol"]),
-                None,
-                None,
-                Some("T20260421-0528"),
-                None,
-                10,
-                None,
-            )
-            .unwrap();
-
-        let selectors: Vec<String> = hits
-            .into_iter()
-            .map(|hit| service.selector_for_node(hit.node))
-            .collect();
-        assert_eq!(total, 2);
-        assert_eq!(
-            selectors,
-            vec![
-                "symbol:src/alpha.rs#alpha:function",
-                "symbol:src/gamma.rs#gamma:function",
-            ]
-        );
-    }
-
-    #[test]
-    fn task_id_filter_absent_from_graph_returns_zero_results() {
-        let graph = graph_with_task_ids();
-        let service = GraphContextService::new(&graph);
-
-        let (total, hits) = service
-            .search_hits_with_total_bounded(
-                "",
-                Some(&["symbol"]),
-                None,
-                None,
-                Some("T20260421-9999"),
-                None,
-                10,
-                None,
-            )
-            .unwrap();
-
-        assert_eq!(total, 0);
-        assert!(hits.is_empty());
-    }
-
-    #[test]
-    fn task_id_filter_and_query_are_combined() {
-        let graph = graph_with_task_ids();
-        let service = GraphContextService::new(&graph);
-
-        let (total, hits) = service
-            .search_hits_with_total_bounded(
-                "gamma",
-                Some(&["symbol"]),
-                None,
-                None,
-                Some("T20260421-0528"),
-                None,
-                10,
-                None,
-            )
-            .unwrap();
-
-        assert_eq!(total, 1);
-        assert_eq!(
-            service.selector_for_node(hits[0].node),
-            "symbol:src/gamma.rs#gamma:function"
-        );
-
-        let (total, hits) = service
-            .search_hits_with_total_bounded(
-                "beta",
-                Some(&["symbol"]),
-                None,
-                None,
-                Some("T20260421-0528"),
-                None,
-                10,
-                None,
-            )
-            .unwrap();
-        assert_eq!(total, 0);
-        assert!(hits.is_empty());
-    }
-
-    #[test]
-    fn task_id_none_matches_no_task_filter_behavior() {
-        let graph = graph_with_task_ids();
-        let service = GraphContextService::new(&graph);
-
-        let (unfiltered_total, unfiltered_hits) = service
-            .search_hits_with_total_bounded(
-                "a",
-                Some(&["symbol"]),
-                None,
-                None,
-                None,
-                None,
-                10,
-                None,
-            )
-            .unwrap();
-        let (legacy_total, legacy_hits) =
-            service.search_hits_with_total("a", Some(&["symbol"]), None, None, None, 10);
-
-        assert_eq!(unfiltered_total, legacy_total);
-        assert_eq!(
-            selectors(&service, unfiltered_hits),
-            selectors(&service, legacy_hits)
-        );
-    }
-
     fn graph_for_case(case: &LanguageCase) -> CodebaseGraphV1 {
         let root_id = "dir:.".to_string();
         let file_id = format!("file:{}", case.path);
@@ -589,77 +458,6 @@ mod tests {
         }
     }
 
-    fn graph_with_task_ids() -> CodebaseGraphV1 {
-        let root_id = "dir:.".to_string();
-        let cases = [
-            ("src/alpha.rs", "alpha", vec!["T20260421-0528"]),
-            ("src/beta.rs", "beta", vec!["T20260421-0001"]),
-            (
-                "src/gamma.rs",
-                "gamma",
-                vec!["T20260421-0528", "T20260421-0002"],
-            ),
-        ];
-        let mut files = Vec::new();
-        let mut leaves = Vec::new();
-        let mut file_children = Vec::new();
-
-        for (path, name, task_ids) in cases {
-            let file_id = format!("file:{path}");
-            let leaf_id = format!("symbol:{path}#{name}:function");
-            file_children.push(file_id.clone());
-            files.push(FileNode {
-                base: base_node(&file_id, path, path, "rust", Some("dir:.")),
-                extension: Some("rs".to_string()),
-                source_blob_hash: None,
-                source: String::new(),
-                imports: Vec::new(),
-                exports: Vec::new(),
-                re_exports: Vec::new(),
-                leaf_children: vec![leaf_id.clone()],
-            });
-            let mut leaf = LeafNode {
-                base: base_node(
-                    &leaf_id,
-                    name,
-                    &format!("{path}#{name}"),
-                    "rust",
-                    Some(&file_id),
-                ),
-                kind: LeafKind::Function,
-                source: format!("fn {name}() {{}}\n"),
-                source_blob_hash: None,
-                source_hash: None,
-                file_hash_at_capture: None,
-                history: Vec::new(),
-                input_signature: Vec::new(),
-                output_signature: Vec::new(),
-                start_line: Some(1),
-                end_line: Some(1),
-                children: Vec::new(),
-            };
-            leaf.base.task_ids = task_ids.into_iter().map(str::to_string).collect();
-            leaves.push(leaf);
-        }
-
-        CodebaseGraphV1 {
-            root_dir_id: root_id.clone(),
-            dirs: vec![DirNode {
-                base: base_node(&root_id, ".", ".", "", None),
-                dir_children: Vec::new(),
-                file_children,
-            }],
-            files,
-            leaves,
-        }
-    }
-
-    fn selectors<'a>(service: &GraphContextService<'a>, hits: Vec<SearchHit<'a>>) -> Vec<String> {
-        hits.into_iter()
-            .map(|hit| service.selector_for_node(hit.node))
-            .collect()
-    }
-
     fn base_node(
         id: &str,
         name: &str,
@@ -680,8 +478,6 @@ mod tests {
             lineage_locked: false,
             lock_owner: None,
             lock_reason: String::new(),
-            task_ids: Vec::new(),
-            structural_conflict: false,
         }
     }
 }

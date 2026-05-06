@@ -136,19 +136,6 @@ pub struct BaseNodeFields {
     pub lock_owner: Option<String>,
     #[serde(default)]
     pub lock_reason: String,
-    /// Sorted, deduplicated task IDs (without surrounding brackets) parsed from
-    /// commit messages touching this node. Populated by the attribute-history
-    /// pipeline stage; see `pipeline::attribute` (T20260421-0528).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub task_ids: Vec<String>,
-    /// Set to `true` when both sides of a merge-commit touched this node.
-    /// Informational — git already resolved the text-level conflict.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub structural_conflict: bool,
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 # Spec: Graph Operations
 
-Orbit-owned symbol-level write operations are the precise-by-construction complement to the identity matcher. When an agent dispatched by Orbit edits code through a graph-aware API (`graph.rename`, `graph.move`, `graph.split`, …) the commit that carries those edits also carries a sidecar `.orbit/operations/<commit_sha>.json` file. The file enumerates the exact set of symbol-level changes the producer intended. The knowledge-graph rebuilder consumes this sidecar to preserve `task_ids` and stable identity *by fiat*, falling back to the matcher only for commits without a log or with a log that contradicts the tree. This spec defines the canonical contract: the operation taxonomy, the JSON schema, how operations address symbols, validation rules, the producer API surface at a sketch level, backfill policy, and the open questions that remain.
+**Obsolete attribution note ([T20260506-11]).** This spec predates removal of graph task attribution. Its `task_ids`, `attribute.rs`, and matcher-consumer language is historical; there is no current read-side hook that consumes these operation logs for attribution. The symbol-operation taxonomy may still inform future graph write tooling, but it needs a fresh consumer and migration design before implementation.
+
+Orbit-owned symbol-level write operations were proposed as the precise-by-construction complement to the historical identity matcher. When an agent dispatched by Orbit edits code through a graph-aware API (`graph.rename`, `graph.move`, `graph.split`, ...) the commit that carries those edits also carries a sidecar `.orbit/operations/<commit_sha>.json` file. The file enumerates the exact set of symbol-level changes the producer intended. In the original design, the knowledge-graph rebuilder consumed this sidecar to preserve `task_ids` and stable identity *by fiat*, falling back to the matcher only for commits without a log or with a log that contradicts the tree. The task-attribution consumer was removed in [T20260506-11].
 
 ## Why This Exists
 
@@ -320,7 +322,8 @@ Drafted by Claude (`claude-opus-4-7`) on 2026-04-22. Consumer hook reserved by [
 
 ## Task References
 
-- **[T20260421-0528]** — `task_ids` schema + git history walker; reserved the read-side hook in [crates/orbit-knowledge/src/pipeline/attribute.rs](../../../crates/orbit-knowledge/src/pipeline/attribute.rs) that this spec formalizes. Fulfills the "operation-log hook" acceptance criterion by defining the contract that hook will enforce.
+- **[T20260421-0528]** — Historical `task_ids` schema + git history walker; removed by [T20260506-11].
 - **[T20260421-0543]** — This spec.
+- **[T20260506-11]** — Remove graph task attribution; this spec's attribution consumer is obsolete.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

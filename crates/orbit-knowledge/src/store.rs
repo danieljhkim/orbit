@@ -1,7 +1,5 @@
 #[path = "store/graph_io.rs"]
 mod graph_io;
-#[path = "store/history_query.rs"]
-mod history_query;
 #[path = "store/leaf_data.rs"]
 mod leaf_data;
 #[path = "store/object_cache.rs"]
@@ -10,8 +8,6 @@ mod object_cache;
 mod open;
 #[path = "store/pack.rs"]
 mod pack;
-#[path = "store/task_commits.rs"]
-pub mod task_commits;
 #[path = "store/task_state.rs"]
 mod task_state;
 #[path = "store/types.rs"]
@@ -22,7 +18,6 @@ use std::path::PathBuf;
 
 use crate::selector::SelectorLookupKey;
 
-pub use history_query::NodeTaskInfo;
 pub use object_cache::{
     DEFAULT_BLOB_CACHE_CAPACITY, DEFAULT_OBJECT_CACHE_CAPACITY, GraphObjectCache,
 };

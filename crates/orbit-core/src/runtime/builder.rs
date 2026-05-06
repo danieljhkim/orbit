@@ -94,7 +94,6 @@ pub(crate) fn build_context_from_roots(
     let scoring_enabled = runtime_config.scoring_enabled;
     let graph_editing = runtime_config.graph_editing;
     let v2_backend = runtime_config.v2_backend().map(ToString::to_string);
-    let task_id_pattern = runtime_config.task_id_pattern().map(ToString::to_string);
     let agent_roles = runtime_config.agent_roles.clone();
 
     Ok(OrbitContext::new(
@@ -126,7 +125,6 @@ pub(crate) fn build_context_from_roots(
             scoring_enabled,
             graph_editing,
             v2_backend,
-            task_id_pattern,
             agent_roles,
         ),
     ))

@@ -176,105 +176,6 @@ fn search_source_regex_rejects_invalid_and_unbounded_inputs() {
 }
 
 #[test]
-fn search_task_id_filter_plumbs_json_input() {
-    let mut touched = leaf_node(
-        "src/runtime.rs",
-        "AgentRuntime",
-        LeafKind::Trait,
-        "pub trait AgentRuntime {}",
-    );
-    touched.base.task_ids = vec!["T20260421-0528".to_string()];
-    let mut untouched = leaf_node(
-        "src/engine.rs",
-        "EngineRuntime",
-        LeafKind::Struct,
-        "pub struct EngineRuntime;",
-    );
-    untouched.base.task_ids = vec!["T20260421-0001".to_string()];
-    let fixture = write_graph_fixture(graph_with_root(
-        vec![
-            attach_leaf(
-                file_node("src/runtime.rs", "rust", Some("rs"), vec![]),
-                &touched,
-            ),
-            attach_leaf(
-                file_node("src/engine.rs", "rust", Some("rs"), vec![]),
-                &untouched,
-            ),
-        ],
-        vec![touched, untouched],
-    ));
-
-    let response = execute_graph_tool(
-        fixture.path(),
-        "orbit.graph.search",
-        json!({
-            "query": "Runtime",
-            "type": "symbol",
-            "task_id": "T20260421-0528",
-            "limit": 10
-        }),
-    );
-
-    assert_eq!(response["total"], 1);
-    assert_eq!(response["results"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        response["results"][0]["selector"],
-        "symbol:src/runtime.rs#AgentRuntime:trait"
-    );
-}
-
-#[test]
-fn search_task_id_filter_accepts_current_short_suffix() {
-    let mut touched = leaf_node(
-        "src/runtime.rs",
-        "AgentRuntime",
-        LeafKind::Trait,
-        "pub trait AgentRuntime {}",
-    );
-    touched.base.task_ids = vec!["T20260428-1".to_string()];
-    let fixture = write_graph_fixture(graph_with_root(
-        vec![attach_leaf(
-            file_node("src/runtime.rs", "rust", Some("rs"), vec![]),
-            &touched,
-        )],
-        vec![touched],
-    ));
-
-    let response = execute_graph_tool(
-        fixture.path(),
-        "orbit.graph.search",
-        json!({
-            "query": "Runtime",
-            "type": "symbol",
-            "task_id": "T20260428-1",
-            "limit": 10
-        }),
-    );
-
-    assert_eq!(response["total"], 1);
-    assert_eq!(
-        response["results"][0]["selector"],
-        "symbol:src/runtime.rs#AgentRuntime:trait"
-    );
-}
-
-#[test]
-fn search_task_id_filter_rejects_malformed_input() {
-    let fixture = write_graph_fixture(graph_with_root(Vec::new(), Vec::new()));
-
-    let error = execute_graph_tool_result(
-        fixture.path(),
-        "orbit.graph.search",
-        json!({"task_id": "T20260421"}),
-    )
-    .unwrap_err()
-    .to_string();
-
-    assert!(error.contains("`task_id` must match T\\d{8}-\\d+(?:-\\d+)*"));
-}
-
-#[test]
 fn search_and_pack_surface_reads_typescript_build_output() {
     let repo = tempfile::tempdir().unwrap();
     write_repo_file(
@@ -836,7 +737,6 @@ fn run_knowledge_build(repo_root: &Path) {
         output_dir: repo_root.join(".orbit/knowledge"),
         incremental: false,
         ref_name: Some(RefName::new(GRAPH_REF).unwrap()),
-        task_id_pattern: None,
     };
     orbit_knowledge::pipeline::run_build(config).unwrap();
 }
@@ -976,7 +876,5 @@ fn base_node(
         lineage_locked: false,
         lock_owner: None,
         lock_reason: String::new(),
-        task_ids: Vec::new(),
-        structural_conflict: false,
     }
 }

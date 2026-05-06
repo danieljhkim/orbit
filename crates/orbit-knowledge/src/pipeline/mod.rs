@@ -2,11 +2,9 @@
 //!
 //! Each stage is a plain function operating on a shared [`PipelineContext`].
 
-pub mod attribute;
 pub mod build;
 pub mod context;
 pub mod hash;
-pub mod history;
 pub mod persist;
 pub mod scan;
 
@@ -103,9 +101,7 @@ fn run_build_inner(config: BuildConfig) -> Result<PipelineContext, KnowledgeErro
     build::build_graph_files(&mut ctx)?;
     build::build_graph_leaves(&mut ctx)?;
 
-    let attribute_outcome = attribute::attribute_history(&mut ctx)?;
-
-    persist::persist_graph(&ctx, &attribute_outcome)?;
+    persist::persist_graph(&ctx)?;
     persist::write_manifest(&ctx)?;
     hash::save_hash_cache(&ctx)?;
 
@@ -153,7 +149,6 @@ pub fn ensure_fresh(
         output_dir: knowledge_dir.to_path_buf(),
         incremental,
         ref_name: None,
-        task_id_pattern: None,
     };
     run_build_inner(config)
         .map_err(|e| KnowledgeError::knowledge_unavailable(format!("auto-refresh failed: {e}")))?;

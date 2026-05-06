@@ -40,10 +40,8 @@ pub struct RawAgentRoleConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawKnowledgeConfig {
-    /// `knowledge.task_id_pattern` — workspace override for the task-ID
-    /// extraction regex used by `orbit graph build` and `orbit graph history`.
-    /// `None` falls back to the Orbit default.
-    pub(super) task_id_pattern: Option<String>,
+    /// Deprecated legacy key. Kept only so loaders can warn and ignore it.
+    pub(super) task_id_pattern: Option<toml::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

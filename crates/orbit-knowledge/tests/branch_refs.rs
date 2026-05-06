@@ -163,7 +163,6 @@ fn concurrent_branch_builds_keep_distinct_refs_and_graphs_reachable()
             output_dir: alpha_knowledge_dir,
             incremental: false,
             ref_name: None,
-            task_id_pattern: None,
         })
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -175,7 +174,6 @@ fn concurrent_branch_builds_keep_distinct_refs_and_graphs_reachable()
             output_dir: beta_knowledge_dir,
             incremental: false,
             ref_name: None,
-            task_id_pattern: None,
         })
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -228,7 +226,6 @@ fn ensure_fresh_waits_for_requested_branch_ref_before_returning()
         output_dir: knowledge_dir.clone(),
         incremental: false,
         ref_name: None,
-        task_id_pattern: None,
     })?;
 
     git(repo.path(), &["branch", "feature/wait"])?;
@@ -273,7 +270,6 @@ fn ensure_fresh_waits_for_requested_branch_ref_before_returning()
         output_dir: knowledge_dir.clone(),
         incremental: true,
         ref_name: None,
-        task_id_pattern: None,
     })?;
 
     let status = status_rx
@@ -309,7 +305,6 @@ fn branch_refs_ensure_fresh_rebuilds_clean_worktree_when_branch_ref_is_missing()
         output_dir: knowledge_dir.clone(),
         incremental: false,
         ref_name: None,
-        task_id_pattern: None,
     })?;
 
     let default_ref = RefName::new("main")?;
@@ -404,7 +399,6 @@ fn pack_regression_selector_opens_from_branch_ref_layout() -> Result<(), Box<dyn
         output_dir: knowledge_dir.clone(),
         incremental: false,
         ref_name: Some(build_ref.clone()),
-        task_id_pattern: None,
     })?;
 
     let store = KnowledgeStore::open(&knowledge_dir, &build_ref, None, None)?;
@@ -530,8 +524,6 @@ fn base_node(id: &str, name: &str, location: &str, parent_id: Option<&str>) -> B
         lineage_locked: false,
         lock_owner: None,
         lock_reason: String::new(),
-        task_ids: Vec::new(),
-        structural_conflict: false,
     }
 }
 

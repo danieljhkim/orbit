@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-06
 
 ADR-style log of non-obvious task-sync decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -14,7 +14,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Status:** Proposed · 2026-05 · [T20260505-12]
 
-**Context.** Three plausible designs for "where does the team's task state live?" exist: a coordinator daemon (shared-host), per-host ID suffixes that paper over allocation collisions without a shared store, and a git-based registry. v1 commits to per-engineer deployment ([README](../../../README.md), [POSITIONING](../../POSITIONING.md)), which rules out a coordinator daemon. Per-host suffixes (`T20260504-h7a3-1`) preserve uniqueness but break the load-bearing `T<YYYYMMDD>-<N>` regex in commit messages, knowledge-graph attribution, audit events, and downstream tooling. A git-based orphan-branch registry preserves the ID format and uses infrastructure the team already has.
+**Context.** Three plausible designs for "where does the team's task state live?" exist: a coordinator daemon (shared-host), per-host ID suffixes that paper over allocation collisions without a shared store, and a git-based registry. v1 commits to per-engineer deployment ([README](../../../README.md), [POSITIONING](../../POSITIONING.md)), which rules out a coordinator daemon. Per-host suffixes (`T20260504-h7a3-1`) preserve uniqueness but complicate the local commit-message search convention, audit events, and downstream tooling. Knowledge-graph task attribution was removed in [T20260506-11] and is no longer a current consumer. A git-based orphan-branch registry preserves the ID format and uses infrastructure the team already has.
 
 **Decision.** The task registry lives on a git orphan branch at `refs/heads/orbit/tasks` (user-facing name `orbit/tasks`) on the team's shared remote. Every sync-enabled mutation fetches this ref, mutates locally, commits on the branch, and pushes. Atomic git ref update is the coordinator. Reject coordinator daemon: it would violate the v1 per-engineer doctrine and reintroduce the shared-host work that v1 explicitly defers. Reject per-host suffixes: they break ID-format-as-interface across the system.
 
@@ -29,6 +29,8 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 ## ADR-002 — Operation-aware replay over text-merge or event sourcing
 
 **Status:** Proposed · 2026-05 · [T20260505-12]
+
+**Superseded by:** [T20260506-11] for any premise that Orbit `task_id` must be globally resolvable outside a future sync registry.
 
 **Context.** Standard git text merge fails for task bundles in three concrete ways: status-transition divergence (git keeps both target paths), comment/history list appends (text-merge mangles YAML structure), and same-field edits (humans can't usefully resolve YAML quoting conflicts). Four mechanisms were evaluated against four scenarios in [2_design.md §3.1](./2_design.md): ADD-only sync, operation-aware replay, event sourcing, and no sync. ADD-only ships fast but leaves the partial-coverage mental model that updates don't sync — the operations users care about most. Event sourcing handles every scenario but requires building an event materializer and abandoning YAML-as-canonical. No sync defers the entire problem to v2 shared-host.
 
@@ -61,7 +63,9 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 **Status:** Proposed · 2026-05 · [T20260505-12]
 
-**Context.** The `T<YYYYMMDD>-<N>` task ID format is an interface, not a string. It appears in commit messages (`[T20260421-0528]`), knowledge-graph node attribution ([README](../../../README.md) §Knowledge graph), audit events, and operator scripts that grep `T\d{8}-\d+`. Changing the format requires touching every consumer. The current allocator at [layout.rs:102-132](../../../crates/orbit-store/src/file/task_store/layout.rs) scans the local file store and increments — it has no view of other operators' allocations.
+**Superseded by:** [T20260506-11] for any knowledge-graph attribution or cross-machine `task_id` motivation.
+
+**Context.** The `T<YYYYMMDD>-<N>` task ID format is a local interface, not a cross-machine reference. It appears in commit messages (`[T20260421-0528]`), local audit events, and operator scripts that grep `T\d{8}-\d+`. Knowledge-graph node attribution was removed in [T20260506-11], and cross-engineer task references now go through `external_refs`. The current allocator at [layout.rs:102-132](../../../crates/orbit-store/src/file/task_store/layout.rs) scans the local file store and increments — it has no view of other operators' allocations.
 
 **Decision.** ID allocation continues to produce `T<YYYYMMDD>-<N>`; the format is preserved. The allocator gains a "view" abstraction that, when sync is enabled, scans the fetched registry's state directories *plus* any local unpushed tasks before computing the next counter. On push rejection caused by ID collision, the operation is retried via the standard replay path: re-fetch, re-allocate (now seeing the conflicting peer's task), rewrite the bundle locally with the new ID, and retry push. The retry window is safe because allocation happens before any commit message, audit event, or agent dispatch references the ID.
 

@@ -26,7 +26,7 @@ Two features carry the product thesis. Everything else in Orbit is infrastructur
 
 Agents inspect a parsed, content-addressed graph of your codebase: directories, files, extracted symbols, import edges, crate dependencies, trait implementors, and signature-matched caller/reference indexes. Queries are token-budgeted packs shaped for prompt consumption, not LSP-style hover text.
 
-The graph is built for safe parallel execution. It is branch-scoped (two worktrees on two branches rebuild concurrently without corruption), task attribution from commit messages is carried on every node (`[T20260421-0528]`), and reads fall back to the default branch until a new branch has been built. The public graph surface is read-only; write coordination happens before dispatch through task `context_files` and `orbit.task.locks.reserve` preflight guards.
+The graph is built for safe parallel execution. It is branch-scoped (two worktrees on two branches rebuild concurrently without corruption), and reads fall back to the default branch until a new branch has been built. The public graph surface is read-only; write coordination happens before dispatch through task `context_files` and `orbit.task.locks.reserve` preflight guards.
 
 This is the technical moat and the reason to pick Orbit over a generic agent framework. Design docs: [docs/design/knowledge-graph/](docs/design/knowledge-graph/).
 

@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
 use orbit_common::utility::redaction::redact_home_dir;
 
 use crate::paths;
-
-use regex::Regex;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
@@ -35,10 +34,6 @@ pub(crate) struct RuntimeConfig {
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `http` default.
     pub(crate) v2_backend: Option<String>,
-    /// `knowledge.task_id_pattern` — workspace override for the task-ID
-    /// extraction regex (T20260426-0507). Validated at load time; raw source
-    /// string only (avoids forcing an `orbit-knowledge` dep on `orbit-core`).
-    pub(crate) task_id_pattern: Option<String>,
     /// `[agent.<role>]` role-keyed overrides written by `orbit init` per
     /// ADR-027 and consumed at v2 dispatch time per ADR-029. Empty when no
     /// `[agent.*]` block is present.
@@ -61,7 +56,6 @@ impl RuntimeConfig {
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
-            task_id_pattern: None,
             agent_roles: BTreeMap::new(),
         }
     }
@@ -136,27 +130,14 @@ impl RuntimeConfig {
             .as_ref()
             .and_then(|section| section.backend.clone());
 
-        let task_id_pattern = parsed
+        if parsed
             .knowledge
             .as_ref()
-            .and_then(|section| section.task_id_pattern.clone())
-            .map(|raw| {
-                let trimmed = raw.trim().to_string();
-                if trimmed.is_empty() {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "knowledge.task_id_pattern in '{}' must not be empty",
-                        redact_home_dir(&config_path.display().to_string())
-                    )));
-                }
-                Regex::new(&trimmed).map_err(|err| {
-                    OrbitError::InvalidInput(format!(
-                        "knowledge.task_id_pattern in '{}' is not a valid regex: {err}",
-                        redact_home_dir(&config_path.display().to_string())
-                    ))
-                })?;
-                Ok::<String, OrbitError>(trimmed)
-            })
-            .transpose()?;
+            .and_then(|section| section.task_id_pattern.as_ref())
+            .is_some()
+        {
+            warn_deprecated_task_id_pattern(&config_path);
+        }
 
         let agent_roles = parsed.agent.clone().unwrap_or_default();
 
@@ -172,7 +153,6 @@ impl RuntimeConfig {
             scoring_enabled,
             graph_editing,
             v2_backend,
-            task_id_pattern,
             agent_roles,
         })
     }
@@ -181,12 +161,15 @@ impl RuntimeConfig {
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.v2_backend.as_deref()
     }
+}
 
-    /// Workspace-configured task-ID extraction regex (T20260426-0507). `None`
-    /// means callers should use the Orbit default.
-    pub(crate) fn task_id_pattern(&self) -> Option<&str> {
-        self.task_id_pattern.as_deref()
-    }
+fn warn_deprecated_task_id_pattern(config_path: &Path) {
+    let path = redact_home_dir(&config_path.display().to_string());
+    let mut stderr = std::io::stderr().lock();
+    let _ = writeln!(
+        stderr,
+        "warning: knowledge.task_id_pattern in '{path}' is deprecated and ignored"
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -476,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn task_id_pattern_loads_valid_regex_from_workspace_config() {
+    fn deprecated_task_id_pattern_loads_valid_regex_from_workspace_config() {
         let global = tempdir().expect("global tempdir");
         let workspace = tempdir().expect("workspace tempdir");
         write_config(
@@ -486,11 +469,11 @@ mod tests {
 
         let config =
             RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-        assert_eq!(config.task_id_pattern(), Some(r"[A-Z]+-\d+"));
+        assert!(config.v2_backend().is_none());
     }
 
     #[test]
-    fn task_id_pattern_rejects_invalid_regex_at_load_time() {
+    fn deprecated_task_id_pattern_ignores_invalid_regex_at_load_time() {
         let global = tempdir().expect("global tempdir");
         let workspace = tempdir().expect("workspace tempdir");
         write_config(
@@ -498,38 +481,28 @@ mod tests {
             "[knowledge]\ntask_id_pattern = \"[unclosed\"\n",
         );
 
-        let err = RuntimeConfig::load_layered(global.path(), workspace.path())
-            .expect_err("invalid regex must error");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("knowledge.task_id_pattern") && msg.contains("not a valid regex"),
-            "unexpected error: {msg}"
-        );
+        RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect("deprecated invalid regex must load");
     }
 
     #[test]
-    fn task_id_pattern_rejects_empty_string() {
+    fn deprecated_task_id_pattern_ignores_empty_string() {
         let global = tempdir().expect("global tempdir");
         let workspace = tempdir().expect("workspace tempdir");
         write_config(workspace.path(), "[knowledge]\ntask_id_pattern = \"  \"\n");
 
-        let err = RuntimeConfig::load_layered(global.path(), workspace.path())
-            .expect_err("empty pattern must error");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("knowledge.task_id_pattern") && msg.contains("must not be empty"),
-            "unexpected error: {msg}"
-        );
+        RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect("deprecated empty pattern must load");
     }
 
     #[test]
-    fn task_id_pattern_defaults_to_none_when_section_absent() {
+    fn deprecated_task_id_pattern_absent_when_section_absent() {
         let global = tempdir().expect("global tempdir");
         let workspace = tempdir().expect("workspace tempdir");
         write_config(workspace.path(), "[scoring]\nenabled = true\n");
 
         let config =
             RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-        assert_eq!(config.task_id_pattern(), None);
+        assert!(config.v2_backend().is_none());
     }
 }

@@ -20,6 +20,8 @@ The deployment shape that fits:
 - **Fleets, not a single assistant.** Multiple agents, possibly multiple providers, running in parallel.
 - **Per-operator install.** Orbit runs on each engineer's machine, not on a shared server. Provider credentials, audit DB, locks, and the dashboard are local to the operator. Cross-engineer coordination flows through git and GitHub.
 
+Orbit `task_id` is locally meaningful. It appears in commits as a personal search key for the task author and is recorded in local audit. It is not designed to be resolvable on another engineer's machine; for cross-engineer task references, use `external_refs` to link tasks to your team's tracker (Jira, Linear, GitHub Issues, etc.).
+
 ## What Orbit is NOT for
 
 Three use cases we are deliberately not serving. Each would pull Orbit in a direction that makes it worse for the in-scope use case.

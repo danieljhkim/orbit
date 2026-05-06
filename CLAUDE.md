@@ -88,6 +88,7 @@ Follow the `## Task Quality Standards` section in `orbit-create-task` skill: exp
 
 - Use the agent commit identity (i.e. `codex` or `claude`) as author/committer when you make commits
 - Include the task ID in the commit message when the commit is associated with an Orbit task (e.g. `[T20260320-001234]`).
+- The task ID in the commit message is a local search key: it lets you or your agent find commits via `git log --grep '[T...]'` in your own workspace, and is not designed to be resolvable on another engineer's machine. When a task has a linked `external_ref`, include that tag alongside it (e.g. `[T20260506-11] [ENG-1234] ...`); cross-engineer reviewers resolve the external tag, not the Orbit one.
 - Use your model name (e.g. `claude-opus-4-7`, `gpt-5.5`, `gemini-3.1-pro`) when authoring tasks or docs.
 - When writing docs, cite relevant task IDs in the doc itself.
 - When your change touches an owned feature's implementation, update that feature's design docs in the same PR: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `Last updated`, and add a new ADR for any non-obvious decision the change embodies. Stale docs are treated as a review blocker.

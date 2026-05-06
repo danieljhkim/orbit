@@ -1,16 +1,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
 
 use orbit_knowledge::extract::{FileKind, Language, extract_file};
+use orbit_knowledge::graph::GraphNodeRef;
 use orbit_knowledge::graph::object_store::RefName;
-use orbit_knowledge::graph::{GraphNodeRef, LeafKind};
 use orbit_knowledge::pipeline::context::BuildConfig;
 use orbit_knowledge::service::GraphContextService;
-use orbit_knowledge::{
-    DEFAULT_STALENESS_THRESHOLD, HistoryQueryOptions, KnowledgeStore, Selector, TaskIdPattern,
-    query_task_history,
-};
+use orbit_knowledge::{KnowledgeStore, Selector};
 use tempfile::tempdir;
 
 const TS_SOURCE: &str = "export function buildThing(value: string): string {\n\
@@ -227,96 +223,6 @@ export interface DeclaredShape {\n\
     );
 }
 
-#[test]
-fn history_attribution_maps_typescript_hunk_to_leaf_node() {
-    let repo_dir = tempdir().expect("repo tempdir");
-    let repo = repo_dir.path();
-    init_repo(repo);
-
-    write_file(
-        repo,
-        "src/calc.ts",
-        "export function tracked(value: number): number {\n\
-    return value + 1;\n\
-}\n\
-\n\
-export function untouched(): number {\n\
-    return 0;\n\
-}\n",
-    );
-    commit_all(repo, "chore: initial TypeScript fixture");
-
-    write_file(
-        repo,
-        "src/calc.ts",
-        "export function tracked(value: number): number {\n\
-    return value + 2;\n\
-}\n\
-\n\
-export function untouched(): number {\n\
-    return 0;\n\
-}\n",
-    );
-    commit_all(repo, "[T20260505-11] adjust tracked");
-
-    let knowledge_root = tempdir().expect("knowledge tempdir");
-    let output_dir = knowledge_root.path().join("knowledge");
-    let ctx = run_build(repo, &output_dir);
-
-    let file = ctx
-        .graph
-        .files
-        .iter()
-        .find(|file| file.base.location == "src/calc.ts")
-        .expect("calc.ts file node");
-    assert!(file.base.task_ids.contains(&"T20260505-11".to_string()));
-
-    let tracked = ctx
-        .graph
-        .leaves
-        .iter()
-        .find(|leaf| leaf.base.location == "src/calc.ts#tracked")
-        .expect("tracked leaf");
-    assert_eq!(tracked.kind, LeafKind::Function);
-    assert!(
-        tracked.base.task_ids.contains(&"T20260505-11".to_string()),
-        "tracked task_ids = {:?}",
-        tracked.base.task_ids
-    );
-
-    let untouched = ctx
-        .graph
-        .leaves
-        .iter()
-        .find(|leaf| leaf.base.location == "src/calc.ts#untouched")
-        .expect("untouched leaf");
-    assert!(
-        !untouched
-            .base
-            .task_ids
-            .contains(&"T20260505-11".to_string()),
-        "untouched task_ids = {:?}",
-        untouched.base.task_ids
-    );
-
-    let selector: Selector = "symbol:src/calc.ts#tracked:function"
-        .parse()
-        .expect("selector parses");
-    let branch = RefName::new("main").expect("valid ref");
-    let pattern = TaskIdPattern::default();
-    let options = HistoryQueryOptions {
-        knowledge_dir: &output_dir,
-        repo_path: repo,
-        branch_ref: &branch,
-        selector: &selector,
-        staleness_threshold: DEFAULT_STALENESS_THRESHOLD,
-        task_id_pattern: &pattern,
-    };
-    let history = query_task_history(&options).expect("history query succeeds");
-    assert_eq!(history.task_history.len(), 1);
-    assert_eq!(history.task_history[0].task_id, "T20260505-11");
-}
-
 fn run_build(
     repo: &Path,
     output_dir: &Path,
@@ -326,7 +232,6 @@ fn run_build(
         output_dir: output_dir.to_path_buf(),
         incremental: false,
         ref_name: Some(RefName::new("main").expect("valid ref")),
-        task_id_pattern: None,
     };
     orbit_knowledge::pipeline::run_build(config).expect("pipeline runs")
 }
@@ -364,38 +269,4 @@ fn assert_leaf(
     assert_eq!(leaf.start_line, start_line);
     assert_eq!(leaf.end_line, end_line);
     assert!(!leaf.source.is_empty());
-}
-
-fn init_repo(repo: &Path) {
-    run_git(repo, &["init", "-q", "--initial-branch=main"]);
-    run_git(repo, &["config", "user.email", "test@example.com"]);
-    run_git(repo, &["config", "user.name", "Test"]);
-    run_git(repo, &["config", "commit.gpgsign", "false"]);
-}
-
-fn commit_all(repo: &Path, message: &str) {
-    run_git(repo, &["add", "-A"]);
-    let mut cmd = Command::new("git");
-    let status = cmd
-        .args(["commit", "-q", "-m", message])
-        .current_dir(repo)
-        .env("GIT_AUTHOR_DATE", "2026-05-05T00:00:00+00:00")
-        .env("GIT_COMMITTER_DATE", "2026-05-05T00:00:00+00:00")
-        .status()
-        .expect("git commit runs");
-    assert!(status.success(), "git commit failed in {}", repo.display());
-}
-
-fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .status()
-        .expect("git command runs");
-    assert!(
-        status.success(),
-        "git {:?} failed in {}",
-        args,
-        repo.display()
-    );
 }
