@@ -231,6 +231,18 @@ The executor exposes outputs as `{{ steps.<id>.output.* }}`. Initial context fol
 
 `fan_out` workers see `{{ item }}` / `{{ input.item }}`. Loop bodies see `{{ input.iteration }}`.
 
+#### Agent-step state handoff via `orbit.state.*`
+
+Agents running inside an activity step pass durable data to later steps through `orbit.state.*`, not through the step's response payload. The contract:
+
+- `orbit.state.get` reads the persisted pipeline snapshot.
+- `orbit.state.set` writes this step's output for the engine to merge after the step finishes.
+- Once needed fields are written to `orbit.state`, the activity itself usually has no structured response-payload requirement.
+- `orbit.task.update` stays the right tool for task artifacts (`execution_summary`, `pr_status`, comments, lifecycle state). That is task persistence, not pipeline-state handoff.
+- `orbit.state.*` is only callable when the activity allowlist includes those tools. Currently only [step_failure_recovery](../../../crates/orbit-core/assets/activities/step_failure_recovery.yaml) grants them; other activities thread data through `{{ steps.<id>.output.* }}` or purpose-built tools (e.g. `orbit.duel.plan.winner`).
+
+For `run_command` or any shell-based step, there is no implicit structured output path beyond `exit_code`. If the command must feed downstream steps, have it invoke `orbit.state.set` explicitly. Downstream jobs read the persisted state instead of parsing shell stdout.
+
 ### 8.2 `when` and `retry`
 
 `when` is evaluated once, before retry. A skipped step is a successful no-op and does not retry.
