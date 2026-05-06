@@ -11,7 +11,7 @@ const targetPath = path.join(websiteRoot, 'src', 'content', 'docs', 'scoreboard.
 const FRONTMATTER = [
   '---',
   'title: "Scoreboard"',
-  'description: "Per-agent metrics for tasks completed, friction reports, planning duels, task review threads, tool calls, and token usage."',
+  'description: "Per-agent metrics for tasks completed, friction reports, planning duels, task review threads, and tool calls."',
   'tableOfContents: false',
   '---',
   '',
@@ -41,7 +41,6 @@ const sections = [
   renderDuelsTable(duelsByModel),
   renderTaskReviewTable(agents),
   renderToolCallsTable(agents),
-  renderTokensTable(agents),
 ];
 
 await writeFile(targetPath, FRONTMATTER + sections.join('\n\n') + '\n');
@@ -99,7 +98,7 @@ async function loadDuelStats(filePath) {
 function renderIntro(generatedAt, agentCount) {
   const lines = ['# Scoreboard', ''];
   lines.push(
-    'Per-agent metrics aggregated from Orbit task history, planning duel runs, token accounting, and audit trails.',
+    'Per-agent metrics aggregated from Orbit task history, planning duel runs, and audit trails.',
   );
   lines.push('');
   if (generatedAt) {
@@ -210,27 +209,6 @@ function renderToolCallsTable(agents) {
     'Tool calls',
     'Tool invocations recorded in the audit trail. Failure rate = `failed / total`. Sorted by failure rate (highest first).',
     ['Agent', 'Total', 'Failed', 'Failure rate'],
-    sortRows(rows),
-  );
-}
-
-function renderTokensTable(agents) {
-  const rows = agents
-    .filter(([, a]) => {
-      const t = a.tokens ?? {};
-      return (t.total ?? 0) + (t.output ?? 0) > 0;
-    })
-    .map(([name, a]) => {
-      const t = a.tokens ?? {};
-      return {
-        sortKey: t.total ?? 0,
-        cells: [agentCell(name), num(t.total), num(t.output)],
-      };
-    });
-  return section(
-    'Token usage',
-    'Cumulative token totals across agent runs. Sorted by total tokens.',
-    ['Agent', 'Total', 'Output'],
     sortRows(rows),
   );
 }

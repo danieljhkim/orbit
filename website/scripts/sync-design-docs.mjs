@@ -7,9 +7,11 @@ const repoRoot = path.dirname(websiteRoot);
 const sourceRoot = path.join(repoRoot, 'docs', 'design');
 const targetRoot = path.join(websiteRoot, 'src', 'content', 'docs', 'architecture', 'design');
 const editBaseUrl = 'https://github.com/danieljhkim/orbit/edit/main/';
+const blobBaseUrl = 'https://github.com/danieljhkim/orbit/blob/main/';
+
+const SKIP_FILES = new Set(['CONVENTIONS.md']);
 
 const orderByFile = new Map([
-  ['CONVENTIONS.md', 1],
   ['1_overview.md', 10],
   ['2_design.md', 20],
   ['3_vision.md', 30],
@@ -23,6 +25,7 @@ await mkdir(targetRoot, { recursive: true });
 
 for (const file of await collectMarkdown(sourceRoot)) {
   const relative = path.relative(sourceRoot, file);
+  if (SKIP_FILES.has(path.basename(relative))) continue;
   const target = path.join(targetRoot, relative);
   const raw = await readFile(file, 'utf8');
   const { title, body } = splitTitle(raw, relative);
@@ -102,6 +105,10 @@ function rewriteMarkdownLinks(raw, currentRelative) {
       path.posix.join(path.posix.dirname(toPosix(currentRelative)), withoutHash)
     );
     if (sourceTarget.startsWith('..')) return match;
+    if (SKIP_FILES.has(path.posix.basename(sourceTarget))) {
+      const githubHref = `${blobBaseUrl}${path.posix.join('docs/design', sourceTarget)}${hash ? `#${hash}` : ''}`;
+      return `[${label}](${githubHref})`;
+    }
     const currentRoute = routeDirFor(currentRelative);
     const targetRoute = routeDirFor(sourceTarget);
     let relativeRoute = path.posix.relative(currentRoute, targetRoute);

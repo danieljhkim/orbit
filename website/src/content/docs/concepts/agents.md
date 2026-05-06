@@ -23,8 +23,6 @@ Schema v2 provider values include:
 - `claude`
 - `codex`
 - `gemini`
-- `ollama`
-- `openai_compat`
 
 In v1 each provider runs through its CLI runtime under `orbit-agent::providers/<name>/`. HTTP transport support is provider-specific and not part of the v1 release surface; an HTTP attempt against an unwired provider fails structurally rather than silently falling back to CLI.
 
