@@ -463,5 +463,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260505-8]** — Add dashboard/runtime controls to cancel active job runs.
 - **[T20260505-10]** — Release run-owned task lock reservations through engine-owned terminal cleanup and reserve-pressure reconciliation.
 - **[T20260505-21]** — Add whole-run replay with `retry_source_run_id` lineage and current-definition semantics.
+- **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

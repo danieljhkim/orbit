@@ -77,5 +77,6 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 - **[T20260427-0023]** — Project policy denials and friction task submissions into the global tracing feed.
 - **[T20260427-47]** — Allow explicit task attribution correction for `planned_by` and `implemented_by` through task update paths.
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
+- **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

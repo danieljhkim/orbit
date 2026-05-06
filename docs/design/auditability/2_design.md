@@ -148,5 +148,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[T20260430-4]** — Change local task-review scoring to count review-thread creations rather than replies, rename the compact field to `task_review.threads`, and keep legacy metric reads mapped forward.
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
 - **[T20260505-6]** — Replace timestamp-only command-audit execution ids with collision-resistant generated ids for parallel tool runs.
+- **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
