@@ -41,16 +41,17 @@ jobs:
       - name: Create orbit task on CI failure
         if: failure() && github.event_name == 'pull_request'
         env:
-          ORBIT_CI_WORKFLOW: ${{ github.workflow }}
-          ORBIT_CI_PR_NUMBER: ${{ github.event.pull_request.number }}
-          ORBIT_CI_HEAD_REF: ${{ github.head_ref }}
-          ORBIT_CI_SHA: ${{ github.sha }}
-          ORBIT_CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW: ${{ format('{0}', github.workflow) }}
+          PR_NUMBER: ${{ format('{0}', github.event.pull_request.number) }}
+          BRANCH: ${{ format('{0}', github.head_ref) }}
+          SHA: ${{ format('{0}', github.sha) }}
+          RUN_ID: ${{ format('{0}', github.run_id) }}
         run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"
           payload="$(jq -n \
-            --arg title "CI failure: ${ORBIT_CI_WORKFLOW} on PR #${ORBIT_CI_PR_NUMBER}" \
-            --arg description "## Problem\nCI failed on PR #${ORBIT_CI_PR_NUMBER} (\`${ORBIT_CI_HEAD_REF}\`).\n\nCommit: \`${ORBIT_CI_SHA}\`\nRun: ${ORBIT_CI_RUN_URL}" \
-            --arg branch "${ORBIT_CI_HEAD_REF}" \
+            --arg title "CI failure: $WORKFLOW on PR #$PR_NUMBER" \
+            --arg description "## Problem\nCI failed on PR #$PR_NUMBER (\`$BRANCH\`).\n\nCommit: \`$SHA\`\nRun: $run_url" \
+            --arg branch "$BRANCH" \
             '{
               title: $title,
               description: $description,

@@ -52,9 +52,11 @@ jobs:
       - name: Deploy to Cloudflare Pages
         id: deploy
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+        env:
+          BRANCH: ${{ format('{0}', github.head_ref || github.ref_name) }}
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: website
-          command: pages deploy dist --project-name=orbit-website --branch=${{ github.head_ref || github.ref_name }}
+          command: pages deploy dist --project-name=orbit-website --branch=${{ toJSON(env.BRANCH) }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
