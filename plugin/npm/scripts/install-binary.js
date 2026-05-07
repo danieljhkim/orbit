@@ -117,7 +117,7 @@ async function main() {
     const checksums = parseChecksums(checksumText);
     const expected = checksums[asset];
     if (!expected) {
-      log(`warning: no checksum entry for ${asset}; proceeding without verification.`);
+      fail(`checksum entry for ${asset} was not found in orbit-checksums.txt`);
     } else {
       const actual = sha256(archiveBuf);
       if (actual !== expected) {
@@ -125,7 +125,7 @@ async function main() {
       }
     }
   } catch (err) {
-    log(`warning: could not verify checksum (${err.message}); proceeding anyway.`);
+    fail(`could not verify checksum for ${asset}: ${err.message}`);
   }
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orbit-cli-'));
