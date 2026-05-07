@@ -330,17 +330,19 @@ fn build_file_leaves(
     let extractor = registry.get(info.file_kind)?;
     let result = extractor.extract(&content);
     let file_hash_at_capture = ctx.new_hashes.get(&info.location).cloned();
+    let mut file = extracted_file_from_result(
+        &info.location,
+        &info.file_id,
+        info.file_kind,
+        content,
+        result,
+        file_hash_at_capture,
+    );
+    preserve_prior_leaf_identities(&mut file, prior_files, &ctx.new_hashes, &info.location);
 
     Some(LeafBuildOutput::Extracted {
         file_idx: info.file_idx,
-        file: extracted_file_from_result(
-            &info.location,
-            &info.file_id,
-            info.file_kind,
-            content,
-            result,
-            file_hash_at_capture,
-        ),
+        file,
     })
 }
 
@@ -408,6 +410,142 @@ fn extracted_file_from_result(
         leaf_children,
         leaves,
     }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct LeafIdentityMatchKey {
+    qualified_name: String,
+    kind: String,
+    source_hash: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct PriorLeafIdentity {
+    id: String,
+    identity_key: String,
+}
+
+fn preserve_prior_leaf_identities(
+    file: &mut ExtractedFile,
+    prior_files: Option<&HashMap<String, PriorFileSnapshot>>,
+    current_hashes: &HashMap<String, String>,
+    current_location: &str,
+) {
+    let Some(prior_files) = prior_files else {
+        return;
+    };
+
+    if let Some(snapshot) = prior_files.get(current_location) {
+        apply_prior_leaf_identities(file, &snapshot.leaves, false);
+        return;
+    }
+
+    let mut candidates = prior_files
+        .iter()
+        .filter(|(location, _)| location.as_str() != current_location)
+        .filter(|(location, _)| !current_hashes.contains_key(location.as_str()))
+        .filter(|(_, snapshot)| {
+            snapshot.source_blob_hash.as_deref() == Some(&file.source_blob_hash)
+        })
+        .map(|(_, snapshot)| snapshot);
+
+    let Some(candidate) = candidates.next() else {
+        return;
+    };
+    if candidates.next().is_some() {
+        return;
+    }
+
+    apply_prior_leaf_identities(file, &candidate.leaves, true);
+}
+
+fn apply_prior_leaf_identities(
+    file: &mut ExtractedFile,
+    prior_leaves: &[LeafNode],
+    include_source_hash: bool,
+) {
+    let prior_by_key = unique_prior_leaf_identities(prior_leaves, include_source_hash);
+    let mut id_rewrites = HashMap::new();
+
+    for leaf in &mut file.leaves {
+        let Some(key) = leaf_identity_match_key(leaf, include_source_hash) else {
+            continue;
+        };
+        let Some(prior) = prior_by_key.get(&key) else {
+            continue;
+        };
+
+        let default_id = leaf.base.id.clone();
+        leaf.base.id = prior.id.clone();
+        leaf.base.identity_key = prior.identity_key.clone();
+        id_rewrites.insert(default_id, leaf.base.id.clone());
+    }
+
+    if id_rewrites.is_empty() {
+        return;
+    }
+
+    for child_id in &mut file.leaf_children {
+        if let Some(rewritten) = id_rewrites.get(child_id) {
+            *child_id = rewritten.clone();
+        }
+    }
+    for leaf in &mut file.leaves {
+        for child_id in &mut leaf.children {
+            if let Some(rewritten) = id_rewrites.get(child_id) {
+                *child_id = rewritten.clone();
+            }
+        }
+    }
+}
+
+fn unique_prior_leaf_identities(
+    leaves: &[LeafNode],
+    include_source_hash: bool,
+) -> HashMap<LeafIdentityMatchKey, PriorLeafIdentity> {
+    let mut identities = HashMap::new();
+    let mut duplicates = HashSet::new();
+
+    for leaf in leaves {
+        let Some(key) = leaf_identity_match_key(leaf, include_source_hash) else {
+            continue;
+        };
+        if identities
+            .insert(
+                key.clone(),
+                PriorLeafIdentity {
+                    id: leaf.base.id.clone(),
+                    identity_key: leaf.base.identity_key.clone(),
+                },
+            )
+            .is_some()
+        {
+            duplicates.insert(key);
+        }
+    }
+
+    for key in duplicates {
+        identities.remove(&key);
+    }
+
+    identities
+}
+
+fn leaf_identity_match_key(
+    leaf: &LeafNode,
+    include_source_hash: bool,
+) -> Option<LeafIdentityMatchKey> {
+    let (_, qualified_name) = leaf.base.location.split_once('#')?;
+    let source_hash = if include_source_hash {
+        Some(leaf.source_hash.clone()?)
+    } else {
+        None
+    };
+    Some(LeafIdentityMatchKey {
+        qualified_name: qualified_name.to_string(),
+        kind: leaf.kind.to_string(),
+        source_hash,
+    })
 }
 
 #[derive(Clone)]

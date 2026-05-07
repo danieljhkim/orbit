@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-07
 
 This document specifies the current knowledge graph: storage, build pipeline, query services, Orbit integration, locking, and limitations. The [T20260430-22] cleanup removes duplicated rationale already covered by [1_overview.md](./1_overview.md), [3_vision.md](./3_vision.md), and ADRs.
 
@@ -75,6 +75,20 @@ The graph no longer stores node-level task attribution. The former `attribute_hi
 `knowledge.task_id_pattern` is now a deprecated config key. Existing configs that still set it load successfully and emit a one-line warning to stderr; the value is ignored even when empty or no longer a valid regex.
 
 Forward lookup remains a git convention: commits associated with a local Orbit task include `[T<task-id>]`, and operators can run `git log --grep '[T...]'` in their own workspace. Cross-engineer references use task `external_refs`.
+
+### 2.3 `identity_key` durability invariants
+
+`LeafNode.identity_key` is the durable graph identity consumed by the planned v2 task-to-graph bridge ([T20260507-13]). Its canonical executable reference is [crates/orbit-knowledge/tests/identity_key_durability.rs](../../../crates/orbit-knowledge/tests/identity_key_durability.rs).
+
+The suite locks these rebuild invariants for Rust leaves:
+
+- **Rename** — a uniquely matched leaf keeps its `identity_key` when its containing file is renamed and rebuilt incrementally.
+- **Move** — all uniquely matched leaves keep their `identity_key` values when the containing file moves directories and rebuilds incrementally.
+- **Content edit** — editing a function body without changing the leaf's qualified name or kind keeps both the edited leaf and untouched sibling leaves on their prior `identity_key` values.
+- **Delete + recreate** — deleting a file, rebuilding, then recreating the same path with the same content currently reallocates the same `identity_key`.
+- **Signature change** — changing a Rust function parameter or return type currently keeps the same `identity_key`; Rust function identity is keyed by qualified name and kind, not signature text.
+
+Incremental rebuilds preserve leaf identity from the prior branch ref when a changed file still has matching qualified-name/kind leaves at the same path, or when exactly one deleted prior file with the same source hash provides a relocation match. Ambiguous relocations fall back to freshly derived identity keys rather than risking duplicate node IDs.
 
 ### 2.4 Inclusion vs Access: `.orbitignore` vs Policy
 
@@ -273,5 +287,6 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 - **[T20260505-16]** — Add C and header extraction coverage, documented by gpt-5.
 - **[T20260505-5]** — Bound `orbit.graph.pack` selector gathering and skip inline refresh by default, documented by gpt-5.5.
 - **[T20260506-11]** — Remove graph task attribution after 0/961 audited reverse-lookup uses; preserve task IDs as local commit-search keys.
+- **[T20260507-13]** — Lock down `LeafNode.identity_key` rebuild durability invariants for rename, move, content edit, delete/recreate, and signature-change cases.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
