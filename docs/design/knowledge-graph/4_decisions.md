@@ -2,11 +2,13 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-07
 
 ADR-style log of non-obvious knowledge-graph decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
 Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. The [T20260430-22] cleanup folds the former top-level evidence log into ADR-018 so this folder keeps only the convention-approved numbered docs.
+
+The [T20260506-19] maintenance pass keeps every remaining ADR tied to exactly one non-trivial Cost line; plain language-coverage instances that were already folded into ADR-003 remain as non-ADR coverage records below.
 
 ---
 
@@ -64,8 +66,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - Fast, deterministic extraction with no per-query process lifecycle.
 - `find_references`, `callers`, `implementors` ([T20260412-0645-3]) are signature-matched, not type-resolved — a superset of the truth.
 - Adding a language is an instance of this ADR, not a new decision: append a row above and cite the task on the Status line.
-- Cost: extractor maintenance scales with languages supported; overloads and partial declarations still share syntax-level names until a future signature-aware identity scheme lands.
-- Cost: the graph `LeafKind` surface grows as languages add their own kinds (`enum`, `type_alias`, `package`, `object`, `companion_object`, `function_declaration`); downstream exhaustive matches must absorb each addition.
+- Cost: extractor maintenance scales with languages supported, and the graph `LeafKind` surface grows as languages add their own kinds (`enum`, `type_alias`, `package`, `object`, `companion_object`, `function_declaration`); downstream exhaustive matches must absorb each addition while overloads and partial declarations still share syntax-level names until a future signature-aware identity scheme lands.
 
 ---
 
@@ -287,6 +288,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - Developers can compare graph build trends with machine/core context and git SHA preserved beside the metrics.
 - No CI gate is introduced; shared-runner noise would make absolute thresholds misleading.
 - The default corpus is maintenance-free because it is the repo itself, but timings and counts move as the repo grows. Use the scoreboard for trend-watching, not cross-machine normalization.
+- Cost: regressions are advisory instead of blocking; maintainers must notice trend drift manually, and a repo-local corpus can hide performance cliffs that appear on larger or differently shaped workspaces.
 
 ---
 
@@ -339,8 +341,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - Non-Orbit codebases can now use the feature without forking; orbit's own repo gets identical output to before.
 - A pattern change is safe: a subsequent `orbit graph build` is guaranteed to backfill correctly rather than silently leave stale `task_ids` from the prior pattern.
 - The agent tool surface stays in sync with the CLI: a future schema change must update both.
-- Cost: a pattern change incurs a full-history walk on next build. This is the right default — silently skipping history would be the worse failure mode.
-- Cost: validating regex twice (orbit-core config + orbit-knowledge consumer) — accepted to keep `orbit-core` free of the `orbit-knowledge` dep.
+- Cost: a pattern change incurs a full-history walk on next build, and regex validation stays duplicated between orbit-core config and the orbit-knowledge consumer to keep `orbit-core` free of the `orbit-knowledge` dependency; both are deliberate churn to avoid silent stale attribution.
 
 ---
 
@@ -392,11 +393,16 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR-024 — TypeScript and TSX use dedicated tree-sitter grammars
+## Folded language coverage records
 
-**Status:** Superseded by ADR-003 (folded 2026-05) · 2026-05 · [T20260505-11]
+These entries were formerly ADR headings, but they are plain instances of ADR-003's extractor decision rather than standalone decisions under the three-test rule. The task IDs and current behavior stay in ADR-003's per-language table.
 
-Folded into ADR-003's per-language coverage table. See that entry for the current shape.
+| Former entry | Status | Current home |
+|--------------|--------|--------------|
+| ADR-024 — TypeScript and TSX use dedicated tree-sitter grammars · [T20260505-11] | Superseded by ADR-003 (folded 2026-05) | ADR-003 TypeScript / TSX row |
+| ADR-026 — C source and headers share one extractor · [T20260505-16] | Superseded by ADR-003 (folded 2026-05) | ADR-003 C row |
+| ADR-027 — Kotlin mirrors Java-style tree-sitter extraction · [T20260505-14] | Superseded by ADR-003 (folded 2026-05) | ADR-003 Kotlin row |
+| ADR-028 — C# uses syntax-only enterprise coverage · [T20260505-13] | Superseded by ADR-003 (folded 2026-05) | ADR-003 C# row |
 
 ---
 
@@ -413,28 +419,6 @@ Folded into ADR-003's per-language coverage table. See that entry for the curren
 - Context-gathering agents get prompt-visible guidance instead of a silent rebuild when the snapshot is stale.
 - Timed-out pack calls can still return the selectors already projected plus unresolved entries for the remainder.
 - Cost: default pack reads can be stale until a separate `orbit graph build` or an opt-in refresh updates the branch ref.
-
-## ADR-026 — C source and headers share one extractor
-
-**Status:** Superseded by ADR-003 (folded 2026-05) · 2026-05 · [T20260505-16]
-
-Folded into ADR-003's per-language coverage table. See that entry for the current shape.
-
----
-
-## ADR-027 — Kotlin mirrors Java-style tree-sitter extraction
-
-**Status:** Superseded by ADR-003 (folded 2026-05) · 2026-05 · [T20260505-14]
-
-Folded into ADR-003's per-language coverage table. See that entry for the current shape.
-
----
-
-## ADR-028 — C# uses syntax-only enterprise coverage
-
-**Status:** Superseded by ADR-003 (folded 2026-05) · 2026-05 · [T20260505-13]
-
-Folded into ADR-003's per-language coverage table. See that entry for the current shape.
 
 ---
 
@@ -499,5 +483,6 @@ Tasks cited by ADRs above:
 - **[T20260505-15]** — Add Ruby classification, tree-sitter extraction, graph search coverage, and Ruby symbol kinds.
 - **[T20260505-16]** — Add C and header classification, tree-sitter extraction, and graph search coverage.
 - **[T20260506-11]** — Remove graph task attribution after audited reverse-lookup usage was 0/961; preserve `[T...]` as a local commit-search key.
+- **[T20260506-19]** — Normalize knowledge-graph ADR Cost lines and demote folded language instances to coverage records.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
