@@ -1553,6 +1553,7 @@ dependencies = [
  "tokio",
  "toml",
  "tower",
+ "url",
 ]
 
 [[package]]

@@ -35,6 +35,7 @@ use orbit_core::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use url::Url;
 
 use crate::command::audit::audit_event_to_json;
 use crate::command::job::job_catalog_to_json_with_last_run;
@@ -222,11 +223,16 @@ fn month_bounds_utc(raw: &str) -> Result<(DateTime<Utc>, DateTime<Utc>), orbit_c
 }
 
 async fn require_localhost_origin(request: Request<Body>, next: Next) -> Response {
-    if !request.method().is_safe()
-        && let Some(origin) = request.headers().get(header::ORIGIN)
-    {
-        let origin = origin.to_str().unwrap_or("");
-        if !origin.starts_with("http://localhost") && !origin.starts_with("http://127.0.0.1") {
+    if let Some(origin) = request.headers().get(header::ORIGIN) {
+        let allowed = origin
+            .to_str()
+            .ok()
+            .and_then(|origin| Url::parse(origin).ok())
+            .is_some_and(|origin| {
+                origin.scheme() == "http"
+                    && matches!(origin.host_str(), Some("localhost" | "127.0.0.1"))
+            });
+        if !allowed {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({"error": "cross-origin requests not allowed"})),
@@ -1148,6 +1154,92 @@ spec:
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         let stored = runtime.show_job_run(&run.run_id).expect("show run");
         assert_eq!(stored.state, JobRunState::Pending);
+    }
+
+    #[tokio::test]
+    async fn require_localhost_origin_rejects_prefix_match() {
+        let cases = [
+            ("http://localhost.evil.com", "localhost prefix"),
+            ("http://127.0.0.1.evil.com", "127.0.0.1 prefix"),
+        ];
+
+        for (index, (origin, label)) in cases.into_iter().enumerate() {
+            let runtime = OrbitRuntime::in_memory().expect("build runtime");
+            let run = seed_run(
+                &runtime,
+                &format!("jrun-web-cancel-prefix-{index}"),
+                "web_cancel_prefix",
+                JobRunState::Pending,
+            );
+
+            let response = request_cancel(runtime.clone(), &run.run_id, Some(origin)).await;
+
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+            let stored = runtime.show_job_run(&run.run_id).expect("show run");
+            assert_eq!(stored.state, JobRunState::Pending, "{label}");
+        }
+    }
+
+    #[tokio::test]
+    async fn require_localhost_origin_rejects_https_origin() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let run = seed_run(
+            &runtime,
+            "jrun-web-cancel-https-origin",
+            "web_cancel_https_origin",
+            JobRunState::Pending,
+        );
+
+        let response =
+            request_cancel(runtime.clone(), &run.run_id, Some("https://localhost")).await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let stored = runtime.show_job_run(&run.run_id).expect("show run");
+        assert_eq!(stored.state, JobRunState::Pending);
+    }
+
+    #[tokio::test]
+    async fn require_localhost_origin_accepts_localhost_with_port() {
+        let cases = [
+            ("http://localhost:7878", "localhost"),
+            ("http://127.0.0.1:7878", "127-0-0-1"),
+        ];
+
+        for (origin, label) in cases {
+            let runtime = OrbitRuntime::in_memory().expect("build runtime");
+            let run = seed_run(
+                &runtime,
+                &format!("jrun-web-cancel-origin-port-{label}"),
+                "web_cancel_origin_port",
+                JobRunState::Pending,
+            );
+
+            let response = request_cancel(runtime.clone(), &run.run_id, Some(origin)).await;
+
+            assert_eq!(response.status(), StatusCode::OK, "{label}");
+            let stored = runtime.show_job_run(&run.run_id).expect("show run");
+            assert_eq!(stored.state, JobRunState::Cancelled, "{label}");
+        }
+    }
+
+    #[tokio::test]
+    async fn require_localhost_origin_blocks_cross_origin_get_with_attacker_origin() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        let response = router()
+            .with_state(Arc::new(runtime))
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/tasks")
+                    .header(header::ORIGIN, "http://localhost.evil.com")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
