@@ -49,3 +49,4 @@ build/
 # direnv — per-repo env vars (holds secrets like ANTHROPIC_API_KEY)
 .envrc
 .direnv/
+.gstack/
