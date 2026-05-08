@@ -32,32 +32,30 @@ pub mod json_schema;
 pub mod scope;
 pub mod sqlite;
 pub mod state_io;
-#[path = "file/token_scoreboard.rs"]
-mod token_scoreboard_impl;
 
 pub mod skill_store {
     pub use crate::file::skill_store::*;
 }
 
 pub mod friction_bounty {
-    pub use crate::file::friction_bounty::{
+    pub use crate::file::scoreboard::friction_bounty::{
         record_friction_accepted, record_friction_rejected, record_friction_reported,
         refresh_from_tasks,
     };
 }
 
 pub mod pr_scoreboard {
-    pub use crate::file::pr_scoreboard::{
+    pub use crate::file::scoreboard::pr_scoreboard::{
         record_pr_count_with_revision, record_pr_count_without_revision, record_pr_review_comment,
     };
 }
 
 pub mod task_review_scoreboard {
-    pub use crate::file::task_review_scoreboard::record_task_review_thread;
+    pub use crate::file::scoreboard::task_review_scoreboard::record_task_review_thread;
 }
 
 pub mod scoreboard_summary {
-    pub use crate::file::scoreboard_summary::{
+    pub use crate::file::scoreboard::scoreboard_summary::{
         AgentSummary, DuelSummary, FrictionSummary, PrSummary, ScoreboardSummary,
         TaskReviewSummary, TokenSummary, generate_summary, generate_summary_with_audit_tool_calls,
         summary_path, write_summary,
@@ -65,34 +63,32 @@ pub mod scoreboard_summary {
 }
 
 pub mod duel_scoreboard {
-    pub use crate::file::duel_scoreboard::{
+    pub use crate::file::scoreboard::duel_scoreboard::{
         AggregateFilter, AggregateRow, Aggregates, ReviewerTally, RoleAxis, SegmentBy, aggregate,
         append_run, derive_task_scope, known_agent_families, load_runs, tally_reviewer_stats,
     };
 }
 
 pub mod planning_duel_scoreboard {
-    pub use crate::file::planning_duel_scoreboard::{
+    pub use crate::file::scoreboard::planning_duel_scoreboard::{
         AggregateFilter, AggregateRow, Aggregates, RoleAxis, aggregate, append_run, load_runs,
     };
 }
 
-pub mod knowledge_stats {
-    pub use crate::file::knowledge_stats::{
-        DoubleReadSummary, KnowledgeStatsSummary, RatioSummary, TokenInputSummary, aggregate,
+pub mod friction_log {
+    pub use crate::file::diagnostics::friction_log::{
+        append_friction_entry, read_friction_entries_for_month,
     };
 }
 
-pub mod friction_log {
-    pub use crate::file::friction_log::{append_friction_entry, read_friction_entries_for_month};
-}
-
 pub mod metrics_log {
-    pub use crate::file::metrics_log::{append_metrics_entry, read_metrics_entries_for_month};
+    pub use crate::file::diagnostics::metrics_log::{
+        append_metrics_entry, read_metrics_entries_for_month,
+    };
 }
 
 pub mod token_scoreboard {
-    pub use crate::token_scoreboard_impl::write_token_scoreboard;
+    pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
 }
 
 use chrono::{DateTime, Utc};
