@@ -366,30 +366,19 @@ fn ensure_completed_tasks_have_meaningful_execution_summaries(
     Ok(())
 }
 
+/// Builds the generated PR body. One-task PRs use the task-contract-first
+/// layout; multi-task callers intentionally keep the historical batch layout
+/// until those legacy paths are retired.
 fn build_batch_pr_body(
     tasks: &[Task],
     freshness: &super::freshness::BranchFreshness,
     changed_files: &[&str],
 ) -> String {
-    let task_sections = tasks
-        .iter()
-        .map(render_task_section)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let changed_files_section = changed_files
-        .iter()
-        .map(|file| format!("- `{file}`"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut body = format!(
-        "## Tasks\n{}\n\n## Branch Freshness\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}\n\n## Files Changed\n{}",
-        task_sections,
-        freshness.base_ref,
-        freshness.head_ref,
-        freshness.commits_behind,
-        freshness.commits_ahead,
-        changed_files_section
-    );
+    let mut body = if let [task] = tasks {
+        build_single_task_pr_body(task, freshness)
+    } else {
+        build_legacy_batch_pr_body(tasks, freshness, changed_files)
+    };
 
     if let Some(signature) = batch_pr_signature(tasks) {
         body.push_str("\n\n");
@@ -399,7 +388,81 @@ fn build_batch_pr_body(
     body
 }
 
-fn render_task_section(task: &Task) -> String {
+fn build_single_task_pr_body(task: &Task, freshness: &super::freshness::BranchFreshness) -> String {
+    let mut sections = vec![render_single_task_section(task)];
+
+    if let Some(execution_summary) = meaningful_execution_summary(&task.execution_summary) {
+        sections.push(render_execution_summary_section(execution_summary));
+    }
+
+    sections.push(render_validation_section());
+    sections.push(render_branch_freshness_section(freshness));
+    sections.join("\n\n")
+}
+
+fn build_legacy_batch_pr_body(
+    tasks: &[Task],
+    freshness: &super::freshness::BranchFreshness,
+    changed_files: &[&str],
+) -> String {
+    let task_sections = tasks
+        .iter()
+        .map(render_legacy_task_section)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let changed_files_section = changed_files
+        .iter()
+        .map(|file| format!("- `{file}`"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "## Tasks\n{}\n\n## Branch Freshness\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}\n\n## Files Changed\n{}",
+        task_sections,
+        freshness.base_ref,
+        freshness.head_ref,
+        freshness.commits_behind,
+        freshness.commits_ahead,
+        changed_files_section
+    )
+}
+
+fn render_single_task_section(task: &Task) -> String {
+    let acceptance_criteria = render_acceptance_criteria(&task.acceptance_criteria);
+
+    format!(
+        "## Task\n\n{}\n\n### Description\n\n{}\n\n### Acceptance Criteria\n\n{}",
+        render_single_task_line(task),
+        task.description,
+        acceptance_criteria
+    )
+}
+
+fn render_execution_summary_section(execution_summary: &str) -> String {
+    format!(
+        "## Execution Summary\n\n<details>\n<summary>Click to expand</summary>\n\n{execution_summary}\n\n</details>"
+    )
+}
+
+fn render_validation_section() -> String {
+    "## Validation\n\n- Not reported".to_string()
+}
+
+fn render_branch_freshness_section(freshness: &super::freshness::BranchFreshness) -> String {
+    format!(
+        "## Branch Freshness\n\n- Base ref: `{}`\n- Head ref: `{}`\n- Behind base: {}\n- Ahead of base: {}",
+        freshness.base_ref, freshness.head_ref, freshness.commits_behind, freshness.commits_ahead
+    )
+}
+
+fn render_acceptance_criteria(criteria: &[String]) -> String {
+    criteria
+        .iter()
+        .map(|criterion| format!("- {criterion}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_legacy_task_section(task: &Task) -> String {
     let line = render_task_line(task);
     match meaningful_execution_summary(&task.execution_summary) {
         Some(execution_summary) => {
@@ -454,6 +517,24 @@ fn render_task_line(task: &Task) -> String {
     } else {
         format!("- [{}] {}", task.id, title)
     }
+}
+
+fn render_single_task_line(task: &Task) -> String {
+    let title = task.title.trim();
+    let url = task_url(task);
+    if title.is_empty() {
+        format!("[{}]({url})", task.id)
+    } else {
+        format!("[{}]({url}) — {title}", task.id)
+    }
+}
+
+fn task_url(task: &Task) -> String {
+    task.external_refs
+        .iter()
+        .find_map(|external_ref| external_ref.url.as_deref())
+        .unwrap_or(task.id.as_str())
+        .to_string()
 }
 
 fn default_pr_title(tasks: &[Task]) -> String {
@@ -813,6 +894,30 @@ mod tests {
         task
     }
 
+    fn task_with_contract(
+        id: &str,
+        title: &str,
+        execution_summary: &str,
+        description: &str,
+        acceptance_criteria: &[String],
+        task_url: Option<&str>,
+    ) -> Task {
+        let mut task = task(id, title, execution_summary);
+        task.description = description.to_string();
+        task.acceptance_criteria = acceptance_criteria.to_vec();
+        if let Some(task_url) = task_url {
+            task.external_refs = vec![
+                ExternalRef::try_new(
+                    "orbit-task".to_string(),
+                    id.to_string(),
+                    Some(task_url.to_string()),
+                )
+                .expect("task url external ref"),
+            ];
+        }
+        task
+    }
+
     fn freshness() -> BranchFreshness {
         BranchFreshness {
             base_ref: "main".to_string(),
@@ -875,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn default_pr_body_includes_non_empty_execution_summary() {
+    fn multi_task_pr_body_preserves_legacy_execution_summary_layout() {
         let first_summary = "## Status\nsuccess\n\n## Summary of Changes\n- Routed automation updates through system.";
         let second_summary =
             "## Status\nsuccess\n\n## Summary of Changes\n- Added PR body summary coverage.";
@@ -900,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn default_pr_body_omits_empty_or_placeholder_execution_summary_block() {
+    fn multi_task_pr_body_preserves_legacy_placeholder_summary_omission() {
         let body = build_batch_pr_body(
             &[
                 task("T20260427-32", "Include execution summaries", ""),
@@ -920,19 +1025,95 @@ mod tests {
     }
 
     #[test]
-    fn default_pr_body_keeps_existing_sections_and_signature() {
+    fn single_task_pr_body_matches_snapshot() {
         let body = build_batch_pr_body(
-            &[task("T20260427-32", "Include execution summaries", "done")],
+            &[task_with_contract(
+                "T20260508-3",
+                "Revise PR body template",
+                "Reviewer context stays inline.\n\nSummary remains collapsible.",
+                "Reviewers can inspect the task contract without leaving the PR.",
+                &[
+                    "Description is rendered verbatim.".to_string(),
+                    "Acceptance criteria render as plain bullets.".to_string(),
+                ],
+                Some("https://orbit.example/tasks/T20260508-3"),
+            )],
             &freshness(),
             &["crates/orbit-engine/src/executor/automation/pr.rs"],
         );
 
-        assert!(body.contains("## Branch Freshness"));
-        assert!(body.contains("- Base ref: `main`"));
-        assert!(body.contains("- Head ref: `feature/task`"));
-        assert!(body.contains("## Files Changed"));
-        assert!(body.contains("- `crates/orbit-engine/src/executor/automation/pr.rs`"));
+        assert_eq!(
+            body,
+            "## Task\n\n[T20260508-3](https://orbit.example/tasks/T20260508-3) — Revise PR body template\n\n### Description\n\nReviewers can inspect the task contract without leaving the PR.\n\n### Acceptance Criteria\n\n- Description is rendered verbatim.\n- Acceptance criteria render as plain bullets.\n\n## Execution Summary\n\n<details>\n<summary>Click to expand</summary>\n\nReviewer context stays inline.\n\nSummary remains collapsible.\n\n</details>\n\n## Validation\n\n- Not reported\n\n## Branch Freshness\n\n- Base ref: `main`\n- Head ref: `feature/task`\n- Behind base: 0\n- Ahead of base: 2\n\n*authored by: gpt-5.5*"
+        );
+    }
+
+    #[test]
+    fn single_task_pr_body_uses_contract_first_layout() {
+        let body = build_batch_pr_body(
+            &[task_with_contract(
+                "T20260427-32",
+                "Include execution summaries",
+                "done",
+                "Keep the task description near the review context.",
+                &["Criterion one".to_string(), "Criterion two".to_string()],
+                Some("https://orbit.example/tasks/T20260427-32"),
+            )],
+            &freshness(),
+            &["crates/orbit-engine/src/executor/automation/pr.rs"],
+        );
+
+        let headings = body
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            headings,
+            vec![
+                "## Task",
+                "## Execution Summary",
+                "## Validation",
+                "## Branch Freshness",
+            ]
+        );
+        assert!(!body.contains("## Tasks"));
+        assert!(!body.contains("## Status"));
+        assert!(!body.contains("## Summary of Changes"));
+        assert!(!body.contains("## Overall Assessment"));
+        assert!(!body.contains("## Files Changed"));
+        assert!(body.contains(
+            "[T20260427-32](https://orbit.example/tasks/T20260427-32) — Include execution summaries"
+        ));
+        assert!(
+            body.contains("### Description\n\nKeep the task description near the review context.")
+        );
+        assert!(body.contains("### Acceptance Criteria\n\n- Criterion one\n- Criterion two"));
+        assert!(!body.contains("- [ ] Criterion one"));
+        assert!(!body.contains("- [x] Criterion one"));
+        assert!(body.contains("<summary>Click to expand</summary>"));
         assert!(body.contains("*authored by: gpt-5.5*"));
+    }
+
+    #[test]
+    fn single_task_pr_body_omits_placeholder_execution_summary_section() {
+        let body = build_batch_pr_body(
+            &[task_with_contract(
+                "T20260427-34",
+                "Placeholder summary",
+                "TODO",
+                "Keep placeholder summaries out of generated PR bodies.",
+                &["No details block is rendered.".to_string()],
+                None,
+            )],
+            &freshness(),
+            &[],
+        );
+
+        assert!(body.contains("## Task"));
+        assert!(!body.contains("## Execution Summary"));
+        assert!(!body.contains("<details>"));
+        assert!(body.contains("## Validation"));
+        assert!(body.contains("## Branch Freshness"));
     }
 
     #[test]

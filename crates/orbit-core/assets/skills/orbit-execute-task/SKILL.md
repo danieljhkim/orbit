@@ -97,32 +97,36 @@ orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary
 
 ## Execution Summary Template
 
-Required sections:
+The generated PR body supplies the top-level `## Task`, `## Execution Summary`,
+`## Validation`, and `## Branch Freshness` sections. Keep the persisted
+`execution_summary` focused on what changed; it will be rendered inside the
+collapsed `## Execution Summary` block, so do not duplicate PR body section
+headings in the summary.
+
+Required content:
 
 ```markdown
-## Status
-success | failed
+Outcome: success | failed
 
-## Summary of Changes
-<what changed and why>
+Changes:
+- <what changed and why>
 
-## Overall Assessment
-<short quality assessment>
+Assessment: <short quality assessment>
 ```
 
 Include when relevant (omit if N/A):
 
 ```markdown
-## Strategic Decisions
+Strategic decisions:
 - <decision> | Rationale: <why>
 
-## Design Weaknesses / Risks
+Design weaknesses / risks:
 - <risk> | Severity: Low / Medium / High | Mitigation: <mitigation>
 
-## Deviations from Original Plan
+Deviations from original plan:
 - <deviation> | Justification: <why>
 
-## Recommended Follow-Ups
+Recommended follow-ups:
 - <next step>
 ```
 
