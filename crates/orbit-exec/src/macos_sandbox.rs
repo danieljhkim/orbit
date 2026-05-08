@@ -276,16 +276,31 @@ fn emit_claude_home_json_allows(
 ///
 /// `process_group(0)` is set on Unix so the supervision layer can reap the
 /// whole tree (matching the `orbit-exec::process::spawn` contract).
+pub struct MacosSandboxSpawnRequest<'a> {
+    pub profile_text: &'a str,
+    pub program: &'a str,
+    pub args: &'a [String],
+    pub env: &'a [(String, String)],
+    pub cwd: Option<&'a Path>,
+    pub stdin: Stdio,
+    pub stdout: Stdio,
+    pub stderr: Stdio,
+}
+
 pub fn spawn_under_macos_sandbox(
-    profile_text: &str,
-    program: &str,
-    args: &[String],
-    env: &[(String, String)],
-    cwd: Option<&Path>,
-    stdin: Stdio,
-    stdout: Stdio,
-    stderr: Stdio,
+    request: MacosSandboxSpawnRequest<'_>,
 ) -> Result<(Child, NamedTempFile), OrbitError> {
+    let MacosSandboxSpawnRequest {
+        profile_text,
+        program,
+        args,
+        env,
+        cwd,
+        stdin,
+        stdout,
+        stderr,
+    } = request;
+
     let mut profile_file = tempfile::Builder::new()
         .prefix("orbit-sandbox-")
         .suffix(".sb")
@@ -815,16 +830,17 @@ mod tests {
             .tempdir_in(&parent)
             .expect("cwd tempdir");
         let cwd = dir.path().canonicalize().expect("canonical cwd");
-        let (child, _profile_file) = spawn_under_macos_sandbox(
-            "(version 1)\n(allow default)\n",
-            "/bin/sh",
-            &["-c".to_string(), "pwd".to_string()],
-            &[],
-            Some(&cwd),
-            Stdio::null(),
-            Stdio::piped(),
-            Stdio::piped(),
-        )
+        let args = ["-c".to_string(), "pwd".to_string()];
+        let (child, _profile_file) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
+            profile_text: "(version 1)\n(allow default)\n",
+            program: "/bin/sh",
+            args: &args,
+            env: &[],
+            cwd: Some(&cwd),
+            stdin: Stdio::null(),
+            stdout: Stdio::piped(),
+            stderr: Stdio::piped(),
+        })
         .expect("spawn sandboxed child");
         let output = child.wait_with_output().expect("wait for child");
 

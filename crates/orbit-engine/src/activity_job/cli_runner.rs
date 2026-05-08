@@ -37,8 +37,8 @@ use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{ExecutionResult, ExecutorSandboxKind, InvocationTrace, OrbitError};
 use orbit_common::utility::redaction::PatternRedactor;
 use orbit_exec::{
-    claude_state_dir_from_env, compile_macos_sandbox_profile, sandbox_exec_available,
-    spawn_under_macos_sandbox,
+    MacosSandboxSpawnRequest, claude_state_dir_from_env, compile_macos_sandbox_profile,
+    sandbox_exec_available, spawn_under_macos_sandbox,
 };
 use serde_json::Value;
 use tempfile::NamedTempFile;
@@ -166,22 +166,23 @@ pub fn run_cli_backend(
         ("ORBIT_RUN_ID".to_string(), run_id.to_string()),
         ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
     ];
-    let (stdout, stderr, exit_code, duration, timed_out) = spawn_with_timeout(
-        &invocation.program,
-        &subprocess_args,
-        &invocation.stdin,
-        &child_env,
-        subprocess_cwd.as_deref(),
-        wall_clock_timeout,
-        SpawnTraceContext {
-            provider: &provider,
-            job_run_id: run_id,
-            task_id: task_id_from_input(input),
-            cwd: subprocess_cwd_string.as_deref(),
-        },
-        sandbox.as_ref(),
-    )
-    .map_err(|err| DispatchError::CliInvocationFailed(err.to_string()))?;
+    let (stdout, stderr, exit_code, duration, timed_out) =
+        spawn_with_timeout(SpawnWithTimeoutRequest {
+            program: &invocation.program,
+            args: &subprocess_args,
+            stdin_bytes: &invocation.stdin,
+            env: &child_env,
+            cwd: subprocess_cwd.as_deref(),
+            timeout: wall_clock_timeout,
+            sandbox: sandbox.as_ref(),
+            trace: SpawnTraceContext {
+                provider: &provider,
+                job_run_id: run_id,
+                task_id: task_id_from_input(input),
+                cwd: subprocess_cwd_string.as_deref(),
+            },
+        })
+        .map_err(|err| DispatchError::CliInvocationFailed(err.to_string()))?;
 
     let stdout_blob_ref = audit.write_blob(&stdout);
     let stderr_blob_ref = audit.write_blob(&stderr);
@@ -546,16 +547,16 @@ fn spawn_macos_sandboxed_with(
     // (`fs_profile` + `kind` + `allow_fallback`) so orbit-core has no
     // direct edge to orbit-exec.
     let profile_text = compile_macos_sandbox_profile(&sandbox.fs_profile)?;
-    let (child, profile_temp) = spawn_under_macos_sandbox(
-        &profile_text,
+    let (child, profile_temp) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
+        profile_text: &profile_text,
         program,
         args,
         env,
         cwd,
-        Stdio::piped(),
-        Stdio::piped(),
-        Stdio::piped(),
-    )?;
+        stdin: Stdio::piped(),
+        stdout: Stdio::piped(),
+        stderr: Stdio::piped(),
+    })?;
     Ok(SpawnedChild {
         child,
         _profile_temp: Some(profile_temp),
@@ -569,16 +570,38 @@ struct SpawnTraceContext<'a> {
     cwd: Option<&'a str>,
 }
 
-fn spawn_with_timeout(
-    program: &str,
-    args: &[String],
-    stdin_bytes: &[u8],
-    env: &[(String, String)],
-    cwd: Option<&Path>,
+struct SpawnWithTimeoutRequest<'a> {
+    program: &'a str,
+    args: &'a [String],
+    stdin_bytes: &'a [u8],
+    env: &'a [(String, String)],
+    cwd: Option<&'a Path>,
     timeout: Duration,
-    trace: SpawnTraceContext<'_>,
-    sandbox: Option<&ResolvedSandbox>,
-) -> Result<SpawnOutput, String> {
+    sandbox: Option<&'a ResolvedSandbox>,
+    trace: SpawnTraceContext<'a>,
+}
+
+struct OutputReaderContext {
+    provider: String,
+    stream: &'static str,
+    job_run_id: String,
+    task_id: Option<String>,
+    cwd: Option<String>,
+    dispatch: tracing::Dispatch,
+}
+
+fn spawn_with_timeout(request: SpawnWithTimeoutRequest<'_>) -> Result<SpawnOutput, String> {
+    let SpawnWithTimeoutRequest {
+        program,
+        args,
+        stdin_bytes,
+        env,
+        cwd,
+        timeout,
+        sandbox,
+        trace,
+    } = request;
+
     let started = Instant::now();
     let SpawnedChild {
         mut child,
@@ -602,24 +625,28 @@ fn spawn_with_timeout(
         spawn_output_reader(
             handle,
             Arc::clone(&stdout_buf),
-            trace.provider.to_string(),
-            "stdout",
-            trace.job_run_id.to_string(),
-            trace.task_id.map(ToString::to_string),
-            trace.cwd.map(ToString::to_string),
-            dispatch.clone(),
+            OutputReaderContext {
+                provider: trace.provider.to_string(),
+                stream: "stdout",
+                job_run_id: trace.job_run_id.to_string(),
+                task_id: trace.task_id.map(ToString::to_string),
+                cwd: trace.cwd.map(ToString::to_string),
+                dispatch: dispatch.clone(),
+            },
         )
     });
     let stderr_reader = child.stderr.take().map(|handle| {
         spawn_output_reader(
             handle,
             Arc::clone(&stderr_buf),
-            trace.provider.to_string(),
-            "stderr",
-            trace.job_run_id.to_string(),
-            trace.task_id.map(ToString::to_string),
-            trace.cwd.map(ToString::to_string),
-            dispatch,
+            OutputReaderContext {
+                provider: trace.provider.to_string(),
+                stream: "stderr",
+                job_run_id: trace.job_run_id.to_string(),
+                task_id: trace.task_id.map(ToString::to_string),
+                cwd: trace.cwd.map(ToString::to_string),
+                dispatch,
+            },
         )
     });
 
@@ -667,16 +694,20 @@ fn spawn_with_timeout(
 fn spawn_output_reader<R>(
     handle: R,
     buf: Arc<Mutex<Vec<u8>>>,
-    provider: String,
-    stream: &'static str,
-    job_run_id: String,
-    task_id: Option<String>,
-    cwd: Option<String>,
-    dispatch: tracing::Dispatch,
+    context: OutputReaderContext,
 ) -> thread::JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
+    let OutputReaderContext {
+        provider,
+        stream,
+        job_run_id,
+        task_id,
+        cwd,
+        dispatch,
+    } = context;
+
     thread::spawn(move || {
         tracing::dispatcher::with_default(&dispatch, || {
             let mut reader = BufReader::new(handle);
@@ -762,6 +793,25 @@ mod tests {
     use super::*;
     use crate::activity_job::dispatcher::ResolvedCliExecutor;
 
+    fn spawn_test_request<'a>(
+        program: &'a str,
+        args: &'a [String],
+        cwd: Option<&'a Path>,
+        timeout: Duration,
+        trace: SpawnTraceContext<'a>,
+    ) -> SpawnWithTimeoutRequest<'a> {
+        SpawnWithTimeoutRequest {
+            program,
+            args,
+            stdin_bytes: b"",
+            env: &[],
+            cwd,
+            timeout,
+            sandbox: None,
+            trace,
+        }
+    }
+
     #[test]
     fn user_prompt_from_object_input_without_prompt_serializes_full_input() {
         let input = serde_json::json!({
@@ -793,11 +843,9 @@ mod tests {
     fn spawn_with_timeout_emits_structured_stdout_and_stderr_events() {
         let args = sh_args("printf '%s\\n' out-one out-two; printf '%s\\n' err-one >&2");
         let (result, events) = capture_events(|| {
-            spawn_with_timeout(
+            spawn_with_timeout(spawn_test_request(
                 "/bin/sh",
                 &args,
-                b"",
-                &[],
                 None,
                 Duration::from_secs(5),
                 SpawnTraceContext {
@@ -806,8 +854,7 @@ mod tests {
                     task_id: Some("T123"),
                     cwd: None,
                 },
-                None,
-            )
+            ))
         });
         let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
@@ -833,11 +880,9 @@ mod tests {
         let cwd_path = cwd.path().canonicalize().expect("canonical cwd");
         let cwd_string = cwd_path.display().to_string();
         let (result, events) = capture_events(|| {
-            spawn_with_timeout(
+            spawn_with_timeout(spawn_test_request(
                 "/bin/sh",
                 &args,
-                b"",
-                &[],
                 Some(&cwd_path),
                 Duration::from_secs(5),
                 SpawnTraceContext {
@@ -846,8 +891,7 @@ mod tests {
                     task_id: Some("T456"),
                     cwd: Some(cwd_string.as_str()),
                 },
-                None,
-            )
+            ))
         });
         let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
@@ -865,11 +909,9 @@ mod tests {
     fn spawn_with_timeout_redacts_tracing_line_without_redacting_raw_stdout() {
         let args = sh_args("printf '%s\\n' 'Authorization: Bearer abc123'");
         let (result, formatted_output) = capture_redacted_tracing_output(|| {
-            spawn_with_timeout(
+            spawn_with_timeout(spawn_test_request(
                 "/bin/sh",
                 &args,
-                b"",
-                &[],
                 None,
                 Duration::from_secs(5),
                 SpawnTraceContext {
@@ -878,8 +920,7 @@ mod tests {
                     task_id: Some("TRED"),
                     cwd: None,
                 },
-                None,
-            )
+            ))
         });
         let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 
@@ -1184,11 +1225,9 @@ mod tests {
     fn spawn_with_timeout_kills_timed_out_process_and_keeps_partial_output() {
         let args = sh_args("printf '%s\\n' 'before timeout'; sleep 1; printf '%s\\n' after");
         let (result, events) = capture_events(|| {
-            spawn_with_timeout(
+            spawn_with_timeout(spawn_test_request(
                 "/bin/sh",
                 &args,
-                b"",
-                &[],
                 None,
                 Duration::from_millis(75),
                 SpawnTraceContext {
@@ -1197,8 +1236,7 @@ mod tests {
                     task_id: Some("TTIME"),
                     cwd: None,
                 },
-                None,
-            )
+            ))
         });
         let (stdout, stderr, exit_code, _duration, timed_out) = result.expect("spawn succeeds");
 

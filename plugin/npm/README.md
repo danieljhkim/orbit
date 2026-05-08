@@ -32,7 +32,7 @@ Windows is not currently published. Use WSL or build from source.
 | Variable | Effect |
 |---|---|
 | `ORBIT_BINARY` | Path to a local `orbit` binary; bypasses download. |
-| `ORBIT_BINARY_VERSION` | Override the release tag to install (e.g. `v0.3.0`). |
+| `ORBIT_BINARY_VERSION` | Override the release tag to install (e.g. `v0.3.1`). |
 | `ORBIT_SKIP_DOWNLOAD=1` | Skip postinstall download (lazy install on first run still works). |
 
 ## License

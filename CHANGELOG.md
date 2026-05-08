@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.1
+
+### Features
+
+- **Pipeline dispatch reliability**: hardened parallel, gate, and epic pipelines with failed-child completion handling, longer task lock coverage, epic timeout/convergence fixes, resolved workspace subprocess cwd, and per-step agent log/error surfacing. ([T20260427-34], [T20260427-36], [T20260427-38], [T20260427-40], [T20260508-8], [T20260508-14])
+- **Metrics and public docs**: split the public metrics surface into Operations and Scoreboard views, added done-task sync pages for orbit-cli.com, refreshed positioning/reference docs, and refined the website UI. ([T20260508-4], [T20260508-16], [T20260508-19], [T20260508-20], [T20260507-21])
+- **Registry and benchmark tooling**: added the `orbit-registry` crate and identity-key benchmark harness for exercising knowledge graph selector stability. ([T20260507-12], [T20260508-2])
+
+### Fixes
+
+- **macOS sandbox and CLI execution**: allowed Claude's `$HOME/.claude.json` lock/tmp siblings, re-allowed the active job-run worktree after global deny rules, and demoted successful CLI exits when the inner Orbit envelope reported failure. ([T20260508-13], [T20260508-17])
+- **Workflow defaults and links**: made workflow base branches resolve from `[workflow] base_branch` when CLI flags are omitted, and fixed task-ID links in generated PR bodies with an opt-in URL template. ([T20260508-11], [T20260508-12])
+- **CI clippy guardrails**: grouped macOS sandbox spawn inputs into a request struct so strict workspace clippy passes under `-D warnings`. ([T20260508-21])
+
+### Chores
+
+- **Release metadata**: bumped Cargo workspace crates, plugin manifests, install examples, and npm proxy metadata to v0.3.1. ([T20260508-21])
+- **Release packaging**: kept GitHub Release tarballs, checksums, Homebrew tap updates, and installer smoke tests as the supported release path, while removing the npm publish step from the tag workflow.
+
 ## 0.3.0
 
 ### Release scope

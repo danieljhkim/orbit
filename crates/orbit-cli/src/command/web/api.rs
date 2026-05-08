@@ -3139,7 +3139,7 @@ fn global_error_rows_from_path(
     limit: usize,
 ) -> Result<Vec<Value>, orbit_core::OrbitError> {
     let filters = LogFilters::from_query_parts(None, Some("error".to_string()), None)?;
-    let events = read_recent_rendered_events(&path, &filters, limit)
+    let events = read_recent_rendered_events(path, &filters, limit)
         .map_err(|e| orbit_core::OrbitError::Io(format!("read log {}: {e}", path.display())))?;
     Ok(events
         .into_iter()

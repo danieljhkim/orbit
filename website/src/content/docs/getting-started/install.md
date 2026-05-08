@@ -47,7 +47,7 @@ make install
 ### Pinned versions and custom install directory
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | ORBIT_VERSION=v0.3.0 sh
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | ORBIT_VERSION=v0.3.1 sh
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | ORBIT_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
