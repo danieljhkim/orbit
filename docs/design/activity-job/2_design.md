@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-08 (T20260508-3)
+**Last updated:** 2026-05-08 (T20260427-36, T20260508-3)
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -127,7 +127,7 @@ Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) 
 
 The seeded `list_backlog_tasks` deterministic activity starts `task_auto_pipeline`. Automatic mode admits tasks by `status: backlog`, including accepted friction reports whose `type` remains `friction`, while untriaged `status: friction` reports stay out. It emits `task_count`, `task_ids`, `tasks`, singleton `bundles`, and an `excluded` array for admitted backlog tasks filtered because their context files overlap `in-progress` or `review` locks. `excluded` covers only lock overlap; status-based admission and `max_tasks` truncation stay silent, and explicit `task_ids` mode omits it. This attribution contract was added in [T20260421-0542-2] and the friction admission rule was updated in [T20260505-2].
 
-`task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation owner is the gate run that executed `reserve_locks`, not the child shipment run. Owned reservations are engine-cleaned when that owner run reaches a terminal state (`success`, `failed`, `cancelled`, or `timeout`), so correctness does not depend on every workspace override preserving a YAML release step. The seeded deterministic `release_locks` activity still calls `orbit.task.locks.release` after a terminal child wait as an early-release optimization; idempotent terminal cleanup then finds nothing left to release. Unowned/manual reservations remain explicit-release-or-TTL only. TTL is the fallback for abandoned/manual reservations or cases where no terminal cleanup or reserve-pressure reconciliation trigger runs. This lifecycle was tightened in [T20260430-26] and made engine-owned in [T20260505-10].
+`task_gate_pipeline` reserves a bundle's context files before it dispatches `task_pr_pipeline` or `task_local_pipeline` through `invoke_and_wait`. The reservation owner is the gate run that executed `reserve_locks`, not the child shipment run. Seeded defaults keep `ttl_seconds` aligned with `dispatch_timeout_seconds` at 7200 seconds, so the admission reservation covers the full child wait budget; workspace overrides must preserve `ttl_seconds >= dispatch_timeout_seconds` [T20260427-36]. Owned reservations are engine-cleaned when that owner run reaches a terminal state (`success`, `failed`, `cancelled`, or `timeout`), so correctness does not depend on every workspace override preserving a YAML release step. The seeded deterministic `release_locks` activity still calls `orbit.task.locks.release` after a terminal child wait as an early-release optimization; idempotent terminal cleanup then finds nothing left to release. Unowned/manual reservations remain explicit-release-or-TTL only. TTL is the fallback for abandoned/manual reservations or cases where no terminal cleanup or reserve-pressure reconciliation trigger runs. This lifecycle was tightened in [T20260430-26] and made engine-owned in [T20260505-10].
 
 Reserve conflict checking also performs bounded, opportunistic stale-owned-reservation reconciliation before reporting reservation conflicts. It inspects only overlapping owned reservations under current reserve pressure; it is not a background sweeper. Existing job-run list/show reconciliation remains in place, and both paths release run-owned reservations with `release_reason: stale_run_reconciled` when they prove the owner is already terminal or stale. Release audit rows use the task-lock audit surface and include `reservation_id`, `owner_run_id` when present, and `release_reason` (`explicit`, `run_terminal`, `stale_run_reconciled`, or TTL expiration).
 
@@ -462,6 +462,7 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260426-0742]** — Remove duplicate job-level run inspection aliases and keep run inspection under `orbit run`.
 - **[T20260426-2313]** — Stream CLI subprocess stdout/stderr through structured tracing events while retaining the existing audit/blob path.
 - **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
+- **[T20260427-36]** — Align task-gate reservation TTL with the child dispatch wait budget.
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260427-51]** — Wrap cli-backend agent invocations in `sandbox-exec` on macOS.

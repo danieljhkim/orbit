@@ -547,6 +547,31 @@ spec:
     }
 
     #[test]
+    fn gate_pipeline_default_reservation_ttl_covers_child_wait_budget() {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == "task_gate_pipeline").then_some(*yaml))
+            .expect("task gate pipeline default exists");
+        let asset = load_job_asset(yaml).expect("parse task gate pipeline");
+        let default_input = asset
+            .spec
+            .default_input
+            .as_ref()
+            .expect("task gate pipeline default input");
+        let ttl_seconds = default_input["ttl_seconds"]
+            .as_u64()
+            .expect("numeric ttl_seconds");
+        let dispatch_timeout_seconds = default_input["dispatch_timeout_seconds"]
+            .as_u64()
+            .expect("numeric dispatch_timeout_seconds");
+
+        assert!(
+            ttl_seconds >= dispatch_timeout_seconds,
+            "reservation TTL must cover the child dispatch wait budget"
+        );
+    }
+
+    #[test]
     fn default_jobs_do_not_template_agent_loop_outputs() {
         let agent_activity_names = DEFAULT_ACTIVITY_FILES
             .iter()
