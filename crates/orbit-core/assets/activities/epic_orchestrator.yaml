@@ -38,18 +38,20 @@ spec:
 
     # Objective
 
-    Drive every subtask to a terminal state (`done`, `blocked`, or
-    `failed`). Use judgment on dependency ordering and on when to run
-    subtasks in parallel vs sequentially.
+    Drive every subtask to a state where automated shipment should stop:
+    shipped to `review`, already `done`, or unable to proceed
+    (`blocked`/`rejected`). Use judgment on dependency ordering and on
+    when to run subtasks in parallel vs sequentially.
 
     # Per-cycle procedure
 
     1. **Read state.** Use the `subtasks` input as the current
-       deterministic snapshot. It contains the non-terminal subtasks
-       after the workflow's latest `load_epic` refresh.
+       deterministic snapshot. It contains the subtasks still needing
+       automated shipment after the workflow's latest `load_epic`
+       refresh.
 
     2. **Decide READY subtasks.** A subtask is READY iff:
-       - its current task status is not terminal;
+       - its current task status still needs automated shipment;
        - its dependencies (inferred from descriptions) are all `done`;
        - it is not already represented by a child run you dispatched in
          this cycle.
@@ -73,7 +75,9 @@ spec:
 
     5. **Wait.** Call `orbit.pipeline.wait` with the dispatched
        `run_ids`. On terminal responses:
-       - `status: succeeded` → mark subtask `state: "done"`.
+       - `status: succeeded` → mark subtask `state: "done"` or
+         `state: "shipped"` in audit notes; the deterministic refresh
+         treats review as the shipped stop state.
        - `status: failed` or `cancelled` or `timeout` → increment
          note the failed run IDs and leave retry/blocking decisions for
          the next cycle's deterministic task snapshot.

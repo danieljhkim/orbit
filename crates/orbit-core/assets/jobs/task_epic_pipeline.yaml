@@ -17,6 +17,8 @@
 #   reference its own prior reasoning.
 # - `break_when: "{{ steps.refresh_epic.output.all_terminal }} == true"`
 #   keys off deterministic task state, not the agent's final response.
+#   `review` counts as terminal for this pipeline because the normal
+#   PR/local child workflows stop at that human handoff state.
 # - `max_iterations: 20` is the structural ceiling on cycles — a
 #   literal because `LoopBlock.max_iterations` is `u32` (not templated).
 #   Callers who need a different ceiling must fork this YAML.

@@ -6,11 +6,13 @@ spec:
   type: deterministic
   description: >
     Materialize the working set for `epic_orchestrator`: the epic task
-    itself plus all non-terminal subtasks (reverse-parent lookup).
-    Filters out Done / Archived — the orchestrator only needs to drive
-    the open subset. The orchestrator reasons over task descriptions
-    for dependency ordering, so titles and full descriptions ship in
-    the payload.
+    itself plus all subtasks that still need automated shipment
+    (reverse-parent lookup). Filters out Done / Review / Blocked /
+    Archived / Rejected — the orchestrator only needs to drive the open
+    subset, and Review is the shipped human-handoff state for normal
+    PR/local child pipelines. The orchestrator reasons over task
+    descriptions for dependency ordering, so titles and full
+    descriptions ship in the payload.
   input_schema_json:
     type: object
     required: [epic_task_id]

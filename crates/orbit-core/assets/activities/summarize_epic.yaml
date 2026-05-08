@@ -6,10 +6,11 @@ spec:
   type: deterministic
   description: >
     Fold the orchestrator's final `state` snapshot into an audit-grade
-    summary (counts + unfinished ids + one-line status message). Pure
-    aggregation — no I/O, no side effects. The workflow obtains `state`
-    from deterministic task refresh output, not from the orchestrator's
-    final response.
+    summary (counts + unfinished ids + one-line status message). The
+    `done` count is the epic-complete bucket, including review-shipped
+    subtasks from `load_epic`. Pure aggregation — no I/O, no side
+    effects. The workflow obtains `state` from deterministic task
+    refresh output, not from the orchestrator's final response.
   input_schema_json:
     type: object
     required: [state]

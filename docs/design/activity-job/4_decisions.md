@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-08 (T20260427-36, T20260508-3)
+**Last updated:** 2026-05-08 (T20260427-36, T20260427-38, T20260508-3)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -397,6 +397,19 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 **Decision.** Render one-task PR bodies as `## Task`, optional collapsed `## Execution Summary`, `## Validation`, and `## Branch Freshness`. The task section includes the task link, verbatim description, and plain-bullet acceptance criteria. Multi-task callers keep the legacy body while those paths remain supported.
 
+## ADR-043 — Epic review status is a shipped stop state
+
+**Status:** Accepted · 2026-05 · [T20260427-38]
+
+**Context.** `task_epic_pipeline` exits from deterministic `load_epic` snapshots, while normal child shipment workflows stop successful subtasks in `review` for human handoff. Treating `review` as open work made a clean epic cycle redispatch already-shipped subtasks or run until its iteration ceiling.
+
+**Decision.** For epic orchestration only, treat `review` as a shipped stop state: `load_epic` omits review subtasks from the open workset, allows them to satisfy `all_terminal`, and maps their epic summary state to `done` while preserving the raw task status.
+
+**Consequences.**
+- Epic loops can converge after normal PR/local child shipment without embedding human approval into the pipeline.
+- Operators can still inspect raw `status: "review"` in the final snapshot and task records before approving lifecycle completion.
+- Cost: `summarize_epic`'s `done` counter now includes review-shipped subtasks for epic completion, so readers must distinguish pipeline completion from task approval.
+
 ---
 
 ## Task References
@@ -431,6 +444,7 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - **[T20260426-2349]** — Move CLI tracing output redaction from `cli_runner` call sites into the default tracing formatter layer.
 - **[T20260427-33]** — Remove the audit-only `dispatch_agent` step from `task_auto_pipeline`.
 - **[T20260427-36]** — Align task-gate reservation TTL with the child dispatch wait budget.
+- **[T20260427-38]** — Treat review as a shipped stop state for epic automation.
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260428-8]** — Add workflow-specific task admission for task-starting workflows.

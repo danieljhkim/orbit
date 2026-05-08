@@ -20,6 +20,17 @@ fn list_backlog_tasks(runtime: &OrbitRuntime, input: Value) -> Value {
         .expect("list backlog tasks")
 }
 
+fn load_epic(runtime: &OrbitRuntime, epic_task_id: &str) -> Value {
+    runtime
+        .run_deterministic(
+            "load_epic",
+            &json!({}),
+            &json!({ "epic_task_id": epic_task_id }),
+            ToolContext::default(),
+        )
+        .expect("load epic")
+}
+
 fn excluded_entry<'a>(output: &'a Value, task_id: &str) -> &'a Value {
     output["excluded"]
         .as_array()
@@ -27,6 +38,104 @@ fn excluded_entry<'a>(output: &'a Value, task_id: &str) -> &'a Value {
         .iter()
         .find(|entry| entry["id"] == task_id)
         .expect("excluded entry")
+}
+
+#[test]
+fn load_epic_treats_review_subtasks_as_shipped_terminal_state() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let epic = seed_list_backlog_task(
+        &runtime,
+        "Epic",
+        TaskStatus::InProgress,
+        TaskPriority::High,
+        TaskType::Epic,
+        None,
+        vec![],
+    );
+    let review = seed_list_backlog_task(
+        &runtime,
+        "Review child",
+        TaskStatus::Review,
+        TaskPriority::High,
+        TaskType::Task,
+        Some(epic.id.clone()),
+        vec![],
+    );
+    let done = seed_list_backlog_task(
+        &runtime,
+        "Done child",
+        TaskStatus::Done,
+        TaskPriority::Medium,
+        TaskType::Task,
+        Some(epic.id.clone()),
+        vec![],
+    );
+
+    let output = load_epic(&runtime, &epic.id);
+
+    assert_eq!(output["all_terminal"], json!(true));
+    assert_eq!(output["subtasks"], json!([]));
+    assert_eq!(
+        output["final_state"]["subtasks"][review.id.as_str()],
+        json!({
+            "state": "done",
+            "status": "review",
+            "title": "Review child"
+        })
+    );
+    assert_eq!(
+        output["final_state"]["subtasks"][done.id.as_str()],
+        json!({
+            "state": "done",
+            "status": "done",
+            "title": "Done child"
+        })
+    );
+}
+
+#[test]
+fn load_epic_keeps_in_progress_subtasks_open_when_review_is_shipped() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let epic = seed_list_backlog_task(
+        &runtime,
+        "Epic",
+        TaskStatus::InProgress,
+        TaskPriority::High,
+        TaskType::Epic,
+        None,
+        vec![],
+    );
+    let review = seed_list_backlog_task(
+        &runtime,
+        "Review child",
+        TaskStatus::Review,
+        TaskPriority::High,
+        TaskType::Task,
+        Some(epic.id.clone()),
+        vec![],
+    );
+    let in_progress = seed_list_backlog_task(
+        &runtime,
+        "In progress child",
+        TaskStatus::InProgress,
+        TaskPriority::High,
+        TaskType::Task,
+        Some(epic.id.clone()),
+        vec![],
+    );
+
+    let output = load_epic(&runtime, &epic.id);
+    let subtasks = output["subtasks"].as_array().expect("subtasks array");
+
+    assert_eq!(output["all_terminal"], json!(false));
+    assert_eq!(subtasks.len(), 1);
+    assert_eq!(subtasks[0]["id"], json!(in_progress.id));
+    assert_eq!(subtasks[0]["status"], json!("in-progress"));
+    assert!(
+        subtasks
+            .iter()
+            .all(|entry| entry["id"].as_str() != Some(review.id.as_str()))
+    );
 }
 
 #[test]

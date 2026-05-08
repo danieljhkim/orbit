@@ -174,7 +174,8 @@ pub(super) fn run_deterministic(
         "list_backlog_tasks" => backlog_exclusion::list_backlog_tasks(runtime, action, input),
         // Materialize an epic's working set for the orchestrator:
         // the epic task itself plus non-terminal subtasks
-        // (`parent_id == epic_task_id` and status ∉ {done, archived}).
+        // (`parent_id == epic_task_id` and status not done, review,
+        // blocked, archived, or rejected).
         // Full descriptions ride along because the orchestrator
         // reasons about dependency ordering from prose.
         "load_epic" => backlog_exclusion::load_epic(runtime, action, input),

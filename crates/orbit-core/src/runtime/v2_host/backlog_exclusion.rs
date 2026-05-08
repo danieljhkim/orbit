@@ -53,15 +53,21 @@ fn active_task_lock_holders<'a>(
 fn is_epic_terminal_status(status: TaskStatus) -> bool {
     matches!(
         status,
-        TaskStatus::Done | TaskStatus::Blocked | TaskStatus::Archived | TaskStatus::Rejected
+        TaskStatus::Done
+            | TaskStatus::Blocked
+            | TaskStatus::Archived
+            | TaskStatus::Rejected
+            | TaskStatus::Review
     )
 }
 
 fn epic_state_for_task_status(status: TaskStatus) -> &'static str {
     match status {
-        TaskStatus::Done | TaskStatus::Archived => "done",
+        // For epic orchestration, `review` means a child shipment workflow
+        // reached the human handoff point and should not be dispatched again.
+        TaskStatus::Done | TaskStatus::Archived | TaskStatus::Review => "done",
         TaskStatus::Blocked | TaskStatus::Rejected => "blocked",
-        TaskStatus::InProgress | TaskStatus::Review => "in_flight",
+        TaskStatus::InProgress => "in_flight",
         TaskStatus::Proposed | TaskStatus::Friction | TaskStatus::Backlog | TaskStatus::Someday => {
             "pending"
         }
@@ -305,7 +311,6 @@ pub(super) fn load_epic(
         .collect::<Vec<_>>();
     let subtask_payload: Vec<Value> = open_subtasks
         .iter()
-        .filter(|t| !matches!(t.status, TaskStatus::Done | TaskStatus::Archived))
         .map(|t| {
             serde_json::json!({
                 "id": t.id,
@@ -374,7 +379,7 @@ pub(super) fn summarize_epic(input: &Value) -> Result<Value, DispatchError> {
     let message = if total == 0 {
         "epic had no subtasks".to_string()
     } else if unfinished_ids.is_empty() {
-        format!("all {total} subtasks done")
+        format!("all {total} subtasks complete")
     } else {
         format!(
             "{done}/{total} done; {failed} failed, {blocked} blocked, \
