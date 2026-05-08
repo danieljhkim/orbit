@@ -18,12 +18,16 @@
 #   budget is enforced by `input.max_wait_seconds`, which the
 #   `starvation_check` step surfaces via the `gate.starvation` audit
 #   event when the loop exits without a reservation.
+# - The default reservation TTL intentionally covers the child dispatch wait
+#   budget. Keep `ttl_seconds >= dispatch_timeout_seconds` when overriding
+#   these inputs; otherwise a second gate can reserve the same context before
+#   the first child pipeline finishes.
 # - The dispatched child pipeline runs while the reservation is still valid;
 #   a fresh `orbit.task.locks.reserve` call from another bundle will either
 #   wait or surface `task.locks.reserve.denied`. After `invoke_and_wait`
 #   returns a terminal child-run status, `release_reservation` frees the
 #   reservation immediately. TTL remains the fallback for abandoned/crashed
-#   runs or wait-side timeouts where the child may still be running.
+#   runs.
 
 schemaVersion: 2
 kind: Job
@@ -40,7 +44,7 @@ spec:
     base_sync: remote
     max_wait_seconds: 3600
     poll_interval_seconds: 30
-    ttl_seconds: 1800
+    ttl_seconds: 7200
     dispatch_timeout_seconds: 7200
 
   steps:
