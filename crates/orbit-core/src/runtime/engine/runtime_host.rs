@@ -160,6 +160,10 @@ impl RuntimeHost for OrbitRuntime {
         self.context.graph_editing()
     }
 
+    fn pr_config(&self) -> orbit_engine::PrConfig {
+        OrbitRuntime::pr_config(self).clone()
+    }
+
     fn scoreboard_dir(&self) -> &std::path::Path {
         &self.context.paths().scoreboard_dir
     }

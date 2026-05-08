@@ -225,6 +225,10 @@ impl OrbitRuntime {
         self.context.graph_editing()
     }
 
+    pub fn pr_config(&self) -> &orbit_engine::PrConfig {
+        self.context.pr_config()
+    }
+
     /// Configured default for the v2 `agent_loop` execution backend (§3.1
     /// precedence step 3). Returns `None` when not set.
     pub fn v2_backend_config(&self) -> Option<&str> {

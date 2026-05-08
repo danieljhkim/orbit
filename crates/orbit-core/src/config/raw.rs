@@ -7,6 +7,7 @@ pub(super) struct RawRuntimeConfig {
     #[allow(dead_code)]
     pub(super) identity: Option<toml::Value>,
     pub(super) task: Option<RawTaskSection>,
+    pub(super) pr: Option<RawPrSection>,
     pub(super) scoring: Option<RawScoringConfig>,
     pub(super) graph: Option<RawGraphConfig>,
     pub(super) knowledge: Option<RawKnowledgeConfig>,
@@ -92,6 +93,11 @@ pub(super) struct RawCodexExecutionConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawTaskSection {
     pub(super) approval: Option<RawTaskApprovalConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawPrSection {
+    pub(super) task_url_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

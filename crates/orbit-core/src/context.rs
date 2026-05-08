@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use orbit_common::types::WorkspacePaths;
+use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
     AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
@@ -159,6 +160,7 @@ pub(crate) struct OrbitRuntimeSettings {
     task_delegate_approval: bool,
     scoring_enabled: bool,
     graph_editing: bool,
+    pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
     /// Default base branch for ship/ship-auto/duel-plan workflows
@@ -178,6 +180,7 @@ impl OrbitRuntimeSettings {
         task_delegate_approval: bool,
         scoring_enabled: bool,
         graph_editing: bool,
+        pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
         agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
@@ -189,10 +192,15 @@ impl OrbitRuntimeSettings {
             task_delegate_approval,
             scoring_enabled,
             graph_editing,
+            pr_config,
             v2_backend,
             workflow_base_branch,
             agent_roles,
         }
+    }
+
+    pub(crate) fn pr_config(&self) -> &PrConfig {
+        &self.pr_config
     }
 
     pub(crate) fn v2_backend(&self) -> Option<&str> {
@@ -292,6 +300,10 @@ impl OrbitContext {
 
     pub(crate) fn graph_editing(&self) -> bool {
         self.runtime.graph_editing
+    }
+
+    pub(crate) fn pr_config(&self) -> &PrConfig {
+        self.runtime.pr_config()
     }
 
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1

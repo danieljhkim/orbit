@@ -315,6 +315,11 @@ pub struct AgentRoleConfig {
     pub backend: Option<Backend>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrConfig {
+    pub task_url_template: Option<String>,
+}
+
 pub trait EnvironmentHost {
     // ── Config accessors (implementors provide these) ──────────────────
 
@@ -454,6 +459,9 @@ pub trait RuntimeHost {
     }
     fn scoring_enabled(&self) -> bool;
     fn graph_editing(&self) -> bool;
+    fn pr_config(&self) -> PrConfig {
+        PrConfig::default()
+    }
     fn scoreboard_dir(&self) -> &Path;
     fn persist_invocation_trace(
         &self,

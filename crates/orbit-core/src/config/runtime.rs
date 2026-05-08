@@ -5,13 +5,14 @@ use std::path::Path;
 
 use orbit_common::types::OrbitError;
 use orbit_common::utility::redaction::redact_home_dir;
+use orbit_engine::PrConfig;
 
 use crate::paths;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
-    RawAgentRoleConfig, RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig,
-    RawTaskSection, RawWorkflowConfig,
+    RawAgentRoleConfig, RawCodexExecutionConfig, RawExecutionEnvConfig, RawPrSection,
+    RawRuntimeConfig, RawTaskSection, RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -29,6 +30,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) codex_execution: CodexExecutionPolicy,
     pub(crate) persistence: PersistenceConfig,
     pub(crate) task_approval: TaskApprovalConfig,
+    pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
     pub(crate) graph_editing: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
@@ -58,6 +60,7 @@ impl RuntimeConfig {
             codex_execution: CodexExecutionPolicy::default(),
             persistence: PersistenceConfig::default_for_data_root(data_root),
             task_approval: TaskApprovalConfig::default(),
+            pr: PrConfig::default(),
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
@@ -137,6 +140,7 @@ impl RuntimeConfig {
             .and_then(|section| section.backend.clone());
 
         let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
+        let pr = pr_config_from_raw(parsed.pr.as_ref());
 
         if parsed
             .knowledge
@@ -158,6 +162,7 @@ impl RuntimeConfig {
             )?,
             persistence,
             task_approval: TaskApprovalConfig::from_raw(parsed.task.as_ref())?,
+            pr,
             scoring_enabled,
             graph_editing,
             v2_backend,
@@ -173,6 +178,16 @@ impl RuntimeConfig {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn pr_config(&self) -> &PrConfig {
+        &self.pr
+    }
+}
+
+fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
+    PrConfig {
+        task_url_template: raw.and_then(|section| section.task_url_template.clone()),
     }
 }
 
@@ -533,5 +548,35 @@ mod tests {
         let config =
             RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
         assert!(config.v2_backend().is_none());
+        assert_eq!(config.pr_config().task_url_template.as_deref(), None);
+    }
+
+    #[test]
+    fn pr_config_defaults_to_no_task_url_template_without_config() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+
+        assert_eq!(config.pr_config().task_url_template.as_deref(), None);
+    }
+
+    #[test]
+    fn pr_task_url_template_loads_from_workspace_config() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            "[pr]\ntask_url_template = \"https://orbit-cli.com/tasks/{task_id}\"\n",
+        );
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+
+        assert_eq!(
+            config.pr_config().task_url_template.as_deref(),
+            Some("https://orbit-cli.com/tasks/{task_id}")
+        );
     }
 }

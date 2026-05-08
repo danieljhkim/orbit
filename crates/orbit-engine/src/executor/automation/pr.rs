@@ -8,7 +8,7 @@ use orbit_store::pr_scoreboard;
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
-use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{PrConfig, RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 use super::freshness::{ensure_branch_fresh_against_base, ensure_branch_rebased_onto_base};
 use super::git::{base_sync_mode_from_input, git_output};
@@ -244,9 +244,12 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     let title = input_string_field(input, "title")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default_pr_title(&completed_tasks));
+    let pr_config = host.pr_config();
     let body = input_string_field(input, "body")
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| build_batch_pr_body(&completed_tasks, &freshness, &changed_files));
+        .unwrap_or_else(|| {
+            build_batch_pr_body(&completed_tasks, &freshness, &changed_files, &pr_config)
+        });
 
     let tool_context = ToolContext {
         cwd: Some(workspace_path.to_string_lossy().to_string()),
@@ -373,11 +376,12 @@ fn build_batch_pr_body(
     tasks: &[Task],
     freshness: &super::freshness::BranchFreshness,
     changed_files: &[&str],
+    pr_config: &PrConfig,
 ) -> String {
     let mut body = if let [task] = tasks {
-        build_single_task_pr_body(task, freshness)
+        build_single_task_pr_body(task, freshness, pr_config)
     } else {
-        build_legacy_batch_pr_body(tasks, freshness, changed_files)
+        build_legacy_batch_pr_body(tasks, freshness, changed_files, pr_config)
     };
 
     if let Some(signature) = batch_pr_signature(tasks) {
@@ -388,8 +392,12 @@ fn build_batch_pr_body(
     body
 }
 
-fn build_single_task_pr_body(task: &Task, freshness: &super::freshness::BranchFreshness) -> String {
-    let mut sections = vec![render_single_task_section(task)];
+fn build_single_task_pr_body(
+    task: &Task,
+    freshness: &super::freshness::BranchFreshness,
+    pr_config: &PrConfig,
+) -> String {
+    let mut sections = vec![render_single_task_section(task, pr_config)];
 
     if let Some(execution_summary) = meaningful_execution_summary(&task.execution_summary) {
         sections.push(render_execution_summary_section(execution_summary));
@@ -404,10 +412,11 @@ fn build_legacy_batch_pr_body(
     tasks: &[Task],
     freshness: &super::freshness::BranchFreshness,
     changed_files: &[&str],
+    pr_config: &PrConfig,
 ) -> String {
     let task_sections = tasks
         .iter()
-        .map(render_legacy_task_section)
+        .map(|task| render_legacy_task_section(task, pr_config))
         .collect::<Vec<_>>()
         .join("\n");
     let changed_files_section = changed_files
@@ -426,12 +435,12 @@ fn build_legacy_batch_pr_body(
     )
 }
 
-fn render_single_task_section(task: &Task) -> String {
+fn render_single_task_section(task: &Task, pr_config: &PrConfig) -> String {
     let acceptance_criteria = render_acceptance_criteria(&task.acceptance_criteria);
 
     format!(
         "## Task\n\n{}\n\n### Description\n\n{}\n\n### Acceptance Criteria\n\n{}",
-        render_single_task_line(task),
+        render_single_task_line(task, pr_config),
         task.description,
         acceptance_criteria
     )
@@ -462,8 +471,8 @@ fn render_acceptance_criteria(criteria: &[String]) -> String {
         .join("\n")
 }
 
-fn render_legacy_task_section(task: &Task) -> String {
-    let line = render_task_line(task);
+fn render_legacy_task_section(task: &Task, pr_config: &PrConfig) -> String {
+    let line = render_task_line(task, pr_config);
     match meaningful_execution_summary(&task.execution_summary) {
         Some(execution_summary) => {
             format!(
@@ -510,31 +519,44 @@ fn is_placeholder_execution_summary(summary: &str) -> bool {
         )
 }
 
-fn render_task_line(task: &Task) -> String {
+fn render_task_line(task: &Task, pr_config: &PrConfig) -> String {
     let title = task.title.trim();
+    let task_ref = render_task_ref(task, pr_config);
     if title.is_empty() {
-        format!("- [{}]", task.id)
+        format!("- {task_ref}")
     } else {
-        format!("- [{}] {}", task.id, title)
+        format!("- {task_ref} {title}")
     }
 }
 
-fn render_single_task_line(task: &Task) -> String {
+fn render_single_task_line(task: &Task, pr_config: &PrConfig) -> String {
     let title = task.title.trim();
-    let url = task_url(task);
+    let task_ref = render_task_ref(task, pr_config);
     if title.is_empty() {
-        format!("[{}]({url})", task.id)
+        task_ref
     } else {
-        format!("[{}]({url}) — {title}", task.id)
+        format!("{task_ref} — {title}")
     }
 }
 
-fn task_url(task: &Task) -> String {
+fn render_task_ref(task: &Task, pr_config: &PrConfig) -> String {
+    match task_url(task, pr_config) {
+        Some(url) => format!("[{}]({url})", task.id),
+        None => task.id.clone(),
+    }
+}
+
+fn task_url(task: &Task, pr_config: &PrConfig) -> Option<String> {
     task.external_refs
         .iter()
         .find_map(|external_ref| external_ref.url.as_deref())
-        .unwrap_or(task.id.as_str())
-        .to_string()
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            pr_config
+                .task_url_template
+                .as_ref()
+                .map(|template| template.replace("{task_id}", &task.id))
+        })
 }
 
 fn default_pr_title(tasks: &[Task]) -> String {
@@ -927,6 +949,12 @@ mod tests {
         }
     }
 
+    fn test_pr_config(task_url_template: Option<&str>) -> PrConfig {
+        PrConfig {
+            task_url_template: task_url_template.map(ToOwned::to_owned),
+        }
+    }
+
     struct PrWorkspace {
         _temp: TempDir,
         repo: PathBuf,
@@ -980,6 +1008,99 @@ mod tests {
     }
 
     #[test]
+    fn task_url_rendering_covers_template_and_external_ref_priority() {
+        let plain = task_with_contract("T123", "Plain task", "done", "", &[], None);
+        assert_eq!(task_url(&plain, &test_pr_config(None)), None);
+        assert_eq!(
+            render_single_task_line(&plain, &test_pr_config(None)),
+            "T123 — Plain task"
+        );
+
+        let external = task_with_contract(
+            "T124",
+            "External task",
+            "done",
+            "",
+            &[],
+            Some("https://tracker.example/T124"),
+        );
+        assert_eq!(
+            task_url(&external, &test_pr_config(None)).as_deref(),
+            Some("https://tracker.example/T124")
+        );
+        assert_eq!(
+            render_single_task_line(&external, &test_pr_config(None)),
+            "[T124](https://tracker.example/T124) — External task"
+        );
+
+        let templated = task_with_contract("T125", "Templated task", "done", "", &[], None);
+        assert_eq!(
+            task_url(
+                &templated,
+                &test_pr_config(Some("https://orbit-cli.com/tasks/{task_id}"))
+            )
+            .as_deref(),
+            Some("https://orbit-cli.com/tasks/T125")
+        );
+        assert_eq!(
+            render_single_task_line(
+                &templated,
+                &test_pr_config(Some("https://orbit-cli.com/tasks/{task_id}"))
+            ),
+            "[T125](https://orbit-cli.com/tasks/T125) — Templated task"
+        );
+
+        let external_wins = task_with_contract(
+            "T126",
+            "External wins",
+            "done",
+            "",
+            &[],
+            Some("https://tracker.example/T126"),
+        );
+        assert_eq!(
+            task_url(
+                &external_wins,
+                &test_pr_config(Some("https://orbit-cli.com/tasks/{task_id}"))
+            )
+            .as_deref(),
+            Some("https://tracker.example/T126")
+        );
+        assert_eq!(
+            render_single_task_line(
+                &external_wins,
+                &test_pr_config(Some("https://orbit-cli.com/tasks/{task_id}"))
+            ),
+            "[T126](https://tracker.example/T126) — External wins"
+        );
+    }
+
+    #[test]
+    fn default_pr_config_renders_plain_task_id_without_markdown_link_punctuation() {
+        let body = build_batch_pr_body(
+            &[task_with_contract(
+                "T20260508-11",
+                "Fix task links",
+                "done",
+                "Default config must not create broken links.",
+                &["Task id renders as plain text.".to_string()],
+                None,
+            )],
+            &freshness(),
+            &[],
+            &test_pr_config(None),
+        );
+        let task_line = body
+            .lines()
+            .find(|line| line.starts_with("T20260508-11"))
+            .expect("plain task line");
+
+        assert_eq!(task_line, "T20260508-11 — Fix task links");
+        assert!(!task_line.contains(']'));
+        assert!(!task_line.contains('('));
+    }
+
+    #[test]
     fn multi_task_pr_body_preserves_legacy_execution_summary_layout() {
         let first_summary = "## Status\nsuccess\n\n## Summary of Changes\n- Routed automation updates through system.";
         let second_summary =
@@ -991,10 +1112,11 @@ mod tests {
             ],
             &freshness(),
             &["crates/orbit-core/src/runtime/engine/task_host.rs"],
+            &test_pr_config(None),
         );
 
-        assert!(body.contains("- [T20260427-24] System attribution fix"));
-        assert!(body.contains("- [T20260427-25] Review handoff"));
+        assert!(body.contains("- T20260427-24 System attribution fix"));
+        assert!(body.contains("- T20260427-25 Review handoff"));
         assert_eq!(
             body.matches("<details><summary>Execution Summary</summary>")
                 .count(),
@@ -1015,12 +1137,13 @@ mod tests {
             ],
             &freshness(),
             &[],
+            &test_pr_config(None),
         );
 
-        assert!(body.contains("- [T20260427-32] Include execution summaries"));
-        assert!(body.contains("- [T20260427-33] Whitespace summary"));
-        assert!(body.contains("- [T20260427-34] Placeholder summary"));
-        assert!(body.contains("- [T20260427-35] Ellipsis summary"));
+        assert!(body.contains("- T20260427-32 Include execution summaries"));
+        assert!(body.contains("- T20260427-33 Whitespace summary"));
+        assert!(body.contains("- T20260427-34 Placeholder summary"));
+        assert!(body.contains("- T20260427-35 Ellipsis summary"));
         assert!(!body.contains("<details><summary>Execution Summary</summary>"));
     }
 
@@ -1040,6 +1163,7 @@ mod tests {
             )],
             &freshness(),
             &["crates/orbit-engine/src/executor/automation/pr.rs"],
+            &test_pr_config(None),
         );
 
         assert_eq!(
@@ -1061,6 +1185,7 @@ mod tests {
             )],
             &freshness(),
             &["crates/orbit-engine/src/executor/automation/pr.rs"],
+            &test_pr_config(None),
         );
 
         let headings = body
@@ -1107,6 +1232,7 @@ mod tests {
             )],
             &freshness(),
             &[],
+            &test_pr_config(None),
         );
 
         assert!(body.contains("## Task"));
@@ -1170,9 +1296,9 @@ mod tests {
         .expect("pr_open should create PR");
         let body = host.pr_create_body();
 
-        assert!(body.contains("- [T20260430-31A] First completed task"));
+        assert!(body.contains("- T20260430-31A First completed task"));
         assert!(body.contains(first_summary));
-        assert!(body.contains("- [T20260430-31B] Second completed task"));
+        assert!(body.contains("- T20260430-31B Second completed task"));
         assert!(body.contains(second_summary));
         assert_eq!(
             body.matches("<details><summary>Execution Summary</summary>")
