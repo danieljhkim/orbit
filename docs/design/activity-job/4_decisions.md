@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-07 (T20260506-18 ADR rollup compaction)
+**Last updated:** 2026-05-08 (T20260508-3)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -387,6 +387,14 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
+## ADR-042 — One-task PR bodies start with the task contract
+
+**Status:** Accepted · 2026-05 · [T20260508-3]
+
+**Context.** Task-shipping PRs now carry one task, but the default generated body still reflected the older batch shape. Reviewers had to leave the PR to read the task description and acceptance criteria, while GitHub already rendered the changed-file list natively.
+
+**Decision.** Render one-task PR bodies as `## Task`, optional collapsed `## Execution Summary`, `## Validation`, and `## Branch Freshness`. The task section includes the task link, verbatim description, and plain-bullet acceptance criteria. Multi-task callers keep the legacy body while those paths remain supported.
+
 ---
 
 ## Task References
@@ -441,5 +449,6 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - **[T20260506-16]** — Replace raw `orbit init` agent prompts with a recommendation-first setup wizard.
 - **[T20260506-17]** — Make `orbit init` recommend Codex for reviewer and implementer when available.
 - **[T20260506-18]** — Compact activity-job ADRs via rollups.
+- **[T20260508-3]** — Revise generated task PR bodies around the one-task-per-PR workflow.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
