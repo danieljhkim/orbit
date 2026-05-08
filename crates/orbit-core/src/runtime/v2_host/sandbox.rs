@@ -185,9 +185,9 @@ fn absolutize_rule(workspace_root: &str, rule: &str) -> String {
 mod tests {
     use orbit_engine::activity_job::V2RuntimeHost;
 
-    use crate::runtime::v2_host::test_support::{
-        runtime_with_workspace_layout, seed_executor, seeded_runtime_with_executor,
-    };
+    use crate::runtime::v2_host::test_support::seeded_runtime_with_executor;
+    #[cfg(target_os = "macos")]
+    use crate::runtime::v2_host::test_support::{runtime_with_workspace_layout, seed_executor};
 
     #[test]
     fn resolve_executor_sandbox_returns_none_when_executor_has_no_sandbox() {
