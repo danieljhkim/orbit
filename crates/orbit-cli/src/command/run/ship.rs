@@ -49,9 +49,10 @@ pub struct ShipCommand {
     /// Pipeline mode for the selected task bundle.
     #[arg(short = 'm', long, value_enum, default_value = "pr")]
     pub mode: ShipMode,
-    /// Base branch for the selected pipeline.
-    #[arg(short = 'b', long, default_value = "agent-main")]
-    pub base: String,
+    /// Base branch for the selected pipeline. Defaults to
+    /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
+    #[arg(short = 'b', long)]
+    pub base: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -59,7 +60,7 @@ pub struct ShipCommand {
 
 impl Execute for ShipCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let plan = build_ship_run_plan(&self)?;
+        let plan = build_ship_run_plan(&self, runtime.workflow_base_branch())?;
         let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, 1)?;
         print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
@@ -75,9 +76,10 @@ pub struct ShipAutoCommand {
     /// Pipeline mode for auto-selected task bundles.
     #[arg(short = 'm', long, value_enum, default_value = "pr")]
     pub mode: ShipMode,
-    /// Base branch for auto-selected task bundles.
-    #[arg(short = 'b', long, default_value = "agent-main")]
-    pub base: String,
+    /// Base branch for auto-selected task bundles. Defaults to
+    /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
+    #[arg(short = 'b', long)]
+    pub base: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -85,7 +87,7 @@ pub struct ShipAutoCommand {
 
 impl Execute for ShipAutoCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let plan = build_ship_auto_run_plan(&self)?;
+        let plan = build_ship_auto_run_plan(&self, runtime.workflow_base_branch())?;
         let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, 1)?;
         print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
@@ -97,23 +99,29 @@ pub(crate) struct WorkflowRunPlan {
     pub input: Value,
 }
 
-pub(crate) fn build_ship_run_plan(args: &ShipCommand) -> Result<WorkflowRunPlan, OrbitError> {
+pub(crate) fn build_ship_run_plan(
+    args: &ShipCommand,
+    config_base_branch: &str,
+) -> Result<WorkflowRunPlan, OrbitError> {
     validate_explicit_task_selection(&args.task_ids)?;
     let workflow_alias = args.mode.explicit_workflow_alias();
     ensure_workflow_exists(workflow_alias)?;
+    let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias,
-        input: ship_input(args.mode, &args.base, Some(&args.task_ids)),
+        input: ship_input(args.mode, base, Some(&args.task_ids)),
     })
 }
 
 pub(crate) fn build_ship_auto_run_plan(
     args: &ShipAutoCommand,
+    config_base_branch: &str,
 ) -> Result<WorkflowRunPlan, OrbitError> {
     ensure_workflow_exists(SHIP_AUTO_WORKFLOW)?;
+    let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(WorkflowRunPlan {
         workflow_alias: SHIP_AUTO_WORKFLOW,
-        input: ship_input(args.mode, &args.base, None),
+        input: ship_input(args.mode, base, None),
     })
 }
 
@@ -181,30 +189,29 @@ mod tests {
 
     use super::*;
 
-    fn explicit_args(task_ids: &[&str], mode: ShipMode, base: &str) -> ShipCommand {
+    fn explicit_args(task_ids: &[&str], mode: ShipMode, base: Option<&str>) -> ShipCommand {
         ShipCommand {
             task_ids: task_ids.iter().map(|value| value.to_string()).collect(),
             mode,
-            base: base.to_string(),
+            base: base.map(str::to_string),
             json: false,
         }
     }
 
-    fn auto_args(mode: ShipMode, base: &str) -> ShipAutoCommand {
+    fn auto_args(mode: ShipMode, base: Option<&str>) -> ShipAutoCommand {
         ShipAutoCommand {
             mode,
-            base: base.to_string(),
+            base: base.map(str::to_string),
             json: false,
         }
     }
 
     #[test]
-    fn explicit_ship_defaults_to_pr_job_input_shape() {
-        let plan = build_ship_run_plan(&explicit_args(
-            &["T20260425-2010", "T20260425-2011"],
-            ShipMode::Pr,
+    fn explicit_ship_falls_back_to_config_base_when_flag_absent() {
+        let plan = build_ship_run_plan(
+            &explicit_args(&["T20260425-2010", "T20260425-2011"], ShipMode::Pr, None),
             "agent-main",
-        ))
+        )
         .expect("build plan");
 
         assert_eq!(plan.workflow_alias, SHIP_PR_WORKFLOW);
@@ -219,10 +226,12 @@ mod tests {
     }
 
     #[test]
-    fn explicit_ship_local_mode_uses_local_job_input_shape() {
-        let plan =
-            build_ship_run_plan(&explicit_args(&["T20260425-2010"], ShipMode::Local, "main"))
-                .expect("build plan");
+    fn explicit_ship_flag_overrides_config_base() {
+        let plan = build_ship_run_plan(
+            &explicit_args(&["T20260425-2010"], ShipMode::Local, Some("main")),
+            "agent-main",
+        )
+        .expect("build plan");
 
         assert_eq!(plan.workflow_alias, SHIP_LOCAL_WORKFLOW);
         assert_eq!(
@@ -237,8 +246,8 @@ mod tests {
 
     #[test]
     fn ship_auto_uses_auto_job_without_explicit_task_ids() {
-        let plan =
-            build_ship_auto_run_plan(&auto_args(ShipMode::Pr, "agent-main")).expect("build plan");
+        let plan = build_ship_auto_run_plan(&auto_args(ShipMode::Pr, None), "agent-main")
+            .expect("build plan");
 
         assert_eq!(plan.workflow_alias, SHIP_AUTO_WORKFLOW);
         assert_eq!(
@@ -252,14 +261,14 @@ mod tests {
 
     #[test]
     fn ship_rejects_removed_history_forms() {
-        let err = build_ship_run_plan(&explicit_args(&["list"], ShipMode::Pr, "agent-main"))
+        let err = build_ship_run_plan(&explicit_args(&["list"], ShipMode::Pr, None), "agent-main")
             .expect_err("legacy history form should fail");
         assert!(
             err.to_string().contains("orbit run history"),
             "unexpected error: {err}"
         );
 
-        let err = build_ship_run_plan(&explicit_args(&["show"], ShipMode::Pr, "agent-main"))
+        let err = build_ship_run_plan(&explicit_args(&["show"], ShipMode::Pr, None), "agent-main")
             .expect_err("legacy history form should fail");
         assert!(
             err.to_string().contains("orbit run history"),
@@ -269,7 +278,7 @@ mod tests {
 
     #[test]
     fn ship_rejects_removed_local_subcommand_form() {
-        let err = build_ship_run_plan(&explicit_args(&["local"], ShipMode::Pr, "agent-main"))
+        let err = build_ship_run_plan(&explicit_args(&["local"], ShipMode::Pr, None), "agent-main")
             .expect_err("legacy local form should fail");
         assert!(
             err.to_string().contains("--mode local"),
@@ -279,7 +288,7 @@ mod tests {
 
     #[test]
     fn ship_requires_explicit_task_ids() {
-        let err = build_ship_run_plan(&explicit_args(&[], ShipMode::Pr, "agent-main"))
+        let err = build_ship_run_plan(&explicit_args(&[], ShipMode::Pr, None), "agent-main")
             .expect_err("missing explicit task IDs should fail");
         assert!(
             err.to_string().contains("ship-auto"),
@@ -289,11 +298,10 @@ mod tests {
 
     #[test]
     fn ship_rejects_duplicate_task_ids() {
-        let err = build_ship_run_plan(&explicit_args(
-            &["T20260425-2010", "T20260425-2010"],
-            ShipMode::Pr,
+        let err = build_ship_run_plan(
+            &explicit_args(&["T20260425-2010", "T20260425-2010"], ShipMode::Pr, None),
             "agent-main",
-        ))
+        )
         .expect_err("duplicate task IDs should fail");
         assert!(
             err.to_string().contains("duplicate task id"),

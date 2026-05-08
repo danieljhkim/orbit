@@ -14,7 +14,7 @@ spec:
   max_active_runs: 3
   default_input:
     task_id: null
-    base_branch: agent-main
+    base_branch: main
 
   steps:
     - id: run_planning_duel

@@ -39,9 +39,9 @@ spec:
     Procedure:
 
     1. Treat `input.workspace_path` as the active worktree. Diff it against
-       `input.base_branch` (default `agent-main` when absent) using
-       `proc.spawn` git, e.g. `git diff <base>...HEAD` and
-       `git diff` for unstaged changes.
+       `input.base_branch` (the workflow's configured base, e.g. `main` or
+       `agent-main`) using `proc.spawn` git, e.g. `git diff <base>...HEAD`
+       and `git diff` for unstaged changes.
     2. For each task id in `input.task_ids`, call `orbit.task.show` to
        recover its description, acceptance criteria, plan, and context
        files. Read context selectors via `orbit.graph.pack`, falling back

@@ -231,6 +231,13 @@ impl OrbitRuntime {
         self.context.v2_backend()
     }
 
+    /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
+    /// from `[workflow] base_branch` in the active `config.toml`; defaults
+    /// to `"main"` when no key is present.
+    pub fn workflow_base_branch(&self) -> &str {
+        self.context.workflow_base_branch()
+    }
+
     /// Build the activity catalog for `target: activity:<name>` resolution
     /// (Phase 4). Loads from the layered Orbit data dirs using §9.1
     /// `MergeByKey` semantics — global provides defaults, workspace overrides.

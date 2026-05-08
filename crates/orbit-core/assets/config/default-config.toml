@@ -26,6 +26,12 @@ enabled = true
 [graph]
 editing = false
 
+[workflow]
+# Default base branch for `orbit run ship`, `ship-auto`, and `duel-plan`.
+# Override per-invocation with `--base <branch>`. Repos that keep an
+# `agent-main` buffer branch in front of `main` set this to `"agent-main"`.
+base_branch = "main"
+
 # [agent.<role>] — per-role agent settings written by `orbit init`.
 #
 # Roles: reviewer, implementer, planner. Each table accepts:

@@ -147,7 +147,7 @@ mod tests {
             RunSubcommand::Ship(args) => {
                 assert_eq!(args.task_ids, vec!["T1", "T2"]);
                 assert_eq!(args.mode, ship::ShipMode::Pr);
-                assert_eq!(args.base, "agent-main");
+                assert_eq!(args.base, None);
             }
             _ => panic!("expected ship"),
         }
@@ -160,7 +160,7 @@ mod tests {
             RunSubcommand::Ship(args) => {
                 assert_eq!(args.task_ids, vec!["T1"]);
                 assert_eq!(args.mode, ship::ShipMode::Local);
-                assert_eq!(args.base, "main");
+                assert_eq!(args.base.as_deref(), Some("main"));
             }
             _ => panic!("expected ship"),
         }
@@ -172,7 +172,7 @@ mod tests {
         match command.command {
             RunSubcommand::ShipAuto(args) => {
                 assert_eq!(args.mode, ship::ShipMode::Pr);
-                assert_eq!(args.base, "main");
+                assert_eq!(args.base.as_deref(), Some("main"));
             }
             _ => panic!("expected ship-auto"),
         }
@@ -184,7 +184,7 @@ mod tests {
         match command.command {
             RunSubcommand::DuelPlan(args) => {
                 assert_eq!(args.task_id, "T1");
-                assert_eq!(args.base, "main");
+                assert_eq!(args.base.as_deref(), Some("main"));
             }
             _ => panic!("expected duel-plan"),
         }

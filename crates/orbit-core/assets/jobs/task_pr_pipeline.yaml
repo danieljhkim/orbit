@@ -23,7 +23,7 @@ spec:
   max_active_runs: 10
   default_input:
     task_ids: []
-    base_branch: agent-main
+    base_branch: main
     base_sync: remote
     review: false
     title: null

@@ -11,7 +11,7 @@ use crate::paths;
 use super::persistence::PersistenceConfig;
 use super::raw::{
     RawAgentRoleConfig, RawCodexExecutionConfig, RawExecutionEnvConfig, RawRuntimeConfig,
-    RawTaskSection,
+    RawTaskSection, RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -21,6 +21,7 @@ const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
 // without an explicit Orbit config still record scoreboard metrics.
 const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
+const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -34,6 +35,10 @@ pub(crate) struct RuntimeConfig {
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `http` default.
     pub(crate) v2_backend: Option<String>,
+    /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
+    /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
+    /// when no key is set.
+    pub(crate) workflow_base_branch: String,
     /// `[agent.<role>]` role-keyed overrides written by `orbit init` per
     /// ADR-027 and consumed at v2 dispatch time per ADR-029. Empty when no
     /// `[agent.*]` block is present.
@@ -56,6 +61,7 @@ impl RuntimeConfig {
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
+            workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             agent_roles: BTreeMap::new(),
         }
     }
@@ -130,6 +136,8 @@ impl RuntimeConfig {
             .as_ref()
             .and_then(|section| section.backend.clone());
 
+        let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
+
         if parsed
             .knowledge
             .as_ref()
@@ -153,6 +161,7 @@ impl RuntimeConfig {
             scoring_enabled,
             graph_editing,
             v2_backend,
+            workflow_base_branch,
             agent_roles,
         })
     }
@@ -161,6 +170,26 @@ impl RuntimeConfig {
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.v2_backend.as_deref()
     }
+
+    pub(crate) fn workflow_base_branch(&self) -> &str {
+        &self.workflow_base_branch
+    }
+}
+
+fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
+    let Some(raw) = raw else {
+        return Ok(DEFAULT_WORKFLOW_BASE_BRANCH.to_string());
+    };
+    let Some(value) = raw.base_branch.as_deref() else {
+        return Ok(DEFAULT_WORKFLOW_BASE_BRANCH.to_string());
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "workflow.base_branch must not be empty".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn warn_deprecated_task_id_pattern(config_path: &Path) {

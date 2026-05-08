@@ -19,9 +19,10 @@ const DUEL_PLAN_WORKFLOW: &str = "duel-plan";
 pub struct DuelPlanCommand {
     /// Task ID for the planning duel.
     pub task_id: String,
-    /// Base branch for the planning duel pipeline.
-    #[arg(short = 'b', long, default_value = "agent-main")]
-    pub base: String,
+    /// Base branch for the planning duel pipeline. Defaults to
+    /// `[workflow] base_branch` from `config.toml` (or `main` if unset).
+    #[arg(short = 'b', long)]
+    pub base: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -29,7 +30,7 @@ pub struct DuelPlanCommand {
 
 impl Execute for DuelPlanCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let plan = build_duel_plan_run_plan(&self)?;
+        let plan = build_duel_plan_run_plan(&self, runtime.workflow_base_branch())?;
         let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, 1)?;
         print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
@@ -43,16 +44,18 @@ pub(crate) struct DuelPlanRunPlan {
 
 pub(crate) fn build_duel_plan_run_plan(
     args: &DuelPlanCommand,
+    config_base_branch: &str,
 ) -> Result<DuelPlanRunPlan, OrbitError> {
     find_workflow(DUEL_PLAN_WORKFLOW).ok_or_else(|| {
         OrbitError::InvalidInput(format!("unknown workflow '{DUEL_PLAN_WORKFLOW}'"))
     })?;
+    let base = args.base.as_deref().unwrap_or(config_base_branch);
     Ok(DuelPlanRunPlan {
         workflow_alias: DUEL_PLAN_WORKFLOW,
         input: json!({
             "task_id": args.task_id.clone(),
             "task_ids": [args.task_id.clone()],
-            "base_branch": args.base.clone(),
+            "base_branch": base,
         }),
     })
 }
@@ -64,12 +67,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn duel_plan_builds_persisted_workflow_input() {
-        let plan = build_duel_plan_run_plan(&DuelPlanCommand {
-            task_id: "T20260425-2010".to_string(),
-            base: "main".to_string(),
-            json: false,
-        })
+    fn duel_plan_uses_explicit_base_when_flag_set() {
+        let plan = build_duel_plan_run_plan(
+            &DuelPlanCommand {
+                task_id: "T20260425-2010".to_string(),
+                base: Some("main".to_string()),
+                json: false,
+            },
+            "agent-main",
+        )
         .expect("build duel-plan run plan");
 
         assert_eq!(plan.workflow_alias, DUEL_PLAN_WORKFLOW);
@@ -79,6 +85,28 @@ mod tests {
                 "task_id": "T20260425-2010",
                 "task_ids": ["T20260425-2010"],
                 "base_branch": "main",
+            })
+        );
+    }
+
+    #[test]
+    fn duel_plan_falls_back_to_config_base_when_flag_absent() {
+        let plan = build_duel_plan_run_plan(
+            &DuelPlanCommand {
+                task_id: "T20260425-2010".to_string(),
+                base: None,
+                json: false,
+            },
+            "agent-main",
+        )
+        .expect("build duel-plan run plan");
+
+        assert_eq!(
+            plan.input,
+            json!({
+                "task_id": "T20260425-2010",
+                "task_ids": ["T20260425-2010"],
+                "base_branch": "agent-main",
             })
         );
     }

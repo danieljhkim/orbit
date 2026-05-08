@@ -25,7 +25,7 @@ spec:
   default_input:
     task_ids: []
     auto_push: false
-    base_branch: agent-main
+    base_branch: main
     base_sync: remote
     review: false
   

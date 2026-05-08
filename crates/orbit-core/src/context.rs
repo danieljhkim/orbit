@@ -161,6 +161,9 @@ pub(crate) struct OrbitRuntimeSettings {
     graph_editing: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
+    /// Default base branch for ship/ship-auto/duel-plan workflows
+    /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
+    workflow_base_branch: String,
     /// `[agent.<role>]` overrides written by `orbit init` (ADR-027) and
     /// consumed at v2 dispatch time (ADR-029).
     agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
@@ -176,6 +179,7 @@ impl OrbitRuntimeSettings {
         scoring_enabled: bool,
         graph_editing: bool,
         v2_backend: Option<String>,
+        workflow_base_branch: String,
         agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
     ) -> Self {
         Self {
@@ -186,12 +190,17 @@ impl OrbitRuntimeSettings {
             scoring_enabled,
             graph_editing,
             v2_backend,
+            workflow_base_branch,
             agent_roles,
         }
     }
 
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.v2_backend.as_deref()
+    }
+
+    pub(crate) fn workflow_base_branch(&self) -> &str {
+        &self.workflow_base_branch
     }
 
     pub(crate) fn agent_role(&self, role: &str) -> Option<&crate::config::RawAgentRoleConfig> {
@@ -289,6 +298,13 @@ impl OrbitContext {
     /// resolution precedence step 3). `None` means "not configured".
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.runtime.v2_backend()
+    }
+
+    /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
+    /// from `[workflow] base_branch` in `config.toml`; falls back to
+    /// `"main"` when the key is absent.
+    pub(crate) fn workflow_base_branch(&self) -> &str {
+        self.runtime.workflow_base_branch()
     }
 
     /// `[agent.<role>]` lookup written by `orbit init` and consumed at v2

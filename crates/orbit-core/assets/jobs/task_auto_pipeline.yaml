@@ -35,7 +35,7 @@ spec:
   default_input:
     task_ids: []
     mode: pr
-    base_branch: agent-main
+    base_branch: main
     base_sync: remote
     max_bundles: 10
     concurrency: 3
