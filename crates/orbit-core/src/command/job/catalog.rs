@@ -459,6 +459,18 @@ spec:
     }
 
     #[test]
+    fn default_job_target_refs_resolve_against_default_activities() {
+        let catalog = default_activity_catalog();
+
+        for (job_name, yaml) in DEFAULT_JOB_FILES {
+            let mut asset = load_job_asset(yaml)
+                .unwrap_or_else(|err| panic!("default job {job_name} should parse: {err}"));
+            resolve_job_target_refs(&mut asset.spec, &catalog)
+                .unwrap_or_else(|err| panic!("default job {job_name} refs resolve: {err}"));
+        }
+    }
+
+    #[test]
     fn local_task_pipeline_commits_before_merge() {
         let yaml = DEFAULT_JOB_FILES
             .iter()
@@ -572,7 +584,7 @@ spec:
     }
 
     #[test]
-    fn default_jobs_do_not_template_agent_loop_outputs() {
+    fn default_jobs_template_only_declared_agent_loop_handoffs() {
         let agent_activity_names = DEFAULT_ACTIVITY_FILES
             .iter()
             .filter_map(|(name, yaml)| {
@@ -580,6 +592,11 @@ spec:
                 matches!(asset.spec.spec, ActivityV2Spec::AgentLoop(_)).then_some(*name)
             })
             .collect::<BTreeSet<_>>();
+        let allowed_handoffs = BTreeSet::from([(
+            "task_epic_pipeline",
+            "orchestrator_iter",
+            "steps.orchestrator_iter.output.dispatched_run_ids",
+        )]);
 
         for (job_name, yaml) in DEFAULT_JOB_FILES {
             let asset = load_job_asset(yaml)
@@ -601,8 +618,16 @@ spec:
             for agent_step_id in agent_step_ids {
                 let forbidden = format!("steps.{agent_step_id}.output");
                 for template in &template_strings {
+                    let allowed =
+                        allowed_handoffs
+                            .iter()
+                            .any(|(allowed_job, allowed_step, allowed_path)| {
+                                *allowed_job == *job_name
+                                    && *allowed_step == agent_step_id
+                                    && template.contains(allowed_path)
+                            });
                     assert!(
-                        !template.contains(&forbidden),
+                        !template.contains(&forbidden) || allowed,
                         "default job {job_name} templates from agent_loop output: {template}"
                     );
                 }

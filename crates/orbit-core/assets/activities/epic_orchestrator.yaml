@@ -7,10 +7,10 @@ spec:
   description: >
     Judgment-grade orchestrator for epic-sized tasks. One invocation = one
     cycle: read state, decide READY subtasks, decide SEQUENTIAL vs PARALLEL,
-    dispatch `task_gate_pipeline` per bundle, wait for results, and leave a
-    concise audit note. The enclosing workflow refreshes task state
-    deterministically after this activity and uses that snapshot to decide loop
-    exit; this activity's final response is not a workflow data handoff.
+    dispatch `task_gate_pipeline` per bundle, emit the dispatched child run
+    IDs, and leave a concise audit note. The enclosing workflow waits on those
+    child runs and refreshes task state deterministically after this activity,
+    then uses that snapshot to decide loop exit.
     Conversation history persists across iterations when the enclosing workflow
     step declares `session: <name>`, so the orchestrator can reference its own
     prior reasoning.
@@ -29,10 +29,16 @@ spec:
         enum: [ pr, local ]
   output_schema_json:
     type: object
+    required: [cycle_notes, dispatched_run_ids]
     properties:
       cycle_notes:
         type: string
         description: One- or two-sentence summary of this cycle's dispatches.
+      dispatched_run_ids:
+        type: array
+        description: Child `task_gate_pipeline` run IDs dispatched in this cycle.
+        items:
+          type: string
   instruction: |
     You are the epic orchestrator. One activity invocation = one cycle.
 
@@ -73,28 +79,28 @@ spec:
        each subtask `state: "in_flight", current_gate_run_id: <id>`
        in your audit notes for this cycle.
 
-    5. **Wait.** Call `orbit.pipeline.wait` with the dispatched
-       `run_ids`. On terminal responses:
-       - `status: succeeded` → mark subtask `state: "done"` or
-         `state: "shipped"` in audit notes; the deterministic refresh
-         treats review as the shipped stop state.
-       - `status: failed` or `cancelled` or `timeout` → increment
-         note the failed run IDs and leave retry/blocking decisions for
-         the next cycle's deterministic task snapshot.
+    5. **Emit structured output and return.** Do not wait for child
+       runs. The deterministic workflow step after you performs the join.
+       Your final assistant turn MUST be exactly one JSON object and
+       nothing else:
 
-    6. **Emit an audit note.** Your final assistant turn is for audit only.
-       It may be plain text or JSON, but downstream workflow control must
-       not depend on it. The job refreshes task state with deterministic
-       `load_epic` after this step and uses that output for loop exit and
-       summary.
+       {
+         "cycle_notes": "one- or two-sentence summary of this cycle",
+         "dispatched_run_ids": ["<run_id>"]
+       }
 
-    # Read-only by construction
+       Include every run ID returned by `orbit.pipeline.invoke`. Use an
+       empty array when no bundle was dispatched.
+
+    # Narrow mutation surface
 
     You have `orbit.task.list`, `orbit.task.search`, and `orbit.task.show` for reading
-    descriptions and checking status changes, plus the pipeline tools.
+    descriptions and checking status changes, plus `orbit.pipeline.invoke`
+    for dispatch. You do NOT have `orbit.pipeline.wait`; the workflow does
+    the join in a deterministic activity.
     You do NOT have `orbit.task.update`, `orbit.task.approve`,
-    or any other mutating tool — requests for those will be rejected by
-    the HTTP backend allowlist enforcement (§6). Do not attempt them.
+    or any other task-mutating tool — requests for those will be rejected
+    by the HTTP backend allowlist enforcement (§6). Do not attempt them.
 
     # Resumability
 
@@ -102,13 +108,14 @@ spec:
     remains in conversation history. Treat the `subtasks` input as the
     current deterministic task snapshot for this cycle.
   tools:
-    - orbit.task.*
+    - orbit.task.list
+    - orbit.task.search
+    - orbit.task.show
     - orbit.pipeline.invoke
-    - orbit.pipeline.wait
     - orbit.graph.*
   on_denial: terminate
   max_iterations: 8
   role: planner
   backend: http
   provider: claude
-  wall_clock_timeout_seconds: 1800
+  wall_clock_timeout_seconds: 600

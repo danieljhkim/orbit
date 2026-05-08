@@ -440,16 +440,25 @@ fn run_agent_loop_via_driver(
         fs_profile,
     )?;
     let trace = loop_outcome_trace(&outcome, started.elapsed().as_millis() as u64);
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "final_message".to_string(),
+        Value::String(outcome.final_message.clone()),
+    );
+    metadata.insert(
+        "terminate_reason".to_string(),
+        Value::String(format!("{:?}", outcome.terminate_reason)),
+    );
+    metadata.insert(
+        "usage".to_string(),
+        serde_json::json!({
+            "input_tokens": outcome.usage.input_tokens,
+            "output_tokens": outcome.usage.output_tokens,
+        }),
+    );
     Ok(DispatchOutcome {
         success: true,
-        output: serde_json::json!({
-            "final_message": outcome.final_message,
-            "terminate_reason": format!("{:?}", outcome.terminate_reason),
-            "usage": {
-                "input_tokens": outcome.usage.input_tokens,
-                "output_tokens": outcome.usage.output_tokens,
-            },
-        }),
+        output: agent_loop_output_from_final_message(&outcome.final_message, metadata),
         message: None,
         invocation: Some(DispatchInvocationTrace {
             provider: spec.provider.as_str().to_string(),
@@ -488,6 +497,32 @@ pub(crate) fn loop_outcome_trace(
         },
         tool_calls,
         duration_ms,
+    }
+}
+
+pub(crate) fn agent_loop_output_from_final_message(
+    final_message: &str,
+    metadata: serde_json::Map<String, Value>,
+) -> Value {
+    let mut output = parse_structured_final_message(final_message).unwrap_or_default();
+    for (key, value) in metadata {
+        output.entry(key).or_insert(value);
+    }
+    Value::Object(output)
+}
+
+fn parse_structured_final_message(final_message: &str) -> Option<serde_json::Map<String, Value>> {
+    let parsed: Value = serde_json::from_str(final_message.trim()).ok()?;
+    match parsed {
+        Value::Object(map) => {
+            if (map.contains_key("schemaVersion") || map.contains_key("status"))
+                && let Some(Value::Object(result)) = map.get("result")
+            {
+                return Some(result.clone());
+            }
+            Some(map)
+        }
+        _ => None,
     }
 }
 
@@ -564,4 +599,39 @@ fn run_shell(spec: &ShellSpec) -> Result<DispatchOutcome, DispatchError> {
         message: (!success).then(|| format!("exit {exit_code} not in {expected:?}")),
         invocation: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn agent_loop_output_exposes_structured_final_message_fields() {
+        let mut metadata = serde_json::Map::new();
+        metadata.insert(
+            "final_message".to_string(),
+            Value::String("raw".to_string()),
+        );
+
+        let output = agent_loop_output_from_final_message(
+            r#"{"cycle_notes":"dispatched one","dispatched_run_ids":["jrun-1"]}"#,
+            metadata,
+        );
+
+        assert_eq!(output["cycle_notes"], json!("dispatched one"));
+        assert_eq!(output["dispatched_run_ids"], json!(["jrun-1"]));
+        assert_eq!(output["final_message"], json!("raw"));
+    }
+
+    #[test]
+    fn agent_loop_output_unwraps_response_envelope_result() {
+        let output = agent_loop_output_from_final_message(
+            r#"{"schemaVersion":1,"status":"success","result":{"dispatched_run_ids":[]}}"#,
+            serde_json::Map::new(),
+        );
+
+        assert_eq!(output["dispatched_run_ids"], json!([]));
+        assert!(output.get("schemaVersion").is_none());
+    }
 }

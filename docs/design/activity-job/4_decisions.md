@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-08 (T20260427-36, T20260427-38, T20260508-3)
+**Last updated:** 2026-05-08 (T20260427-36, T20260427-38, T20260427-40, T20260508-3)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -410,6 +410,19 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - Operators can still inspect raw `status: "review"` in the final snapshot and task records before approving lifecycle completion.
 - Cost: `summarize_epic`'s `done` counter now includes review-shipped subtasks for epic completion, so readers must distinguish pipeline completion from task approval.
 
+## ADR-044 — Epic orchestrator does not block on child runs
+
+**Status:** Accepted · 2026-05 · [T20260427-40]
+
+**Context.** The `epic_orchestrator` activity exists to make one judgment cycle: read the deterministic epic snapshot, choose ready bundles, and dispatch child `task_gate_pipeline` runs. Its previous instruction also made the HTTP agent call `orbit.pipeline.wait`, but a normal gate-and-ship envelope can exceed the orchestrator's wall-clock by hours: gate admission can wait, child dispatch can wait, and implementer activities have their own long timeout.
+
+**Decision.** Keep the orchestrator fire-and-forget. It may call `orbit.pipeline.invoke`, then must return structured `dispatched_run_ids`. `task_epic_pipeline` performs the blocking join through deterministic `pipeline_wait`, then runs `refresh_epic` so loop exit still keys off durable task state. The per-cycle wait budget should satisfy `iteration_wait_seconds >= task_gate_pipeline.max_wait_seconds + task_gate_pipeline.dispatch_timeout_seconds` for full-envelope joins; seeded defaults currently keep `iteration_wait_seconds` at the pipeline wait cap of 7200 seconds, below the theoretical 10800-second gate envelope, so a timeout can surface a still-running child.
+
+**Consequences.**
+- A premium HTTP orchestrator session is bounded to a dispatch decision cycle instead of babysitting child workflow polling.
+- Audit lineage moves from agent tool calls to deterministic `ActivityStarted` / `ActivityFinished` envelopes for the join step; the child relationship remains reconstructable from `dispatched_run_ids` and run-step state.
+- If `pipeline_wait` times out while a child is still running, the next deterministic `load_epic` snapshot still shows open work. Redundant redispatch is bounded by the gate pipeline's task-lock reservation: overlapping context files are denied while the child reservation is active, and TTL remains the abandoned-run fallback.
+
 ---
 
 ## Task References
@@ -445,6 +458,7 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - **[T20260427-33]** — Remove the audit-only `dispatch_agent` step from `task_auto_pipeline`.
 - **[T20260427-36]** — Align task-gate reservation TTL with the child dispatch wait budget.
 - **[T20260427-38]** — Treat review as a shipped stop state for epic automation.
+- **[T20260427-40]** — Move epic child-run waiting out of the orchestrator agent and into a deterministic workflow step.
 - **[T20260427-45]** — Use freshly fetched remote base refs for default task-shipping worktrees.
 - **[T20260427-48]** — Thread provider config into the v2 CLI backend and keep Codex dynamic flags exec-compatible.
 - **[T20260428-8]** — Add workflow-specific task admission for task-starting workflows.

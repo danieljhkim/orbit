@@ -905,10 +905,17 @@ fn run_agent_loop_outcome(
         input,
         &trace,
     )?;
-    let out_json = serde_json::json!({
-        "final_message": outcome.final_message,
-        "terminate_reason": format!("{:?}", outcome.terminate_reason),
-    });
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "final_message".to_string(),
+        Value::String(outcome.final_message.clone()),
+    );
+    metadata.insert(
+        "terminate_reason".to_string(),
+        Value::String(format!("{:?}", outcome.terminate_reason)),
+    );
+    let out_json =
+        super::dispatcher::agent_loop_output_from_final_message(&outcome.final_message, metadata);
     record_pipeline(ctx, &step.id, out_json.clone());
     Ok(StepOutcome {
         success: true,

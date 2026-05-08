@@ -49,6 +49,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/invoke_and_wait.yaml"),
     ),
     (
+        "pipeline_wait",
+        include_str!("../../assets/activities/pipeline_wait.yaml"),
+    ),
+    (
         "list_backlog_tasks",
         include_str!("../../assets/activities/list_backlog_tasks.yaml"),
     ),
@@ -213,6 +217,24 @@ mod tests {
         match asset.spec.spec {
             ActivityV2Spec::Deterministic(spec) => {
                 assert_eq!(spec.action, "release_locks");
+            }
+            other => panic!("expected deterministic activity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seeded_activities_include_pipeline_wait() {
+        let root = tempdir().expect("create tempdir");
+        let activities_dir = root.path().join("resources/activities");
+        seed_default_activities(&activities_dir, true).expect("seed default activities");
+
+        let yaml = std::fs::read_to_string(activities_dir.join("pipeline_wait.yaml"))
+            .expect("read pipeline wait activity");
+        let asset = load_activity_asset(&yaml).expect("parse pipeline wait activity");
+        assert_eq!(asset.name, "pipeline_wait");
+        match asset.spec.spec {
+            ActivityV2Spec::Deterministic(spec) => {
+                assert_eq!(spec.action, "pipeline_wait");
             }
             other => panic!("expected deterministic activity, got {other:?}"),
         }
