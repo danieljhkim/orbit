@@ -25,9 +25,10 @@ use axum::routing::{get, post};
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 use futures_core::Stream;
 use orbit_common::utility::blob_store::BlobStore;
+use orbit_common::utility::redaction::redact_all;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
-use orbit_core::runtime::run_audit::RunAuditStep;
+use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord};
 use orbit_core::{
     AuditEventStatus, ExternalRef, InvocationQuery, InvocationRecord, JobRun, JobRunState,
     OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
@@ -66,6 +67,10 @@ const LOG_DEFAULT_LIMIT: usize = 50;
 const LOG_MAX_LIMIT: usize = 500;
 const LOG_STREAM_CHANNEL_DEPTH: usize = 64;
 const LOG_STREAM_POLL_INTERVAL: StdDuration = StdDuration::from_millis(50);
+/// Maximum bytes included in stdout/stderr previews returned by run-log APIs.
+const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
+/// Maximum lines included in stdout/stderr previews returned by run-log APIs.
+const RUN_LOG_PREVIEW_MAX_LINES: usize = 120;
 /// Default time window for header tile counts when `?since=` is omitted.
 const DEFAULT_SUMMARY_WINDOW: &str = "24h";
 /// Default header-tile alert threshold for the denials counter. Surfaced via
@@ -256,12 +261,14 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
         .route("/runs/:id/cancel", post(cancel_run_action))
         .route("/runs/:id/replay", post(replay_run_action))
         .route("/runs/:id/events", get(list_run_events))
+        .route("/runs/:id/logs", get(list_run_logs))
         .route("/audit", get(list_audit))
         .route("/log", get(get_log))
         .route("/log/stream", get(stream_log))
         .route("/audit/summary", get(audit_summary))
         .route("/scoreboard", get(scoreboard))
         .route("/diagnostics/metrics", get(list_diagnostics_metrics))
+        .route("/diagnostics/errors", get(list_diagnostics_errors))
         .route("/diagnostics/friction", get(list_diagnostics_friction))
         .route("/diagnostics/denials", get(list_denials))
         .layer(middleware::from_fn(require_localhost_origin))
@@ -1034,6 +1041,197 @@ spec:
             .expect("response")
     }
 
+    async fn request_dashboard_run_logs(runtime: OrbitRuntime, encoded_run_id: &str) -> Response {
+        Router::new()
+            .nest("/api", router())
+            .with_state(Arc::new(runtime))
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/runs/{encoded_run_id}/logs"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    async fn request_dashboard_errors(runtime: OrbitRuntime) -> Response {
+        Router::new()
+            .nest("/api", router())
+            .with_state(Arc::new(runtime))
+            .oneshot(
+                Request::builder()
+                    .uri("/api/diagnostics/errors?limit=10")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]) -> String {
+        let audit_root = runtime.data_root().join("state").join("audit");
+        let blob_store = BlobStore::new(audit_root.join("blobs"));
+        let stdout_ref = blob_store
+            .write(b"normal output\n")
+            .expect("write stdout blob");
+        let stderr_ref = blob_store.write(stderr).expect("write stderr blob");
+        let audit_dir = audit_root.join("v2_loop");
+        std::fs::create_dir_all(&audit_dir).expect("create audit dir");
+        write_lines(
+            &audit_dir.join(format!("{run_id}.jsonl")),
+            &[
+                json!({
+                    "schemaVersion": 1,
+                    "event_type": "run.started",
+                    "event_id": "evt-run",
+                    "ts": "2026-05-08T04:12:20Z",
+                    "run_id": run_id,
+                    "body_kind": "run_started"
+                })
+                .to_string(),
+                "malformed".to_string(),
+                json!({
+                    "schemaVersion": 1,
+                    "event_type": "step.started",
+                    "event_id": "evt-step",
+                    "ts": "2026-05-08T04:12:21Z",
+                    "run_id": run_id,
+                    "parent_event_id": "evt-run",
+                    "body_kind": "step_started",
+                    "step_id": "implement"
+                })
+                .to_string(),
+                json!({
+                    "schemaVersion": 1,
+                    "event_type": "cli.invocation.finished",
+                    "event_id": "evt-cli",
+                    "ts": "2026-05-08T04:12:22Z",
+                    "run_id": run_id,
+                    "parent_event_id": "evt-step",
+                    "body_kind": "cli_invocation_finished",
+                    "provider": "codex",
+                    "stdout_blob_ref": stdout_ref,
+                    "stderr_blob_ref": stderr_ref,
+                    "exit_code": 0,
+                    "timed_out": false,
+                    "duration_ms": 123
+                })
+                .to_string(),
+            ],
+        );
+        stderr_ref
+    }
+
+    #[tokio::test]
+    async fn list_run_logs_returns_bounded_redacted_step_records() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let run_id = "jrun-log-api";
+        let mut stderr = String::from("first line\n");
+        stderr.push_str("Authorization: Bearer sk-test-secret\n");
+        for index in 0..200 {
+            stderr.push_str(&format!("line {index}\n"));
+        }
+        let stderr_ref = seed_cli_invocation_audit(&runtime, run_id, stderr.as_bytes());
+
+        let response = request_dashboard_run_logs(runtime, run_id).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload = body_json(response).await;
+        let rows = payload.as_array().expect("rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["run_id"], run_id);
+        assert_eq!(rows[0]["event_id"], "evt-cli");
+        assert_eq!(rows[0]["step_id"], "implement");
+        assert_eq!(rows[0]["step_index"], 0);
+        assert_eq!(rows[0]["provider"], "codex");
+        assert_eq!(rows[0]["stderr_blob_ref"], stderr_ref);
+        assert_eq!(rows[0]["exit_code"], 0);
+        assert_eq!(rows[0]["timed_out"], false);
+        assert_eq!(rows[0]["duration_ms"], 123);
+        let preview = rows[0]["stderr_preview"].as_str().expect("stderr preview");
+        assert!(preview.contains("[REDACTED_AUTH]"));
+        assert!(!preview.contains("sk-test-secret"));
+        assert_eq!(rows[0]["stderr_truncated"], true);
+    }
+
+    #[tokio::test]
+    async fn diagnostics_errors_include_codex_style_stderr_rows() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let run_id = "jrun-error-api";
+        let stderr = b"2026-05-08T04:12:22.346005Z ERROR codex_core::session: failed to record rollout items\nordinary stderr\nERROR codex_core::tools::router: apply_patch verification failed\n";
+        let stderr_ref = seed_cli_invocation_audit(&runtime, run_id, stderr);
+
+        let response = request_dashboard_errors(runtime).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload = body_json(response).await;
+        let rows = payload.as_array().expect("rows");
+        let agent_rows = rows
+            .iter()
+            .filter(|row| row["source"] == "agent-stderr" && row["job_run"] == run_id)
+            .collect::<Vec<_>>();
+        assert_eq!(agent_rows.len(), 2);
+        assert_eq!(agent_rows[0]["step"], "implement");
+        assert_eq!(agent_rows[0]["step_index"], 0);
+        assert_eq!(agent_rows[0]["provider"], "codex");
+        assert_eq!(agent_rows[0]["blob_ref"], stderr_ref);
+        assert!(rows.iter().any(|row| {
+            row["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("apply_patch verification failed"))
+        }));
+    }
+
+    #[test]
+    fn global_error_rows_include_process_log_errors() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("orbit.log.jsonl");
+        write_lines(
+            &path,
+            &[
+                json!({
+                    "timestamp": "2026-05-08T04:00:00Z",
+                    "level": "INFO",
+                    "target": "orbit.test",
+                    "fields": { "message": "ignored" }
+                })
+                .to_string(),
+                json!({
+                    "timestamp": "2026-05-08T04:01:00Z",
+                    "level": "ERROR",
+                    "target": "orbit.test",
+                    "fields": { "message": "process failed" }
+                })
+                .to_string(),
+            ],
+        );
+
+        let rows = global_error_rows_from_path(&path, 10).expect("rows");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ts"], "2026-05-08T04:01:00Z");
+        assert_eq!(rows[0]["source"], "process");
+        assert!(
+            rows[0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("process failed"))
+        );
+    }
+
+    #[test]
+    fn parse_structured_error_line_ignores_unstructured_error_words() {
+        assert!(parse_structured_error_line("this has ERROR but no shape", "").is_none());
+        let parsed = parse_structured_error_line(
+            "2026-05-08T04:12:22.346005Z ERROR codex_core::session: failed",
+            "",
+        )
+        .expect("parsed");
+        assert_eq!(parsed.ts, "2026-05-08T04:12:22.346005Z");
+        assert_eq!(parsed.target, "codex_core::session");
+        assert_eq!(parsed.message, "failed");
+    }
+
     #[tokio::test]
     async fn list_run_events_rejects_path_traversal_id() {
         let runtime = OrbitRuntime::in_memory().expect("build runtime");
@@ -1744,6 +1942,92 @@ async fn list_run_events(
     let end = offset.saturating_add(limit).min(events.len());
     let page: Vec<Value> = events.drain(offset..end).collect();
     Json(Value::Array(page)).into_response()
+}
+
+async fn list_run_logs(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path(id): Path<String>,
+    Query(q): Query<LimitQuery>,
+) -> Response {
+    let run_id = match validate_id(&id) {
+        Ok(id) => id,
+        Err(message) => return bad_request(message),
+    };
+    let limit = bounded_limit(q.limit, HISTORY_DEFAULT_LIMIT);
+    match runtime.collect_run_cli_invocations(run_id) {
+        Ok(records) => Json(Value::Array(
+            records
+                .into_iter()
+                .take(limit)
+                .map(run_cli_invocation_to_json)
+                .collect(),
+        ))
+        .into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+fn run_cli_invocation_to_json(record: RunCliInvocationRecord) -> Value {
+    let stdout_preview = bounded_preview(&record.stdout);
+    let stderr_preview = bounded_preview(&record.stderr);
+    json!({
+        "run_id": record.run_id,
+        "event_id": record.event_id,
+        "ts": record.ts.map(|ts| ts.to_rfc3339()),
+        "step_id": record.step_id,
+        "step_index": record.step_index,
+        "provider": record.provider,
+        "stdout_blob_ref": record.stdout_blob_ref,
+        "stderr_blob_ref": record.stderr_blob_ref,
+        "stdout_preview": stdout_preview.text,
+        "stderr_preview": stderr_preview.text,
+        "stdout_truncated": stdout_preview.truncated,
+        "stderr_truncated": stderr_preview.truncated,
+        "exit_code": record.exit_code,
+        "timed_out": record.timed_out,
+        "duration_ms": record.duration_ms,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Preview {
+    text: String,
+    truncated: bool,
+}
+
+fn bounded_preview(raw: &str) -> Preview {
+    let mut out = String::new();
+    let mut truncated = false;
+    for (index, line) in raw.lines().enumerate() {
+        if index >= RUN_LOG_PREVIEW_MAX_LINES {
+            truncated = true;
+            break;
+        }
+        let needed = line.len() + usize::from(!out.is_empty());
+        if out.len().saturating_add(needed) > RUN_LOG_PREVIEW_MAX_BYTES {
+            if out.is_empty() {
+                for ch in line.chars() {
+                    if out.len().saturating_add(ch.len_utf8()) > RUN_LOG_PREVIEW_MAX_BYTES {
+                        break;
+                    }
+                    out.push(ch);
+                }
+            }
+            truncated = true;
+            break;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    if raw.ends_with('\n') && !out.is_empty() && out.len() < RUN_LOG_PREVIEW_MAX_BYTES {
+        out.push('\n');
+    }
+    Preview {
+        text: redact_all(&out),
+        truncated,
+    }
 }
 
 fn v2_loop_path(runtime: &OrbitRuntime, run_id: &str) -> PathBuf {
@@ -2814,6 +3098,225 @@ fn read_blob_text_best_effort(blob_store: &BlobStore, blob_ref: &str) -> String 
         .read(blob_ref)
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_default()
+}
+
+async fn list_diagnostics_errors(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Query(q): Query<DiagnosticsQuery>,
+) -> Response {
+    let limit = bounded_limit(q.limit, HISTORY_DEFAULT_LIMIT);
+    match diagnostics_errors(&runtime, limit) {
+        Ok(rows) => Json(Value::Array(rows)).into_response(),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+fn diagnostics_errors(
+    runtime: &OrbitRuntime,
+    limit: usize,
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut rows = global_error_rows(limit)?;
+    rows.extend(agent_stderr_error_rows(runtime, limit)?);
+    rows.sort_by(|a, b| {
+        let left = a.get("ts").and_then(Value::as_str).unwrap_or("");
+        let right = b.get("ts").and_then(Value::as_str).unwrap_or("");
+        right.cmp(left)
+    });
+    rows.truncate(limit);
+    Ok(rows)
+}
+
+fn global_error_rows(limit: usize) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let path = resolve_log_path(None)?;
+    global_error_rows_from_path(&path, limit)
+}
+
+fn global_error_rows_from_path(
+    path: &std::path::Path,
+    limit: usize,
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let filters = LogFilters::from_query_parts(None, Some("error".to_string()), None)?;
+    let events = read_recent_rendered_events(&path, &filters, limit)
+        .map_err(|e| orbit_core::OrbitError::Io(format!("read log {}: {e}", path.display())))?;
+    Ok(events
+        .into_iter()
+        .map(|event| {
+            json!({
+                "ts": event.ts,
+                "source": "process",
+                "message": strip_htmlish(&event.message_html),
+                "event_id": null,
+                "job_run": null,
+                "step": null,
+                "step_index": null,
+                "task_id": null,
+                "provider": null,
+                "blob_ref": null,
+                "target": event.source,
+            })
+        })
+        .collect())
+}
+
+fn agent_stderr_error_rows(
+    runtime: &OrbitRuntime,
+    limit: usize,
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let audit_dir = v2_loop_dir(runtime);
+    if !audit_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut files = std::fs::read_dir(&audit_dir)
+        .map_err(|e| orbit_core::OrbitError::Io(e.to_string()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"))
+        .collect::<Vec<_>>();
+    files.sort();
+    if files.len() > V2_LOOP_FILE_SCAN_CAP {
+        files = files.split_off(files.len() - V2_LOOP_FILE_SCAN_CAP);
+    }
+    files.reverse();
+
+    let blob_store = BlobStore::new(
+        runtime
+            .data_root()
+            .join("state")
+            .join("audit")
+            .join("blobs"),
+    );
+    let mut rows = Vec::new();
+    for path in files {
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| orbit_core::OrbitError::Io(format!("read {}: {e}", path.display())))?;
+        let mut events = Vec::new();
+        let mut by_id = HashMap::new();
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let value: Value = match serde_json::from_str(trimmed) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if let Some(event_id) = value.get("event_id").and_then(Value::as_str) {
+                by_id.insert(event_id.to_string(), value.clone());
+            }
+            events.push(value);
+        }
+        let step_index_by_id = step_index_by_id(&events);
+        for event in events {
+            if event.get("body_kind").and_then(Value::as_str) != Some("cli_invocation_finished") {
+                continue;
+            }
+            let Some(blob_ref) = event.get("stderr_blob_ref").and_then(Value::as_str) else {
+                continue;
+            };
+            let stderr = read_blob_text_best_effort(&blob_store, blob_ref);
+            let fallback_ts = event
+                .get("ts")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let step = enclosing_step_id_for_event(&event, &by_id);
+            let step_index = step
+                .as_ref()
+                .and_then(|step| step_index_by_id.get(step).copied());
+            for parsed in parse_structured_error_lines(&stderr, &fallback_ts) {
+                rows.push(json!({
+                    "ts": parsed.ts,
+                    "source": "agent-stderr",
+                    "message": redact_all(&parsed.message),
+                    "job_run": event.get("run_id").and_then(Value::as_str),
+                    "step": step,
+                    "step_index": step_index,
+                    "task_id": event.get("task_id").and_then(Value::as_str),
+                    "provider": event.get("provider").and_then(Value::as_str),
+                    "blob_ref": blob_ref,
+                    "event_id": event.get("event_id").and_then(Value::as_str),
+                    "target": parsed.target,
+                }));
+                if rows.len() >= limit.saturating_mul(2) {
+                    return Ok(rows);
+                }
+            }
+        }
+    }
+    Ok(rows)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParsedErrorLine {
+    ts: String,
+    target: String,
+    message: String,
+}
+
+fn parse_structured_error_lines(stderr: &str, fallback_ts: &str) -> Vec<ParsedErrorLine> {
+    stderr
+        .lines()
+        .filter_map(|line| parse_structured_error_line(line, fallback_ts))
+        .collect()
+}
+
+fn parse_structured_error_line(line: &str, fallback_ts: &str) -> Option<ParsedErrorLine> {
+    let trimmed = line.trim();
+    let (ts, rest) = if let Some((head, tail)) = trimmed.split_once(" ERROR ") {
+        if DateTime::parse_from_rfc3339(head).is_ok() {
+            (head.to_string(), tail)
+        } else {
+            (fallback_ts.to_string(), trimmed.strip_prefix("ERROR ")?)
+        }
+    } else {
+        (fallback_ts.to_string(), trimmed.strip_prefix("ERROR ")?)
+    };
+    let (target, message) = rest.rsplit_once(": ")?;
+    let target = target.trim();
+    let message = message.trim();
+    if target.is_empty() || message.is_empty() {
+        return None;
+    }
+    Some(ParsedErrorLine {
+        ts,
+        target: target.to_string(),
+        message: message.to_string(),
+    })
+}
+
+fn step_index_by_id(events: &[Value]) -> HashMap<String, u32> {
+    let mut result = HashMap::new();
+    for event in events {
+        if event.get("body_kind").and_then(Value::as_str) != Some("step_started") {
+            continue;
+        }
+        let Some(step_id) = event.get("step_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let index = result.len() as u32;
+        result.entry(step_id.to_string()).or_insert(index);
+    }
+    result
+}
+
+fn strip_htmlish(raw: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for ch in raw.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
 }
 
 async fn list_diagnostics_friction(

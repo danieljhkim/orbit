@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-08 (T20260506-2, T20260508-8)
+**Last updated:** 2026-05-08 (T20260506-2, T20260508-8, T20260508-14)
 
 This document describes Orbit's shipped auditability implementation across command audit rows, activity/job envelopes, loop-level provider/tool traces, blob storage, redaction, identity attribution, metrics-adjacent invocation records, and known limitations. See [1_overview.md](./1_overview.md) for the feature purpose and [3_vision.md](./3_vision.md) for future questions.
 
@@ -57,7 +57,7 @@ After [T20260427-0023], selected canonical stores also project live tracing even
 
 `V2AuditWriter` in `crates/orbit-engine/src/activity_job/audit_writer.rs` assigns event ids, maintains per-thread parent stacks, emits through `V2JsonlSink`, keeps a smoke-verification snapshot, and exposes the inner loop sink for provider/tool events. CLI-launched v2 runs stamp envelope `agent_identity` as `system`; concrete agent identity lives in activity configuration, CLI invocation events, and invocation metrics.
 
-`crates/orbit-engine/src/activity_job/jsonl_sink.rs` appends one JSON object per line under `v2_loop/` and flushes per write. `crates/orbit-core/src/runtime/run_audit.rs` is the read-side accessor after [T20260426-0709], deriving activity DAG `step.id` values from `parent_event_id` ancestry and resolving CLI stdout/stderr blob references for `orbit run logs`.
+`crates/orbit-engine/src/activity_job/jsonl_sink.rs` appends one JSON object per line under `v2_loop/` and flushes per write. `crates/orbit-core/src/runtime/run_audit.rs` is the read-side accessor after [T20260426-0709], deriving activity DAG `step.id` values from `parent_event_id` ancestry and resolving CLI stdout/stderr blob references for `orbit run logs`. After [T20260508-14], the same accessor tolerates malformed read-side JSONL lines and missing blobs for dashboard inspection, returning partial per-step CLI invocation records with run id, event id, timestamp, step index, exit status, timeout, duration, provider, blob refs, and bounded stdout/stderr material.
 
 ---
 
@@ -74,6 +74,8 @@ Loop events reference hashes for request bodies, response bodies, tool inputs, a
 `crates/orbit-common/src/utility/blob_store.rs` writes content-addressed blobs under `{root}/{hash_prefix}/{hash}`. The hash is computed after redaction, and existing blob paths are reused.
 
 `crates/orbit-common/src/utility/redaction.rs` centralizes sensitive live environment value scrubbing plus regex-based HTTP/argv patterns for authorization headers, API keys, bearer tokens, JSON API-key fields, and bare `sk-...` tokens when argv scrubbing is requested. CLI audit errors, blob bytes, selected pipeline outputs/errors, and the default tracing subscriber all redact before persistence or terminal/JSONL output. The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies stored blob bytes omit the raw secret and contain a marker.
+
+Dashboard log previews added by [T20260508-14] are derived views over `.orbit/state/audit/v2_loop` and `.orbit/state/audit/blobs`; they do not duplicate full transcripts into SQLite. Preview responses are byte- and line-capped, apply defensive read-time redaction with the shared redactor, and preserve existing write-time redaction markers. The focused diagnostics error feed is also derived, combining global ERROR tracing rows with structured `ERROR <target>:` lines found in agent stderr blobs. No `.orbit/state/diagnostics/errors/` store exists in this design; retention remains bounded by the existing v2 audit, blob, and global log retention roots.
 
 ---
 
@@ -97,6 +99,8 @@ The requirement is not to collapse every field into one value. It is that a revi
 `crates/orbit-cli/src/command/audit.rs` exposes command rows through `orbit audit list`, `show`, `stats`, `export --format json`, `export --format csv`, and `prune`, with filters for time, tool, status, role, and limit. Exports include all command-audit columns, including sparse `stdout_truncated`, `stderr_truncated`, and `session_id`.
 
 V2 traces are exposed separately: `orbit run events` prints chronological envelopes, `orbit run trace` renders the parent tree, and `orbit run logs` extracts CLI stdout/stderr blobs. `orbit run history` and `orbit run show` expose job-run state rather than the full envelope stream. Metrics and scoreboard commands read invocation records; they summarize cost and usage, not transcript structure.
+
+The local dashboard exposes two read-only API surfaces for these traces after [T20260508-14]: `GET /api/runs/:id/logs` returns bounded per-step CLI invocation previews, and `GET /api/diagnostics/errors` returns recent process ERROR rows plus structured agent-stderr error rows sorted newest first. Both endpoints use existing dashboard limit conventions and tolerate missing v2 audit files, malformed lines, and missing blobs by returning empty or partial arrays.
 
 After [T20260428-11], compact `summary.json` counts all audited tool-run attempts and failed attempts from command-audit rows where `command: tool`, `subcommand` is `"run"` or `"run-mcp"`, and `tool_name` is present. Token totals still come from invocation/token scoreboards, with legacy tool-call totals used only as a max overlay to avoid obvious double counting.
 
@@ -150,5 +154,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[T20260505-6]** — Replace timestamp-only command-audit execution ids with collision-resistant generated ids for parallel tool runs.
 - **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
 - **[T20260508-8]** — Record backend: cli subprocess cwd in v2 audit and live tracing.
+- **[T20260508-14]** — Surface bounded per-step agent log previews and derived diagnostics error rows in the dashboard.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

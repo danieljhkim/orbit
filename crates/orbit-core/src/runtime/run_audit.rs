@@ -46,12 +46,19 @@ pub struct RunAuditStep {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunCliInvocationRecord {
+    pub run_id: String,
+    pub event_id: String,
+    pub ts: Option<DateTime<Utc>>,
     pub step_id: Option<String>,
+    pub step_index: Option<u32>,
     pub provider: Option<String>,
     pub stdout_blob_ref: Option<String>,
     pub stderr_blob_ref: Option<String>,
     pub stdout: String,
     pub stderr: String,
+    pub exit_code: Option<i64>,
+    pub timed_out: bool,
+    pub duration_ms: Option<u64>,
 }
 
 impl OrbitRuntime {
@@ -67,12 +74,10 @@ impl OrbitRuntime {
         let mut events_by_id = HashMap::new();
         let mut ordered_ids = Vec::new();
         for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-            let value: Value = serde_json::from_str(line).map_err(|err| {
-                OrbitError::Store(format!(
-                    "invalid audit log '{}': {err}",
-                    audit_path.display()
-                ))
-            })?;
+            let value: Value = match serde_json::from_str(line) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
             let Some(event_id) = value.get("event_id").and_then(Value::as_str) else {
                 continue;
             };
@@ -192,6 +197,11 @@ impl OrbitRuntime {
     ) -> Result<Vec<RunCliInvocationRecord>, OrbitError> {
         let events = self.collect_run_audit_events(run_id)?;
         let blob_store = BlobStore::new(self.v2_audit_blob_root());
+        let step_index_by_id = self
+            .collect_run_audit_steps(run_id)?
+            .into_iter()
+            .map(|step| (step.step_id, step.step_index))
+            .collect::<HashMap<_, _>>();
         let mut records = Vec::new();
 
         for event in events {
@@ -209,14 +219,27 @@ impl OrbitRuntime {
                 .and_then(Value::as_str)
                 .map(str::to_string);
             let stdout = match stdout_blob_ref.as_deref() {
-                Some(blob_ref) => read_blob_text(&blob_store, blob_ref)?,
+                Some(blob_ref) => read_blob_text_best_effort(&blob_store, blob_ref),
                 None => String::new(),
             };
             let stderr = match stderr_blob_ref.as_deref() {
-                Some(blob_ref) => read_blob_text(&blob_store, blob_ref)?,
+                Some(blob_ref) => read_blob_text_best_effort(&blob_store, blob_ref),
                 None => String::new(),
             };
+            let step_index = event
+                .step_id
+                .as_ref()
+                .and_then(|step_id| step_index_by_id.get(step_id).copied());
             records.push(RunCliInvocationRecord {
+                run_id: event
+                    .raw
+                    .get("run_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or(run_id)
+                    .to_string(),
+                event_id: event.event_id,
+                ts: event.timestamp,
+                step_index,
                 step_id: event.step_id,
                 provider: event
                     .raw
@@ -227,6 +250,13 @@ impl OrbitRuntime {
                 stderr_blob_ref,
                 stdout,
                 stderr,
+                exit_code: event.raw.get("exit_code").and_then(Value::as_i64),
+                timed_out: event
+                    .raw
+                    .get("timed_out")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                duration_ms: event.raw.get("duration_ms").and_then(Value::as_u64),
             });
         }
 
@@ -285,6 +315,10 @@ fn read_blob_text(blob_store: &BlobStore, blob_ref: &str) -> Result<String, Orbi
         .read(blob_ref)
         .map_err(|err| OrbitError::Io(format!("read audit blob '{blob_ref}': {err}")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn read_blob_text_best_effort(blob_store: &BlobStore, blob_ref: &str) -> String {
+    read_blob_text(blob_store, blob_ref).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -412,11 +446,18 @@ mod tests {
             .collect_run_cli_invocations(run_id)
             .expect("collect records");
         assert_eq!(records.len(), 2);
+        assert_eq!(records[0].run_id, run_id);
+        assert_eq!(records[0].event_id, "evt-cli-one");
         assert_eq!(records[0].step_id.as_deref(), Some("implement_one"));
+        assert_eq!(records[0].step_index, Some(0));
         assert_eq!(records[0].provider.as_deref(), Some("codex"));
         assert_eq!(records[0].stdout, "one stdout\n");
         assert_eq!(records[0].stderr, "one stderr\n");
+        assert_eq!(records[0].exit_code, Some(0));
+        assert!(!records[0].timed_out);
+        assert_eq!(records[0].duration_ms, Some(10));
         assert_eq!(records[1].step_id.as_deref(), Some("review"));
+        assert_eq!(records[1].step_index, Some(1));
         assert_eq!(records[1].provider.as_deref(), Some("claude"));
         assert_eq!(records[1].stdout, "two stdout\n");
         assert_eq!(records[1].stderr, "");
@@ -429,5 +470,56 @@ mod tests {
             .collect_run_cli_invocations("jrun-missing")
             .expect("collect records");
         assert!(records.is_empty());
+    }
+
+    #[test]
+    fn malformed_jsonl_and_missing_blobs_are_tolerated() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let audit_root = runtime.data_root().join("state").join("audit");
+        let jsonl_dir = audit_root.join("v2_loop");
+        std::fs::create_dir_all(&jsonl_dir).expect("create jsonl dir");
+        let run_id = "jrun-tolerant";
+        std::fs::write(
+            jsonl_dir.join(format!("{run_id}.jsonl")),
+            format!(
+                "{}\nnot-json\n{}\n",
+                json!({
+                    "event_id": "evt-step",
+                    "ts": "2026-04-26T07:00:01Z",
+                    "run_id": run_id,
+                    "body_kind": "step_started",
+                    "step_id": "implement"
+                }),
+                json!({
+                    "event_id": "evt-cli",
+                    "ts": "2026-04-26T07:00:02Z",
+                    "run_id": run_id,
+                    "parent_event_id": "evt-step",
+                    "body_kind": "cli_invocation_finished",
+                    "provider": "codex",
+                    "exit_code": 1,
+                    "duration_ms": 42,
+                    "stdout_blob_ref": "aa/missing",
+                    "stderr_blob_ref": "error:writer-failed",
+                    "timed_out": true
+                })
+            ),
+        )
+        .expect("write jsonl");
+
+        let events = runtime
+            .collect_run_audit_events(run_id)
+            .expect("collect events");
+        assert_eq!(events.len(), 2);
+
+        let records = runtime
+            .collect_run_cli_invocations(run_id)
+            .expect("collect records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].step_index, Some(0));
+        assert_eq!(records[0].stdout, "");
+        assert_eq!(records[0].stderr, "");
+        assert_eq!(records[0].exit_code, Some(1));
+        assert!(records[0].timed_out);
     }
 }

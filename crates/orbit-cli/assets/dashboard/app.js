@@ -35,7 +35,7 @@ let activeStatuses = new Set(
 );
 let lastTasks = [];
 let lastRuns = [];
-let lastDiagnostics = { metrics: [], friction: [] };
+let lastDiagnostics = { metrics: [], friction: [], errors: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
 let expandedTaskIds = new Set();
@@ -71,6 +71,7 @@ let lastSummary = null;
 let activeRunId = null;
 let activeRunDetail = null;
 let activeRunEvents = [];
+let activeRunLogs = [];
 let activeRunSubtab = "steps";
 let expandedStepIndices = new Set();
 
@@ -875,7 +876,7 @@ function wireSearch() {
 }
 
 const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "friction"];
+const DIAG_SUBTABS = ["runs", "metrics", "friction", "errors"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const AUDIT_SUBTABS = ["events", "policy"];
 
@@ -895,7 +896,16 @@ function setActiveTab(raw, opts = {}) {
   let top;
   if (head === "runs" && segments[1]) {
     top = "run-detail";
-    activeRunId = decodeURIComponent(segments[1]);
+    const nextRunId = decodeURIComponent(segments[1]);
+    if (activeRunId !== nextRunId) {
+      activeRunLogs = [];
+      expandedStepIndices.clear();
+    }
+    activeRunId = nextRunId;
+    const expandStep = query.get("step");
+    if (expandStep != null && /^\d+$/.test(expandStep)) {
+      expandedStepIndices.add(Number(expandStep));
+    }
     const sub = RUN_DETAIL_SUBTABS.includes(segments[2]) ? segments[2] : activeRunSubtab;
     activeRunSubtab = sub;
   } else if (TABS.includes(head)) {
@@ -950,6 +960,7 @@ function setActiveTab(raw, opts = {}) {
     setRunDetailSubtab(activeRunSubtab);
     hash = `#runs/${encodeURIComponent(activeRunId || "")}` +
       (activeRunSubtab !== "steps" ? `/${activeRunSubtab}` : "");
+    if (query.get("step") != null) hash += `?step=${encodeURIComponent(query.get("step"))}`;
   } else {
     hash = `#${top}`;
   }
@@ -1148,6 +1159,24 @@ const DIAG_FRICTION_COLUMNS = [
   },
 ];
 
+const DIAG_ERRORS_COLUMNS = [
+  { key: "ts", label: "time", num: false, render: (v) => fmtRelative(v) },
+  { key: "source", label: "source", num: false },
+  { key: "provider", label: "provider", num: false, render: (v) => v || "-" },
+  { key: "step", label: "step", num: false, render: (v) => v || "-" },
+  {
+    key: "message",
+    label: "message",
+    num: false,
+    cellClass: "stderr",
+    render: (v, row, td) => {
+      const full = v || "";
+      td.title = row.target ? `${row.target}: ${full}` : full;
+      return truncate(full, 220);
+    },
+  },
+];
+
 function renderDiagnosticsTable(rows, columns) {
   const body = $("diag-body");
   
@@ -1194,6 +1223,14 @@ function renderDiagnosticsTable(rows, columns) {
     }
     tr.dataset.key = `diag-${row.ts || ''}-${row.step || i}-${row.command || row.actor_identity || ''}`;
     tr.dataset.hash = JSON.stringify(row);
+    if (row.job_run) {
+      tr.classList.add("clickable");
+      tr.title = "Open owning run";
+      tr.addEventListener("click", () => {
+        const stepQuery = row.step_index == null ? "" : `?step=${encodeURIComponent(row.step_index)}`;
+        setActiveTab(`runs/${encodeURIComponent(row.job_run)}${stepQuery}`);
+      });
+    }
     frag.appendChild(tr);
   }
   
@@ -1204,9 +1241,15 @@ function renderDiagnostics() {
   const sub = activeDiagSubtab;
   const rows = lastDiagnostics[sub] || [];
   $("diag-count").textContent = `${rows.length}`;
+  const columns =
+    sub === "metrics"
+      ? DIAG_METRICS_COLUMNS
+      : sub === "errors"
+        ? DIAG_ERRORS_COLUMNS
+        : DIAG_FRICTION_COLUMNS;
   renderDiagnosticsTable(
     rows,
-    sub === "metrics" ? DIAG_METRICS_COLUMNS : DIAG_FRICTION_COLUMNS,
+    columns,
   );
 }
 
@@ -1248,6 +1291,7 @@ function activeRefreshJobs() {
     // they're fetched on every run-detail refresh regardless of which sub-tab
     // is active.
     jobs.push(fetchAndRenderRunEvents());
+    jobs.push(fetchAndRenderRunLogs());
     return jobs;
   }
 
@@ -1260,6 +1304,16 @@ function activeRefreshJobs() {
     jobs.push(
       fetchJson(`/api/diagnostics/metrics?limit=${DIAG_LIMIT}`).then((rows) => {
         lastDiagnostics.metrics = rows;
+        renderDiagnostics();
+      }),
+    );
+    return jobs;
+  }
+
+  if (activeDiagSubtab === "errors") {
+    jobs.push(
+      fetchJson(`/api/diagnostics/errors?limit=${DIAG_LIMIT}`).then((rows) => {
+        lastDiagnostics.errors = rows;
         renderDiagnostics();
       }),
     );
@@ -1306,6 +1360,17 @@ function fetchAndRenderRunEvents() {
     // Missing v2 events file is non-fatal — run detail still renders.
     activeRunEvents = [];
     renderRunGantt();
+  });
+}
+
+function fetchAndRenderRunLogs() {
+  if (!activeRunId) return Promise.resolve();
+  return fetchJson(`/api/runs/${encodeURIComponent(activeRunId)}/logs?limit=${RUN_EVENTS_LIMIT}`).then((logs) => {
+    activeRunLogs = logs;
+    renderRunSteps();
+  }).catch(() => {
+    activeRunLogs = [];
+    renderRunSteps();
   });
 }
 
@@ -2048,6 +2113,41 @@ function hideGanttTooltip() {
   tip.setAttribute("aria-hidden", "true");
 }
 
+function logsForStep(step) {
+  const stepId = step.target_id == null ? null : String(step.target_id);
+  return (activeRunLogs || []).filter((record) => {
+    if (record.step_index != null && Number(record.step_index) === Number(step.step_index)) return true;
+    return stepId != null && record.step_id === stepId;
+  });
+}
+
+function buildLogBlock(record, stream) {
+  const isErr = stream === "stderr";
+  const preview = record[`${stream}_preview`] || "";
+  if (!preview) return null;
+  const block = el("div", { class: `step-log-block ${isErr ? "stderr" : "stdout"}` });
+  const meta = [
+    record.provider || "cli",
+    record.exit_code == null ? "exit -" : `exit ${record.exit_code}`,
+    record.timed_out ? "timeout" : null,
+    record[`${stream}_truncated`] ? "truncated" : null,
+  ].filter(Boolean).join(" · ");
+  block.appendChild(el("div", { class: "step-log-head" }, [
+    el("span", { class: "label", text: stream }),
+    el("span", { class: "meta", text: meta }),
+  ]));
+  const pre = el("pre");
+  for (const line of preview.split("\n")) {
+    const row = el("span", {
+      class: isErr && /\bERROR\s+[^:]+:/.test(line) ? "log-line error-line" : "log-line",
+      text: line || " ",
+    });
+    pre.appendChild(row);
+  }
+  block.appendChild(pre);
+  return block;
+}
+
 function buildStepDetail(step) {
   const wrap = el("div", { class: "step-detail" });
   wrap.dataset.key = `step-detail-${step.step_index}`;
@@ -2065,6 +2165,18 @@ function buildStepDetail(step) {
 
   if (step.error_message) addBlock("error", `${step.error_code || ""} ${step.error_message}`);
   addBlock("agent_response", step.agent_response_json);
+  const logs = logsForStep(step);
+  if (logs.length > 0) {
+    const section = el("div", { class: "step-log-section" });
+    section.appendChild(el("div", { class: "label", text: "agent logs" }));
+    for (const record of logs) {
+      const stdout = buildLogBlock(record, "stdout");
+      const stderr = buildLogBlock(record, "stderr");
+      if (stdout) section.appendChild(stdout);
+      if (stderr) section.appendChild(stderr);
+    }
+    wrap.appendChild(section);
+  }
   const km = activeRunDetail && activeRunDetail.run && activeRunDetail.run.knowledge_metrics;
   if (km && step.step_index === 0) addBlock("knowledge_metrics (run)", km);
   return wrap;
@@ -2176,7 +2288,7 @@ async function refreshDashboard() {
   isRefreshing = false;
   if (activeTab === "tasks") fitLogPanelToViewport();
   
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,scoreboard,diagnostics/{metrics,friction,denials?since|kind|profile|agent}}`;
+  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();
