@@ -79,24 +79,8 @@ body {
 }
 
 .sl-markdown-content h2 {
-  border-top: 0px solid var(--sl-color-hairline-light);
   margin-top: 5rem;
   padding-top: 2rem;
-  position: relative;
-}
-
-.sl-markdown-content h2::before {
-  background: var(--sl-color-bg);
-  border: 1px solid var(--sl-color-hairline-light);
-  border-radius: 999px;
-  box-shadow: 0 0 0 4px var(--sl-color-bg);
-  content: "";
-  height: 0.52rem;
-  left: 50%;
-  position: absolute;
-  top: -0.3rem;
-  transform: translateX(-50%);
-  width: 0.52rem;
 }
 
 .sl-markdown-content :is(p, li) {
