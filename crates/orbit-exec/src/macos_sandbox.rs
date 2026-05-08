@@ -138,6 +138,7 @@ fn compile_macos_sandbox_profile_with_env(
             sbpl_escape(&state_dir.display().to_string())
         ));
     }
+    emit_claude_home_json_allows(home, claude_config_dir, &mut out);
 
     for rule in &rules.modify {
         if let Some(deny_path) = rule.strip_prefix('!') {
@@ -223,6 +224,47 @@ fn non_empty_env_path(value: Option<&OsStr>) -> Option<PathBuf> {
         return None;
     }
     Some(PathBuf::from(value))
+}
+
+/// Claude Code persists its main settings to `$HOME/.claude.json`, a sibling
+/// *file* (with `.lock` and atomic-write `.tmp.<pid>.<ms_ts>` siblings) of
+/// the `$HOME/.claude/` directory. SBPL `subpath` does not match these
+/// siblings, so the per-provider state-dir clause emitted by
+/// `provider_state_dirs` is not enough — Claude under sandbox would hang
+/// waiting on its own lockfile.
+///
+/// Skip when `CLAUDE_CONFIG_DIR` is set: with the override, Claude writes
+/// `<override>/.claude.json` (and the lock/tmp siblings) inside the override
+/// directory, already covered by the existing subpath clause.
+fn emit_claude_home_json_allows(
+    home: Option<&OsStr>,
+    claude_config_dir: Option<&OsStr>,
+    out: &mut String,
+) {
+    if non_empty_env_path(claude_config_dir).is_some() {
+        return;
+    }
+    let Some(home) = non_empty_env_path(home) else {
+        return;
+    };
+    let home_str = home.display().to_string();
+    out.push_str(&format!(
+        "(allow file-write* (literal \"{}/.claude.json\"))\n",
+        sbpl_escape(&home_str)
+    ));
+    out.push_str(&format!(
+        "(allow file-write* (literal \"{}/.claude.json.lock\"))\n",
+        sbpl_escape(&home_str)
+    ));
+    let mut tmp_regex = String::from("^");
+    for c in home_str.chars() {
+        push_regex_escaped(&mut tmp_regex, c);
+    }
+    tmp_regex.push_str("/\\.claude\\.json\\.tmp\\.[0-9]+\\.[0-9]+$");
+    out.push_str(&format!(
+        "(allow file-write* (regex \"{}\"))\n",
+        sbpl_escape(&tmp_regex)
+    ));
 }
 
 /// Spawn `program` under `sandbox-exec -f <profile>`. Returns the running
@@ -574,6 +616,49 @@ mod tests {
         assert!(
             text.contains("(allow file-write* (subpath \"/Users/test/.claude\"))"),
             "missing HOME/.claude write allow: {text}"
+        );
+    }
+
+    #[test]
+    fn compile_grants_write_access_to_home_claude_json_when_claude_config_dir_missing() {
+        let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+        let text = compile_with_env(
+            &resolved,
+            EnvOverrides {
+                home: Some("/Users/test"),
+                ..Default::default()
+            },
+        );
+        assert!(
+            text.contains("(allow file-write* (literal \"/Users/test/.claude.json\"))"),
+            "missing HOME/.claude.json write allow: {text}"
+        );
+        assert!(
+            text.contains("(allow file-write* (literal \"/Users/test/.claude.json.lock\"))"),
+            "missing HOME/.claude.json.lock write allow: {text}"
+        );
+        assert!(
+            text.contains(
+                "(allow file-write* (regex \"^/Users/test/\\\\.claude\\\\.json\\\\.tmp\\\\.[0-9]+\\\\.[0-9]+$\"))"
+            ),
+            "missing HOME/.claude.json.tmp.<pid>.<ts> regex allow: {text}"
+        );
+    }
+
+    #[test]
+    fn compile_does_not_emit_home_claude_json_allow_when_claude_config_dir_set() {
+        let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
+        let text = compile_with_env(
+            &resolved,
+            EnvOverrides {
+                home: Some("/Users/test"),
+                claude_config_dir: Some("/var/folders/test/claude-config"),
+                ..Default::default()
+            },
+        );
+        assert!(
+            !text.contains("/Users/test/.claude.json"),
+            "HOME/.claude.json sibling allow must be skipped when CLAUDE_CONFIG_DIR is set: {text}"
         );
     }
 
@@ -966,6 +1051,84 @@ mod tests {
             assert!(
                 status.success(),
                 "expected write under synthetic ~/.{label} to succeed; status={status:?}"
+            );
+            assert!(
+                target.exists(),
+                "{label} target file was not written: {target:?}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn compiled_profile_allows_writes_to_claude_home_json_siblings() {
+        // T20260508-13: Claude Code persists `$HOME/.claude.json` (plus
+        // `.lock` and atomic-write `.tmp.<pid>.<ms_ts>` siblings) at the home
+        // root, not under `$HOME/.claude/`. Without explicit allows the
+        // kernel denies these writes and Claude hangs on its own lockfile
+        // under sandbox-exec.
+        use std::process::Command;
+
+        if !sandbox_exec_can_apply() {
+            return;
+        }
+
+        let parent = sandbox_test_parent("claude-home-json");
+        let _cleanup = ScopeGuard(parent.clone());
+        let synthetic_home = tempfile::Builder::new()
+            .prefix("synthetic-home-")
+            .tempdir_in(&parent)
+            .expect("synthetic home tempdir");
+
+        let resolved = ResolvedFsProfile {
+            name: "default".to_string(),
+            read: vec![synthetic_home.path().display().to_string()],
+            modify: vec![],
+        };
+        let profile_text = compile_macos_sandbox_profile_with_env(
+            &resolved,
+            SandboxCompileEnv {
+                home: Some(synthetic_home.path().as_os_str()),
+                codex_home: None,
+                claude_config_dir: None,
+            },
+        )
+        .expect("compile sbpl");
+        let mut profile_file = tempfile::Builder::new()
+            .prefix("orbit-sandbox-test-")
+            .suffix(".sb")
+            .tempfile()
+            .expect("tempfile");
+        use std::io::Write;
+        profile_file
+            .write_all(profile_text.as_bytes())
+            .expect("write profile");
+        profile_file.flush().expect("flush");
+
+        for (label, target) in [
+            (".claude.json", synthetic_home.path().join(".claude.json")),
+            (
+                ".claude.json.lock",
+                synthetic_home.path().join(".claude.json.lock"),
+            ),
+            (
+                ".claude.json.tmp.<pid>.<ts>",
+                synthetic_home
+                    .path()
+                    .join(".claude.json.tmp.7969.1778210964004"),
+            ),
+        ] {
+            let status = Command::new("sandbox-exec")
+                .arg("-f")
+                .arg(profile_file.path())
+                .arg("/bin/sh")
+                .arg("-c")
+                .arg(format!("echo ok > {}", shell_escape(&target)))
+                .status()
+                .expect("run sandbox-exec");
+            assert!(
+                status.success(),
+                "expected write to synthetic {label} to succeed; status={status:?}"
             );
             assert!(
                 target.exists(),
