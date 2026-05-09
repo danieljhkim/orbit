@@ -1,4 +1,8 @@
+use std::collections::BTreeSet;
+
 use thiserror::Error;
+
+use super::activity_v2::{ActivityV2, ActivityV2Spec};
 
 /// Explicit list of permitted wildcard roots (§6 / §12 Q7).
 ///
@@ -9,17 +13,28 @@ use thiserror::Error;
 pub const V2_TOOL_WILDCARD_ROOTS: &[&str] = &[
     "orbit.graph.",
     "orbit.task.",
+    "orbit.state.",
+    // Reserved for audit-session tools. No builtin tools currently live under
+    // this root, so registry validation treats it as intentionally empty.
     "orbit.audit.",
     "fs.",
     "proc.",
 ];
 
-#[derive(Debug, Error)]
+pub const V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS: &[&str] = &["orbit.audit."];
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ToolAllowlistError {
-    #[error("wildcard root not permitted: `{0}` (see V2_TOOL_WILDCARD_ROOTS)")]
-    WildcardRootNotPermitted(String),
-    #[error("empty tool name in allowlist")]
-    EmptyName,
+    #[error(
+        "wildcard root not permitted in allowlist entry `{entry}` (see V2_TOOL_WILDCARD_ROOTS)"
+    )]
+    WildcardRootNotPermitted { entry: String },
+    #[error("empty tool name in allowlist entry at index {index}")]
+    EmptyName { index: usize },
+    #[error("unknown tool name in allowlist entry `{entry}`")]
+    UnknownToolName { entry: String },
+    #[error("wildcard allowlist entry `{entry}` did not match any registered tools")]
+    WildcardRootMatchesNoTools { entry: String },
 }
 
 /// Validate an activity's declared tool allowlist at asset-load time.
@@ -27,15 +42,77 @@ pub enum ToolAllowlistError {
 /// wildcard root. Does NOT verify that concrete tool names resolve in the
 /// registry — that's a separate load-time check at the engine layer.
 pub fn validate_tool_allowlist(allowlist: &[String]) -> Result<(), ToolAllowlistError> {
-    for entry in allowlist {
-        if entry.is_empty() {
-            return Err(ToolAllowlistError::EmptyName);
+    for (index, entry) in allowlist.iter().enumerate() {
+        if entry.trim().is_empty() {
+            return Err(ToolAllowlistError::EmptyName { index });
         }
         if let Some(prefix) = wildcard_prefix(entry)
             && !V2_TOOL_WILDCARD_ROOTS.iter().any(|root| *root == prefix)
         {
-            return Err(ToolAllowlistError::WildcardRootNotPermitted(entry.clone()));
+            return Err(ToolAllowlistError::WildcardRootNotPermitted {
+                entry: entry.clone(),
+            });
         }
+    }
+    Ok(())
+}
+
+/// Validate an activity allowlist against the registered tool surface.
+///
+/// Concrete names must resolve exactly. Wildcards must use an approved root,
+/// and must expand to at least one registered tool unless the root is an
+/// explicitly documented empty reservation.
+pub fn validate_tool_allowlist_against_registered_tools<'a, I>(
+    allowlist: &[String],
+    registered_tools: I,
+) -> Result<(), ToolAllowlistError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    validate_tool_allowlist(allowlist)?;
+
+    let registered_tools: BTreeSet<&str> = registered_tools.into_iter().collect();
+    for entry in allowlist {
+        if let Some(prefix) = wildcard_prefix(entry) {
+            let has_match = registered_tools.iter().any(|tool| tool.starts_with(prefix));
+            if !has_match
+                && !V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS
+                    .iter()
+                    .any(|root| *root == prefix)
+            {
+                return Err(ToolAllowlistError::WildcardRootMatchesNoTools {
+                    entry: entry.clone(),
+                });
+            }
+            continue;
+        }
+
+        if !registered_tools.contains(entry.as_str()) {
+            return Err(ToolAllowlistError::UnknownToolName {
+                entry: entry.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+pub fn validate_activity_tool_allowlist(activity: &ActivityV2) -> Result<(), ToolAllowlistError> {
+    if let Some(allowlist) = activity_tool_allowlist(activity) {
+        validate_tool_allowlist(allowlist)?;
+    }
+    Ok(())
+}
+
+pub fn validate_activity_tool_allowlist_against_registered_tools<'a, I>(
+    activity: &ActivityV2,
+    registered_tools: I,
+) -> Result<(), ToolAllowlistError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    if let Some(allowlist) = activity_tool_allowlist(activity) {
+        validate_tool_allowlist_against_registered_tools(allowlist, registered_tools)?;
     }
     Ok(())
 }
@@ -56,6 +133,44 @@ pub fn tool_allowed(tool_name: &str, allowlist: &[String]) -> bool {
     false
 }
 
-fn wildcard_prefix(entry: &str) -> Option<String> {
-    entry.strip_suffix('*').map(|s| s.to_string())
+fn activity_tool_allowlist(activity: &ActivityV2) -> Option<&[String]> {
+    match &activity.spec {
+        ActivityV2Spec::AgentLoop(spec) => Some(&spec.tools),
+        ActivityV2Spec::Groundhog(spec) => Some(&spec.tools),
+        ActivityV2Spec::Deterministic(_) | ActivityV2Spec::Shell(_) => None,
+    }
+}
+
+fn wildcard_prefix(entry: &str) -> Option<&str> {
+    entry.strip_suffix('*')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_validation_accepts_documented_empty_audit_root() {
+        validate_tool_allowlist_against_registered_tools(
+            &["orbit.audit.*".to_string()],
+            ["orbit.task.show"].into_iter(),
+        )
+        .expect("reserved audit root is intentionally empty");
+    }
+
+    #[test]
+    fn registry_validation_rejects_unmatched_non_empty_root() {
+        let err = validate_tool_allowlist_against_registered_tools(
+            &["fs.*".to_string()],
+            ["orbit.task.show"].into_iter(),
+        )
+        .expect_err("fs wildcard must match registered tools");
+
+        assert_eq!(
+            err,
+            ToolAllowlistError::WildcardRootMatchesNoTools {
+                entry: "fs.*".to_string()
+            }
+        );
+    }
 }

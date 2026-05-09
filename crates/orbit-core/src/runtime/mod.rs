@@ -273,6 +273,13 @@ impl OrbitRuntime {
                 catalog.load_dir_skipping_retired_prefer_existing(&dir)?,
             );
         }
+        let registered_tools: Vec<String> = self
+            .tool_registry()
+            .schemas()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        catalog.validate_tool_allowlists(registered_tools.iter().map(String::as_str))?;
 
         Ok(catalog)
     }
@@ -447,6 +454,8 @@ mod tests {
 
     use tempfile::tempdir;
 
+    use crate::command::activity::DEFAULT_ACTIVITY_FILES;
+
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
@@ -530,6 +539,28 @@ spec:
         std::fs::write(path, yaml).expect("write activity yaml");
     }
 
+    fn write_agent_loop_activity(path: &Path, name: &str, tools: &[&str]) {
+        let tools_yaml = tools
+            .iter()
+            .map(|tool| format!("    - {tool}\n"))
+            .collect::<String>();
+        let yaml = format!(
+            r#"schemaVersion: 2
+kind: Activity
+metadata:
+  name: {name}
+spec:
+  type: agent_loop
+  description: Test agent loop.
+  instruction: Test.
+  tools:
+{tools_yaml}"#
+        );
+        std::fs::create_dir_all(path.parent().expect("activity path has parent"))
+            .expect("create activity dir");
+        std::fs::write(path, yaml).expect("write activity yaml");
+    }
+
     #[test]
     fn workspace_activity_overrides_global_default_in_catalog() {
         let (_root, runtime, global_root, workspace_root) = test_runtime();
@@ -568,5 +599,68 @@ spec:
             .v2_activity_catalog()
             .expect_err("duplicate activity name should fail");
         assert!(err.to_string().contains("duplicate activity name"), "{err}");
+    }
+
+    #[test]
+    fn activity_catalog_accepts_registered_task_wildcard() {
+        let (_root, runtime, _global_root, workspace_root) = test_runtime();
+        write_agent_loop_activity(
+            &workspace_root.join("resources/activities/task_tools.yaml"),
+            "task_tools",
+            &["orbit.task.*"],
+        );
+
+        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+        assert!(catalog.get("task_tools").is_some());
+    }
+
+    #[test]
+    fn activity_catalog_rejects_unknown_concrete_tool() {
+        let (_root, runtime, _global_root, workspace_root) = test_runtime();
+        write_agent_loop_activity(
+            &workspace_root.join("resources/activities/unknown_tool.yaml"),
+            "unknown_tool",
+            &["orbit.task.nope"],
+        );
+
+        let err = runtime
+            .v2_activity_catalog()
+            .expect_err("unknown concrete tool should fail");
+        let message = err.to_string();
+
+        assert!(message.contains("unknown_tool"), "{message}");
+        assert!(message.contains("orbit.task.nope"), "{message}");
+        assert!(message.contains("unknown tool name"), "{message}");
+    }
+
+    #[test]
+    fn activity_catalog_accepts_intentionally_empty_audit_wildcard() {
+        let (_root, runtime, _global_root, workspace_root) = test_runtime();
+        write_agent_loop_activity(
+            &workspace_root.join("resources/activities/audit_tools.yaml"),
+            "audit_tools",
+            &["orbit.audit.*"],
+        );
+
+        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+        assert!(catalog.get("audit_tools").is_some());
+    }
+
+    #[test]
+    fn default_activity_catalog_allowlists_resolve_registered_tools() {
+        let (_root, runtime, global_root, _workspace_root) = test_runtime();
+        let activities_dir = global_root.join("resources/activities");
+        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
+            let path = activities_dir.join(format!("{name}.yaml"));
+            std::fs::create_dir_all(path.parent().expect("activity path has parent"))
+                .expect("create activity dir");
+            std::fs::write(path, yaml).expect("write activity yaml");
+        }
+
+        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
+
+        assert_eq!(catalog.len(), DEFAULT_ACTIVITY_FILES.len());
     }
 }

@@ -83,7 +83,6 @@ spec:
     - orbit.state.*
     - orbit.graph.*
     - fs.read
-    - fs.write
     - fs.delete
     - proc.spawn
   on_denial: terminate

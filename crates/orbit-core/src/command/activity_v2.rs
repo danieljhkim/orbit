@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use orbit_common::types::activity_job::{
     Backend, V2AuditEventKind, load_activity_asset, resolve_activity_backends,
+    validate_activity_tool_allowlist_against_registered_tools,
 };
 use orbit_common::types::{OrbitError, OrbitEvent};
 use orbit_engine::activity_job::{V2AuditWriter, V2DispatchInput, dispatch_v2_activity};
@@ -20,6 +21,7 @@ use serde_json::Value;
 use crate::OrbitRuntime;
 use crate::command::SYSTEM_AUDIT_IDENTITY;
 
+#[derive(Debug)]
 pub struct V2ActivityRunResult {
     pub activity_name: String,
     pub activity_type: &'static str,
@@ -51,6 +53,22 @@ impl OrbitRuntime {
         })?;
         let mut asset = load_activity_asset(&yaml).map_err(|err| {
             OrbitError::InvalidInput(format!("load {}: {err}", yaml_path.display()))
+        })?;
+        let registered_tools: Vec<String> = self
+            .tool_registry()
+            .schemas()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        validate_activity_tool_allowlist_against_registered_tools(
+            &asset.spec,
+            registered_tools.iter().map(String::as_str),
+        )
+        .map_err(|err| {
+            OrbitError::InvalidInput(format!(
+                "activity `{}` tool allowlist invalid: {err}",
+                asset.name
+            ))
         })?;
 
         // §3.1 resolution: replace `Auto` with a concrete backend per
@@ -178,6 +196,23 @@ spec:
         std::fs::write(path, yaml).expect("write activity yaml");
     }
 
+    fn write_agent_loop_activity(path: &Path, name: &str, tool: &str) {
+        let yaml = format!(
+            r#"schemaVersion: 2
+kind: Activity
+metadata:
+  name: {name}
+spec:
+  type: agent_loop
+  description: Test agent loop.
+  instruction: Test.
+  tools:
+    - {tool}
+"#
+        );
+        std::fs::write(path, yaml).expect("write activity yaml");
+    }
+
     #[test]
     fn direct_activity_run_uses_system_audit_identity() {
         let (_root, runtime, repo_root) = test_runtime();
@@ -203,5 +238,21 @@ spec:
                 .and_then(serde_json::Value::as_str),
             Some(SYSTEM_AUDIT_IDENTITY)
         );
+    }
+
+    #[test]
+    fn direct_activity_run_rejects_unknown_tool_before_dispatch() {
+        let (_root, runtime, repo_root) = test_runtime();
+        let yaml_path = repo_root.join("unknown_tool_activity.yaml");
+        write_agent_loop_activity(&yaml_path, "unknown_tool_activity", "orbit.task.nope");
+
+        let err = runtime
+            .run_activity_v2_from_yaml(&yaml_path, json!({}), None)
+            .expect_err("unknown tool should fail before dispatch");
+        let message = err.to_string();
+
+        assert!(message.contains("unknown_tool_activity"), "{message}");
+        assert!(message.contains("orbit.task.nope"), "{message}");
+        assert!(message.contains("unknown tool name"), "{message}");
     }
 }
