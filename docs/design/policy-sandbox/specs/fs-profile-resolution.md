@@ -21,7 +21,7 @@ The resolution algorithm has multiple layered transformations (lookup, normaliza
 
 ## Evaluation Invariants
 
-- **Path normalization.** Caller-supplied paths are normalized via `normalize_path`: trim, slash-flip, strip leading `./`. Absolute paths and `~`-anchored paths are rejected.
+- **Path normalization.** Caller-supplied paths are normalized via `normalize_path`: trim, slash-flip, strip leading `./`. Absolute paths, `~`-anchored paths, and parent-directory components are rejected after backslash normalization.
 - **Empty rule list.** If the operation's rule list is empty after deny injection, the decision is `allowed = false` with `matched_rule = "[]"`.
 - **Rule walk.** The evaluator walks the rule list in order and tracks the most recent match. The decision uses the *last* match's negation flag: positive match → allow, negated match → deny.
 - **Empty positive set.** If the rule list contains no positive rules (only negated rules), the decision is `allowed = false` with `matched_rule = "[]"`.
@@ -49,4 +49,4 @@ The resolution algorithm has multiple layered transformations (lookup, normaliza
 
 ## Agent Signature
 
-Last revised by claude / claude-opus-4-7 for [T20260426-0622].
+Last revised by codex / gpt-5.5 for [T20260509-27].

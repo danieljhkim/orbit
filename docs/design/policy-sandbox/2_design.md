@@ -47,7 +47,7 @@ The implicit `unrestricted` profile appears only when an activity omitted `fsPro
 4. Walk rules in order and record the most recent match against the normalized workspace-relative path. Later matches override earlier ones.
 5. Use the last match's negation flag. If no rule matched but a positive rule exists, deny with `<no matching rule>`; if only negated rules exist, deny with `[]`.
 
-Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths or `~`-anchored paths. Tool callers are expected to canonicalize first and then express the path workspace-relative — `crates/orbit-tools/src/builtin/fs/mod.rs::workspace_relative_path` handles that on the call site.
+Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths, `~`-anchored paths, and parent-directory traversal anywhere in the component list ([T20260509-27]). Tool callers are expected to canonicalize first and then express the path workspace-relative — `crates/orbit-tools/src/builtin/fs/mod.rs::workspace_relative_path` handles that on the call site.
 
 The glob translator supports `*`, `**`, `?`, and `<prefix>/**`. It is intentionally narrower than POSIX glob syntax.
 
@@ -157,7 +157,10 @@ Risk-weighted regression tests sit beside the implementations they guard
   to `allowed=false`; global `denyRead` / `denyModify` rules override
   profile-level positive rules under last-match-wins; an unknown profile name
   errors structurally (with the documented `unrestricted` exception); and the
-  `matched_rule` field is populated for audit attribution.
+  `matched_rule` field is populated for audit attribution. Traversal inputs
+  such as `../secret.txt`, `src/../secret.txt`, and their backslash-normalized
+  equivalents are rejected as `OrbitError::InvalidInput` for both read and
+  modify checks ([T20260509-27]).
 - `crates/orbit-exec/src/macos_sandbox.rs#tests` — SBPL compilation tests
   cover `denyRead` / `denyModify` clause emission (`subpath` for simple
   rules, `regex` for non-trivial globs) and the deny-after-allow ordering

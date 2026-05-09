@@ -11,6 +11,7 @@
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
+use orbit_common::types::activity_job::tool_allowed;
 use orbit_tools::{ToolContext, ToolRegistry};
 
 use super::audit::{AuditSink, LoopAuditEvent, UsageSnapshot};
@@ -188,7 +189,6 @@ impl AgentLoop {
             None => cfg.tool_allowlist.clone(),
         };
         let tool_specs = build_tool_specs(registry, &advertised);
-        let allowlist: Vec<&str> = cfg.tool_allowlist.iter().map(String::as_str).collect();
 
         let started = Instant::now();
         let mut total_tokens_observed: u64 = 0;
@@ -260,7 +260,7 @@ impl AgentLoop {
             for (tool_use_id, tool_name, input) in tool_calls {
                 iter_tool_names.push(tool_name.clone());
 
-                if !is_tool_allowed(&tool_name, &allowlist) {
+                if !tool_allowed(&tool_name, &cfg.tool_allowlist) {
                     let reason = "tool not in allowlist".to_string();
                     let denial_payload = serde_json::json!({
                         "tool_name": &tool_name,
@@ -409,13 +409,6 @@ fn classify_content(
     (text, assistant_blocks, tool_calls)
 }
 
-fn is_tool_allowed(name: &str, allowlist: &[&str]) -> bool {
-    if allowlist.is_empty() {
-        return false;
-    }
-    allowlist.contains(&name)
-}
-
 fn accumulate(total: &mut TurnUsage, delta: &TurnUsage) {
     total.input_tokens = total.input_tokens.saturating_add(delta.input_tokens);
     total.output_tokens = total.output_tokens.saturating_add(delta.output_tokens);
@@ -498,4 +491,146 @@ fn preview_request(req: &TurnRequest<'_>, transport: &dyn LoopTransport) -> Vec<
         }),
     });
     serde_json::to_vec(&value).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use orbit_common::types::OrbitError;
+    use orbit_tools::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, ReservationOwnerContext};
+    use serde_json::{Value, json};
+
+    use super::super::audit::NullSink;
+    use super::super::session::Session;
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingTransport {
+        advertised: Mutex<Vec<Vec<String>>>,
+        calls: Mutex<usize>,
+    }
+
+    impl RecordingTransport {
+        fn advertised(&self) -> Vec<Vec<String>> {
+            self.advertised.lock().expect("advertised mutex").clone()
+        }
+    }
+
+    impl LoopTransport for RecordingTransport {
+        fn provider(&self) -> &str {
+            "test"
+        }
+
+        fn model(&self) -> &str {
+            "test-model"
+        }
+
+        fn send_turn(&self, req: &TurnRequest<'_>) -> Result<TurnResponse, TransportError> {
+            self.advertised
+                .lock()
+                .expect("advertised mutex")
+                .push(req.tools.iter().map(|tool| tool.name.clone()).collect());
+
+            let mut calls = self.calls.lock().expect("calls mutex");
+            let call_index = *calls;
+            *calls += 1;
+
+            let (content, stop_reason) = if call_index == 0 {
+                (
+                    vec![ContentBlock::ToolUse {
+                        id: "call-1".to_string(),
+                        name: "orbit.task.show".to_string(),
+                        input: json!({ "id": "T-test" }),
+                    }],
+                    StopReason::ToolUse,
+                )
+            } else {
+                (
+                    vec![ContentBlock::Text {
+                        text: "done".to_string(),
+                    }],
+                    StopReason::EndTurn,
+                )
+            };
+
+            Ok(TurnResponse {
+                content,
+                stop_reason,
+                usage: TurnUsage::default(),
+                raw_request_body: Vec::new(),
+                raw_response_body: Vec::new(),
+                endpoint: String::new(),
+                http_status: 200,
+            })
+        }
+    }
+
+    struct FakeOrbitHost;
+
+    impl OrbitToolHost for FakeOrbitHost {
+        fn execute(
+            &self,
+            action: OrbitBuiltinAction,
+            input: Value,
+            _agent: Option<String>,
+            _model: Option<String>,
+            _reservation_owner: Option<ReservationOwnerContext>,
+        ) -> Result<Value, OrbitError> {
+            assert_eq!(action, OrbitBuiltinAction::TaskShow);
+            assert_eq!(input["id"], "T-test");
+            Ok(json!({ "id": "T-test" }))
+        }
+
+        fn task_scope(&self) -> OrbitTaskScope {
+            OrbitTaskScope {
+                orbit_root: None,
+                task_id: Some("T-test".to_string()),
+            }
+        }
+    }
+
+    #[test]
+    fn wildcard_allowlist_advertises_and_executes_task_show() {
+        let mut session = Session::new("test", "test-model", "", None);
+        let cfg = AgentLoopConfig::new_for_run("run-test")
+            .with_allowlist(vec!["orbit.task.*".to_string()])
+            .with_max_iterations(3);
+        let mut registry = ToolRegistry::new();
+        registry.register_builtins();
+        let tool_ctx = ToolContext {
+            allowed_tools: vec!["orbit.task.*".to_string()],
+            orbit_host: Some(Arc::new(FakeOrbitHost)),
+            ..Default::default()
+        };
+        let transport = RecordingTransport::default();
+        let sink = NullSink;
+
+        let outcome = AgentLoop::run(
+            &mut session,
+            &cfg,
+            &transport,
+            &registry,
+            &tool_ctx,
+            &sink,
+            "show the task",
+        )
+        .expect("wildcard should allow orbit.task.show");
+
+        assert_eq!(outcome.final_message, "done");
+        assert!(
+            outcome
+                .trace
+                .iter()
+                .all(|iteration| iteration.policy_denials.is_empty())
+        );
+        assert!(
+            transport
+                .advertised()
+                .first()
+                .expect("first request")
+                .iter()
+                .any(|name| name == "orbit.task.show")
+        );
+    }
 }

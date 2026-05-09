@@ -6,23 +6,43 @@
 //! `ToolRegistry::execute` entry point that the rest of Orbit uses, so tool
 //! behavior, policy, and attribution stay in a single source of truth.
 
+use std::collections::HashSet;
 use std::time::Instant;
 
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::types::{
+    OrbitError, ToolSchema,
+    activity_job::{tool_allowed, validate_tool_allowlist},
+};
 use orbit_tools::{ToolContext, ToolRegistry};
 use serde_json::{Value, json};
 
 use super::transport::ToolSpec;
 
 pub fn build_tool_specs(registry: &ToolRegistry, allowlist: &[String]) -> Vec<ToolSpec> {
-    allowlist
-        .iter()
-        .filter_map(|name| {
-            registry
-                .get_schema(name)
-                .map(|schema| schema_to_tool_spec(&schema))
-        })
-        .collect()
+    let mut schemas = registry.schemas();
+    schemas.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+
+    let mut seen = HashSet::new();
+    let mut specs = Vec::new();
+    for entry in allowlist {
+        if let Some(schema) = registry.get_schema(entry) {
+            push_tool_spec(&mut specs, &mut seen, &schema);
+        }
+        if entry.ends_with('*') && validate_tool_allowlist(std::slice::from_ref(entry)).is_ok() {
+            for schema in &schemas {
+                if tool_allowed(&schema.name, std::slice::from_ref(entry)) {
+                    push_tool_spec(&mut specs, &mut seen, schema);
+                }
+            }
+        }
+    }
+    specs
+}
+
+fn push_tool_spec(specs: &mut Vec<ToolSpec>, seen: &mut HashSet<String>, schema: &ToolSchema) {
+    if seen.insert(schema.name.clone()) {
+        specs.push(schema_to_tool_spec(schema));
+    }
 }
 
 pub fn schema_to_tool_spec(schema: &ToolSchema) -> ToolSpec {
@@ -231,5 +251,29 @@ mod tests {
                 "{tool_name} dependencies must accept a string"
             );
         }
+    }
+
+    #[test]
+    fn build_tool_specs_expands_wildcards_to_registered_tools_only() {
+        let mut registry = ToolRegistry::new();
+        registry.register_builtins();
+        assert!(registry.unregister("orbit.task.search"));
+
+        let specs = build_tool_specs(&registry, &["orbit.task.*".to_string()]);
+        let names = specs.into_iter().map(|spec| spec.name).collect::<Vec<_>>();
+
+        assert!(names.iter().any(|name| name == "orbit.task.show"));
+        assert!(!names.iter().any(|name| name == "orbit.task.search"));
+        assert!(!names.iter().any(|name| name == "orbit.task.*"));
+    }
+
+    #[test]
+    fn build_tool_specs_does_not_expand_unvalidated_wildcard_roots() {
+        let mut registry = ToolRegistry::new();
+        registry.register_builtins();
+
+        let specs = build_tool_specs(&registry, &["orbit.*".to_string()]);
+
+        assert!(specs.is_empty());
     }
 }

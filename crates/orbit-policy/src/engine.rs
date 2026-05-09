@@ -159,6 +159,56 @@ mod tests {
     }
 
     #[test]
+    fn check_rejects_parent_traversal_for_read_and_modify_paths() {
+        let def = make_def(vec![], vec![], &[("default", &["**"], &["**"])]);
+        let engine = PolicyEngine::from_def(&def).expect("engine");
+
+        for (operation, path) in [
+            (FsOperation::Read, "../secret.txt"),
+            (FsOperation::Read, "src/../secret.txt"),
+            (FsOperation::Read, "..\\secret.txt"),
+            (FsOperation::Read, "src\\..\\secret.txt"),
+            (FsOperation::Modify, "../secret.txt"),
+            (FsOperation::Modify, "src/../secret.txt"),
+            (FsOperation::Modify, "..\\secret.txt"),
+            (FsOperation::Modify, "src\\..\\secret.txt"),
+        ] {
+            let err = engine
+                .check("default", operation, path)
+                .expect_err("parent traversal must be rejected");
+
+            assert!(
+                matches!(err, OrbitError::InvalidInput(_)),
+                "expected InvalidInput for {operation:?} `{path}`, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn check_accepts_valid_relative_paths_after_normalization() {
+        let def = make_def(
+            vec![],
+            vec![],
+            &[("default", &["src/lib.rs"], &["src/lib.rs"])],
+        );
+        let engine = PolicyEngine::from_def(&def).expect("engine");
+
+        for (operation, path) in [
+            (FsOperation::Read, "src/lib.rs"),
+            (FsOperation::Read, "./src/lib.rs"),
+            (FsOperation::Modify, "src/lib.rs"),
+            (FsOperation::Modify, "./src/lib.rs"),
+        ] {
+            let result = engine
+                .check("default", operation, path)
+                .expect("valid relative path should check");
+
+            assert!(result.allowed, "{operation:?} `{path}` should be allowed");
+            assert_eq!(result.matched_rule, "src/lib.rs");
+        }
+    }
+
+    #[test]
     fn check_unknown_profile_returns_error_not_silent_allow() {
         // Invariant: requesting an undefined profile name must surface a
         // structured error rather than silently allowing or silently denying.

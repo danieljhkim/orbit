@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitEvent, Role};
+use orbit_common::types::{OrbitEvent, Role, activity_job::tool_allowed};
 use orbit_common::utility::redaction::{redact_sensitive_env_error, redact_sensitive_env_json};
 use orbit_tools::ToolContext;
 use serde_json::Value;
@@ -63,7 +63,7 @@ impl OrbitRuntime {
         self.check_tool_enabled(name)?;
 
         if !tool_context.allowed_tools.is_empty()
-            && !tool_context.allowed_tools.iter().any(|t| t == name)
+            && !tool_allowed(name, &tool_context.allowed_tools)
         {
             self.with_mutation(|| {
                 Ok((
@@ -264,4 +264,66 @@ pub struct DryRunResult {
     pub tool_name: String,
     pub policy_allowed: bool,
     pub missing_params: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
+    use orbit_store::TaskCreateParams;
+    use orbit_tools::ToolContext;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn run_tool_context_allowlist_honors_task_wildcard() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let task = runtime
+            .stores()
+            .tasks()
+            .create(TaskCreateParams {
+                actor: "test".to_string(),
+                parent_id: None,
+                title: "Wildcard task".to_string(),
+                description: "Exercise wildcard runtime allowlist".to_string(),
+                acceptance_criteria: Vec::new(),
+                dependencies: Vec::new(),
+                plan: String::new(),
+                execution_summary: String::new(),
+                context_files: Vec::new(),
+                workspace_path: Some(runtime.paths().repo_root.to_string_lossy().into_owned()),
+                repo_root: None,
+                created_by: Some("test".to_string()),
+                planned_by: None,
+                implemented_by: None,
+                agent: None,
+                model: None,
+                status: TaskStatus::Backlog,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Task,
+                external_refs: Vec::new(),
+                source_task_id: None,
+                comments: Vec::new(),
+            })
+            .expect("create task");
+
+        let output = runtime
+            .run_tool_with_context_and_role(
+                "orbit.task.show",
+                json!({ "id": task.id.clone() }),
+                Role::Admin,
+                ToolContext {
+                    allowed_tools: vec!["orbit.task.*".to_string()],
+                    orbit_host: Some(crate::runtime::build_orbit_tool_host(
+                        &runtime,
+                        Some(task.id.clone()),
+                    )),
+                    ..Default::default()
+                },
+            )
+            .expect("wildcard activity context should permit orbit.task.show");
+
+        assert_eq!(output["id"], task.id);
+    }
 }

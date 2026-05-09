@@ -135,6 +135,8 @@ impl TaskFileStore {
         &self,
         id: &str,
     ) -> Result<Option<(TaskStateDir, PathBuf)>, OrbitError> {
+        validate_task_id(id)?;
+
         for state in TaskStateDir::all() {
             if state.is_partitioned() {
                 if let Some(partition) = partition_key(id) {
@@ -308,6 +310,7 @@ impl TaskFileStore {
                 legacy_dir.display()
             )));
         };
+        validate_task_id(task_id)?;
         let target_dir = self.task_dir(state, task_id);
         if target_dir == legacy_dir {
             return Ok(legacy_dir);
@@ -331,6 +334,16 @@ impl TaskFileStore {
     }
 }
 
+pub(super) fn validate_task_id(id: &str) -> Result<(), OrbitError> {
+    if is_valid_task_id(id) {
+        return Ok(());
+    }
+
+    Err(OrbitError::InvalidInput(
+        "task id must match TYYYYMMDD-<digits> with optional legacy -<digits> suffix".to_string(),
+    ))
+}
+
 fn rewrite_legacy_proposed_friction_history(history: &mut [orbit_common::types::TaskHistoryEntry]) {
     for entry in history {
         if entry.event == "created"
@@ -341,6 +354,40 @@ fn rewrite_legacy_proposed_friction_history(history: &mut [orbit_common::types::
             return;
         }
     }
+}
+
+fn is_valid_task_id(id: &str) -> bool {
+    let Some(raw) = id.strip_prefix('T') else {
+        return false;
+    };
+    if raw.len() < 10 {
+        return false;
+    }
+
+    let Some(date) = raw.get(0..8) else {
+        return false;
+    };
+    if !date.as_bytes().iter().all(u8::is_ascii_digit) {
+        return false;
+    }
+
+    let Some(year) = date.get(0..4) else {
+        return false;
+    };
+    let Some(month) = date.get(4..6) else {
+        return false;
+    };
+    if !is_valid_year_month(year, month) {
+        return false;
+    }
+
+    let Some(tail) = raw.get(8..).and_then(|value| value.strip_prefix('-')) else {
+        return false;
+    };
+    !tail.is_empty()
+        && tail.split('-').all(|component| {
+            !component.is_empty() && component.as_bytes().iter().all(u8::is_ascii_digit)
+        })
 }
 
 fn partition_key(id: &str) -> Option<String> {
@@ -519,6 +566,48 @@ mod tests {
             let located = store.locate_task(id).expect("locate task");
 
             assert_eq!(located, Some((TaskStateDir::Done, expected_dir)));
+        }
+    }
+
+    #[test]
+    fn locate_task_migrates_legacy_partitioned_id_forms() {
+        let (_tempdir, store, _now) = fixture();
+        let task_ids = ["T20260426-1", "T20260426-0455", "T20260426-2313-2"];
+
+        for id in task_ids {
+            let legacy_dir = store.state_dir_path(TaskStateDir::Done).join(id);
+            fs::create_dir_all(&legacy_dir).expect("create legacy task dir");
+            let expected_dir = store.task_dir(TaskStateDir::Done, id);
+
+            let located = store.locate_task(id).expect("locate task");
+
+            assert_eq!(located, Some((TaskStateDir::Done, expected_dir.clone())));
+            assert!(expected_dir.is_dir(), "{id} should be migrated");
+            assert!(!legacy_dir.exists(), "{id} legacy dir should be moved");
+        }
+    }
+
+    #[test]
+    fn locate_task_rejects_invalid_path_like_ids_before_path_lookup() {
+        let (_tempdir, store, _now) = fixture();
+        let invalid_ids = [
+            "",
+            "   ",
+            "../T20260426-1",
+            "../../outside",
+            "/tmp/T20260426-1",
+            r"C:\tmp\T20260426-1",
+            r"T20260426-1\outside",
+            "T20260426-1/outside",
+            "T20260426-1..2",
+        ];
+
+        for id in invalid_ids {
+            let err = store.locate_task(id).expect_err("invalid id rejected");
+            assert!(
+                matches!(err, OrbitError::InvalidInput(_)),
+                "{id:?} should fail as invalid input, got {err:?}"
+            );
         }
     }
 
