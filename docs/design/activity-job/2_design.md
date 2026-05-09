@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2, T20260509-7)
+**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2, T20260509-7, T20260509-9)
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -339,6 +339,8 @@ After [T20260428-8], task-starting workflows own explicit admission instead of r
 This path stays separate from `orbit.task.update` and generic deterministic metadata stamping. Direct task updates keep the non-empty-plan guard, and workflow admission records system-actor lifecycle history while preserving friction-bounty accounting for `friction -> in-progress`.
 
 Planning-duel writeback now reports `task_status: "in-progress"` instead of `status_unchanged`; the plan artifact still lands through `planning_duel_resolved`.
+
+After [T20260509-9], `writeback_planning_duel_task` also extracts a "Context Files" section from the normalized winning plan and replaces `task.context_files` with the canonicalized selectors when extraction succeeds. Section recognition is strict (`##` or `###` heading whose trimmed text is exactly `context files` or `context_files`, optional trailing `:`); unindented `- ` / `* ` bullets contribute one entry each, and each entry is canonicalized via `orbit_common::utility::selector::canonical_selector`. Sections that are absent or recognized but yield zero canonical entries leave `task.context_files` untouched; entries that fail canonicalization are dropped with an `OrbitEvent::PlanningDuelContextFileSkipped` event for observability. Plumbing is a single optional field on `TaskAutomationUpdate` (`context_files: Option<Vec<String>>`); `None` leaves the field untouched, matching the `TaskDocumentUpdateParams.context_files` semantics already documented in `orbit-store`. See [ADR-048](./4_decisions.md#adr-048--auto-populate-taskcontext_files-from-the-winning-duel-plan).
 
 ### 8.11 Task PR handoff summaries
 

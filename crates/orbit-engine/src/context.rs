@@ -186,6 +186,11 @@ pub struct ActivityInvocationResult {
 pub struct TaskAutomationUpdate {
     pub status: Option<TaskStatus>,
     pub plan: Option<String>,
+    /// Default `None` = leave the task's `context_files` untouched. `Some(v)`
+    /// replaces the field wholesale (mirrors `TaskDocumentUpdateParams.context_files`
+    /// semantics in `orbit-store`). Only set deliberately — most automation
+    /// call sites should leave this at `None`.
+    pub context_files: Option<Vec<String>>,
     pub workspace_path: Option<Option<String>>,
     pub repo_root: Option<String>,
     pub external_refs: Vec<ExternalRef>,

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2, T20260509-7)
+**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2, T20260509-7, T20260509-9)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -450,6 +450,29 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - The split preserves the existing engine/core and CLI-runner boundaries; no new crate edge or provider type crosses the activity/job layer.
 - Cost: private helper movement now requires maintaining intra-module visibility and imports across several files instead of one lexical scope.
 
+## ADR-048 — Auto-populate `task.context_files` from the winning duel plan
+
+**Status:** Accepted · 2026-05 · [T20260509-9]
+
+**Context.** Planning duels already write the winning plan markdown to `task.plan`, but operators were forced to extract the plan's "Context Files" section and push it to `task.context_files` by hand (see T20260509-7's post-hoc fix). `context_files` is the canonical machine-readable handoff to file-lock, focused-read, and scoped-agent consumers; leaving it empty silently degrades every downstream tool that depends on it.
+
+**Decision.** During duel resolution, `writeback_planning_duel_task` parses the normalized winning plan for a "Context Files" section and replaces `task.context_files` with the canonicalized entries when extraction succeeds. Section recognition is deliberately strict to keep the failure mode safe (preserve existing field) rather than best-effort:
+
+- A heading line at level `##` or `###` whose trimmed, case-insensitive text equals `context files` or `context_files` (a single trailing `:` is permitted, additional words are not). The section body extends to the next heading of equal-or-higher level, or to end-of-string.
+- Within the section body, unindented `- ` or `* ` bullets contribute one entry each: the first inline-code span on the line, otherwise the first whitespace-bounded token after the marker. Sub-bullets and prose lines are ignored.
+- Each entry is canonicalized via `orbit_common::utility::selector::canonical_selector`. Raw paths upgrade to `file:` (or `dir:` if trailing `/`); already-canonical `file:` / `dir:` / `symbol:` selectors round-trip unchanged. Entries that fail canonicalization are dropped and reported as `OrbitEvent::PlanningDuelContextFileSkipped` for observability.
+- Duplicates collapse in first-seen order. The replace-not-merge semantics mirror `task.plan`: the winning plan is the new source of truth.
+
+When the section is absent OR recognized but yields zero canonical entries (placeholder / all-unparseable), the writeback leaves `task.context_files` untouched. Both branches are asymmetric-with the right safety bias: clearing a curated field on resolution would silently destroy operator state.
+
+The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_files: Option<Vec<String>>`, default `None` = leave untouched, `Some(v)` = replace). The store layer's `TaskRecordUpdateParams.context_files` already supports this shape, so no store changes are required. Plan-writing flows that aren't duel-mediated are explicitly out of scope for this ADR.
+
+**Consequences.**
+- The duel-resolution writeback is no longer a half-conversion: structured task fields stay in sync with the persisted plan markdown.
+- Section-recognition heuristics drift between writers is bounded by the strict rule above; future planner agents that emit non-conforming shapes simply fall back to the preserve-existing branch instead of triggering best-effort guesses.
+- A new `TaskAutomationUpdate.context_files` field touches every existing automation call site, but the `..Default::default()` pattern keeps each site at the "leave untouched" default. A regression test in `task_host` guards that contract.
+- Operators get a `PlanningDuelContextFileSkipped` event channel for debugging stale or malformed plan markdown, instead of silently-dropped entries.
+
 ## ADR-047 — Each new executor block ships with a sibling test module
 
 **Status:** Accepted · 2026-05 · [T20260509-7]
@@ -525,5 +548,6 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - **[T20260508-8]** — Resolve backend: cli subprocess cwd from workspace context and record it in audit/tracing.
 - **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 - **[T20260509-7]** — Establish focused test coverage for the activity/job DAG executor (linear, retry, parallel, fan-out, loop, pipeline durability) and the macOS sandbox / policy boundary.
+- **[T20260509-9]** — Auto-populate `task.context_files` from the winning planning-duel plan after resolution.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
