@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-06 (T20260506-2)
+**Last updated:** 2026-05-09 (T20260506-2, T20260508-22)
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -260,6 +260,19 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - Runs with no loop-level provider/tool events no longer leave empty loop JSONL placeholders.
 - Cost: consumers must treat a missing loop JSONL file as "no loop events were emitted", not as a missing run; the v2 envelope file remains the canonical run spine.
 
+## ADR-022 — Automated git commits carry implementer authorship
+
+**Status:** Accepted · 2026-05 · [T20260508-22]
+
+**Context.** Task records already store `implemented_by`, but automated `git_commit` actions previously delegated commit authorship to local git config, hiding the agent that actually produced the change.
+
+**Decision.** Pass a per-commit `--author` derived from `task.implemented_by` for single-implementer commits. Mixed-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and add one `Co-Authored-By` trailer per distinct implementer identity.
+
+**Consequences.**
+- Reviewers can see implementation provenance directly in git history without joining back through run audit events.
+- Local git config remains committer identity only and can stay stable across parallel agent runs.
+- Cost: multi-implementer batch commits require trailer-aware attribution queries; `git log --author` finds the aggregate commit author, not every co-author trailer.
+
 ---
 
 ## Task References
@@ -289,5 +302,6 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
 - **[T20260505-6]** — Replace timestamp-only command-audit execution ids with process-disambiguated generated ids for parallel tool runs.
 - **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
+- **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
