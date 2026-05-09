@@ -53,7 +53,8 @@ Each record (`<seed>.json`) contains `wall_ms`, `rss_peak_mb`, `result_size_byte
 | Version | Scope | Status | Report |
 |---|---|---|---|
 | [v1](./v1/) | First baseline; Python + Java + TypeScript at medium × 9 tools | FROZEN | [RESULTS.md](./v1/RESULTS.md) |
-| [v2](./v2/) | TBD — measurement variable not yet fixed | LIVING | [RESULTS.md](./v2/RESULTS.md) |
+| [v2](./v2/) | Same matrix as v1; orbit binary SHA bumped (v0.1.0 → v0.3.1 release) | FROZEN | [RESULTS.md](./v2/RESULTS.md) |
+| [v3](./v3/) | TBD — measurement variable not yet fixed | LIVING | [RESULTS.md](./v3/RESULTS.md) |
 
 ## Conventions
 
@@ -70,13 +71,15 @@ benchmarks/graph-latency/
 │   ├── sweep.py        # full matrix
 │   └── aggregate.py    # p50/p90/p99 tables
 ├── v1/                 # FROZEN round 1
-│   ├── README.md       # version banner
-│   ├── METHOD.md       # corpus pins, host disclosure, record schema
-│   ├── RESULTS.md      # frozen v1 report
-│   ├── corpora.yaml    # pinned <repo>@<sha> for each corpus
-│   ├── tasks/          # query-shape primitives
+│   ├── README.md
+│   ├── METHOD.md
+│   ├── RESULTS.md
+│   ├── corpora.yaml
+│   ├── tasks/
 │   └── runs/           # frozen records (per-cell JSON)
-└── v2/                 # LIVING round 2
+├── v2/                 # FROZEN round 2
+│   └── ...             # same shape; orbit binary SHA bumped vs v1
+└── v3/                 # LIVING round 3
     ├── README.md
     ├── METHOD.md
     ├── RESULTS.md

@@ -72,41 +72,90 @@ def group_by(records: list[dict], *keys: str) -> dict[tuple, list[dict]]:
     return out
 
 
-def render_query_table(records: list[dict]) -> str:
+def _delta_str(current_p50: int, baseline_p50: int | None) -> str:
+    """Format a percent delta vs baseline. Negative = improvement (faster)."""
+    if baseline_p50 is None or baseline_p50 == 0 or current_p50 == 0:
+        return "—"
+    pct = (current_p50 - baseline_p50) / baseline_p50 * 100
+    sign = "+" if pct > 0 else ""
+    return f"{sign}{pct:.0f}%"
+
+
+def _baseline_p50_query(baseline: list[dict], corpus: str, tool: str) -> int | None:
+    rows = [r for r in baseline if r.get("phase") == "query" and r.get("corpus") == corpus and r.get("tool") == tool and not r.get("error")]
+    if not rows:
+        return None
+    return percentile([int(r["wall_ms"]) for r in rows], 0.50)
+
+
+def _baseline_p50_build(baseline: list[dict], corpus: str, phase: str) -> int | None:
+    rows = [r for r in baseline if r.get("phase") == phase and r.get("corpus") == corpus and not r.get("error")]
+    if not rows:
+        return None
+    return percentile([int(r["wall_ms"]) for r in rows], 0.50)
+
+
+def render_query_table(records: list[dict], baseline: list[dict] | None = None) -> str:
     query = [r for r in records if r.get("phase") == "query"]
     groups = group_by(query, "corpus", "tool")
-    lines = [
-        "| corpus | tool | runs | errors | p50_ms | p90_ms | p99_ms |",
-        "|---|---|---:|---:|---:|---:|---:|",
-    ]
+    has_base = baseline is not None
+    if has_base:
+        lines = [
+            "| corpus | tool | runs | errors | p50_ms | p90_ms | p99_ms | Δp50 vs v(N-1) |",
+            "|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    else:
+        lines = [
+            "| corpus | tool | runs | errors | p50_ms | p90_ms | p99_ms |",
+            "|---|---|---:|---:|---:|---:|---:|",
+        ]
     for (corpus, tool), rows in sorted(groups.items()):
         ok = [r for r in rows if not r.get("error")]
         errs = len(rows) - len(ok)
         wall = [int(r["wall_ms"]) for r in ok]
-        lines.append(
-            f"| {corpus} | {tool} | {len(rows)} | {errs} | "
-            f"{percentile(wall, 0.50)} | {percentile(wall, 0.90)} | {percentile(wall, 0.99)} |"
-        )
+        p50 = percentile(wall, 0.50) if wall else 0
+        cells = [
+            f"{corpus}", f"{tool}", f"{len(rows)}", f"{errs}",
+            f"{p50}" if wall else "—",
+            f"{percentile(wall, 0.90)}" if wall else "—",
+            f"{percentile(wall, 0.99)}" if wall else "—",
+        ]
+        if has_base:
+            cells.append(_delta_str(p50, _baseline_p50_query(baseline, corpus, tool)))
+        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
-def render_build_table(records: list[dict]) -> str:
+def render_build_table(records: list[dict], baseline: list[dict] | None = None) -> str:
     build = [r for r in records if r.get("phase") in ("build-cold", "build-incremental")]
     groups = group_by(build, "corpus", "phase")
-    lines = [
-        "| corpus | phase | runs | errors | p50_ms | p90_ms | p99_ms | rss_p90_mb |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
-    ]
+    has_base = baseline is not None
+    if has_base:
+        lines = [
+            "| corpus | phase | runs | errors | p50_ms | p90_ms | p99_ms | rss_p90_mb | Δp50 vs v(N-1) |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    else:
+        lines = [
+            "| corpus | phase | runs | errors | p50_ms | p90_ms | p99_ms | rss_p90_mb |",
+            "|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
     for (corpus, phase), rows in sorted(groups.items()):
         ok = [r for r in rows if not r.get("error")]
         errs = len(rows) - len(ok)
         wall = [int(r["wall_ms"]) for r in ok]
         rss = [int(r.get("rss_peak_mb") or 0) for r in ok]
-        lines.append(
-            f"| {corpus} | {phase} | {len(rows)} | {errs} | "
-            f"{percentile(wall, 0.50)} | {percentile(wall, 0.90)} | {percentile(wall, 0.99)} | "
-            f"{percentile(rss, 0.90)} |"
-        )
+        p50 = percentile(wall, 0.50) if wall else 0
+        cells = [
+            f"{corpus}", f"{phase}", f"{len(rows)}", f"{errs}",
+            f"{p50}" if wall else "—",
+            f"{percentile(wall, 0.90)}" if wall else "—",
+            f"{percentile(wall, 0.99)}" if wall else "—",
+            f"{percentile(rss, 0.90)}" if rss else "—",
+        ]
+        if has_base:
+            cells.append(_delta_str(p50, _baseline_p50_build(baseline, corpus, phase)))
+        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -138,10 +187,17 @@ def main(argv: list[str]) -> int:
         print(json.dumps(records, indent=2, sort_keys=True))
         return 0
 
+    baseline_records: list[dict] | None = None
+    if args.baseline:
+        bp = Path(args.baseline)
+        if not bp.is_dir():
+            raise SystemExit(f"baseline runs dir not found: {bp}")
+        baseline_records = load_records(bp)
+
     print("## Primary latency table (query phase)\n")
-    print(render_query_table(records))
+    print(render_query_table(records, baseline_records))
     print("\n## Build-phase table\n")
-    print(render_build_table(records))
+    print(render_build_table(records, baseline_records))
     print("\n## Failed cells\n")
     print(render_errors(records))
     return 0

@@ -1,15 +1,25 @@
 # Graph Latency Benchmark v2
 
-**Status: LIVING.** Round 2 is in progress. Inputs (`corpora.yaml`,
-`tasks/queries.yaml`) start as a copy of v1's; the measurement change that
-justifies cutting v2 will be recorded in `METHOD.md §Delta vs v1` once it
-lands.
+**Status: FROZEN** as of 2026-05-09. Records under `runs/`,
+[`METHOD.md`](./METHOD.md), and [`RESULTS.md`](./RESULTS.md) are immutable per
+[`../../CONVENTIONS.md`](../../CONVENTIONS.md) §Immutability. Factual
+corrections go in `CORRECTIONS.md`; reinterpretation goes in v3 §Delta or a
+shared compare doc.
 
-- Method: [`METHOD.md`](./METHOD.md) (placeholder until measurement variable is fixed)
-- Results: [`RESULTS.md`](./RESULTS.md) (placeholder until first v2 sweep)
-- Run records: [`runs/`](./runs/) (gitignored until v2 freeze)
+- Method: [`METHOD.md`](./METHOD.md)
+- Results: [`RESULTS.md`](./RESULTS.md)
+- Run records: [`runs/`](./runs/)
 
-The v1 frozen baseline is at [`../v1/`](../v1/). v2 must change at least one
-of (fixtures, harness, system-under-test pin, interpretive frame) per
-[`../../CONVENTIONS.md`](../../CONVENTIONS.md) §When to cut a new version. A
-re-run on identical inputs is seed expansion, not a version cut.
+## Headline
+
+Single variable changed vs v1: orbit binary SHA. v2's `orbit_sha=f6097e0a` is
+accurate (cargo-installed immediately before sweep); v1's recorded SHA was a
+harness-checkout proxy and the actual v1 binary was a stale `orbit-cli v0.1.0`.
+v1→v2 delta therefore measures "stale v0.1.0 → fresh v0.3.1 release-mode" and
+is best read as "establishing the first reliable baseline" rather than a clean
+code-change delta.
+
+Two material regressions: Python `graph.refs` p50 +32%, Java build-incremental
+p50 +21%. Most other cells drifted within ±10%. The "incremental slower than
+cold" gap widened in all three languages. v1's structural failure pattern
+reproduced exactly. See [`RESULTS.md`](./RESULTS.md).

@@ -1,0 +1,38 @@
+# Corpus pins for graph-latency v1.
+#
+# Source of truth — fetch.sh, run.py, sweep.py all read this file.
+# Adding a corpus row is the only way to widen the sweep matrix.
+#
+# Each row pins a public repo at a specific SHA so the sweep is reproducible
+# across machines. SHAs are resolved from upstream tags (via `git ls-remote`)
+# and locked at v1 freeze time. The `tag` field is informational only; only
+# `sha` is load-bearing.
+#
+# For mutation-driven build-incremental phase, `mutation_path` names a real
+# source file that the harness will append a marker line to before running
+# `orbit graph update`. The path must exist in the checkout.
+
+corpora:
+  - name: python-medium
+    language: python
+    repo: django/django
+    sha: c499184f198df8deb8b5f7282b679babef8384ff
+    tag: "5.1.2"
+    loc_target: 280000
+    mutation_path: django/db/models/query.py
+
+  - name: java-medium
+    language: java
+    repo: google/guava
+    sha: f06690fa3e874f65515e8fd338a74d636e2c792f
+    tag: v33.4.8
+    loc_target: 150000
+    mutation_path: guava/src/com/google/common/collect/ImmutableList.java
+
+  - name: ts-medium
+    language: typescript
+    repo: vuejs/core
+    sha: 6eb29d345aa73746207f80c89ee8b37ff7b949c9
+    tag: v3.5.13
+    loc_target: 150000
+    mutation_path: packages/runtime-core/src/component.ts
