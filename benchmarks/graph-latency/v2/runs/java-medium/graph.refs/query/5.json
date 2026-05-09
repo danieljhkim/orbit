@@ -1,0 +1,19 @@
+{
+  "corpus": "java-medium",
+  "corpus_sha": "f06690fa3e874f65515e8fd338a74d636e2c792f",
+  "error": "",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "bacf630981e6c88f7ccc3471d90835d20f47b873",
+  "phase": "query",
+  "query_shape": "refs:symbol:guava/src/com/google/common/collect/Iterables.java#Iterables:class",
+  "result_count": 20,
+  "result_size_bytes": 4446,
+  "rss_peak_mb": 171,
+  "seed": 5,
+  "tool": "graph.refs",
+  "wall_ms": 2037
+}

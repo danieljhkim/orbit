@@ -9,6 +9,7 @@ shared compare doc.
 - Method: [`METHOD.md`](./METHOD.md)
 - Results: [`RESULTS.md`](./RESULTS.md)
 - Run records: [`runs/`](./runs/)
+- Next round: [`../v2/`](../v2/) (FROZEN — adds SQLite read fast paths for `graph.overview` / `graph.search` / `graph.show`).
 
 ## Headline
 

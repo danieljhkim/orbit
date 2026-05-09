@@ -1,0 +1,19 @@
+{
+  "corpus": "ts-medium",
+  "corpus_sha": "6eb29d345aa73746207f80c89ee8b37ff7b949c9",
+  "error": "exit:1 {\"code\":\"invalid_input\",\"error\":\"invalid input: Knowledge-graph task attribution has been removed. Use `git log --grep '[T<task-id>]'` for local forward lookup, and use `external_refs` for cross-engineer task references.\"}",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "bacf630981e6c88f7ccc3471d90835d20f47b873",
+  "phase": "query",
+  "query_shape": "history:symbol:packages/reactivity/src/baseHandlers.ts#BaseReactiveHandler:class",
+  "result_count": null,
+  "result_size_bytes": 223,
+  "rss_peak_mb": 19,
+  "seed": 5,
+  "tool": "graph.history",
+  "wall_ms": 22
+}

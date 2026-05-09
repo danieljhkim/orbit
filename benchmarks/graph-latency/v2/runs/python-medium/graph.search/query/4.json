@@ -1,0 +1,19 @@
+{
+  "corpus": "python-medium",
+  "corpus_sha": "c499184f198df8deb8b5f7282b679babef8384ff",
+  "error": "",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "bacf630981e6c88f7ccc3471d90835d20f47b873",
+  "phase": "query",
+  "query_shape": "search:QuerySet",
+  "result_count": 4,
+  "result_size_bytes": 584,
+  "rss_peak_mb": 19,
+  "seed": 4,
+  "tool": "graph.search",
+  "wall_ms": 35
+}

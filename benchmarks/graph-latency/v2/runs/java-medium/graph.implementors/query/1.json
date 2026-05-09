@@ -1,0 +1,19 @@
+{
+  "corpus": "java-medium",
+  "corpus_sha": "f06690fa3e874f65515e8fd338a74d636e2c792f",
+  "error": "exit:1 {\"code\":\"execution_failed\",\"error\":\"execution failed: knowledge_invalid: `symbol:guava/src/com/google/common/collect/ImmutableList.java#ImmutableList:class` is not a trait leaf\"}",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "bacf630981e6c88f7ccc3471d90835d20f47b873",
+  "phase": "query",
+  "query_shape": "impl:symbol:guava/src/com/google/common/collect/ImmutableList.java#ImmutableList:class",
+  "result_count": null,
+  "result_size_bytes": 179,
+  "rss_peak_mb": 172,
+  "seed": 1,
+  "tool": "graph.implementors",
+  "wall_ms": 1950
+}

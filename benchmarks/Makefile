@@ -33,7 +33,7 @@ IDENTITY_KEY_SCRIPTS ?= $(BENCH_ROOT)/identity-key/scripts
 
 # graph-latency is a perf benchmark (kind: perf). Same versioning rules as
 # graph; see benchmarks/CONVENTIONS.md.
-GRAPH_LATENCY_VERSION ?= v2
+GRAPH_LATENCY_VERSION ?= v3
 GRAPH_LATENCY_SCRIPTS ?= $(BENCH_ROOT)/graph-latency/scripts
 GRAPH_LATENCY_DIR := $(BENCH_ROOT)/graph-latency/$(GRAPH_LATENCY_VERSION)
 
@@ -95,7 +95,8 @@ help:
 	@echo "  GRAPH_VERSION=v3 (default)          targets benchmarks/graph/v3/ (living)."
 	@echo "  GRAPH_VERSION=v2                    targets benchmarks/graph/v2/ (frozen)."
 	@echo "  GRAPH_VERSION=v1                    targets benchmarks/graph/v1/ (frozen)."
-	@echo "  GRAPH_LATENCY_VERSION=v2 (default)  targets benchmarks/graph-latency/v2/ (living)."
+	@echo "  GRAPH_LATENCY_VERSION=v3 (default)  targets benchmarks/graph-latency/v3/ (living)."
+	@echo "  GRAPH_LATENCY_VERSION=v2            targets benchmarks/graph-latency/v2/ (frozen)."
 	@echo "  GRAPH_LATENCY_VERSION=v1            targets benchmarks/graph-latency/v1/ (frozen)."
 	@echo "  See benchmarks/CONVENTIONS.md."
 
