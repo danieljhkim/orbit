@@ -155,4 +155,14 @@ pub enum OrbitEvent {
         id: String,
         message: String,
     },
+    /// Recorded when [planning-duel writeback] drops an entry from the winning
+    /// plan's "Context Files" section because it could not be canonicalized
+    /// into a `file:` / `dir:` / `symbol:` selector. The writeback continues
+    /// without the entry; consumers can use this event to debug stale or
+    /// malformed plan markdown.
+    PlanningDuelContextFileSkipped {
+        task_id: String,
+        raw_entry: String,
+        reason: String,
+    },
 }

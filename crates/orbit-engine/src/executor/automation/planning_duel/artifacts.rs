@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::{
-    OrbitError, PlannerSlot, PlanningRoleAssignment, PlanningRoles, Role, TaskArtifact, TaskComment,
+    OrbitError, OrbitEvent, PlannerSlot, PlanningRoleAssignment, PlanningRoles, Role, TaskArtifact,
+    TaskComment,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
@@ -11,6 +12,7 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 use crate::executor::automation::input::required_input_string;
 
+use super::context_files::extract_context_files_from_plan;
 use super::roles::parse_planning_duel_roles;
 use super::types::{
     PlanningDuelPlanArtifact, PlanningDuelWinnerArtifact, PlanningDuelWinnerMarker,
@@ -390,7 +392,7 @@ pub(super) fn cleanup_stale_planning_duel_artifacts<H: RuntimeHost + TaskHost + 
     Ok(())
 }
 
-pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
+pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -421,6 +423,19 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
         None
     };
     let winning_plan = normalize_winning_plan_for_task(&winning_artifact.content);
+    let extraction = extract_context_files_from_plan(&winning_plan);
+    let context_files = extraction.as_ref().map(|e| e.canonical_entries.clone());
+    if let Some(extraction) = extraction.as_ref() {
+        for skipped in &extraction.skipped {
+            // Best-effort observability — never fail writeback on event-record error.
+            let _ = host.record_event(OrbitEvent::PlanningDuelContextFileSkipped {
+                task_id: task_id.to_string(),
+                raw_entry: skipped.raw_entry.clone(),
+                reason: skipped.reason.clone(),
+            });
+        }
+    }
+
     let winner_label = winner_slot
         .map(|slot| match slot {
             PlannerSlot::PlannerA => "planner_a",
@@ -441,6 +456,7 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + ?Sized>(
         task_id,
         TaskAutomationUpdate {
             plan: Some(winning_plan),
+            context_files,
             status_event: Some("planning_duel_resolved".to_string()),
             status_note: Some(format!(
                 "{status_note}; rationale={}",

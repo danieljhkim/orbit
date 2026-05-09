@@ -140,6 +140,7 @@ impl TaskWriteHost for OrbitRuntime {
                     actor: actor_label.clone(),
                     execution_summary: update.execution_summary.clone(),
                     plan: update.plan.clone(),
+                    context_files: update.context_files.clone(),
                     planned_by,
                     implemented_by: if matches!(
                         update.status,
@@ -252,6 +253,86 @@ mod tests {
             None,
         )
         .expect("run worktree setup")
+    }
+
+    #[test]
+    fn apply_task_automation_update_does_not_touch_context_files_when_unset() {
+        let (root, runtime) = test_runtime();
+        // Pre-create files in the workspace so add_task does not prune the
+        // selectors as missing.
+        let repo = root.path().join("repo");
+        fs::write(repo.join("README.md"), "test\n").expect("write README.md");
+        fs::write(repo.join("CLAUDE.md"), "test\n").expect("write CLAUDE.md");
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Preserve context_files".to_string(),
+                description: "Exercise context_files preservation across automation updates."
+                    .to_string(),
+                workspace_path: Some(".".to_string()),
+                context_files: vec!["README.md".to_string(), "CLAUDE.md".to_string()],
+                ..Default::default()
+            })
+            .expect("add task");
+
+        let initial_context_files = runtime
+            .get_task(&task.id)
+            .expect("reload task")
+            .context_files;
+        assert!(
+            !initial_context_files.is_empty(),
+            "test precondition: add_task should keep existing context_files"
+        );
+
+        runtime
+            .apply_task_automation_update(
+                &task.id,
+                TaskAutomationUpdate {
+                    plan: Some("## Plan\nSome plan body.\n".to_string()),
+                    context_files: None,
+                    ..TaskAutomationUpdate::default()
+                },
+            )
+            .expect("automation update without context_files set");
+
+        let updated = runtime.get_task(&task.id).expect("reload task");
+        assert_eq!(
+            updated.context_files, initial_context_files,
+            "context_files: None should leave the field untouched"
+        );
+    }
+
+    #[test]
+    fn apply_task_automation_update_replaces_context_files_when_set() {
+        let (_root, runtime) = test_runtime();
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Replace context_files".to_string(),
+                description: "Exercise context_files replacement via automation update."
+                    .to_string(),
+                workspace_path: Some(".".to_string()),
+                context_files: vec!["Cargo.toml".to_string()],
+                ..Default::default()
+            })
+            .expect("add task");
+
+        runtime
+            .apply_task_automation_update(
+                &task.id,
+                TaskAutomationUpdate {
+                    context_files: Some(vec![
+                        "file:src/new.rs".to_string(),
+                        "dir:src/new_dir".to_string(),
+                    ]),
+                    ..TaskAutomationUpdate::default()
+                },
+            )
+            .expect("automation update with new context_files");
+
+        let updated = runtime.get_task(&task.id).expect("reload task");
+        assert_eq!(
+            updated.context_files,
+            vec!["file:src/new.rs".to_string(), "dir:src/new_dir".to_string()]
+        );
     }
 
     #[test]

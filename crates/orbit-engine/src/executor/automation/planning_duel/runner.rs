@@ -175,6 +175,7 @@ mod tests {
         _tempdir: TempDir,
         workflow_admissions: AtomicUsize,
         task_starts: AtomicUsize,
+        last_automation_update: Mutex<Option<TaskAutomationUpdate>>,
     }
 
     impl PlanningDuelHost {
@@ -192,11 +193,20 @@ mod tests {
                 _tempdir: tempdir,
                 workflow_admissions: AtomicUsize::new(0),
                 task_starts: AtomicUsize::new(0),
+                last_automation_update: Mutex::new(None),
             }
         }
 
         fn task_status(&self) -> TaskStatus {
             self.task.lock().expect("task lock").status
+        }
+
+        fn last_context_files_update(&self) -> Option<Option<Vec<String>>> {
+            self.last_automation_update
+                .lock()
+                .expect("update lock")
+                .as_ref()
+                .map(|update| update.context_files.clone())
         }
 
         fn admission_count(&self) -> usize {
@@ -287,9 +297,13 @@ mod tests {
                     "planning duel writeback must not include a status update".to_string(),
                 ));
             }
+            *self.last_automation_update.lock().expect("update lock") = Some(update.clone());
             let mut task = self.task.lock().expect("task lock");
             if let Some(plan) = update.plan {
                 task.plan = plan;
+            }
+            if let Some(context_files) = update.context_files {
+                task.context_files = context_files;
             }
             task.comments.extend(update.append_comments);
             task.agent = update.agent;
@@ -554,5 +568,132 @@ mod tests {
             assert_eq!(host.admission_count(), 0, "{status}");
             assert_eq!(host.start_count(), 0, "{status}");
         }
+    }
+
+    fn install_planning_duel_artifacts(host: &PlanningDuelHost, plan_body: &str) {
+        let mut artifacts = host.artifacts.lock().expect("artifacts lock");
+        artifacts.clear();
+        artifacts.push(TaskArtifact {
+            path: "planning-duel/codex-gpt-5.5.md".to_string(),
+            content: "*authored by: codex / gpt-5.5*\n## Plan\nLoser plan.\n".to_string(),
+        });
+        artifacts.push(TaskArtifact {
+            path: "planning-duel/claude-claude-opus-4-7.md".to_string(),
+            content: format!("*authored by: claude / claude-opus-4-7*\n{plan_body}"),
+        });
+        artifacts.push(TaskArtifact {
+            path: "planning-duel/winner.json".to_string(),
+            content: json!({
+                "winner_agent_cli": "claude",
+                "winner_model": "claude-opus-4-7",
+                "arbiter_rationale": "Claude provided more detail."
+            })
+            .to_string(),
+        });
+    }
+
+    fn run_writeback(host: &PlanningDuelHost) -> serde_json::Value {
+        super::artifacts::writeback_planning_duel_task(
+            host,
+            &json!({
+                "task_id": "T20260430-STATUS",
+                "planning_duel_roles": {
+                    "planner_a": { "agent": "codex", "model": "gpt-5.5" },
+                    "planner_b": { "agent": "claude", "model": "claude-opus-4-7" },
+                    "arbiter":   { "agent": "gemini", "model": "gemini-3.1-pro" }
+                }
+            }),
+        )
+        .expect("writeback succeeds")
+    }
+
+    #[test]
+    fn writeback_populates_context_files_when_section_present() {
+        let host = PlanningDuelHost::new(TaskStatus::InProgress);
+        install_planning_duel_artifacts(
+            &host,
+            "## Plan\nDo it.\n\n## Context Files\n\n- `file:src/a.rs`\n- crates/foo/\n",
+        );
+
+        let _ = run_writeback(&host);
+
+        assert_eq!(
+            host.last_context_files_update(),
+            Some(Some(vec![
+                "file:src/a.rs".to_string(),
+                "dir:crates/foo".to_string(),
+            ])),
+            "writeback should set context_files to canonical entries"
+        );
+
+        let task = host.get_task("T20260430-STATUS").expect("task readable");
+        assert_eq!(
+            task.context_files,
+            vec!["file:src/a.rs".to_string(), "dir:crates/foo".to_string()]
+        );
+    }
+
+    #[test]
+    fn writeback_preserves_context_files_when_section_absent() {
+        let host = PlanningDuelHost::new(TaskStatus::InProgress);
+        // Pre-populate the task's context_files with curated state.
+        host.task.lock().expect("task lock").context_files =
+            vec!["file:pre-existing.rs".to_string()];
+        install_planning_duel_artifacts(&host, "## Plan\nNo Context Files section here.\n");
+
+        let _ = run_writeback(&host);
+
+        assert_eq!(
+            host.last_context_files_update(),
+            Some(None),
+            "writeback must leave context_files untouched when no section is present"
+        );
+
+        let task = host.get_task("T20260430-STATUS").expect("task readable");
+        assert_eq!(
+            task.context_files,
+            vec!["file:pre-existing.rs".to_string()],
+            "pre-existing context_files should be preserved"
+        );
+    }
+
+    #[test]
+    fn writeback_preserves_context_files_when_section_recognized_but_empty() {
+        let host = PlanningDuelHost::new(TaskStatus::InProgress);
+        host.task.lock().expect("task lock").context_files =
+            vec!["file:pre-existing.rs".to_string()];
+        install_planning_duel_artifacts(
+            &host,
+            "## Plan\nDo it.\n\n## Context Files\n\n## Risks\n- something.\n",
+        );
+
+        let _ = run_writeback(&host);
+
+        assert_eq!(
+            host.last_context_files_update(),
+            Some(None),
+            "an empty Context Files section should not clear the field"
+        );
+    }
+
+    #[test]
+    fn writeback_is_idempotent_across_two_resolves() {
+        let host = PlanningDuelHost::new(TaskStatus::InProgress);
+        install_planning_duel_artifacts(
+            &host,
+            "## Plan\nDo it.\n\n## Context Files\n- `file:src/a.rs`\n- `dir:src`\n",
+        );
+
+        let _ = run_writeback(&host);
+        let first = host.last_context_files_update();
+
+        let _ = run_writeback(&host);
+        let second = host.last_context_files_update();
+
+        assert!(first.is_some());
+        assert_eq!(
+            first, second,
+            "two consecutive resolves must produce identical context_files"
+        );
     }
 }
