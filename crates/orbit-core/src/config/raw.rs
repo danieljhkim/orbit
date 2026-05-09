@@ -58,7 +58,8 @@ pub(super) struct RawKnowledgeConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawRuntimeSection {
     /// `runtime.backend` — persisted default for the v2 `agent_loop` execution
-    /// backend (§3.1). One of `http`, `cli`, `auto`.
+    /// backend (§3.1). One of `http`, `cli`, `auto`; validated by
+    /// `RuntimeConfig::load_layered`.
     pub(super) backend: Option<String>,
 }
 

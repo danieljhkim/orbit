@@ -54,7 +54,7 @@ impl OrbitRuntime {
         })?;
 
         // §3.1 resolution: replace `Auto` with a concrete backend per
-        // precedence (flag → env → config → http).
+        // precedence (flag → env → config → cli).
         let resolution = self.resolve_v2_backend(backend_flag);
         resolve_activity_backends(&mut asset.spec, resolution.backend);
         let resolved_backend = match &asset.spec.spec {

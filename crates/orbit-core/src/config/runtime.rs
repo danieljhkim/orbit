@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, activity_job::Backend};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
@@ -12,7 +12,7 @@ use crate::paths;
 use super::persistence::PersistenceConfig;
 use super::raw::{
     RawAgentRoleConfig, RawCodexExecutionConfig, RawExecutionEnvConfig, RawPrSection,
-    RawRuntimeConfig, RawTaskSection, RawWorkflowConfig,
+    RawRuntimeConfig, RawRuntimeSection, RawTaskSection, RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -35,7 +35,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) graph_editing: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
-    /// coded `http` default.
+    /// coded `cli` default.
     pub(crate) v2_backend: Option<String>,
     /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
@@ -134,10 +134,7 @@ impl RuntimeConfig {
             .and_then(|g| g.editing)
             .unwrap_or(DEFAULT_GRAPH_EDITING);
 
-        let v2_backend = parsed
-            .runtime
-            .as_ref()
-            .and_then(|section| section.backend.clone());
+        let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
 
         let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
         let pr = pr_config_from_raw(parsed.pr.as_ref());
@@ -189,6 +186,19 @@ fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
     PrConfig {
         task_url_template: raw.and_then(|section| section.task_url_template.clone()),
     }
+}
+
+fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<String>, OrbitError> {
+    let Some(value) = raw.and_then(|section| section.backend.as_deref()) else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    let Some(backend) = Backend::parse(trimmed) else {
+        return Err(OrbitError::InvalidInput(format!(
+            "[runtime] backend has invalid value '{trimmed}'; expected one of: http, cli, auto"
+        )));
+    };
+    Ok(Some(backend.as_str().to_string()))
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
@@ -578,5 +588,32 @@ mod tests {
             config.pr_config().task_url_template.as_deref(),
             Some("https://orbit-cli.com/tasks/{task_id}")
         );
+    }
+
+    #[test]
+    fn runtime_backend_loads_auto_from_workspace_config() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), "[runtime]\nbackend = \"auto\"\n");
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+
+        assert_eq!(config.v2_backend(), Some("auto"));
+    }
+
+    #[test]
+    fn runtime_backend_rejects_invalid_value() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), "[runtime]\nbackend = \"clii\"\n");
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("invalid backend must fail config load");
+        let message = error.to_string();
+
+        assert!(message.contains("[runtime] backend"));
+        assert!(message.contains("clii"));
+        assert!(message.contains("http, cli, auto"));
     }
 }

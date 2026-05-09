@@ -20,7 +20,7 @@ pub struct JobRunArgs {
     #[arg(long)]
     pub input: Vec<String>,
     /// Explicit execution backend override for `agent_loop` steps (§3.1).
-    /// Precedence: this flag > `ORBIT_BACKEND` > `[runtime] backend` > `http`.
+    /// Precedence: this flag > `ORBIT_BACKEND` > `[runtime] backend` > `cli`.
     /// Accepted values: `http`, `cli`, `auto`.
     #[arg(long)]
     pub backend: Option<String>,
