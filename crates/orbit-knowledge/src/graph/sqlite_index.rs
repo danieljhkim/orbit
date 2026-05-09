@@ -443,11 +443,13 @@ pub(crate) fn write_graph_index(
                 path,
                 &mut node_insert,
                 &dir.base,
-                "dir",
-                None,
-                selector.as_deref(),
-                object_hash,
-                child_ordinals.get(&dir.base.id).copied().unwrap_or(0),
+                NodeInsertValues {
+                    node_type: "dir",
+                    kind: None,
+                    selector: selector.as_deref(),
+                    object_hash,
+                    ordinal: child_ordinals.get(&dir.base.id).copied().unwrap_or(0),
+                },
             )?;
         }
 
@@ -458,11 +460,13 @@ pub(crate) fn write_graph_index(
                 path,
                 &mut node_insert,
                 &file.base,
-                "file",
-                None,
-                selector.as_deref(),
-                object_hash,
-                child_ordinals.get(&file.base.id).copied().unwrap_or(0),
+                NodeInsertValues {
+                    node_type: "file",
+                    kind: None,
+                    selector: selector.as_deref(),
+                    object_hash,
+                    ordinal: child_ordinals.get(&file.base.id).copied().unwrap_or(0),
+                },
             )?;
         }
 
@@ -474,11 +478,13 @@ pub(crate) fn write_graph_index(
                 path,
                 &mut node_insert,
                 &leaf.base,
-                "leaf",
-                Some(kind.as_str()),
-                selector.as_deref(),
-                object_hash,
-                child_ordinals.get(&leaf.base.id).copied().unwrap_or(0),
+                NodeInsertValues {
+                    node_type: "leaf",
+                    kind: Some(kind.as_str()),
+                    selector: selector.as_deref(),
+                    object_hash,
+                    ordinal: child_ordinals.get(&leaf.base.id).copied().unwrap_or(0),
+                },
             )?;
         }
     }
@@ -573,30 +579,34 @@ fn query_meta(conn: &Connection, key: &str) -> Result<Option<String>, KnowledgeE
     }
 }
 
+struct NodeInsertValues<'a> {
+    node_type: &'a str,
+    kind: Option<&'a str>,
+    selector: Option<&'a str>,
+    object_hash: &'a str,
+    ordinal: i64,
+}
+
 fn insert_node(
     path: &Path,
     statement: &mut rusqlite::Statement<'_>,
     base: &BaseNodeFields,
-    node_type: &str,
-    kind: Option<&str>,
-    selector: Option<&str>,
-    object_hash: &str,
-    ordinal: i64,
+    values: NodeInsertValues<'_>,
 ) -> Result<(), KnowledgeError> {
     statement
         .execute(params![
             base.id.as_str(),
-            node_type,
-            kind,
+            values.node_type,
+            values.kind,
             base.name.as_str(),
             base.name.to_lowercase(),
             base.language.as_str(),
             base.location.as_str(),
             base.location.to_lowercase(),
             base.parent_id.as_deref(),
-            selector,
-            object_hash,
-            ordinal,
+            values.selector,
+            values.object_hash,
+            values.ordinal,
         ])
         .map_err(|error| sqlite_error(path, "insert graph sqlite node", error))?;
     Ok(())
