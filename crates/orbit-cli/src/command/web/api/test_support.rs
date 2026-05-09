@@ -1,0 +1,105 @@
+//! Shared test helpers reused by the api submodules.
+
+use axum::body::to_bytes;
+use axum::response::Response;
+use chrono::Utc;
+use orbit_core::{JobRun, JobRunState, OrbitRuntime};
+use serde_json::Value;
+
+pub(super) fn write_lines(path: &std::path::Path, lines: &[String]) {
+    let mut content = String::new();
+    for line in lines {
+        content.push_str(line);
+        content.push('\n');
+    }
+    std::fs::write(path, content).expect("write fixture");
+}
+
+pub(super) fn write_replay_job(runtime: &OrbitRuntime, name: &str) -> std::path::PathBuf {
+    let jobs_dir = runtime.data_root().join("resources/jobs");
+    std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+    let path = jobs_dir.join(format!("{name}.yaml"));
+    std::fs::write(
+        &path,
+        format!(
+            r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: {name}
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: nap
+      spec:
+        type: deterministic
+        action: sleep
+        config: {{}}
+"#
+        ),
+    )
+    .expect("write replay job");
+    path
+}
+
+pub(super) fn seed_run(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+    job_id: &str,
+    state: JobRunState,
+) -> JobRun {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct JobRunDoc<'a> {
+        schema_version: u8,
+        run: &'a JobRun,
+    }
+
+    let now = Utc::now();
+    let run = JobRun {
+        run_id: run_id.to_string(),
+        job_id: job_id.to_string(),
+        attempt: 1,
+        state,
+        scheduled_at: now,
+        started_at: matches!(
+            state,
+            JobRunState::Running
+                | JobRunState::Success
+                | JobRunState::Failed
+                | JobRunState::Timeout
+                | JobRunState::Cancelled
+        )
+        .then_some(now),
+        finished_at: state.is_terminal().then_some(now),
+        duration_ms: state.is_terminal().then_some(0),
+        created_at: now,
+        pid: None,
+        pid_start_time: None,
+        input: None,
+        retry_source_run_id: None,
+        knowledge_metrics: None,
+        steps: Vec::new(),
+    };
+    let run_dir = runtime
+        .data_root()
+        .join("state")
+        .join("job-runs")
+        .join(job_id)
+        .join(run_id);
+    std::fs::create_dir_all(&run_dir).expect("create run dir");
+    let content = serde_yaml::to_string(&JobRunDoc {
+        schema_version: 1,
+        run: &run,
+    })
+    .expect("serialize run yaml");
+    std::fs::write(run_dir.join("jrun.yaml"), content).expect("write run yaml");
+    run
+}
+
+pub(super) async fn body_json(response: Response) -> Value {
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    serde_json::from_slice(&bytes).expect("json response")
+}
