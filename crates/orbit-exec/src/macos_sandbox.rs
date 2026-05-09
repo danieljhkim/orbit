@@ -27,6 +27,8 @@ use std::process::{Child, Command, Stdio};
 use orbit_common::types::{OrbitError, ResolvedFsProfile};
 use tempfile::NamedTempFile;
 
+const TRUSTED_SANDBOX_EXEC_PATHS: &[&str] = &["/usr/bin/sandbox-exec"];
+
 /// Compile a [`ResolvedFsProfile`] into SBPL text suitable for
 /// `sandbox-exec -f`.
 ///
@@ -320,7 +322,8 @@ pub fn spawn_under_macos_sandbox(
 
     let profile_path = profile_file.path().to_path_buf();
 
-    let mut command = Command::new("sandbox-exec");
+    let sandbox_exec_path = sandbox_exec_path_or_error()?;
+    let mut command = Command::new(&sandbox_exec_path);
     command
         .arg("-f")
         .arg(&profile_path)
@@ -342,28 +345,52 @@ pub fn spawn_under_macos_sandbox(
 
     let child = command.spawn().map_err(|err| {
         OrbitError::Execution(format!(
-            "failed to spawn sandbox-exec wrapper around `{program}`: {err}"
+            "failed to spawn trusted sandbox-exec `{}` around `{program}`: {err}",
+            sandbox_exec_path.display()
         ))
     })?;
     Ok((child, profile_file))
 }
 
-/// Returns `true` if `sandbox-exec` is on `PATH`.
-pub fn sandbox_exec_available() -> bool {
-    sandbox_exec_available_in(&std::env::var_os("PATH").unwrap_or_default())
+/// Returns the stable program path used in audit logs for sandboxed CLI
+/// invocations. The real spawn path is resolved again at execution time so
+/// missing binaries still fail closed.
+pub fn sandbox_exec_program_for_audit() -> &'static str {
+    TRUSTED_SANDBOX_EXEC_PATHS[0]
 }
 
-pub(crate) fn sandbox_exec_available_in(path_var: &std::ffi::OsStr) -> bool {
-    for dir in std::env::split_paths(path_var) {
-        if dir.as_os_str().is_empty() {
-            continue;
-        }
-        let candidate = dir.join("sandbox-exec");
-        if is_executable(&candidate) {
-            return true;
-        }
-    }
-    false
+/// Returns `true` if a trusted absolute `sandbox-exec` binary is available.
+pub fn sandbox_exec_available() -> bool {
+    sandbox_exec_path().is_some()
+}
+
+/// Human-facing reason used when fail-closed sandboxing cannot find the
+/// trusted wrapper.
+pub fn sandbox_exec_unavailable_message() -> String {
+    format!(
+        "trusted sandbox-exec not available at {}",
+        TRUSTED_SANDBOX_EXEC_PATHS.join(", ")
+    )
+}
+
+/// Resolve `sandbox-exec` from trusted absolute locations only.
+pub fn sandbox_exec_path() -> Option<PathBuf> {
+    sandbox_exec_path_from(TRUSTED_SANDBOX_EXEC_PATHS.iter().map(Path::new))
+}
+
+fn sandbox_exec_path_or_error() -> Result<PathBuf, OrbitError> {
+    sandbox_exec_path().ok_or_else(|| OrbitError::Execution(sandbox_exec_unavailable_message()))
+}
+
+fn sandbox_exec_path_from<I, P>(candidates: I) -> Option<PathBuf>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    candidates
+        .into_iter()
+        .map(|candidate| candidate.as_ref().to_path_buf())
+        .find(|candidate| candidate.is_absolute() && is_executable(candidate))
 }
 
 #[cfg(unix)]
@@ -834,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_exec_available_in_finds_executable_on_path() {
+    fn sandbox_exec_path_from_uses_trusted_absolute_candidate() {
         let dir = tempfile::tempdir().expect("tempdir");
         let bin = dir.path().join("sandbox-exec");
         std::fs::write(&bin, "#!/bin/sh\nexit 0\n").expect("write");
@@ -843,15 +870,67 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("perms");
         }
-        let path_var = std::ffi::OsString::from(dir.path().display().to_string());
-        assert!(sandbox_exec_available_in(&path_var));
+        assert_eq!(sandbox_exec_path_from([bin.as_path()]), Some(bin));
     }
 
     #[test]
-    fn sandbox_exec_available_in_returns_false_when_missing() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path_var = std::ffi::OsString::from(dir.path().display().to_string());
-        assert!(!sandbox_exec_available_in(&path_var));
+    fn sandbox_exec_path_from_rejects_relative_candidates() {
+        let bin = Path::new("sandbox-exec");
+        assert_eq!(sandbox_exec_path_from([bin]), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn spawn_under_macos_sandbox_ignores_fake_sandbox_exec_on_path() {
+        if !sandbox_exec_can_apply() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fake_dir = temp.path().join("fake-bin");
+        std::fs::create_dir_all(&fake_dir).expect("fake dir");
+        let marker = temp.path().join("fake-used");
+        let fake = fake_dir.join("sandbox-exec");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho fake > {}\nexit 77\n",
+                shell_escape(&marker)
+            ),
+        )
+        .expect("write fake sandbox-exec");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
+                .expect("fake perms");
+        }
+
+        let poisoned_path = format!("{}:/usr/bin:/bin", fake_dir.display());
+        let args = ["-c".to_string(), "exit 0".to_string()];
+        let env = [("PATH".to_string(), poisoned_path)];
+        let (child, _profile_file) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
+            profile_text: "(version 1)\n(allow default)\n",
+            program: "/bin/sh",
+            args: &args,
+            env: &env,
+            cwd: None,
+            stdin: Stdio::null(),
+            stdout: Stdio::piped(),
+            stderr: Stdio::piped(),
+        })
+        .expect("spawn sandboxed child");
+        let output = child.wait_with_output().expect("wait for child");
+
+        assert!(
+            output.status.success(),
+            "trusted sandbox-exec should run child despite fake PATH entry; stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !marker.exists(),
+            "fake sandbox-exec on PATH should not have been executed"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -935,7 +1014,7 @@ mod tests {
         profile_file.flush().expect("flush");
 
         let allowed_target = allowed.join("ok");
-        let allow_status = Command::new("sandbox-exec")
+        let allow_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -953,7 +1032,7 @@ mod tests {
         );
 
         let blocked_target = blocked.join("nope");
-        let deny_status = Command::new("sandbox-exec")
+        let deny_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1018,7 +1097,7 @@ mod tests {
         profile_file.flush().expect("flush");
 
         // Allowed read of public_path succeeds.
-        let allow_status = Command::new("sandbox-exec")
+        let allow_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1032,7 +1111,7 @@ mod tests {
         );
 
         // Denied read of secret_path fails.
-        let deny_status = Command::new("sandbox-exec")
+        let deny_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1092,7 +1171,7 @@ mod tests {
         let source_target = src_dir.join("foo.rs");
         let env_target = repo.path().join(".env");
 
-        let source_status = Command::new("sandbox-exec")
+        let source_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1109,7 +1188,7 @@ mod tests {
         );
         assert!(source_target.exists(), "source file not written");
 
-        let env_status = Command::new("sandbox-exec")
+        let env_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1161,7 +1240,7 @@ mod tests {
         profile_file.flush().expect("flush");
 
         let allowed_target = dir.path().join("ok.txt");
-        let allow_status = Command::new("sandbox-exec")
+        let allow_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1175,7 +1254,7 @@ mod tests {
         );
 
         let env_target = dir.path().join("blocked.env");
-        let deny_status = Command::new("sandbox-exec")
+        let deny_status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/bin/sh")
@@ -1247,7 +1326,7 @@ mod tests {
             ("claude", claude_dir.join("ok")),
             ("gemini", gemini_dir.join("ok")),
         ] {
-            let status = Command::new("sandbox-exec")
+            let status = Command::new(sandbox_exec_path_for_test())
                 .arg("-f")
                 .arg(profile_file.path())
                 .arg("/bin/sh")
@@ -1325,7 +1404,7 @@ mod tests {
                     .join(".claude.json.tmp.7969.1778210964004"),
             ),
         ] {
-            let status = Command::new("sandbox-exec")
+            let status = Command::new(sandbox_exec_path_for_test())
                 .arg("-f")
                 .arg(profile_file.path())
                 .arg("/bin/sh")
@@ -1351,6 +1430,11 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    fn sandbox_exec_path_for_test() -> PathBuf {
+        sandbox_exec_path().expect("trusted sandbox-exec path")
+    }
+
+    #[cfg(target_os = "macos")]
     fn sandbox_exec_can_apply() -> bool {
         if !sandbox_exec_available() {
             return false;
@@ -1367,7 +1451,7 @@ mod tests {
             .expect("write probe profile");
         profile_file.flush().expect("flush probe profile");
 
-        std::process::Command::new("sandbox-exec")
+        std::process::Command::new(sandbox_exec_path_for_test())
             .arg("-f")
             .arg(profile_file.path())
             .arg("/usr/bin/true")

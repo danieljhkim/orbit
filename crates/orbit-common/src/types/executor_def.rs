@@ -103,8 +103,8 @@ pub struct ExecutorDef {
     /// wraps the spawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<ExecutorSandboxKind>,
-    /// When `sandbox` is set but the platform's sandbox primitive is
-    /// unavailable (e.g. `sandbox-exec` not on PATH), should the runner
+    /// When `sandbox` is set but the platform's trusted sandbox primitive is
+    /// unavailable (e.g. `/usr/bin/sandbox-exec` is missing), should the runner
     /// degrade to bare exec? Default `false` (fail-closed).
     #[serde(default, skip_serializing_if = "is_false")]
     pub allow_fallback: bool,

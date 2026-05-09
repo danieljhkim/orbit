@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2, T20260509-7, T20260509-9, T20260509-11)
+**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2, T20260509-7, T20260509-9, T20260509-11, T20260509-30)
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -216,7 +216,7 @@ Executor args are prepended before provider runtime args. For seeded Codex, the 
 
 After [T20260427-48], provider runtime args receive provider config through `V2RuntimeHost`. Static executor definitions keep command-shape flags (`exec --json`); dynamic Codex settings such as sandbox mode, side-write roots, and approval policy stay in the retained provider runtime. Codex approval policy is an exec-compatible config override, not the interactive-only `--ask-for-approval` flag.
 
-After [T20260427-51], macOS CLI invocations declaring `sandbox: macos-sandbox-exec` run under `sandbox-exec -f <profile.sb> <provider> ...`. Orbit treats that SBPL profile as filesystem authority and neutralizes provider-native sandbox flags. After [T20260428-10], the profile grants Codex state (`$CODEX_HOME` or `$HOME/.codex`) plus side-write roots from provider config so inherited Orbit subprocesses can persist workflow state while project writes remain governed by `fsProfile`. After [T20260505-22], dispatch also runs `apply_provider_static_arg_fixups` before spawn, separately from sandbox neutralization. Today this only rewrites Claude's `--debug-file` value to `<claude_state_dir>/<basename>` so the log lands inside the already-writable state dir instead of `.orbit/**`, which the default policy denies.
+After [T20260427-51], macOS CLI invocations declaring `sandbox: macos-sandbox-exec` run under `/usr/bin/sandbox-exec -f <profile.sb> <provider> ...`; [T20260509-30] made that wrapper resolution trusted and absolute instead of `PATH`-based. Orbit treats that SBPL profile as filesystem authority and neutralizes provider-native sandbox flags. After [T20260428-10], the profile grants Codex state (`$CODEX_HOME` or `$HOME/.codex`) plus side-write roots from provider config so inherited Orbit subprocesses can persist workflow state while project writes remain governed by `fsProfile`. After [T20260505-22], dispatch also runs `apply_provider_static_arg_fixups` before spawn, separately from sandbox neutralization. Today this only rewrites Claude's `--debug-file` value to `<claude_state_dir>/<basename>` so the log lands inside the already-writable state dir instead of `.orbit/**`, which the default policy denies.
 
 After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], `backend: cli` also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. `groundhog` delegates to the same resolver so task execution and attempt orchestration do not drift. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
 
@@ -529,5 +529,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 - **[T20260509-7]** — Establish focused test coverage for the activity/job DAG executor (linear, retry, parallel, fan-out, loop, pipeline durability) and the macOS sandbox / policy boundary.
 - **[T20260509-11]** — Keep condition guards on equality-only grammar and repair the `ship-auto` empty-backlog guard.
+- **[T20260509-30]** — Resolve the macOS `sandbox-exec` wrapper from a trusted absolute path before CLI spawn.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

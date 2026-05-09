@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use orbit_common::types::ExecutorSandboxKind;
-use orbit_exec::claude_state_dir_from_env;
+use orbit_exec::{claude_state_dir_from_env, sandbox_exec_program_for_audit};
 
 use super::super::dispatcher::ResolvedSandbox;
 
 /// Build the argv we audit-log. When wrapped, the parent process the kernel
-/// sees is `sandbox-exec`, so we prepend `sandbox-exec -f <profile_path>` to
+/// sees is the trusted `sandbox-exec`, so we prepend
+/// `<trusted sandbox-exec> -f <profile_path>` to
 /// the child program. The profile path is the literal `<profile.sb>` because
 /// the real path is a tempfile created at spawn time and only meaningful to
 /// the kernel — the placeholder keeps the audit record stable across runs.
@@ -18,7 +19,7 @@ pub(super) fn audit_argv_for_dispatch(
     match sandbox {
         Some(sb) if sb.kind == ExecutorSandboxKind::MacosSandboxExec => {
             let mut out = Vec::with_capacity(args.len() + 4);
-            out.push("sandbox-exec".to_string());
+            out.push(sandbox_exec_program_for_audit().to_string());
             out.push("-f".to_string());
             out.push("<profile.sb>".to_string());
             out.push(program.to_string());
@@ -121,7 +122,7 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "sandbox-exec",
+                sandbox_exec_program_for_audit(),
                 "-f",
                 "<profile.sb>",
                 "/usr/bin/claude",

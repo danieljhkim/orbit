@@ -13,6 +13,8 @@ use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::ExecutorSandboxKind;
 use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
 use orbit_common::utility::logging::RedactingFields;
+#[cfg(target_os = "macos")]
+use orbit_exec::sandbox_exec_path;
 use orbit_tools::{FsAuditLogger, ToolContext};
 use serde_json::Value;
 use tracing::field::{Field, Visit};
@@ -356,7 +358,10 @@ fn make_executable(_path: &Path) {}
 
 #[cfg(target_os = "macos")]
 pub(in crate::activity_job::cli_runner) fn sandbox_exec_can_apply_for_test() -> bool {
-    Command::new("sandbox-exec")
+    let Some(path) = sandbox_exec_path() else {
+        return false;
+    };
+    Command::new(path)
         .args(["-p", "(version 1)\n(allow default)\n", "/usr/bin/true"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

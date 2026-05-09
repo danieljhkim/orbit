@@ -110,9 +110,9 @@ pub fn run_cli_backend(
     subprocess_args.extend(invocation.args.iter().cloned());
 
     // The audit argv reflects what actually runs. Under sandbox-exec the
-    // parent is `sandbox-exec -f <profile.sb> <program> <args...>`; under
-    // bare exec it's `<program> <args...>`. The redactor still scrubs the
-    // child's program name + args so secrets in argv stay redacted.
+    // parent is `<trusted sandbox-exec> -f <profile.sb> <program> <args...>`;
+    // under bare exec it's `<program> <args...>`. The redactor still scrubs
+    // the child's program name + args so secrets in argv stay redacted.
     let redaction = PatternRedactor::with_argv_secrets();
     let audit_argv =
         audit_argv_for_dispatch(&invocation.program, &subprocess_args, sandbox.as_ref());

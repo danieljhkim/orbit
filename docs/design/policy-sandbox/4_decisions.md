@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-08
+**Last updated:** 2026-05-09
 
 This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by ADR number. New entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -189,6 +189,19 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 - Cost: three additional clauses on every macOS sandbox profile when `HOME` resolves and `CLAUDE_CONFIG_DIR` is unset. Symmetric to the ADR-013 trade-off; provider plumbing is avoided.
 - This ADR amends ADR-013 rather than replacing it: the per-provider state-dir clauses still emit unconditionally; the new clauses are scoped to the HOME-fallback branch only.
 
+## ADR-015 — macOS sandbox wrapper resolves from trusted absolute locations
+
+**Status:** Accepted · 2026-05 · [T20260509-30]
+
+**Context.** The macOS CLI wrapper previously spawned `sandbox-exec` by bare name and checked availability by walking `PATH`. A writable or config-influenced `PATH` could point Orbit at an attacker-controlled wrapper while Orbit still believed kernel sandbox enforcement was active.
+
+**Decision.** Resolve the wrapper only from trusted absolute locations, currently `/usr/bin/sandbox-exec`, and use the same trusted resolver for availability checks, audit argv, and process spawn. Missing trusted binaries fail closed unless the executor explicitly allows fallback, and the error names the trusted location that was probed.
+
+**Consequences.**
+- Fake `sandbox-exec` binaries earlier on `PATH` are ignored, so the sandbox boundary no longer depends on inherited environment ordering.
+- Availability messages describe the trusted absolute location instead of implying arbitrary `PATH` lookup.
+- Cost: the implementation is intentionally macOS-location-specific; if Apple moves or removes the binary, Orbit must update the trusted location list or add a new backend rather than silently accepting a user-supplied replacement.
+
 ---
 
 ## Task References
@@ -204,5 +217,6 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 - **[T20260428-14]** — Extend the macOS sandbox state-dir allowance to Claude and Gemini, and document why side-write roots remain Codex-only.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 - **[T20260508-13]** — Add `$HOME/.claude.json{,.lock,.tmp.<pid>.<ms_ts>}` sibling allows to the macOS sandbox profile so Claude can persist its main settings file.
+- **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations rather than inherited `PATH`.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09 (T20260509-7, T20260509-28)
+**Last updated:** 2026-05-09 (T20260509-7, T20260509-28, T20260509-30)
 
 This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
@@ -115,6 +115,8 @@ Legacy pipeline contexts are different. `crates/orbit-core/src/runtime/pipeline.
 
 The `Sandbox` trait remains the seam for generic `run_process` callers, but CLI-backed `agent_loop` invocations use a separate executor wrapper when the executor declares `sandbox: macos-sandbox-exec` ([T20260427-51]). The v2 host resolves the activity `fsProfile`; the engine converts workspace-relative rules to absolute roots and compiles SBPL before spawning the provider CLI.
 
+The macOS wrapper resolves `sandbox-exec` from trusted absolute locations only, currently `/usr/bin/sandbox-exec`; it does not consult `PATH` for either availability checks or process spawn. If the trusted binary is missing, the runner fails closed unless the executor declares `allow_fallback: true`, and the error names the trusted location that was probed ([T20260509-30]).
+
 The compiled macOS profile denies by default, allows broad reads required by agent CLIs and system libraries, allows process/signal/ipc/network/sysctl/iokit operations, and allows writes to:
 
 - scratch/cache roots (`/tmp`, `/private/tmp`, `/private/var/folders`, `/dev`, `$HOME/Library/Caches`)
@@ -161,7 +163,10 @@ Risk-weighted regression tests sit beside the implementations they guard
   such as `../secret.txt`, `src/../secret.txt`, and their backslash-normalized
   equivalents are rejected as `OrbitError::InvalidInput` for both read and
   modify checks ([T20260509-27]).
-- `crates/orbit-exec/src/macos_sandbox.rs#tests` — SBPL compilation tests
+- `crates/orbit-exec/src/macos_sandbox.rs#tests` — trusted wrapper
+  resolution ignores `PATH`, including a macOS runtime test that places a fake
+  `sandbox-exec` earlier on `PATH` and verifies the fake wrapper is not
+  executed ([T20260509-30]). SBPL compilation tests
   cover `denyRead` / `denyModify` clause emission (`subpath` for simple
   rules, `regex` for non-trivial globs) and the deny-after-allow ordering
   required for last-match-wins. macOS-gated runtime tests
@@ -216,5 +221,6 @@ non-empty on Linux CI.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 - **[T20260509-7]** — Add `PolicyEngine::check` boundary tests and macOS sandbox `denyRead` / realistic agent-loop profile tests.
 - **[T20260509-28]** — Validate policy and executor resource names as safe file stems before file-store path construction.
+- **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations and keep availability errors fail-closed and explicit.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

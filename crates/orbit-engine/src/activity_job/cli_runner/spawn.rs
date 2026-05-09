@@ -4,7 +4,7 @@ use std::process::{Child, Command, Stdio};
 use orbit_common::types::{ExecutorSandboxKind, OrbitError};
 use orbit_exec::{
     MacosSandboxSpawnRequest, compile_macos_sandbox_profile, sandbox_exec_available,
-    spawn_under_macos_sandbox,
+    sandbox_exec_unavailable_message, spawn_under_macos_sandbox,
 };
 use tempfile::NamedTempFile;
 
@@ -69,8 +69,8 @@ fn spawn_macos_sandboxed(
 }
 
 /// Test-friendly variant of [`spawn_macos_sandboxed`]: callers pass an
-/// explicit availability flag instead of probing `PATH`. Production routes
-/// through the public wrapper which always reads the live `PATH`; tests
+/// explicit availability flag instead of probing the trusted wrapper. Production
+/// routes through the public wrapper which resolves the trusted absolute path; tests
 /// can assert the fail-closed and fallback branches without mutating
 /// process-global state.
 fn spawn_macos_sandboxed_with(
@@ -82,18 +82,18 @@ fn spawn_macos_sandboxed_with(
     sandbox_exec_present: bool,
 ) -> Result<SpawnedChild, OrbitError> {
     if !sandbox_exec_present {
+        let unavailable = sandbox_exec_unavailable_message();
         if sandbox.allow_fallback {
             tracing::warn!(
                 target: "orbit.engine.cli_runner",
                 program = program,
-                "sandbox-exec not available on PATH; falling back to bare exec because executor declares allow_fallback"
+                "{unavailable}; falling back to bare exec because executor declares allow_fallback"
             );
             return spawn_bare(program, args, env, cwd);
         }
-        return Err(OrbitError::Execution(
-            "sandbox-exec not available on PATH; declare allow_fallback: true to permit bare exec"
-                .to_string(),
-        ));
+        return Err(OrbitError::Execution(format!(
+            "{unavailable}; declare allow_fallback: true to permit bare exec"
+        )));
     }
 
     // SBPL compilation happens at spawn time so the orbit-exec dependency
@@ -150,8 +150,12 @@ mod tests {
         match err {
             OrbitError::Execution(msg) => {
                 assert!(
-                    msg.contains("sandbox-exec not available"),
+                    msg.contains("trusted sandbox-exec not available at /usr/bin/sandbox-exec"),
                     "unexpected error message: {msg}"
+                );
+                assert!(
+                    msg.contains("allow_fallback: true"),
+                    "error should describe fallback opt-in: {msg}"
                 );
             }
             other => panic!("expected Execution error, got {other:?}"),

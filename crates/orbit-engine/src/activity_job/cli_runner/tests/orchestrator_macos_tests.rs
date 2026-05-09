@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::types::activity_job::V2AuditEventKind;
+use orbit_exec::sandbox_exec_program_for_audit;
 use tempfile::tempdir;
 
 use super::super::super::audit_writer::V2AuditWriter;
@@ -71,11 +72,11 @@ fn run_cli_backend_audit_argv_starts_with_sandbox_exec_for_each_provider() {
         assert_eq!(
             &argv[..3],
             &[
-                "sandbox-exec".to_string(),
+                sandbox_exec_program_for_audit().to_string(),
                 "-f".to_string(),
                 "<profile.sb>".to_string()
             ],
-            "provider {provider_name} should log sandbox-exec prefix; argv={argv:?}"
+            "provider {provider_name} should log trusted sandbox-exec prefix; argv={argv:?}"
         );
         assert_eq!(
             argv[3],
@@ -210,7 +211,7 @@ fn run_cli_backend_drops_gemini_sandbox_flag_under_outer_wrapper() {
             _ => None,
         })
         .expect("cli.invocation.started event");
-    // Skip `sandbox-exec -f <profile.sb> <program>` prefix so the
+    // Skip `<trusted sandbox-exec> -f <profile.sb> <program>` prefix so the
     // assertion targets the gemini-side argv.
     let suffix = &argv[4..];
     assert!(
