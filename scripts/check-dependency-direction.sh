@@ -10,6 +10,9 @@ allowed_internal_deps() {
     orbit-common)
       echo ""
       ;;
+    orbit-registry)
+      echo "orbit-common"
+      ;;
     orbit-policy | orbit-exec | orbit-knowledge | orbit-store)
       echo "orbit-common"
       ;;
@@ -32,7 +35,7 @@ allowed_internal_deps() {
       echo "orbit-common orbit-core orbit-mcp"
       ;;
     *)
-      echo ""
+      return 1
       ;;
   esac
 }
@@ -48,19 +51,35 @@ contains_word() {
   return 1
 }
 
-workspace_crates=(
-  orbit-agent
-  orbit-cli
-  orbit-common
-  orbit-core
-  orbit-engine
-  orbit-exec
-  orbit-knowledge
-  orbit-mcp
-  orbit-policy
-  orbit-store
-  orbit-tools
+load_workspace_crates() {
+  cargo metadata --format-version 1 --no-deps --manifest-path "$repo_root/Cargo.toml" |
+    python3 -c '
+import json
+import sys
+
+metadata = json.load(sys.stdin)
+workspace_members = set(metadata["workspace_members"])
+workspace_crates = sorted(
+    package["name"]
+    for package in metadata["packages"]
+    if package["id"] in workspace_members and package["name"].startswith("orbit-")
 )
+for crate in workspace_crates:
+    print(crate)
+'
+}
+
+workspace_crates=()
+while IFS= read -r crate; do
+  if [[ -n "$crate" ]]; then
+    workspace_crates+=("$crate")
+  fi
+done < <(load_workspace_crates)
+
+if [[ "${#workspace_crates[@]}" -eq 0 ]]; then
+  echo "no orbit workspace crates discovered from cargo metadata"
+  exit 1
+fi
 
 for crate in "${workspace_crates[@]}"; do
   manifest="$repo_root/crates/${crate}/Cargo.toml"
@@ -70,7 +89,12 @@ for crate in "${workspace_crates[@]}"; do
     continue
   fi
 
-  allowed="$(allowed_internal_deps "$crate")"
+  if ! allowed="$(allowed_internal_deps "$crate")"; then
+    echo "missing dependency direction policy for workspace crate '${crate}'"
+    fail=1
+    continue
+  fi
+
   while IFS= read -r dep; do
     if [[ -n "$dep" ]] && ! contains_word "$allowed" "$dep"; then
       echo "forbidden dependency '${dep}' found in ${manifest}"

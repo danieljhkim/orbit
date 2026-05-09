@@ -47,7 +47,7 @@ pub fn validate_tool_allowlist(allowlist: &[String]) -> Result<(), ToolAllowlist
             return Err(ToolAllowlistError::EmptyName { index });
         }
         if let Some(prefix) = wildcard_prefix(entry)
-            && !V2_TOOL_WILDCARD_ROOTS.iter().any(|root| *root == prefix)
+            && !V2_TOOL_WILDCARD_ROOTS.contains(&prefix)
         {
             return Err(ToolAllowlistError::WildcardRootNotPermitted {
                 entry: entry.clone(),
@@ -75,11 +75,7 @@ where
     for entry in allowlist {
         if let Some(prefix) = wildcard_prefix(entry) {
             let has_match = registered_tools.iter().any(|tool| tool.starts_with(prefix));
-            if !has_match
-                && !V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS
-                    .iter()
-                    .any(|root| *root == prefix)
-            {
+            if !has_match && !V2_INTENTIONALLY_EMPTY_TOOL_WILDCARD_ROOTS.contains(&prefix) {
                 return Err(ToolAllowlistError::WildcardRootMatchesNoTools {
                     entry: entry.clone(),
                 });
@@ -125,7 +121,7 @@ pub fn tool_allowed(tool_name: &str, allowlist: &[String]) -> bool {
             return true;
         }
         if let Some(prefix) = wildcard_prefix(entry)
-            && tool_name.starts_with(&prefix)
+            && tool_name.starts_with(prefix)
         {
             return true;
         }
@@ -153,7 +149,7 @@ mod tests {
     fn registry_validation_accepts_documented_empty_audit_root() {
         validate_tool_allowlist_against_registered_tools(
             &["orbit.audit.*".to_string()],
-            ["orbit.task.show"].into_iter(),
+            ["orbit.task.show"],
         )
         .expect("reserved audit root is intentionally empty");
     }
@@ -162,7 +158,7 @@ mod tests {
     fn registry_validation_rejects_unmatched_non_empty_root() {
         let err = validate_tool_allowlist_against_registered_tools(
             &["fs.*".to_string()],
-            ["orbit.task.show"].into_iter(),
+            ["orbit.task.show"],
         )
         .expect_err("fs wildcard must match registered tools");
 
