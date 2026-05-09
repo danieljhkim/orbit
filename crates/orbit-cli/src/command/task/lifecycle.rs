@@ -77,7 +77,7 @@ pub struct TaskApproveArgs {
 impl Execute for TaskApproveArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let ids = if self.all_proposed {
-            select_proposed_task_ids(runtime, self.yes, "approved")?
+            select_proposed_task_ids(runtime, self.yes, "approved", self.json)?
         } else {
             self.ids
         };
@@ -148,7 +148,7 @@ pub struct TaskRejectArgs {
 impl Execute for TaskRejectArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let ids = if self.all_proposed {
-            select_proposed_task_ids(runtime, self.yes, "rejected")?
+            select_proposed_task_ids(runtime, self.yes, "rejected", self.json)?
         } else {
             self.ids
         };
@@ -288,33 +288,57 @@ fn select_proposed_task_ids(
     runtime: &OrbitRuntime,
     yes: bool,
     action: &str,
+    json: bool,
 ) -> Result<Vec<String>, OrbitError> {
     let proposed =
         runtime.list_tasks_filtered(Some(TaskStatus::Proposed), None, None, None, None, None)?;
     if proposed.is_empty() {
-        println!("No proposed tasks found.");
+        if json {
+            eprintln!("No proposed tasks found.");
+        } else {
+            println!("No proposed tasks found.");
+        }
         return Ok(Vec::new());
     }
     if !yes {
-        println!(
-            "The following {} task(s) will be {}:",
-            proposed.len(),
-            action
-        );
-        for task in &proposed {
-            println!("  {} — {}", task.id, task.title);
-        }
-        print!("Proceed? [y/N] ");
         use std::io::Write;
-        std::io::stdout()
-            .flush()
-            .map_err(|e| OrbitError::Io(e.to_string()))?;
+        if json {
+            eprintln!(
+                "The following {} task(s) will be {}:",
+                proposed.len(),
+                action
+            );
+            for task in &proposed {
+                eprintln!("  {} — {}", task.id, task.title);
+            }
+            eprint!("Proceed? [y/N] ");
+            std::io::stderr()
+                .flush()
+                .map_err(|e| OrbitError::Io(e.to_string()))?;
+        } else {
+            println!(
+                "The following {} task(s) will be {}:",
+                proposed.len(),
+                action
+            );
+            for task in &proposed {
+                println!("  {} — {}", task.id, task.title);
+            }
+            print!("Proceed? [y/N] ");
+            std::io::stdout()
+                .flush()
+                .map_err(|e| OrbitError::Io(e.to_string()))?;
+        }
         let mut input = String::new();
         std::io::stdin()
             .read_line(&mut input)
             .map_err(|e| OrbitError::Io(e.to_string()))?;
         if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-            println!("Aborted.");
+            if json {
+                eprintln!("Aborted.");
+            } else {
+                println!("Aborted.");
+            }
             return Ok(Vec::new());
         }
     }
