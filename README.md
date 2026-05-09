@@ -24,6 +24,18 @@ Full positioning, commercial model, and roadmap: [docs/POSITIONING.md](docs/POSI
 
 ---
 
+## Dogfooding: throughput
+
+Orbit ships its own backlog using Orbit. Recent peak: **~24 PRs merged per hour** to this repo, agent-authored end-to-end — tasks dispatched in parallel worktrees, and PRs opened without human intervention between them.
+
+<p align="center">
+  <img src="docs/assets/merge-throughput.png" alt="GitHub commit timeline showing parallel-batch PRs landing every few minutes, each tagged with an Orbit task ID" width="300" />
+</p>
+
+Live receipts: [`agent-main` commit history](https://github.com/danieljhkim/orbit/commits/agent-main/) and the [published task backlog](https://orbit-cli.com/tasks/). Every `[T20260509-XX]` tag in a commit is an Orbit task ID — `orbit task show <id>` (or the published view) reconstructs the prompt, plan, execution trace, and review threads months later.
+
+---
+
 ## Quick Start
 
 **Prerequisites:** at least one supported agent CLI (Codex, Claude Code, or Gemini CLI), authenticated. For PR-based execution, `gh` installed and authenticated; otherwise use `--mode local`.
