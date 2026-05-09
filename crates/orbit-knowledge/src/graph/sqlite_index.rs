@@ -1,20 +1,166 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{SecondsFormat, Utc};
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 
 use super::nodes::{BaseNodeFields, CodebaseGraphV1, FileNode, LeafKind};
 use crate::error::KnowledgeError;
 
-pub(crate) const GRAPH_SQLITE_INDEX_SCHEMA_VERSION: u32 = 1;
+pub(crate) const GRAPH_SQLITE_INDEX_SCHEMA_VERSION: u32 = 2;
 pub(crate) const GRAPH_SQLITE_INDEX_FILENAME: &str = "graph_index.sqlite";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphIndexNodeRow {
+    pub id: String,
+    pub node_type: String,
+    pub kind: Option<String>,
+    pub location: String,
+    pub parent_id: Option<String>,
+    pub selector: Option<String>,
+    pub object_hash: String,
+}
+
+pub struct GraphIndexReader {
+    conn: Connection,
+    path: PathBuf,
+}
+
+impl GraphIndexReader {
+    pub fn open_current(
+        path: impl AsRef<Path>,
+        graph_ref: &str,
+    ) -> Result<Option<Self>, KnowledgeError> {
+        let path = path.as_ref();
+        if !path.is_file() {
+            return Ok(None);
+        }
+
+        let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(conn) => conn,
+            Err(_) => return Ok(None),
+        };
+        conn.pragma_update(None, "busy_timeout", "5000")
+            .map_err(|error| sqlite_error(path, "set busy_timeout", error))?;
+
+        let expected_schema = GRAPH_SQLITE_INDEX_SCHEMA_VERSION.to_string();
+        if query_meta(&conn, "schema_version")?.as_deref() != Some(expected_schema.as_str()) {
+            return Ok(None);
+        }
+        if query_meta(&conn, "graph_ref")?.as_deref() != Some(graph_ref) {
+            return Ok(None);
+        }
+
+        Ok(Some(Self {
+            conn,
+            path: path.to_path_buf(),
+        }))
+    }
+
+    pub fn find_node_by_selector(
+        &self,
+        selector: &str,
+    ) -> Result<Option<GraphIndexNodeRow>, KnowledgeError> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, node_type, kind, location, parent_id, selector, object_hash
+                FROM node
+                WHERE selector = ?1
+                LIMIT 1
+                "#,
+                params![selector],
+                graph_index_node_from_row,
+            )
+            .optional()
+            .map_err(|error| sqlite_error(&self.path, "query graph sqlite selector", error))
+    }
+
+    pub fn node_by_id(&self, id: &str) -> Result<Option<GraphIndexNodeRow>, KnowledgeError> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, node_type, kind, location, parent_id, selector, object_hash
+                FROM node
+                WHERE id = ?1
+                LIMIT 1
+                "#,
+                params![id],
+                graph_index_node_from_row,
+            )
+            .optional()
+            .map_err(|error| sqlite_error(&self.path, "query graph sqlite node by id", error))
+    }
+
+    pub fn children_of(
+        &self,
+        parent_id: &str,
+        limit: usize,
+    ) -> Result<Vec<GraphIndexNodeRow>, KnowledgeError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let limit = i64::try_from(limit).map_err(|_| {
+            KnowledgeError::invalid_data("graph sqlite child limit exceeds i64".to_string())
+        })?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT id, node_type, kind, location, parent_id, selector, object_hash
+                FROM node
+                WHERE parent_id = ?1
+                ORDER BY ordinal ASC, id ASC
+                LIMIT ?2
+                "#,
+            )
+            .map_err(|error| {
+                sqlite_error(&self.path, "prepare graph sqlite children query", error)
+            })?;
+        let rows = stmt
+            .query_map(params![parent_id, limit], graph_index_node_from_row)
+            .map_err(|error| sqlite_error(&self.path, "query graph sqlite children", error))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| sqlite_error(&self.path, "read graph sqlite child row", error))
+    }
+
+    pub fn lineage_for(
+        &self,
+        parent_id: Option<&str>,
+        depth: usize,
+    ) -> Result<Vec<GraphIndexNodeRow>, KnowledgeError> {
+        if depth == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut lineage = Vec::new();
+        let mut next_id = parent_id.map(ToOwned::to_owned);
+        while let Some(id) = next_id {
+            let row = self.node_by_id(&id)?.ok_or_else(|| {
+                KnowledgeError::invalid_data(format!(
+                    "graph sqlite index references missing parent node `{id}`"
+                ))
+            })?;
+            next_id = row.parent_id.clone();
+            lineage.push(row);
+        }
+        lineage.reverse();
+
+        if lineage.len() > depth {
+            Ok(lineage.split_off(lineage.len() - depth))
+        } else {
+            Ok(lineage)
+        }
+    }
+}
 
 pub(crate) fn write_graph_index(
     path: &Path,
     graph_ref: &str,
     graph: &CodebaseGraphV1,
+    node_object_hashes: &HashMap<String, String>,
 ) -> Result<(), KnowledgeError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -57,11 +203,14 @@ pub(crate) fn write_graph_index(
           location TEXT NOT NULL,
           location_lower TEXT NOT NULL,
           parent_id TEXT,
-          selector TEXT
+          selector TEXT,
+          object_hash TEXT NOT NULL,
+          ordinal INTEGER NOT NULL
         );
         CREATE INDEX idx_node_name_lower ON node(name_lower);
         CREATE INDEX idx_node_location_lower ON node(location_lower);
         CREATE INDEX idx_node_parent ON node(parent_id);
+        CREATE INDEX idx_node_parent_ordinal ON node(parent_id, ordinal);
         CREATE UNIQUE INDEX idx_node_selector ON node(selector) WHERE selector IS NOT NULL;
 
         CREATE TABLE file_summary (
@@ -89,18 +238,21 @@ pub(crate) fn write_graph_index(
     .map_err(|error| sqlite_error(path, "insert sqlite index created_at", error))?;
 
     {
+        let child_ordinals = child_ordinals(graph);
         let mut node_insert = tx
             .prepare(
                 r#"
                 INSERT OR REPLACE INTO node (
-                  id, node_type, kind, name, name_lower, location, location_lower, parent_id, selector
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                  id, node_type, kind, name, name_lower, location, location_lower, parent_id,
+                  selector, object_hash, ordinal
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                 "#,
             )
             .map_err(|error| sqlite_error(path, "prepare graph sqlite node insert", error))?;
 
         for dir in &graph.dirs {
             let selector = stable_selector(dir_selector(&dir.base), &selector_counts);
+            let object_hash = object_hash_for(path, node_object_hashes, &dir.base.id)?;
             insert_node(
                 path,
                 &mut node_insert,
@@ -108,11 +260,14 @@ pub(crate) fn write_graph_index(
                 "dir",
                 None,
                 selector.as_deref(),
+                object_hash,
+                child_ordinals.get(&dir.base.id).copied().unwrap_or(0),
             )?;
         }
 
         for file in &graph.files {
             let selector = stable_selector(file_selector(&file.base), &selector_counts);
+            let object_hash = object_hash_for(path, node_object_hashes, &file.base.id)?;
             insert_node(
                 path,
                 &mut node_insert,
@@ -120,12 +275,15 @@ pub(crate) fn write_graph_index(
                 "file",
                 None,
                 selector.as_deref(),
+                object_hash,
+                child_ordinals.get(&file.base.id).copied().unwrap_or(0),
             )?;
         }
 
         for leaf in &graph.leaves {
             let kind = leaf.kind.to_string();
             let selector = stable_selector(leaf_selector(&leaf.base, &leaf.kind), &selector_counts);
+            let object_hash = object_hash_for(path, node_object_hashes, &leaf.base.id)?;
             insert_node(
                 path,
                 &mut node_insert,
@@ -133,6 +291,8 @@ pub(crate) fn write_graph_index(
                 "leaf",
                 Some(kind.as_str()),
                 selector.as_deref(),
+                object_hash,
+                child_ordinals.get(&leaf.base.id).copied().unwrap_or(0),
             )?;
         }
     }
@@ -234,6 +394,8 @@ fn insert_node(
     node_type: &str,
     kind: Option<&str>,
     selector: Option<&str>,
+    object_hash: &str,
+    ordinal: i64,
 ) -> Result<(), KnowledgeError> {
     statement
         .execute(params![
@@ -246,9 +408,64 @@ fn insert_node(
             base.location.to_lowercase(),
             base.parent_id.as_deref(),
             selector,
+            object_hash,
+            ordinal,
         ])
         .map_err(|error| sqlite_error(path, "insert graph sqlite node", error))?;
     Ok(())
+}
+
+fn graph_index_node_from_row(row: &Row<'_>) -> rusqlite::Result<GraphIndexNodeRow> {
+    Ok(GraphIndexNodeRow {
+        id: row.get(0)?,
+        node_type: row.get(1)?,
+        kind: row.get(2)?,
+        location: row.get(3)?,
+        parent_id: row.get(4)?,
+        selector: row.get(5)?,
+        object_hash: row.get(6)?,
+    })
+}
+
+fn object_hash_for<'a>(
+    path: &Path,
+    node_object_hashes: &'a HashMap<String, String>,
+    node_id: &str,
+) -> Result<&'a str, KnowledgeError> {
+    node_object_hashes
+        .get(node_id)
+        .map(String::as_str)
+        .ok_or_else(|| {
+            KnowledgeError::invalid_data(format!(
+                "graph sqlite index {} missing object hash for node `{node_id}`",
+                path.display()
+            ))
+        })
+}
+
+fn child_ordinals(graph: &CodebaseGraphV1) -> HashMap<String, i64> {
+    let mut ordinals = HashMap::new();
+    for dir in &graph.dirs {
+        for (ordinal, child_id) in dir
+            .dir_children
+            .iter()
+            .chain(dir.file_children.iter())
+            .enumerate()
+        {
+            ordinals.insert(child_id.clone(), ordinal as i64);
+        }
+    }
+    for file in &graph.files {
+        for (ordinal, child_id) in file.leaf_children.iter().enumerate() {
+            ordinals.insert(child_id.clone(), ordinal as i64);
+        }
+    }
+    for leaf in &graph.leaves {
+        for (ordinal, child_id) in leaf.children.iter().enumerate() {
+            ordinals.insert(child_id.clone(), ordinal as i64);
+        }
+    }
+    ordinals
 }
 
 fn insert_file_summary(

@@ -16,7 +16,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
-use super::nodes::{CodebaseGraphV1, DirNode, FileNode, LeafNode};
+use super::nodes::{CodebaseGraphV1, DirNode, FileNode, GraphNode, LeafNode};
 use super::sqlite_index::{GRAPH_SQLITE_INDEX_FILENAME, write_graph_index};
 use crate::error::KnowledgeError;
 use crate::io::{write_text_atomic, write_text_atomic_durable};
@@ -515,6 +515,68 @@ impl GraphObjectStore {
         })
     }
 
+    pub fn read_node_by_object_hash(
+        &self,
+        node_id: &str,
+        node_type: &str,
+        object_hash: &str,
+        options: GraphReadOptions,
+    ) -> Result<GraphNode, KnowledgeError> {
+        let envelope = self.read_object_envelope(object_hash)?;
+        let node = match node_type {
+            "dir" => {
+                let mut dir: DirNode = serde_json::from_value(envelope.node).map_err(|error| {
+                    KnowledgeError::invalid_data(format!("dir node parse: {error}"))
+                })?;
+                dir.base.object_hash = Some(object_hash.to_string());
+                GraphNode::Dir(dir)
+            }
+            "file" => {
+                let mut file: FileNode =
+                    serde_json::from_value(envelope.node).map_err(|error| {
+                        KnowledgeError::invalid_data(format!("file node parse: {error}"))
+                    })?;
+                file.base.object_hash = Some(object_hash.to_string());
+                if let Some(ref blob_hash) = file.source_blob_hash
+                    && file.source.is_empty()
+                    && options.hydrate_file_source
+                    && let Ok(source) = self.read_blob(blob_hash)
+                {
+                    file.source = source;
+                }
+                GraphNode::File(file)
+            }
+            "leaf" => {
+                let mut leaf: LeafNode =
+                    serde_json::from_value(envelope.node).map_err(|error| {
+                        KnowledgeError::invalid_data(format!("leaf node parse: {error}"))
+                    })?;
+                leaf.base.object_hash = Some(object_hash.to_string());
+                if let Some(ref blob_hash) = leaf.source_blob_hash
+                    && leaf.source.is_empty()
+                    && options.hydrate_leaf_source
+                {
+                    leaf.source = self.read_blob(blob_hash)?;
+                }
+                GraphNode::Leaf(leaf)
+            }
+            other => {
+                return Err(KnowledgeError::invalid_data(format!(
+                    "unsupported graph node type `{other}` for `{node_id}`"
+                )));
+            }
+        };
+
+        if node.id() != node_id {
+            return Err(KnowledgeError::invalid_data(format!(
+                "graph object `{object_hash}` contained node `{}` instead of `{node_id}`",
+                node.id()
+            )));
+        }
+
+        Ok(node)
+    }
+
     // -----------------------------------------------------------------------
     // Write path
     // -----------------------------------------------------------------------
@@ -720,7 +782,12 @@ impl GraphObjectStore {
             "nodes": index_nodes,
         });
         write_json_file(&self.index_path_for_hash(&root_graph_hash)?, &by_id_index)?;
-        write_graph_index(&self.graph_sqlite_index_path(), &root_graph_hash, graph)?;
+        write_graph_index(
+            &self.graph_sqlite_index_path(),
+            &root_graph_hash,
+            graph,
+            &object_hashes,
+        )?;
 
         // The stored `index` path is knowledge-root-relative. Readers rooted at
         // `knowledge_dir` can join it directly; readers rooted at `graph_dir`
@@ -1036,10 +1103,11 @@ mod tests {
         assert!(indexes.contains(&"idx_node_location_lower".to_string()));
         assert!(indexes.contains(&"idx_node_name_lower".to_string()));
         assert!(indexes.contains(&"idx_node_parent".to_string()));
+        assert!(indexes.contains(&"idx_node_parent_ordinal".to_string()));
         assert!(indexes.contains(&"idx_node_selector".to_string()));
 
         let meta = sqlite_meta(&conn);
-        assert_eq!(meta.get("schema_version").map(String::as_str), Some("1"));
+        assert_eq!(meta.get("schema_version").map(String::as_str), Some("2"));
         assert_eq!(
             meta.get("graph_ref").map(String::as_str),
             Some(current_ref.root_graph_hash.as_str())

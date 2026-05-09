@@ -11,3 +11,4 @@ pub use nodes::{
     LeafNode, SignatureField,
 };
 pub use object_store::{GraphObjectStore, GraphReadOptions};
+pub use sqlite_index::{GraphIndexNodeRow, GraphIndexReader};

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::time::Instant;
 
 use orbit_common::types::OrbitError;
 use orbit_knowledge::graph::object_store::RefName;
@@ -9,6 +10,7 @@ use orbit_knowledge::graph::{
 };
 use orbit_knowledge::pipeline::context::BuildConfig;
 use orbit_tools::{ToolContext, ToolRegistry};
+use rusqlite::Connection;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -171,6 +173,179 @@ fn show_file_selector_includes_file_level_source() {
     assert_eq!(response["selector"], "file:package.json");
     assert_eq!(response["source"], "{\"name\":\"orbit\"}\n");
     assert!(response["children"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn show_selector_uses_sql_index_without_by_id_graph_read() {
+    let mut file = file_node("src/lib.rs", "rust", Some("rs"), vec!["use std::fmt;"]);
+    file.source = "pub fn alpha() {}\npub fn beta() {}\n".to_string();
+    let alpha = leaf_node(
+        "src/lib.rs",
+        "alpha",
+        LeafKind::Function,
+        "pub fn alpha() {}",
+    );
+    let beta = leaf_node("src/lib.rs", "beta", LeafKind::Function, "pub fn beta() {}");
+    file = attach_leaf(file, &alpha);
+    file = attach_leaf(file, &beta);
+    let fixture = write_graph_fixture(graph_with_root(vec![file], vec![alpha, beta]));
+    let knowledge_dir = fixture.path().join(".orbit/knowledge");
+
+    delete_by_id_index(&knowledge_dir);
+    delete_objects_except(&knowledge_dir, "file:src/lib.rs");
+
+    let response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":"file:src/lib.rs","children":5}),
+    );
+
+    assert_eq!(response["selector"], "file:src/lib.rs");
+    assert_eq!(response["source"], "pub fn alpha() {}\npub fn beta() {}\n");
+    assert_eq!(response["lineage"], json!(["dir:."]));
+    assert_eq!(
+        response["children"],
+        json!([
+            "symbol:src/lib.rs#alpha:function",
+            "symbol:src/lib.rs#beta:function"
+        ])
+    );
+}
+
+#[test]
+fn show_selector_sql_path_and_fallback_are_byte_equal() {
+    let mut file = file_node("src/lib.rs", "rust", Some("rs"), vec!["use std::fmt;"]);
+    file.source = "pub fn alpha() {}\npub fn beta() {}\n".to_string();
+    let alpha = leaf_node(
+        "src/lib.rs",
+        "alpha",
+        LeafKind::Function,
+        "pub fn alpha() {}",
+    );
+    let beta = leaf_node("src/lib.rs", "beta", LeafKind::Function, "pub fn beta() {}");
+    file = attach_leaf(file, &alpha);
+    file = attach_leaf(file, &beta);
+    let fixture = write_graph_fixture(graph_with_root(vec![file], vec![alpha, beta]));
+    let knowledge_dir = fixture.path().join(".orbit/knowledge");
+
+    let sql_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":"file:src/lib.rs","children":5}),
+    );
+    fs::remove_file(knowledge_dir.join("graph/graph_index.sqlite")).unwrap();
+    let fallback_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":"file:src/lib.rs","children":5}),
+    );
+
+    assert_eq!(
+        serde_json::to_vec(&sql_response).unwrap(),
+        serde_json::to_vec(&fallback_response).unwrap()
+    );
+}
+
+#[test]
+fn show_selector_falls_back_when_sqlite_index_is_stale() {
+    let mut file = file_node("package.json", "json", Some("json"), vec![]);
+    file.source = "{\"name\":\"orbit\"}\n".to_string();
+    let fixture = write_graph_fixture(graph_with_root(vec![file], Vec::new()));
+    let index_path = fixture
+        .path()
+        .join(".orbit/knowledge/graph/graph_index.sqlite");
+    let conn = Connection::open(index_path).unwrap();
+    conn.execute(
+        "UPDATE meta SET value = 'stale-root' WHERE key = 'graph_ref'",
+        [],
+    )
+    .unwrap();
+
+    let response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":"file:package.json"}),
+    );
+
+    assert_eq!(response["selector"], "file:package.json");
+    assert_eq!(response["source"], "{\"name\":\"orbit\"}\n");
+}
+
+#[test]
+fn show_selector_not_found_matches_fallback_error() {
+    let file = file_node("src/lib.rs", "rust", Some("rs"), vec![]);
+    let fixture = write_graph_fixture(graph_with_root(vec![file], Vec::new()));
+    let knowledge_dir = fixture.path().join(".orbit/knowledge");
+
+    let sql_error = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":"file:missing.rs"}),
+    )
+    .unwrap_err();
+    fs::remove_file(knowledge_dir.join("graph/graph_index.sqlite")).unwrap();
+    let fallback_error = execute_graph_tool_result(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":"file:missing.rs"}),
+    )
+    .unwrap_err();
+
+    assert!(matches!(sql_error, OrbitError::InvalidInput(_)));
+    assert!(matches!(fallback_error, OrbitError::InvalidInput(_)));
+    assert_eq!(sql_error.to_string(), fallback_error.to_string());
+}
+
+#[test]
+#[ignore = "manual latency observation for T20260509-74"]
+fn show_selector_sql_path_microbenchmark_10k_leaf_fixture() {
+    let mut file = file_node("src/generated.rs", "rust", Some("rs"), vec![]);
+    let leaves: Vec<LeafNode> = (0..10_000)
+        .map(|idx| {
+            leaf_node(
+                "src/generated.rs",
+                &format!("generated_{idx}"),
+                LeafKind::Function,
+                &format!("pub fn generated_{idx}() {{}}\n"),
+            )
+        })
+        .collect();
+    for leaf in &leaves {
+        file = attach_leaf(file, leaf);
+    }
+    let target_selector = "symbol:src/generated.rs#generated_9999:function";
+    let fixture = write_graph_fixture(graph_with_root(vec![file], leaves));
+    let knowledge_dir = fixture.path().join(".orbit/knowledge");
+
+    let sql_start = Instant::now();
+    let sql_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":target_selector,"depth":2,"siblings":3,"children":5}),
+    );
+    let sql_elapsed = sql_start.elapsed();
+    assert_eq!(sql_response["selector"], target_selector);
+
+    fs::remove_file(knowledge_dir.join("graph/graph_index.sqlite")).unwrap();
+    let fallback_start = Instant::now();
+    let fallback_response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.show",
+        json!({"selector":target_selector,"depth":2,"siblings":3,"children":5}),
+    );
+    let fallback_elapsed = fallback_start.elapsed();
+    assert_eq!(fallback_response, sql_response);
+
+    let sql_ms = sql_elapsed.as_secs_f64() * 1000.0;
+    let fallback_ms = fallback_elapsed.as_secs_f64() * 1000.0;
+    let speedup = fallback_ms / sql_ms.max(f64::EPSILON);
+    println!(
+        "show selector 10k leaves: sql={sql_ms:.3}ms fallback={fallback_ms:.3}ms speedup={speedup:.1}x"
+    );
+    assert!(
+        speedup >= 10.0,
+        "expected SQL selector path to be at least 10x faster, got {speedup:.1}x"
+    );
 }
 
 #[test]
@@ -811,6 +986,43 @@ fn write_graph_fixture(graph: CodebaseGraphV1) -> TempDir {
         .unwrap();
 
     repo_root
+}
+
+fn delete_by_id_index(knowledge_dir: &Path) {
+    let by_id_dir = knowledge_dir.join("graph/index/by-id");
+    for entry in fs::read_dir(by_id_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().is_some_and(|ext| ext == "json") {
+            fs::remove_file(entry.path()).unwrap();
+        }
+    }
+}
+
+fn delete_objects_except(knowledge_dir: &Path, retained_node_id: &str) {
+    for (node_id, object_hash) in sqlite_node_object_hashes(knowledge_dir) {
+        if node_id == retained_node_id {
+            continue;
+        }
+        fs::remove_file(graph_object_path(knowledge_dir, &object_hash)).unwrap();
+    }
+}
+
+fn sqlite_node_object_hashes(knowledge_dir: &Path) -> Vec<(String, String)> {
+    let conn = Connection::open(knowledge_dir.join("graph/graph_index.sqlite")).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id, object_hash FROM node ORDER BY id")
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn graph_object_path(knowledge_dir: &Path, object_hash: &str) -> std::path::PathBuf {
+    knowledge_dir
+        .join("graph/objects")
+        .join(&object_hash[..2])
+        .join(format!("{object_hash}.json"))
 }
 
 fn graph_with_root(files: Vec<FileNode>, leaves: Vec<LeafNode>) -> CodebaseGraphV1 {
