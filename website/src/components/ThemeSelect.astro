@@ -1,7 +1,3 @@
----
-import { Icon } from '@astrojs/starlight/components';
----
-
 <starlight-theme-select>
 	<button
 		type="button"
@@ -35,6 +31,18 @@ import { Icon } from '@astrojs/starlight/components';
 </style>
 
 <script>
+	type StarlightThemeProvider = {
+		updatePickers: (theme: string) => void;
+	};
+
+	const updateThemePickers = (theme: string) => {
+		(
+			window as Window & {
+				StarlightThemeProvider?: StarlightThemeProvider;
+			}
+		).StarlightThemeProvider?.updatePickers(theme);
+	};
+
 	class StarlightThemeSelect extends HTMLElement {
 		constructor() {
 			super();
@@ -44,13 +52,13 @@ import { Icon } from '@astrojs/starlight/components';
 					const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
 					localStorage.setItem('starlight-theme', theme);
 					document.documentElement.dataset.theme = theme;
-					window.StarlightThemeProvider?.updatePickers(theme);
+					updateThemePickers(theme);
 				});
 			}
 		}
 		connectedCallback() {
 			const theme = document.documentElement.dataset.theme || 'dark';
-			window.StarlightThemeProvider?.updatePickers(theme);
+			updateThemePickers(theme);
 		}
 	}
 	customElements.define('starlight-theme-select', StarlightThemeSelect);
