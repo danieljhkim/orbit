@@ -31,6 +31,9 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 
 - Prefer canonical task context selectors in `context_files`: `file:path`, `dir:path`, and `symbol:path#name:kind`.
 - Raw legacy paths are still accepted, but Orbit silently upgrades them to canonical selector form on write.
+- Add `context_files` entries only for existing files, directories, or symbols expected to be modified or deleted by the task.
+- Do not add entries solely for files that will be created later, or for files that are only relevant background context.
+- Prefer `file:` selectors over `dir:` selectors whenever the expected changes can be named at file level; use `dir:` only when the directory itself is the smallest honest scope.
 - When a task needs precise code context, prefer `symbol:` selectors over whole-file scopes.
 
 ## Operating Rules
