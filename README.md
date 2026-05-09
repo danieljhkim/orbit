@@ -1,4 +1,4 @@
-# Orbit — Linear for AI-Native Developers
+# Orbit — The audit log for your AI coding agents
 
 <p align="center">
   <img src="docs/assets/orbit-dashboard-hero.gif" alt="Orbit dashboard: task backlog, agent execution, and live audit log" width="600" />
@@ -8,277 +8,68 @@
   <em>The Orbit dashboard (<code>orbit web serve</code>) — task backlog, live audit log, per-agent scoreboard.</em>
 </p>
 
-**Orbit is durable, intent-tracked agentic project management for developers who use AI coding agents heavily — Linear / Jira designed for the AI-native solo developer, with a path to team-scale automation as trust in agents matures.**
+**Orbit is a durable, intent-tracked, auditable task layer for developers driving AI coding agents at high volume — local-first by design, with a path to team-scale automation as trust in agents matures.**
 
-The wedge today is the individual engineer driving multiple coding agents (Claude Code, Cursor, Aider, Codex CLI) against real code, who has outgrown the one-agent-one-terminal model. You need a durable backlog when ideas and bugs accumulate faster than any single session can hold. You need lifecycle tracking when work spans sessions, weeks, or branches. You need intent attribution when six months from now you have to remember *why* an agent wrote a given line of code. Linear and Jira solve durable project management for human-driven teams. Agent vendors solve in-session execution. **Orbit is the layer above — the layer that turns individual agent sessions into a coherent body of work.**
+You drive multiple coding agents (Claude Code, Cursor, Aider, Codex CLI) against real code. Ideas accumulate faster than any session can hold, work spans branches and weeks, and six months from now you have to remember *why* an agent wrote a given line. Agent vendors solve in-session execution. Orbit is the layer above — local-first state that turns individual agent sessions into a coherent, auditable body of work.
 
-Built for the AI-native solo developer first, with a deliberate funnel that expands toward teams over time: **solo adoption → internal champion at a team → team-scale agentic automation.** The team-scale destination is multi-year. The wedge is today.
-
-The full positioning — what Orbit is for, who it's for in funnel order, what it refuses to become, the open-core commercial model, and the commercial roadmap for the hosted Team product — lives in [docs/POSITIONING.md](docs/POSITIONING.md). Read it before contributing or evaluating fit.
+Full positioning, commercial model, and roadmap: [docs/POSITIONING.md](docs/POSITIONING.md).
 
 ---
 
 ## Primary Features
 
-Three features carry the wedge. Everything else is infrastructure that makes these reliable.
-
-### Durable, intent-tracked task layer — *available today*
-
-The wedge surface. Every task carries a durable lifecycle (`proposed → backlog → in-progress → review → done`) that survives across sessions, branches, and weeks. Every commit produced through Orbit carries the `task_id`, so the codebase itself becomes a queryable record of agent intent — `git log --grep '\[T20260506-...\]'` finds every commit that flowed through a given task; `orbit task show` reconstructs the prompt, plan, execution trace, and review threads for that task months later.
-
-The hand-tracking-in-Notion-or-scratch-notes problem ends here. Ideas and bugs go into `orbit task add`, get worked on by an agent (now or later), and produce a body of work that's still navigable a year from now. This is what Linear and Jira solve for human-driven teams; Orbit solves it for the AI-native solo developer who plans to expand the practice across their team.
-
-### Knowledge-graph–aware tooling — *available today*
-
-Agents inspect a parsed, content-addressed graph of your codebase: directories, files, extracted symbols, import edges, crate dependencies, trait implementors, and signature-matched caller/reference indexes. Queries return token-budgeted packs shaped for prompt consumption, not LSP-style hover text.
-
-The graph is the **technical moat** and it is measured, not asserted. Under MCP exposure, the graph reduces token cost on structural code questions (see `benchmarks/graph/` for full v3 results: codex hybrid arm came in 35% cheaper than no-graph, with pre-registered cull thresholds passed). It is also branch-scoped and built for safe parallel execution — two worktrees on two branches rebuild concurrently without corruption; reads fall back to the default branch until a new branch has been built. The public graph surface is read-only; write coordination happens before dispatch through task `context_files` and `orbit.task.locks.reserve` preflight guards.
-
-Design docs: [docs/design/knowledge-graph/](docs/design/knowledge-graph/).
-
-### Auditability — *available today*
-
-Every tool call, provider request/response, and task-state transition is a structured, queryable event with agent identity attached. When something goes sideways — a bad merge, a regression, a refactor whose intent you can't reconstruct months later — you answer *what / why / who* without asking the maintainers. Append-only, tamper-evident, exportable.
-
-For the wedge audience (single engineer, multiple agents, real code), this is what makes ad-hoc agent sessions trustworthy enough to live with downstream — both for you, and for the future teammate who reviews your PR. For the long-arc team-scale destination, it's also the substrate every team-grade primitive depends on.
-
-Full contract below in the [Auditability](#auditability) section. Design docs: [docs/design/auditability/](docs/design/auditability/).
-
----
-
-## The Core Model
-
-Orbit is built around four concepts you will actually touch:
-
-- **Task** — the durable unit of work. You create one, approve it, and let Orbit dispatch agents against it. Tasks are versioned, auditable, and scoped to a workspace.
-- **Knowledge graph** — the parsed structure of your codebase. Agents query it instead of grep-ing. It is what makes parallel scheduling safe and what distinguishes Orbit from a generic agent framework.
-- **Worktree** — each agent session runs in an isolated git worktree so parallel work does not stomp on your checkout. Reconciliation happens when the agent finishes.
-- **Locks** — explicit claims on files or code regions that prevent overlapping parallel edits. A task reserves its locks before dispatch; if the reservation would conflict, the task waits.
-
-Supporting primitives (`activity`, `job`, `policy`, `executor`, `tool`) are the substrate those four concepts run on. They are inspectable on purpose — Orbit's audit thesis requires it — but they are not the product story.
+- **Durable, intent-tracked task layer.** Lifecycle (`proposed → backlog → in-progress → review → done`) survives sessions, branches, and weeks. Every commit carries the `task_id`; `orbit task show` reconstructs prompt, plan, execution trace, and review threads months later.
+- **Auditability.** Every tool call, provider request/response, and task transition is a structured, queryable event with agent identity attached. Append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
+- **Knowledge-graph–aware tooling.** Agents query a parsed, content-addressed graph (symbols, imports, callers, implementors) instead of grep. Branch-scoped, safe for parallel rebuild. The graph is what makes audit cheap to populate; benchmark in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/knowledge-graph/](docs/design/knowledge-graph/)
 
 ---
 
 ## Quick Start
 
-**Prerequisites**: at least one supported agent CLI installed and authenticated (Codex, Claude Code, or Gemini CLI). v1 invokes these CLIs as subprocesses — the agent CLI is responsible for talking to the model provider, so Orbit does not need a separate provider API key.
-
-Orbit itself can be installed without Rust. Only source builds require a Rust toolchain.
-
-For the default PR-based execution path (`orbit run ship-auto` or `orbit run ship`), you also need the GitHub CLI (`gh`) installed and authenticated. If you do not want to use GitHub or open pull requests, use `orbit run ship --mode local` instead.
+**Prerequisites:** at least one supported agent CLI (Codex, Claude Code, or Gemini CLI), authenticated. For PR-based execution, `gh` installed and authenticated; otherwise use `--mode local`.
 
 ```bash
-# install via curl | sh (macOS and Linux)
+# install
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | sh
-
-# or install via Homebrew (macOS)
-brew install danieljhkim/tap/orbit
-
-# or, if you use Claude Code: install the plugin (it registers MCP + skills
-# and downloads the native binary on first use; requires Node 18+)
+# or: brew install danieljhkim/tap/orbit
+# or, in Claude Code:
 #   /plugin marketplace add danieljhkim/orbit
 #   /plugin install orbit
 
-# or build from source
-git clone https://github.com/danieljhkim/orbit.git
-cd orbit
-make install
+# initialize
+orbit init                                 # global state (~/.orbit)
+cd <repo> && orbit workspace init --mcp    # workspace state + MCP integration
 
-# initialize global Orbit state (~/.orbit), global skills, and user-level skill links
-orbit init
-
-# initialize workspace-local Orbit state inside a repository
-cd <repo>
-orbit workspace init
-# or also auto-detect and set up MCP client integrations
-orbit workspace init --mcp
-
-# create a task for the work you want done (prints the new task ID)
+# create, approve, and ship a task
 TASK_ID=$(orbit task add \
-  --title "Create orbit-hello.txt" \
-  --description "Add orbit-hello.txt at the repository root containing the text 'hello from orbit'." \
-  --acceptance-criteria "orbit-hello.txt exists at the repository root." \
-  --acceptance-criteria "orbit-hello.txt contains the text 'hello from orbit'." \
+  --title "..." \
+  --description "..." \
+  --acceptance-criteria "..." \
   --workspace .)
-echo "$TASK_ID"
-
-# or simply ask an agent to create a task
-"create an orbit task for ..."
-
-# review and approve the created proposed task
-orbit task list --status proposed
-orbit task show "$TASK_ID"
 orbit task approve "$TASK_ID"
-
-# run the default PR-based execution path (orbit's default base branch is agent-main, so we target main here)
-orbit run ship "$TASK_ID" --base main
-
-# or auto-select backlog tasks (without conflicts) and dispatch them through the same PR/local path
-orbit run ship-auto --base main
+orbit run ship "$TASK_ID" --base main      # PR pipeline (default)
+# or: orbit run ship-auto --base main      # auto-select from backlog
+# or: orbit run ship --mode local "$TASK_ID"
 ```
+
+Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com).
 
 ---
 
-## Why Orbit Exists
+## Core Model
 
-The hard problem is not "how do I run steps in order?" Durable workflow engines (Temporal, Airflow) already solve that. And the hard problem is not "how does an agent edit code?" — agent vendors (Claude Code, Cursor, Aider, Codex CLI) already solve that, and well, in-session.
+- **Task** — durable unit of work, versioned and auditable, scoped to a workspace.
+- **Knowledge graph** — parsed structure of your codebase. Branch-scoped; safe for parallel rebuild.
+- **Worktree** — each agent session runs in an isolated git worktree.
+- **Locks** — explicit claims on files or code regions; reserved before dispatch to prevent overlapping edits.
 
-The hard problem the wedge user has is everything that lives **between** and **around** those agent sessions:
-
-- how to keep durable, queryable state across many short-lived agent sessions
-- how to know six months from now *why* an agent wrote a given line of code
-- how to manage a backlog of agent-actionable work that grows faster than any one session can hold
-- how to drive multiple agents in parallel without losing track of who did what to which file
-- how to do all of that with durable **local** state, under an audit trail you control, without routing your source through a third-party SaaS
-
-Linear and Jira solve durable project management for human-driven teams. Agent vendors solve in-session execution. Orbit is the layer that turns individual agent sessions into a coherent, navigable, audited body of work — for the AI-native solo developer today, with the architectural path to team-scale fleet orchestration through **Orbit Team**, the hosted multi-tenant paid product (see [POSITIONING § Commercial roadmap](docs/POSITIONING.md#commercial-roadmap-orbit-team)).
-
-
----
-
-## Commercial Model
-
-Orbit ships in two tiers:
-
-- **Orbit OSS (this repository).** Self-hosted, single-operator. The whole solo wedge experience — agent loop, knowledge graph, audit, task layer, MCP, providers, CLI — ships under a permissive license (MIT or Apache 2.0). Free forever for individuals and small teams running their own infrastructure. The OSS is self-sufficient: no single-operator workflow is gated behind the paid tier.
-- **Orbit Team (in development).** Hosted multi-tenant deployment for engineering organizations. Cross-engineer audit aggregation, team scoreboards, SSO/SAML, RBAC, hosted operations, support SLAs. Closed-source SaaS, separate repository, separate billing.
-
-The boundary rule: *"would a solo developer running self-hosted Orbit on their laptop want this?"* — yes → OSS, no → Team. Open-core split locked at the architecture level (separate repos), not feature flags in shared code. The Team product funds sustained OSS development. See [POSITIONING § Commercial model](docs/POSITIONING.md#commercial-model-open-core-two-tiers) for the full structure.
-
-
----
-
-## Primary Commands
-
-### Graph
-
-```bash
-orbit graph build
-orbit graph update
-orbit graph search <query>
-orbit graph show <selector>
-```
-
-Build and inspect the code-aware structure Orbit uses for partitioning and scheduling.
-
-### Execution
-
-```bash
-orbit run ship <task_id> ...
-orbit run ship --mode local <task_id> ...
-orbit run ship-auto
-orbit run duel-plan <task_id>
-orbit run job <job_id>
-
-# audits and observability
-orbit run show [run_id]
-orbit run logs [run_id]
-orbit run events [run_id]
-orbit run trace [run_id]
-```
-
-- `ship` runs explicitly selected tasks through the PR pipeline by default.
-- `ship --mode local` runs explicitly selected tasks through the local-only path.
-- `ship-auto` auto-selects backlog tasks and dispatches them through the same PR/local mode switch.
-- `duel-plan` runs the planning-duel workflow for one task.
-- `show`, `logs`, `events`, and `trace` inspect the most recent run by default, or a specific run ID when supplied.
-- use `orbit run history -j <job_id>` and `orbit run show <run_id>` for durable job-run history and state.
-
-### Tasks
-
-```bash
-orbit task add
-orbit task list
-orbit task show <task_id>
-orbit task artifact put <task_id> <source_path>
-orbit task approve <task_id>
-```
-
-Tasks are the durable unit of work. Newly created tasks enter `proposed`; `approve` moves proposed work into the backlog and approves completed review work into done.
-
-### Audit and Observability
-
-```bash
-orbit audit list
-orbit audit show <event_id>
-orbit audit stats
-orbit run events <run_id>
-orbit run trace <run_id>
-```
-
-Every agent action is queryable. `orbit audit` reads compact command-audit rows; `orbit run events` and `orbit run trace` read workspace-local activity/job run traces from `.orbit/state/audit/`. Treat this as a first-class surface, not a debug tool.
-
----
-
-## Operating Surfaces
-
-### Workspace state
-
-Orbit artifacts have two scopes: **global** (initialized via `orbit init`, under `~/.orbit/`) and **workspace** (initialized via `orbit workspace init`, under `<repo>/.orbit/`).
-
-```text
-.orbit/
-├── knowledge/        # Code graph artifacts
-├── resources/        # Workspace overrides for activities, jobs, policies, executors, skills
-├── state/            # Audit traces, diagnostics, job runs, scoreboards, worktrees
-└── tasks/            # Durable task state
-```
-
-Tasks, job runs, scoreboards, and run traces are workspace-local. Graph artifacts are workspace-local and branch-scoped. Activities, jobs, policies, and skills merge global defaults with workspace overrides. Default skills are initialized under `~/.orbit/skills` and linked into `~/.agents/skills` and `~/.claude/skills`. Command audit events live globally in SQLite.
-
-### Filesystem guardrails
-
-Orbit uses filesystem-scoped policies to control what agent execution can read and modify — safe parallel execution is the core problem, not just prompt routing. A v2 activity can opt into a named filesystem profile with `fsProfile`; if it omits the field, Orbit resolves an implicit unrestricted profile and still applies global deny rules. Design docs: [docs/design/policy-sandbox/](docs/design/policy-sandbox/).
-
-> **Platform support.** OS-level sandbox enforcement of `fsProfile` for spawned agent CLIs is currently **macOS only**, via `sandbox-exec`. The bundled `claude`, `codex`, and `gemini` executors declare `sandbox: macos-sandbox-exec` and will refuse to launch with a sandbox on Linux/Windows; on those platforms the policy still applies as in-process FS guards for HTTP-tool calls, but the spawned agent subprocess itself runs without OS-level isolation. Linux/Windows backends are not yet implemented.
-
-```yaml
-schemaVersion: 2
-kind: Policy
-metadata:
-  name: default
-spec:
-  denyRead:
-    - "**/*.env"
-  denyModify:
-    - .orbit/**
-    - "**/*.env"
-  fsProfiles:
-    reviewer:
-      read: [./**]
-      modify: []
-```
-
-### MCP integration
-
-Orbit exposes a safe MCP surface by default: `orbit.task.*` tools and read-only `orbit.graph.*` tools, including `search`, `show`, `pack`, `refs`, `callers`, `implementors`, `deps`, `overview`, and `history`. No graph write tools — write coordination flows through task lock reservations such as `orbit.task.locks.reserve`.
-
-```bash
-orbit mcp init --auto    # detects .claude/, .gemini/, ~/.codex/config.toml
-orbit mcp init --claude  # writes <repo>/.mcp.json + <repo>/.claude/settings.json
-orbit mcp init --codex   # writes <repo>/.codex/config.toml (repo must be trusted in Codex)
-orbit mcp init --gemini  # writes <repo>/.gemini/settings.json
-orbit mcp serve
-```
-
-`orbit mcp init` defaults to workspace scope (repo-local files). Pass `--scope home` to register at the user level instead (e.g. `~/.claude/.mcp.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`). `.claude/settings.local.json` and `~/.gemini/settings.json` are user override layers and are never modified. MCP support is an integration layer, not Orbit's moat.
-
-### Advanced surfaces
-
-Lower-level operating surfaces are intentionally available because durable local state is part of the product:
-
-- `activity` and `job` for defining and running substrate assets directly
-- `policy`, `executor`, and `tool` for runtime customization
-- `orbit scoreboard`, `orbit run history -j <job_id>`, `orbit run show/logs/events/trace`, and `orbit run job <id>` for evaluation, history, trace inspection, and direct workflow execution
-- `metrics` and `serve` for observability and outward integration
-
-Most users can ignore these on day one. Reach for `orbit --help` and `orbit <command> --help` when you need the deeper surface area.
+Substrate primitives (`activity`, `job`, `policy`, `executor`, `tool`) are inspectable on purpose but not the product story.
 
 ---
 
 ## Architecture
 
-Orbit is structured as a layered set of Rust crates. Lower layers do not depend on higher layers.
+Layered Rust crates. Lower layers do not depend on higher layers.
 
 ```mermaid
 flowchart LR
@@ -300,37 +91,32 @@ flowchart LR
   Core --> Common
 ```
 
-Two details matter most:
+`orbit-knowledge` provides the graph substrate; `orbit-engine` and `orbit-agent` provide the execution substrate. v1 ships `backend: cli` (CLI-subprocess providers under `orbit-agent::providers/*`). Design docs: [docs/design/](docs/design/).
 
-- **`orbit-knowledge`** provides the graph substrate. Design docs in [docs/design/knowledge-graph/](docs/design/knowledge-graph/).
-- **`orbit-engine`** and **`orbit-agent`** provide the execution substrate. v1 ships `backend: cli` as the only supported agent invocation path: CLI subprocess providers (Codex, Claude Code, Gemini CLI, etc.) under `orbit-agent::providers/*`. The HTTP `LoopTransport` and `backend: http` exist in the codebase for v2 work but are not covered by the v1 release contract. Design docs in [docs/design/activity-job/](docs/design/activity-job/) and [docs/design/groundhog/](docs/design/groundhog/).
-
-That is the center of gravity for Orbit.
+> **Platform:** OS-level sandbox enforcement is **macOS only** (via `sandbox-exec`). On Linux/Windows, FS policies still apply as in-process guards for HTTP-tool calls; the spawned agent subprocess runs without OS-level isolation.
 
 ---
 
 ## Current Status
 
-Orbit is a work in progress.
+Orbit is v0.3.x — work in progress.
 
-- core local execution primitives are usable today
-- graph build and query are available today
-- audit infrastructure is live; coverage still expanding
-- the execution substrate shows more internal machinery than the final product should
-- some historical surfaces remain in the CLI even though they are no longer central
-- production or multi-machine deployments are not yet recommended — we expect to lift this once audit coverage is complete and the lower-level activity/job surfaces are folded behind the task and graph product surfaces
+- Core local execution, graph build/query, and audit infrastructure are usable today.
+- The execution substrate shows more internal machinery than the final product should; some historical CLI surfaces remain even though they're no longer central.
+- Production or multi-machine deployments are not yet recommended.
 
-The repository currently contains more workflow and task machinery than the long-term public story should emphasize. That is intentional technical debt on the path toward a tighter product focused on graph-aware agent scheduling.
+Intentional technical debt on the path toward a tighter product focused on the audit and task layer.
+
+---
+
+## Commercial Model
+
+OSS (this repo, MIT/Apache 2.0) is the full solo-wedge experience — free forever for self-hosted individuals and small teams. **Orbit Team** is a planned hosted multi-tenant SKU for engineering organizations. Full structure: [POSITIONING § Commercial model](docs/POSITIONING.md#commercial-model-open-core-two-tiers).
 
 ---
 
 ## Contributing
 
-Contributions focused on **graph-aware scheduling, locking, worktree/session management, execution primitives, reconciliation, audit coverage, and tool-calling interfaces** are especially welcome.
+Contributions especially welcome on graph-aware scheduling, locking, worktree/session management, execution primitives, reconciliation, audit coverage, and tool-calling interfaces.
 
-Before contributing, read:
-
-- [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md) — design doc conventions (required reading if you touch `docs/design/`)
-- [CLAUDE.md](CLAUDE.md) — project-wide instructions for human and agent contributors
-
-Open an issue or submit a pull request for review.
+Before contributing: [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md) and [CLAUDE.md](CLAUDE.md).
