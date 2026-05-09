@@ -39,6 +39,8 @@ fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
 
     assert!(outcome.success);
     assert_eq!(outcome.output["stdout_text"], "plain stdout\n");
+    assert_eq!(outcome.output["stdout_text_truncated"], false);
+    assert_eq!(outcome.output["stdout_text_original_bytes"], 13);
     let events = audit.events_snapshot().expect("events snapshot");
     let finished = events
         .iter()
@@ -68,6 +70,124 @@ fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
     assert!(!finished.4);
     assert_eq!(sink.blob("blob-2"), Some(b"plain stdout\n".to_vec()));
     assert_eq!(sink.blob("blob-3"), Some(b"plain stderr\n".to_vec()));
+}
+
+#[test]
+fn run_cli_backend_bounds_stdout_text_preview_and_keeps_envelope_status_from_full_stdout() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    let embedded_envelope = r#"{"schemaVersion":1,"status":"failed","error":{"code":"workspace_unavailable","message":"worktree missing","details":null}}"#;
+    let stdout = serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "result": format!("{}{}", "x".repeat(70 * 1024), embedded_envelope),
+        "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1
+        }
+    })
+    .to_string();
+    write_executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{stdout}'\n"),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-stdout-preview",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-stdout-preview",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(
+        !outcome.success,
+        "status=failed after the preview limit must still demote success"
+    );
+    let preview = outcome.output["stdout_text"]
+        .as_str()
+        .expect("stdout_text preview");
+    assert!(preview.len() <= 64 * 1024);
+    assert!(!preview.contains("workspace_unavailable"));
+    assert_eq!(outcome.output["stdout_text_truncated"], true);
+    assert_eq!(
+        outcome.output["stdout_text_preview_bytes"].as_u64(),
+        Some(preview.len() as u64)
+    );
+    assert_eq!(
+        outcome.output["stdout_text_preview_limit_bytes"].as_u64(),
+        Some((64 * 1024) as u64)
+    );
+    let message = outcome.message.expect("expected demote message");
+    assert!(
+        message.contains("envelope status") && message.contains("failed"),
+        "demote message should explain envelope status; got {message:?}"
+    );
+}
+
+#[test]
+fn run_cli_backend_redacts_secret_like_stdout_text_preview() {
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        r#"#!/bin/sh
+cat > /dev/null
+printf '%s\n' 'Authorization: Bearer stdout-secret-token'
+printf '%s\n' 'x-api-key: stdout-header-key'
+printf '%s\n' 'sk-stdoutsecret123'
+printf '%s\n' '{"api_key":"stdout-json-key"}'
+"#,
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-stdout-redaction",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-stdout-redaction",
+        audit,
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(outcome.success);
+    let preview = outcome.output["stdout_text"]
+        .as_str()
+        .expect("stdout_text preview");
+    assert!(!preview.contains("stdout-secret-token"));
+    assert!(!preview.contains("stdout-header-key"));
+    assert!(!preview.contains("stdout-json-key"));
+    assert!(!preview.contains("sk-stdoutsecret123"));
+    assert!(preview.contains("[REDACTED_AUTH]"));
+    assert!(preview.contains("[REDACTED_API_KEY]"));
+    assert_eq!(outcome.output["stdout_text_truncated"], false);
+    assert_eq!(
+        outcome.output["stdout_blob_ref"].as_str(),
+        Some("blob-2"),
+        "full stdout should remain available via blob ref"
+    );
 }
 
 #[test]

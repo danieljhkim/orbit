@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status};
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
-use orbit_common::utility::redaction::PatternRedactor;
+use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
 
 use super::super::audit_writer::V2AuditWriter;
@@ -21,6 +21,8 @@ use super::supervisor::{
     DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS, SpawnTraceContext, SpawnWithTimeoutRequest,
     spawn_with_timeout,
 };
+
+const STDOUT_TEXT_PREVIEW_LIMIT_BYTES: usize = 64 * 1024;
 
 pub fn run_cli_backend(
     host: &dyn V2RuntimeHost,
@@ -174,6 +176,7 @@ pub fn run_cli_backend(
     let exit_success = !timed_out && matches!(exit_code, Some(0));
     let stdout_text = String::from_utf8_lossy(&stdout).into_owned();
     let envelope_status = peek_response_status(&stdout_text);
+    let stdout_preview = stdout_text_preview(&stdout_text, &redaction);
     let envelope_indicates_failure =
         matches!(envelope_status.as_deref(), Some("failed") | Some("timeout"));
     let success = exit_success && !envelope_indicates_failure;
@@ -211,7 +214,11 @@ pub fn run_cli_backend(
             "exit_code": exit_code,
             "duration_ms": duration.as_millis() as u64,
             "timed_out": timed_out,
-            "stdout_text": stdout_text,
+            "stdout_text": stdout_preview.text,
+            "stdout_text_truncated": stdout_preview.truncated,
+            "stdout_text_original_bytes": stdout.len(),
+            "stdout_text_preview_bytes": stdout_preview.preview_bytes,
+            "stdout_text_preview_limit_bytes": STDOUT_TEXT_PREVIEW_LIMIT_BYTES,
         }),
         message,
         invocation: trace.map(|trace| DispatchInvocationTrace {
@@ -220,4 +227,33 @@ pub fn run_cli_backend(
             trace,
         }),
     })
+}
+
+struct StdoutTextPreview {
+    text: String,
+    truncated: bool,
+    preview_bytes: usize,
+}
+
+fn stdout_text_preview(raw: &str, redactor: &PatternRedactor) -> StdoutTextPreview {
+    let redacted = redactor.apply_str(&redact_sensitive_env_text(raw));
+    let truncated = redacted.len() > STDOUT_TEXT_PREVIEW_LIMIT_BYTES;
+    let text = if truncated {
+        let boundary = redacted
+            .char_indices()
+            .map(|(idx, _)| idx)
+            .take_while(|idx| *idx <= STDOUT_TEXT_PREVIEW_LIMIT_BYTES)
+            .last()
+            .unwrap_or(0);
+        redacted[..boundary].to_string()
+    } else {
+        redacted
+    };
+    let preview_bytes = text.len();
+
+    StdoutTextPreview {
+        text,
+        truncated,
+        preview_bytes,
+    }
 }
