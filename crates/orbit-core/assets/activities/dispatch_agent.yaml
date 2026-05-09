@@ -86,6 +86,4 @@ spec:
   on_denial: terminate
   max_iterations: 8
   role: planner
-  backend: cli
-  provider: claude
   wall_clock_timeout_seconds: 300

@@ -53,9 +53,11 @@ pub(super) fn attempt_recovery_activity(
         "attempt": attempt,
         "max_attempts": max_attempts,
     });
+    let role_overridden_spec = role_overridden_recovery_spec(recovery, ctx);
+    let spec = role_overridden_spec.as_ref().unwrap_or(&recovery.spec);
     let dispatch = dispatch_v2_activity_without_run_id_injection(V2DispatchInput {
         activity_name: &recovery.name,
-        spec: &recovery.spec,
+        spec,
         fs_profile: step_fs_profile(step),
         input: input.clone(),
         audit: ctx.audit.clone(),
@@ -86,4 +88,18 @@ pub(super) fn attempt_recovery_activity(
     );
 
     recovery_succeeded
+}
+
+pub(super) fn role_overridden_recovery_spec(
+    recovery: &ResolvedRecoveryActivity,
+    ctx: &ExecCtx<'_>,
+) -> Option<ActivityV2Spec> {
+    let ActivityV2Spec::AgentLoop(inline_spec) = &recovery.spec else {
+        return None;
+    };
+    let role = inline_spec.role?;
+    let resolved = resolve_agent_settings(role, ctx.host, inline_spec);
+    let mut spec = inline_spec.clone();
+    apply_resolved_settings(&mut spec, &resolved);
+    Some(ActivityV2Spec::AgentLoop(spec))
 }

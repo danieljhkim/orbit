@@ -88,6 +88,5 @@ spec:
     - proc.spawn
   on_denial: terminate
   max_iterations: 8
-  backend: cli
-  provider: codex
+  role: reviewer
   wall_clock_timeout_seconds: 900

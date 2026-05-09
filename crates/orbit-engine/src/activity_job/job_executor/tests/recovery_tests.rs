@@ -1,5 +1,11 @@
 use super::*;
 
+use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
+
+use crate::AgentRoleConfig;
+
+use super::role_overridden_recovery_spec;
+
 #[test]
 fn recovery_success_runs_one_post_recovery_attempt_with_exact_input_and_fs_profile() {
     let original_error = retryable_error("flaky", "dirty checkout");
@@ -163,6 +169,61 @@ fn step_level_recovery_activity_runs_without_job_level_recovery() {
             ..
         } if recovery_activity == "recover_step"
     ));
+}
+
+#[test]
+fn recovery_agent_loop_uses_reviewer_role_config() {
+    let mut role_config = HashMap::new();
+    role_config.insert(
+        AgentRole::Reviewer,
+        AgentRoleConfig {
+            provider: Some(Provider::Gemini),
+            model: Some("gemini-3.1-pro".to_string()),
+            backend: Some(Backend::Cli),
+        },
+    );
+    let host = RecoveryHost::empty().with_role_config(role_config);
+    let ctx = recovery_exec_ctx(&host);
+    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(
+        Some(AgentRole::Reviewer),
+        Provider::Claude,
+        Backend::Http,
+        None,
+    ));
+
+    let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+        .expect("role-tagged recovery should resolve");
+
+    let ActivityV2Spec::AgentLoop(spec) = overridden else {
+        panic!("expected agent_loop recovery spec");
+    };
+    assert_eq!(spec.provider, Provider::Gemini);
+    assert_eq!(spec.model.as_deref(), Some("gemini-3.1-pro"));
+    assert_eq!(spec.backend, Backend::Cli);
+    assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
+}
+
+#[test]
+fn recovery_agent_loop_without_reviewer_config_keeps_inline_defaults() {
+    let host = RecoveryHost::empty();
+    let ctx = recovery_exec_ctx(&host);
+    let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(
+        Some(AgentRole::Reviewer),
+        Provider::Claude,
+        Backend::Http,
+        None,
+    ));
+
+    let overridden = role_overridden_recovery_spec(&recovery, &ctx)
+        .expect("role-tagged recovery should still produce dispatch spec");
+
+    let ActivityV2Spec::AgentLoop(spec) = overridden else {
+        panic!("expected agent_loop recovery spec");
+    };
+    assert_eq!(spec.provider, Provider::Claude);
+    assert_eq!(spec.model, None);
+    assert_eq!(spec.backend, Backend::Http);
+    assert_eq!(host.observed_role_lookups(), vec![AgentRole::Reviewer]);
 }
 
 #[test]
@@ -340,6 +401,46 @@ fn deterministic_activity(action: &str, fs_profile: Option<&str>) -> ActivityV2 
     }
 }
 
+fn agent_loop_recovery_activity(spec: AgentLoopSpec) -> ResolvedRecoveryActivity {
+    ResolvedRecoveryActivity {
+        name: "recover".to_string(),
+        spec: ActivityV2Spec::AgentLoop(spec),
+    }
+}
+
+fn recovery_agent_loop_spec(
+    role: Option<AgentRole>,
+    provider: Provider,
+    backend: Backend,
+    model: Option<&str>,
+) -> AgentLoopSpec {
+    AgentLoopSpec {
+        instruction: "recover carefully".to_string(),
+        tools: Vec::new(),
+        on_denial: OnDenial::Terminate,
+        model: model.map(str::to_string),
+        max_iterations: 1,
+        backend,
+        provider,
+        wall_clock_timeout_seconds: 30,
+        role,
+    }
+}
+
+fn recovery_exec_ctx<'a>(host: &'a dyn V2RuntimeHost) -> ExecCtx<'a> {
+    ExecCtx {
+        run_id: "run-recovery-role".to_string(),
+        audit: std::sync::Arc::new(test_writer("run-recovery-role")),
+        host,
+        input: json!({}),
+        pipeline: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        sessions: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        recovery_activity: None,
+        item: None,
+        iteration: None,
+    }
+}
+
 fn retryable_error(action: &str, message: &str) -> DispatchError {
     DispatchError::DeterministicActionFailed {
         action: action.to_string(),
@@ -365,9 +466,15 @@ struct RecoveryHost {
     responses: StdMutex<HashMap<String, VecDeque<Result<Value, DispatchError>>>>,
     calls: StdMutex<Vec<DeterministicCall>>,
     pending_fs_profiles: StdMutex<VecDeque<Option<String>>>,
+    role_config: StdMutex<HashMap<AgentRole, AgentRoleConfig>>,
+    observed_role_lookups: StdMutex<Vec<AgentRole>>,
 }
 
 impl RecoveryHost {
+    fn empty() -> Self {
+        Self::new([])
+    }
+
     fn new<const N: usize>(responses: [(&str, Vec<Result<Value, DispatchError>>); N]) -> Self {
         Self {
             responses: StdMutex::new(
@@ -378,7 +485,14 @@ impl RecoveryHost {
             ),
             calls: StdMutex::new(Vec::new()),
             pending_fs_profiles: StdMutex::new(VecDeque::new()),
+            role_config: StdMutex::new(HashMap::new()),
+            observed_role_lookups: StdMutex::new(Vec::new()),
         }
+    }
+
+    fn with_role_config(self, config: HashMap<AgentRole, AgentRoleConfig>) -> Self {
+        *self.role_config.lock().expect("role config lock") = config;
+        self
     }
 
     fn actions(&self) -> Vec<String> {
@@ -415,6 +529,13 @@ impl RecoveryHost {
             .iter()
             .find(|call| call.action == action)
             .map(|call| call.fs_profile.clone())
+    }
+
+    fn observed_role_lookups(&self) -> Vec<AgentRole> {
+        self.observed_role_lookups
+            .lock()
+            .expect("observed role lock")
+            .clone()
     }
 }
 
@@ -475,5 +596,17 @@ impl V2RuntimeHost for RecoveryHost {
             .expect("fs profiles lock")
             .push_back(fs_profile.map(str::to_string));
         orbit_tools::ToolContext::default()
+    }
+
+    fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
+        self.observed_role_lookups
+            .lock()
+            .expect("observed role lock")
+            .push(role);
+        self.role_config
+            .lock()
+            .expect("role config lock")
+            .get(&role)
+            .cloned()
     }
 }

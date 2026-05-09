@@ -129,7 +129,7 @@ pub(crate) fn seed_default_activities(
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::activity_job::{Backend, Provider};
+    use orbit_common::types::activity_job::AgentRole;
     use orbit_common::types::{ActivityV2Spec, load_activity_asset};
     use tempfile::tempdir;
 
@@ -197,8 +197,9 @@ mod tests {
         );
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
-                assert_eq!(spec.backend, Backend::Cli);
-                assert_eq!(spec.provider, Provider::Codex);
+                assert_eq!(spec.role, Some(AgentRole::Reviewer));
+                assert!(!yaml.contains("\n  backend:"));
+                assert!(!yaml.contains("\n  provider:"));
                 assert!(
                     spec.instruction
                         .contains("You are Orbit's step-failure recovery agent.")

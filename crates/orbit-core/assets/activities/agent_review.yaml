@@ -72,6 +72,4 @@ spec:
   on_denial: terminate
   max_iterations: 20
   role: reviewer
-  backend: cli
-  provider: codex
   wall_clock_timeout_seconds: 3600
