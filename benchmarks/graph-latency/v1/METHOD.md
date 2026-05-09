@@ -11,25 +11,44 @@ v1 is the first frozen round; no prior version to diff.
 
 ## Corpus list
 
-Three tiers per language. All corpora are pinned at a specific upstream SHA and
-fetched into `~/.cache/orbit-bench/<corpus>` by `scripts/fetch.sh`. Pins listed
-below are the v1 starting set; concrete commit SHAs are resolved and locked in
-the first sweep (the placeholder `<sha>` markers below become real 40-char
-hashes once the sweep runs and `git rev-parse HEAD` is recorded).
+Three tiers across three languages — Python, Java, TypeScript. All corpora are
+pinned at a specific upstream SHA and fetched into `~/.cache/orbit-bench/<corpus>`
+by `scripts/fetch.sh`. Pins listed below are the v1 starting set; concrete commit
+SHAs are resolved and locked in the first sweep (the placeholder `<sha>` markers
+below become real 40-char hashes once the sweep runs and `git rev-parse HEAD` is
+recorded).
 
-| Corpus name      | Language | Tier   | Source                                                | LOC target |
-|------------------|----------|--------|-------------------------------------------------------|-----------:|
-| `python-small`   | Python   | small  | `pallets/flask@<sha>`                                 |       ~10k |
-| `python-medium`  | Python   | medium | `pandas-dev/pandas@<sha>`                             |      ~250k |
-| `python-large`   | Python   | large  | `python/cpython@<sha>` (`Lib/` + `Modules/` subset)   |        ~2M |
-| `java-small`     | Java     | small  | `spring-projects/spring-petclinic@<sha>`              |       ~10k |
-| `java-medium`    | Java     | medium | `apache/commons-lang@<sha>`                           |      ~250k |
-| `java-large`     | Java     | large  | `spring-projects/spring-boot@<sha>`                   |        ~2M |
+The `large` tier targets ~700k–1M LOC, not the 2M+ enterprise regime. 2M+
+mono-repos exist (cpython core, IntelliJ Community, full OpenStack) but are rare
+in practice; sizing the tier at 700k–1M matches the regime most users actually
+hit graph-latency walls in.
+
+| Corpus name      | Language   | Tier   | Source                                              | LOC target  |
+|------------------|------------|--------|-----------------------------------------------------|------------:|
+| `python-small`   | Python     | small  | `pallets/flask@<sha>`                               |        ~10k |
+| `python-medium`  | Python     | medium | `django/django@<sha>`                               |       ~280k |
+| `python-large`   | Python     | large  | `home-assistant/core@<sha>`                         |       ~700k |
+| `java-small`     | Java       | small  | `apache/commons-cli@<sha>`                          |        ~12k |
+| `java-medium`    | Java       | medium | `google/guava@<sha>`                                |       ~150k |
+| `java-large`     | Java       | large  | `apache/hadoop@<sha>`                               |        ~1M  |
+| `ts-small`       | TypeScript | small  | `preactjs/preact@<sha>`                             |        ~10k |
+| `ts-medium`      | TypeScript | medium | `vuejs/core@<sha>`                                  |       ~150k |
+| `ts-large`       | TypeScript | large  | `angular/angular@<sha>`                             |       ~600k |
+
+TypeScript is included because `orbit-knowledge` parses it as a first-class
+language and TS exercises pathologies neither Python nor Java cover well —
+barrel re-exports (`export * from './x'`), `import type` vs value imports,
+and conditional types. The closed `graph/` series found a `pub use` re-export
+parser bug in v4 (`T20260425-0739`); barrel files are the JS/TS analog and a
+likely place for parser surprises.
 
 The "v1 starting set, may revise on first sweep" caveat applies to every row:
 if a candidate repo turns out to be unrepresentative, unfetchable, or
 mis-sized, the first-sweep task substitutes a replacement and records the
-substitution in `RESULTS.md` §Known caveats.
+substitution in `RESULTS.md` §Known caveats. `ts-large` (`angular/angular`,
+~600k) sits slightly under the 700k–1M tier floor — it is the cleanest
+canonical large-TS choice; the next-best fit (`vercel/next.js`, ~700k)
+requires path-filtering during fetch and was deferred for now.
 
 ### Fetch instructions
 

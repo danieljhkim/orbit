@@ -19,13 +19,13 @@ Tools in scope (one cell per): `orbit.graph.overview`, `search`, `callers`, `dep
 
 ## Corpus matrix
 
-Three tiers per language. Concrete `<org>/<repo>@<sha>` pins are recorded in each round's `vN/METHOD.md`. Fixtures live outside the repo to keep our git footprint small — `scripts/fetch.sh` clones into `~/.cache/orbit-bench/<corpus>` on first run.
+Three tiers across three languages — Python, Java, TypeScript. Concrete `<org>/<repo>@<sha>` pins are recorded in each round's `vN/METHOD.md`. Fixtures live outside the repo to keep our git footprint small — `scripts/fetch.sh` clones into `~/.cache/orbit-bench/<corpus>` on first run.
 
-| Tier   | Python target LOC | Java target LOC | Rationale                                  |
-|--------|-------------------|-----------------|--------------------------------------------|
-| small  | ~10k              | ~10k            | sanity floor; sub-100ms expected           |
-| medium | ~250k             | ~250k           | typical product mono-repo                  |
-| large  | ~2M               | ~2M             | the regime where users hit latency walls   |
+| Tier   | Target LOC   | Rationale                                                       |
+|--------|--------------|-----------------------------------------------------------------|
+| small  | ~10k         | sanity floor; sub-100ms expected                                |
+| medium | ~250k        | typical product mono-repo                                       |
+| large  | ~700k–1M     | the regime where users hit latency walls (2M+ is rare in practice) |
 
 ## Reproducing
 
@@ -56,7 +56,7 @@ Each record (`<seed>.json`) contains `wall_ms`, `rss_peak_mb`, `result_size_byte
 
 | Version | Scope | Status | Report |
 |---|---|---|---|
-| [v1](./v1/) | First baseline; Python + Java × 3 tiers × 9 tools | LIVING | [RESULTS.md](./v1/RESULTS.md) |
+| [v1](./v1/) | First baseline; Python + Java + TypeScript × 3 tiers × 9 tools | LIVING | [RESULTS.md](./v1/RESULTS.md) |
 
 ## Conventions
 
