@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-06 (T20260506-2)
+**Last updated:** 2026-05-09 (T20260506-2, T20260508-22)
 
 Auditability is Orbit's answer to the operator question that matters after an agent touches a real repository: what happened, why, and who is accountable? The contract spans command rows, Orbit tool mutations, activity/job runs, provider turns, tool calls, filesystem denials, task attribution, metrics, and redacted payload storage. [2_design.md](./2_design.md) describes the shipped implementation; [3_vision.md](./3_vision.md) names the remaining gaps.
 
@@ -14,7 +14,7 @@ Orbit runs fleets of agents against user-owned repositories, so auditability is 
 
 1. **Replayable accountability.** README and positioning docs promise enough context for every meaningful action to answer what, why, and who. The dedicated design folder from [T20260426-0605] keeps that promise reviewable.
 2. **Layered evidence.** A command row says which command ran. A v2 envelope says which workflow step ran. Loop events and blobs preserve provider/tool detail. The layers must remain related without becoming one oversized record.
-3. **Durable identity.** Task author fields, command audit roles, v2 `agent_identity`, invocation metrics, and commit/task metadata all need to point back to a concrete actor or model.
+3. **Durable identity.** Task author fields, command audit roles, v2 `agent_identity`, invocation metrics, git commit authors, and commit/task metadata all need to point back to a concrete actor or model.
 4. **Write-side secrecy.** Orbit preserves useful payloads while redacting provider keys and sensitive environment-derived values before durable storage.
 5. **Explicit gaps.** Silent mutation paths are bugs. Missing coverage belongs in the coverage matrix, not in tribal memory.
 
@@ -61,6 +61,7 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 | Global tracing JSONL feed and live projections | `crates/orbit-common/src/utility/logging.rs`, selected FS/proc/task producers | [T20260426-2343], [T20260427-0023] |
 | V2 invocation metrics persistence | `crates/orbit-store/src/sqlite/invocation_store.rs`, `crates/orbit-core/src/runtime/v2_host.rs` | [T20260426-0526] |
 | Task attribution fields | `crates/orbit-common/src/types/task.rs`, task update/runtime host paths | [T20260426-0605], [T20260427-47] |
+| Git commit author attribution | `crates/orbit-engine/src/executor/automation/commit.rs` | [T20260508-22] |
 
 ---
 
@@ -78,5 +79,6 @@ The default tracing subscriber appends redacted structured events to `~/.orbit/s
 - **[T20260427-47]** — Allow explicit task attribution correction for `planned_by` and `implemented_by` through task update paths.
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
 - **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
+- **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

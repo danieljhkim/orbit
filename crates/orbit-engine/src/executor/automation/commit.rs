@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::types::{OrbitError, Task, infer_agent_family_from_model};
 use orbit_common::utility::selector::anchor_path;
 use serde_json::{Value, json};
 
@@ -88,7 +88,8 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
         }
 
         let message = task_commit_message(&task);
-        git_success(&workspace_path, &["commit", "-m", &message])?;
+        let author = git_author_for_task(&task);
+        git_commit_with_author(&workspace_path, &message, author.as_ref())?;
         committed_task_ids.push(task.id);
     }
 
@@ -140,8 +141,10 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
         return Ok(json!({}));
     }
 
-    let message = finalize_commit_message(&affected_tasks);
-    git_success(&workspace_path, &["commit", "-m", &message])?;
+    let mut message = finalize_commit_message(&affected_tasks);
+    let (author, coauthors) = commit_author_for_tasks(&affected_tasks);
+    append_co_author_trailers(&mut message, &coauthors);
+    git_commit_with_author(&workspace_path, &message, author.as_ref())?;
 
     Ok(json!({
         "workspace_path": workspace_path.to_string_lossy().to_string(),
@@ -162,7 +165,6 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
-    let completed_task_ids: Vec<String> = batch_tasks.iter().map(|t| t.id.clone()).collect();
 
     ensure_no_unmerged_changes(&workspace_path)?;
     git_success(&workspace_path, &["add", "--all", "--", "."])?;
@@ -175,20 +177,163 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 
     let mut task_lines = Vec::new();
     let mut id_labels = Vec::new();
-    for task_id in &completed_task_ids {
-        let task = host.get_task(task_id)?;
-        task_lines.push(format!("- {}: {}", task_id, task.title.trim()));
-        id_labels.push(task_id.clone());
+    for task in &batch_tasks {
+        task_lines.push(format!("- {}: {}", task.id, task.title.trim()));
+        id_labels.push(task.id.clone());
     }
     let ids_joined = id_labels.join(", ");
-    let message = format!(
+    let mut message = format!(
         "feat: parallel batch [{}]\n\nTasks:\n{}",
         ids_joined,
         task_lines.join("\n")
     );
+    let (author, coauthors) = commit_author_for_tasks(&batch_tasks);
+    append_co_author_trailers(&mut message, &coauthors);
 
-    git_success(&workspace_path, &["commit", "-m", &message])?;
+    git_commit_with_author(&workspace_path, &message, author.as_ref())?;
     Ok(json!({}))
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct GitAuthor {
+    name: String,
+    email: String,
+}
+
+impl GitAuthor {
+    fn new(name: impl Into<String>, email: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            email: email.into(),
+        }
+    }
+
+    fn spec(&self) -> String {
+        format!("{} <{}>", self.name, self.email)
+    }
+
+    fn trailer(&self) -> String {
+        format!("Co-Authored-By: {}", self.spec())
+    }
+}
+
+fn git_author_for_task(task: &Task) -> Option<GitAuthor> {
+    git_author_for_implemented_by(task.implemented_by.as_deref())
+}
+
+fn commit_author_for_tasks(tasks: &[Task]) -> (Option<GitAuthor>, Vec<GitAuthor>) {
+    let authors = tasks
+        .iter()
+        .filter_map(git_author_for_task)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    match authors.as_slice() {
+        [] => (None, Vec::new()),
+        [author] => (Some(author.clone()), Vec::new()),
+        _ => (Some(GitAuthor::new("orbit", "orbit@orbit.local")), authors),
+    }
+}
+
+fn append_co_author_trailers(message: &mut String, coauthors: &[GitAuthor]) {
+    if coauthors.is_empty() {
+        return;
+    }
+
+    message.push_str("\n\n");
+    message.push_str(
+        &coauthors
+            .iter()
+            .map(GitAuthor::trailer)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+}
+
+fn git_author_for_implemented_by(implemented_by: Option<&str>) -> Option<GitAuthor> {
+    let implemented_by = implemented_by?.trim();
+    if implemented_by.is_empty() {
+        return None;
+    }
+
+    match implementer_family(implemented_by).as_deref() {
+        Some("claude") => Some(GitAuthor::new("claude", "claude@orbit.local")),
+        Some("gemini") => Some(GitAuthor::new("gemini", "gemini@orbit.local")),
+        Some("codex") => Some(GitAuthor::new("codex", "codex@openai.com")),
+        _ => {
+            let slug = author_slug(implemented_by);
+            Some(GitAuthor::new(slug.clone(), format!("{slug}@orbit.local")))
+        }
+    }
+}
+
+fn implementer_family(implemented_by: &str) -> Option<String> {
+    let lower = implemented_by.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+
+    let model_hint = lower
+        .rsplit_once(" / ")
+        .map(|(_, model)| model.trim())
+        .unwrap_or(lower.as_str());
+
+    infer_agent_family_from_model(model_hint)
+        .or_else(|| {
+            if model_hint.starts_with("o4") {
+                Some("codex".to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if lower.starts_with("codex") || lower.starts_with("openai") {
+                Some("codex".to_string())
+            } else if lower.starts_with("claude") || lower.contains("/claude") {
+                Some("claude".to_string())
+            } else if lower.starts_with("gemini") || lower.contains("/gemini") {
+                Some("gemini".to_string())
+            } else {
+                None
+            }
+        })
+}
+
+fn author_slug(label: &str) -> String {
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+
+    for ch in label.trim().chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+            last_was_dash = false;
+        } else if !last_was_dash {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "agent".to_string()
+    } else {
+        slug
+    }
+}
+
+fn git_commit_with_author(
+    workspace_path: &Path,
+    message: &str,
+    author: Option<&GitAuthor>,
+) -> Result<(), OrbitError> {
+    let mut args = vec!["commit".to_string()];
+    if let Some(author) = author {
+        args.push("--author".to_string());
+        args.push(author.spec());
+    }
+    args.extend(["-m".to_string(), message.to_string()]);
+    git_success_dynamic(workspace_path, &args)
 }
 
 fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
@@ -451,9 +596,224 @@ fn ensure_no_unmerged_changes(workspace_path: &Path) -> Result<(), OrbitError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_task_scope, path_matches_scope};
+    use std::fs;
+    use std::path::{Path, PathBuf};
 
+    use chrono::Utc;
+    use orbit_common::types::{
+        Activity, Job, JobTargetType, OrbitEvent, Role, TaskArtifact, TaskPriority, TaskStatus,
+        TaskType,
+    };
+    use orbit_tools::ToolContext;
+    use serde_json::{Value, json};
     use tempfile::tempdir;
+
+    use crate::context::{
+        JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
+    };
+    use crate::executor::registry::ActivityExecutorRegistry;
+
+    use super::*;
+
+    struct CommitTestHost {
+        tasks: Vec<Task>,
+        repo_root: PathBuf,
+        data_root: PathBuf,
+        scoreboard_dir: PathBuf,
+        registry: ActivityExecutorRegistry,
+    }
+
+    impl CommitTestHost {
+        fn new(tasks: Vec<Task>, repo_root: PathBuf) -> Self {
+            let data_root = repo_root.join(".orbit-test-data");
+            let scoreboard_dir = data_root.join("scoreboard");
+            Self {
+                tasks,
+                repo_root,
+                data_root,
+                scoreboard_dir,
+                registry: ActivityExecutorRegistry::default(),
+            }
+        }
+    }
+
+    impl TaskReadHost for CommitTestHost {
+        fn get_task(&self, task_id: &str) -> Result<Task, OrbitError> {
+            self.tasks
+                .iter()
+                .find(|task| task.id == task_id)
+                .cloned()
+                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+        }
+
+        fn get_task_artifacts(&self, _task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
+            Ok(Vec::new())
+        }
+
+        fn list_tasks_filtered(
+            &self,
+            status: Option<TaskStatus>,
+            priority: Option<TaskPriority>,
+            parent_id: Option<&str>,
+            batch_id: Option<&str>,
+            external_ref: Option<&orbit_common::types::ExternalRef>,
+            has_external_ref_system: Option<&str>,
+        ) -> Result<Vec<Task>, OrbitError> {
+            Ok(self
+                .tasks
+                .iter()
+                .filter(|task| status.is_none_or(|status| task.status == status))
+                .filter(|task| priority.is_none_or(|priority| task.priority == priority))
+                .filter(|task| {
+                    parent_id.is_none_or(|parent_id| task.parent_id.as_deref() == Some(parent_id))
+                })
+                .filter(|task| {
+                    batch_id.is_none_or(|batch_id| task.batch_id.as_deref() == Some(batch_id))
+                })
+                .filter(|task| {
+                    external_ref.is_none_or(|external_ref| {
+                        task.external_refs.iter().any(|candidate| {
+                            candidate.system == external_ref.system
+                                && candidate.id == external_ref.id
+                        })
+                    })
+                })
+                .filter(|task| {
+                    has_external_ref_system.is_none_or(|system| {
+                        task.external_refs
+                            .iter()
+                            .any(|candidate| candidate.system == system)
+                    })
+                })
+                .cloned()
+                .collect())
+        }
+    }
+
+    impl TaskWriteHost for CommitTestHost {
+        fn start_task(
+            &self,
+            _task_id: &str,
+            _note: Option<String>,
+            _comment: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            Err(OrbitError::Execution(
+                "start_task is not needed by commit tests".to_string(),
+            ))
+        }
+
+        fn admit_task_for_workflow(
+            &self,
+            _task_id: &str,
+            _workflow: &str,
+        ) -> Result<Task, OrbitError> {
+            Err(OrbitError::Execution(
+                "admit_task_for_workflow is not needed by commit tests".to_string(),
+            ))
+        }
+
+        fn update_task_from_activity(
+            &self,
+            _task_id: &str,
+            _status: TaskStatus,
+            _execution_summary: Option<String>,
+            _comment: Option<String>,
+            _note: Option<String>,
+        ) -> Result<Task, OrbitError> {
+            Err(OrbitError::Execution(
+                "update_task_from_activity is not needed by commit tests".to_string(),
+            ))
+        }
+
+        fn apply_task_automation_update(
+            &self,
+            _task_id: &str,
+            _update: TaskAutomationUpdate,
+        ) -> Result<(), OrbitError> {
+            Err(OrbitError::Execution(
+                "apply_task_automation_update is not needed by commit tests".to_string(),
+            ))
+        }
+    }
+
+    impl RuntimeHost for CommitTestHost {
+        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn repo_root(&self) -> Result<String, OrbitError> {
+            Ok(self.repo_root.to_string_lossy().to_string())
+        }
+
+        fn data_root(&self) -> &Path {
+            &self.data_root
+        }
+
+        fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
+            &self.registry
+        }
+
+        fn run_job_now_with_input_debug(
+            &self,
+            _job_id: &str,
+            _input: Value,
+            _debug: bool,
+        ) -> Result<JobRunResult, OrbitError> {
+            Err(OrbitError::Execution(
+                "run_job_now_with_input_debug is not needed by commit tests".to_string(),
+            ))
+        }
+
+        fn validate_activity_target_exists(
+            &self,
+            _target_type: JobTargetType,
+            _target_id: &str,
+        ) -> Result<Activity, OrbitError> {
+            Err(OrbitError::Execution(
+                "validate_activity_target_exists is not needed by commit tests".to_string(),
+            ))
+        }
+
+        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
+            Ok(None)
+        }
+
+        fn run_tool_with_context_and_role(
+            &self,
+            _name: &str,
+            _input: Value,
+            _role: Role,
+            _tool_context: ToolContext,
+        ) -> Result<Value, OrbitError> {
+            Err(OrbitError::Execution(
+                "run_tool_with_context_and_role is not needed by commit tests".to_string(),
+            ))
+        }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            false
+        }
+
+        fn graph_editing(&self) -> bool {
+            false
+        }
+
+        fn scoreboard_dir(&self) -> &Path {
+            &self.scoreboard_dir
+        }
+    }
 
     #[test]
     fn normalize_task_scope_uses_selector_anchor_paths() {
@@ -482,5 +842,132 @@ mod tests {
         assert!(path_matches_scope("src/lib.rs", "src"));
         assert!(path_matches_scope("src/lib.rs", "src/lib.rs"));
         assert!(!path_matches_scope("tests/lib.rs", "src"));
+    }
+
+    #[test]
+    fn git_commit_uses_task_implemented_by_as_author() {
+        let cases = [
+            ("claude-opus-4-7", "claude <claude@orbit.local>"),
+            ("gemini-3.1-pro", "gemini <gemini@orbit.local>"),
+            ("gpt-5.5", "codex <codex@openai.com>"),
+        ];
+
+        for (implemented_by, expected_author) in cases {
+            let temp = initialized_git_repo();
+            let workspace = temp.path();
+            fs::create_dir_all(workspace.join("src")).unwrap();
+            fs::write(
+                workspace.join("src/task.txt"),
+                format!("implemented by {implemented_by}\n"),
+            )
+            .unwrap();
+
+            let task = task_with_file("T1", "Implement one task", "src/task.txt", implemented_by);
+            let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+            let input = json!({
+                "scope": "per_task",
+                "batch_id": "batch-1",
+                "workspace_path": workspace.to_string_lossy().to_string(),
+                "completed_task_ids": ["T1"],
+            });
+
+            let user_name_before = git_output(workspace, &["config", "--get", "user.name"])
+                .expect("read git user.name before");
+            let user_email_before = git_output(workspace, &["config", "--get", "user.email"])
+                .expect("read git user.email before");
+
+            git_commit(&host, &input).expect("git_commit succeeds");
+
+            let actual_author = git_output(workspace, &["log", "-1", "--format=%an <%ae>"])
+                .expect("read git author");
+            assert_eq!(actual_author, expected_author);
+            assert_eq!(
+                git_output(workspace, &["config", "--get", "user.name"])
+                    .expect("read git user.name after"),
+                user_name_before
+            );
+            assert_eq!(
+                git_output(workspace, &["config", "--get", "user.email"])
+                    .expect("read git user.email after"),
+                user_email_before
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_implementer_batch_commit_uses_aggregate_author_with_trailers() {
+        let temp = initialized_git_repo();
+        let workspace = temp.path();
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::write(workspace.join("src/claude.txt"), "claude work\n").unwrap();
+        fs::write(workspace.join("src/gemini.txt"), "gemini work\n").unwrap();
+
+        let tasks = vec![
+            task_with_file("T1", "Claude task", "src/claude.txt", "claude-opus-4-7"),
+            task_with_file("T2", "Gemini task", "src/gemini.txt", "gemini-3.1-pro"),
+        ];
+        let host = CommitTestHost::new(tasks, workspace.to_path_buf());
+        let input = json!({
+            "scope": "all",
+            "batch_id": "batch-1",
+            "workspace_path": workspace.to_string_lossy().to_string(),
+        });
+
+        git_commit(&host, &input).expect("git_commit succeeds");
+
+        let actual_author =
+            git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read git author");
+        let body = git_output(workspace, &["log", "-1", "--format=%B"]).expect("read git body");
+        assert_eq!(actual_author, "orbit <orbit@orbit.local>");
+        assert!(body.contains("Co-Authored-By: claude <claude@orbit.local>"));
+        assert!(body.contains("Co-Authored-By: gemini <gemini@orbit.local>"));
+    }
+
+    fn initialized_git_repo() -> tempfile::TempDir {
+        let temp = tempdir().unwrap();
+        let repo = temp.path();
+        git_success(repo, &["init"]).expect("git init");
+        git_success(repo, &["config", "user.name", "Local User"]).expect("config user.name");
+        git_success(repo, &["config", "user.email", "local@example.test"])
+            .expect("config user.email");
+        fs::write(repo.join("README.md"), "base\n").unwrap();
+        git_success(repo, &["add", "README.md"]).expect("git add");
+        git_success(repo, &["commit", "-m", "initial commit"]).expect("initial commit");
+        temp
+    }
+
+    fn task_with_file(id: &str, title: &str, path: &str, implemented_by: &str) -> Task {
+        let now = Utc::now();
+        Task {
+            id: id.to_string(),
+            parent_id: None,
+            title: title.to_string(),
+            description: String::new(),
+            acceptance_criteria: Vec::new(),
+            dependencies: Vec::new(),
+            plan: String::new(),
+            execution_summary: String::new(),
+            context_files: vec![format!("file:{path}")],
+            workspace_path: None,
+            repo_root: None,
+            created_by: None,
+            planned_by: None,
+            implemented_by: Some(implemented_by.to_string()),
+            agent: None,
+            model: None,
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            complexity: None,
+            task_type: TaskType::Task,
+            pr_status: None,
+            external_refs: Vec::new(),
+            source_task_id: None,
+            batch_id: Some("batch-1".to_string()),
+            comments: Vec::new(),
+            history: Vec::new(),
+            review_threads: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
     }
 }
