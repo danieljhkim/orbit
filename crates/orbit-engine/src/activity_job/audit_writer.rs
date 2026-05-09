@@ -114,7 +114,7 @@ impl V2AuditWriter {
     }
 
     /// Run identifier carried in every emitted envelope. Exposed so dual-write
-    /// helpers (e.g. `job_executor::emit_job_event`) can stamp `run_id` onto
+    /// helpers (e.g. `job_executor::audit::emit_job_event`) can stamp `run_id` onto
     /// paired tracing events without re-threading the value from call sites.
     pub fn run_id(&self) -> &str {
         &self.run_id

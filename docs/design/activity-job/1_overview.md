@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-09 (T20260509-2)
 
 Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions.
 
@@ -90,7 +90,7 @@ This layer also owns:
 | Target-ref resolution | `crates/orbit-common/src/types/activity_job/catalog.rs` | [T20260418-2019] |
 | `run-v2` core entrypoints and host boundary | `crates/orbit-core/src/command/activity_v2.rs`, `crates/orbit-core/src/command/job_v2.rs` | [T20260418-2143], [T20260418-2210] |
 | Backend resolution and loop/session constraints | `crates/orbit-core/src/command/backend_resolver.rs`, `crates/orbit-common/src/types/activity_job/backend.rs` | [T20260419-0104] |
-| v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor.rs` | [T20260418-2018] |
+| v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor/` | [T20260418-2018], [T20260509-2] |
 | V2 audit envelope and disk sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002] |
 | `backend: cli` runtime path | `crates/orbit-engine/src/activity_job/cli_runner.rs` | [T20260419-0104] |
 | `fsProfile` enforcement | `crates/orbit-policy`, `tool_context_for_activity`, CLI describe/get surfaces | [T20260419-0503] |
@@ -117,5 +117,6 @@ This layer also owns:
 - **[T20260419-2347]** — Seed activities and workflows on `orbit init`.
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
+- **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

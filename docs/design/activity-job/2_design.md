@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-08 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8)
+**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2)
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -227,6 +227,8 @@ Just as important, Orbit does not enforce tool allowlists on this path today. It
 ---
 
 ## 8. Job Execution Semantics
+
+The executor implementation lives under `crates/orbit-engine/src/activity_job/job_executor/` after [T20260509-2]. `mod.rs` owns the public exports and run entrypoint, while responsibility-focused child modules own audit projection, execution context, templating, step retry/recovery, target dispatch, parallel/fan-out/loop constructs, validation, and the small fan-out semaphore. The outward `activity_job::job_executor::{JobOutcome, execute_job, resolve_job_catalog_refs_for_execution, validate_job}` surface is unchanged.
 
 ### 8.1 Template rendering and pipeline context
 
@@ -485,5 +487,6 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260505-21]** — Add whole-run replay with `retry_source_run_id` lineage and current-definition semantics.
 - **[T20260506-2]** — Lazily materialize loop audit JSONL files only when loop-level events are emitted.
 - **[T20260508-8]** — Resolve backend: cli subprocess cwd from workspace context and record it in audit/tracing.
+- **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

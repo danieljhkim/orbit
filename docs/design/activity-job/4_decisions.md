@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-08 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8)
+**Last updated:** 2026-05-09 (T20260427-34, T20260427-36, T20260427-38, T20260427-40, T20260508-3, T20260508-8, T20260509-2)
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -437,6 +437,19 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - Groundhog and CLI dispatch share one workspace resolver, reducing future drift between orchestration and implementation attempts.
 - Cost: stale declared worktrees now fail before spawn instead of silently running from the parent process directory.
 
+## ADR-046 — Job executor internals split by execution responsibility
+
+**Status:** Accepted · 2026-05 · [T20260509-2]
+
+**Context.** The v2 job executor concentrated step dispatch, retry/recovery, construct orchestration, template rendering, validation, audit projection, and inline tests in one 2.8k-line file.
+
+**Decision.** Keep the public job-executor API stable, but organize the implementation as `job_executor/` child modules with `mod.rs` holding the exported entrypoints and private helpers shared through module-scoped visibility.
+
+**Consequences.**
+- Reviewers can inspect retry/recovery, target dispatch, fan-out, loop, validation, and audit behavior in smaller files without changing runtime semantics.
+- The split preserves the existing engine/core and CLI-runner boundaries; no new crate edge or provider type crosses the activity/job layer.
+- Cost: private helper movement now requires maintaining intra-module visibility and imports across several files instead of one lexical scope.
+
 ---
 
 ## Task References
@@ -497,5 +510,6 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 - **[T20260506-18]** — Compact activity-job ADRs via rollups.
 - **[T20260508-3]** — Revise generated task PR bodies around the one-task-per-PR workflow.
 - **[T20260508-8]** — Resolve backend: cli subprocess cwd from workspace context and record it in audit/tracing.
+- **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
