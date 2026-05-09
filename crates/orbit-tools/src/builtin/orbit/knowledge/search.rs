@@ -10,13 +10,17 @@ use crate::{Tool, ToolContext};
 pub struct OrbitKnowledgeSearchTool;
 
 const DEFAULT_LIMIT: usize = 20;
+const DEFAULT_RANKING_HEADROOM: usize = 10;
+const DEFAULT_RANKING_HARD_CAP: usize = 5_000;
 const SOURCE_REGEX_UNBOUNDED_LIMIT_MAX: usize = 200;
 
 impl Tool for OrbitKnowledgeSearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.graph.search".to_string(),
-            description: "Use when you need to locate selectors by name/path/source regex. Prefer over grep when text hits lose node type or source-context filters.".to_string(),
+            description: format!(
+                "Use when you need to locate selectors by name/path/source regex. Prefer over grep when text hits lose node type or source-context filters. Default ranking keeps at most {DEFAULT_RANKING_HARD_CAP} candidates before ranking."
+            ),
             parameters: vec![
                 ToolParam {
                     name: "query".to_string(),
@@ -122,7 +126,8 @@ impl Tool for OrbitKnowledgeSearchTool {
             Some(type_strs.as_slice())
         };
         let search_limit = if use_default_ranking {
-            usize::MAX
+            // Bound retained service hits while still ranking a wider candidate pool down to `limit`.
+            default_ranking_search_limit(limit)
         } else {
             limit
         };
@@ -253,6 +258,12 @@ fn compile_source_regex(source_regex: Option<&str>) -> Result<Option<Regex>, Orb
         .transpose()
 }
 
+fn default_ranking_search_limit(limit: usize) -> usize {
+    limit
+        .saturating_mul(DEFAULT_RANKING_HEADROOM)
+        .min(DEFAULT_RANKING_HARD_CAP)
+}
+
 fn rank_default_search_results<'a>(
     nodes: Vec<GraphNodeRef<'a>>,
     include_non_code: bool,
@@ -313,4 +324,123 @@ fn is_non_code_path(path: &str) -> bool {
         extension.as_str(),
         "md" | "txt" | "rst" | "adoc" | "yaml" | "yml" | "toml" | "json" | "jsonc" | "csv" | "tsv"
     ) || lower.starts_with("docs/")
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_knowledge::graph::nodes::{
+        BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode,
+    };
+
+    use super::*;
+
+    #[test]
+    fn default_ranking_search_uses_finite_capped_bound_for_large_graph() {
+        const REQUESTED_LIMIT: usize = 10;
+        const FIXTURE_LEAF_COUNT: usize = 1_000;
+
+        let graph = graph_with_matching_leaves(FIXTURE_LEAF_COUNT);
+        let service = GraphContextService::new(&graph);
+        let search_limit = default_ranking_search_limit(REQUESTED_LIMIT);
+
+        assert!(search_limit <= DEFAULT_RANKING_HARD_CAP);
+        assert_eq!(search_limit, REQUESTED_LIMIT * DEFAULT_RANKING_HEADROOM);
+
+        let (_total, hits) =
+            service.search_hits_with_total("fixture", None, None, None, None, search_limit);
+
+        assert_eq!(hits.len(), search_limit);
+    }
+
+    #[test]
+    fn default_ranking_search_limit_saturates_at_hard_cap() {
+        let over_cap_limit = DEFAULT_RANKING_HARD_CAP / DEFAULT_RANKING_HEADROOM + 1;
+
+        assert_eq!(
+            default_ranking_search_limit(over_cap_limit),
+            DEFAULT_RANKING_HARD_CAP
+        );
+    }
+
+    fn graph_with_matching_leaves(leaf_count: usize) -> CodebaseGraphV1 {
+        let root_id = "dir:.".to_string();
+        let file_id = "file:src/fixture.rs".to_string();
+        let mut leaf_ids = Vec::with_capacity(leaf_count);
+        let mut leaves = Vec::with_capacity(leaf_count);
+
+        for index in 0..leaf_count {
+            let name = format!("fixture_{index}");
+            let leaf_id = format!("symbol:src/fixture.rs#{name}:function");
+            leaf_ids.push(leaf_id.clone());
+            leaves.push(LeafNode {
+                base: base_node(
+                    &leaf_id,
+                    &name,
+                    &format!("src/fixture.rs#{name}"),
+                    "rust",
+                    Some(&file_id),
+                ),
+                kind: LeafKind::Function,
+                source: String::new(),
+                source_blob_hash: None,
+                source_hash: None,
+                file_hash_at_capture: None,
+                history: Vec::new(),
+                input_signature: Vec::new(),
+                output_signature: Vec::new(),
+                start_line: Some((index + 1) as u32),
+                end_line: Some((index + 1) as u32),
+                children: Vec::new(),
+            });
+        }
+
+        CodebaseGraphV1 {
+            root_dir_id: root_id.clone(),
+            dirs: vec![DirNode {
+                base: base_node(&root_id, ".", ".", "", None),
+                dir_children: Vec::new(),
+                file_children: vec![file_id.clone()],
+            }],
+            files: vec![FileNode {
+                base: base_node(
+                    &file_id,
+                    "fixture.rs",
+                    "src/fixture.rs",
+                    "rust",
+                    Some(&root_id),
+                ),
+                extension: Some("rs".to_string()),
+                source_blob_hash: None,
+                source: String::new(),
+                imports: Vec::new(),
+                exports: Vec::new(),
+                re_exports: Vec::new(),
+                leaf_children: leaf_ids,
+            }],
+            leaves,
+        }
+    }
+
+    fn base_node(
+        id: &str,
+        name: &str,
+        location: &str,
+        language: &str,
+        parent_id: Option<&str>,
+    ) -> BaseNodeFields {
+        BaseNodeFields {
+            id: id.to_string(),
+            identity_key: id.to_string(),
+            object_hash: None,
+            name: name.to_string(),
+            location: location.to_string(),
+            language: language.to_string(),
+            description: String::new(),
+            parent_id: parent_id.map(str::to_string),
+            is_locked: false,
+            lineage_locked: false,
+            lock_owner: None,
+            lock_reason: String::new(),
+        }
+    }
 }

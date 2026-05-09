@@ -136,6 +136,8 @@ All services are read-only against a resolved snapshot. Graph mutation code rema
 
 Search no longer accepts a `task_id` filter. Task-to-commit lookup is handled by `git log --grep '[T...]'`; the graph remains focused on code structure and source queries.
 
+Default `orbit.graph.search` ranking keeps a bounded candidate pool before ranking rather than retaining every matching node. The cap gives ranking enough headroom over the requested `limit` while preventing broad searches from allocating unbounded hit sets on large graphs ([T20260509-67]).
+
 ### 3.3 Object/blob read cache
 
 `KnowledgeStore` owns a bounded `GraphObjectCache` for selector-oriented reads ([T20260426-0141]). The cache keeps two LRU sets: graph node objects keyed by object hash and source blobs keyed by blob hash. Default capacities are 10,000 objects and 2,000 blobs, enforced by the `lru` crate.

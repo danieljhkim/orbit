@@ -491,6 +491,23 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
+## ADR-033 — Default search ranking uses a bounded candidate pool
+
+**Status:** Accepted · 2026-05 · [T20260509-67]
+**Author:** gpt-5.5
+
+**Context.** `orbit.graph.search` default ranking previously asked the service for `usize::MAX` hits so ranking could choose the best `limit` results from the full match set. On large graphs this let a small user-facing limit retain an effectively unbounded candidate list before ranking.
+
+**Decision.** Replace the unbounded request with a named headroom multiplier and hard cap. Default ranking collects more candidates than the requested `limit`, ranks that bounded pool, and returns the top `limit`; filtered and source-regex searches keep their explicit limit behavior.
+
+**Consequences.**
+- Broad default searches retain a bounded candidate set before ranking.
+- Queries whose strongest matches fit inside the capped candidate pool keep the same ranking and output order.
+- The tool description now states the cap so callers know very broad default searches can rank only the retained candidate pool.
+- Cost: if the best-ranked match appears after the cap in service traversal order, it is no longer considered until a narrower query, type/kind filter, or prefix is supplied.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -538,5 +555,6 @@ Tasks cited by ADRs above:
 - **[T20260509-33]** — Skip symlinked directory entries during scanner traversal and `.orbitignore` discovery.
 - **[T20260509-34]** — Use exact git checkout identity instead of commit timestamps for clean graph freshness.
 - **[T20260509-65]** — Add `GraphReadOptions` so broad graph reads skip file/leaf source hydration unless a tool opts in.
+- **[T20260509-67]** — Bound default-ranking graph search candidate retention with named headroom and hard cap constants.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
