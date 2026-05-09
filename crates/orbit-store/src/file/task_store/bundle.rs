@@ -13,7 +13,7 @@ use super::{
     TaskFileStore,
     constants::TASK_SCHEMA_VERSION,
     doc::{TaskFileDocument, serialize_task_doc_yaml},
-    layout::TaskStateDir,
+    layout::{TaskStateDir, validate_task_id},
 };
 
 #[derive(Debug, Clone)]
@@ -29,6 +29,7 @@ impl TaskFileStore {
         state: TaskStateDir,
         bundle: &TaskBundle,
     ) -> Result<(), OrbitError> {
+        validate_task_id(&bundle.doc.id)?;
         self.write_bundle_at(&self.task_dir(state, &bundle.doc.id), bundle)
     }
 
@@ -91,6 +92,7 @@ impl TaskFileStore {
                 "task id must not be empty".to_string(),
             ));
         }
+        validate_task_id(&bundle.doc.id)?;
         if bundle.doc.title.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task title must not be empty".to_string(),
