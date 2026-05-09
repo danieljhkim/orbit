@@ -1,0 +1,546 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use orbit_common::types::{
+    AuditEventStatus, OrbitError, Task, TaskStatus, audit_execution_id,
+    normalize_optional_attribution_label, optional_string_list_alias, optional_u32_alias,
+    prune_missing_context_files, required_string,
+};
+use orbit_common::utility::path::workspace_relative_paths_overlap;
+use orbit_common::utility::selector::Selector;
+use orbit_store::{
+    ExpiredTaskReservation, ReleasedTaskReservation, TaskLockConflict, TaskLockHolder,
+    TaskReservationCheckParams, TaskReservationReleaseParams, TaskReservationReleaseReason,
+    TaskReservationReserveParams,
+};
+use orbit_tools::ReservationOwnerContext;
+use serde_json::{Value, json};
+
+use crate::OrbitRuntime;
+use crate::command::task::canonicalize_context_files_for_read;
+
+use super::json::{task_lock_status_rank, task_lock_to_json};
+
+pub(super) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+    let reservation_result = runtime
+        .stores()
+        .task_reservations()
+        .list_active(&workspace_orbit_dir(runtime))?;
+    emit_expired_reservation_events(runtime, &reservation_result.expired_reservations)?;
+
+    let mut tasks: Vec<_> = runtime
+        .list_tasks()?
+        .into_iter()
+        .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
+        .collect();
+    tasks.sort_by_key(|task| {
+        (
+            task_lock_status_rank(task.status),
+            task.created_at,
+            task.id.clone(),
+        )
+    });
+
+    let locked_files: BTreeSet<String> = tasks
+        .iter()
+        .flat_map(|task| existing_context_files(runtime, task))
+        .chain(
+            reservation_result
+                .reservations
+                .iter()
+                .flat_map(|reservation| reservation.files.iter().cloned()),
+        )
+        .collect();
+    let by_reservation = reservation_result
+        .reservations
+        .iter()
+        .map(|reservation| {
+            json!({
+                "reservation_id": reservation.reservation_id.clone(),
+                "task_ids": reservation.task_ids.clone(),
+                "files": reservation.files.clone(),
+                "actor": reservation.actor.clone(),
+                "created_at": reservation.created_at.clone(),
+                "expires_at": reservation.expires_at.clone(),
+                "owner_run_id": reservation.owner_run_id.clone(),
+                "owner_metadata_json": reservation.owner_metadata_json.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
+        "by_task": tasks.iter().map(task_lock_to_json).collect::<Vec<_>>(),
+        "by_reservation": by_reservation,
+        "total_locked": locked_files.len(),
+        "total_tasks": tasks.len(),
+        "total_reservations": reservation_result.reservations.len(),
+    }))
+}
+
+pub(super) fn release(
+    runtime: &OrbitRuntime,
+    input: Value,
+    agent: Option<String>,
+    model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let reservation_id = required_string(
+        &input,
+        &["reservation_id", "reservationId", "reservation-id"],
+        "reservation_id",
+    )?;
+    let result = runtime
+        .stores()
+        .task_reservations()
+        .release(TaskReservationReleaseParams {
+            workspace_orbit_dir: workspace_orbit_dir(runtime),
+            reservation_id: reservation_id.clone(),
+            release_reason: TaskReservationReleaseReason::Explicit,
+            release_metadata_json: Some(
+                json!({
+                    "released_by": reservation_actor_label(
+                        runtime,
+                        agent.as_deref(),
+                        model.as_deref(),
+                    ),
+                })
+                .to_string(),
+            ),
+        })?;
+    emit_expired_reservation_events(runtime, &result.expired_reservations)?;
+    if result.released {
+        record_task_lock_audit_event(
+            runtime,
+            "task.locks.reserve.released",
+            "orbit.task.locks.release",
+            Some(reservation_id.as_str()),
+            AuditEventStatus::Success,
+            json!({
+                "reservation_id": reservation_id,
+                "owner_run_id": result
+                    .reservation
+                    .as_ref()
+                    .and_then(|reservation| reservation.owner_run_id.clone()),
+                "release_reason": TaskReservationReleaseReason::Explicit.as_str(),
+                "released_at": result.released_at,
+                "released_by": reservation_actor_label(
+                    runtime,
+                    agent.as_deref(),
+                    model.as_deref(),
+                ),
+            }),
+        )?;
+    }
+    Ok(json!({ "released": result.released }))
+}
+
+pub(super) fn reserve(
+    runtime: &OrbitRuntime,
+    input: Value,
+    agent: Option<String>,
+    model: Option<String>,
+    reservation_owner: Option<ReservationOwnerContext>,
+) -> Result<Value, OrbitError> {
+    let reservation_scope = parse_task_lock_reservation_scope(&input)?;
+    let ttl_seconds =
+        optional_u32_alias(&input, &["ttl_seconds", "ttlSeconds", "ttl-seconds"])?.unwrap_or(1800);
+    if !(1..=7200).contains(&ttl_seconds) {
+        return Err(OrbitError::InvalidInput(
+            "`ttl_seconds` must be between 1 and 7200 seconds".to_string(),
+        ));
+    }
+
+    let actor = reservation_actor_label(runtime, agent.as_deref(), model.as_deref());
+    let (task_ids, requested_files) = match &reservation_scope {
+        TaskLockReservationScope::TaskIds(task_ids) => {
+            (task_ids.clone(), requested_task_files(runtime, task_ids)?)
+        }
+        TaskLockReservationScope::Files(files) => (Vec::new(), files.clone()),
+    };
+    runtime.reconcile_stale_owned_reservations_for_files(&requested_files, 32)?;
+    let mut conflicts = task_lock_conflicts(runtime, &task_ids, &requested_files)?;
+
+    record_task_lock_audit_event(
+        runtime,
+        "task.locks.reserve.requested",
+        "orbit.task.locks.reserve",
+        None,
+        AuditEventStatus::Success,
+        json!({
+            "actor": actor.clone(),
+            "task_ids": task_ids.clone(),
+            "files": requested_files.clone(),
+            "ttl_seconds": ttl_seconds,
+        }),
+    )?;
+
+    let reservation_result = if conflicts.is_empty() {
+        runtime
+            .stores()
+            .task_reservations()
+            .reserve(TaskReservationReserveParams {
+                workspace_orbit_dir: workspace_orbit_dir(runtime),
+                task_ids: task_ids.clone(),
+                requested_files: requested_files.clone(),
+                actor: actor.clone(),
+                ttl_seconds,
+                owner_run_id: reservation_owner
+                    .as_ref()
+                    .map(|owner| owner.owner_run_id.clone()),
+                owner_metadata_json: reservation_owner
+                    .as_ref()
+                    .and_then(|owner| owner.owner_metadata_json.clone()),
+            })?
+    } else {
+        let check = runtime
+            .stores()
+            .task_reservations()
+            .check(TaskReservationCheckParams {
+                workspace_orbit_dir: workspace_orbit_dir(runtime),
+                requested_files: requested_files.clone(),
+            })?;
+        conflicts = merge_task_lock_conflicts(conflicts, check.conflicts);
+        emit_expired_reservation_events(runtime, &check.expired_reservations)?;
+        orbit_store::TaskReservationReserveResult {
+            reserved: false,
+            reservation_id: None,
+            expires_at: None,
+            reserved_files: Vec::new(),
+            conflicts: conflicts.clone(),
+            expired_reservations: Vec::new(),
+        }
+    };
+
+    emit_expired_reservation_events(runtime, &reservation_result.expired_reservations)?;
+
+    if reservation_result.reserved {
+        let reservation_id = reservation_result.reservation_id.clone().ok_or_else(|| {
+            OrbitError::Execution("reservation grant is missing reservation_id".to_string())
+        })?;
+        record_task_lock_audit_event(
+            runtime,
+            "task.locks.reserve.granted",
+            "orbit.task.locks.reserve",
+            Some(reservation_id.as_str()),
+            AuditEventStatus::Success,
+            json!({
+                "reservation_id": reservation_id,
+                "files": reservation_result.reserved_files.clone(),
+                "expires_at": reservation_result.expires_at.clone(),
+                "actor": actor,
+                "task_ids": task_ids.clone(),
+                "owner_run_id": reservation_owner
+                    .as_ref()
+                    .map(|owner| owner.owner_run_id.clone()),
+            }),
+        )?;
+        Ok(json!({
+            "reserved": true,
+            "reservation_id": reservation_result.reservation_id,
+            "expires_at": reservation_result.expires_at,
+            "reserved_files": reservation_result.reserved_files,
+        }))
+    } else {
+        let conflicts = merge_task_lock_conflicts(conflicts, reservation_result.conflicts);
+        record_task_lock_audit_event(
+            runtime,
+            "task.locks.reserve.denied",
+            "orbit.task.locks.reserve",
+            None,
+            AuditEventStatus::Denied,
+            json!({
+                "actor": actor,
+                "task_ids": task_ids.clone(),
+                "files": requested_files.clone(),
+                "conflicts": conflicts.clone(),
+            }),
+        )?;
+        Ok(json!({
+            "reserved": false,
+            "conflicts": conflicts,
+        }))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum TaskLockReservationScope {
+    TaskIds(Vec<String>),
+    Files(Vec<String>),
+}
+
+pub(super) fn parse_task_lock_reservation_scope(
+    input: &Value,
+) -> Result<TaskLockReservationScope, OrbitError> {
+    let task_ids = optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?;
+    let files = optional_string_list_alias(input, &["files"])?;
+
+    match (task_ids, files) {
+        (Some(_), Some(_)) | (None, None) => Err(OrbitError::InvalidInput(
+            "exactly one of 'task_ids' or 'files' must be provided".to_string(),
+        )),
+        (Some(task_ids), None) => {
+            parse_task_id_list(task_ids).map(TaskLockReservationScope::TaskIds)
+        }
+        (None, Some(files)) => {
+            parse_file_lock_selectors(files).map(TaskLockReservationScope::Files)
+        }
+    }
+}
+
+fn parse_task_id_list(task_ids: Vec<String>) -> Result<Vec<String>, OrbitError> {
+    let deduped = task_ids.into_iter().collect::<BTreeSet<_>>();
+    if deduped.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "`task_ids` must contain at least one task ID".to_string(),
+        ));
+    }
+    Ok(deduped.into_iter().collect())
+}
+
+fn parse_file_lock_selectors(files: Vec<String>) -> Result<Vec<String>, OrbitError> {
+    let mut deduped = BTreeSet::new();
+    for raw in files {
+        let selector: Selector = raw.parse().map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "`files` entries must be canonical file or directory selectors using `file:` or `dir:`: {error}"
+            ))
+        })?;
+        match &selector {
+            Selector::Dir { .. } | Selector::File { .. } => {
+                deduped.insert(selector.to_string());
+            }
+            Selector::Symbol { .. } => {
+                return Err(OrbitError::InvalidInput(
+                    "`files` entries must be canonical file or directory selectors using `file:` or `dir:`; `symbol:` selectors are not supported for task locks".to_string(),
+                ));
+            }
+        }
+    }
+    if deduped.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "`files` must contain at least one file or directory selector using `file:` or `dir:`"
+                .to_string(),
+        ));
+    }
+    Ok(deduped.into_iter().collect())
+}
+
+pub(crate) fn workspace_orbit_dir(runtime: &OrbitRuntime) -> String {
+    runtime.paths().orbit_dir.to_string_lossy().into_owned()
+}
+
+fn task_workspace_root(runtime: &OrbitRuntime, task: &Task) -> PathBuf {
+    task.workspace_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                runtime.paths().repo_root.join(path)
+            }
+        })
+        .unwrap_or_else(|| runtime.paths().repo_root.clone())
+}
+
+fn existing_context_files(runtime: &OrbitRuntime, task: &Task) -> Vec<String> {
+    let workspace_root = task_workspace_root(runtime, task);
+    let canonical = canonicalize_context_files_for_read(&task.context_files, &workspace_root);
+    let (kept, _dropped) = prune_missing_context_files(&workspace_root, canonical);
+    kept
+}
+
+pub(crate) fn requested_task_files(
+    runtime: &OrbitRuntime,
+    task_ids: &[String],
+) -> Result<Vec<String>, OrbitError> {
+    let tasks = runtime.stores().tasks().list()?;
+    let task_map = tasks
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut requested_files = BTreeSet::new();
+    for task_id in task_ids {
+        let task = task_map
+            .get(task_id)
+            .ok_or_else(|| OrbitError::TaskNotFound(task_id.clone()))?;
+        requested_files.extend(existing_context_files(runtime, task));
+    }
+
+    Ok(requested_files.into_iter().collect())
+}
+
+pub(crate) fn task_lock_conflicts(
+    runtime: &OrbitRuntime,
+    bundle_task_ids: &[String],
+    requested_files: &[String],
+) -> Result<Vec<TaskLockConflict>, OrbitError> {
+    let bundle_ids = bundle_task_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let requested_files = requested_files.iter().cloned().collect::<BTreeSet<_>>();
+    if requested_files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut tasks: Vec<Task> = runtime
+        .stores()
+        .tasks()
+        .list()?
+        .into_iter()
+        .filter(|task| {
+            matches!(task.status, TaskStatus::InProgress | TaskStatus::Review)
+                && !bundle_ids.contains(&task.id)
+        })
+        .collect();
+    tasks.sort_by_key(|task| {
+        (
+            task_lock_status_rank(task.status),
+            task.created_at,
+            task.id.clone(),
+        )
+    });
+
+    let mut conflicts = Vec::new();
+    for task in tasks {
+        let held_files = existing_context_files(runtime, &task);
+        for requested_file in &requested_files {
+            if held_files
+                .iter()
+                .any(|held_file| workspace_relative_paths_overlap(requested_file, held_file))
+            {
+                conflicts.push(TaskLockConflict {
+                    file: requested_file.clone(),
+                    held_by: TaskLockHolder::Task,
+                    held_by_id: task.id.clone(),
+                });
+            }
+        }
+    }
+
+    conflicts.sort_by(|left, right| {
+        left.file
+            .cmp(&right.file)
+            .then(left.held_by_id.cmp(&right.held_by_id))
+    });
+    Ok(conflicts)
+}
+
+pub(crate) fn merge_task_lock_conflicts(
+    left: Vec<TaskLockConflict>,
+    right: Vec<TaskLockConflict>,
+) -> Vec<TaskLockConflict> {
+    let mut merged = left;
+    merged.extend(right);
+    merged.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| match (a.held_by, b.held_by) {
+                (TaskLockHolder::Task, TaskLockHolder::Reservation) => std::cmp::Ordering::Less,
+                (TaskLockHolder::Reservation, TaskLockHolder::Task) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            })
+            .then(a.held_by_id.cmp(&b.held_by_id))
+    });
+    merged.dedup_by(|a, b| {
+        a.file == b.file && a.held_by == b.held_by && a.held_by_id == b.held_by_id
+    });
+    merged
+}
+
+pub(crate) fn emit_expired_reservation_events(
+    runtime: &OrbitRuntime,
+    expired_reservations: &[ExpiredTaskReservation],
+) -> Result<(), OrbitError> {
+    for expired in expired_reservations {
+        record_task_lock_audit_event(
+            runtime,
+            "task.locks.reserve.expired",
+            "orbit.task.locks.reserve",
+            Some(expired.reservation_id.as_str()),
+            AuditEventStatus::Success,
+            json!({
+                "reservation_id": expired.reservation_id,
+                "expired_at": expired.expired_at,
+            }),
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn emit_task_lock_release_event(
+    runtime: &OrbitRuntime,
+    reservation: &ReleasedTaskReservation,
+    release_reason: TaskReservationReleaseReason,
+) -> Result<(), OrbitError> {
+    record_task_lock_audit_event(
+        runtime,
+        "task.locks.reserve.released",
+        "orbit.task.locks.release",
+        Some(reservation.reservation_id.as_str()),
+        AuditEventStatus::Success,
+        json!({
+            "reservation_id": reservation.reservation_id,
+            "owner_run_id": reservation.owner_run_id,
+            "release_reason": release_reason.as_str(),
+            "released_at": reservation.released_at,
+        }),
+    )
+}
+
+fn reservation_actor_label(
+    runtime: &OrbitRuntime,
+    agent: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    normalize_optional_attribution_label(model.or(agent), model)
+        .unwrap_or_else(|| runtime.actor_label().to_string())
+}
+
+fn record_task_lock_audit_event(
+    runtime: &OrbitRuntime,
+    command: &str,
+    tool_name: &str,
+    target_id: Option<&str>,
+    status: AuditEventStatus,
+    payload: Value,
+) -> Result<(), OrbitError> {
+    let execution_id_prefix = format!("audit-{}", command.replace('.', "-"));
+    runtime.record_audit_event(&crate::AuditEventInsertParams {
+        execution_id: audit_execution_id(&execution_id_prefix),
+        command: command.to_string(),
+        subcommand: None,
+        tool_name: Some(tool_name.to_string()),
+        target_type: Some("task_reservation".to_string()),
+        target_id: target_id.map(ToOwned::to_owned),
+        role: "admin".to_string(),
+        status,
+        exit_code: if status == AuditEventStatus::Denied {
+            1
+        } else {
+            0
+        },
+        duration_ms: 0,
+        working_directory: runtime.paths().repo_root.to_string_lossy().into_owned(),
+        arguments_json: Some(
+            serde_json::to_string(&payload).map_err(|error| {
+                OrbitError::Execution(format!("serialize audit payload: {error}"))
+            })?,
+        ),
+        stdout_truncated: None,
+        stderr_truncated: None,
+        error_message: None,
+        host: std::env::var("HOSTNAME").ok(),
+        pid: std::process::id(),
+        session_id: None,
+        task_id: target_id.map(ToOwned::to_owned),
+        job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
+        activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        step_index: std::env::var("ORBIT_STEP_INDEX")
+            .ok()
+            .and_then(|s| s.parse().ok()),
+    })
+}
