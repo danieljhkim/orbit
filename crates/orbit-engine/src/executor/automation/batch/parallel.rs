@@ -7,8 +7,11 @@ use orbit_common::types::{JobRunState, OrbitError, Task, TaskStatus};
 use orbit_common::utility::selector::overlaps;
 use serde_json::{Value, json};
 
-use super::git::{base_sync_mode_from_input, resolve_worktree_start_point};
-use super::worktree::{ensure_shared_worktree, resolve_shared_worktree_path};
+use super::super::vcs::{
+    ensure_shared_worktree,
+    git::{base_sync_mode_from_input, resolve_worktree_start_point},
+    resolve_shared_worktree_path,
+};
 use crate::context::{
     RuntimeHost, TaskAutomationUpdate, TaskHost, blocked_workflow_failure_update,
 };
@@ -20,7 +23,10 @@ const PARALLEL_WORKER_JOB_ID: &str = "job_parallel_task_worker";
 /// Extract the `run_id` from an activity input value, returning a trimmed
 /// non-empty string. Used by downstream batch activities that need to resolve
 /// the same shared worktree as the dispatch step.
-pub(super) fn require_run_id<'a>(input: &'a Value, activity: &str) -> Result<&'a str, OrbitError> {
+pub(in crate::executor::automation) fn require_run_id<'a>(
+    input: &'a Value,
+    activity: &str,
+) -> Result<&'a str, OrbitError> {
     input
         .get("run_id")
         .and_then(Value::as_str)
@@ -61,7 +67,9 @@ fn block_failed_parallel_task<H: TaskHost + ?Sized>(
     );
 }
 
-pub(super) fn run_parallel_task_pipeline<H: RuntimeHost + TaskHost + Sync + ?Sized>(
+pub(in crate::executor::automation) fn run_parallel_task_pipeline<
+    H: RuntimeHost + TaskHost + Sync + ?Sized,
+>(
     host: &H,
     input: &Value,
     debug: bool,

@@ -1,16 +1,33 @@
-use std::collections::BTreeSet;
-use std::path::{Component, Path, PathBuf};
+mod author;
+mod git_ops;
+mod message;
+mod scope;
 
-use orbit_common::types::{OrbitError, Task, infer_agent_family_from_model};
-use orbit_common::utility::selector::anchor_path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
+
+#[cfg(test)]
+use orbit_common::types::Task;
 
 use crate::context::{RuntimeHost, TaskHost};
 
-use super::git::{git_output, git_output_paths, git_success};
-use super::input::{canonicalize_existing_dir, input_string_field, required_batch_id};
+use super::super::input::{canonicalize_existing_dir, input_string_field, required_batch_id};
+use super::git::git_success;
+use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
+use git_ops::{
+    ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_author, stage_paths,
+    staged_changed_files,
+};
+use message::{finalize_commit_message, task_commit_message};
+use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
 
-pub(super) fn git_commit<H: TaskHost + RuntimeHost + ?Sized>(
+#[cfg(test)]
+use scope::{normalize_task_scope, path_matches_scope};
+
+pub(in crate::executor::automation) fn git_commit<H: TaskHost + RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -194,148 +211,6 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     Ok(json!({}))
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct GitAuthor {
-    name: String,
-    email: String,
-}
-
-impl GitAuthor {
-    fn new(name: impl Into<String>, email: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            email: email.into(),
-        }
-    }
-
-    fn spec(&self) -> String {
-        format!("{} <{}>", self.name, self.email)
-    }
-
-    fn trailer(&self) -> String {
-        format!("Co-Authored-By: {}", self.spec())
-    }
-}
-
-fn git_author_for_task(task: &Task) -> Option<GitAuthor> {
-    git_author_for_implemented_by(task.implemented_by.as_deref())
-}
-
-fn commit_author_for_tasks(tasks: &[Task]) -> (Option<GitAuthor>, Vec<GitAuthor>) {
-    let authors = tasks
-        .iter()
-        .filter_map(git_author_for_task)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-
-    match authors.as_slice() {
-        [] => (None, Vec::new()),
-        [author] => (Some(author.clone()), Vec::new()),
-        _ => (Some(GitAuthor::new("orbit", "orbit@orbit.local")), authors),
-    }
-}
-
-fn append_co_author_trailers(message: &mut String, coauthors: &[GitAuthor]) {
-    if coauthors.is_empty() {
-        return;
-    }
-
-    message.push_str("\n\n");
-    message.push_str(
-        &coauthors
-            .iter()
-            .map(GitAuthor::trailer)
-            .collect::<Vec<_>>()
-            .join("\n"),
-    );
-}
-
-fn git_author_for_implemented_by(implemented_by: Option<&str>) -> Option<GitAuthor> {
-    let implemented_by = implemented_by?.trim();
-    if implemented_by.is_empty() {
-        return None;
-    }
-
-    match implementer_family(implemented_by).as_deref() {
-        Some("claude") => Some(GitAuthor::new("claude", "claude@orbit.local")),
-        Some("gemini") => Some(GitAuthor::new("gemini", "gemini@orbit.local")),
-        Some("codex") => Some(GitAuthor::new("codex", "codex@openai.com")),
-        _ => {
-            let slug = author_slug(implemented_by);
-            Some(GitAuthor::new(slug.clone(), format!("{slug}@orbit.local")))
-        }
-    }
-}
-
-fn implementer_family(implemented_by: &str) -> Option<String> {
-    let lower = implemented_by.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return None;
-    }
-
-    let model_hint = lower
-        .rsplit_once(" / ")
-        .map(|(_, model)| model.trim())
-        .unwrap_or(lower.as_str());
-
-    infer_agent_family_from_model(model_hint)
-        .or_else(|| {
-            if model_hint.starts_with("o4") {
-                Some("codex".to_string())
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            if lower.starts_with("codex") || lower.starts_with("openai") {
-                Some("codex".to_string())
-            } else if lower.starts_with("claude") || lower.contains("/claude") {
-                Some("claude".to_string())
-            } else if lower.starts_with("gemini") || lower.contains("/gemini") {
-                Some("gemini".to_string())
-            } else {
-                None
-            }
-        })
-}
-
-fn author_slug(label: &str) -> String {
-    let mut slug = String::new();
-    let mut last_was_dash = false;
-
-    for ch in label.trim().chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
-            slug.push(ch);
-            last_was_dash = false;
-        } else if !last_was_dash {
-            slug.push('-');
-            last_was_dash = true;
-        }
-    }
-
-    let slug = slug.trim_matches('-').to_string();
-    if slug.is_empty() {
-        "agent".to_string()
-    } else {
-        slug
-    }
-}
-
-fn git_commit_with_author(
-    workspace_path: &Path,
-    message: &str,
-    author: Option<&GitAuthor>,
-) -> Result<(), OrbitError> {
-    let mut args = vec!["commit".to_string()];
-    if let Some(author) = author {
-        args.push("--author".to_string());
-        args.push(author.spec());
-    }
-    args.extend(["-m".to_string(), message.to_string()]);
-    git_success_dynamic(workspace_path, &args)
-}
-
 fn resolve_workspace_path<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
@@ -364,236 +239,6 @@ fn completed_task_ids_field(input: &Value) -> Option<Vec<String>> {
     )
 }
 
-fn changed_files_for_task(workspace_path: &Path, task: &Task) -> Result<Vec<String>, OrbitError> {
-    let changed_files = collect_worktree_changes(workspace_path)?;
-    Ok(filter_changed_files_for_task(
-        &changed_files,
-        workspace_path,
-        task,
-    ))
-}
-
-fn filter_changed_files_for_task(
-    changed_files: &BTreeSet<String>,
-    workspace_path: &Path,
-    task: &Task,
-) -> Vec<String> {
-    let scopes = task_scopes(task, workspace_path);
-    if scopes.is_empty() {
-        return Vec::new();
-    }
-
-    changed_files
-        .iter()
-        .filter(|file| scopes.iter().any(|scope| path_matches_scope(file, scope)))
-        .cloned()
-        .collect()
-}
-
-fn collect_worktree_changes(workspace_path: &Path) -> Result<BTreeSet<String>, OrbitError> {
-    let mut files = BTreeSet::new();
-    for path in git_output_paths(
-        workspace_path,
-        &["diff", "--name-only", "-z", "--relative", "HEAD", "--"],
-    )? {
-        files.insert(path);
-    }
-    for path in git_output_paths(
-        workspace_path,
-        &["ls-files", "--others", "--exclude-standard", "-z", "--"],
-    )? {
-        files.insert(path);
-    }
-    Ok(files)
-}
-
-fn task_scopes(task: &Task, workspace_path: &Path) -> Vec<String> {
-    task.context_files
-        .iter()
-        .filter_map(|raw| normalize_task_scope(raw, workspace_path))
-        .collect()
-}
-
-fn normalize_task_scope(raw: &str, workspace_path: &Path) -> Option<String> {
-    let anchor = anchor_path(raw).ok()?;
-    let relative = if anchor.is_absolute() {
-        anchor.strip_prefix(workspace_path).ok()?.to_path_buf()
-    } else {
-        anchor
-    };
-    normalize_relative_path(&relative)
-}
-
-fn normalize_relative_path(path: &Path) -> Option<String> {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) => normalized.push(part),
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-
-    let value = normalized.to_string_lossy().replace('\\', "/");
-    (!value.is_empty()).then_some(value)
-}
-
-fn path_matches_scope(path: &str, scope: &str) -> bool {
-    path == scope
-        || scope == "."
-        || path
-            .strip_prefix(scope)
-            .is_some_and(|suffix| suffix.starts_with('/'))
-}
-
-fn task_commit_message(task: &Task) -> String {
-    let mut message = format!("[{}] {}", task.id, task.title.trim());
-    if let Some(summary) = execution_summary_paragraph(task) {
-        message.push_str("\n\n");
-        message.push_str(&summary);
-    }
-    message
-}
-
-fn finalize_commit_message(tasks: &[Task]) -> String {
-    if tasks.len() == 1 {
-        let task = &tasks[0];
-        let summary =
-            execution_summary_paragraph(task).unwrap_or_else(|| task.title.trim().to_string());
-        let subject = single_line_summary(&summary);
-        let mut message = format!("fix: {} [{}]", subject, task.id);
-        if summary != subject {
-            message.push_str("\n\n");
-            message.push_str(&summary);
-        }
-        return message;
-    }
-
-    let ids_joined = tasks
-        .iter()
-        .map(|task| task.id.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let summaries = tasks
-        .iter()
-        .map(|task| {
-            let summary =
-                execution_summary_paragraph(task).unwrap_or_else(|| task.title.trim().to_string());
-            format!("- {}: {}", task.id, single_line_summary(&summary))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!("fix: finalize ship batch [{ids_joined}]\n\n{summaries}")
-}
-
-fn execution_summary_paragraph(task: &Task) -> Option<String> {
-    let section = extract_summary_section(&task.execution_summary)?;
-    let paragraph = section
-        .lines()
-        .map(str::trim)
-        .map(|line| {
-            line.trim_start_matches("- ")
-                .trim_start_matches("* ")
-                .trim()
-        })
-        .skip_while(|line| line.is_empty())
-        .take_while(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let paragraph = paragraph.trim();
-    (!paragraph.is_empty()).then_some(paragraph.to_string())
-}
-
-fn extract_summary_section(summary: &str) -> Option<String> {
-    let mut in_section = false;
-    let mut lines = Vec::new();
-
-    for line in summary.lines() {
-        let trimmed = line.trim();
-        let is_heading = trimmed.starts_with("## ");
-        if trimmed == "## 1. Summary of Changes" || trimmed == "## Summary" {
-            in_section = true;
-            continue;
-        }
-        if in_section && is_heading {
-            break;
-        }
-        if in_section {
-            lines.push(trimmed.to_string());
-        }
-    }
-
-    let section = lines.join("\n");
-    let section = section.trim();
-    (!section.is_empty()).then_some(section.to_string())
-}
-
-fn single_line_summary(summary: &str) -> String {
-    summary
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
-}
-
-fn stage_paths(workspace_path: &Path, files: &[String]) -> Result<(), OrbitError> {
-    if files.is_empty() {
-        return Ok(());
-    }
-
-    let mut args = vec!["add".to_string(), "-A".to_string(), "--".to_string()];
-    args.extend(files.iter().cloned());
-    git_success_dynamic(workspace_path, &args)
-}
-
-fn staged_changed_files(workspace_path: &Path) -> Result<Vec<String>, OrbitError> {
-    git_output_paths(
-        workspace_path,
-        &["diff", "--cached", "--name-only", "-z", "--relative"],
-    )
-}
-
-fn git_success_dynamic(current_dir: &Path, args: &[String]) -> Result<(), OrbitError> {
-    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    git_success(current_dir, &args)
-}
-
-fn ensure_named_branch(workspace_path: &Path) -> Result<(), OrbitError> {
-    let actual_branch = git_output(workspace_path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    let actual_branch = actual_branch.trim();
-    if actual_branch == "HEAD" {
-        return Err(OrbitError::Execution(format!(
-            "workspace '{}' has detached HEAD; expected a named branch",
-            workspace_path.display(),
-        )));
-    }
-    Ok(())
-}
-
-fn ensure_no_unmerged_changes(workspace_path: &Path) -> Result<(), OrbitError> {
-    let status = git_output(workspace_path, &["status", "--porcelain"])?;
-    for line in status.lines() {
-        if line.len() < 2 {
-            continue;
-        }
-        let bytes = line.as_bytes();
-        let x = bytes[0] as char;
-        let y = bytes[1] as char;
-        if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
-            return Err(OrbitError::Execution(format!(
-                "task worktree '{}' has unresolved merge conflicts",
-                workspace_path.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -613,6 +258,7 @@ mod tests {
     };
     use crate::executor::registry::ActivityExecutorRegistry;
 
+    use super::super::git::git_output;
     use super::*;
 
     struct CommitTestHost {

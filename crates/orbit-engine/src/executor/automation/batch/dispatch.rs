@@ -10,12 +10,12 @@ use serde_json::{Value, json};
 
 use crate::context::{TaskAutomationUpdate, TaskHost};
 
-use super::input::required_input_string;
+use super::super::input::required_input_string;
 use super::parallel::{parse_parallelism, tasks_conflict};
 
 const SYSTEM_ACTOR_LABEL: &str = "system";
 
-pub(super) fn dispatch_batch<H: TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn dispatch_batch<H: TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

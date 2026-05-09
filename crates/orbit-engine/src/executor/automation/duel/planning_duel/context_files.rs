@@ -310,9 +310,9 @@ Do the work.
 
 ## Context Files
 
-- `symbol:crates/orbit-engine/src/executor/automation/planning_duel/artifacts.rs#writeback_planning_duel_task:function` — primary insertion point.
+- `symbol:crates/orbit-engine/src/executor/automation/duel/planning_duel/artifacts.rs#writeback_planning_duel_task:function` — primary insertion point.
 - `file:crates/orbit-engine/src/context.rs` — add the `context_files` field.
-- `dir:crates/orbit-engine/src/executor/automation/planning_duel` — module folder.
+- `dir:crates/orbit-engine/src/executor/automation/duel/planning_duel` — module folder.
 - `file:CLAUDE.md` — doc-update rule.
 
 ## Risks
@@ -323,9 +323,9 @@ Do the work.
         assert_eq!(
             result.canonical_entries,
             vec![
-                "symbol:crates/orbit-engine/src/executor/automation/planning_duel/artifacts.rs#writeback_planning_duel_task:function".to_string(),
+                "symbol:crates/orbit-engine/src/executor/automation/duel/planning_duel/artifacts.rs#writeback_planning_duel_task:function".to_string(),
                 "file:crates/orbit-engine/src/context.rs".to_string(),
-                "dir:crates/orbit-engine/src/executor/automation/planning_duel".to_string(),
+                "dir:crates/orbit-engine/src/executor/automation/duel/planning_duel".to_string(),
                 "file:CLAUDE.md".to_string(),
             ]
         );

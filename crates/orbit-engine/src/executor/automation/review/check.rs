@@ -1,11 +1,11 @@
 use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 
-use super::input::required_batch_id;
-use super::review::normalize_review_decision;
+use super::super::input::required_batch_id;
+use super::normalize_review_decision;
 use crate::context::TaskHost;
 
-pub(super) fn check_task_value<H: TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn check_task_value<H: TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

@@ -29,7 +29,7 @@ use serde_json::Value;
 
 use crate::context::{RuntimeHost, TaskHost};
 
-use super::input::{input_string_field, required_input_string};
+use super::super::input::{input_string_field, required_input_string};
 
 /// Parse a required role assignment from current_input.
 ///
@@ -237,7 +237,7 @@ fn resolve_scope<H: RuntimeHost + ?Sized>(host: &H, input: &Value) -> TaskScope 
     }
 }
 
-pub(super) fn record_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn record_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

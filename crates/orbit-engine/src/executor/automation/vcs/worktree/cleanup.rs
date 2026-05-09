@@ -4,9 +4,9 @@ use orbit_common::types::OrbitError;
 use serde_json::{Map, Value, json};
 
 use crate::context::RuntimeHost;
+use crate::executor::automation::input::input_string_field;
 
 use super::super::git::{git_output, git_output_raw, git_success};
-use super::super::input::input_string_field;
 use super::{resolve_shared_worktree_path, resolve_worktree_path_from_prefix};
 
 const DEFAULT_BRANCH_PREFIX: &str = "orbit";
@@ -15,7 +15,7 @@ pub(in crate::executor::automation) fn cleanup_worktree<H: RuntimeHost + ?Sized>
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let run_id = super::super::parallel::require_run_id(input, "cleanup_worktree")?;
+    let run_id = crate::executor::automation::batch::require_run_id(input, "cleanup_worktree")?;
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
     let workspace_path = resolve_workspace_path(repo_root, input, run_id)?;

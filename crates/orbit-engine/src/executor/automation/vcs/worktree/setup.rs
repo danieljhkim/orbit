@@ -5,9 +5,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+use crate::executor::automation::input::{input_string_field, required_input_string};
 
 use super::super::git::{base_sync_mode_from_input, git_success, resolve_worktree_start_point};
-use super::super::input::{input_string_field, required_input_string};
 use super::resolve_worktree_path_from_prefix;
 
 const DEFAULT_BASE: &str = "main";

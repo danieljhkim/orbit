@@ -1,22 +1,10 @@
-mod check_review;
-mod commit;
-mod dispatch_batch;
-mod freshness;
-pub(crate) mod git;
+mod batch;
+mod command;
+mod duel;
 mod input;
-mod parallel;
-mod planning_duel;
-mod pr;
-mod pull;
-mod push;
-mod record_duel_scores;
 pub(crate) mod review;
-mod run_command;
-mod select_duel_roles;
-mod select_duel_task;
-mod sync_review;
-mod task;
-mod worktree;
+mod task_update;
+pub(crate) mod vcs;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -168,27 +156,25 @@ pub fn execute_action<
 ) -> Result<Value, OrbitError> {
     match action {
         // ---- retained internal actions ----
-        UPDATE_TASK_ACTION => task::update_task(host, input),
-        RUN_PARALLEL_TASK_PIPELINE_ACTION => {
-            parallel::run_parallel_task_pipeline(host, input, debug)
-        }
-        SELECT_DUEL_TASK_ACTION => select_duel_task::select_duel_task(host, input),
-        SELECT_DUEL_ROLES_ACTION => select_duel_roles::select_duel_roles(host, input),
-        RECORD_DUEL_SCORES_ACTION => record_duel_scores::record_duel_scores(host, input),
-        RUN_PLANNING_DUEL_ACTION => planning_duel::run_planning_duel(host, input, debug),
+        UPDATE_TASK_ACTION => task_update::update_task(host, input),
+        RUN_PARALLEL_TASK_PIPELINE_ACTION => batch::run_parallel_task_pipeline(host, input, debug),
+        SELECT_DUEL_TASK_ACTION => duel::select_duel_task(host, input),
+        SELECT_DUEL_ROLES_ACTION => duel::select_duel_roles(host, input),
+        RECORD_DUEL_SCORES_ACTION => duel::record_duel_scores(host, input),
+        RUN_PLANNING_DUEL_ACTION => duel::run_planning_duel(host, input, debug),
 
         // ---- generic built-in actions ----
-        GIT_COMMIT_ACTION => commit::git_commit(host, input),
-        GIT_PUSH_ACTION => push::push_batch_changes(host, input),
-        GIT_PULL_ACTION => pull::pull_batch_changes(host, input),
-        GIT_MERGE_ACTION => pr::git_merge(host, input),
-        WORKTREE_SETUP_ACTION => worktree::setup_worktree(host, input),
-        WORKTREE_CLEANUP_ACTION => worktree::cleanup_worktree(host, input),
-        PR_OPEN_ACTION => pr::pr_open(host, input),
-        PR_SYNC_REVIEWS_ACTION => sync_review::sync_batch_review_to_github(host, input),
-        CHECK_TASK_VALUE_ACTION => check_review::check_task_value(host, input),
-        DISPATCH_BATCH_ACTION => dispatch_batch::dispatch_batch(host, input),
-        RUN_COMMAND_ACTION => run_command::run_command(host, input, steps_outputs, state_context),
+        GIT_COMMIT_ACTION => vcs::git_commit(host, input),
+        GIT_PUSH_ACTION => vcs::push_batch_changes(host, input),
+        GIT_PULL_ACTION => vcs::pull_batch_changes(host, input),
+        GIT_MERGE_ACTION => vcs::git_merge(host, input),
+        WORKTREE_SETUP_ACTION => vcs::setup_worktree(host, input),
+        WORKTREE_CLEANUP_ACTION => vcs::cleanup_worktree(host, input),
+        PR_OPEN_ACTION => vcs::pr_open(host, input),
+        PR_SYNC_REVIEWS_ACTION => review::sync_batch_review_to_github(host, input),
+        CHECK_TASK_VALUE_ACTION => review::check_task_value(host, input),
+        DISPATCH_BATCH_ACTION => batch::dispatch_batch(host, input),
+        RUN_COMMAND_ACTION => command::run_command(host, input, steps_outputs, state_context),
 
         other => Err(OrbitError::InvalidInput(format!(
             "unsupported automation action '{other}'"

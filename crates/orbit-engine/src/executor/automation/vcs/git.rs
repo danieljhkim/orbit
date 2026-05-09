@@ -5,12 +5,14 @@ use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum BaseSyncMode {
+pub(in crate::executor::automation) enum BaseSyncMode {
     Local,
     Remote,
 }
 
-pub(super) fn base_sync_mode_from_input(input: &Value) -> Result<BaseSyncMode, OrbitError> {
+pub(in crate::executor::automation) fn base_sync_mode_from_input(
+    input: &Value,
+) -> Result<BaseSyncMode, OrbitError> {
     match input
         .as_object()
         .and_then(|map| map.get("base_sync"))
@@ -110,7 +112,10 @@ pub(crate) fn git_command_success(current_dir: &Path, args: &[&str]) -> Result<b
     Ok(result.success)
 }
 
-pub(super) fn fetch_remote_base(repo_root: &Path, base: &str) -> Result<(), OrbitError> {
+pub(in crate::executor::automation) fn fetch_remote_base(
+    repo_root: &Path,
+    base: &str,
+) -> Result<(), OrbitError> {
     let branch = normalize_base_branch(base)?;
     let result = run_process(
         &ExecRequest {
@@ -140,7 +145,7 @@ pub(super) fn fetch_remote_base(repo_root: &Path, base: &str) -> Result<(), Orbi
     Ok(())
 }
 
-pub(super) fn resolve_worktree_start_point(
+pub(in crate::executor::automation) fn resolve_worktree_start_point(
     repo_root: &Path,
     base: &str,
     sync_mode: BaseSyncMode,
@@ -155,7 +160,9 @@ pub(super) fn resolve_worktree_start_point(
     }
 }
 
-pub(super) fn normalize_base_branch(base: &str) -> Result<String, OrbitError> {
+pub(in crate::executor::automation) fn normalize_base_branch(
+    base: &str,
+) -> Result<String, OrbitError> {
     let branch = base
         .trim()
         .strip_prefix("origin/")

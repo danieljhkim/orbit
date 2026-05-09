@@ -5,9 +5,9 @@ use serde_json::{Value, json};
 
 use crate::context::TaskReadHost;
 
-use super::input::input_string_field;
+use super::super::input::input_string_field;
 
-pub(super) fn select_duel_task<H: TaskReadHost + ?Sized>(
+pub(in crate::executor::automation) fn select_duel_task<H: TaskReadHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

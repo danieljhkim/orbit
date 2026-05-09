@@ -5,10 +5,10 @@ use serde_json::{Value, json};
 
 use crate::context::RuntimeHost;
 
+use super::super::input::{canonicalize_existing_dir, input_string_field, required_batch_id};
 use super::git::{git_output, git_success};
-use super::input::{canonicalize_existing_dir, input_string_field, required_batch_id};
 
-pub(super) fn push_batch_changes<H: RuntimeHost + ?Sized>(
+pub(in crate::executor::automation) fn push_batch_changes<H: RuntimeHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

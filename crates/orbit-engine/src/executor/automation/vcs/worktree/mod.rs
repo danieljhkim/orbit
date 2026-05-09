@@ -8,14 +8,16 @@ use orbit_common::types::OrbitError;
 
 use super::git::{git_output, git_success};
 
-pub(super) use cleanup::cleanup_worktree;
-pub(super) use merge::merge_batch_worktree_into_base;
-pub(super) use setup::setup_worktree;
+pub(in crate::executor::automation) use cleanup::cleanup_worktree;
+pub(in crate::executor::automation) use merge::merge_batch_worktree_into_base;
+pub(in crate::executor::automation) use setup::setup_worktree;
 
 const SHARED_WORKTREE_NAME_PREFIX: &str = "parallel-batch";
 const SHARED_WORKTREE_BRANCH_PREFIX: &str = "orbit/parallel-batch";
 
-pub(super) fn sanitize_worktree_token(value: &str) -> Result<String, OrbitError> {
+pub(in crate::executor::automation) fn sanitize_worktree_token(
+    value: &str,
+) -> Result<String, OrbitError> {
     let sanitized: String = value
         .trim()
         .chars()
@@ -38,7 +40,7 @@ pub(super) fn sanitize_worktree_token(value: &str) -> Result<String, OrbitError>
     Ok(trimmed)
 }
 
-pub(super) fn resolve_worktree_path_from_prefix(
+pub(in crate::executor::automation) fn resolve_worktree_path_from_prefix(
     repo_root: &Path,
     prefix: &str,
     run_id: &str,
@@ -55,7 +57,7 @@ pub(super) fn resolve_worktree_path_from_prefix(
     }
 }
 
-pub(super) fn resolve_shared_worktree_path(
+pub(in crate::executor::automation) fn resolve_shared_worktree_path(
     repo_root: &Path,
     run_id: &str,
 ) -> Result<PathBuf, OrbitError> {
@@ -70,7 +72,7 @@ pub(super) fn resolve_shared_worktree_path(
     }
 }
 
-pub(super) fn ensure_shared_worktree(
+pub(in crate::executor::automation) fn ensure_shared_worktree(
     repo_root: &Path,
     worktree_path: &Path,
     start_point: &str,

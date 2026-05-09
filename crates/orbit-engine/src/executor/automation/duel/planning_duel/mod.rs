@@ -5,4 +5,4 @@ mod roles;
 mod runner;
 mod types;
 
-pub(super) use runner::run_planning_duel;
+pub(in crate::executor::automation) use runner::run_planning_duel;

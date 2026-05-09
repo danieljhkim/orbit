@@ -13,11 +13,15 @@ pub(super) fn commit_and_open_batch_pr<H: RuntimeHost + TaskHost + Sync + ?Sized
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    let run_id = super::parallel::require_run_id(input, "commit_and_open_batch_pr")?.to_string();
+    let run_id = crate::executor::automation::batch::require_run_id(
+        input,
+        "commit_and_open_batch_pr",
+    )?
+    .to_string();
     let input = ensure_workspace_path(host, input, &run_id)?;
 
-    let mut commit_result = super::commit::commit_batch_changes(host, &input)?;
-    let pr_result = super::pr::open_batch_pr(host, &input)?;
+    let mut commit_result = super::commit_batch_changes(host, &input)?;
+    let pr_result = super::super::pr::open_batch_pr(host, &input)?;
 
     // Merge pr_result fields into commit_result so the caller gets a union of both outputs.
     if let (Some(base), Some(overlay)) = (commit_result.as_object_mut(), pr_result.as_object()) {
@@ -45,7 +49,7 @@ fn ensure_workspace_path<H: RuntimeHost + ?Sized>(
 
     let repo_root_str = host.repo_root()?;
     let repo_root = Path::new(&repo_root_str);
-    let worktree = super::worktree::resolve_shared_worktree_path(repo_root, run_id)?;
+    let worktree = super::super::worktree::resolve_shared_worktree_path(repo_root, run_id)?;
 
     let mut patched = input.clone();
     if let Some(obj) = patched.as_object_mut() {

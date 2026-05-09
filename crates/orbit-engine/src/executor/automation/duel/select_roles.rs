@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
-use super::input::required_input_string;
+use super::super::input::required_input_string;
 
 /// The six permutations of `[0, 1, 2]`, used to assign families to
 /// `(implementer, reviewer, arbiter)` slots.
@@ -126,7 +126,7 @@ fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
         })
 }
 
-pub(super) fn select_duel_roles<H: RuntimeHost + TaskHost + ?Sized>(
+pub(in crate::executor::automation) fn select_duel_roles<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {

@@ -4,7 +4,7 @@ use chrono::Utc;
 use orbit_common::types::OrbitError;
 use serde::{Deserialize, Serialize};
 
-use crate::executor::automation::git::{
+use crate::executor::automation::vcs::git::{
     git_command_success, git_output, git_output_paths, git_success,
 };
 

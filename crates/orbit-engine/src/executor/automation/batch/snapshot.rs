@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::context::TaskHost;
 
-use super::input::required_input_string;
+use super::super::input::required_input_string;
 
 pub(super) fn snapshot_batch_state<H: TaskHost + ?Sized>(
     host: &H,

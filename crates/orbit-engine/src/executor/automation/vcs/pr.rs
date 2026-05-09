@@ -10,14 +10,14 @@ use serde_json::{Value, json};
 
 use crate::context::{PrConfig, RuntimeHost, TaskAutomationUpdate, TaskHost};
 
-use super::freshness::{ensure_branch_fresh_against_base, ensure_branch_rebased_onto_base};
-use super::git::{base_sync_mode_from_input, git_output};
-use super::input::{
+use super::super::input::{
     canonicalize_existing_dir, input_string_field, json_number_to_string, required_batch_id,
     required_input_string,
 };
+use super::freshness::{ensure_branch_fresh_against_base, ensure_branch_rebased_onto_base};
+use super::git::{base_sync_mode_from_input, git_output};
 
-pub(super) fn pr_open<H: RuntimeHost + TaskHost + Sync + ?Sized>(
+pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -25,7 +25,7 @@ pub(super) fn pr_open<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     open_batch_pr(host, input)
 }
 
-pub(super) fn git_merge<H: RuntimeHost + TaskHost + Sync + ?Sized>(
+pub(in crate::executor::automation) fn git_merge<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     host: &H,
     input: &Value,
 ) -> Result<Value, OrbitError> {
@@ -85,7 +85,7 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     // Check that ALL tasks have APPROVED pr_status
     for task in &batch_tasks {
         let pr_status_raw = task.pr_status.as_deref().unwrap_or("none");
-        let review_decision = super::review::normalize_review_decision(pr_status_raw);
+        let review_decision = super::super::review::normalize_review_decision(pr_status_raw);
         if review_decision != "APPROVED" {
             return Err(OrbitError::Execution(format!(
                 "task '{}' is not approved (pr_status={pr_status_raw})",
@@ -1162,7 +1162,7 @@ mod tests {
                 Some("https://orbit.example/tasks/T20260508-3"),
             )],
             &freshness(),
-            &["crates/orbit-engine/src/executor/automation/pr.rs"],
+            &["crates/orbit-engine/src/executor/automation/vcs/pr.rs"],
             &test_pr_config(None),
         );
 
@@ -1184,7 +1184,7 @@ mod tests {
                 Some("https://orbit.example/tasks/T20260427-32"),
             )],
             &freshness(),
-            &["crates/orbit-engine/src/executor/automation/pr.rs"],
+            &["crates/orbit-engine/src/executor/automation/vcs/pr.rs"],
             &test_pr_config(None),
         );
 

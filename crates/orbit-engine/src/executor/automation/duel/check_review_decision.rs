@@ -13,7 +13,7 @@
 use orbit_common::types::{Decision, OrbitError};
 use serde_json::{Value, json};
 
-use super::input::required_input_string;
+use super::super::input::required_input_string;
 
 /// Extract the arbiter decision from the current input. The arbiter
 /// writes a top-level `decision` string (`APPROVED` or `REQUEST_CHANGES`)
