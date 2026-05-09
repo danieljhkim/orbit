@@ -18,7 +18,7 @@ use super::super::input::{canonicalize_existing_dir, input_string_field, require
 use super::git::git_success;
 use author::{append_co_author_trailers, commit_author_for_tasks, git_author_for_task};
 use git_ops::{
-    ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_author, stage_paths,
+    ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
     staged_changed_files,
 };
 use message::{finalize_commit_message, task_commit_message};
@@ -106,7 +106,7 @@ pub(super) fn commit_task_artifact_changes<H: TaskHost + RuntimeHost + ?Sized>(
 
         let message = task_commit_message(&task);
         let author = git_author_for_task(&task);
-        git_commit_with_author(&workspace_path, &message, author.as_ref())?;
+        git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
         committed_task_ids.push(task.id);
     }
 
@@ -161,7 +161,7 @@ pub(super) fn commit_finalize_artifact_changes<H: TaskHost + RuntimeHost + ?Size
     let mut message = finalize_commit_message(&affected_tasks);
     let (author, coauthors) = commit_author_for_tasks(&affected_tasks);
     append_co_author_trailers(&mut message, &coauthors);
-    git_commit_with_author(&workspace_path, &message, author.as_ref())?;
+    git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
 
     Ok(json!({
         "workspace_path": workspace_path.to_string_lossy().to_string(),
@@ -207,7 +207,7 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
     let (author, coauthors) = commit_author_for_tasks(&batch_tasks);
     append_co_author_trailers(&mut message, &coauthors);
 
-    git_commit_with_author(&workspace_path, &message, author.as_ref())?;
+    git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
     Ok(json!({}))
 }
 
@@ -243,6 +243,7 @@ fn completed_task_ids_field(input: &Value) -> Option<Vec<String>> {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::process::Command;
 
     use chrono::Utc;
     use orbit_common::types::{
@@ -491,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn git_commit_uses_task_implemented_by_as_author() {
+    fn git_commit_uses_scoped_identity_without_mutating_local_human_config() {
         let cases = [
             ("claude-opus-4-7", "claude <claude@orbit.local>"),
             ("gemini-3.1-pro", "gemini <gemini@orbit.local>"),
@@ -521,12 +522,25 @@ mod tests {
                 .expect("read git user.name before");
             let user_email_before = git_output(workspace, &["config", "--get", "user.email"])
                 .expect("read git user.email before");
+            let local_user_name_before = git_stdout_bytes(
+                workspace,
+                &["config", "--local", "--get", "user.name"],
+                "read local git user.name before",
+            );
+            let local_user_email_before = git_stdout_bytes(
+                workspace,
+                &["config", "--local", "--get", "user.email"],
+                "read local git user.email before",
+            );
 
             git_commit(&host, &input).expect("git_commit succeeds");
 
             let actual_author = git_output(workspace, &["log", "-1", "--format=%an <%ae>"])
                 .expect("read git author");
+            let actual_committer = git_output(workspace, &["log", "-1", "--format=%cn <%ce>"])
+                .expect("read git committer");
             assert_eq!(actual_author, expected_author);
+            assert_eq!(actual_committer, expected_author);
             assert_eq!(
                 git_output(workspace, &["config", "--get", "user.name"])
                     .expect("read git user.name after"),
@@ -537,11 +551,59 @@ mod tests {
                     .expect("read git user.email after"),
                 user_email_before
             );
+            assert_eq!(
+                git_stdout_bytes(
+                    workspace,
+                    &["config", "--local", "--get", "user.name"],
+                    "read local git user.name after",
+                ),
+                local_user_name_before
+            );
+            assert_eq!(
+                git_stdout_bytes(
+                    workspace,
+                    &["config", "--local", "--get", "user.email"],
+                    "read local git user.email after",
+                ),
+                local_user_email_before
+            );
         }
     }
 
     #[test]
-    fn mixed_implementer_batch_commit_uses_aggregate_author_with_trailers() {
+    fn git_commit_succeeds_without_creating_local_user_config() {
+        let temp = initialized_git_repo_without_local_user_config();
+        let workspace = temp.path();
+        fs::create_dir_all(workspace.join("src")).unwrap();
+        fs::write(workspace.join("src/task.txt"), "codex work\n").unwrap();
+
+        let task = task_with_file("T1", "Implement one task", "src/task.txt", "gpt-5.5");
+        let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
+        let input = json!({
+            "scope": "per_task",
+            "batch_id": "batch-1",
+            "workspace_path": workspace.to_string_lossy().to_string(),
+            "completed_task_ids": ["T1"],
+        });
+
+        let local_user_config_before = local_user_config_snapshot(workspace);
+
+        git_commit(&host, &input).expect("git_commit succeeds without local user config");
+
+        let actual_author =
+            git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read author");
+        let actual_committer =
+            git_output(workspace, &["log", "-1", "--format=%cn <%ce>"]).expect("read committer");
+        assert_eq!(actual_author, "codex <codex@openai.com>");
+        assert_eq!(actual_committer, "codex <codex@openai.com>");
+        assert_eq!(
+            local_user_config_snapshot(workspace),
+            local_user_config_before
+        );
+    }
+
+    #[test]
+    fn git_commit_mixed_implementer_batch_uses_aggregate_identity_with_trailers() {
         let temp = initialized_git_repo();
         let workspace = temp.path();
         fs::create_dir_all(workspace.join("src")).unwrap();
@@ -559,14 +621,23 @@ mod tests {
             "workspace_path": workspace.to_string_lossy().to_string(),
         });
 
+        let local_user_config_before = local_user_config_snapshot(workspace);
+
         git_commit(&host, &input).expect("git_commit succeeds");
 
         let actual_author =
             git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read git author");
+        let actual_committer = git_output(workspace, &["log", "-1", "--format=%cn <%ce>"])
+            .expect("read git committer");
         let body = git_output(workspace, &["log", "-1", "--format=%B"]).expect("read git body");
         assert_eq!(actual_author, "orbit <orbit@orbit.local>");
+        assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
         assert!(body.contains("Co-Authored-By: claude <claude@orbit.local>"));
         assert!(body.contains("Co-Authored-By: gemini <gemini@orbit.local>"));
+        assert_eq!(
+            local_user_config_snapshot(workspace),
+            local_user_config_before
+        );
     }
 
     fn initialized_git_repo() -> tempfile::TempDir {
@@ -580,6 +651,71 @@ mod tests {
         git_success(repo, &["add", "README.md"]).expect("git add");
         git_success(repo, &["commit", "-m", "initial commit"]).expect("initial commit");
         temp
+    }
+
+    fn initialized_git_repo_without_local_user_config() -> tempfile::TempDir {
+        let temp = tempdir().unwrap();
+        let repo = temp.path();
+        git_success(repo, &["init"]).expect("git init");
+        fs::write(repo.join("README.md"), "base\n").unwrap();
+        git_success(repo, &["add", "README.md"]).expect("git add");
+        git_success(
+            repo,
+            &[
+                "-c",
+                "user.name=Initial User",
+                "-c",
+                "user.email=initial@example.test",
+                "commit",
+                "-m",
+                "initial commit",
+            ],
+        )
+        .expect("initial commit");
+        assert_eq!(
+            local_user_config_snapshot(repo),
+            CommandSnapshot {
+                code: Some(1),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            }
+        );
+        temp
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct CommandSnapshot {
+        code: Option<i32>,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    }
+
+    fn local_user_config_snapshot(repo: &Path) -> CommandSnapshot {
+        git_command_snapshot(repo, &["config", "--local", "--get-regexp", "^user\\."])
+    }
+
+    fn git_stdout_bytes(repo: &Path, args: &[&str], context: &str) -> Vec<u8> {
+        let snapshot = git_command_snapshot(repo, args);
+        assert_eq!(
+            snapshot.code,
+            Some(0),
+            "{context}: stderr={}",
+            String::from_utf8_lossy(&snapshot.stderr)
+        );
+        snapshot.stdout
+    }
+
+    fn git_command_snapshot(repo: &Path, args: &[&str]) -> CommandSnapshot {
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .output()
+            .expect("run git command");
+        CommandSnapshot {
+            code: output.status.code(),
+            stdout: output.stdout,
+            stderr: output.stderr,
+        }
     }
 
     fn task_with_file(id: &str, title: &str, path: &str, implemented_by: &str) -> Task {

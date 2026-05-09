@@ -16,6 +16,18 @@ impl GitAuthor {
         }
     }
 
+    pub(super) fn orbit() -> Self {
+        Self::new("orbit", "orbit@orbit.local")
+    }
+
+    pub(super) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(super) fn email(&self) -> &str {
+        &self.email
+    }
+
     pub(super) fn spec(&self) -> String {
         format!("{} <{}>", self.name, self.email)
     }
@@ -40,7 +52,7 @@ pub(super) fn commit_author_for_tasks(tasks: &[Task]) -> (Option<GitAuthor>, Vec
     match authors.as_slice() {
         [] => (None, Vec::new()),
         [author] => (Some(author.clone()), Vec::new()),
-        _ => (Some(GitAuthor::new("orbit", "orbit@orbit.local")), authors),
+        _ => (Some(GitAuthor::orbit()), authors),
     }
 }
 

@@ -11,7 +11,7 @@ impl Tool for GitCommitTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "git.commit".to_string(),
-            description: "Create a git commit for an explicit file list".to_string(),
+            description: "Create a user-directed git commit for an explicit file list using the repository's ambient Git identity; workflow-owned commits use separate scoped automation.".to_string(),
             parameters: vec![
                 ToolParam {
                     name: "repo_root".to_string(),

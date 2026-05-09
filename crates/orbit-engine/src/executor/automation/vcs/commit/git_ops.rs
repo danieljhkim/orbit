@@ -1,22 +1,23 @@
 use std::path::Path;
 
 use orbit_common::types::OrbitError;
+use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
 
 use super::super::git::{git_output, git_output_paths, git_success};
 use super::author::GitAuthor;
 
-pub(super) fn git_commit_with_author(
+pub(super) fn git_commit_with_identity(
     workspace_path: &Path,
     message: &str,
     author: Option<&GitAuthor>,
 ) -> Result<(), OrbitError> {
+    let committer = author.cloned().unwrap_or_else(GitAuthor::orbit);
+    let author = author.cloned().unwrap_or_else(|| committer.clone());
     let mut args = vec!["commit".to_string()];
-    if let Some(author) = author {
-        args.push("--author".to_string());
-        args.push(author.spec());
-    }
+    args.push("--author".to_string());
+    args.push(author.spec());
     args.extend(["-m".to_string(), message.to_string()]);
-    git_success_dynamic(workspace_path, &args)
+    git_success_dynamic_with_identity(workspace_path, &args, &author, &committer)
 }
 
 pub(super) fn stage_paths(workspace_path: &Path, files: &[String]) -> Result<(), OrbitError> {
@@ -39,6 +40,56 @@ pub(super) fn staged_changed_files(workspace_path: &Path) -> Result<Vec<String>,
 fn git_success_dynamic(current_dir: &Path, args: &[String]) -> Result<(), OrbitError> {
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     git_success(current_dir, &args)
+}
+
+fn git_success_dynamic_with_identity(
+    current_dir: &Path,
+    args: &[String],
+    author: &GitAuthor,
+    committer: &GitAuthor,
+) -> Result<(), OrbitError> {
+    let env_overrides = [
+        ("GIT_AUTHOR_NAME", author.name()),
+        ("GIT_AUTHOR_EMAIL", author.email()),
+        ("GIT_COMMITTER_NAME", committer.name()),
+        ("GIT_COMMITTER_EMAIL", committer.email()),
+    ];
+    let mut environment = std::env::vars()
+        .filter(|(key, _)| {
+            !env_overrides
+                .iter()
+                .any(|(override_key, _)| key == override_key)
+        })
+        .collect::<Vec<_>>();
+    environment.extend(
+        env_overrides
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
+    );
+
+    let result = run_process(
+        &ExecRequest {
+            program: "git".to_string(),
+            args: args.to_vec(),
+            current_dir: Some(current_dir.to_string_lossy().to_string()),
+            timeout_ms: Some(30_000),
+            stdin_mode: StdinMode::Null,
+            environment_mode: EnvironmentMode::ClearAndSet(environment),
+            debug: false,
+        },
+        &NoSandbox,
+    )?;
+
+    if !result.success {
+        return Err(OrbitError::Execution(format!(
+            "git {} failed in '{}': {}",
+            args.join(" "),
+            current_dir.display(),
+            result.stderr.trim()
+        )));
+    }
+
+    Ok(())
 }
 
 pub(super) fn ensure_named_branch(workspace_path: &Path) -> Result<(), OrbitError> {
