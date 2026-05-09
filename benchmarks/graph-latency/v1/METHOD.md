@@ -2,8 +2,10 @@
 
 ## Harness git SHA at freeze time
 
-`<TBD-at-freeze>`. The harness skeleton lands with task `T20260509-63`; the
-first real sweep and the SHA pin land with a follow-up task.
+`1b4a9be8881f411effb5c1719b1959fefee40463` (the orbit binary built at this SHA
+produced every record under `v1/runs/`). The freeze commit lands the harness
+sources alongside the records; reproducing this report requires both — the
+harness at the freeze commit AND an orbit binary at the SHA above.
 
 ## Delta vs v0
 
@@ -11,29 +13,25 @@ v1 is the first frozen round; no prior version to diff.
 
 ## Corpus list
 
-Three tiers across three languages — Python, Java, TypeScript. All corpora are
+One corpus per language at the `medium` (~250k LOC) tier. All corpora are
 pinned at a specific upstream SHA and fetched into `~/.cache/orbit-bench/<corpus>`
 by `scripts/fetch.sh`. Pins listed below are the v1 starting set; concrete commit
 SHAs are resolved and locked in the first sweep (the placeholder `<sha>` markers
 below become real 40-char hashes once the sweep runs and `git rev-parse HEAD` is
 recorded).
 
-The `large` tier targets ~700k–1M LOC, not the 2M+ enterprise regime. 2M+
-mono-repos exist (cpython core, IntelliJ Community, full OpenStack) but are rare
-in practice; sizing the tier at 700k–1M matches the regime most users actually
-hit graph-latency walls in.
+v1 is intentionally a tight three-corpus baseline. The `small` tier was
+dropped because most graph operations are sub-100ms at ~10k LOC — the regime
+gives little signal about the cost dynamics that matter. The `large` tier
+(700k+ LOC) is deferred until the graph design is known to handle that
+regime cleanly; benchmarks whose large cells time out or OOM tell us nothing
+about latency. Future rounds reintroduce tiers as the design proves out.
 
-| Corpus name      | Language   | Tier   | Source                                              | LOC target  |
-|------------------|------------|--------|-----------------------------------------------------|------------:|
-| `python-small`   | Python     | small  | `pallets/flask@<sha>`                               |        ~10k |
-| `python-medium`  | Python     | medium | `django/django@<sha>`                               |       ~280k |
-| `python-large`   | Python     | large  | `home-assistant/core@<sha>`                         |       ~700k |
-| `java-small`     | Java       | small  | `apache/commons-cli@<sha>`                          |        ~12k |
-| `java-medium`    | Java       | medium | `google/guava@<sha>`                                |       ~150k |
-| `java-large`     | Java       | large  | `apache/hadoop@<sha>`                               |        ~1M  |
-| `ts-small`       | TypeScript | small  | `preactjs/preact@<sha>`                             |        ~10k |
-| `ts-medium`      | TypeScript | medium | `vuejs/core@<sha>`                                  |       ~150k |
-| `ts-large`       | TypeScript | large  | `angular/angular@<sha>`                             |       ~600k |
+| Corpus name     | Language   | Source                | LOC target |
+|-----------------|------------|-----------------------|-----------:|
+| `python-medium` | Python     | `django/django@<sha>` |      ~280k |
+| `java-medium`   | Java       | `google/guava@<sha>`  |      ~150k |
+| `ts-medium`     | TypeScript | `vuejs/core@<sha>`    |      ~150k |
 
 TypeScript is included because `orbit-knowledge` parses it as a first-class
 language and TS exercises pathologies neither Python nor Java cover well —
@@ -45,10 +43,7 @@ likely place for parser surprises.
 The "v1 starting set, may revise on first sweep" caveat applies to every row:
 if a candidate repo turns out to be unrepresentative, unfetchable, or
 mis-sized, the first-sweep task substitutes a replacement and records the
-substitution in `RESULTS.md` §Known caveats. `ts-large` (`angular/angular`,
-~600k) sits slightly under the 700k–1M tier floor — it is the cleanest
-canonical large-TS choice; the next-best fit (`vercel/next.js`, ~700k)
-requires path-filtering during fetch and was deferred for now.
+substitution in `RESULTS.md` §Known caveats.
 
 ### Fetch instructions
 

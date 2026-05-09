@@ -1,0 +1,19 @@
+{
+  "corpus": "ts-medium",
+  "corpus_sha": "6eb29d345aa73746207f80c89ee8b37ff7b949c9",
+  "error": "",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "1b4a9be8881f411effb5c1719b1959fefee40463",
+  "phase": "query",
+  "query_shape": "refs:symbol:packages/reactivity/src/baseHandlers.ts#BaseReactiveHandler:class",
+  "result_count": 2,
+  "result_size_bytes": 423,
+  "rss_peak_mb": 30,
+  "seed": 5,
+  "tool": "graph.refs",
+  "wall_ms": 169
+}

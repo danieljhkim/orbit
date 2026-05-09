@@ -1,0 +1,19 @@
+{
+  "corpus": "python-medium",
+  "corpus_sha": "c499184f198df8deb8b5f7282b679babef8384ff",
+  "error": "",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "1b4a9be8881f411effb5c1719b1959fefee40463",
+  "phase": "query",
+  "query_shape": "refs:symbol:django/db/models/base.py#Model:class",
+  "result_count": 20,
+  "result_size_bytes": 3215,
+  "rss_peak_mb": 144,
+  "seed": 5,
+  "tool": "graph.refs",
+  "wall_ms": 1808
+}

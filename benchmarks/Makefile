@@ -33,7 +33,7 @@ IDENTITY_KEY_SCRIPTS ?= $(BENCH_ROOT)/identity-key/scripts
 
 # graph-latency is a perf benchmark (kind: perf). Same versioning rules as
 # graph; see benchmarks/CONVENTIONS.md.
-GRAPH_LATENCY_VERSION ?= v1
+GRAPH_LATENCY_VERSION ?= v2
 GRAPH_LATENCY_SCRIPTS ?= $(BENCH_ROOT)/graph-latency/scripts
 GRAPH_LATENCY_DIR := $(BENCH_ROOT)/graph-latency/$(GRAPH_LATENCY_VERSION)
 
@@ -41,7 +41,6 @@ GL_CORPUS ?=
 GL_TOOL ?=
 GL_PHASE ?= query
 GL_SEED ?= 1
-GL_QUERY_SHAPE ?= default
 GL_RUN_ARGS ?=
 GL_SWEEP_ARGS ?=
 GL_FETCH_ARGS ?=
@@ -96,7 +95,8 @@ help:
 	@echo "  GRAPH_VERSION=v3 (default)          targets benchmarks/graph/v3/ (living)."
 	@echo "  GRAPH_VERSION=v2                    targets benchmarks/graph/v2/ (frozen)."
 	@echo "  GRAPH_VERSION=v1                    targets benchmarks/graph/v1/ (frozen)."
-	@echo "  GRAPH_LATENCY_VERSION=v1 (default)  targets benchmarks/graph-latency/v1/ (living)."
+	@echo "  GRAPH_LATENCY_VERSION=v2 (default)  targets benchmarks/graph-latency/v2/ (living)."
+	@echo "  GRAPH_LATENCY_VERSION=v1            targets benchmarks/graph-latency/v1/ (frozen)."
 	@echo "  See benchmarks/CONVENTIONS.md."
 
 graph-run:
@@ -151,10 +151,9 @@ graph-latency-run:
 	$(PYTHON) $(GRAPH_LATENCY_SCRIPTS)/run.py \
 		--version $(GRAPH_LATENCY_VERSION) \
 		--corpus $(GL_CORPUS) \
-		--tool $(GL_TOOL) \
 		--phase $(GL_PHASE) \
 		--seed $(GL_SEED) \
-		--query-shape $(GL_QUERY_SHAPE) \
+		$(if $(GL_TOOL),--tool $(GL_TOOL),) \
 		$(GL_RUN_ARGS)
 
 graph-latency-sweep:

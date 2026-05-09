@@ -1,0 +1,54 @@
+# Corpus-specific query primitives.
+#
+# Per-tool input shapes are composed by run.py from these primitives:
+#   graph.overview     -> prefix?  (or empty)
+#   graph.search       -> search_terms[seed % len]
+#   graph.callers      -> selectors[seed % len]
+#   graph.deps         -> {} (no corpus-specific input)
+#   graph.refs         -> selectors[seed % len]
+#   graph.show         -> selectors[seed % len]
+#   graph.implementors -> selectors[seed % len]   (parser may classify TS/Java interfaces as traits)
+#   graph.history      -> selectors[seed % len]   (compatibility stub; fast)
+#   graph.pack         -> selectors (full list, packed in one call)
+#
+# Rotating by seed gives N seeds × M shapes coverage without exploding the matrix.
+
+corpora:
+  python-medium:
+    search_terms:
+      - QuerySet
+      - save
+      - Model
+    selectors:
+      - symbol:django/db/models/query.py#QuerySet:class
+      - symbol:django/db/models/base.py#Model:class
+      - file:django/db/models/query.py
+    prefixes:
+      - django/db/
+      - django/contrib/
+
+  java-medium:
+    search_terms:
+      - ImmutableList
+      - Iterables
+      - Optional
+    selectors:
+      - symbol:guava/src/com/google/common/collect/ImmutableList.java#ImmutableList:class
+      - symbol:guava/src/com/google/common/collect/Iterables.java#Iterables:class
+      - file:guava/src/com/google/common/base/Optional.java
+    prefixes:
+      - guava/src/com/google/common/collect/
+      - guava/src/com/google/common/base/
+
+  ts-medium:
+    search_terms:
+      - createApp
+      - reactive
+      - defineComponent
+    selectors:
+      - symbol:packages/runtime-core/src/component.ts#ComponentCustomProps:interface
+      - symbol:packages/reactivity/src/baseHandlers.ts#BaseReactiveHandler:class
+      - file:packages/runtime-core/src/component.ts
+    prefixes:
+      - packages/runtime-core/src/
+      - packages/reactivity/src/

@@ -19,13 +19,9 @@ Tools in scope (one cell per): `orbit.graph.overview`, `search`, `callers`, `dep
 
 ## Corpus matrix
 
-Three tiers across three languages — Python, Java, TypeScript. Concrete `<org>/<repo>@<sha>` pins are recorded in each round's `vN/METHOD.md`. Fixtures live outside the repo to keep our git footprint small — `scripts/fetch.sh` clones into `~/.cache/orbit-bench/<corpus>` on first run.
+One tier per language — Python, Java, TypeScript — at the `medium` (~250k LOC) target. v1 is intentionally a tight baseline: one corpus per language, no tier comparison. The `small` tier (~10k LOC) is omitted because it gives little signal — most graph operations are sub-100ms there and the cost dynamics that matter only show up at medium and above. The `large` tier (~700k+ LOC) is deferred until the graph design is known to handle that regime cleanly. Future rounds reintroduce tiers as the design proves out.
 
-| Tier   | Target LOC   | Rationale                                                       |
-|--------|--------------|-----------------------------------------------------------------|
-| small  | ~10k         | sanity floor; sub-100ms expected                                |
-| medium | ~250k        | typical product mono-repo                                       |
-| large  | ~700k–1M     | the regime where users hit latency walls (2M+ is rare in practice) |
+Concrete `<org>/<repo>@<sha>` pins are recorded in each round's `vN/METHOD.md`. Fixtures live outside the repo — `scripts/fetch.sh` clones into `~/.cache/orbit-bench/<corpus>` on first run.
 
 ## Reproducing
 
@@ -56,7 +52,8 @@ Each record (`<seed>.json`) contains `wall_ms`, `rss_peak_mb`, `result_size_byte
 
 | Version | Scope | Status | Report |
 |---|---|---|---|
-| [v1](./v1/) | First baseline; Python + Java + TypeScript × 3 tiers × 9 tools | LIVING | [RESULTS.md](./v1/RESULTS.md) |
+| [v1](./v1/) | First baseline; Python + Java + TypeScript at medium × 9 tools | FROZEN | [RESULTS.md](./v1/RESULTS.md) |
+| [v2](./v2/) | TBD — measurement variable not yet fixed | LIVING | [RESULTS.md](./v2/RESULTS.md) |
 
 ## Conventions
 
@@ -72,10 +69,18 @@ benchmarks/graph-latency/
 │   ├── run.py          # one cell
 │   ├── sweep.py        # full matrix
 │   └── aggregate.py    # p50/p90/p99 tables
-└── v1/                 # LIVING round 1
-    ├── README.md       # version banner
-    ├── METHOD.md       # corpus pins, host disclosure, record schema
-    ├── RESULTS.md      # placeholder until first sweep lands
-    ├── tasks/          # query-shape definitions
-    └── runs/           # gitignored staging for in-progress sweep
+├── v1/                 # FROZEN round 1
+│   ├── README.md       # version banner
+│   ├── METHOD.md       # corpus pins, host disclosure, record schema
+│   ├── RESULTS.md      # frozen v1 report
+│   ├── corpora.yaml    # pinned <repo>@<sha> for each corpus
+│   ├── tasks/          # query-shape primitives
+│   └── runs/           # frozen records (per-cell JSON)
+└── v2/                 # LIVING round 2
+    ├── README.md
+    ├── METHOD.md
+    ├── RESULTS.md
+    ├── corpora.yaml
+    ├── tasks/
+    └── runs/           # gitignored staging
 ```

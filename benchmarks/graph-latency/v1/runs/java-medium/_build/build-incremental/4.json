@@ -1,0 +1,19 @@
+{
+  "corpus": "java-medium",
+  "corpus_sha": "f06690fa3e874f65515e8fd338a74d636e2c792f",
+  "error": "",
+  "host": {
+    "cpu": "Apple M4 Pro",
+    "os": "macOS-26.4.1-arm64-arm-64bit",
+    "ram_gb": 64
+  },
+  "orbit_sha": "1b4a9be8881f411effb5c1719b1959fefee40463",
+  "phase": "build-incremental",
+  "query_shape": null,
+  "result_count": null,
+  "result_size_bytes": null,
+  "rss_peak_mb": 605,
+  "seed": 4,
+  "tool": null,
+  "wall_ms": 22641
+}
