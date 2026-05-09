@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::graph::nodes::CodebaseGraphV1;
 use crate::graph::object_store::RefName;
+use crate::pipeline::GitCheckoutIdentity;
 
 /// Configuration for a build run.
 pub struct BuildConfig {
@@ -19,6 +20,7 @@ pub struct PipelineContext {
     pub incremental: bool,
     pub ref_name: RefName,
     pub default_ref_name: Option<RefName>,
+    pub(crate) checkout_identity: Option<GitCheckoutIdentity>,
     /// Relative file paths discovered by scan.
     pub file_paths: Vec<PathBuf>,
     /// SHA-256 hashes keyed by relative path string.
@@ -37,6 +39,7 @@ impl PipelineContext {
             incremental: config.incremental,
             ref_name,
             default_ref_name,
+            checkout_identity: None,
             file_paths: Vec::new(),
             new_hashes: HashMap::new(),
             changed_paths: Vec::new(),

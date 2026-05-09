@@ -53,6 +53,10 @@ pub struct CurrentRef {
     pub root_object_hash: String,
     #[serde(default)]
     pub root_dir_id: String,
+    #[serde(default)]
+    pub git_head_oid: Option<String>,
+    #[serde(default)]
+    pub git_tree_oid: Option<String>,
     pub index: String,
 }
 
@@ -711,6 +715,8 @@ impl GraphObjectStore {
             root_graph_hash: root_graph_hash.clone(),
             root_object_hash,
             root_dir_id: graph.root_dir_id.clone(),
+            git_head_oid: None,
+            git_tree_oid: None,
             index: format!("graph/index/by-id/{root_graph_hash}.json"),
         })
     }

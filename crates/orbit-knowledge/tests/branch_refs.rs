@@ -384,6 +384,88 @@ fn branch_refs_ensure_fresh_rebuilds_clean_worktree_when_branch_ref_is_missing()
 }
 
 #[test]
+fn branch_refs_ensure_fresh_rebuilds_after_reset_to_older_timestamp_head()
+-> Result<(), Box<dyn std::error::Error>> {
+    let repo = init_repo()?;
+    let knowledge_temp = TempDir::new()?;
+    let knowledge_dir = knowledge_temp.path().join("knowledge");
+
+    write_rust_source(repo.path(), "old_graph")?;
+    commit_all_with_date(repo.path(), "old graph", "2026-04-01T00:00:00Z")?;
+    let old_head = git(repo.path(), &["rev-parse", "HEAD"])?;
+
+    write_rust_source(repo.path(), "new_graph")?;
+    commit_all_with_date(repo.path(), "new graph", "2030-01-01T00:00:00Z")?;
+    let new_head = git(repo.path(), &["rev-parse", "HEAD"])?;
+
+    run_build(BuildConfig {
+        repo_path: repo.path().to_path_buf(),
+        output_dir: knowledge_dir.clone(),
+        incremental: false,
+        ref_name: None,
+    })?;
+
+    let read_target = resolve_graph_read_target(Some(repo.path()), None)?;
+    let graph_store = GraphObjectStore::new(knowledge_dir.join("graph"));
+    let current_ref = graph_store.read_ref(&read_target.requested)?;
+    assert_eq!(current_ref.git_head_oid.as_deref(), Some(new_head.as_str()));
+    assert!(current_ref.git_tree_oid.as_deref().is_some());
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(knowledge_dir.join("manifest.json"))?)?;
+    assert_eq!(
+        manifest
+            .get("git_head_oid")
+            .and_then(|value| value.as_str()),
+        Some(new_head.as_str())
+    );
+    assert!(
+        manifest
+            .get("git_tree_oid")
+            .and_then(|value| value.as_str())
+            .is_some()
+    );
+
+    git(repo.path(), &["reset", "--hard", &old_head])?;
+    let generated_at = manifest
+        .get("generated_at")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| io_error("manifest generated_at missing".to_string()))?;
+    let generated_at = chrono::DateTime::parse_from_rfc3339(generated_at)?;
+    let head_ts =
+        chrono::DateTime::parse_from_rfc3339(&git(repo.path(), &["log", "-1", "--format=%cI"])?)?;
+    assert!(head_ts < generated_at);
+
+    let status = ensure_fresh(&knowledge_dir, repo.path())?;
+    assert_eq!(status, RefreshStatus::Rebuilt);
+
+    let refreshed_ref = graph_store.read_ref(&read_target.requested)?;
+    assert_eq!(
+        refreshed_ref.git_head_oid.as_deref(),
+        Some(old_head.as_str())
+    );
+
+    let graph = graph_store.read_graph(
+        &read_target.requested,
+        read_target.fallback.as_ref(),
+        read_target.default.as_ref(),
+    )?;
+    assert!(
+        graph
+            .leaves
+            .iter()
+            .any(|leaf| leaf.base.name == "old_graph")
+    );
+    assert!(
+        !graph
+            .leaves
+            .iter()
+            .any(|leaf| leaf.base.name == "new_graph")
+    );
+    Ok(())
+}
+
+#[test]
 fn pack_regression_selector_opens_from_branch_ref_layout() -> Result<(), Box<dyn std::error::Error>>
 {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

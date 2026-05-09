@@ -36,11 +36,15 @@ A branch ref is JSON with the same high-level metadata as the old current ref pl
   "root_graph_hash": "<sha256>",
   "root_object_hash": "<sha256>",
   "root_dir_id": "dir:.",
+  "git_head_oid": "<commit-oid>",
+  "git_tree_oid": "<tree-oid>",
   "index": "graph/index/by-id/<root-graph-hash>.json"
 }
 ```
 
 The `index` field is knowledge-root-relative. That means it is interpreted relative to `.orbit/knowledge/`, not relative to `.orbit/knowledge/graph/`. This is now the single documented frame of reference for stored ref paths.
+
+The git identity fields record the clean checkout identity used for the build. Read-side auto-refresh compares the current `HEAD` OID to `git_head_oid` before treating a branch ref as fresh; `git_tree_oid` remains available as a content identity fallback and diagnostic. Commit timestamps are not a freshness authority, because history rewrites and resets can move a branch to an older-dated commit.
 
 ## Read Resolution
 

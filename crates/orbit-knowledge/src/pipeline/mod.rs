@@ -15,7 +15,7 @@ use std::{fs, fs::OpenOptions, io::ErrorKind};
 
 use crate::error::KnowledgeError;
 use crate::graph::object_store::{
-    GraphObjectStore, resolve_graph_read_target, resolve_graph_write_target,
+    CurrentRef, GraphObjectStore, resolve_graph_read_target, resolve_graph_write_target,
 };
 use crate::io::write_text_atomic_durable;
 use context::{BuildConfig, PipelineContext};
@@ -50,6 +50,12 @@ struct DirtyFingerprint {
     status_hash: String,
     path_count: usize,
     newest_mtime_ns: Option<u128>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GitCheckoutIdentity {
+    pub head_oid: String,
+    pub tree_oid: String,
 }
 
 enum RefreshPlan {
@@ -92,6 +98,7 @@ fn run_build_inner(config: BuildConfig) -> Result<PipelineContext, KnowledgeErro
         KnowledgeError::knowledge_unavailable(format!("resolve graph ref: {error}"))
     })?;
     let mut ctx = PipelineContext::new(config, build_target.requested, build_target.default);
+    ctx.checkout_identity = git_checkout_identity(&ctx.repo_path);
 
     scan::scan_repo(&mut ctx)?;
     hash::compute_hashes(&mut ctx)?;
@@ -158,18 +165,23 @@ pub fn ensure_fresh(
     Ok(RefreshStatus::Rebuilt)
 }
 
-/// Get the committer timestamp of HEAD as a fixed-offset DateTime.
-fn git_head_timestamp(repo_path: &Path) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+fn git_checkout_identity(repo_path: &Path) -> Option<GitCheckoutIdentity> {
     let output = Command::new("git")
-        .args(["log", "-1", "--format=%cI"])
+        .args(["rev-parse", "HEAD^{commit}", "HEAD^{tree}"])
         .current_dir(repo_path)
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
-    let ts_str = String::from_utf8_lossy(&output.stdout);
-    chrono::DateTime::parse_from_rfc3339(ts_str.trim()).ok()
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let head_oid = lines.next()?.to_string();
+    let tree_oid = lines.next()?.to_string();
+    Some(GitCheckoutIdentity { head_oid, tree_oid })
 }
 
 fn git_dirty_fingerprint(repo_path: &Path) -> Option<DirtyFingerprint> {
@@ -232,9 +244,10 @@ fn compute_refresh_plan(
     repo_path: &Path,
 ) -> Result<RefreshPlan, KnowledgeError> {
     let manifest_path = knowledge_dir.join("manifest.json");
-    let graph_available = current_branch_graph_available(knowledge_dir, repo_path);
+    let current_ref = current_branch_ref(knowledge_dir, repo_path);
+    let graph_available = current_ref.is_some();
     let dirty_fingerprint = git_dirty_fingerprint(repo_path);
-    let head_ts = git_head_timestamp(repo_path);
+    let checkout_identity = git_checkout_identity(repo_path);
 
     if let Some(dirty_fingerprint) = dirty_fingerprint {
         if manifest_path.is_file()
@@ -252,28 +265,26 @@ fn compute_refresh_plan(
     if manifest_path.is_file() {
         let raw = fs::read_to_string(&manifest_path)
             .map_err(|e| KnowledgeError::knowledge_unavailable(format!("read manifest: {e}")))?;
-        let manifest: serde_json::Value = serde_json::from_str(&raw)
+        let _: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| KnowledgeError::knowledge_unavailable(format!("parse manifest: {e}")))?;
-        let generated_at = manifest
-            .get("generated_at")
-            .and_then(|v| v.as_str())
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
         if !graph_available {
             return Ok(RefreshPlan::Rebuild {
                 dirty_fingerprint: None,
                 incremental: true,
             });
         }
-        return Ok(match (generated_at, head_ts) {
-            (Some(generated), Some(head_ts)) if head_ts > generated => RefreshPlan::Rebuild {
+        let Some(checkout_identity) = checkout_identity else {
+            return Ok(RefreshPlan::Rebuild {
                 dirty_fingerprint: None,
                 incremental: true,
-            },
-            (None, _) => RefreshPlan::Rebuild {
-                dirty_fingerprint: None,
-                incremental: true,
-            },
-            _ => RefreshPlan::Fresh,
+            });
+        };
+        if stored_checkout_identity_matches(current_ref.as_ref(), &checkout_identity) {
+            return Ok(RefreshPlan::Fresh);
+        }
+        return Ok(RefreshPlan::Rebuild {
+            dirty_fingerprint: None,
+            incremental: true,
         });
     }
 
@@ -281,6 +292,22 @@ fn compute_refresh_plan(
         dirty_fingerprint: None,
         incremental: false,
     })
+}
+
+fn stored_checkout_identity_matches(
+    current_ref: Option<&CurrentRef>,
+    checkout_identity: &GitCheckoutIdentity,
+) -> bool {
+    if let Some(current_ref) = current_ref {
+        if let Some(stored_head_oid) = current_ref.git_head_oid.as_deref() {
+            return stored_head_oid == checkout_identity.head_oid;
+        }
+        if let Some(stored_tree_oid) = current_ref.git_tree_oid.as_deref() {
+            return stored_tree_oid == checkout_identity.tree_oid;
+        }
+    }
+
+    false
 }
 
 fn refresh_state_within_cooldown(
@@ -366,12 +393,16 @@ fn acquire_refresh_lock(
 }
 
 fn current_branch_graph_available(knowledge_dir: &Path, repo_path: &Path) -> bool {
+    current_branch_ref(knowledge_dir, repo_path).is_some()
+}
+
+fn current_branch_ref(knowledge_dir: &Path, repo_path: &Path) -> Option<CurrentRef> {
     if !knowledge_dir.join("manifest.json").is_file() {
-        return false;
+        return None;
     }
 
     let Ok(read_target) = resolve_graph_read_target(Some(repo_path), None) else {
-        return false;
+        return None;
     };
 
     let store = GraphObjectStore::new(knowledge_dir.join("graph"));
@@ -379,10 +410,14 @@ fn current_branch_graph_available(knowledge_dir: &Path, repo_path: &Path) -> boo
         .prepare_refs_layout(read_target.default.as_ref())
         .is_err()
     {
-        return false;
+        return None;
     }
 
-    store.ref_path(&read_target.requested).is_file()
+    if !store.ref_path(&read_target.requested).is_file() {
+        return None;
+    }
+
+    store.read_ref(&read_target.requested).ok()
 }
 
 fn wait_for_current_graph(knowledge_dir: &Path, repo_path: &Path) {

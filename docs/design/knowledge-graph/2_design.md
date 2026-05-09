@@ -12,7 +12,7 @@ This document specifies the current knowledge graph: storage, build pipeline, qu
 
 ```
 .orbit/knowledge/
-├── manifest.json                commit pointer + generated_at timestamp
+├── manifest.json                checkout identity + generated_at timestamp
 ├── refresh.lock                 flock for single-flighted rebuilds
 ├── refresh_state.json           debounce bookkeeping for dirty refreshes
 ├── graph/
@@ -46,7 +46,7 @@ scan → hash → detect_changes → build_dirs → build_files → build_leaves
 | `build_graph_files` | `FileNode` entries linked to parent dir | Language detected from extension |
 | `build_graph_leaves` | `LeafNode` entries via file-kind-dispatched extractor | Code via tree-sitter (C, C#, Rust, Python, Go, Java, JavaScript, Kotlin, TypeScript, TSX, Ruby); markdown sections, YAML/JSON/TOML top-level keys, and CSV/TSV header columns via shallow extractors added in [T20260422-1540]. TypeScript/TSX coverage was added in [T20260505-11]; C# coverage was added in [T20260505-13]; C `.c`/`.h` coverage was added in [T20260505-16]. Per-file read/extract work runs in parallel, then graph mutation is merged on the main thread in file order ([T20260426-0139]). Incremental builds reuse unchanged file/leaf snapshots from the same branch ref when hashes match ([T20260426-0140]) |
 | `persist_graph` | Content-addressed objects, blobs, index | Atomic via tempfile + rename |
-| `write_manifest` | `manifest.json` | Timestamp + commit + ref pointer |
+| `write_manifest` | `manifest.json` | Timestamp + clean checkout identity + graph summary |
 | `save_hash_cache` | `hashes.json` | Baseline for the next incremental `detect_changes` pass |
 
 Extraction dispatches on `FileKind`. Each `FileExtractor` emits `ExtractedLeaf` records with name, kind, span, hash, and child names. Code uses tree-sitter; shallow doc/config/table extractors handle markdown ATX headings, top-level YAML/JSON/TOML keys, and CSV/TSV header cells with a 1 MiB cap ([T20260422-1540]).
@@ -55,7 +55,7 @@ Hashing and leaf extraction are parallelized only across independent file work. 
 
 ### 2.1 Incremental refresh
 
-`ensure_fresh(knowledge_dir, repo_path)` is the read-side entry point. It compares the persisted manifest against the current HEAD timestamp and the dirty-worktree fingerprint, and picks one of:
+`ensure_fresh(knowledge_dir, repo_path)` is the read-side entry point. For clean worktrees, it compares the current git checkout identity (`HEAD` commit OID, with tree OID persisted for diagnostics/fallback) against the current branch ref. Commit timestamps remain diagnostic metadata and are not freshness authority. Dirty worktrees still use the dirty-worktree fingerprint, and the planner picks one of:
 
 - **Fresh** — nothing to do.
 - **SkippedDirtyDebounce** — worktree is dirty with the same fingerprint as a recent refresh; reuse.
@@ -66,7 +66,7 @@ The refresh lock is a `flock` on `.orbit/knowledge/refresh.lock`. Concurrent cal
 
 Incremental rebuilds still rebuild the directory and file node skeleton from the current scan so deletes and `.orbitignore` changes take effect. The expensive leaf phase loads the previously persisted graph for the same branch ref and copies unchanged files' `source_blob_hash`, hydrated source, exports, re-exports, `leaf_children`, and leaf nodes when both the file source hash and every reused leaf's `file_hash_at_capture` match the new hash. Paths in `ctx.changed_paths`, new files, hash mismatches, absent refs, or unreadable prior graphs take the full extractor path instead ([T20260426-0140]).
 
-Refresh hardening: [T20260417-0307] gated and guarded the refresh/search hot paths; [T20260416-0719] added recovery from a corrupted default store; [T20260417-0639] sped up the workspace-init persistence path.
+Refresh hardening: [T20260417-0307] gated and guarded the refresh/search hot paths; [T20260416-0719] added recovery from a corrupted default store; [T20260417-0639] sped up the workspace-init persistence path; [T20260509-34] moved clean-checkout freshness from commit timestamps to exact git identity.
 
 ### 2.2 Removed task attribution ([T20260506-11])
 
