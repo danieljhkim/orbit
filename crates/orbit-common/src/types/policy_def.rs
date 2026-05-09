@@ -382,11 +382,34 @@ fn normalize_path(path: &str) -> Result<String, OrbitError> {
     if normalized == "." {
         normalized.clear();
     }
-    if normalized.starts_with('/') || normalized == "~" || normalized.starts_with("~/") {
+    if normalized == "~"
+        || normalized.starts_with("~/")
+        || normalized.starts_with("../")
+        || normalized == ".."
+    {
         return Err(OrbitError::InvalidInput(format!(
             "filesystem path `{path}` must stay inside the workspace root"
         )));
     }
+
+    let path_ref = Path::new(&normalized);
+    if path_ref.is_absolute() {
+        return Err(OrbitError::InvalidInput(format!(
+            "filesystem path `{path}` must stay inside the workspace root"
+        )));
+    }
+
+    for component in path_ref.components() {
+        match component {
+            Component::CurDir | Component::Normal(_) => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "filesystem path `{path}` must stay inside the workspace root"
+                )));
+            }
+        }
+    }
+
     Ok(normalized)
 }
 

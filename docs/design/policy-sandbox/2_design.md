@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09 (T20260509-7)
+**Last updated:** 2026-05-09 (T20260509-27)
 
 This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
@@ -46,7 +46,7 @@ The implicit `unrestricted` profile appears only when an activity omitted `fsPro
 4. Walk rules in order and record the most recent match against the normalized workspace-relative path. Later matches override earlier ones.
 5. Use the last match's negation flag. If no rule matched but a positive rule exists, deny with `<no matching rule>`; if only negated rules exist, deny with `[]`.
 
-Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths or `~`-anchored paths. Tool callers are expected to canonicalize first and then express the path workspace-relative — `crates/orbit-tools/src/builtin/fs/mod.rs::workspace_relative_path` handles that on the call site.
+Path normalization (`normalize_path`) trims, flips slashes, strips `./` prefixes, and rejects absolute paths, `~`-anchored paths, and parent-directory traversal anywhere in the component list ([T20260509-27]). Tool callers are expected to canonicalize first and then express the path workspace-relative — `crates/orbit-tools/src/builtin/fs/mod.rs::workspace_relative_path` handles that on the call site.
 
 The glob translator supports `*`, `**`, `?`, and `<prefix>/**`. It is intentionally narrower than POSIX glob syntax.
 
@@ -156,7 +156,10 @@ Risk-weighted regression tests sit beside the implementations they guard
   to `allowed=false`; global `denyRead` / `denyModify` rules override
   profile-level positive rules under last-match-wins; an unknown profile name
   errors structurally (with the documented `unrestricted` exception); and the
-  `matched_rule` field is populated for audit attribution.
+  `matched_rule` field is populated for audit attribution. Traversal inputs
+  such as `../secret.txt`, `src/../secret.txt`, and their backslash-normalized
+  equivalents are rejected as `OrbitError::InvalidInput` for both read and
+  modify checks ([T20260509-27]).
 - `crates/orbit-exec/src/macos_sandbox.rs#tests` — SBPL compilation tests
   cover `denyRead` / `denyModify` clause emission (`subpath` for simple
   rules, `regex` for non-trivial globs) and the deny-after-allow ordering
@@ -207,5 +210,6 @@ non-empty on Linux CI.
 - **[T20260428-14]** — Extend the macOS sandbox state-dir allowance to Claude (`~/.claude` / `$CLAUDE_CONFIG_DIR`) and Gemini (`~/.gemini`), and document why side-write roots remain Codex-only.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 - **[T20260509-7]** — Add `PolicyEngine::check` boundary tests and macOS sandbox `denyRead` / realistic agent-loop profile tests.
+- **[T20260509-27]** — Reject parent-directory traversal in candidate policy paths while preserving valid relative path normalization.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
