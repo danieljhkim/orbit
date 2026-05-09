@@ -1,5 +1,7 @@
 # Identity-Key Benchmark
 
+kind: perf
+
 Empirical benchmark for `LeafNode.identity_key` durability across rebuilds. The
 harness creates temporary git repositories, runs `orbit_knowledge::pipeline::run_build`
 before and after each mutation, and records what the current source tree does

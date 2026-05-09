@@ -1,5 +1,7 @@
 # Knowledge Graph Benchmarks
 
+kind: agent
+
 Measures how much navigation budget an agent spends on the same task under three tool surfaces: `no-graph` (shell only), `graph-only` (Orbit graph MCP tools only), or `hybrid` (both).
 
 See [docs/design/knowledge-graph/](../../docs/design/knowledge-graph/) for the graph itself.

@@ -1,168 +1,135 @@
 # Benchmark Conventions
 
-Rules for how Orbit benchmarks are laid out, versioned, and reported.
+Layout, versioning, and report shape for benchmarks under `benchmarks/`. Two kinds:
 
-This document governs shape only — what directories exist, what files they contain, what sections a report must have. It does not prescribe what benchmarks measure; that's per-benchmark and lives in each benchmark's own `README.md` and fixture schema.
+- **agent** — measure agent behavior under a tool surface (token budget, pass rate, tool utilization). LLM in the loop. e.g. `graph/`.
+- **perf** — measure system properties directly (latency, durability, resource cost). No agent. e.g. `graph-latency/`, `identity-key/`.
+
+Common rules apply to both. `RESULTS.md` and `METHOD.md` schemas differ by kind.
 
 ---
 
-## Directory layout
+## Common rules
 
-Each benchmark lives under a single `benchmarks/<name>/` parent. Within it, every round — frozen or in-progress — gets its own `vN/` subdirectory. Files that are legitimately shared across rounds (the overview README, the living scripts, the MCP config) live at the benchmark root. Per-round content (fixtures, run records, report, method) lives inside `vN/`.
+### Benchmark kind
 
-- `benchmarks/<name>/README.md` — **shared overview**. Describes the benchmark, providers, arms, how to run, output layout. Lists the versions with links to each.
-- `benchmarks/<name>/scripts/` — **shared harness**. Edited as part of living-version development. Expected to stay backward-compatible with every frozen round's record schema so a single aggregator / classifier / token-normalizer handles all versions. If a round's work forces a back-compat break, that round snapshots `scripts/` into its own `vN/scripts/` at freeze time and the Makefile's `GRAPH_SCRIPTS` override points there for reproduction.
-- `benchmarks/<name>/mcp.json` — shared transport config. Same back-compat expectation as scripts; snapshot into `vN/mcp.json` only if it diverges.
-- `benchmarks/<name>/vN/` — per-round directory. Frozen for completed rounds, LIVING for the in-progress round.
-  - `vN/README.md` — short per-round banner: status, links to METHOD/RESULTS.
-  - `vN/METHOD.md` — scope, delta vs previous version, caveats, reproduction command.
-  - `vN/RESULTS.md` — the report.
-  - `vN/ISSUES.md` — open issues at freeze (optional).
-  - `vN/tasks/` — fixture set as graded for round N.
-  - `vN/runs/` — per-cell records and `_sweeps/<sweep_id>/` metadata.
-  - `vN/scripts/` (optional) — only present if round N broke back-compat with the shared scripts at freeze time. Default is to rely on shared `../scripts/`.
-  - `vN/mcp.json` (optional) — same rule as scripts.
+Each benchmark's top-level `README.md` MUST have `kind: agent` or `kind: perf` as the first body line under the H1 — plain text, grep-able, not YAML frontmatter. The declared kind selects the report schema for every `vN/` round. A benchmark cannot mix kinds; if the question changes shape, cut a new benchmark directory.
 
-Example (graph benchmark):
+### Directory layout
 
 ```
-benchmarks/
-├── Makefile                  # graph-* targets; GRAPH_VERSION=vN selects a version
-├── CONVENTIONS.md            # this file
-└── graph/
-    ├── README.md             # shared overview; versions table
-    ├── mcp.json              # shared MCP config
-    ├── scripts/              # SHARED harness (sweep.py, aggregate.py, providers.py, tests, …)
-    ├── v1/                   # FROZEN round 1
-    │   ├── README.md         # version banner
-    │   ├── METHOD.md
-    │   ├── RESULTS.md
-    │   ├── ISSUES.md
-    │   ├── tasks/
-    │   └── runs/             # per-cell records + _sweeps/…
-    ├── v2/                   # FROZEN round 2
-    │   └── …                 # same shape
-    └── v3/                   # LIVING round 3
-        ├── README.md
-        ├── tasks/            # mutable — next-round fixture set
-        └── runs/             # gitignored staging for in-progress sweep
+benchmarks/<name>/
+├── README.md          # shared overview; kind: ...; versions table
+├── scripts/           # SHARED harness, expected to stay back-compat with frozen runs/
+├── mcp.json           # shared transport (agent kind, when applicable)
+├── v1/                # FROZEN — immutable
+│   ├── README.md      # frozen banner
+│   ├── METHOD.md
+│   ├── RESULTS.md
+│   ├── ISSUES.md      # optional
+│   ├── tasks/         # fixtures (agent) or query-shape defs (perf)
+│   └── runs/          # per-cell records + _sweeps/<id>/
+└── v2/                # LIVING — in-progress
+    ├── README.md      # living banner
+    ├── tasks/         # mutable
+    └── runs/          # gitignored staging
 ```
 
-Neither the living version nor the frozen versions carry their own `scripts/` or `mcp.json` under this convention — shared copies at the benchmark root serve all rounds. Frozen versions carry only round-specific content (tasks, runs, reports). If a future round breaks back-compat with the shared harness, it snapshots `scripts/` (and `mcp.json` if relevant) into its own `vN/` at freeze time; the Makefile's `GRAPH_SCRIPTS` override addresses that case.
+Per-round `scripts/` and `mcp.json` exist *only* if a round broke back-compat with the shared harness at freeze time; otherwise rounds rely on `../scripts/`. Frozen `vN/` is immutable; the shared `scripts/` + living `vN/` represent "what the next round will use."
 
-Everything in a frozen `vN/` directory is *immutable* and represents "what round N actually measured, reproducibly." The shared `scripts/` + the living `vN/` together represent "what the next round will use."
+### When to cut a new version
 
----
+A version captures a sweep campaign — report plus all inputs that produced it. Cut a new version when any of these change vs the prior frozen version:
 
-## When to cut a new version
+1. Fixture set (tasks added/removed/edited; corpus list or query-shape defs changed for perf).
+2. Harness code that affects measurement (scoring, normalization, classifier; timing/sampling, record schema, host disclosure for perf).
+3. Model/provider lineup (agent), or system-under-test version pin (perf).
+4. Interpretive frame (e.g. adding a tool-utilization audit or a budget column).
 
-A version captures a **sweep campaign** — the report plus every input that produced it. Start a new version when any of these changes vs the previous frozen version:
+Do NOT cut for: stochastic re-runs, typo fixes (use `CORRECTIONS.md`), or measurement-neutral refactors.
 
-1. **Fixture set changed** — tasks added, removed, or materially edited.
-2. **Harness code that affects measurement changed** — scoring, token normalization, arm enforcement, classifier.
-3. **Model or provider lineup changed**.
-4. **The interpretive frame changed** — e.g. adding a tool-utilization audit that reframes the headline.
+### Freezing a version
 
-Do NOT cut a new version for:
+1. Sweep complete, `RESULTS.md` written.
+2. Drop the `runs/.gitignore` so records commit.
+3. Author `METHOD.md` per kind-specific schema below.
+4. Optionally prune failed staging sweeps under `runs/_sweeps/`.
+5. Replace the LIVING banner in `vN/README.md` with a frozen banner.
+6. Back-compat check: shared `scripts/` still reproduces `vN/runs/` numbers. If not, snapshot `scripts/` (and `mcp.json` if needed) into `vN/` and note in METHOD.md §Delta.
+7. Scaffold `v(N+1)/`: copy `vN/tasks/`, empty `runs/` with `.gitignore`, LIVING README.
+8. Bump default `<NAME>_VERSION` in `Makefile`.
+9. Update versions table in `benchmarks/<name>/README.md`.
 
-- Stochastic re-runs on the same code + fixtures (that's seed expansion; keep running and either update the current version if unfrozen, or note it as an addendum to the frozen version).
-- Typo fixes in the report (append to `CORRECTIONS.md`, see §Immutability).
-- Harness code changes that don't affect measurement (refactors, logging cleanups).
+Freeze lands as one commit, separate from v(N+1) development.
 
----
+### Runs and git
 
-## Freezing a version
+- **Living `runs/`** — `.gitignore` excludes everything except itself. Staging only.
+- **Frozen `runs/`** — committed. Records and any transcripts are the evidence behind `RESULTS.md`.
 
-Freezing round N means: the living `vN/` becomes immutable, and a fresh `v(N+1)/` is scaffolded as the next living version.
+Before committing a new frozen version, scan transcripts for secrets (API key prefixes, bearer tokens). Matches block the commit. Env-var *names* are acceptable; absolute paths leaking a username are acceptable if the same name appears in `git log`.
 
-1. Ensure the sweep is complete and `RESULTS.md` is written inside `benchmarks/<name>/vN/`.
-2. Remove (or overwrite) the `.gitignore` in `benchmarks/<name>/vN/runs/` so the run records are committed. See §"Runs and git" below.
-3. Author `benchmarks/<name>/vN/METHOD.md` (see required sections below).
-4. Optionally prune staging artifacts (e.g. failed partial sweeps under `runs/_sweeps/` that are not part of vN).
-5. Replace the per-version banner in `benchmarks/<name>/vN/README.md` with a frozen banner so opening it out of context makes the status obvious.
-6. **Back-compat check**: confirm the shared `scripts/` and `mcp.json` still correctly read/reproduce `vN/runs/` (run the aggregator; numbers should match `RESULTS.md`). If not — i.e. this round introduced a record-schema change or a behavior change that can't be backported — snapshot `scripts/` (and `mcp.json` if relevant) into `vN/` and note the divergence in METHOD.md §Delta.
-7. Scaffold the new living version `v(N+1)/`: copy `vN/tasks/` as the starting fixture set, create an empty `runs/` with a `.gitignore`, write a LIVING-status README.
-8. Bump the default `GRAPH_VERSION` (or benchmark's equivalent) in `benchmarks/Makefile` to `v(N+1)`.
-9. Update the versions table in `benchmarks/<name>/README.md` to include the newly frozen round and the new living round.
+### Immutability
 
-A freeze lands in a single commit separate from v(N+1) development, so the diff is easy to review: it's additive (new frozen `vN/scripts|mcp.json`, new `v(N+1)/` skeleton) plus the Makefile version bump.
+Once `vN/RESULTS.md` is committed, the directory is read-only by convention.
 
-## Runs and git
+- Factual correction → append to `vN/CORRECTIONS.md`. Don't mutate report/method/runs.
+- Reinterpretation with same evidence → new METHOD.md §Delta in v(N+1), or a `COMPARE-vN-vs-vM.md` at the shared level.
+- New evidence → cut a new version.
 
-The two kinds of `runs/` have different commit rules:
+If a frozen snapshot must be mutated for a non-fitting reason (e.g. accidentally committed secrets), say so explicitly in the commit message.
 
-- **Living `benchmarks/<name>/vN/runs/`** — ships with a `.gitignore` that excludes all contents except the `.gitignore` itself. This is a staging area for in-progress sweeps; every developer's half-finished runs should not flood the history.
-- **Frozen `benchmarks/<name>/vN/runs/`** (after the round is frozen) — contents ARE committed. The run records (`<seed>.json`) and transcripts (`<seed>.transcript.json`) are the evidence behind `RESULTS.md`; without them the reproduction command in `METHOD.md` cannot execute, and the tool-utilization audit in `RESULTS.md` cannot be re-verified.
+### Tooling and references
 
-Before committing a new frozen version, scan transcripts for secrets and PII:
+`benchmarks/Makefile` accepts a per-benchmark version variable (`GRAPH_VERSION`, `GRAPH_LATENCY_VERSION`, …) that swaps `vN/` in script paths. Unset defaults to the living harness.
 
-```
-grep -rE "sk-ant-[A-Za-z0-9]{20}|sk-proj-[A-Za-z0-9]{20}|AKIA[A-Z0-9]{16}|Bearer [A-Za-z0-9]{20}" \
-  benchmarks/<name>/vN/runs/
-```
-
-Matches are blockers. Env-var *names* (`ANTHROPIC_API_KEY` as a string, not a value) are acceptable. Absolute paths that leak a local username are acceptable if the same username already appears in `git log` (i.e. no new information is disclosed).
+In docs, PRs, and commits: cite `benchmarks/<name>/vN/RESULTS.md` plus the SHA at which it landed. Never write "the benchmark results" without a version — that refers to mutable state and rots. PRs claiming a perf or accuracy effect must either (a) cite a frozen version, or (b) include a new frozen version produced by the PR.
 
 ---
 
-## Immutability
+## RESULTS.md (agent benchmarks)
 
-Once `benchmarks/<name>/vN/RESULTS.md` is committed, that directory is read-only by convention.
+Required sections, in order:
 
-- **Factual correction** → append a dated entry to `benchmarks/<name>/vN/CORRECTIONS.md`. Do not mutate `RESULTS.md`, `METHOD.md`, fixtures, or runs.
-- **Reinterpretation with the same evidence** → write a new `METHOD.md §Delta vs v(N-1)` in the *next* version, or a standalone `benchmarks/<name>/COMPARE-vN-vs-vM.md` at the shared level.
-- **New evidence** → cut a new version.
+1. **Frontmatter** — task ID, sweep date, seed(s), scope (providers × arms × fixtures × seeds), fixture list. One paragraph.
+2. **Headline** — 3–6 bullets. Lead with the most load-bearing finding. If a naive read of the tables would mislead, say so here.
+3. **Tool-utilization audit** — per-arm counts of which tools agents actually called. A cost table without utilization is incomplete. Omit only if the benchmark structurally cannot vary tool surface.
+4. **Primary table** — provider × arm × task_class. Columns: `runs`, `pass_rate`, `median_total_tokens`, `p90_total_tokens`, `tokens_per_success`. From `scripts/aggregate.py`.
+5. **Cost (USD)** — per-arm totals where billing is reported. Note explicitly when a `$0` is a CLI limitation, not free usage.
+6. **Pass-rate breakdown** — every failed run by (provider, arm, fixture, seed) with rejection reason.
+7. **Re-interpretation** (encouraged) — reconcile raw tables vs utilization audit when they disagree.
+8. **Hypothesis reconciliation** — pre-sweep hypotheses graded ✅/❌/⏸. If none were filed, say so.
+9. **Recommendations** — separate "change in product" from "change in next sweep."
+10. **Methodology notes** — token-accounting convention, caveats, reproduction command, ad-hoc analyses outside `aggregate.py`.
 
-If a frozen snapshot has to be mutated for a reason that doesn't fit the above (e.g. accidentally committed secrets), the commit message must call it out explicitly.
+## METHOD.md (agent benchmarks)
 
----
-
-## `RESULTS.md` — required sections
-
-Every `benchmarks/<name>_vN/RESULTS.md` MUST have, in order:
-
-1. **Frontmatter** — task ID, sweep date, sweep seed(s), scope (providers × arms × fixtures × seeds), fixture list by name. One paragraph.
-2. **Headline** — 3–6 bullets summarizing what the sweep showed. Lead with the strongest, most load-bearing finding. If a naive read of the tables would mislead, say so in the headline, not as reader inference.
-3. **Tool-utilization audit** — per-arm counts of which tools agents actually called. A cost table without utilization is incomplete: if agents didn't use a tool, its cost measurement is about schema overhead, not tool value. Omit only if the benchmark structurally cannot vary tool surface.
-4. **Primary table** — the provider × arm × task_class aggregate. Columns: `runs`, `pass_rate`, `median_total_tokens`, `p90_total_tokens`, `tokens_per_success`. Produced by `scripts/aggregate.py`.
-5. **Cost (USD)** — per-arm totals for providers that report billing. State explicitly when a provider reports $0 due to a CLI limitation rather than free usage.
-6. **Pass-rate breakdown** — every failed run listed by (provider, arm, fixture, seed) with the rejection reason.
-7. **Re-interpretation** (encouraged) — spell out any reframing. If the raw tables say one thing and the utilization audit says another, reconcile them here.
-8. **Hypothesis reconciliation** — pre-sweep hypotheses graded ✅ supported / ❌ falsified / ⏸ untested. If no pre-sweep hypotheses were filed, write "No pre-sweep hypotheses were filed." and move on.
-9. **Recommendations** — actionable next steps derived from the evidence. Separate "change in the product" from "change in the next sweep."
-10. **Methodology notes** — token-accounting convention, known caveats, reproduction command, any ad-hoc analyses not in `aggregate.py`.
-
-Sections may be subdivided but must appear in this order.
+1. Harness git SHA at freeze time.
+2. Delta vs v(N-1) — fixture/harness/model/scope diff. v1: write "v1 is the first frozen round; no prior version to diff."
+3. Fixture list with one-line purposes.
+4. Known caveats.
+5. Reproduction command.
 
 ---
 
-## `METHOD.md` — required sections
+## RESULTS.md (perf benchmarks)
 
-Every `benchmarks/<name>_vN/METHOD.md` MUST have:
+No agent in the loop. No `pass_rate`, no `tokens_per_success`, no per-arm hypothesis grading. Required sections, in order:
 
-1. **Harness git SHA at freeze time** — so the report is reproducible from source.
-2. **Delta vs v(N-1)** — fixture diff, harness diff, model diff, scope diff. If this is v1, write "v1 is the first frozen round; no prior version to diff."
-3. **Fixture list with one-line purposes** — so future readers don't have to open each YAML.
-4. **Known caveats** — things that would bias a naive reading of `RESULTS.md`.
-5. **Reproduction command** — exact CLI to regenerate the primary tables from the frozen fixture + run snapshots.
+1. **Frontmatter** — task ID, sweep date, seed(s), scope (corpora × tools/scenarios × phases × seeds), `orbit_sha`. One paragraph.
+2. **Headline** — 3–6 bullets. Lead with what's over budget, where the regression or improvement lives.
+3. **Primary table** — corpus × tool × phase. Columns: `runs`, `p50_ms`, `p90_ms`, `p99_ms`, `budget_ms`, `over_budget`. From `scripts/aggregate.py`. Non-latency perf benchmarks substitute their analogous primary observation table — but columns must expose distribution shape, not point estimates.
+4. **Build-phase table** — for benchmarks with an indexer or other state-building step: cold full + warm incremental, per corpus tier. Columns: `corpus`, `phase`, `wall_ms` (p50/p90/p99), `rss_peak_mb`, `budget_ms`. Omit only if no build phase exists.
+5. **Host/environment disclosure** — CPU, RAM, OS. State whether all primary-table rows came from one host or are aggregated (cross-host aggregation requires per-row host annotation).
+6. **Delta vs v(N-1)** — absolute and percent change per row that exists in both versions. Lead with regressions; call out improvements explicitly. v1: "v1 is the first frozen round; no prior version to diff."
+7. **Known caveats** — cold/warm cache, GC pauses, indexer parallelism — anything that shifts numbers if reproduced naively.
+8. **Recommendations** — separate "change in product" from "change in next sweep."
 
----
+## METHOD.md (perf benchmarks)
 
-## Addressing a frozen version in tooling
-
-The top-level `benchmarks/Makefile` should accept a version variable (e.g. `GRAPH_VERSION`) that swaps `benchmarks/<name>/` for `benchmarks/<name>_vN/` in script paths. This lets:
-
-```
-make -C benchmarks graph-aggregate                      # against the living harness
-make -C benchmarks graph-aggregate GRAPH_VERSION=v1     # against the v1 snapshot
-```
-
-without copying code or modifying scripts. Unset defaults to the living harness.
-
----
-
-## Referencing a frozen version in docs, PRs, commits
-
-- Cite `benchmarks/<name>_vN/RESULTS.md` plus the commit SHA at which the report landed. Never write "the benchmark results" or "RESULTS.md" without a version — those phrases refer to mutable current state and will rot.
-- Orbit task summaries (`purpose`, `implementation`) that rely on benchmark evidence must include the version number.
-- When a PR claims a performance or accuracy effect, it should either (a) cite a frozen version, or (b) include a new frozen version produced by the PR.
+1. Harness git SHA at freeze time.
+2. Delta vs v(N-1) — corpus/query-shape/harness/SUT-pin/scope diff. v1: "v1 is the first frozen round; no prior version to diff."
+3. Corpus list with `<org>/<repo>@<sha>` rows, LOC tier, language, and fetch instructions (typically `~/.cache/orbit-bench/<corpus>` populated by `scripts/fetch.sh`).
+4. Per-cell record schema — JSON shape of each `runs/*.json` field-by-field. For latency benchmarks: `corpus`, `tool`, `query_shape`, `phase`, `seed`, `wall_ms`, `rss_peak_mb`, `result_size_bytes`, `result_count`, `host` (`cpu`, `ram_gb`, `os`), `orbit_sha`, `corpus_sha`. Other perf benchmarks substitute their own field set.
+5. Host disclosure rules — what metadata the harness records, and the policy on cross-host comparisons. State explicitly whether `RESULTS.md` numbers are single-host or aggregated.
+6. Reproduction command.
