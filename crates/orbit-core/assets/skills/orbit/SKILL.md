@@ -102,6 +102,7 @@ Command surface determines provenance by default:
 ## Skill Selection
 
 - `orbit-create-task`: Create a new task with description, acceptance criteria, and context.
+- `orbit-debug-job-failure`: Diagnose failed, stuck, cancelled, or suspicious Orbit job runs.
 - `orbit-execute-task`: Carry a change through implementation, validation, and review.
 - `orbit-locks`: Reserve and release file locks for ad-hoc code modification outside workflow-held reservations.
 - `orbit-review-task`: Review someone else's work and file findings as review threads, without transitioning the task.
