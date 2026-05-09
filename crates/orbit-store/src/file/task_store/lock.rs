@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use fs2::FileExt;
 use orbit_common::types::OrbitError;
 
-use super::TaskFileStore;
+use super::{TaskFileStore, layout::validate_task_id};
 
 const LOCKS_DIR_NAME: &str = ".locks";
 const TASK_LOCKS_DIR_NAME: &str = "tasks";
@@ -19,6 +19,7 @@ impl TaskFileStore {
     }
 
     pub(super) fn acquire_task_lock(&self, task_id: &str) -> Result<File, OrbitError> {
+        validate_task_id(task_id)?;
         self.acquire_lock(self.task_lock_path(task_id), &format!("task '{task_id}'"))
     }
 

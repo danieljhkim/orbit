@@ -10,7 +10,7 @@ use orbit_common::types::{
 use super::bundle::{TaskBundle, bundle_to_task, merge_review_threads};
 use super::constants::TASK_SCHEMA_VERSION;
 use super::doc::TaskFileDocument;
-use super::layout::TaskStateDir;
+use super::layout::{TaskStateDir, validate_task_id};
 use crate::backend::{
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
     TaskReviewUpdateParams,
@@ -155,6 +155,7 @@ impl TaskFileStore {
     }
 
     pub(crate) fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
+        validate_task_id(id)?;
         let Some((state, task_dir)) = self.locate_task(id)? else {
             return Ok(None);
         };
@@ -166,6 +167,7 @@ impl TaskFileStore {
         &self,
         id: &str,
     ) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
+        validate_task_id(id)?;
         let Some((_, task_dir)) = self.locate_task(id)? else {
             return Ok(None);
         };
@@ -193,6 +195,7 @@ impl TaskFileStore {
         id: &str,
         fields: &TaskDocumentUpdateParams,
     ) -> Result<(), OrbitError> {
+        validate_task_id(id)?;
         if fields.actor.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task actor must not be empty".to_string(),
@@ -300,6 +303,7 @@ impl TaskFileStore {
         id: &str,
         fields: &TaskHistoryUpdateParams,
     ) -> Result<(), OrbitError> {
+        validate_task_id(id)?;
         if fields.actor.trim().is_empty() {
             return Err(OrbitError::InvalidInput(
                 "task actor must not be empty".to_string(),
@@ -361,6 +365,7 @@ impl TaskFileStore {
         id: &str,
         fields: &TaskReviewUpdateParams,
     ) -> Result<(), OrbitError> {
+        validate_task_id(id)?;
         let _task_lock = self.acquire_task_lock(id)?;
         let Some((current_state, current_dir)) = self.locate_task(id)? else {
             return Err(OrbitError::TaskNotFound(id.to_string()));
@@ -393,6 +398,7 @@ impl TaskFileStore {
         id: &str,
         fields: &TaskArtifactUpdateParams,
     ) -> Result<(), OrbitError> {
+        validate_task_id(id)?;
         let _task_lock = self.acquire_task_lock(id)?;
         let Some((_, task_dir)) = self.locate_task(id)? else {
             return Err(OrbitError::TaskNotFound(id.to_string()));
@@ -426,6 +432,7 @@ impl TaskFileStore {
     }
 
     pub(crate) fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
+        validate_task_id(id)?;
         let _task_lock = self.acquire_task_lock(id)?;
         let Some((_, task_dir)) = self.locate_task(id)? else {
             return Ok(false);
@@ -490,6 +497,82 @@ mod tests {
             source_task_id: None,
             comments: Vec::new(),
         }
+    }
+
+    fn assert_invalid_task_id<T: std::fmt::Debug>(result: Result<T, OrbitError>) {
+        let err = result.expect_err("invalid task id should be rejected");
+        assert!(
+            matches!(err, OrbitError::InvalidInput(_)),
+            "expected invalid input error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn public_task_id_entrypoints_reject_invalid_ids_before_locking() {
+        let root = tempdir().expect("tempdir");
+        let store = TaskFileStore::new(root.path().to_path_buf());
+        let invalid_ids = [
+            "",
+            "   ",
+            "../T20260426-1",
+            "../../outside",
+            "/tmp/T20260426-1",
+            r"C:\tmp\T20260426-1",
+            r"T20260426-1\outside",
+            "T20260426-1/outside",
+            "T20260426-1..2",
+        ];
+
+        for id in invalid_ids {
+            assert_invalid_task_id(store.get_task(id));
+            assert_invalid_task_id(store.get_task_artifacts(id));
+            assert_invalid_task_id(store.update_task_document(
+                id,
+                &TaskDocumentUpdateParams {
+                    actor: "test".to_string(),
+                    ..Default::default()
+                },
+            ));
+            assert_invalid_task_id(store.update_task_history(
+                id,
+                &TaskHistoryUpdateParams {
+                    actor: "test".to_string(),
+                    ..Default::default()
+                },
+            ));
+            assert_invalid_task_id(
+                store.update_task_reviews(id, &TaskReviewUpdateParams::default()),
+            );
+            assert_invalid_task_id(
+                store.upsert_task_artifacts(id, &TaskArtifactUpdateParams::default()),
+            );
+            assert_invalid_task_id(store.delete_task(id));
+        }
+
+        assert!(
+            !store.root.join(".locks").exists(),
+            "invalid ids must not create task lock files"
+        );
+    }
+
+    #[test]
+    fn delete_task_rejects_traversal_without_removing_outside_dir_or_creating_lock() {
+        let outer = tempdir().expect("tempdir");
+        let store_root = outer.path().join("tasks");
+        let store = TaskFileStore::new(store_root.clone());
+        let outside_dir = outer.path().join("outside");
+        let sentinel = outside_dir.join("sentinel.txt");
+        fs::create_dir_all(&outside_dir).expect("create outside dir");
+        fs::write(&sentinel, "keep").expect("write sentinel");
+
+        assert_invalid_task_id(store.delete_task("../../outside"));
+
+        assert!(outside_dir.is_dir(), "outside dir must not be removed");
+        assert!(sentinel.is_file(), "outside sentinel must not be removed");
+        assert!(
+            !store_root.join(".locks").exists(),
+            "invalid delete must not create an outside lock file"
+        );
     }
 
     #[test]
