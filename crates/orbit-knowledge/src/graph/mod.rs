@@ -3,6 +3,7 @@
 pub mod navigator;
 pub mod nodes;
 pub mod object_store;
+mod sqlite_index;
 
 pub use navigator::{GraphNavigator, GraphNodeRef};
 pub use nodes::{

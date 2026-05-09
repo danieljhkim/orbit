@@ -1695,6 +1695,7 @@ dependencies = [
  "orbit-common",
  "rayon",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",

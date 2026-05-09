@@ -11,6 +11,7 @@ ignore = "0.4.25"
 libc.workspace = true
 orbit-common = { path = "../orbit-common" }
 regex.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

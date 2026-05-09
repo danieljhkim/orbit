@@ -19,11 +19,14 @@ This document specifies the current knowledge graph: storage, build pipeline, qu
 │   ├── objects/<hh>/<hash>.json   immutable node bodies (dir / file / leaf)
 │   ├── blobs/<hh>/<hash>.txt      immutable source blobs
 │   ├── index/by-id/<root-graph-hash>.json   immutable per-build index
+│   ├── graph_index.sqlite         mutable SQLite secondary index for future fast reads
 │   └── refs/heads/<branch>.json   mutable branch ref → active index
 └── working/<activity_id>/       (in memory today; see 3_vision.md §2.3)
 ```
 
 The split between immutable objects/blobs/index and mutable refs is deliberate. Rebuilds always write new immutable artifacts and then atomically rename a ref file; no object file is ever overwritten. This survives concurrent worktree rebuilds and interrupted writes ([T20260421-0358]).
+
+`graph/graph_index.sqlite` is a mutable secondary index written alongside the content-addressed graph ([T20260509-70]). Its `meta` table records `schema_version`, `created_at`, and the active `graph_ref` root hash; `node` contains one row per dir/file/leaf with lowercased name/location fields and stable selectors where unambiguous; `file_summary` stores one row per file with direct leaf-child count. Writes rebuild the SQLite schema/data in one WAL-backed transaction and insert `meta.graph_ref` last, so future readers can treat a missing or mismatched `graph_ref` as invalid. No read tool consumes this sidecar yet.
 
 The legacy `refs/current.json` layout is migrated to `refs/heads/<default-branch>.json` on open; see [specs/refs.md](./specs/refs.md).
 
@@ -45,7 +48,7 @@ scan → hash → detect_changes → build_dirs → build_files → build_leaves
 | `build_graph_dirs` | `DirNode` entries with parent/child wiring | Deterministic; root dir id derived from `.` |
 | `build_graph_files` | `FileNode` entries linked to parent dir | Language detected from extension |
 | `build_graph_leaves` | `LeafNode` entries via file-kind-dispatched extractor | Code via tree-sitter (C, C#, Rust, Python, Go, Java, JavaScript, Kotlin, TypeScript, TSX, Ruby); markdown sections, YAML/JSON/TOML top-level keys, and CSV/TSV header columns via shallow extractors added in [T20260422-1540]. TypeScript/TSX coverage was added in [T20260505-11]; C# coverage was added in [T20260505-13]; C `.c`/`.h` coverage was added in [T20260505-16]. Per-file read/extract work runs in parallel, then graph mutation is merged on the main thread in file order ([T20260426-0139]). Incremental builds reuse unchanged file/leaf snapshots from the same branch ref when hashes match ([T20260426-0140]) |
-| `persist_graph` | Content-addressed objects, blobs, index | Atomic via tempfile + rename |
+| `persist_graph` | Content-addressed objects, blobs, JSON index, SQLite secondary index | Atomic file writes for immutable JSON artifacts; SQLite sidecar rebuilt in one WAL transaction with `meta.graph_ref` written last ([T20260509-70]) |
 | `write_manifest` | `manifest.json` | Timestamp + clean checkout identity + graph summary |
 | `save_hash_cache` | `hashes.json` | Baseline for the next incremental `detect_changes` pass |
 
@@ -257,6 +260,10 @@ The read cache is per `KnowledgeStore`, not global ([T20260426-0141]). Long-runn
 
 The scanner skips symlinked directories rather than trying to canonicalize and follow only in-workspace targets ([T20260509-33]). This is the safer default for agent indexing because it avoids outside-repo leakage and cycles, but a workspace that intentionally exposes source through symlinked directories must materialize those files or wait for an explicit, cycle-safe opt-in traversal policy.
 
+### 6.13 SQLite secondary index is write-only
+
+The `graph/graph_index.sqlite` sidecar exists to make future selector, name, and file-symbol-count reads sublinear, but current graph services still hydrate through the JSON by-id index and object store ([T20260509-70]). Until a read facade verifies `meta.graph_ref` against the resolved branch ref, this sidecar is an independently testable write-path artifact rather than a query source.
+
 ---
 
 ## Task References
@@ -289,5 +296,6 @@ The scanner skips symlinked directories rather than trying to canonicalize and f
 - **[T20260506-11]** — Remove graph task attribution after 0/961 audited reverse-lookup uses; preserve task IDs as local commit-search keys.
 - **[T20260509-33]** — Skip symlinked directories/files during knowledge scans and `.orbitignore` discovery to prevent outside-repo indexing and recursive cycles.
 - **[T20260509-65]** — Add `GraphReadOptions` so broad graph reads skip file/leaf source hydration unless a tool opts in.
+- **[T20260509-70]** — Build the write-only SQLite secondary index sidecar during graph persistence.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
