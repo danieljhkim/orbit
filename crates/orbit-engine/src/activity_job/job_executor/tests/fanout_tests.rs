@@ -51,32 +51,43 @@ fn fanout_empty_items_emits_dispatched_zero_and_joined_zero() {
 
 #[test]
 fn fanout_collected_outputs_are_index_ordered_even_when_workers_finish_out_of_order() {
-    // Two-item fan_out where the host scripts ordered outputs whose first
-    // worker (spawn idx 0) sleeps long enough for spawn idx 1 to finish
-    // first. fan_out.rs:131 sorts by spawn idx so the collected output must
-    // be in declaration order regardless.
+    // Each worker renders its own spawn index and sleep duration into the
+    // deterministic action input. The first worker sleeps long enough for the
+    // second worker to finish first, without coupling the expected output to
+    // whichever thread reaches ScriptedHost first.
     let host = ScriptedHost::new([(
         "w",
         vec![
-            Action::SleepOk {
-                ms: 80,
-                value: json!({"spawn_index": 0}),
+            Action::SleepInputMsThenEcho {
+                ms_field: "sleep_ms",
             },
-            Action::Ok(json!({"spawn_index": 1})),
+            Action::SleepInputMsThenEcho {
+                ms_field: "sleep_ms",
+            },
         ],
     )]);
+    let mut worker = target_step("worker", "w");
+    match &mut worker.body {
+        JobV2StepBody::Target(target) => {
+            target.default_input = Some(json!({
+                "sleep_ms": "{{ input.item.sleep_ms }}",
+                "spawn_index": "{{ input.iteration }}",
+            }));
+        }
+        _ => unreachable!("target_step must build a target body"),
+    }
     let job = job_with_steps(vec![fanout_step(
         "scatter",
         "{{ input.items }}",
         4, // both run concurrently
-        target_step("worker", "w"),
+        worker,
         JoinMode::All,
         None,
     )]);
     let outcome = run_job(
         &host,
         &job,
-        json!({"items": ["a", "b"]}),
+        json!({"items": [{"sleep_ms": 80}, {"sleep_ms": 0}]}),
         "run-fanout-order",
     );
 

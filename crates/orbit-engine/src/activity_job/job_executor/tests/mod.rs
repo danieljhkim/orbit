@@ -159,6 +159,7 @@ pub(super) enum Action {
     Ok(Value),
     Err(DispatchError),
     SleepOk { ms: u64, value: Value },
+    SleepInputMsThenEcho { ms_field: &'static str },
 }
 
 pub(super) struct ScriptedHost {
@@ -202,7 +203,7 @@ impl V2RuntimeHost for ScriptedHost {
         &self,
         action: &str,
         _config: &Value,
-        _input: &Value,
+        input: &Value,
         _tool_context: orbit_tools::ToolContext,
     ) -> Result<Value, DispatchError> {
         let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
@@ -234,6 +235,15 @@ impl V2RuntimeHost for ScriptedHost {
             Some(Action::SleepOk { ms, value }) => {
                 std::thread::sleep(Duration::from_millis(ms));
                 Ok(value)
+            }
+            Some(Action::SleepInputMsThenEcho { ms_field }) => {
+                let ms = input.get(ms_field).and_then(Value::as_u64).ok_or_else(|| {
+                    DispatchError::JobExecution(format!(
+                        "scripted host missing numeric sleep field `{ms_field}`"
+                    ))
+                })?;
+                std::thread::sleep(Duration::from_millis(ms));
+                Ok(input.clone())
             }
             // Default: succeed with `{ "action": <name> }` so untyped tests
             // don't have to script every call.
