@@ -27,6 +27,14 @@ pub(super) fn build_exec_request(
     Ok(super::gh_exec_request(args, None, TIMEOUT_DEFAULT_MS))
 }
 
+fn parse_reply_response(stdout: &str) -> Result<Value, OrbitError> {
+    let id = super::parse_gh_api_id(stdout, "gh api (pr comment reply)")?;
+    Ok(json!({
+        "id": id,
+        "replied": true,
+    }))
+}
+
 super::gh_tool! {
     pub struct GithubPrCommentReplyTool;
     name: "github.pr.comment.reply";
@@ -42,11 +50,40 @@ super::gh_tool! {
     }
     response: |_ctx, _input, result| {
         check_exec_result(result, "gh api (pr comment reply)")?;
-        let response: Value = serde_json::from_str(result.stdout.trim()).unwrap_or(json!({}));
-        let id = response.get("id").and_then(Value::as_u64).unwrap_or(0);
-        Ok(json!({
-            "id": id,
-            "replied": true,
-        }))
+        parse_reply_response(&result.stdout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_reply_response_returns_id_from_valid_stdout() {
+        let response = parse_reply_response(r#"{"id":24680,"body":"Done"}"#).unwrap();
+
+        assert_eq!(response["id"], json!(24680));
+        assert_eq!(response["replied"], json!(true));
+    }
+
+    #[test]
+    fn parse_reply_response_rejects_malformed_stdout() {
+        let error = parse_reply_response("not json").unwrap_err();
+
+        assert!(matches!(error, OrbitError::Execution(_)));
+    }
+
+    #[test]
+    fn parse_reply_response_rejects_empty_stdout() {
+        let error = parse_reply_response("").unwrap_err();
+
+        assert!(matches!(error, OrbitError::Execution(_)));
+    }
+
+    #[test]
+    fn parse_reply_response_rejects_object_without_id() {
+        let error = parse_reply_response(r#"{"body":"Done"}"#).unwrap_err();
+
+        assert!(matches!(error, OrbitError::Execution(_)));
     }
 }

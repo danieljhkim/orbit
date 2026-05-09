@@ -202,6 +202,20 @@ pub(super) fn require_numeric_str(input: &Value, key: &str) -> Result<String, Or
     Ok(value)
 }
 
+pub(super) fn parse_gh_api_id(stdout: &str, label: &str) -> Result<u64, OrbitError> {
+    let response: Value = serde_json::from_str(stdout.trim())
+        .map_err(|err| OrbitError::Execution(format!("{label} returned invalid JSON: {err}")))?;
+    response
+        .as_object()
+        .and_then(|object| object.get("id"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            OrbitError::Execution(format!(
+                "{label} returned unexpected JSON: expected object with numeric `id`"
+            ))
+        })
+}
+
 /// Build an agent attribution footer line.
 ///
 /// Returns `None` when `agent_name` is not set on the context (i.e. the tool

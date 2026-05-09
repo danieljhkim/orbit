@@ -77,6 +77,14 @@ fn resolve_pr_head_sha(repo: &str, pr: &str) -> Result<String, OrbitError> {
     Ok(sha)
 }
 
+fn parse_review_comment_response(stdout: &str) -> Result<Value, OrbitError> {
+    let id = super::parse_gh_api_id(stdout, "gh api (pr review comment)")?;
+    Ok(json!({
+        "id": id,
+        "commented": true,
+    }))
+}
+
 super::gh_tool! {
     pub struct GithubPrReviewCommentTool;
     name: "github.pr.review.comment";
@@ -109,11 +117,41 @@ super::gh_tool! {
     }
     response: |_ctx, _input, result| {
         check_exec_result(result, "gh api (pr review comment)")?;
-        let response: Value = serde_json::from_str(result.stdout.trim()).unwrap_or(json!({}));
-        let id = response.get("id").and_then(Value::as_u64).unwrap_or(0);
-        Ok(json!({
-            "id": id,
-            "commented": true,
-        }))
+        parse_review_comment_response(&result.stdout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_review_comment_response_returns_id_from_valid_stdout() {
+        let response =
+            parse_review_comment_response(r#"{"id":67890,"body":"Looks good"}"#).unwrap();
+
+        assert_eq!(response["id"], json!(67890));
+        assert_eq!(response["commented"], json!(true));
+    }
+
+    #[test]
+    fn parse_review_comment_response_rejects_malformed_stdout() {
+        let error = parse_review_comment_response("not json").unwrap_err();
+
+        assert!(matches!(error, OrbitError::Execution(_)));
+    }
+
+    #[test]
+    fn parse_review_comment_response_rejects_empty_stdout() {
+        let error = parse_review_comment_response("").unwrap_err();
+
+        assert!(matches!(error, OrbitError::Execution(_)));
+    }
+
+    #[test]
+    fn parse_review_comment_response_rejects_object_without_id() {
+        let error = parse_review_comment_response(r#"{"body":"Looks good"}"#).unwrap_err();
+
+        assert!(matches!(error, OrbitError::Execution(_)));
     }
 }
