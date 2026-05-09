@@ -526,6 +526,22 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
+## ADR-035 — Search exact-name and path-prefix fast paths use SQLite
+
+**Status:** Accepted · 2026-05 · [T20260509-73]
+**Author:** gpt-5.5
+
+**Context.** Default graph search is intentionally substring-capable, but the most common agent searches are exact symbol names and path prefixes. Walking the graph for those shapes burns the same scan cost as broad substring search even though the SQLite sidecar already stores indexed `name_lower` and `location_lower` columns.
+
+**Decision.** Route default `orbit.graph.search` queries through `graph_index.sqlite` only when a small classifier identifies an exact-name query or a path-prefix query. Exact-name uses `name_lower = ?`; path-prefix uses `location_lower LIKE ? ESCAPE '\'` after escaping literal `%`, `_`, and `\`. SQL rows are ranked with the same default rank buckets as scan results, and missing/stale indexes, source-regex searches, wildcard/regex-like shapes, and ambiguous substring shapes stay on the scan path.
+
+**Consequences.**
+- Exact-name and path-prefix search can answer from the B-tree sidecar without hydrating the full graph.
+- The `node` table carries `scan_order` so SQL ranking can preserve scan-order tie breaks for the same hit set.
+- Cost: simple exact probes that miss the name index fall back to scan to preserve substring behavior, so miss latency remains scan-bound until a future substring/trigram index exists.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -576,5 +592,6 @@ Tasks cited by ADRs above:
 - **[T20260509-67]** — Bound default-ranking graph search candidate retention with named headroom and hard cap constants.
 - **[T20260509-70]** — Build the write-only SQLite secondary index sidecar during graph persistence.
 - **[T20260509-72]** — Use the SQLite secondary index for current, unscoped `orbit.graph.overview` summary aggregation.
+- **[T20260509-73]** — Wire exact-name and path-prefix graph search through the SQLite sidecar.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

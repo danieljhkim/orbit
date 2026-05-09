@@ -8,7 +8,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavio
 use super::nodes::{BaseNodeFields, CodebaseGraphV1, FileNode, LeafKind};
 use crate::error::KnowledgeError;
 
-pub(crate) const GRAPH_SQLITE_INDEX_SCHEMA_VERSION: u32 = 3;
+pub(crate) const GRAPH_SQLITE_INDEX_SCHEMA_VERSION: u32 = 4;
 pub(crate) const GRAPH_SQLITE_INDEX_FILENAME: &str = "graph_index.sqlite";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +20,17 @@ pub struct GraphIndexNodeRow {
     pub parent_id: Option<String>,
     pub selector: Option<String>,
     pub object_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphIndexSearchRow {
+    pub id: String,
+    pub node_type: String,
+    pub kind: Option<String>,
+    pub name: String,
+    pub location: String,
+    pub selector: Option<String>,
+    pub scan_order: i64,
 }
 
 pub struct GraphIndexReader {
@@ -91,6 +102,68 @@ impl GraphIndexReader {
             )
             .optional()
             .map_err(|error| sqlite_error(&self.path, "query graph sqlite node by id", error))
+    }
+
+    pub fn search_exact_name(
+        &self,
+        name_lower: &str,
+    ) -> Result<Vec<GraphIndexSearchRow>, KnowledgeError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT id, node_type, kind, name, location, selector, scan_order
+                FROM node
+                WHERE name_lower = ?1
+                ORDER BY scan_order ASC
+                "#,
+            )
+            .map_err(|error| {
+                sqlite_error(&self.path, "prepare graph sqlite exact-name search", error)
+            })?;
+        let rows = stmt
+            .query_map(params![name_lower], graph_index_search_row_from_row)
+            .map_err(|error| {
+                sqlite_error(&self.path, "query graph sqlite exact-name search", error)
+            })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| sqlite_error(&self.path, "read graph sqlite exact-name row", error))
+    }
+
+    pub fn search_location_prefix(
+        &self,
+        location_prefix_lower: &str,
+    ) -> Result<Vec<GraphIndexSearchRow>, KnowledgeError> {
+        let pattern = sqlite_like_prefix_pattern(location_prefix_lower);
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT id, node_type, kind, name, location, selector, scan_order
+                FROM node
+                WHERE location_lower LIKE ?1 ESCAPE '\'
+                ORDER BY scan_order ASC
+                "#,
+            )
+            .map_err(|error| {
+                sqlite_error(
+                    &self.path,
+                    "prepare graph sqlite location-prefix search",
+                    error,
+                )
+            })?;
+        let rows = stmt
+            .query_map(params![pattern], graph_index_search_row_from_row)
+            .map_err(|error| {
+                sqlite_error(
+                    &self.path,
+                    "query graph sqlite location-prefix search",
+                    error,
+                )
+            })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+            sqlite_error(&self.path, "read graph sqlite location-prefix row", error)
+        })
     }
 
     pub fn children_of(
@@ -391,7 +464,8 @@ pub(crate) fn write_graph_index(
           parent_id TEXT,
           selector TEXT,
           object_hash TEXT NOT NULL,
-          ordinal INTEGER NOT NULL
+          ordinal INTEGER NOT NULL,
+          scan_order INTEGER NOT NULL
         );
         CREATE INDEX idx_node_name_lower ON node(name_lower);
         CREATE INDEX idx_node_location_lower ON node(location_lower);
@@ -430,13 +504,16 @@ pub(crate) fn write_graph_index(
                 r#"
                 INSERT OR REPLACE INTO node (
                   id, node_type, kind, name, name_lower, language, location, location_lower,
-                  parent_id, selector, object_hash, ordinal
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                  parent_id, selector, object_hash, ordinal, scan_order
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                 "#,
             )
             .map_err(|error| sqlite_error(path, "prepare graph sqlite node insert", error))?;
 
-        for dir in &graph.dirs {
+        let file_scan_offset = graph.dirs.len();
+        let leaf_scan_offset = file_scan_offset + graph.files.len();
+
+        for (scan_order, dir) in graph.dirs.iter().enumerate() {
             let selector = stable_selector(dir_selector(&dir.base), &selector_counts);
             let object_hash = object_hash_for(path, node_object_hashes, &dir.base.id)?;
             insert_node(
@@ -448,10 +525,11 @@ pub(crate) fn write_graph_index(
                 selector.as_deref(),
                 object_hash,
                 child_ordinals.get(&dir.base.id).copied().unwrap_or(0),
+                scan_order as i64,
             )?;
         }
 
-        for file in &graph.files {
+        for (index, file) in graph.files.iter().enumerate() {
             let selector = stable_selector(file_selector(&file.base), &selector_counts);
             let object_hash = object_hash_for(path, node_object_hashes, &file.base.id)?;
             insert_node(
@@ -463,10 +541,11 @@ pub(crate) fn write_graph_index(
                 selector.as_deref(),
                 object_hash,
                 child_ordinals.get(&file.base.id).copied().unwrap_or(0),
+                (file_scan_offset + index) as i64,
             )?;
         }
 
-        for leaf in &graph.leaves {
+        for (index, leaf) in graph.leaves.iter().enumerate() {
             let kind = leaf.kind.to_string();
             let selector = stable_selector(leaf_selector(&leaf.base, &leaf.kind), &selector_counts);
             let object_hash = object_hash_for(path, node_object_hashes, &leaf.base.id)?;
@@ -479,6 +558,7 @@ pub(crate) fn write_graph_index(
                 selector.as_deref(),
                 object_hash,
                 child_ordinals.get(&leaf.base.id).copied().unwrap_or(0),
+                (leaf_scan_offset + index) as i64,
             )?;
         }
     }
@@ -582,6 +662,7 @@ fn insert_node(
     selector: Option<&str>,
     object_hash: &str,
     ordinal: i64,
+    scan_order: i64,
 ) -> Result<(), KnowledgeError> {
     statement
         .execute(params![
@@ -597,6 +678,7 @@ fn insert_node(
             selector,
             object_hash,
             ordinal,
+            scan_order,
         ])
         .map_err(|error| sqlite_error(path, "insert graph sqlite node", error))?;
     Ok(())
@@ -621,6 +703,33 @@ fn graph_index_node_from_row(row: &Row<'_>) -> rusqlite::Result<GraphIndexNodeRo
         selector: row.get(5)?,
         object_hash: row.get(6)?,
     })
+}
+
+fn graph_index_search_row_from_row(row: &Row<'_>) -> rusqlite::Result<GraphIndexSearchRow> {
+    Ok(GraphIndexSearchRow {
+        id: row.get(0)?,
+        node_type: row.get(1)?,
+        kind: row.get(2)?,
+        name: row.get(3)?,
+        location: row.get(4)?,
+        selector: row.get(5)?,
+        scan_order: row.get(6)?,
+    })
+}
+
+fn sqlite_like_prefix_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len() + 1);
+    for ch in input.chars() {
+        match ch {
+            '%' | '_' | '\\' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped.push('%');
+    escaped
 }
 
 fn object_hash_for<'a>(
