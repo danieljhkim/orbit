@@ -82,6 +82,35 @@ impl OrbitToolServer {
         self.replace_name_map(map);
         Ok(resolved.unwrap_or_else(|| advertised.to_string()))
     }
+
+    async fn call_tool_request(
+        &self,
+        req: CallToolRequestParams,
+    ) -> Result<CallToolResult, McpError> {
+        let inbound = req.name.to_string();
+        let canonical = self
+            .canonical_name(&inbound)
+            .map_err(ToolNameCollision::into_mcp_error)?;
+        let input = req
+            .arguments
+            .map(Value::Object)
+            .unwrap_or_else(|| Value::Object(Map::new()));
+
+        let host = Arc::clone(&self.host);
+        let exec_name = canonical.clone();
+        let join = tokio::task::spawn_blocking(move || host.call_tool(&exec_name, input)).await;
+
+        match join {
+            Ok(Ok(value)) => Ok(CallToolResult::structured(mcp_structured_content(value))),
+            Ok(Err(orbit_err)) => Ok(tool_error_result(&orbit_err)),
+            Err(join_err) => {
+                let err = OrbitError::Execution(format!(
+                    "tool '{canonical}' worker panicked or was cancelled: {join_err}"
+                ));
+                Ok(tool_error_result(&err))
+            }
+        }
+    }
 }
 
 /// Sanitize an Orbit tool name into the character set MCP clients accept.
@@ -150,6 +179,16 @@ fn build_name_map(schemas: &[ToolSchema]) -> Result<HashMap<String, String>, Too
     Ok(map)
 }
 
+/// Keep MCP `structuredContent` object-shaped for clients that enforce record
+/// results (notably Cursor and VS Code), while preserving non-object payloads.
+fn mcp_structured_content(value: Value) -> Value {
+    match value {
+        Value::Object(_) => value,
+        Value::Array(items) => json!({ "items": items }),
+        value => json!({ "value": value }),
+    }
+}
+
 impl ServerHandler for OrbitToolServer {
     fn get_info(&self) -> ServerInfo {
         let implementation = Implementation::new("orbit-mcp", env!("CARGO_PKG_VERSION"));
@@ -181,29 +220,7 @@ impl ServerHandler for OrbitToolServer {
         req: CallToolRequestParams,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
-        let inbound = req.name.to_string();
-        let canonical = self
-            .canonical_name(&inbound)
-            .map_err(ToolNameCollision::into_mcp_error)?;
-        let input = req
-            .arguments
-            .map(Value::Object)
-            .unwrap_or_else(|| Value::Object(Map::new()));
-
-        let host = Arc::clone(&self.host);
-        let exec_name = canonical.clone();
-        let join = tokio::task::spawn_blocking(move || host.call_tool(&exec_name, input)).await;
-
-        match join {
-            Ok(Ok(value)) => Ok(CallToolResult::structured(value)),
-            Ok(Err(orbit_err)) => Ok(tool_error_result(&orbit_err)),
-            Err(join_err) => {
-                let err = OrbitError::Execution(format!(
-                    "tool '{canonical}' worker panicked or was cancelled: {join_err}"
-                ));
-                Ok(tool_error_result(&err))
-            }
-        }
+        self.call_tool_request(req).await
     }
 }
 
@@ -333,6 +350,7 @@ fn property_for(param_type: &str) -> Map<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn param_with_type(name: &str, param_type: &str) -> ToolParam {
         ToolParam {
@@ -455,6 +473,56 @@ mod tests {
         assert_eq!(tool.name.as_ref(), "orbit_task_add");
     }
 
+    #[tokio::test]
+    async fn call_tool_wraps_affected_array_results_for_strict_mcp_clients() {
+        let affected_tools = [
+            "orbit.task.list",
+            "orbit.task.search",
+            "orbit.task.review_thread.list",
+        ];
+        let host = Arc::new(EchoArrayHost {
+            schemas: affected_tools
+                .iter()
+                .map(|name| tool_schema(name))
+                .collect(),
+        });
+        let server = OrbitToolServer::new(host);
+
+        for canonical_name in affected_tools {
+            let result = server
+                .call_tool_request(CallToolRequestParams::new(sanitize_tool_name(
+                    canonical_name,
+                )))
+                .await
+                .expect("MCP bridge call succeeds");
+            let structured = result
+                .structured_content
+                .as_ref()
+                .expect("structured content");
+
+            assert!(
+                structured.is_object(),
+                "{canonical_name} structuredContent must be object-shaped"
+            );
+            assert_eq!(
+                structured.get("items"),
+                Some(&json!([{ "tool": canonical_name }]))
+            );
+
+            let wire = serde_json::to_value(&result).expect("serialize CallToolResult");
+            assert!(
+                wire.get("structuredContent").is_some_and(Value::is_object),
+                "{canonical_name} serialized structuredContent must satisfy record validators"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_structured_content_preserves_existing_objects() {
+        let value = json!({ "ok": true });
+        assert_eq!(mcp_structured_content(value.clone()), value);
+    }
+
     struct StubHost {
         schemas: Vec<ToolSchema>,
     }
@@ -466,6 +534,20 @@ mod tests {
 
         fn call_tool(&self, _name: &str, _input: Value) -> Result<Value, OrbitError> {
             Ok(Value::Null)
+        }
+    }
+
+    struct EchoArrayHost {
+        schemas: Vec<ToolSchema>,
+    }
+
+    impl crate::McpHost for EchoArrayHost {
+        fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+            self.schemas.clone()
+        }
+
+        fn call_tool(&self, name: &str, _input: Value) -> Result<Value, OrbitError> {
+            Ok(json!([{ "tool": name }]))
         }
     }
 
