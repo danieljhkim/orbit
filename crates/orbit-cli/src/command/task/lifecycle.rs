@@ -245,19 +245,7 @@ pub struct TaskDeleteArgs {
 
 impl Execute for TaskDeleteArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let task = runtime.get_task(&self.id)?;
-        if !self.force
-            && !matches!(
-                task.status,
-                TaskStatus::Proposed | TaskStatus::Friction | TaskStatus::Rejected
-            )
-        {
-            return Err(OrbitError::InvalidInput(format!(
-                "task '{}' is in status '{}'; use --force to delete tasks not in proposed, friction, or rejected status",
-                self.id, task.status
-            )));
-        }
-        runtime.delete_task(&self.id)?;
+        runtime.delete_task_guarded(&self.id, self.force)?;
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "id": self.id,

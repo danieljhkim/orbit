@@ -1,7 +1,7 @@
 use orbit_common::types::TaskStatus;
 use serde_json::{Value, json};
 
-use super::test_support::{create_task, test_runtime};
+use super::test_support::{create_task, invalid_input_message, test_runtime};
 
 #[test]
 fn execute_tool_command_searches_tasks_for_agents() {
@@ -72,6 +72,93 @@ fn task_add_tool_creates_proposed_tasks_for_agents() {
         output.get("status").and_then(Value::as_str),
         Some("proposed")
     );
+}
+
+#[test]
+fn task_delete_tool_rejects_unforced_protected_statuses() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Protected delete",
+        "Backlog tasks require force before permanent deletion.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.delete",
+        json!({ "id": task.id.clone() }),
+        Some("codex".to_string()),
+        Some("gpt-5.5".to_string()),
+    ));
+
+    assert_eq!(
+        message,
+        format!(
+            "task '{}' is in status 'backlog'; use --force to delete tasks not in proposed, friction, or rejected status",
+            task.id
+        )
+    );
+    runtime
+        .get_task(&task.id)
+        .expect("unforced protected task remains");
+}
+
+#[test]
+fn task_delete_tool_allows_unforced_proposed_friction_and_rejected_tasks() {
+    let (_root, runtime, repo_root) = test_runtime();
+
+    for status in [
+        TaskStatus::Proposed,
+        TaskStatus::Friction,
+        TaskStatus::Rejected,
+    ] {
+        let task = create_task(
+            &runtime,
+            &repo_root,
+            &format!("Delete {status}"),
+            "Unprotected statuses can be permanently deleted without force.",
+            status,
+            &[],
+        );
+
+        let output = runtime
+            .execute_tool_command(
+                "orbit.task.delete",
+                json!({ "id": task.id.clone() }),
+                Some("codex".to_string()),
+                Some("gpt-5.5".to_string()),
+            )
+            .expect("unprotected delete succeeds");
+
+        assert_eq!(output, json!({ "id": task.id, "deleted": true }));
+    }
+}
+
+#[test]
+fn task_delete_tool_allows_forced_protected_statuses() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Forced delete",
+        "Protected statuses can be permanently deleted with explicit force.",
+        TaskStatus::InProgress,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.delete",
+            json!({ "id": task.id.clone(), "force": true }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("forced protected delete succeeds");
+
+    assert_eq!(output, json!({ "id": task.id.clone(), "deleted": true }));
+    assert!(runtime.get_task(&task.id).is_err(), "task was deleted");
 }
 
 #[test]

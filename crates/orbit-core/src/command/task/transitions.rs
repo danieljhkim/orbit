@@ -526,6 +526,27 @@ impl OrbitRuntime {
             Ok(((), OrbitEvent::TaskDeleted { id: id.to_string() }))
         })
     }
+
+    pub fn delete_task_guarded(&self, id: &str, force: bool) -> Result<(), OrbitError> {
+        let task = self.get_task(id)?;
+        ensure_task_delete_allowed(&task.id, task.status, force)?;
+        self.delete_task(id)
+    }
+}
+
+fn ensure_task_delete_allowed(id: &str, status: TaskStatus, force: bool) -> Result<(), OrbitError> {
+    if force
+        || matches!(
+            status,
+            TaskStatus::Proposed | TaskStatus::Friction | TaskStatus::Rejected
+        )
+    {
+        return Ok(());
+    }
+
+    Err(OrbitError::InvalidInput(format!(
+        "task '{id}' is in status '{status}'; use --force to delete tasks not in proposed, friction, or rejected status"
+    )))
 }
 
 pub(crate) fn ensure_task_has_execution_plan(id: &str, plan: &str) -> Result<(), OrbitError> {

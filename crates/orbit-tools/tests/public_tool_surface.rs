@@ -95,6 +95,24 @@ fn task_dependency_params_remain_in_agent_tool_schemas() {
     }
 }
 
+#[test]
+fn task_delete_schema_exposes_optional_force_boolean() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.task.delete")
+        .expect("task delete schema");
+    let force_param = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "force")
+        .expect("force param");
+
+    assert_eq!(force_param.param_type, "boolean");
+    assert!(!force_param.required);
+}
+
 fn registered_tool_names() -> BTreeSet<String> {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();

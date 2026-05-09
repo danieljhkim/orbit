@@ -371,10 +371,25 @@ mod tests {
     mod audited_mcp_call_tests {
         use orbit_common::types::AuditEventStatus;
         use orbit_core::OrbitRuntime;
+        use orbit_core::TaskStatus;
+        use orbit_core::command::task::TaskAddParams;
         use orbit_mcp::McpHost;
         use serde_json::json;
 
         use super::super::{RuntimeMcpHost, audited_mcp_call};
+
+        fn create_task(runtime: &OrbitRuntime, status: TaskStatus) -> String {
+            runtime
+                .add_task(TaskAddParams {
+                    title: format!("Delete {status}"),
+                    description: "Exercise MCP task deletion guard.".to_string(),
+                    workspace_path: Some(".".to_string()),
+                    status: Some(status),
+                    ..Default::default()
+                })
+                .expect("create task")
+                .id
+        }
 
         #[test]
         fn preflight_failure_for_unknown_tool_records_failure_audit_row() {
@@ -422,6 +437,101 @@ mod tests {
             assert_eq!(events.len(), 1, "exactly one audit row for happy path");
             assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
             assert_eq!(events[0].status, AuditEventStatus::Success);
+        }
+
+        #[test]
+        fn task_delete_rejects_unforced_protected_status_and_audits_failure() {
+            let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+            let task_id = create_task(&runtime, TaskStatus::Backlog);
+            let host = RuntimeMcpHost {
+                runtime: runtime.clone(),
+            };
+
+            let result = host.call_tool(
+                "orbit.task.delete",
+                json!({ "id": task_id, "model": "gpt-5.5" }),
+            );
+
+            let error = result.expect_err("unforced protected delete fails");
+            assert!(error.to_string().contains(
+                "use --force to delete tasks not in proposed, friction, or rejected status"
+            ));
+            runtime
+                .get_task(&task_id)
+                .expect("unforced protected task remains");
+
+            let events = runtime
+                .list_audit_events(None, Some("orbit.task.delete".to_string()), None, None, 16)
+                .expect("list audit events");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
+            assert_eq!(events[0].status, AuditEventStatus::Failure);
+            assert_eq!(events[0].exit_code, 1);
+            assert!(
+                events[0]
+                    .error_message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("use --force"))
+            );
+        }
+
+        #[test]
+        fn task_delete_allows_unforced_proposed_friction_and_rejected_tasks_over_mcp() {
+            let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+            let host = RuntimeMcpHost {
+                runtime: runtime.clone(),
+            };
+
+            for status in [
+                TaskStatus::Proposed,
+                TaskStatus::Friction,
+                TaskStatus::Rejected,
+            ] {
+                let task_id = create_task(&runtime, status);
+                let value = host
+                    .call_tool(
+                        "orbit.task.delete",
+                        json!({ "id": task_id, "model": "gpt-5.5" }),
+                    )
+                    .expect("unprotected delete succeeds");
+                assert_eq!(value, json!({ "id": task_id, "deleted": true }));
+            }
+
+            let events = runtime
+                .list_audit_events(None, Some("orbit.task.delete".to_string()), None, None, 16)
+                .expect("list audit events");
+            assert_eq!(events.len(), 3);
+            assert!(events.iter().all(|event| {
+                event.subcommand.as_deref() == Some("run-mcp")
+                    && event.status == AuditEventStatus::Success
+            }));
+        }
+
+        #[test]
+        fn task_delete_allows_forced_protected_status_over_mcp_and_audits_success() {
+            let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+            let task_id = create_task(&runtime, TaskStatus::InProgress);
+            let host = RuntimeMcpHost {
+                runtime: runtime.clone(),
+            };
+
+            let value = host
+                .call_tool(
+                    "orbit.task.delete",
+                    json!({ "id": task_id, "force": true, "model": "gpt-5.5" }),
+                )
+                .expect("forced protected delete succeeds");
+
+            assert_eq!(value, json!({ "id": task_id, "deleted": true }));
+            assert!(runtime.get_task(&task_id).is_err(), "task was deleted");
+
+            let events = runtime
+                .list_audit_events(None, Some("orbit.task.delete".to_string()), None, None, 16)
+                .expect("list audit events");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
+            assert_eq!(events[0].status, AuditEventStatus::Success);
+            assert_eq!(events[0].exit_code, 0);
         }
     }
 }

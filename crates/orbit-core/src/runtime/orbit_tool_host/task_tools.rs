@@ -103,7 +103,8 @@ pub(super) fn approve(
 
 pub(super) fn delete(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    runtime.delete_task(&id)?;
+    let force = optional_bool_alias(&input, &["force"])?.unwrap_or(false);
+    runtime.delete_task_guarded(&id, force)?;
     Ok(json!({ "id": id, "deleted": true }))
 }
 
