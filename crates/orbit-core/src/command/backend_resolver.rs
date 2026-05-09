@@ -5,7 +5,7 @@
 //!   1. `--backend=<value>` CLI flag (explicit invocation-level override).
 //!   2. `ORBIT_BACKEND` env var.
 //!   3. `[runtime] backend = "<value>"` in `config.toml`.
-//!   4. Hard-coded fallback: `Http`.
+//!   4. Hard-coded fallback: `Cli`.
 //!
 //! Called once per run at load time by direct activity helpers and
 //! `orbit job run` entry points. The resolved value is then applied to the
@@ -52,7 +52,7 @@ pub fn resolve_backend_precedence(
 ) -> ResolvedBackend {
     if let Some(backend) = flag_override {
         return ResolvedBackend {
-            backend: concretize(backend, Backend::Http),
+            backend: concretize(backend, Backend::Cli),
             source: BackendSource::Flag,
         };
     }
@@ -60,7 +60,7 @@ pub fn resolve_backend_precedence(
         && let Some(backend) = Backend::parse(raw)
     {
         return ResolvedBackend {
-            backend: concretize(backend, Backend::Http),
+            backend: concretize(backend, Backend::Cli),
             source: BackendSource::Env,
         };
     }
@@ -68,12 +68,12 @@ pub fn resolve_backend_precedence(
         && let Some(backend) = Backend::parse(raw)
     {
         return ResolvedBackend {
-            backend: concretize(backend, Backend::Http),
+            backend: concretize(backend, Backend::Cli),
             source: BackendSource::Config,
         };
     }
     ResolvedBackend {
-        backend: Backend::Http,
+        backend: Backend::Cli,
         source: BackendSource::Default,
     }
 }
@@ -98,5 +98,50 @@ fn concretize(backend: Backend, fallback: Backend) -> Backend {
         Backend::Auto => fallback,
         Backend::Http => Backend::Http,
         Backend::Cli => Backend::Cli,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_config_uses_cli_fallback() {
+        let resolved = resolve_backend_precedence(None, None, None);
+
+        assert_eq!(resolved.backend, Backend::Cli);
+        assert_eq!(resolved.source, BackendSource::Default);
+    }
+
+    #[test]
+    fn auto_config_folds_to_cli_fallback() {
+        let resolved = resolve_backend_precedence(None, None, Some("auto"));
+
+        assert_eq!(resolved.backend, Backend::Cli);
+        assert_eq!(resolved.source, BackendSource::Config);
+    }
+
+    #[test]
+    fn explicit_flag_overrides_env_and_config() {
+        let resolved = resolve_backend_precedence(Some(Backend::Http), Some("cli"), Some("cli"));
+
+        assert_eq!(resolved.backend, Backend::Http);
+        assert_eq!(resolved.source, BackendSource::Flag);
+    }
+
+    #[test]
+    fn explicit_env_overrides_config() {
+        let resolved = resolve_backend_precedence(None, Some("http"), Some("cli"));
+
+        assert_eq!(resolved.backend, Backend::Http);
+        assert_eq!(resolved.source, BackendSource::Env);
+    }
+
+    #[test]
+    fn auto_flag_folds_to_cli_fallback() {
+        let resolved = resolve_backend_precedence(Some(Backend::Auto), Some("http"), Some("http"));
+
+        assert_eq!(resolved.backend, Backend::Cli);
+        assert_eq!(resolved.source, BackendSource::Flag);
     }
 }

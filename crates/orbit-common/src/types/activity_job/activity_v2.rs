@@ -57,13 +57,13 @@ pub struct AgentLoopSpec {
     /// Upper bound on loop iterations.
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
-    /// Execution backend (§3.1). `Auto` is resolved to `Http` or `Cli` once per
-    /// Run at load time per the precedence rules in §3.1 and then never observed
-    /// by the dispatcher — everything downstream sees the concrete backend.
+    /// Execution backend (§3.1). Missing values default to the v1 `Cli`
+    /// release path. `Auto` is resolved to `Http` or `Cli` once per Run at
+    /// load time per the precedence rules in §3.1 and then never observed by
+    /// the dispatcher — everything downstream sees the concrete backend.
     #[serde(default)]
     pub backend: Backend,
-    /// Provider whose runtime executes this activity (§3.1). Default `Claude`
-    /// matches the Phase 2c HTTP wiring that currently supports only Anthropic.
+    /// Provider whose runtime executes this activity (§3.1).
     #[serde(default)]
     pub provider: Provider,
     /// Wall-clock timeout for a CLI invocation (§7.6). Ignored in HTTP mode
@@ -131,8 +131,8 @@ impl GroundhogSpec {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Backend {
-    #[default]
     Http,
+    #[default]
     Cli,
     Auto,
 }
@@ -304,5 +304,12 @@ mod tests {
         let yaml = "instruction: hi\n";
         let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
         assert_eq!(parsed.role, None);
+    }
+
+    #[test]
+    fn agent_loop_spec_defaults_to_cli_backend() {
+        let yaml = "instruction: hi\n";
+        let parsed: AgentLoopSpec = serde_yaml::from_str(yaml).expect("parse spec");
+        assert_eq!(parsed.backend, Backend::Cli);
     }
 }

@@ -41,9 +41,9 @@ fn main() {
         r.source
     );
 
-    // Default falls through to `http` when nothing is set.
+    // Default falls through to `cli` when nothing is set.
     let r = resolve_backend_precedence(None, None, None);
-    assert_eq!(r.backend, Backend::Http);
+    assert_eq!(r.backend, Backend::Cli);
     assert_eq!(r.source, BackendSource::Default);
     println!(
         "  4) default tier — resolved={} source={:?}",
@@ -51,16 +51,16 @@ fn main() {
         r.source
     );
 
-    // `auto` at any lower tier folds to the hard-coded `http` fallback so the
+    // `auto` at any lower tier folds to the hard-coded `cli` fallback so the
     // dispatcher never sees `Auto` (§3.1 — resolution is one-shot at load).
     let r = resolve_backend_precedence(None, Some("auto"), Some("cli"));
     assert_eq!(
         r.backend,
-        Backend::Http,
-        "env=auto must fold to http, not cascade to config"
+        Backend::Cli,
+        "env=auto must fold to cli, not cascade to config"
     );
     assert_eq!(r.source, BackendSource::Env);
-    println!("  5) env=auto folds to http (no cascade)");
+    println!("  5) env=auto folds to cli (no cascade)");
 
     // Invalid env value is ignored (caller didn't know about it) and we fall
     // through to config.
