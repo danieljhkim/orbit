@@ -21,6 +21,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
             .into_iter()
             .map(|dependency| dependency.label())
             .collect::<Vec<_>>(),
+        "tags": task.tags,
         "plan": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,
@@ -106,6 +107,7 @@ fn task_field_to_json(
             .map_err(serialize_error("serialize acceptance criteria")),
         "dependencies" => serde_json::to_value(&task.dependencies)
             .map_err(serialize_error("serialize dependencies")),
+        "tags" => serde_json::to_value(&task.tags).map_err(serialize_error("serialize tags")),
         "resolved_dependencies" => serde_json::to_value(
             resolve_task_dependencies(
                 task,
@@ -126,7 +128,7 @@ fn task_field_to_json(
         "artifacts" => serde_json::to_value(runtime.get_task_artifacts(&task.id)?)
             .map_err(serialize_error("serialize task artifacts")),
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
         ))),
     }
 }

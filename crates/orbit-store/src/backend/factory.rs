@@ -24,8 +24,8 @@ pub struct WorkspaceTaskBackends {
     pub artifact: Arc<dyn TaskArtifactStoreBackend>,
 }
 
-pub fn workspace_task_backends(root: PathBuf) -> WorkspaceTaskBackends {
-    let store = Arc::new(TaskFileStore::new(root));
+pub fn workspace_task_backends(root: PathBuf, task_index: Store) -> WorkspaceTaskBackends {
+    let store = Arc::new(TaskFileStore::new_with_index(root, task_index));
     WorkspaceTaskBackends {
         task: store.clone(),
         document: store.clone(),

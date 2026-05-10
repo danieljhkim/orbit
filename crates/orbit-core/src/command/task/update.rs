@@ -1,6 +1,6 @@
 use orbit_common::types::{
     OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus, normalize_task_dependencies,
-    prune_missing_context_files, validate_task_dependencies,
+    normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
 };
 
 use crate::OrbitRuntime;
@@ -92,6 +92,9 @@ impl OrbitRuntime {
             let normalized_dependencies = normalize_task_dependencies(dependencies)?;
             validate_task_dependencies(&self.list_tasks()?, Some(id), &normalized_dependencies)?;
             params.dependencies = Some(normalized_dependencies);
+        }
+        if let Some(tags) = params.tags.take() {
+            params.tags = Some(normalize_task_tags(tags));
         }
         if params.has_any_mutation() && task.status == TaskStatus::Archived {
             return Err(OrbitError::InvalidInput(format!(

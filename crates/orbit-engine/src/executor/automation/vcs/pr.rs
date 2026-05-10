@@ -883,6 +883,7 @@ mod tests {
             description: String::new(),
             acceptance_criteria: Vec::new(),
             dependencies: Vec::new(),
+            tags: Vec::new(),
             plan: String::new(),
             execution_summary: execution_summary.to_string(),
             context_files: Vec::new(),

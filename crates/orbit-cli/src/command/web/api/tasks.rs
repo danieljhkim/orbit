@@ -49,6 +49,8 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     dependencies: Vec<String>,
     #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
     plan: String,
     #[serde(default)]
     comment: Option<String>,
@@ -93,6 +95,8 @@ pub(super) struct UpdateTaskBody {
     acceptance_criteria: Option<Vec<String>>,
     #[serde(default)]
     dependencies: Option<Vec<String>>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
     #[serde(default)]
     plan: Option<String>,
     #[serde(default)]
@@ -162,6 +166,7 @@ pub(super) async fn create_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
+        tags: body.tags,
         plan: body.plan,
         comment: body.comment,
         context_files: body.context_files,
@@ -197,6 +202,7 @@ pub(super) async fn update_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
+        tags: body.tags,
         plan: body.plan,
         execution_summary: body.execution_summary,
         comment: body.comment,

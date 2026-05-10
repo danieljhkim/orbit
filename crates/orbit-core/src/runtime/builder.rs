@@ -54,7 +54,7 @@ pub(crate) fn build_context_from_roots(
         global_root.to_path_buf(),
     );
 
-    let task_backends = workspace_task_backends(persistence.task_dir.clone());
+    let task_backends = workspace_task_backends(persistence.task_dir.clone(), store.clone());
     let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());
 
     // Executors and policies are global-only. Jobs always persist run state

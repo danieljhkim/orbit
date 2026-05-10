@@ -35,6 +35,12 @@ impl Tool for OrbitTaskAddTool {
                 required: false,
             },
             ToolParam {
+                name: "tags".to_string(),
+                description: "Optional tags as a string or array of strings".to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "plan".to_string(),
                 description:
                     "Optional task plan markdown. Leave blank for the executing agent to author."

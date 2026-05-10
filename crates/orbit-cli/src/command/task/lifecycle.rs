@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{ArgAction, Args};
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::{Value, json};
 
@@ -262,6 +262,9 @@ impl Execute for TaskDeleteArgs {
 pub struct TaskSearchArgs {
     /// Search query
     pub query: String,
+    /// Filter by tag. Repeat for AND semantics.
+    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
+    pub tags: Vec<String>,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -269,7 +272,7 @@ pub struct TaskSearchArgs {
 
 impl Execute for TaskSearchArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let tasks = runtime.search_tasks(&self.query)?;
+        let tasks = runtime.search_tasks_filtered(&self.query, &self.tags)?;
 
         if self.json {
             let json_tasks: Vec<Value> = tasks

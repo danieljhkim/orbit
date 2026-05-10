@@ -36,6 +36,12 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "tags".to_string(),
+                description: "Replacement task tags as a string or array of strings".to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "plan".to_string(),
                 description: "Replacement task plan text (empty string clears)".to_string(),
                 param_type: "string".to_string(),

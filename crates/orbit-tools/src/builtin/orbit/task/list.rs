@@ -33,6 +33,13 @@ impl Tool for OrbitTaskListTool {
                 required: false,
             },
             ToolParam {
+                name: "tag".to_string(),
+                description: "Filter by tag. Repeat or pass an array for AND semantics."
+                    .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "ready".to_string(),
                 description: "When true, keep only tasks whose dependencies are satisfied"
                     .to_string(),

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use clap::Args;
+use clap::{ArgAction, Args};
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
     build_task_status_index, task_dependencies_ready,
@@ -15,7 +15,7 @@ use super::output::{
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type epic\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --json"
+    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type epic\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --json"
 )]
 pub struct TaskListArgs {
     /// Filter by one or more statuses (comma-separated). Defaults to backlog,in-progress.
@@ -36,6 +36,9 @@ pub struct TaskListArgs {
     /// Filter by batch ID
     #[arg(long)]
     pub batch_id: Option<String>,
+    /// Filter by tag. Repeat for AND semantics.
+    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
+    pub tags: Vec<String>,
     /// Filter by exact external reference in <system>:<id> form
     #[arg(long = "ref")]
     pub external_ref: Option<String>,
@@ -64,6 +67,7 @@ impl Execute for TaskListArgs {
         let task_type = self.task_type;
         let parent_id = self.parent_id;
         let batch_id = self.batch_id;
+        let tags = self.tags;
         let external_ref = self
             .external_ref
             .as_deref()
@@ -75,13 +79,13 @@ impl Execute for TaskListArgs {
             .transpose()?;
         let ready = self.ready;
 
-        let all_tasks = runtime.list_tasks()?;
-        let status_by_id = build_task_status_index(&all_tasks);
+        let tasks_matching_tags = runtime.list_tasks_by_tags(&tags)?;
+        let status_by_id = build_task_status_index(&runtime.list_tasks()?);
         let active_statuses = [TaskStatus::Backlog, TaskStatus::InProgress];
         let status_filter =
             default_task_list_status_filter(all, &status, batch_id.as_deref(), &active_statuses);
 
-        let tasks: Vec<_> = all_tasks
+        let tasks: Vec<_> = tasks_matching_tags
             .into_iter()
             .filter(|t| status_filter.is_empty() || status_filter.contains(&t.status))
             .filter(|t| priority.is_none_or(|p| t.priority == p))

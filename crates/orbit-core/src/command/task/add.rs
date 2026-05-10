@@ -1,6 +1,6 @@
 use orbit_common::types::{
     OrbitError, OrbitEvent, Task, TaskStatus, TaskType, normalize_task_dependencies,
-    prune_missing_context_files, validate_task_dependencies,
+    normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
 };
 use orbit_store::{TaskCreateParams as StoreTaskCreateParams, friction_bounty};
 
@@ -67,6 +67,7 @@ impl OrbitRuntime {
                 description: params.description.clone(),
                 acceptance_criteria: params.acceptance_criteria.clone(),
                 dependencies: dependencies.clone(),
+                tags: normalize_task_tags(params.tags.clone()),
                 plan: params.plan.clone(),
                 execution_summary: String::new(),
                 context_files: kept_context_files.clone(),

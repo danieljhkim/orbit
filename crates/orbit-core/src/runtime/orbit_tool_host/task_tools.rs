@@ -50,6 +50,7 @@ pub(super) fn add(
             .unwrap_or_default(),
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?
                 .unwrap_or_default(),
+            tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
             plan,
             comment: optional_string(&input, "comment")?,
             context_files: optional_csv_or_string_list_alias(
@@ -122,9 +123,10 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .transpose()?;
     let parent_id = optional_string_alias(&input, &["parent_id", "parent", "parentId"])?;
     let batch_id = optional_string(&input, "batch_id")?;
+    let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let ready = optional_bool_alias(&input, &["ready"])?;
-    let all_tasks = runtime.list_tasks()?;
-    let status_by_id = build_task_status_index(&all_tasks);
+    let all_tasks = runtime.list_tasks_by_tags(&tags)?;
+    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
     let tasks = all_tasks
         .into_iter()
         .filter(|task| status.is_none_or(|value| task.status == value))
@@ -151,8 +153,9 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 
 pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let query = required_string(&input, &["query"], "query")?;
+    let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let status_by_id = build_task_status_index(&runtime.list_tasks()?);
-    let tasks = runtime.search_tasks(&query)?;
+    let tasks = runtime.search_tasks_filtered(&query, &tags)?;
     Ok(Value::Array(
         tasks
             .into_iter()
@@ -235,6 +238,7 @@ pub(super) fn update(
                 ],
             )?,
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?,
+            tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?,
             plan: input
                 .get("plan")
                 .map(|value| {

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use orbit_common::types::{
     ActorIdentity, ExternalRef, OrbitError, ReviewThread, Task, TaskStatus,
-    normalize_optional_attribution_label,
+    normalize_optional_attribution_label, normalize_task_tags,
 };
 
 use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
@@ -40,6 +40,7 @@ impl TaskFileStore {
     ) -> Result<(), OrbitError> {
         let mut bundle = bundle.clone();
         bundle.doc.schema_version = TASK_SCHEMA_VERSION;
+        bundle.doc.tags = normalize_task_tags(bundle.doc.tags);
         self.validate_bundle(&bundle, Some(task_dir))?;
         fs::create_dir_all(task_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
         fs::create_dir_all(self.artifacts_dir(task_dir))
@@ -209,6 +210,7 @@ pub(super) fn bundle_to_task(state: TaskStateDir, bundle: TaskBundle) -> Task {
         description: bundle.doc.description,
         acceptance_criteria: bundle.doc.acceptance_criteria,
         dependencies: bundle.doc.dependencies,
+        tags: normalize_task_tags(bundle.doc.tags),
         plan: bundle.plan,
         execution_summary: bundle.execution_summary,
         context_files: bundle.doc.context_files,

@@ -42,6 +42,10 @@ impl OrbitRuntime {
         self.stores().tasks().list()
     }
 
+    pub fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.stores().tasks().list_by_tags(tags)
+    }
+
     /// Returns the `context_files` entries that would be dropped if the task
     /// were re-saved through the normal write path. This does not mutate disk.
     pub fn dry_run_prune_context_files(&self, task: &Task) -> Vec<String> {
@@ -73,5 +77,13 @@ impl OrbitRuntime {
 
     pub fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         self.stores().tasks().search(query)
+    }
+
+    pub fn search_tasks_filtered(
+        &self,
+        query: &str,
+        tags: &[String],
+    ) -> Result<Vec<Task>, OrbitError> {
+        self.stores().tasks().search_filtered(query, tags)
     }
 }

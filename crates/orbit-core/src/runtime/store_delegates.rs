@@ -25,6 +25,7 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) description: Option<String>,
     pub(crate) acceptance_criteria: Option<Vec<String>>,
     pub(crate) dependencies: Option<Vec<String>>,
+    pub(crate) tags: Option<Vec<String>>,
     pub(crate) plan: Option<String>,
     pub(crate) execution_summary: Option<String>,
     pub(crate) context_files: Option<Vec<String>>,
@@ -58,6 +59,7 @@ impl TaskRecordUpdateParams {
             || self.description.is_some()
             || self.acceptance_criteria.is_some()
             || self.dependencies.is_some()
+            || self.tags.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.context_files.is_some()
@@ -171,6 +173,10 @@ impl TaskRecords<'_> {
         self.store.list_tasks()
     }
 
+    pub(crate) fn list_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.store.list_tasks_by_tags(tags)
+    }
+
     pub(crate) fn list_filtered(
         &self,
         status: Option<TaskStatus>,
@@ -204,6 +210,7 @@ impl TaskRecords<'_> {
                     description: params.description.clone(),
                     acceptance_criteria: params.acceptance_criteria.clone(),
                     dependencies: params.dependencies.clone(),
+                    tags: params.tags.clone(),
                     plan: params.plan.clone(),
                     execution_summary: params.execution_summary.clone(),
                     context_files: params.context_files.clone(),
@@ -268,6 +275,14 @@ impl TaskRecords<'_> {
 
     pub(crate) fn search(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         self.store.search_tasks(query)
+    }
+
+    pub(crate) fn search_filtered(
+        &self,
+        query: &str,
+        tags: &[String],
+    ) -> Result<Vec<Task>, OrbitError> {
+        self.store.search_tasks_filtered(query, tags)
     }
 }
 

@@ -14,7 +14,7 @@ pub struct TaskShowArgs {
     pub json: bool,
     /// Print only the specified field projection(s). Valid values: comments, plan,
     /// execution_summary, description, acceptance_criteria, dependencies,
-    /// resolved_dependencies, history, context_files, artifacts.
+    /// resolved_dependencies, tags, history, context_files, artifacts.
     /// Repeat the flag or use a comma-separated value list. Combined with --json,
     /// a single field returns that field as JSON and multiple fields return a JSON object.
     #[arg(long = "fields", alias = "field", value_delimiter = ',', num_args = 1..)]
@@ -76,6 +76,9 @@ impl Execute for TaskShowArgs {
                 for dependency in orbit_core::resolve_task_dependencies(&task, &status_by_id) {
                     println!("  - {}", dependency.label());
                 }
+            }
+            if !task.tags.is_empty() {
+                println!("{} {}", bold("Tags:"), task.tags.join(", "));
             }
             if !task.external_refs.is_empty() {
                 println!("{}", bold("External refs:"));
@@ -176,12 +179,13 @@ fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitErr
                 | "acceptance_criteria"
                 | "dependencies"
                 | "resolved_dependencies"
+                | "tags"
                 | "history"
                 | "context_files"
                 | "artifacts"
         ) {
             return Err(OrbitError::InvalidInput(format!(
-                "unknown field selector `{trimmed}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, history, context_files, artifacts"
+                "unknown field selector `{trimmed}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
             )));
         }
         normalized.push(trimmed.to_string());

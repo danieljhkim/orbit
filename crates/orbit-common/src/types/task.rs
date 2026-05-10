@@ -590,6 +590,8 @@ pub struct Task {
     pub acceptance_criteria: Vec<String>,
     #[serde(default)]
     pub dependencies: Vec<OrbitId>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default, alias = "instructions")]
     pub plan: String,
     #[serde(default)]
@@ -707,6 +709,32 @@ pub fn normalize_task_dependencies(
         }
     }
     Ok(normalized)
+}
+
+pub fn normalize_task_tags(raw_tags: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::with_capacity(raw_tags.len());
+    let mut seen = BTreeSet::new();
+    for raw in raw_tags {
+        let tag = raw.trim().to_lowercase();
+        if !tag.is_empty() && seen.insert(tag.clone()) {
+            normalized.push(tag);
+        }
+    }
+    normalized
+}
+
+pub fn task_matches_tags(task: &Task, required_tags: &[String]) -> bool {
+    let required_tags = normalize_task_tags(required_tags.to_vec());
+    if required_tags.is_empty() {
+        return true;
+    }
+
+    let available = normalize_task_tags(task.tags.clone())
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    required_tags
+        .iter()
+        .all(|tag| available.contains(tag.as_str()))
 }
 
 pub fn build_task_status_index(tasks: &[Task]) -> BTreeMap<OrbitId, TaskStatus> {
@@ -844,7 +872,44 @@ fn find_dependency_path(
 
 #[cfg(test)]
 mod tests {
-    use super::{ExternalRef, TaskArtifact, push_external_ref_if_missing};
+    use super::{
+        ExternalRef, Task, TaskArtifact, normalize_task_tags, push_external_ref_if_missing,
+    };
+
+    #[test]
+    fn task_deserializes_missing_tags_as_empty_vec() {
+        let task = serde_yaml::from_str::<Task>(
+            r#"id: T20260101-1
+title: Legacy task
+description: Existing task record.
+acceptance_criteria: []
+dependencies: []
+plan: ""
+execution_summary: ""
+context_files: []
+status: backlog
+priority: medium
+task_type: task
+created_at: 2026-01-01T00:00:00Z
+updated_at: 2026-01-01T00:00:00Z
+"#,
+        )
+        .expect("task without tags deserializes");
+
+        assert_eq!(task.tags, Vec::<String>::new());
+    }
+
+    #[test]
+    fn normalize_task_tags_trims_lowercases_and_dedupes() {
+        let tags = normalize_task_tags(vec![
+            "  Perf ".to_string(),
+            "BENCH".to_string(),
+            "perf".to_string(),
+            "   ".to_string(),
+        ]);
+
+        assert_eq!(tags, vec!["perf", "bench"]);
+    }
 
     #[test]
     fn external_ref_try_new_normalizes_valid_input() {
