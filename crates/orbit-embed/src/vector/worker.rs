@@ -40,7 +40,7 @@ impl EmbedWorker {
                     }
                 }
                 if embedder.is_none() {
-                    match SubprocessEmbedder::new() {
+                    match SubprocessEmbedder::quiet_with_model(crate::DEFAULT_MODEL) {
                         Ok(value) => embedder = Some(value),
                         Err(error) => {
                             orbit_common::tracing::debug!(

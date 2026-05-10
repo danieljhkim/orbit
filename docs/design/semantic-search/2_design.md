@@ -90,7 +90,7 @@ The protocol is intentionally minimal — four methods, no streaming, no auth. T
 
 ### 2.4 Default model and install-time model selection
 
-`orbit semantic install` accepts `--model {bge-small | minilm-l6 | nomic-v1.5}`; default is `bge-small`. Model files are downloaded into `~/.orbit/embed/models/<model_id>/`. Switching model means running `orbit semantic install --model OTHER`, which downloads the new model alongside the existing one (so the embeddings under the old `model_id` keep working until reindexed; see [§7.2](#72-backfill-and-migration)).
+`orbit semantic install` accepts `--model {bge-small | minilm-l6 | nomic-v1.5}`; default is `bge-small`. The install command probes an existing companion with `--version-info` and replaces it when the reported companion version differs from the current Orbit package version; `--force` replaces it even when the probe says it is current. Model files are downloaded into `~/.orbit/embed/models/<model_id>/`. Switching model means running `orbit semantic install --model OTHER`, which downloads the new model alongside the existing one (so the embeddings under the old `model_id` keep working until reindexed; see [§7.2](#72-backfill-and-migration)).
 
 The three supported models per [3_vision.md §1](./3_vision.md):
 
@@ -241,7 +241,7 @@ Either retriever alone has a failure mode the other doesn't. RRF resolves both a
 ### 6.1 CLI
 
 ```
-orbit semantic install   [--model bge-small | minilm-l6 | nomic-v1.5]
+orbit semantic install   [--model bge-small | minilm-l6 | nomic-v1.5] [--force]
 orbit semantic uninstall [--model MODEL] [--all]
 orbit semantic search    <query> [--limit N] [--field FIELD] [--kind task]
 orbit semantic related   <task-id> [--limit N]
@@ -249,7 +249,7 @@ orbit semantic reindex   [--force] [--model MODEL]
 orbit semantic stats
 ```
 
-`install` is the gate that enables every other subcommand. It downloads the platform-appropriate `orbit-embed-companion` binary from the published release URL and the chosen model from HuggingFace, both into `~/.orbit/embed/`. Default model is `bge-small`; users can override per [§2.4](#24-default-model-and-install-time-model-selection). Re-running `install` with a different `--model` adds that model alongside existing ones.
+`install` is the gate that enables every other subcommand. It downloads the platform-appropriate `orbit-embed-companion` binary from the published release URL and the chosen model from HuggingFace, both into `~/.orbit/embed/`. Default model is `bge-small`; users can override per [§2.4](#24-default-model-and-install-time-model-selection). Re-running `install` with a different `--model` adds that model alongside existing ones. Re-running `install` after an Orbit upgrade also refreshes a stale companion automatically because the existing binary's `--version-info` output is compared to the current package version; `--force` is the explicit override for reinstalling the current version.
 
 `uninstall` removes the companion binary and (by default) the currently active model. `--model M` removes only model M. `--all` removes the companion plus every installed model.
 
@@ -290,7 +290,7 @@ The score breakdown is deliberately exposed: agents can use it to decide whether
 
 ### 7.1 On-mutation indexing
 
-`task.add` and mutating `task.update` paths emit an `EmbedJob` to a bounded in-process channel after the durable write commits. A worker drains the channel, batches up to 16 jobs at a time, and runs `upsert_embeddings`. Failures log and continue — embedding is not in the critical path of task mutation. Users without the companion installed (`orbit semantic install` not yet run) see `OrbitError::CompanionNotInstalled` from the worker, which it logs at debug level and skips; core task operations are entirely unaffected.
+`task.add` and mutating `task.update` paths emit an `EmbedJob` to a bounded in-process channel after the durable write commits. A worker drains the channel, batches up to 16 jobs at a time, and runs `upsert_embeddings`. Failures log and continue — embedding is not in the critical path of task mutation. Background indexing spawns the companion with stderr suppressed so a best-effort indexing failure cannot make a successful task mutation look failed; direct semantic commands still inherit companion stderr so users see actionable failures. Users without the companion installed (`orbit semantic install` not yet run) see `OrbitError::CompanionNotInstalled` from the worker, which it logs at debug level and skips; core task operations are entirely unaffected.
 
 ### 7.2 Backfill and migration
 
@@ -334,5 +334,6 @@ All embeddings stay local. Task content never leaves the workspace. This is stru
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
 - [T20260510-9] — Phase-1 semantic search foundation: orbit-embed + orbit-embed-companion + indexing pipeline. Accepted the foundation implementation and workspace-local semantic DB placement.
+- [T20260510-26] — Make semantic companion install/update quiet and version-aware. Accepted version-aware companion replacement and quiet background indexing.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

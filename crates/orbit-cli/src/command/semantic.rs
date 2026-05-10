@@ -35,6 +35,9 @@ pub enum SemanticSubcommand {
 pub struct SemanticInstallArgs {
     #[arg(long)]
     pub model: Option<String>,
+    /// Replace the companion even when the installed version is current
+    #[arg(long)]
+    pub force: bool,
     #[arg(long)]
     pub json: bool,
 }
@@ -112,7 +115,10 @@ impl Execute for SemanticSubcommand {
 
 impl Execute for SemanticInstallArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.semantic_install(SemanticInstallParams { model: self.model })?;
+        let result = runtime.semantic_install(SemanticInstallParams {
+            model: self.model,
+            force: self.force,
+        })?;
         if self.json {
             crate::output::json::print_pretty(&json!(result))
         } else {
@@ -120,7 +126,7 @@ impl Execute for SemanticInstallArgs {
                 "Installed semantic search: companion={} model={} companion_changed={} model_changed={}",
                 result.companion_path,
                 result.model_id,
-                result.companion_installed,
+                result.companion_changed,
                 result.model_installed
             );
             Ok(())

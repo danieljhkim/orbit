@@ -191,6 +191,18 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_semantic_install_force() {
+        let cli = Cli::parse_from(["orbit", "semantic", "install", "--force"]);
+        match cli.command {
+            Commands::Semantic(command) => match command.command {
+                SemanticSubcommand::Install(args) => assert!(args.force),
+                _ => panic!("expected semantic install"),
+            },
+            _ => panic!("expected top-level semantic command"),
+        }
+    }
+
+    #[test]
     fn cli_parses_semantic_stats() {
         let cli = Cli::parse_from(["orbit", "semantic", "stats"]);
         match cli.command {

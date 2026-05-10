@@ -14,6 +14,12 @@ use crate::companion::locate_companion;
 use crate::embedder::{DEFAULT_MODEL, Embedder};
 use crate::rpc::{RpcRequest, RpcResponse, RpcResult};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompanionStderr {
+    Inherit,
+    Suppress,
+}
+
 pub struct SubprocessEmbedder {
     model_id: String,
     dim: usize,
@@ -38,12 +44,24 @@ impl SubprocessEmbedder {
     }
 
     pub fn with_path_and_model(path: PathBuf, model: &str) -> Result<Self, OrbitError> {
+        Self::with_path_model_and_stderr(path, model, CompanionStderr::Inherit)
+    }
+
+    pub(crate) fn quiet_with_model(model: &str) -> Result<Self, OrbitError> {
+        Self::with_path_model_and_stderr(locate_companion()?, model, CompanionStderr::Suppress)
+    }
+
+    fn with_path_model_and_stderr(
+        path: PathBuf,
+        model: &str,
+        stderr: CompanionStderr,
+    ) -> Result<Self, OrbitError> {
         let mut child = Command::new(&path)
             .arg("--model")
             .arg(model)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(stderr.stdio())
             .spawn()
             .map_err(|error| {
                 OrbitError::Execution(format!(
@@ -152,6 +170,15 @@ impl SubprocessEmbedder {
 
     fn next_request_id(&self) -> u64 {
         self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+impl CompanionStderr {
+    fn stdio(self) -> Stdio {
+        match self {
+            Self::Inherit => Stdio::inherit(),
+            Self::Suppress => Stdio::null(),
+        }
     }
 }
 
