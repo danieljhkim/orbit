@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-10
 
 This document captures the questions phase 1 deliberately does not answer, the prior work this design builds on or rejects, what is specific to Orbit's situation, and external references for readers who want to dig deeper. The questions in §1 are the most likely sources of post-phase-1 design pressure.
 
@@ -10,26 +10,25 @@ This document captures the questions phase 1 deliberately does not answer, the p
 
 ## 1. Open Questions
 
-### 1.1 Model-selection evaluation
+### 1.1 Model-selection evaluation (deferred)
 
-The design defaults to BGE-small-en-v1.5 because it sits at the favorable end of the published recall/size/latency curve. That justification is published-paper-flavored, not Orbit-specific. To pick a default honestly we need:
+The design defaults to BGE-small-en-v1.5 because it sits at the favorable end of the MTEB recall/size/latency curve for English sentence embeddings. That justification is published-paper-flavored, not Orbit-specific.
 
-- A labeled evaluation set: ~50 queries paired with the task IDs they should find. Hand-curated from real "I was looking for that task about X" episodes.
-- A recall@k metric run across at least three candidate models: BGE-small (default), all-MiniLM-L6 (smaller), nomic-embed-text-v1.5 (larger, Matryoshka-truncatable).
-- Latency and binary-size measurements on the same hardware.
-- A re-run cadence (monthly? on every model release?) and where the harness lives in the repo.
+Phase 1 does **not** ship an evaluation harness. Building one in parallel with the first implementation is YAGNI before any user has hit a real recall failure on Orbit content. If complaints surface — "I searched for X and the right task didn't come back" — that's the signal to build a harness then, against real episodes rather than synthesized queries.
 
-Phase 1 ships the harness; the choice of default may flip if BGE-small underperforms. The harness is a deliverable, not an aspiration.
+If and when the harness lands, the shape that came out of phase-1 design discussion was: ~50 queries paired with the task IDs they should find, hand-curated from real "I was looking for that task" episodes; recall@k computed across BGE-small (default), all-MiniLM-L6 (smaller), and nomic-embed-text-v1.5 (larger, Matryoshka-truncatable); latency and binary-size measurements on the same hardware. The `Embedder` trait + `model_id` PK column already make a default swap mechanically cheap.
+
+The cost of deferring: phase-1 ships with a default chosen on published benchmarks alone. Model quality for the specific corpus of Orbit task content is an open empirical question.
 
 ### 1.2 Airgapped install path
 
-Operators behind corporate proxies or running on networks that don't reach HuggingFace need a way to populate the model cache from a local source. Options:
+The companion-binary architecture ([4_decisions.md ADR-005](./4_decisions.md)) makes airgapped install harder than a bundled design would have been: operators need to obtain *both* the platform-appropriate `orbit-embed-companion` binary *and* the chosen model files, neither of which is in the main `orbit` release. Options:
 
-- **Pre-bundled model in a release tarball.** Bloats the download. Simplest UX.
-- **Documented manual placement.** Operator copies model files into `~/.orbit/embed/models/<id>/`. Requires documenting the exact file layout fastembed-rs expects.
-- **`orbit semantic fetch-model` subcommand.** Downloads on demand into the cache, can be run from a host with network and the cache moved to the airgapped host.
+- **Documented manual placement.** Operator runs `orbit semantic install` on a connected machine, then copies `~/.orbit/embed/` (companion binary + models) onto the airgapped target. Requires documenting the exact file layout. Phase-1 default.
+- **`orbit semantic install --from <path>`.** Operator points the install command at a pre-staged tarball of companion + models. Removes the need to document the directory layout. Probably the right phase-2 ergonomic improvement.
+- **Per-platform companion + model release tarballs.** Published as GitHub Release artifacts (`orbit-embed-companion-linux-x86_64-bge-small.tar.gz`, etc.). Operator downloads the right one and runs `orbit semantic install --from`. Combines with the previous option.
 
-The third is probably right but isn't decided. Phase 1 ships option 2 (manual placement) and revisits.
+Phase 1 ships option 1 (manual placement with docs); options 2 and 3 are clean follow-ups that don't require schema or architectural changes.
 
 ### 1.3 Graph corpus scaling beyond brute force
 

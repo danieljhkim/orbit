@@ -2,25 +2,29 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-10
 
-This document specifies phase-1 semantic search: the new `orbit-embed` crate and its place in the architecture, the inference backend, the SQLite vector storage schema, the per-field embedding strategy, the hybrid (BM25 + cosine) retrieval pipeline, the MCP and CLI surface, the index-maintenance lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies phase-1 semantic search: the two new `orbit-embed*` crates and their place in the architecture, the companion-binary inference model, the SQLite vector storage schema, the per-field embedding strategy, the hybrid (BM25 + cosine) retrieval pipeline, the MCP and CLI surface, the index-maintenance lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
 ---
 
 ## 1. Architectural Placement
 
-A new crate `orbit-embed` is added as a near-leaf in the dependency graph:
+Two new crates land:
+
+- **`orbit-embed`** — small client library. Owns the `Embedder` trait, the JSON-RPC request/response types, and `SubprocessEmbedder` (the trait impl that locates and talks to the companion). Depends only on `orbit-common`. **Does not depend on fastembed-rs**, so it adds negligible binary cost. Linked into the main `orbit` binary.
+- **`orbit-embed-companion`** — binary crate. Depends on `orbit-embed` (for the RPC types) and on fastembed-rs (for the actual ONNX inference). Produces the standalone `orbit-embed-companion` executable distributed via GitHub Releases per platform. **Not built into `orbit`**; users opt in by running `orbit semantic install`. Per [4_decisions.md ADR-005](./4_decisions.md).
+
+Updated dependency graph:
 
 ```
-orbit-common → orbit-embed → orbit-store → ... (existing graph)
+orbit-common → orbit-embed → orbit-store → ... (existing graph; orbit-embed has no fastembed dep)
+                          ↘ orbit-embed-companion (separate crate, separate binary, fastembed-rs lives here)
 ```
 
-`orbit-embed` depends only on `orbit-common`. It owns the `Embedder` trait, the fastembed-rs-backed default implementation, model resolution, and the model-cache path policy. It does *not* depend on `orbit-store` — the store consumes the trait. This keeps inference machinery isolated from persistence and mirrors the way `orbit-policy` and `orbit-exec` are kept narrow.
+`orbit-store` gains a new submodule `vector::` alongside the existing `file::` and `sqlite::` layers. `vector::` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine query implementation. It depends on `orbit-embed` for the `Embedder` trait but treats the embedder as injected — tests pass a `NoopEmbedder` that returns deterministic vectors so unit tests never need the companion to be installed.
 
-`orbit-store` gains a new submodule `vector::` alongside the existing `file::` and `sqlite::` layers. `vector::` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine query implementation. It depends on `orbit-embed` for the `Embedder` trait but treats the embedder as injected — tests can pass a `NoopEmbedder` that returns zero vectors.
-
-`orbit-tools` exposes `orbit.semantic.search` and `orbit.semantic.related` as MCP tools, and `orbit-cli` exposes `orbit semantic` subcommands. Both are thin shells over `orbit-store::vector::*`.
+`orbit-tools` exposes `orbit.semantic.search` and `orbit.semantic.related` as MCP tools, and `orbit-cli` exposes `orbit semantic` subcommands (including `install` and `uninstall`). Both are thin shells over `orbit-store::vector::*`.
 
 ---
 
@@ -28,32 +32,85 @@ orbit-common → orbit-embed → orbit-store → ... (existing graph)
 
 ### 2.1 Trait
 
+Defined in `orbit-embed`:
+
 ```rust
 pub trait Embedder: Send + Sync {
     fn model_id(&self) -> &str;        // e.g. "bge-small-en-v1.5"
     fn dim(&self) -> usize;            // e.g. 384
     fn max_input_tokens(&self) -> usize; // e.g. 512
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, OrbitError>;
+    fn token_count(&self, text: &str) -> Result<usize, OrbitError>;
 }
 ```
 
-Batch input is mandatory — fastembed-rs is meaningfully faster on batches than on single-document calls because of ONNX kernel reuse, and the indexing path naturally batches by task. Single-document `embed_one` is provided as a thin wrapper for query-time use.
+Batch input is mandatory — fastembed-rs is meaningfully faster on batches than on single-document calls because of ONNX kernel reuse, and the indexing path naturally batches by task. `token_count` is exposed because the chunker in [§4.2](#42-chunking-long-fields) needs exact token counts to split fields under the model's context limit.
 
-### 2.2 Default implementation: `FastembedBackend`
+### 2.2 Companion-binary architecture
 
-Wraps fastembed-rs. Default model is **BGE-small-en-v1.5** (384 dim, ~30MB on disk, 512-token context). The choice is justified in [4_decisions.md ADR-001](./4_decisions.md); briefly, BGE-small sits at the favorable end of the recall/size/latency curve for English-language task content and is the default in the fastembed-rs release.
+Phase 1 ships a single trait impl: `SubprocessEmbedder` (in `orbit-embed`). It does not perform inference itself — it spawns and talks to the `orbit-embed-companion` binary that the user installed with `orbit semantic install`. The arrangement looks like:
 
-Model resolution order:
+```
+orbit (main binary)                          orbit-embed-companion (installed binary)
+├── SubprocessEmbedder                       ├── fastembed-rs
+│     ↕ stdio JSON-RPC                       │     ↕ ONNX Runtime
+└── orbit-store::vector                      └── BGE-small / MiniLM-L6 / Nomic-v1.5
+```
 
-1. `~/.orbit/embed/models/<model_id>/` if pre-populated (airgapped).
-2. fastembed-rs default cache (`$HF_HOME` or platform default).
-3. Download from HuggingFace on first use, written to (1).
+Lifecycle:
 
-On a missing model in airgapped mode (no network + no preloaded cache), `embed()` returns a typed `OrbitError::EmbedderUnavailable` with a remediation message. Callers in the indexing path log and skip; query path surfaces a clear CLI/MCP error.
+- `SubprocessEmbedder::new()` resolves the companion path under `~/.orbit/embed/bin/orbit-embed-companion-<platform>` and starts the subprocess. ~100–300ms cold-start latency for ORT init.
+- The subprocess stays alive for the duration of the parent process or until explicitly dropped. Indexing batches and multi-query interactive sessions reuse the same subprocess.
+- On process exit, the parent sends an `exit` RPC and waits up to 1s; if unresponsive, sends SIGTERM.
 
-### 2.3 Alternative backends
+### 2.3 RPC protocol
 
-The trait makes Candle and llama.cpp viable swap-ins without storage-layer changes. None ship in phase 1; the trait exists to keep that door open. The full backend comparison is in [4_decisions.md ADR-001](./4_decisions.md).
+JSON Lines over stdio. Each request and response is a single JSON object on a single line.
+
+```jsonc
+// Request
+{"id": 1, "method": "info"}
+{"id": 2, "method": "embed", "texts": ["hello", "world"]}
+{"id": 3, "method": "token_count", "text": "..."}
+{"id": 4, "method": "exit"}
+
+// Response
+{"id": 1, "result": {"model_id": "bge-small-en-v1.5", "dim": 384, "max_input_tokens": 512}}
+{"id": 2, "result": {"vectors": [[...384 floats...], [...384 floats...]]}}
+{"id": 3, "result": {"tokens": 42}}
+{"id": 4, "result": {"ok": true}}
+
+// Error
+{"id": 2, "error": {"code": "model_load_failed", "message": "..."}}
+```
+
+The protocol is intentionally minimal — four methods, no streaming, no auth. The trust boundary is "this is a binary the user installed under their home directory"; there is no network involvement and no multi-tenant concern.
+
+### 2.4 Default model and install-time model selection
+
+`orbit semantic install` accepts `--model {bge-small | minilm-l6 | nomic-v1.5}`; default is `bge-small`. Model files are downloaded into `~/.orbit/embed/models/<model_id>/`. Switching model means running `orbit semantic install --model OTHER`, which downloads the new model alongside the existing one (so the embeddings under the old `model_id` keep working until reindexed; see [§7.2](#72-backfill-and-migration)).
+
+The three supported models per [3_vision.md §1](./3_vision.md):
+
+| Model | Dim | On-disk | Best for |
+|-------|-----|---------|----------|
+| `minilm-l6` (all-MiniLM-L6-v2) | 384 | ~23MB | Smallest disk and fastest CPU; older but battle-tested. |
+| `bge-small` (BGE-small-en-v1.5) — default | 384 | ~30MB | Strong recall-per-byte for English on MTEB. |
+| `nomic-v1.5` (nomic-embed-text-v1.5) | 768 | ~140MB | Best quality; Matryoshka-truncatable; 8192-token context. |
+
+### 2.5 Companion locator and missing-companion behavior
+
+On first use of any embedder-touching path, `SubprocessEmbedder::new()` checks:
+
+1. `$ORBIT_EMBED_COMPANION` env var → explicit path override (used by tests and airgapped operators).
+2. `~/.orbit/embed/bin/orbit-embed-companion-<platform>` → standard install path.
+3. `$PATH` → fallback for unusual deployments.
+
+If none resolve, the embedder returns `OrbitError::CompanionNotInstalled` with a remediation message: `"Run \`orbit semantic install\` to enable semantic search."` Indexing-path callers log and skip (semantic search is not on the critical path of task mutation; see [§7.1](#71-on-mutation-indexing)). Query-path callers surface the error directly to the user.
+
+### 2.6 Alternative backends
+
+The trait + RPC protocol make alternative companions viable without changing storage or retrieval. A future `orbit-embed-companion-candle` could speak the same protocol and ship as a separate downloadable. None ship in phase 1; the protocol exists to keep that door open. The full backend comparison is in [4_decisions.md ADR-001](./4_decisions.md); the packaging decision is in [4_decisions.md ADR-005](./4_decisions.md).
 
 ---
 
@@ -182,13 +239,21 @@ Either retriever alone has a failure mode the other doesn't. RRF resolves both a
 ### 6.1 CLI
 
 ```
-orbit semantic search <query> [--limit N] [--field FIELD] [--kind task]
-orbit semantic related <task-id> [--limit N]
-orbit semantic reindex [--force] [--model MODEL]
+orbit semantic install   [--model bge-small | minilm-l6 | nomic-v1.5]
+orbit semantic uninstall [--model MODEL] [--all]
+orbit semantic search    <query> [--limit N] [--field FIELD] [--kind task]
+orbit semantic related   <task-id> [--limit N]
+orbit semantic reindex   [--force] [--model MODEL]
 orbit semantic stats
 ```
 
-`search` runs the hybrid pipeline. `related` embeds the target task's `purpose + summary` and runs cosine-only against other tasks (lexical fusion adds noise here). `reindex` rebuilds the `embeddings` rows; `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, and stale-row count.
+`install` is the gate that enables every other subcommand. It downloads the platform-appropriate `orbit-embed-companion` binary from the published release URL and the chosen model from HuggingFace, both into `~/.orbit/embed/`. Default model is `bge-small`; users can override per [§2.4](#24-default-model-and-install-time-model-selection). Re-running `install` with a different `--model` adds that model alongside existing ones.
+
+`uninstall` removes the companion binary and (by default) the currently active model. `--model M` removes only model M. `--all` removes the companion plus every installed model.
+
+`search` runs the hybrid pipeline. `related` embeds the target task's `purpose + summary` and runs cosine-only against other tasks (lexical fusion adds noise here). `reindex` rebuilds the `embeddings` rows; `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status.
+
+If the companion is not installed, `search`, `related`, and `reindex` exit non-zero with: `"Semantic search not enabled. Run \`orbit semantic install\` to download the inference companion."`
 
 ### 6.2 MCP tools
 
@@ -223,7 +288,7 @@ The score breakdown is deliberately exposed: agents can use it to decide whether
 
 ### 7.1 On-mutation indexing
 
-`task.add` and mutating `task.update` paths emit an `EmbedJob` to a bounded in-process channel after the durable write commits. A worker drains the channel, batches up to 16 jobs at a time, and runs `upsert_embeddings`. Failures log and continue — embedding is not in the critical path of task mutation. Users with no embedder available (airgapped, no model preloaded) see no degradation in core task operations.
+`task.add` and mutating `task.update` paths emit an `EmbedJob` to a bounded in-process channel after the durable write commits. A worker drains the channel, batches up to 16 jobs at a time, and runs `upsert_embeddings`. Failures log and continue — embedding is not in the critical path of task mutation. Users without the companion installed (`orbit semantic install` not yet run) see `OrbitError::CompanionNotInstalled` from the worker, which it logs at debug level and skips; core task operations are entirely unaffected.
 
 ### 7.2 Backfill and migration
 
@@ -237,17 +302,17 @@ The score breakdown is deliberately exposed: agents can use it to decide whether
 
 ## 8. Concerns & Honest Limitations
 
-### 8.1 First-run model download
+### 8.1 Two-step install and first-run download
 
-The default backend downloads ~30MB on first use. For users behind corporate proxies or in airgapped environments, this is a friction point. Mitigation: clear error message + the airgapped cache-path config in [§2.2](#22-default-implementation-fastembedbackend). This does not eliminate the friction; it just makes it actionable.
+Users who want semantic search must run two commands instead of one: install `orbit`, then run `orbit semantic install [--model X]` to download the companion (~50MB) and the chosen model (~23–140MB). The install command is the friction; the per-model download afterward is the same content cost a bundled design would have charged on first search. For users behind corporate proxies or in airgapped environments the friction multiplies — see [3_vision.md §1.2](./3_vision.md). The cost is explicit in [4_decisions.md ADR-005](./4_decisions.md); the mitigation is a clear `CompanionNotInstalled` error with the exact remediation command.
 
-### 8.2 Binary size
+### 8.2 Subprocess overhead
 
-Adding fastembed-rs and its ONNX Runtime dependency adds ~50MB to the Orbit binary on Linux/macOS. This is significant for a tool that today is single-digit MB. The tradeoff is explicit in [4_decisions.md ADR-001](./4_decisions.md). A future option: ship semantic search as an optional feature flag that produces a separate `orbit-embed` binary, but that complicates the install story and is deferred.
+The companion lives in a separate process and inference happens via stdio JSON-RPC. Cold-start latency is ~100–300ms (ORT init + model load). The subprocess is reused across a batch (`reindex`) and across a multi-query interactive session, so the cost is amortized for indexing and after the first search; it is fully visible on the first interactive query of a fresh `orbit` invocation. RPC serialization itself is sub-millisecond at phase-1 batch sizes (≤16 texts × ~512 tokens each); not a measurable contributor.
 
-### 8.3 Model-quality calibration is not free
+### 8.3 Default model quality is unmeasured for Orbit specifically
 
-"BGE-small is fine" is a claim, not a measurement. Phase 1 ships with a recall@k evaluation harness (a small labeled set of "find the task about X" queries) so the default is defensible and model swaps can be compared honestly. The harness is itself a design open question ([3_vision.md §1.1](./3_vision.md)) — what's labeled, by whom, and how often it re-runs.
+"BGE-small is fine" rests on published benchmarks (MTEB), not Orbit-specific recall numbers. Phase 1 deliberately does not ship an evaluation harness — building one in parallel with the feature is YAGNI before any user has hit a real recall failure. The cost is real: if BGE-small underperforms for Orbit's task corpus, we won't know until someone complains, and at that point we measure then. The `Embedder` trait + `model_id` PK column make swapping the default cheap whenever that day arrives ([3_vision.md §1.1](./3_vision.md)).
 
 ### 8.4 Brute-force scaling ceiling
 

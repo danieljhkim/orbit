@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-10
 
 ADR-style log of non-obvious semantic-search decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -21,17 +21,17 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 | **fastembed-rs** | Pure Rust crate wrapping ONNX Runtime; ships a small set of well-known sentence-embedding models (BGE, MiniLM, Nomic, mxbai); CPU-only fine; batch-friendly. |
 | **Candle** | Pure-Rust ML framework from HuggingFace; broader model support; more code to integrate; less plug-and-play for embeddings specifically. |
 | **llama-cpp-rs** | Bindings to llama.cpp; GGUF format; runs anything from tiny embedding models to large LLMs; optional GPU; C++ build dependency. |
-| **External ollama or similar daemon** | Zero binary cost in Orbit; outsources inference; requires the user to install and run a separate process. |
+| **External ollama or similar always-on daemon** | Outsources inference but requires the user to install and run a separate long-lived process. |
 
-The hard constraint is Orbit's single-binary install posture ([docs/POSITIONING.md](../../POSITIONING.md), [README.md](../../../README.md)). A required external daemon contradicts that doctrine. Within in-process options, fastembed-rs covers the embedding-model use case directly; Candle is more general but requires more Orbit-side code; llama-cpp-rs is overkill and adds a C++ build dependency that complicates Orbit's release pipeline.
+This ADR addresses *which* backend to use. The orthogonal decision of *how* the backend is delivered to the user (in-process vs. companion binary vs. feature flag) is in [ADR-005](#adr-005--companion-binary-installed-on-demand-rather-than-bundled-in-orbit). Within in-process or in-companion options, fastembed-rs covers the embedding-model use case directly; Candle is more general but requires more Orbit-side code; llama-cpp-rs is overkill and adds a C++ build dependency that complicates Orbit's release pipeline. An always-on ollama-style daemon contradicts Orbit's no-daemon posture regardless of binary placement.
 
-**Decision.** Phase 1 uses fastembed-rs as the default backend, accessed through an `Embedder` trait in a new `orbit-embed` crate. The default model is BGE-small-en-v1.5 (384 dim, ~30MB). Other backends can be added later as additional `Embedder` implementations without changing storage or retrieval. Reject external ollama: violates single-binary doctrine. Reject llama-cpp-rs: C++ build dependency and binary-size cost outweigh its flexibility for embedding-only work. Reject Candle as default: more integration work for less out-of-the-box behavior; remains a viable swap-in.
+**Decision.** Phase 1 uses fastembed-rs as the inference backend, exposed through an `Embedder` trait that lives in a new `orbit-embed` library crate. Per ADR-005, fastembed-rs is linked into a separate `orbit-embed-companion` binary, not into the main `orbit` binary; the trait abstraction means an alternative backend can later swap in without touching `orbit-store` or `orbit-tools`. The user-facing default model is BGE-small-en-v1.5 (384 dim, ~30MB), with `--model {bge-small | minilm-l6 | nomic-v1.5}` selected at install time. Reject external always-on ollama: contradicts the no-daemon posture. Reject llama-cpp-rs: C++ build dependency outweighs its flexibility for embedding-only work. Reject Candle as default: more integration work for less out-of-the-box behavior; remains a viable trait-impl swap.
 
 **Consequences.**
-- Single-binary install posture preserved.
-- No daemon to install, no port to manage, no auth surface to defend.
-- Model swap is a configuration knob, not a code change, because the trait is small.
-- Cost: fastembed-rs and ONNX Runtime add ~50MB to the Orbit binary on Linux/macOS — significant for a tool that today is single-digit MB. Operators who never use semantic search still pay the binary cost unless we later split into a feature flag (deferred).
+- The `Embedder` trait isolates the choice of backend from storage and retrieval; later-arriving backends (Candle, code-tuned models) plug in without schema or query changes.
+- The fastembed-rs model catalog (BGE, MiniLM, Nomic, mxbai) is the menu phase-1 users pick from. Other model families require a new `Embedder` impl, not a config change.
+- Model output is well-characterized by published benchmarks (MTEB) so the default is defensible without an Orbit-specific eval ([3_vision.md §1.1](./3_vision.md)).
+- Cost: locking in to the fastembed-rs catalog means models outside that catalog (e.g., voyage-code, code-tuned models in [3_vision.md §1.7](./3_vision.md)) need a different `Embedder` impl in a future task. The trait abstraction makes that mechanical, but it does mean the phase-1 menu is bounded by what fastembed-rs ships.
 
 ---
 
@@ -101,6 +101,35 @@ A weighted combination (e.g. `0.6 * cosine_score + 0.4 * bm25_score`) was consid
 - Vocabulary-mismatch queries match correctly.
 - Score breakdown gives agents a real signal for confidence calibration without exposing raw incommensurable scores.
 - Cost: every `search` runs two SQL queries instead of one and computes one extra fusion pass. At phase-1 latency budgets (target <200ms p95) this is unproblematic, but it doubles the per-query work versus a single-retriever design and that overhead is paid even on queries where one retriever would have been enough.
+
+---
+
+## ADR-005 — Companion binary installed on demand, rather than bundled in `orbit`
+
+**Status:** Proposed · 2026-05 · [T20260510-3]
+
+**Context.** Once fastembed-rs is the chosen backend (ADR-001), the question of where it lives matters. Linking ONNX Runtime + fastembed-rs into the main `orbit` binary adds ~50MB and pays that cost for every user — including users who never invoke semantic search. Three packaging shapes are plausible:
+
+| Option | Default install size | Opt-in mechanism | Inference latency |
+|--------|----------------------|------------------|-------------------|
+| **A. Bundled in `orbit`** | Large (~50MB+) | None (always available) | In-process; instant after warm cache |
+| **B. Cargo feature flag, two release artifacts** | Small or large depending on which artifact you download | Choose `orbit-full` at install time; replace the binary to swap | In-process; instant |
+| **C. Companion binary downloaded on demand** | Small | `orbit semantic install [--model X]` | Subprocess; ~100–300ms ORT cold start, amortized across batches |
+
+Option A is what the design originally called "single binary install posture preserved." It does preserve that, but it also means the always-pay binary cost is a permanent tax on users who don't want semantic search. Option B requires users to swap their main binary, which is gross UX (in-flight processes, partially-applied upgrades, surprising behavior changes). Option C keeps the default install slim and gives the user explicit control over which model — and how much disk — they're committing to, at the cost of subprocess overhead.
+
+**Decision.** Phase 1 ships option C. Two new crates:
+
+- `orbit-embed` — small library holding the `Embedder` trait, JSON-RPC types, and `SubprocessEmbedder` (the trait impl that locates and talks to the companion). No fastembed-rs dependency. Linked into the main `orbit` binary.
+- `orbit-embed-companion` — binary crate. Depends on `orbit-embed` + fastembed-rs. Produces a standalone `orbit-embed-companion` binary distributed via GitHub Releases per platform.
+
+`orbit semantic install [--model bge-small | minilm-l6 | nomic-v1.5]` downloads the platform-appropriate companion binary plus the chosen model files into `~/.orbit/embed/`. Inference happens via stdio JSON-RPC; the subprocess is kept alive across a batch (`reindex`, multi-query session) and shut down at process exit. `orbit semantic uninstall` removes both the companion and the model. When semantic search is invoked without the companion installed, all read/write paths fail with a clear, actionable error pointing at `orbit semantic install`.
+
+**Consequences.**
+- Default `orbit` install stays slim — no ORT, no fastembed-rs in the main binary. Users who don't want semantic search pay no cost.
+- The model menu is exposed at install time, not as a runtime config knob the user has to discover. Users actively choose between MiniLM-L6 (smallest, ~23MB), BGE-small (default, ~30MB), and Nomic-v1.5 (largest, ~140MB) at the moment they're committing to the feature.
+- The subprocess-RPC boundary makes the companion swappable: a future `orbit-embed-companion-candle` could reuse the same RPC protocol with a different inference engine.
+- Cost: install becomes a two-step user action (`orbit` install, then `orbit semantic install`). Users hitting `orbit semantic search` without the companion installed need a clean, helpful error. The subprocess introduces ~100–300ms ORT cold-start latency per process; mitigated by reusing the subprocess across batches but still visible on first interactive query. Additionally, the companion binary requires a per-platform release pipeline (Linux x86_64, Linux arm64, macOS x86_64, macOS arm64, Windows x86_64), which is real release-engineering work for follow-up tasks.
 
 ---
 
