@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{
     AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics, OrbitError,
     OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment,
-    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, normalize_task_tags,
+    task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,6 +21,7 @@ pub struct TaskCreateParams {
     pub description: String,
     pub acceptance_criteria: Vec<String>,
     pub dependencies: Vec<OrbitId>,
+    pub tags: Vec<String>,
     pub plan: String,
     pub execution_summary: String,
     pub context_files: Vec<String>,
@@ -60,6 +62,7 @@ pub struct TaskDocumentUpdateParams {
     pub description: Option<String>,
     pub acceptance_criteria: Option<Vec<String>>,
     pub dependencies: Option<Vec<OrbitId>>,
+    pub tags: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub context_files: Option<Vec<String>>,
@@ -265,6 +268,14 @@ pub struct JobRunQuery {
 pub trait TaskStoreBackend: Send + Sync {
     fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError>;
     fn list_tasks(&self) -> Result<Vec<Task>, OrbitError>;
+    fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        let required_tags = normalize_task_tags(tags.to_vec());
+        let mut tasks = self.list_tasks()?;
+        if !required_tags.is_empty() {
+            tasks.retain(|task| task_matches_tags(task, &required_tags));
+        }
+        Ok(tasks)
+    }
     fn list_tasks_filtered(
         &self,
         status: Option<TaskStatus>,
@@ -276,6 +287,14 @@ pub trait TaskStoreBackend: Send + Sync {
     ) -> Result<Vec<Task>, OrbitError>;
     fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError>;
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError>;
+    fn search_tasks_filtered(&self, query: &str, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        let required_tags = normalize_task_tags(tags.to_vec());
+        let mut tasks = self.search_tasks(query)?;
+        if !required_tags.is_empty() {
+            tasks.retain(|task| task_matches_tags(task, &required_tags));
+        }
+        Ok(tasks)
+    }
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;
 }
 

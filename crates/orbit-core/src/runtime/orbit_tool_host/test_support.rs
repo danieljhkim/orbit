@@ -37,6 +37,7 @@ pub(super) fn create_task(
             description: description.to_string(),
             acceptance_criteria: Vec::new(),
             dependencies: Vec::new(),
+            tags: Vec::new(),
             plan: String::new(),
             execution_summary: String::new(),
             context_files: context_files

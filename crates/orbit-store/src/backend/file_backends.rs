@@ -25,6 +25,10 @@ impl TaskStoreBackend for TaskFileStore {
         self.list_tasks()
     }
 
+    fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.list_tasks_by_tags(tags)
+    }
+
     fn list_tasks_filtered(
         &self,
         status: Option<TaskStatus>,
@@ -51,6 +55,10 @@ impl TaskStoreBackend for TaskFileStore {
 
     fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
         self.search_tasks(query)
+    }
+
+    fn search_tasks_filtered(&self, query: &str, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.search_tasks_filtered(query, tags)
     }
 
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {

@@ -65,6 +65,12 @@ CREATE TABLE IF NOT EXISTS task_reservations (
     release_metadata_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS task_tags (
+    task_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY(task_id, tag)
+);
+
 CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp
 ON audit_events(timestamp);
 
@@ -91,3 +97,6 @@ ON task_reservations(workspace_orbit_dir, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_task_reservations_workspace_release
 ON task_reservations(workspace_orbit_dir, released_at);
+
+CREATE INDEX IF NOT EXISTS idx_task_tags_tag_task_id
+ON task_tags(tag, task_id);

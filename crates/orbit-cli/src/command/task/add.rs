@@ -25,6 +25,9 @@ pub struct TaskAddArgs {
     /// Comma-separated dependency task IDs
     #[arg(long, alias = "dependency", default_value = "")]
     pub dependencies: String,
+    /// Task tags. Repeat or comma-separate for multiple tags.
+    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
+    pub tags: Vec<String>,
     /// Optional task plan payload. Leave blank for the executing agent or planning activity to author later.
     #[arg(long, alias = "instructions", default_value = "")]
     pub plan: String,
@@ -112,6 +115,7 @@ impl Execute for TaskAddArgs {
                 description,
                 acceptance_criteria: self.acceptance_criteria,
                 dependencies: crate::parse::csv_to_vec(&self.dependencies),
+                tags: self.tags,
                 plan,
                 comment: self.comment,
                 context_files: crate::parse::csv_to_vec(&self.context),

@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{ArgAction, Args};
 use orbit_common::types::TaskArtifact;
 use orbit_core::command::task::TaskUpdateParams;
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
@@ -23,6 +23,9 @@ pub struct TaskUpdateArgs {
     /// Comma-separated dependency task IDs (empty string clears)
     #[arg(long, alias = "dependency")]
     pub dependencies: Option<String>,
+    /// Replacement task tags. Repeat or comma-separate for multiple tags.
+    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
+    pub tags: Vec<String>,
     /// New task plan (empty string clears)
     #[arg(long, alias = "instructions")]
     pub plan: Option<String>,
@@ -73,6 +76,7 @@ impl Execute for TaskUpdateArgs {
             description,
             acceptance_criteria,
             dependencies,
+            tags,
             plan,
             execution_summary,
             comment,
@@ -118,6 +122,7 @@ impl Execute for TaskUpdateArgs {
         });
         let acceptance_criteria = (!acceptance_criteria.is_empty()).then_some(acceptance_criteria);
         let dependencies = dependencies.map(|value| crate::parse::csv_to_vec(&value));
+        let tags = (!tags.is_empty()).then_some(tags);
         let upsert_artifacts = parse_artifact_args(&artifacts)?;
 
         let task = runtime.update_task_with_identity(
@@ -127,6 +132,7 @@ impl Execute for TaskUpdateArgs {
                 description,
                 acceptance_criteria,
                 dependencies,
+                tags,
                 plan,
                 execution_summary,
                 comment,

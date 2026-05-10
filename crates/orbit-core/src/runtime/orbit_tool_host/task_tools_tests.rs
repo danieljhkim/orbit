@@ -3,6 +3,29 @@ use serde_json::{Value, json};
 
 use super::test_support::{create_task, invalid_input_message, test_runtime};
 
+fn assert_task_titles(output: &Value, expected: &[&str]) {
+    let mut titles = output
+        .as_array()
+        .expect("tool returns task array")
+        .iter()
+        .map(|task| {
+            task.get("title")
+                .and_then(Value::as_str)
+                .expect("task title")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    titles.sort();
+
+    let mut expected = expected
+        .iter()
+        .map(|title| (*title).to_string())
+        .collect::<Vec<_>>();
+    expected.sort();
+
+    assert_eq!(titles, expected);
+}
+
 #[test]
 fn execute_tool_command_searches_tasks_for_agents() {
     let (_root, runtime, repo_root) = test_runtime();
@@ -194,6 +217,82 @@ fn task_add_tool_persists_dependencies() {
 }
 
 #[test]
+fn task_add_and_show_tools_roundtrip_tags() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Tagged task",
+                "description": "Exercise tag input on the agent-facing task creation path.",
+                "workspace": ".",
+                "tags": ["perf", "bench"],
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id");
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task_id }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task show tool succeeds");
+
+    assert_eq!(shown.get("tags"), Some(&json!(["perf", "bench"])));
+}
+
+#[test]
+fn task_show_tool_includes_empty_tags_array() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "No tags",
+        "Exercise empty tag shape.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task show tool succeeds");
+
+    assert_eq!(shown.get("tags"), Some(&json!([])));
+}
+
+#[test]
+fn task_add_tool_normalizes_tags_at_write_time() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Normalized tags",
+                "description": "Exercise tag normalization.",
+                "workspace": ".",
+                "tags": ["  Perf ", "BENCH"],
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+
+    assert_eq!(output.get("tags"), Some(&json!(["perf", "bench"])));
+}
+
+#[test]
 fn task_add_tool_persists_external_refs() {
     let (_root, runtime, _repo_root) = test_runtime();
 
@@ -374,6 +473,104 @@ fn task_update_tool_replaces_dependencies() {
         output.get("dependencies"),
         Some(&json!([second_dependency.id.as_str()]))
     );
+}
+
+#[test]
+fn task_update_tool_replaces_tags() {
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Replace tags",
+                "description": "Exercise tag replacement through tool input.",
+                "workspace": ".",
+                "tags": ["perf", "bench"],
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id").to_string();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "tags": ["docs"],
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task update tool replaces tags");
+
+    assert_eq!(output.get("tags"), Some(&json!(["docs"])));
+}
+
+#[test]
+fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    for (title, tags) in [
+        ("Perf task", json!(["perf"])),
+        ("Bench task", json!(["bench"])),
+        ("Perf bench task", json!(["perf", "bench"])),
+    ] {
+        runtime
+            .execute_tool_command(
+                "orbit.task.add",
+                json!({
+                    "title": title,
+                    "description": "Shared tag-search marker.",
+                    "workspace": ".",
+                    "tags": tags,
+                }),
+                Some("codex".to_string()),
+                Some("gpt-5.5".to_string()),
+            )
+            .expect("create tagged task");
+    }
+
+    let perf_list = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "tag": ["perf"] }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("list by tag");
+    assert_task_titles(&perf_list, &["Perf task", "Perf bench task"]);
+
+    let both_list = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "tag": ["perf", "bench"] }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("list by both tags");
+    assert_task_titles(&both_list, &["Perf bench task"]);
+
+    let bench_search = runtime
+        .execute_tool_command(
+            "orbit.task.search",
+            json!({ "query": "tag-search", "tag": ["bench"] }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("search by tag");
+    assert_task_titles(&bench_search, &["Bench task", "Perf bench task"]);
+
+    let both_search = runtime
+        .execute_tool_command(
+            "orbit.task.search",
+            json!({ "query": "tag-search", "tag": ["perf", "bench"] }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("search by both tags");
+    assert_task_titles(&both_search, &["Perf bench task"]);
 }
 
 #[test]

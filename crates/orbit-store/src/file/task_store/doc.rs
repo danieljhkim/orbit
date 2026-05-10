@@ -25,6 +25,8 @@ pub(super) struct TaskFileDocument {
     pub(super) acceptance_criteria: Vec<String>,
     #[serde(default)]
     pub(super) dependencies: Vec<OrbitId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) tags: Vec<String>,
     #[serde(default)]
     pub(super) context_files: Vec<String>,
     #[serde(default)]
@@ -94,6 +96,8 @@ impl<'de> Deserialize<'de> for TaskFileDocument {
             #[serde(default)]
             dependencies: Vec<OrbitId>,
             #[serde(default)]
+            tags: Vec<String>,
+            #[serde(default)]
             context_files: Vec<String>,
             #[serde(default)]
             workspace_path: Option<String>,
@@ -162,6 +166,7 @@ impl<'de> Deserialize<'de> for TaskFileDocument {
             description: raw.description,
             acceptance_criteria: raw.acceptance_criteria,
             dependencies: raw.dependencies,
+            tags: raw.tags,
             context_files: raw.context_files,
             workspace_path: raw.workspace_path,
             repo_root: raw.repo_root,
@@ -213,6 +218,9 @@ pub(super) fn serialize_task_doc_yaml(doc: &TaskFileDocument) -> Result<String, 
         &doc.acceptance_criteria,
     )?);
     yaml.push_str(&yaml_field("dependencies", &doc.dependencies)?);
+    if !doc.tags.is_empty() {
+        yaml.push_str(&yaml_field("tags", &doc.tags)?);
+    }
 
     yaml.push_str(&yaml_section("context"));
     yaml.push_str(&yaml_field("context_files", &doc.context_files)?);

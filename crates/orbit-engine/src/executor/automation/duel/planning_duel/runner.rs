@@ -493,6 +493,7 @@ mod tests {
             description: "Exercise planning duel without lifecycle admission.".to_string(),
             acceptance_criteria: Vec::new(),
             dependencies: Vec::new(),
+            tags: Vec::new(),
             plan: String::new(),
             execution_summary: String::new(),
             context_files: Vec::new(),

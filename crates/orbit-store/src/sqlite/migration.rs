@@ -96,6 +96,12 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
                 FOREIGN KEY(invocation_id) REFERENCES invocations(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS task_tags (
+                task_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                PRIMARY KEY(task_id, tag)
+            );
+
             CREATE TABLE IF NOT EXISTS tool_calls (
                 invocation_id INTEGER NOT NULL,
                 seq INTEGER NOT NULL,
@@ -112,6 +118,7 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_tools_schema(conn)?;
     ensure_audit_events_schema(conn)?;
     ensure_task_reservations_schema(conn)?;
+    ensure_task_index_schema(conn)?;
     ensure_invocation_schema(conn)?;
 
     Ok(())
@@ -346,6 +353,22 @@ fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
     .map_err(|e| OrbitError::Store(e.to_string()))
 }
 
+fn ensure_task_index_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS task_tags (
+                task_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                PRIMARY KEY(task_id, tag)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_tags_tag_task_id
+            ON task_tags(tag, task_id);
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
 fn ensure_task_reservations_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
@@ -518,5 +541,30 @@ mod tests {
             )
             .expect("query owner index");
         assert_eq!(owner_index, 1);
+    }
+
+    #[test]
+    fn task_index_migration_creates_task_tags_table() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+
+        apply_schema(&conn).expect("apply schema");
+
+        assert!(table_exists(&conn, "task_tags").expect("task_tags exists"));
+        let primary_key_columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(task_tags)")
+            .expect("prepare pragma")
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                let pk: i64 = row.get(5)?;
+                Ok((name, pk))
+            })
+            .expect("query pragma")
+            .filter_map(|row| {
+                let (name, pk) = row.expect("pragma row");
+                (pk > 0).then_some(name)
+            })
+            .collect();
+
+        assert_eq!(primary_key_columns, vec!["task_id", "tag"]);
     }
 }

@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use orbit_common::types::{
     ActorIdentity, ExternalRef, OrbitError, Task, TaskArtifact, TaskHistoryEntry, TaskPriority,
-    TaskStatus,
+    TaskStatus, normalize_task_tags, task_matches_tags,
 };
 
 use super::bundle::{TaskBundle, bundle_to_task, merge_review_threads};
 use super::constants::TASK_SCHEMA_VERSION;
 use super::doc::TaskFileDocument;
 use super::layout::{TaskStateDir, validate_task_id};
+use crate::Store;
 use crate::backend::{
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentUpdateParams, TaskHistoryUpdateParams,
     TaskReviewUpdateParams,
@@ -19,11 +20,20 @@ use crate::file::sort::sort_by_created_desc_id_asc;
 
 pub(crate) struct TaskFileStore {
     pub(super) root: PathBuf,
+    pub(super) index: Option<Store>,
 }
 
 impl TaskFileStore {
+    #[cfg(test)]
     pub(crate) fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self { root, index: None }
+    }
+
+    pub(crate) fn new_with_index(root: PathBuf, index: Store) -> Self {
+        Self {
+            root,
+            index: Some(index),
+        }
     }
 
     pub(crate) fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError> {
@@ -43,6 +53,7 @@ impl TaskFileStore {
         let now = Utc::now();
         let id = self.next_task_id(now)?;
         let initial_state = TaskStateDir::from_status(params.status);
+        let tags = normalize_task_tags(params.tags);
         let bundle = TaskBundle {
             doc: TaskFileDocument {
                 schema_version: TASK_SCHEMA_VERSION,
@@ -52,6 +63,7 @@ impl TaskFileStore {
                 description: params.description,
                 acceptance_criteria: params.acceptance_criteria,
                 dependencies: params.dependencies,
+                tags,
                 context_files: params.context_files,
                 workspace_path: params.workspace_path,
                 repo_root: params.repo_root,
@@ -92,6 +104,14 @@ impl TaskFileStore {
             if let Err(cleanup_err) = cleanup_partial_task_dir(&task_dir) {
                 return Err(OrbitError::Store(format!(
                     "failed to create task bundle: {err}; cleanup failed: {cleanup_err}"
+                )));
+            }
+            return Err(err);
+        }
+        if let Err(err) = self.replace_indexed_task_tags(&bundle.doc.id, &bundle.doc.tags) {
+            if let Err(cleanup_err) = cleanup_partial_task_dir(&task_dir) {
+                return Err(OrbitError::Store(format!(
+                    "failed to index task tags: {err}; cleanup failed: {cleanup_err}"
                 )));
             }
             return Err(err);
@@ -154,6 +174,22 @@ impl TaskFileStore {
         Ok(tasks)
     }
 
+    pub(crate) fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.migrate_legacy_proposed_friction_tasks()?;
+        let required_tags = normalize_task_tags(tags.to_vec());
+        if required_tags.is_empty() {
+            return self.list_tasks();
+        }
+        if let Some(index) = &self.index {
+            let task_ids = index.task_ids_with_all_tags(&required_tags)?;
+            return self.load_tasks_by_ids(&task_ids);
+        }
+
+        let mut tasks = self.list_tasks()?;
+        tasks.retain(|task| task_matches_tags(task, &required_tags));
+        Ok(tasks)
+    }
+
     pub(crate) fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
         validate_task_id(id)?;
         let Some((state, task_dir)) = self.locate_task(id)? else {
@@ -175,8 +211,16 @@ impl TaskFileStore {
     }
 
     pub(crate) fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
+        self.search_tasks_filtered(query, &[])
+    }
+
+    pub(crate) fn search_tasks_filtered(
+        &self,
+        query: &str,
+        tags: &[String],
+    ) -> Result<Vec<Task>, OrbitError> {
         let lowered = query.to_lowercase();
-        let tasks = self.list_tasks()?;
+        let tasks = self.list_tasks_by_tags(tags)?;
         Ok(tasks
             .into_iter()
             .filter(|task| {
@@ -223,6 +267,9 @@ impl TaskFileStore {
         }
         if let Some(value) = &fields.dependencies {
             bundle.doc.dependencies = value.clone();
+        }
+        if let Some(value) = &fields.tags {
+            bundle.doc.tags = normalize_task_tags(value.clone());
         }
         if let Some(value) = &fields.plan {
             bundle.plan = value.clone();
@@ -295,6 +342,11 @@ impl TaskFileStore {
             &previous_bundle,
             &bundle,
         )?;
+        if let Err(err) = self.replace_indexed_task_tags(&bundle.doc.id, &bundle.doc.tags) {
+            let _ =
+                self.replace_indexed_task_tags(&previous_bundle.doc.id, &previous_bundle.doc.tags);
+            return Err(err);
+        }
         Ok(())
     }
 
@@ -438,7 +490,33 @@ impl TaskFileStore {
             return Ok(false);
         };
         fs::remove_dir_all(task_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+        self.delete_indexed_task_tags(id)?;
         Ok(true)
+    }
+
+    fn load_tasks_by_ids(&self, ids: &[String]) -> Result<Vec<Task>, OrbitError> {
+        let mut tasks = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(task) = self.get_task(id)? {
+                tasks.push(task);
+            }
+        }
+        sort_by_created_desc_id_asc(&mut tasks, |task| &task.created_at, |task| &task.id);
+        Ok(tasks)
+    }
+
+    fn replace_indexed_task_tags(&self, task_id: &str, tags: &[String]) -> Result<(), OrbitError> {
+        if let Some(index) = &self.index {
+            index.replace_task_tags(task_id, tags)?;
+        }
+        Ok(())
+    }
+
+    fn delete_indexed_task_tags(&self, task_id: &str) -> Result<(), OrbitError> {
+        if let Some(index) = &self.index {
+            index.delete_task_tags(task_id)?;
+        }
+        Ok(())
     }
 
     fn rollback_bundle_update(
@@ -479,6 +557,7 @@ mod tests {
             description: "Fixture task.".to_string(),
             acceptance_criteria: Vec::new(),
             dependencies: Vec::new(),
+            tags: Vec::new(),
             plan: String::new(),
             execution_summary: String::new(),
             context_files: Vec::new(),
@@ -636,6 +715,7 @@ updated_at: 2026-01-01T00:00:00Z
             .expect("load legacy task")
             .expect("legacy task exists");
         assert!(task.external_refs.is_empty());
+        assert!(task.tags.is_empty());
 
         store
             .update_task_document(
@@ -651,6 +731,52 @@ updated_at: 2026-01-01T00:00:00Z
         let yaml = fs::read_to_string(store.task_doc_path(&task_dir)).expect("read task yaml");
         assert!(yaml.contains("schema_version: 4"));
         assert!(!yaml.contains("external_refs"));
+        assert!(!yaml.contains("tags"));
+    }
+
+    #[test]
+    fn indexed_task_tags_reflect_create_update_and_delete() {
+        let root = tempdir().expect("tempdir");
+        let index = Store::open_in_memory().expect("open index");
+        let store = TaskFileStore::new_with_index(root.path().to_path_buf(), index.clone());
+
+        let task = store
+            .create_task(TaskCreateParams {
+                tags: vec!["  Perf ".to_string(), "BENCH".to_string()],
+                ..create_params("Tagged task", Vec::new())
+            })
+            .expect("create tagged task");
+        assert_eq!(task.tags, vec!["perf", "bench"]);
+        assert_eq!(
+            index.list_task_tags(&task.id).expect("read indexed tags"),
+            vec!["perf", "bench"]
+        );
+
+        store
+            .update_task_document(
+                &task.id,
+                &TaskDocumentUpdateParams {
+                    actor: "test".to_string(),
+                    tags: Some(vec!["Docs".to_string()]),
+                    ..Default::default()
+                },
+            )
+            .expect("replace tags");
+        let updated = store
+            .get_task(&task.id)
+            .expect("load updated task")
+            .expect("updated task exists");
+        assert_eq!(updated.tags, vec!["docs"]);
+        assert_eq!(
+            index.list_task_tags(&task.id).expect("read replaced tags"),
+            vec!["docs"]
+        );
+
+        assert!(store.delete_task(&task.id).expect("delete task"));
+        assert_eq!(
+            index.list_task_tags(&task.id).expect("read pruned tags"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

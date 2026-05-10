@@ -165,6 +165,7 @@ mod tests {
                 description: "test".to_string(),
                 acceptance_criteria: Vec::new(),
                 dependencies: Vec::new(),
+                tags: Vec::new(),
                 plan: String::new(),
                 execution_summary: String::new(),
                 context_files: vec![context_file.to_string()],

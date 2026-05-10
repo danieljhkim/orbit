@@ -12,6 +12,7 @@ pub struct TaskAddParams {
     pub description: String,
     pub acceptance_criteria: Vec<String>,
     pub dependencies: Vec<OrbitId>,
+    pub tags: Vec<String>,
     pub plan: String,
     pub comment: Option<String>,
     pub context_files: Vec<String>,
@@ -35,6 +36,7 @@ impl Default for TaskAddParams {
             description: String::new(),
             acceptance_criteria: Vec::new(),
             dependencies: Vec::new(),
+            tags: Vec::new(),
             plan: String::new(),
             comment: None,
             context_files: Vec::new(),
@@ -56,6 +58,7 @@ pub struct TaskUpdateParams {
     pub description: Option<String>,
     pub acceptance_criteria: Option<Vec<String>>,
     pub dependencies: Option<Vec<OrbitId>>,
+    pub tags: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
@@ -79,6 +82,7 @@ impl TaskUpdateParams {
             || self.description.is_some()
             || self.acceptance_criteria.is_some()
             || self.dependencies.is_some()
+            || self.tags.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.status.is_some()
@@ -103,6 +107,7 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             description: p.description,
             acceptance_criteria: p.acceptance_criteria,
             dependencies: p.dependencies,
+            tags: p.tags,
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,

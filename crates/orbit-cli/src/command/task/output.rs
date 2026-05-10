@@ -30,6 +30,7 @@ pub(crate) fn task_to_json(
         "acceptance_criteria": task.acceptance_criteria,
         "dependencies": task.dependencies,
         "resolved_dependencies": dependency_labels(task, status_by_id),
+        "tags": task.tags,
         "plan": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,
@@ -157,6 +158,7 @@ pub(super) fn task_field_to_json(
         "dependencies" => {
             serde_json::to_value(&task.dependencies).map_err(|e| OrbitError::Io(e.to_string()))
         }
+        "tags" => serde_json::to_value(&task.tags).map_err(|e| OrbitError::Io(e.to_string())),
         "resolved_dependencies" => serde_json::to_value(dependency_labels(
             task,
             status_by_id.ok_or_else(|| {
@@ -173,7 +175,7 @@ pub(super) fn task_field_to_json(
         "artifacts" => serde_json::to_value(runtime.get_task_artifacts(&task.id)?)
             .map_err(|e| OrbitError::Io(e.to_string())),
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
         ))),
     }
 }
@@ -262,6 +264,12 @@ pub(super) fn print_single_task_field(
             }
             Ok(())
         }
+        "tags" => {
+            for tag in &task.tags {
+                println!("{}", tag);
+            }
+            Ok(())
+        }
         "resolved_dependencies" => {
             for dependency in dependency_labels(
                 task,
@@ -316,7 +324,7 @@ pub(super) fn print_single_task_field(
             Ok(())
         }
         other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, history, context_files, artifacts"
+            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, artifacts"
         ))),
     }
 }
