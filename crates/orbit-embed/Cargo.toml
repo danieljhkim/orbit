@@ -1,0 +1,10 @@
+[package]
+name = "orbit-embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+orbit-common = { path = "../orbit-common" }
+serde.workspace = true
+serde_json.workspace = true

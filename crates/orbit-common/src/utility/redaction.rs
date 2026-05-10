@@ -94,6 +94,9 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::AgentSessionNotFound(m) => {
             OrbitError::AgentSessionNotFound(redact_sensitive_env_text(&m))
         }
+        OrbitError::CompanionNotInstalled(m) => {
+            OrbitError::CompanionNotInstalled(redact_sensitive_env_text(&m))
+        }
         OrbitError::InvalidInput(m) => OrbitError::InvalidInput(redact_sensitive_env_text(&m)),
         OrbitError::SkillValidation(m) => {
             OrbitError::SkillValidation(redact_sensitive_env_text(&m))

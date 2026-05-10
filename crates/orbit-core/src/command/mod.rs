@@ -23,6 +23,7 @@ pub mod init;
 pub mod job;
 pub mod pipeline_run;
 pub mod policy;
+pub mod semantic;
 pub mod skill;
 pub mod task;
 pub mod task_template;

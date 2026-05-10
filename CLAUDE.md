@@ -30,15 +30,18 @@ All must pass before a task moves to `review`.
 
 ```
 orbit-common → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → orbit-agent → orbit-engine → orbit-core → orbit-cli
-            ↘ orbit-store ──────────────────────────────────────────────────↗            ↗
+            ↘ orbit-embed → orbit-store ───────────────────────────────────↗            ↗
+                         ↘ orbit-embed-companion
             ↘ orbit-mcp ─────────────────────────────────────────────────────────────────────────────────────────↗
 ```
 
 - **orbit-common**: leaf — no internal deps. `types::` owns shared domain types, `OrbitError`, ID generation, and activity/job schemas; `utility::` owns generic helpers like fs, redaction, logging, and blob storage.
 - **orbit-policy**: filesystem-scoping policy engine. Owns `FsProfile` resolution and `denyRead` / `denyModify` evaluation. Depends only on `orbit-common`.
 - **orbit-exec**: process / sandbox / supervision primitives for shell-command execution under an `FsProfile`. Depends only on `orbit-common`.
+- **orbit-embed**: slim semantic-embedding client boundary. Owns `Embedder`, JSON-Lines RPC types, `SubprocessEmbedder`, and `NoopEmbedder`. Depends on `orbit-common`; does not depend on fastembed-rs.
+- **orbit-embed-companion**: separately installed embedding companion binary. Depends on `orbit-embed` and fastembed-rs; not linked into the default `orbit` CLI binary.
 - **orbit-knowledge**: knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript/TypeScript, Python). Depends on `orbit-common`; consumed by `orbit-tools`, which exposes graph tool and CLI-use-case facades upstream.
-- **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`.
+- **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends on `orbit-common`; semantic vector indexing also depends on `orbit-embed` for the injected `Embedder` trait only.
 - **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
 - **orbit-mcp**: Model Context Protocol adapter using `rmcp`. Depends only on `orbit-common`; consumed by `orbit-cli` via `orbit mcp serve`.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`. Also hosts HTTP `LoopTransport` primitives.
@@ -56,6 +59,7 @@ orbit-common → orbit-policy, orbit-exec, orbit-knowledge → orbit-tools → o
 | Job Runs        | WorkspaceOnly      | Execution artifacts are workspace-local          |
 | Skills          | MergeByKey         | Global defaults in `~/.orbit/skills`; workspace overrides by skill name |
 | Command Audit   | GlobalOnly         | Single authoritative SQLite event trail          |
+| Semantic Index  | WorkspaceOnly      | Task-derived embeddings stay with the workspace  |
 | Run Traces      | WorkspaceOnly      | Per-repo activity/job JSONL and blob artifacts   |
 
 ## Orbit Workflow

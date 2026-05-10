@@ -4,9 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    Store, audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_job_run_store, workspace_policy_def_store, workspace_task_backends,
+    EmbedWorker, Store, VectorStore, audit_event_store_sqlite, global_executor_def_store,
+    global_policy_def_store, layered_policy_def_store, task_reservation_store_sqlite,
+    tool_store_sqlite, workspace_job_run_store, workspace_policy_def_store,
+    workspace_task_backends,
 };
 
 use orbit_common::types::{DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths};
@@ -39,6 +40,7 @@ pub(crate) fn build_context_from_roots(
     let persistence = &runtime_config.persistence;
 
     let store = Store::open(&persistence.audit_db)?;
+    let semantic_sqlite_store = Store::open(&persistence.semantic_db)?;
 
     // workspace_root IS the .orbit dir. For custom roots outside the repo,
     // prefer the registry's workspace root over the parent-directory fallback.
@@ -55,6 +57,8 @@ pub(crate) fn build_context_from_roots(
     );
 
     let task_backends = workspace_task_backends(persistence.task_dir.clone(), store.clone());
+    let semantic_vector_store = Arc::new(VectorStore::new(semantic_sqlite_store));
+    let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
     let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());
 
     // Executors and policies are global-only. Jobs always persist run state
@@ -106,6 +110,8 @@ pub(crate) fn build_context_from_roots(
             task_backends.history,
             task_backends.review,
             task_backends.artifact,
+            semantic_vector_store,
+            semantic_worker,
             task_reservation_store,
             job_run_store,
             tool_store,

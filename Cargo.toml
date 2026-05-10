@@ -3,6 +3,8 @@ members = [
   "crates/orbit-agent",
   "crates/orbit-cli",
   "crates/orbit-common",
+  "crates/orbit-embed",
+  "crates/orbit-embed-companion",
   "crates/orbit-registry",
   "crates/orbit-core",
   "crates/orbit-engine",
@@ -35,6 +37,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 regex = "1"
+blake3 = "1"
 sha2 = "0.10"
 tiktoken-rs = "0.11.0"
 thiserror = "2"

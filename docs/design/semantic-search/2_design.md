@@ -1,6 +1,6 @@
 # Semantic Search — Design
 
-**Status:** Draft
+**Status:** Accepted
 **Owner:** claude
 **Last updated:** 2026-05-10
 
@@ -22,7 +22,9 @@ orbit-common → orbit-embed → orbit-store → ... (existing graph; orbit-embe
                           ↘ orbit-embed-companion (separate crate, separate binary, fastembed-rs lives here)
 ```
 
-`orbit-store` gains a new submodule `vector::` alongside the existing `file::` and `sqlite::` layers. `vector::` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine query implementation. It depends on `orbit-embed` for the `Embedder` trait but treats the embedder as injected — tests pass a `NoopEmbedder` that returns deterministic vectors so unit tests never need the companion to be installed.
+`orbit-store` gains a new submodule `vector::` alongside the existing `file::` and `sqlite::` layers. `vector::` owns the `embeddings` table schema, write/upsert/delete API, and the brute-force cosine helper implementation. It depends on `orbit-embed` for the `Embedder` trait but treats the embedder as injected — tests pass a `NoopEmbedder` that returns deterministic vectors so unit tests never need the companion to be installed.
+
+The vector SQLite store is workspace-local at `.orbit/state/semantic.db`, not in the global `~/.orbit/orbit.db` audit/tool database. This preserves the task scoping rule: task-derived embeddings and FTS rows do not leak across workspaces.
 
 `orbit-tools` exposes `orbit.semantic.search` and `orbit.semantic.related` as MCP tools, and `orbit-cli` exposes `orbit semantic` subcommands (including `install` and `uninstall`). Both are thin shells over `orbit-store::vector::*`.
 
@@ -331,5 +333,6 @@ All embeddings stay local. Task content never leaves the workspace. This is stru
 ## Task References
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
+- [T20260510-9] — Phase-1 semantic search foundation: orbit-embed + orbit-embed-companion + indexing pipeline. Accepted the foundation implementation and workspace-local semantic DB placement.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

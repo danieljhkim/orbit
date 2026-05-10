@@ -20,6 +20,8 @@ pub enum OrbitError {
     ActivityNotFound(String),
     #[error("agent session not found: {0}")]
     AgentSessionNotFound(String),
+    #[error("companion not installed: {0}")]
+    CompanionNotInstalled(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("skill validation failed: {0}")]
