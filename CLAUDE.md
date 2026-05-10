@@ -109,6 +109,7 @@ Feature design docs live under `docs/design/<feature>/` and follow [`docs/design
 | Knowledge graph | `knowledge-graph/` | `claude` |
 | Policy & Sandboxing | `policy-sandbox/` | `claude` |
 | Project Learnings | `project-learnings/` | `claude` |
+| Task Lineage | `task-lineage/` | `claude` |
 | Activity / Job | `activity-job/` | `codex` |
 | Auditability | `auditability/` | `codex` |
 | Groundhog | `groundhog/` | `codex` |
