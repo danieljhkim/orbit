@@ -1,0 +1,16 @@
+[package]
+name = "orbit-embed-companion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "orbit-embed-companion"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
+orbit-common = { path = "../orbit-common" }
+orbit-embed = { path = "../orbit-embed" }
+serde_json.workspace = true

@@ -4,6 +4,7 @@ pub mod log;
 pub mod mcp;
 pub mod observe;
 pub mod run;
+pub mod semantic;
 pub mod task;
 pub mod web;
 
@@ -44,6 +45,7 @@ Environment:
 Operate:
   run         Run a workflow (ship, ship-auto, duel-plan, job)
   task        Create, update, and manage tasks
+  semantic    Manage local semantic-search indexing
 
 Observe:
   graph       Query the knowledge graph
@@ -85,6 +87,7 @@ pub enum Commands {
     // ── Operate ──
     Run(run::RunCommand),
     Task(task::TaskCommand),
+    Semantic(semantic::SemanticCommand),
 
     // ── Observe ──
     Graph(graph::GraphCommand),
@@ -121,6 +124,7 @@ impl Execute for Commands {
             Commands::Config(cmd) => cmd.execute(runtime),
             Commands::Run(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => cmd.execute(runtime),
+            Commands::Semantic(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
@@ -144,7 +148,9 @@ impl Execute for Commands {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Commands, mcp::McpSubcommand, web::WebSubcommand};
+    use super::{
+        Cli, Commands, mcp::McpSubcommand, semantic::SemanticSubcommand, web::WebSubcommand,
+    };
 
     #[test]
     fn cli_parses_mcp_init() {
@@ -178,6 +184,18 @@ mod tests {
                 WebSubcommand::Serve(_) => {}
             },
             _ => panic!("expected top-level web command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_semantic_stats() {
+        let cli = Cli::parse_from(["orbit", "semantic", "stats"]);
+        match cli.command {
+            Commands::Semantic(command) => match command.command {
+                SemanticSubcommand::Stats(_) => {}
+                _ => panic!("expected semantic stats"),
+            },
+            _ => panic!("expected top-level semantic command"),
         }
     }
 

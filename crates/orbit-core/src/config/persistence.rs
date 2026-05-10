@@ -17,6 +17,7 @@ pub(crate) struct PersistenceConfig {
     pub(crate) skill_dir: PathBuf,
     pub(crate) executor_dir: PathBuf,
     pub(crate) audit_db: PathBuf,
+    pub(crate) semantic_db: PathBuf,
     pub(crate) policy_dir: PathBuf,
 }
 
@@ -52,6 +53,7 @@ impl PersistenceConfig {
             executor_dir: global_resources_dir.join("executors"),
             policy_dir: global_resources_dir.join("policies"),
             audit_db: paths.global_dir.join("orbit.db"),
+            semantic_db: paths.state_dir.join("semantic.db"),
         }
     }
 
@@ -64,6 +66,7 @@ impl PersistenceConfig {
             "executor": { "path": self.executor_dir.to_string_lossy() },
             "policy": { "path": self.policy_dir.to_string_lossy() },
             "audit": { "path": self.audit_db.to_string_lossy() },
+            "semantic": { "path": self.semantic_db.to_string_lossy() },
         })
     }
 }

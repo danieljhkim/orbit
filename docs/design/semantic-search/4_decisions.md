@@ -1,6 +1,6 @@
 # Semantic Search — Decisions
 
-**Status:** Draft
+**Status:** Accepted
 **Owner:** claude
 **Last updated:** 2026-05-10
 
@@ -12,7 +12,7 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ## ADR-001 — fastembed-rs ONNX backend over Candle, llama.cpp, or external ollama
 
-**Status:** Proposed · 2026-05 · [T20260510-3]
+**Status:** Accepted · 2026-05 · [T20260510-3], [T20260510-9]
 
 **Context.** Local embedding inference has four plausible backends:
 
@@ -37,7 +37,7 @@ This ADR addresses *which* backend to use. The orthogonal decision of *how* the 
 
 ## ADR-002 — Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade
 
-**Status:** Proposed · 2026-05 · [T20260510-3]
+**Status:** Accepted · 2026-05 · [T20260510-3], [T20260510-9]
 
 **Context.** Vector storage and retrieval has three plausible shapes:
 
@@ -61,7 +61,7 @@ A subtle point: the choice of `embedding BLOB` storage format in (1) is forward-
 
 ## ADR-003 — Per-field embeddings with chunked overflow, not whole-bundle concatenation
 
-**Status:** Proposed · 2026-05 · [T20260510-3]
+**Status:** Accepted · 2026-05 · [T20260510-3], [T20260510-9]
 
 **Context.** A task bundle has structurally distinct fields (purpose, summary, plan, acceptance criteria, comments, review threads) of widely varying length. Two embedding strategies exist:
 
@@ -82,7 +82,7 @@ The cost of per-field is mostly storage (~5–20× rows per task) and indexing C
 
 ## ADR-004 — Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one
 
-**Status:** Proposed · 2026-05 · [T20260510-3]
+**Status:** Accepted · 2026-05 · [T20260510-3], [T20260510-9]
 
 **Context.** Three retrieval strategies were on the table:
 
@@ -106,7 +106,7 @@ A weighted combination (e.g. `0.6 * cosine_score + 0.4 * bm25_score`) was consid
 
 ## ADR-005 — Companion binary installed on demand, rather than bundled in `orbit`
 
-**Status:** Proposed · 2026-05 · [T20260510-3]
+**Status:** Accepted · 2026-05 · [T20260510-3], [T20260510-9]
 
 **Context.** Once fastembed-rs is the chosen backend (ADR-001), the question of where it lives matters. Linking ONNX Runtime + fastembed-rs into the main `orbit` binary adds ~50MB and pays that cost for every user — including users who never invoke semantic search. Three packaging shapes are plausible:
 
@@ -133,8 +133,25 @@ Option A is what the design originally called "single binary install posture pre
 
 ---
 
+## ADR-006 — Workspace-local semantic DB separate from global audit/tool DB
+
+**Status:** Accepted · 2026-05 · [T20260510-9]
+
+**Context.** Orbit already has a global SQLite database at `~/.orbit/orbit.db` for command audit, tool registry, and task-lock bookkeeping. Task bundles themselves are workspace-scoped under `.orbit/tasks`, and the scoping rules treat task data as workspace-only. Semantic rows are derived from task text, so putting embeddings in the global DB would create cross-project leakage and make stale-row accounting depend on which workspace happened to be active.
+
+**Decision.** Store phase-1 semantic tables in a workspace-local SQLite database at `.orbit/state/semantic.db`. It uses the same `orbit-store::Store` schema bootstrap path as other SQLite stores, but the runtime opens it from the active workspace state directory and injects it as `orbit-store::vector::VectorStore`.
+
+**Consequences.**
+- Task-derived vectors and FTS rows follow task scoping: one workspace cannot see another workspace's semantic index.
+- `orbit semantic reindex` can rebuild only the active workspace without filtering a global table by workspace ID.
+- Tests can use `Store::open_in_memory()` with the same schema path.
+- Cost: the generic SQLite bootstrap creates non-semantic tables in `semantic.db` too. They are harmless but untidy; a future migration runner could split schema groups if this becomes confusing.
+
+---
+
 ## Task References
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
+- [T20260510-9] — Phase-1 semantic search foundation: orbit-embed + orbit-embed-companion + indexing pipeline. The task that accepted and implemented ADR-001 through ADR-006.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

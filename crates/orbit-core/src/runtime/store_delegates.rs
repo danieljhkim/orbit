@@ -4,16 +4,17 @@ use orbit_common::types::{
     TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_store::{
-    AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, EmbedWorker,
+    ExecutorDefStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
+    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    ToolStoreBackend, VectorStore,
 };
 
 use crate::context::OrbitStores;
@@ -102,6 +103,8 @@ impl OrbitStores {
             history: self.task_history.as_ref(),
             review: self.task_review.as_ref(),
             artifact: self.task_artifact.as_ref(),
+            semantic_vector: self.semantic_vector.as_ref(),
+            semantic_worker: self.semantic_worker.as_ref(),
         }
     }
 
@@ -148,6 +151,8 @@ pub(crate) struct TaskRecords<'a> {
     history: &'a dyn TaskHistoryStoreBackend,
     review: &'a dyn TaskReviewStoreBackend,
     artifact: &'a dyn TaskArtifactStoreBackend,
+    semantic_vector: &'a VectorStore,
+    semantic_worker: &'a EmbedWorker,
 }
 
 pub(crate) struct TaskReservationRecords<'a> {
@@ -156,7 +161,9 @@ pub(crate) struct TaskReservationRecords<'a> {
 
 impl TaskRecords<'_> {
     pub(crate) fn create(&self, params: TaskCreateParams) -> Result<Task, OrbitError> {
-        self.store.create_task(params)
+        let task = self.store.create_task(params)?;
+        self.semantic_worker.enqueue(task.clone());
+        Ok(task)
     }
 
     pub(crate) fn get(&self, id: &str) -> Result<Option<Task>, OrbitError> {
@@ -258,12 +265,30 @@ impl TaskRecords<'_> {
             )?;
         }
 
-        self.get(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+        let task = self
+            .get(id)?
+            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))?;
+        if params.has_document_changes()
+            || params.has_history_changes()
+            || params.has_review_changes()
+            || params.has_artifact_changes()
+        {
+            self.semantic_worker.enqueue(task.clone());
+        }
+        Ok(task)
     }
 
     pub(crate) fn delete(&self, id: &str) -> Result<bool, OrbitError> {
-        self.store.delete_task(id)
+        let deleted = self.store.delete_task(id)?;
+        if deleted && let Err(error) = self.semantic_vector.delete_source("task", id) {
+            orbit_common::tracing::debug!(
+                target: "orbit.semantic.indexer",
+                task_id = id,
+                error = %error,
+                "semantic delete cascade failed after task deletion",
+            );
+        }
+        Ok(deleted)
     }
 
     pub(crate) fn search(&self, query: &str) -> Result<Vec<Task>, OrbitError> {

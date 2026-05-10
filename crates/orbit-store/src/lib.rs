@@ -32,6 +32,7 @@ pub mod json_schema;
 pub mod scope;
 pub mod sqlite;
 pub mod state_io;
+pub mod vector;
 
 pub mod skill_store {
     pub use crate::file::skill_store::*;
@@ -120,6 +121,10 @@ pub use sqlite::audit_event_store::{
     AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
 };
 pub use sqlite::connection::{Store, StoreTx};
+pub use vector::{
+    EmbedJob, EmbedWorker, EmbeddingField, SemanticStats, SourceModelCount, UpsertReport,
+    VectorStore, cosine_similarity,
+};
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)

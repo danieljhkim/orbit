@@ -293,6 +293,24 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 arguments_json: None,
             }
         }
+        Commands::Semantic(cmd) => {
+            use crate::command::semantic::SemanticSubcommand;
+            let sub = match &cmd.command {
+                SemanticSubcommand::Install(_) => "install",
+                SemanticSubcommand::Uninstall(_) => "uninstall",
+                SemanticSubcommand::Reindex(_) => "reindex",
+                SemanticSubcommand::Stats(_) => "stats",
+            };
+            CommandMeta {
+                command: "semantic".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("semantic_index".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+            }
+        }
         Commands::Activity(cmd) => {
             use crate::command::activity::ActivitySubcommand;
             let (sub, target_id): (&str, Option<&str>) = match &cmd.command {

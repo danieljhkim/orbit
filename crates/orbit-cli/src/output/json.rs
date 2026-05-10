@@ -40,6 +40,7 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::JobRunNotFound(_) => "job_run_not_found",
         OrbitError::ActivityNotFound(_) => "activity_not_found",
         OrbitError::AgentSessionNotFound(_) => "agent_session_not_found",
+        OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::InvalidInput(_) => "invalid_input",
         OrbitError::SkillValidation(_) => "skill_validation_failed",
         OrbitError::JobValidation(_) => "job_validation_failed",
