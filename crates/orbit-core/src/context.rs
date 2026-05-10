@@ -2,13 +2,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use orbit_common::types::WorkspacePaths;
+use orbit_embed::vector::{EmbedWorker, VectorStore};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    AuditEventStoreBackend, EmbedWorker, ExecutorDefStoreBackend, JobRunStoreBackend,
-    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskDocumentStoreBackend,
-    TaskHistoryStoreBackend, TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
-    ToolStoreBackend, VectorStore,
+    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
+    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
+    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
