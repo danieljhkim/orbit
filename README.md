@@ -10,7 +10,7 @@
 
 **Orbit is a durable, intent-tracked, auditable task layer for developers driving AI coding agents at high volume — local-first by design, with a path to team-scale automation as trust in agents matures.**
 
-You drive multiple coding agents (Claude Code, Cursor, Aider, Codex CLI) against real code. Ideas accumulate faster than any session can hold, work spans branches and weeks, and six months from now you have to remember *why* an agent wrote a given line. Agent vendors solve in-session execution. Orbit is the layer above — local-first state that turns individual agent sessions into a coherent, auditable body of work.
+You drive multiple coding agents (Claude Code, Codex CLI, Gemini CLI, and any OpenAI-compatible or Ollama-served model) against real code. Ideas accumulate faster than any session can hold, work spans branches and weeks, and six months from now you have to remember *why* an agent wrote a given line. Agent vendors solve in-session execution. Orbit is the layer above — local-first state that turns individual agent sessions into a coherent, auditable body of work.
 
 Full positioning, commercial model, and roadmap: [docs/POSITIONING.md](docs/POSITIONING.md).
 
@@ -24,7 +24,7 @@ Full positioning, commercial model, and roadmap: [docs/POSITIONING.md](docs/POSI
 
 - **Knowledge-graph–aware tooling.** Agents query a parsed, content-addressed graph (symbols, imports, callers, implementors) instead of grep. Branch-scoped, safe for parallel rebuild. The graph is what makes audit cheap to populate; benchmark in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/knowledge-graph/](docs/design/knowledge-graph/)
 
-- **Conflict-aware parallel execution.** Agents reserve explicit locks on files or code regions they intend to edit (`orbit task locks reserve`) before dispatch. Overlapping reservations are rejected up front instead of producing merge conflicts later; locks auto-release when their owning run reaches a terminal state. → [docs/design/activity-job/](docs/design/activity-job/)
+- **Conflict-aware parallel execution.** Each agent run is dispatched into its own git worktree, and the gate pipeline reserves task `context_files` as locks before fanning out — overlapping reservations are rejected up front rather than producing merge conflicts later. Locks auto-release when their owning run reaches a terminal state. Agents themselves do not call the lock APIs; coordination happens at the workflow plane. → [docs/design/activity-job/](docs/design/activity-job/)
 
 
 ---

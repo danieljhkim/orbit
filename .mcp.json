@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "orbit": {
+      "args": [
+        "mcp",
+        "serve"
+      ],
+      "command": "orbit"
+    }
+  }
+}
