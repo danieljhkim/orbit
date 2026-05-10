@@ -270,7 +270,7 @@ impl TaskFileStore {
                 task_dir.display()
             )));
         };
-        let target_dir = self.task_dir(TaskStateDir::Friction, &task_id);
+        let target_dir = self.task_dir(TaskStateDir::Friction, task_id);
         if target_dir == task_dir {
             return Ok(Some(task_dir));
         }

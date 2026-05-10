@@ -34,8 +34,7 @@ pub struct VectorStore {
 
 impl VectorStore {
     /// Open the workspace-local semantic-search SQLite at `path`, applying WAL
-    /// + busy_timeout pragmas and creating the embeddings/tasks_fts schema if
-    /// missing.
+    /// + busy_timeout pragmas and creating the embeddings/tasks_fts schema if missing.
     pub fn open(path: &Path) -> Result<Self, OrbitError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;

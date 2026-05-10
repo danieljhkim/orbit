@@ -84,10 +84,7 @@ fn extract_function(
     leaves: &mut Vec<ExtractedLeaf>,
     parent_class: Option<&str>,
 ) -> Option<String> {
-    let name = match get_name(node, source) {
-        Some(n) => n,
-        None => return None,
-    };
+    let name = get_name(node, source)?;
 
     let kind = if parent_class.is_some() {
         "method"
@@ -118,10 +115,7 @@ fn extract_class(
     leaves: &mut Vec<ExtractedLeaf>,
     parent_class: Option<&str>,
 ) -> Option<String> {
-    let name = match get_name(node, source) {
-        Some(n) => n,
-        None => return None,
-    };
+    let name = get_name(node, source)?;
 
     let src = node_source(node, source);
     let qualified_name = qualify_name(parent_class, &name);
