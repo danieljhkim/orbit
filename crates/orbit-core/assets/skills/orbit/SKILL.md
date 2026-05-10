@@ -57,14 +57,11 @@ orbit tool run orbit.task.update --input '{"id": "<id>", "status": "review", "mo
 orbit tool run orbit.task.update --input '{"id": "<id>", "comment": "...", "model": "<model_name>"}'
 orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<model_name>"}' # proposed/friction -> backlog, review -> done
 orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "...", "model": "<model_name>"}'   # proposed/friction -> rejected
-orbit tool run orbit.task.locks --input '{}'                         # View active file locks
 # Review-thread commands: add/reply require `model`; list/resolve show it for provenance consistency, though it is optional there.
 orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...", "path": "<repo-relative path>", "line": "<line>", "model": "<model_name>"}'
 orbit tool run orbit.task.review_thread.list --input '{"id": "<id>", "status": "open", "model": "<model_name>"}'
 orbit tool run orbit.task.review_thread.reply --input '{"id": "<id>", "thread_id": "<thread-id>", "body": "...", "model": "<model_name>"}'
 orbit tool run orbit.task.review_thread.resolve --input '{"id": "<id>", "thread_id": "<thread-id>", "model": "<model_name>"}'
-orbit tool run orbit.task.locks.reserve --input '{"files": ["file:src/foo.rs"], "model": "<model_name>"}'
-orbit tool run orbit.task.locks.release --input '{"reservation_id": "<reservation-id>", "model": "<model_name>"}'
 ```
 
 ## Common Mistakes — DO NOT
@@ -104,7 +101,6 @@ Command surface determines provenance by default:
 - `orbit-create-task`: Create a new task with description, acceptance criteria, and context.
 - `orbit-debug-job-failure`: Diagnose failed, stuck, cancelled, or suspicious Orbit job runs.
 - `orbit-execute-task`: Carry a change through implementation, validation, and review.
-- `orbit-locks`: Reserve and release file locks for ad-hoc code modification outside workflow-held reservations.
 - `orbit-review-task`: Review someone else's work and file findings as review threads, without transitioning the task.
 - `orbit-track-issues`: Capture agent-discovered, self-reported friction as tracked tasks.
 - `orbit-graph`: Navigate or inspect the codebase via the knowledge graph when the activity allowlist includes graph tools.

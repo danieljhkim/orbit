@@ -193,7 +193,7 @@ An explicit `ref` means "read the stored graph for this ref." It does not trigge
 
 ### 4.3 Activity interaction
 
-Activities use graph tools for inspection and prompt assembly only. Code-mutating workflows coordinate before dispatch with task `context_files` and `orbit.task.locks.reserve` preflight guards, then rely on optimistic integration/review checks to catch stale or overlapping edits. Activities that only read query the service directly.
+Activities use graph tools for inspection and prompt assembly only. Code-mutating workflows coordinate before dispatch in `task_gate_pipeline`: the deterministic `reserve_locks` activity reserves task `context_files` as the preflight guard, then optimistic integration/review checks catch stale or overlapping edits. Activities that only read query the service directly.
 
 The working graph still exists in `crates/orbit-knowledge/src/working_graph`, but it is not a public agent-facing mutation API in this version. Branch-local graph refs are intentionally not used as distributed locks because agents commonly work in separate worktrees with separate refs.
 
@@ -206,7 +206,7 @@ Nodes carry `is_locked`, `lineage_locked`, `lock_owner`, and `lock_reason` on `B
 - **`is_locked`** — the node itself is frozen. Attempts to mutate it in the working graph produce a `WriteError`.
 - **`lineage_locked`** — the node's identity is frozen. Renames/re-identifications across builds are blocked; the identity key must survive rebuild.
 
-Graph-node locks survive rebuilds because they live on the node body (and therefore in the content-addressed object store), but they are not the current public write-admission mechanism. Public workflow coordination happens at the task plane through `orbit.task.locks.reserve`.
+Graph-node locks survive rebuilds because they live on the node body (and therefore in the content-addressed object store), but they are not the current public write-admission mechanism. Public workflow coordination happens at the task plane when `task_gate_pipeline` runs the `reserve_locks` activity before dispatch.
 
 The shared file-based lock store was introduced in [T20260411-0424] (replacing a removed `orbit-lock` crate) and further hardened in [T20260417-0301-2].
 

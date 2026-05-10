@@ -67,7 +67,7 @@ A rebuild writes new immutable objects/blobs and index, refreshes the SQLite sid
 
 ### 2.4 Working graph and write guards
 
-The current public graph surface is read-only. Agents use it to inspect, search, and pack context, while write coordination happens before dispatch through task `context_files` and `orbit.task.locks.reserve` preflight guards. Those guards operate at the workspace/task plane rather than inside a branch-local graph ref, which keeps them meaningful when agents work in separate worktrees.
+The current public graph surface is read-only. Agents use it to inspect, search, and pack context, while write coordination happens before dispatch in `task_gate_pipeline`: its `reserve_locks` activity reserves task `context_files` as a preflight guard. That guard operates at the workspace/task plane rather than inside a branch-local graph ref, which keeps it meaningful when agents work in separate worktrees.
 
 The in-memory **working graph** (`crates/orbit-knowledge/src/working_graph`) remains an internal/deferred mutation substrate. Public graph write tools are absent because branch-local graph locks do not coordinate independent worktrees.
 
