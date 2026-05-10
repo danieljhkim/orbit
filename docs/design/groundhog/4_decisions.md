@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (added missing ADR task citations, [T20260430-21])
+**Last updated:** 2026-05-10 (aligned ADR metadata with recent Groundhog changes)
 
 This ADR log records the design choices that define Groundhog's current shape. Entries stay in place when they are superseded; new decisions append at the end. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for open questions that may force new ADRs.
 
@@ -137,5 +137,6 @@ This ADR log records the design choices that define Groundhog's current shape. E
 - **[T20260420-0510-2]** — Add the Groundhog v1 activity runner.
 - **[T20260426-0603]** — Remove the public Groundhog checkpoint deviation verb from the tool surface.
 - **[T20260430-21]** — Shorten Groundhog design docs and add missing ADR task citations.
+- **[T20260509-19]** — Split the Groundhog activity runner into focused engine submodules.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

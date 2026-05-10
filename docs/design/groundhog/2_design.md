@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-09 (split Groundhog runner module layout, [T20260509-19])
+**Last updated:** 2026-05-10 (heartbeat drift review)
 
 This document describes Groundhog as it exists in the codebase today: the activity shape, plan schema, persisted artifacts, attempt lifecycle, builtin verbs, verifier path, and the current implementation gaps that still separate the runner from the intended v1 contract. See [1_overview.md](./1_overview.md) for the feature's purpose and [3_vision.md](./3_vision.md) for forward-looking questions.
 
@@ -161,9 +161,9 @@ The current runtime persists `Chronicle` + `groundhog/state.json`, not a cleanly
 
 Later attempts currently receive successful checkpoint summaries only. Side-effect summaries are persisted but not reloaded into the prompt. That means Groundhog remembers less about irreversible or notable prior changes than it claims to.
 
-### 7.4 Legacy deviation surface still ships
+### 7.4 Legacy deviation substrate still ships
 
-The current runner does not support deviation as part of Groundhog v1, but the chronicle types and tool registry still carry deviation-era leftovers. This is exactly the kind of doc/code drift that made the old Groundhog folder hard to trust.
+The current runner does not support deviation as part of Groundhog v1, and the public `checkpoint_deviate` verb has already been removed from the registered tool surface. What still remains is the older substrate: chronicle types, serializer vocabulary, tests, and internal modules that preserve deviation-era shapes. That cleanup is still worth doing because it keeps the persisted model and source tree more confusing than the shipped Groundhog contract needs them to be.
 
 ### 7.5 `attempt_budget_default` is not a true fallback yet
 
