@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 use crate::command::task::canonicalize_context_files_for_read;
+use crate::config::TaskArtifactStoreMode;
 
 use super::json::{task_lock_status_rank, task_lock_to_json};
 
@@ -339,8 +340,16 @@ pub(crate) fn workspace_orbit_dir(runtime: &OrbitRuntime) -> String {
 pub(crate) fn workspace_task_reservation_id(
     runtime: &OrbitRuntime,
 ) -> Result<Option<String>, OrbitError> {
-    read_workspace_config_optional(&runtime.paths().orbit_dir)
-        .map(|config| config.map(|config| config.workspace_id))
+    match read_workspace_config_optional(&runtime.paths().orbit_dir)? {
+        Some(config) => Ok(Some(config.workspace_id)),
+        None if runtime.task_artifact_store() == TaskArtifactStoreMode::V2 => {
+            Err(OrbitError::Store(format!(
+                "task artifact v2 workspace config is missing at '{}'; rebuild the runtime before writing task lock reservations",
+                runtime.paths().orbit_dir.join("config.yaml").display()
+            )))
+        }
+        None => Ok(None),
+    }
 }
 
 fn task_workspace_root(runtime: &OrbitRuntime, task: &Task) -> PathBuf {

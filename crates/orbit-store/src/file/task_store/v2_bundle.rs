@@ -11,8 +11,11 @@ use orbit_common::types::{
 };
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 
 use crate::sqlite::task_registry::{ProjectionRebuildResult, TaskBundleBinding, TaskRegistryStore};
+
+const REVIEW_THREAD_TOMBSTONES_FILE: &str = ".tombstones";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskBundleV2 {
@@ -150,16 +153,17 @@ impl TaskBundleStoreV2 {
         orbit_common::types::validate_orb_task_id(task_id)?;
         let bundle_dir = self.bundle_path(task_id)?;
 
-        remove_projection_entry(&self.workspace_orbit_dir, task_id)?;
+        ensure_projection_entry_removable(&self.workspace_orbit_dir, task_id)?;
+        let unregistered = self
+            .registry
+            .unregister_task_bundle(task_id, &self.workspace_id)?;
         let removed_bundle = match fs::remove_dir_all(&bundle_dir) {
             Ok(()) => true,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
             Err(err) => return Err(OrbitError::Io(err.to_string())),
         };
-        let unregistered = self
-            .registry
-            .unregister_task_bundle(task_id, &self.workspace_id)?;
-        Ok(removed_bundle || unregistered)
+        let removed_projection = remove_projection_entry(&self.workspace_orbit_dir, task_id)?;
+        Ok(unregistered || removed_bundle || removed_projection)
     }
 
     /// List bundles registered to this workspace.
@@ -261,17 +265,34 @@ fn create_lock_path(bundle_dir: &Path, task_id: &str) -> Result<PathBuf, OrbitEr
     Ok(parent.join(format!(".{task_id}.create")))
 }
 
-fn remove_projection_entry(workspace_orbit_dir: &Path, task_id: &str) -> Result<(), OrbitError> {
+fn ensure_projection_entry_removable(
+    workspace_orbit_dir: &Path,
+    task_id: &str,
+) -> Result<(), OrbitError> {
     let projection_path = workspace_orbit_dir.join("tasks").join(task_id);
     match fs::symlink_metadata(&projection_path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            fs::remove_file(&projection_path).map_err(|err| OrbitError::Io(err.to_string()))
-        }
+        Ok(metadata) if metadata.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(OrbitError::Store(format!(
             "projection entry '{}' already exists and is not a symlink",
             projection_path.display()
         ))),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(OrbitError::Io(err.to_string())),
+    }
+}
+
+fn remove_projection_entry(workspace_orbit_dir: &Path, task_id: &str) -> Result<bool, OrbitError> {
+    let projection_path = workspace_orbit_dir.join("tasks").join(task_id);
+    match fs::symlink_metadata(&projection_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            fs::remove_file(&projection_path).map_err(|err| OrbitError::Io(err.to_string()))?;
+            Ok(true)
+        }
+        Ok(_) => Err(OrbitError::Store(format!(
+            "projection entry '{}' already exists and is not a symlink",
+            projection_path.display()
+        ))),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(OrbitError::Io(err.to_string())),
     }
 }
@@ -373,6 +394,19 @@ fn validate_bundle(bundle: &TaskBundleV2) -> Result<(), OrbitError> {
     }
     if let Some(manifest) = &bundle.artifact_manifest {
         manifest.validate()?;
+    }
+    validate_bundle_consistency(bundle)?;
+    Ok(())
+}
+
+fn validate_bundle_consistency(bundle: &TaskBundleV2) -> Result<(), OrbitError> {
+    if let Some(last_status) = bundle.events.iter().rev().find_map(|event| event.to_status)
+        && last_status != bundle.envelope.status
+    {
+        return Err(OrbitError::Store(format!(
+            "task event log status '{}' does not match envelope status '{}' for {}",
+            last_status, bundle.envelope.status, bundle.envelope.id
+        )));
     }
     Ok(())
 }
@@ -605,13 +639,22 @@ fn rewrite_review_threads(
 
     let thread_dir = bundle_dir.join(TASK_REVIEW_THREADS_DIR_NAME);
     fs::create_dir_all(&thread_dir).map_err(|err| OrbitError::Io(err.to_string()))?;
-    let expected = threads
+    let expected_paths = threads
         .iter()
         .flat_map(|thread| {
             let base = thread_dir.join(&thread.metadata.thread_id);
             [base.with_extension("yaml"), base.with_extension("md")]
         })
         .collect::<std::collections::BTreeSet<_>>();
+    let expected_ids = threads
+        .iter()
+        .map(|thread| thread.metadata.thread_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let stale_ids = review_thread_ids_on_disk(&thread_dir)?
+        .into_iter()
+        .filter(|thread_id| !expected_ids.contains(thread_id))
+        .collect::<std::collections::BTreeSet<_>>();
+    write_review_thread_tombstones(&thread_dir, &stale_ids)?;
 
     write_review_threads(bundle_dir, threads)?;
 
@@ -623,11 +666,12 @@ fn rewrite_review_threads(
                 path.extension().and_then(|value| value.to_str()),
                 Some("yaml" | "md")
             )
-            && !expected.contains(&path)
+            && !expected_paths.contains(&path)
         {
             fs::remove_file(&path).map_err(|err| OrbitError::Io(err.to_string()))?;
         }
     }
+    remove_review_thread_tombstones(&thread_dir)?;
     Ok(())
 }
 
@@ -640,6 +684,7 @@ fn read_review_threads(bundle_dir: &Path) -> Result<Vec<TaskReviewThreadV2>, Orb
         )));
     }
 
+    let tombstones = read_review_thread_tombstones(&thread_dir)?;
     let mut threads = Vec::new();
     for entry in fs::read_dir(&thread_dir).map_err(|err| OrbitError::Io(err.to_string()))? {
         let entry = entry.map_err(|err| OrbitError::Io(err.to_string()))?;
@@ -649,11 +694,70 @@ fn read_review_threads(bundle_dir: &Path) -> Result<Vec<TaskReviewThreadV2>, Orb
         }
         let metadata: ReviewThreadMetadataV2 = read_yaml_file(&path)?;
         metadata.validate()?;
+        if tombstones.contains(&metadata.thread_id) {
+            continue;
+        }
         let body = read_required_text(&path.with_extension("md"))?;
         threads.push(TaskReviewThreadV2 { metadata, body });
     }
     threads.sort_by(|left, right| left.metadata.thread_id.cmp(&right.metadata.thread_id));
     Ok(threads)
+}
+
+fn review_thread_ids_on_disk(
+    thread_dir: &Path,
+) -> Result<std::collections::BTreeSet<String>, OrbitError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for entry in fs::read_dir(thread_dir).map_err(|err| OrbitError::Io(err.to_string()))? {
+        let entry = entry.map_err(|err| OrbitError::Io(err.to_string()))?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
+            continue;
+        }
+        if let Some(thread_id) = path.file_stem().and_then(|value| value.to_str()) {
+            ids.insert(thread_id.to_string());
+        }
+    }
+    Ok(ids)
+}
+
+fn write_review_thread_tombstones(
+    thread_dir: &Path,
+    stale_ids: &std::collections::BTreeSet<String>,
+) -> Result<(), OrbitError> {
+    if stale_ids.is_empty() {
+        remove_review_thread_tombstones(thread_dir)?;
+        return Ok(());
+    }
+    let body = stale_ids.iter().cloned().collect::<Vec<_>>().join("\n") + "\n";
+    atomic_write_text(&thread_dir.join(REVIEW_THREAD_TOMBSTONES_FILE), &body)
+        .map_err(|err| OrbitError::Io(err.to_string()))
+}
+
+fn remove_review_thread_tombstones(thread_dir: &Path) -> Result<(), OrbitError> {
+    match fs::remove_file(thread_dir.join(REVIEW_THREAD_TOMBSTONES_FILE)) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(OrbitError::Io(err.to_string())),
+    }
+}
+
+fn read_review_thread_tombstones(
+    thread_dir: &Path,
+) -> Result<std::collections::BTreeSet<String>, OrbitError> {
+    let path = thread_dir.join(REVIEW_THREAD_TOMBSTONES_FILE);
+    match fs::read_to_string(&path) {
+        Ok(raw) => Ok(raw
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(ToString::to_string)
+            .collect()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Ok(std::collections::BTreeSet::new())
+        }
+        Err(err) => Err(OrbitError::Io(err.to_string())),
+    }
 }
 
 fn read_artifact_manifest(bundle_dir: &Path) -> Result<Option<ArtifactManifestV2>, OrbitError> {
@@ -675,11 +779,45 @@ fn read_artifact_manifest(bundle_dir: &Path) -> Result<Option<ArtifactManifestV2
                 ))
             })?;
             manifest.validate()?;
+            validate_artifact_manifest_files(&artifact_dir, &manifest)?;
             Ok(Some(manifest))
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(OrbitError::Io(err.to_string())),
     }
+}
+
+fn validate_artifact_manifest_files(
+    artifact_dir: &Path,
+    manifest: &ArtifactManifestV2,
+) -> Result<(), OrbitError> {
+    for file in &manifest.files {
+        let blob_path = artifact_dir.join(&file.blob);
+        let bytes = fs::read(&blob_path).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                OrbitError::Store(format!(
+                    "artifact manifest references missing file {}",
+                    blob_path.display()
+                ))
+            } else {
+                OrbitError::Io(err.to_string())
+            }
+        })?;
+        if bytes.len() as u64 != file.size_bytes {
+            return Err(OrbitError::Store(format!(
+                "artifact manifest size mismatch for {}",
+                blob_path.display()
+            )));
+        }
+        let actual_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        if actual_sha256 != file.sha256 {
+            return Err(OrbitError::Store(format!(
+                "artifact manifest sha256 mismatch for {}",
+                blob_path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn cleanup_partial_bundle(bundle_dir: &Path) -> Result<(), OrbitError> {
@@ -710,8 +848,9 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use orbit_common::types::{
-        ReviewThreadMessageMetadataV2, ReviewThreadStatus, TASK_ARTIFACT_SCHEMA_VERSION,
-        TaskPriority, TaskStatus, TaskType,
+        ArtifactManifestFileV2, ReviewThreadMessageMetadataV2, ReviewThreadStatus,
+        TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TaskPriority, TaskStatus,
+        TaskType,
     };
     use tempfile::TempDir;
 
@@ -1265,6 +1404,60 @@ mod tests {
     }
 
     #[test]
+    fn read_bundle_rejects_manifest_entry_with_missing_artifact_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = bundle_store(&temp);
+        store
+            .create_bundle(&sample_bundle("ORB-00000"))
+            .expect("create bundle");
+        let now = Utc.with_ymd_and_hms(2026, 5, 11, 12, 0, 0).unwrap();
+        let bundle_dir = store.bundle_path("ORB-00000").expect("bundle path");
+        let blob = format!("{TASK_ARTIFACT_FILES_DIR_NAME}/result.txt");
+        let blob_path = bundle_dir.join(TASK_ARTIFACTS_DIR_NAME).join(&blob);
+        atomic_write_text(&blob_path, "hello").expect("write artifact blob");
+        let manifest = ArtifactManifestV2 {
+            schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
+            files: vec![ArtifactManifestFileV2 {
+                path: "result.txt".to_string(),
+                blob: blob.clone(),
+                sha256: format!("{:x}", Sha256::digest(b"hello")),
+                media_type: "text/plain".to_string(),
+                size_bytes: 5,
+                created_by: "codex:gpt-5.5".to_string(),
+                created_at: now,
+            }],
+        };
+        store
+            .rewrite_artifact_manifest("ORB-00000", &manifest)
+            .expect("write manifest");
+        fs::remove_file(blob_path).expect("remove artifact blob");
+
+        assert!(matches!(
+            store.read_bundle("ORB-00000"),
+            Err(OrbitError::Store(message)) if message.contains("missing file")
+        ));
+    }
+
+    #[test]
+    fn read_bundle_rejects_event_status_newer_than_envelope_status() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = bundle_store(&temp);
+        store
+            .create_bundle(&sample_bundle("ORB-00000"))
+            .expect("create bundle");
+        let mut envelope = sample_bundle("ORB-00000").envelope;
+        envelope.status = TaskStatus::InProgress;
+        store
+            .rewrite_envelope("ORB-00000", &envelope)
+            .expect("rewrite mismatched envelope");
+
+        assert!(matches!(
+            store.read_bundle("ORB-00000"),
+            Err(OrbitError::Store(message)) if message.contains("event log status")
+        ));
+    }
+
+    #[test]
     fn rewrite_review_threads_validates_before_touching_existing_files() {
         let temp = TempDir::new().expect("tempdir");
         let store = bundle_store(&temp);
@@ -1286,6 +1479,30 @@ mod tests {
                 .map(|thread| thread.metadata.thread_id)
                 .collect::<Vec<_>>(),
             vec!["RT-0001", "RT-0002"]
+        );
+    }
+
+    #[test]
+    fn read_review_threads_filters_tombstoned_partial_rewrite_orphans() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = bundle_store(&temp);
+        let mut bundle = sample_bundle("ORB-00000");
+        bundle.review_threads = sample_review_threads();
+        store.create_bundle(&bundle).expect("create bundle");
+        let thread_dir = store
+            .bundle_path("ORB-00000")
+            .expect("bundle path")
+            .join(TASK_REVIEW_THREADS_DIR_NAME);
+        atomic_write_text(&thread_dir.join(REVIEW_THREAD_TOMBSTONES_FILE), "RT-0001\n")
+            .expect("write tombstones");
+
+        let read = store.read_bundle("ORB-00000").expect("read bundle");
+        assert_eq!(
+            read.review_threads
+                .into_iter()
+                .map(|thread| thread.metadata.thread_id)
+                .collect::<Vec<_>>(),
+            vec!["RT-0002"]
         );
     }
 }

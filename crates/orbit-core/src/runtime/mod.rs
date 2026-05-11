@@ -338,6 +338,10 @@ impl OrbitRuntime {
         self.context.paths()
     }
 
+    pub(crate) fn task_artifact_store(&self) -> crate::config::TaskArtifactStoreMode {
+        self.context.task_artifact_store()
+    }
+
     pub(crate) fn data_root_path(&self) -> &Path {
         self.context.data_root()
     }

@@ -13,7 +13,9 @@ use orbit_store::{
 };
 use orbit_tools::ToolRegistry;
 
-use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
+use crate::config::{
+    CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig, TaskArtifactStoreMode,
+};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
@@ -174,6 +176,7 @@ pub(crate) struct OrbitRuntimeSettings {
     task_delegate_approval: bool,
     scoring_enabled: bool,
     graph_editing: bool,
+    task_artifact_store: TaskArtifactStoreMode,
     pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
@@ -194,6 +197,7 @@ impl OrbitRuntimeSettings {
         task_delegate_approval: bool,
         scoring_enabled: bool,
         graph_editing: bool,
+        task_artifact_store: TaskArtifactStoreMode,
         pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
@@ -206,6 +210,7 @@ impl OrbitRuntimeSettings {
             task_delegate_approval,
             scoring_enabled,
             graph_editing,
+            task_artifact_store,
             pr_config,
             v2_backend,
             workflow_base_branch,
@@ -215,6 +220,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr_config
+    }
+
+    pub(crate) fn task_artifact_store(&self) -> TaskArtifactStoreMode {
+        self.task_artifact_store
     }
 
     pub(crate) fn v2_backend(&self) -> Option<&str> {
@@ -318,6 +327,10 @@ impl OrbitContext {
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
         self.runtime.pr_config()
+    }
+
+    pub(crate) fn task_artifact_store(&self) -> TaskArtifactStoreMode {
+        self.runtime.task_artifact_store()
     }
 
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1

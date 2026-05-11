@@ -232,7 +232,7 @@ During the cutover window, the runtime selects this store only when workspace `c
 
 The workspace projection under `.orbit/tasks/<task-id>` is a symlink to the canonical bundle. Task writes through either the canonical path or the projection update the same files; there is no second writable copy and no bundle-level divergence protocol. If `.orbit/tasks/` is deleted, Orbit rebuilds the symlinks from `.orbit/config.yaml` and `index.sqlite`. If `.orbit/config.yaml` is lost, Orbit prompts to rebind by matching the current path, repo root, and optional remote fingerprints against `index.sqlite`; if no confident match exists, the user chooses or creates a workspace binding.
 
-Task delete removes the projection entry, deletes the canonical home bundle, and unregisters the task from `index.sqlite`. Generated index rows and relation edges involving the deleted task are removed with the binding.
+Task delete first verifies that any projection entry is a symlink, then unregisters the binding from `index.sqlite`, deletes the canonical home bundle, and removes the projection. Generated index rows and relation edges involving the deleted task are removed with the binding. If deletion is interrupted after unregistering, the remaining bundle is orphaned storage rather than a listed task and a retry may finish cleanup.
 
 ### 2.7 Generated local indexes
 
@@ -242,7 +242,19 @@ The bundle remains canonical. The registry maintains generated projections from 
 - `task_bundle_tags`: normalized tag rows with AND-style filtering semantics.
 - `task_bundle_relations`: directed `(source_task_id, relation_type, target_task_id)` rows plus an inverse lookup index.
 
-Task mutations rewrite the generated rows after the envelope write. A failed index update should be diagnosed and repaired from bundles rather than treated as a second canonical copy. V2 list and filter paths may use the index when every registered task has an index row; otherwise they fall back to reading the registered bundles directly. Full-text search still scans task content until the Phase 5 lexical/semantic indexes land.
+Task mutations rewrite the generated rows after the envelope write. The index row `updated_at` is a version stamp for the canonical envelope. V2 list and filter paths may use the index only when every registered task has an index row and every indexed `updated_at` matches the bundle envelope. Count or version mismatches trigger a lazy rebuild from registered bundles; if rebuild fails, queries fall back to reading bundles directly. Full-text search still scans task content until the Phase 5 lexical/semantic indexes land.
+
+### 2.8 Crash Consistency
+
+The v2 bundle is local and file-backed, so multi-file mutations are not fully transactional. The implementation keeps the envelope canonical and makes generated data rebuildable, but the following interrupted states are expected repair cases:
+
+- Document updates may write Markdown sidecars before `task.yaml`; readers return the sidecar content and the previous envelope metadata until the next successful mutation.
+- History updates may append `events.jsonl` before `task.yaml`; readers reject bundles when the last status event does not match the envelope status.
+- Artifact updates may write files before `manifest.yaml`; unreferenced files under `artifacts/files/` are ignored, while manifest entries with missing files, size drift, or hash drift are corruption and fail loudly.
+- Review-thread rewrites tombstone removed thread IDs before pruning files, so a crash before prune does not resurrect deleted threads.
+- Generated index writes may fail after the envelope changes; `updated_at` validation detects the stale row and rebuilds from bundles before indexed reads.
+
+Task lock reservations in v2 mode require `.orbit/config.yaml` to provide the workspace binding. If that file disappears while a runtime is active, lock writes fail instead of silently creating legacy `NULL`-workspace reservations.
 
 ---
 

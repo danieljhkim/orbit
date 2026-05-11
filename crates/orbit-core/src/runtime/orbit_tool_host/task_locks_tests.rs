@@ -1,4 +1,4 @@
-use orbit_common::types::TaskStatus;
+use orbit_common::types::{OrbitError, TaskStatus};
 use orbit_store::{TaskLockConflict, TaskLockHolder};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -356,6 +356,33 @@ fn v2_task_locks_store_workspace_binding_id() {
         .as_str()
         .expect("reservation carries workspace_id");
     assert!(workspace_id.starts_with("repo-"), "{workspace_id}");
+}
+
+#[test]
+fn v2_task_locks_fail_when_workspace_binding_config_disappears() {
+    let _env = unmanaged_tool_env_guard();
+    let (_root, runtime, repo_root) = v2_test_runtime();
+    std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
+    std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n").expect("write source file");
+    std::fs::remove_file(repo_root.join(".orbit/config.yaml")).expect("remove workspace config");
+
+    let err = runtime
+        .execute_tool_command(
+            "orbit.task.locks.reserve",
+            json!({
+                "files": ["file:src/lib.rs"],
+                "ttl_seconds": 3600,
+                "model": "gpt-5.5",
+            }),
+            None,
+            None,
+        )
+        .expect_err("missing v2 binding config should fail");
+    assert!(matches!(
+        err,
+        OrbitError::Store(message)
+            if message.contains("task artifact v2 workspace config is missing")
+    ));
 }
 
 #[test]

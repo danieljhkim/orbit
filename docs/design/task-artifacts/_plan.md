@@ -191,16 +191,18 @@ Implemented in working tree:
 
 - Registry schema version 2 with `task_bundle_index`, `task_bundle_tags`, and `task_bundle_relations`.
 - Transactional replacement of generated rows from a validated v2 task envelope.
-- Workspace-scoped index coverage checks so v2 list/filter paths fall back to registered bundles when an index is incomplete.
+- Workspace-scoped index coverage and `updated_at` version checks so v2 list/filter paths lazily rebuild stale generated rows or fall back to registered bundles.
 - V2 list/filter/tag paths read through generated status, priority, and tag indexes when coverage is complete.
 - Forward and inverse relation lookup helpers over `task_bundle_relations`.
 - Mutation hooks for create, document update, history/status update, review-thread update, and artifact update to refresh generated index rows.
-- Task reservation records can carry the v2 `workspace_id`; runtime lock tools pass it from `.orbit/config.yaml`, and reservation queries prefer that binding while still seeing legacy path-scoped rows for cleanup.
-- V2 delete removes the `.orbit/tasks/<task-id>` projection, deletes the canonical home bundle, and unregisters task binding/index/relation rows.
+- Task reservation records can carry the v2 `workspace_id`; runtime lock tools pass it from `.orbit/config.yaml`, fail loudly if the v2 binding config disappears, and reservation queries prefer that binding while still seeing legacy path-scoped rows for cleanup.
+- V2 delete unregisters task binding/index/relation rows before deleting the canonical home bundle and `.orbit/tasks/<task-id>` projection.
+- Review-thread rewrites tombstone removed thread IDs before pruning orphan files so partial rewrites do not resurrect deleted threads.
 
 Still open in Phase 4:
 
 - Use relation indexes in public lineage/query surfaces once those surfaces expose typed v2 relations.
+- Multi-file bundle mutations are still detect-and-repair rather than fully transactional; the spec now names the accepted crash midpoints.
 
 ## Phase 5 - Consumers And Search
 
@@ -254,7 +256,7 @@ Exit criteria:
 | Phase 1 - V2 Domain Types | Implemented in working tree | `orbit-common` domain contracts and focused tests are in place. |
 | Phase 2 - Home Registry And Workspace Binding | Implemented in working tree | `orbit-store` registry foundation and projection rebuild tests are in place. |
 | Phase 3 - V2 Bundle Store | Implemented in working tree | V2 create/get/list/update/review/artifact backend is wired behind `[task] artifact_store = "v2"`. |
-| Phase 4 - Task Operations And Local Indexes | In progress | Generated indexes, lock rekeying, relation query acceleration, and delete semantics remain. |
+| Phase 4 - Task Operations And Local Indexes | In progress | Generated indexes, lock rekeying, relation query acceleration, delete semantics, and review-found repair guards are implemented; public relation query surfaces remain. |
 | Phase 5 - Consumers And Search | Not started | Updates surfaces outside storage. |
 | Phase 6 - Remove Old Store Shape | Not started | Cleanup after v2 passes. |
 
@@ -270,6 +272,9 @@ Exit criteria:
 - `cargo test -p orbit-store v2_store`
 - `cargo test -p orbit-core task_artifact_store`
 - `cargo test -p orbit-core v2_task_backend`
+- `cargo test -p orbit-store`
+- `cargo test -p orbit-core`
+- `git diff --check`
 
 ## Suggested Next Slice
 

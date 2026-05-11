@@ -473,6 +473,10 @@ fn find_reservation_conflicts(
 }
 
 fn reservation_scope_clause() -> &'static str {
+    // Parameter contract for every caller: ?1 is workspace_id, ?2 is
+    // workspace_orbit_dir. V2 callers see workspace-bound rows plus legacy
+    // NULL-workspace rows for the same orbit dir; legacy callers see all rows
+    // scoped to that orbit dir.
     "(
         (?1 IS NOT NULL AND (workspace_id = ?1 OR (workspace_id IS NULL AND workspace_orbit_dir = ?2)))
         OR (?1 IS NULL AND workspace_orbit_dir = ?2)

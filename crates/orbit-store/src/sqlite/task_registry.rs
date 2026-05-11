@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -376,54 +376,85 @@ impl TaskRegistryStore {
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
 
+        write_task_index_rows(&tx, &workspace_id, envelope)?;
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    pub fn replace_workspace_task_indexes(
+        &self,
+        workspace_id: &str,
+        envelopes: &[TaskEnvelopeV2],
+    ) -> Result<(), OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        for envelope in envelopes {
+            envelope.validate()?;
+        }
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        let registered = task_ids_for_workspace(&tx, &workspace_id)?;
+        let requested = envelopes
+            .iter()
+            .map(|envelope| envelope.id.clone())
+            .collect::<BTreeSet<_>>();
+        if registered != requested {
+            return Err(OrbitError::Store(format!(
+                "task index rebuild for workspace '{}' expected registered ids {:?}, got {:?}",
+                workspace_id, registered, requested
+            )));
+        }
+
         tx.execute(
-            "INSERT INTO task_bundle_index (
-                task_id, workspace_id, status, priority, created_at, updated_at, terminal_month
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(task_id) DO UPDATE SET
-                workspace_id = excluded.workspace_id,
-                status = excluded.status,
-                priority = excluded.priority,
-                created_at = excluded.created_at,
-                updated_at = excluded.updated_at,
-                terminal_month = excluded.terminal_month",
-            params![
-                &envelope.id,
-                &workspace_id,
-                envelope.status.to_string(),
-                envelope.priority.to_string(),
-                envelope.created_at.to_rfc3339(),
-                envelope.updated_at.to_rfc3339(),
-                terminal_month(envelope.status, envelope.updated_at),
-            ],
+            "DELETE FROM task_bundle_tags WHERE workspace_id = ?1",
+            [&workspace_id],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+        tx.execute(
+            "DELETE FROM task_bundle_relations WHERE workspace_id = ?1",
+            [&workspace_id],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+        tx.execute(
+            "DELETE FROM task_bundle_index WHERE workspace_id = ?1",
+            [&workspace_id],
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
 
-        for tag in normalize_task_tags(envelope.tags.clone()) {
-            tx.execute(
-                "INSERT OR IGNORE INTO task_bundle_tags(task_id, workspace_id, tag)
-                 VALUES (?1, ?2, ?3)",
-                params![&envelope.id, &workspace_id, &tag],
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        for envelope in envelopes {
+            write_task_index_rows(&tx, &workspace_id, envelope)?;
         }
-
-        for relation in &envelope.relations {
-            tx.execute(
-                "INSERT OR IGNORE INTO task_bundle_relations(
-                    source_task_id, workspace_id, relation_type, target_task_id
-                ) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    &envelope.id,
-                    &workspace_id,
-                    relation_type_name(relation.relation_type),
-                    &relation.target
-                ],
-            )
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        }
-
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    pub fn indexed_task_versions_for_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<BTreeMap<String, String>, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT task_id, updated_at FROM task_bundle_index
+                 WHERE workspace_id = ?1
+                 ORDER BY task_id ASC",
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([workspace_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        rows.collect::<Result<BTreeMap<_, _>, _>>()
+            .map_err(|e| OrbitError::Store(e.to_string()))
     }
 
     pub fn indexed_task_count_for_workspace(
@@ -532,7 +563,7 @@ impl TaskRegistryStore {
                     source_task_id,
                     relation_type_name(relation_type)
                 ],
-                |row| row.get(0),
+                |row| row.get::<_, String>(0),
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -900,6 +931,79 @@ fn task_bundle_by_id(
     )
     .optional()
     .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn task_ids_for_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<BTreeSet<String>, OrbitError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id FROM task_bundle_bindings
+             WHERE workspace_id = ?1
+             ORDER BY task_id ASC",
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    let rows = stmt
+        .query_map([workspace_id], |row| row.get::<_, String>(0))
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    rows.collect::<Result<BTreeSet<_>, _>>()
+        .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn write_task_index_rows(
+    tx: &rusqlite::Transaction<'_>,
+    workspace_id: &str,
+    envelope: &TaskEnvelopeV2,
+) -> Result<(), OrbitError> {
+    tx.execute(
+        "INSERT INTO task_bundle_index (
+            task_id, workspace_id, status, priority, created_at, updated_at, terminal_month
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(task_id) DO UPDATE SET
+            workspace_id = excluded.workspace_id,
+            status = excluded.status,
+            priority = excluded.priority,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            terminal_month = excluded.terminal_month",
+        params![
+            &envelope.id,
+            workspace_id,
+            envelope.status.to_string(),
+            envelope.priority.to_string(),
+            envelope.created_at.to_rfc3339(),
+            envelope.updated_at.to_rfc3339(),
+            terminal_month(envelope.status, envelope.updated_at),
+        ],
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+    for tag in normalize_task_tags(envelope.tags.clone()) {
+        tx.execute(
+            "INSERT OR IGNORE INTO task_bundle_tags(task_id, workspace_id, tag)
+             VALUES (?1, ?2, ?3)",
+            params![&envelope.id, workspace_id, &tag],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    }
+
+    for relation in &envelope.relations {
+        tx.execute(
+            "INSERT OR IGNORE INTO task_bundle_relations(
+                source_task_id, workspace_id, relation_type, target_task_id
+            ) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                &envelope.id,
+                workspace_id,
+                relation_type_name(relation.relation_type),
+                &relation.target
+            ],
+        )
+        .map_err(|e| OrbitError::Store(e.to_string()))?;
+    }
+
+    Ok(())
 }
 
 fn next_workspace_id_candidate(

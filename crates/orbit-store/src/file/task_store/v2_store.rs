@@ -151,7 +151,7 @@ impl TaskV2Store {
         has_external_ref_system: Option<&str>,
     ) -> Result<Vec<Task>, OrbitError> {
         if parent_id.is_some() || batch_id.is_some() {
-            return Ok(Vec::new());
+            return Err(unsupported_v2_operation("lineage filters"));
         }
 
         let mut tasks = match self.indexed_tasks(TaskIndexFilter {
@@ -189,12 +189,6 @@ impl TaskV2Store {
             priority: None,
             tags: required_tags.clone(),
         })? {
-            let mut tasks = tasks;
-            tasks.retain(|task| {
-                required_tags
-                    .iter()
-                    .all(|required| task.tags.iter().any(|tag| tag == required))
-            });
             return Ok(tasks);
         }
         let mut tasks = self.list_tasks()?;
@@ -249,11 +243,10 @@ impl TaskV2Store {
 
     pub(crate) fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
         orbit_common::types::validate_orb_task_id(id)?;
-        let bundle_dir = self.bundle_store.bundle_path(id)?;
-        if !bundle_dir.exists() {
-            return self.bundle_store.delete_bundle(id);
-        }
-        self.with_task_lock(id, || self.bundle_store.delete_bundle(id))
+        let lock_target = self.bundle_store.bundle_path(id)?;
+        with_exclusive_file_lock(&lock_target, "task artifact v2 delete", || {
+            self.bundle_store.delete_bundle(id)
+        })
     }
 
     pub(crate) fn update_task_document(
@@ -584,7 +577,7 @@ impl TaskV2Store {
     }
 
     fn indexed_tasks(&self, filter: TaskIndexFilter) -> Result<Option<Vec<Task>>, OrbitError> {
-        if !self.index_is_complete()? {
+        if !self.index_is_usable()? {
             return Ok(None);
         }
         let ids = self
@@ -593,12 +586,49 @@ impl TaskV2Store {
         self.tasks_from_ids(ids).map(Some)
     }
 
-    fn index_is_complete(&self) -> Result<bool, OrbitError> {
-        let registered = self.registry.tasks_for_workspace(&self.workspace_id)?.len();
+    fn index_is_usable(&self) -> Result<bool, OrbitError> {
+        let registered = self.registry.tasks_for_workspace(&self.workspace_id)?;
         let indexed = self
             .registry
-            .indexed_task_count_for_workspace(&self.workspace_id)?;
-        Ok(registered == indexed)
+            .indexed_task_versions_for_workspace(&self.workspace_id)?;
+        if registered.len() != indexed.len() {
+            return self.rebuild_index_best_effort("index count mismatch");
+        }
+
+        for binding in registered {
+            let Some(indexed_updated_at) = indexed.get(&binding.task_id) else {
+                return self.rebuild_index_best_effort("missing index row");
+            };
+            let bundle = self.read_existing_bundle(&binding.task_id)?;
+            if bundle.envelope.updated_at.to_rfc3339() != *indexed_updated_at {
+                return self.rebuild_index_best_effort("stale index row");
+            }
+        }
+        Ok(true)
+    }
+
+    fn rebuild_index_best_effort(&self, reason: &str) -> Result<bool, OrbitError> {
+        let bundles = self.bundle_store.list_bundles()?;
+        let envelopes = bundles
+            .into_iter()
+            .map(|bundle| bundle.envelope)
+            .collect::<Vec<_>>();
+        match self
+            .registry
+            .replace_workspace_task_indexes(&self.workspace_id, &envelopes)
+        {
+            Ok(()) => Ok(true),
+            Err(err) => {
+                orbit_common::tracing::warn!(
+                    target: "orbit.store.task_v2",
+                    workspace_id = %self.workspace_id,
+                    reason,
+                    error = %err,
+                    "generated task index rebuild failed; falling back to bundle scan",
+                );
+                Ok(false)
+            }
+        }
     }
 
     fn tasks_from_ids(&self, ids: Vec<String>) -> Result<Vec<Task>, OrbitError> {
@@ -1214,6 +1244,70 @@ mod tests {
                 .map(|task| task.title)
                 .collect::<Vec<_>>(),
             vec!["Review task"]
+        );
+    }
+
+    #[test]
+    fn list_tasks_filtered_rejects_unwired_lineage_filters() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = store(&temp);
+
+        let err = store
+            .list_tasks_filtered(None, None, Some("ORB-00000"), None, None, None)
+            .expect_err("lineage filters are not wired for v2");
+        assert!(err.to_string().contains("lineage filters"), "{err}");
+    }
+
+    #[test]
+    fn stale_generated_index_is_rebuilt_before_filtered_reads() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = store(&temp);
+        store
+            .create_task(create_params("Indexed", TaskStatus::Backlog))
+            .expect("create task");
+        let stale_envelope = store
+            .bundle_store
+            .read_bundle("ORB-00000")
+            .expect("read bundle")
+            .envelope;
+
+        store
+            .update_task_history(
+                "ORB-00000",
+                &TaskHistoryUpdateParams {
+                    actor: "codex:gpt-5.5".to_string(),
+                    status: Some(TaskStatus::InProgress),
+                    status_note: Some("Starting".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("update status");
+        store
+            .registry
+            .replace_task_index(&store.workspace_id, &stale_envelope)
+            .expect("force stale index row");
+
+        let matches = store
+            .list_tasks_filtered(Some(TaskStatus::InProgress), None, None, None, None, None)
+            .expect("filtered tasks");
+        assert_eq!(
+            matches.into_iter().map(|task| task.id).collect::<Vec<_>>(),
+            vec!["ORB-00000"]
+        );
+        let current_updated_at = store
+            .bundle_store
+            .read_bundle("ORB-00000")
+            .expect("read current bundle")
+            .envelope
+            .updated_at
+            .to_rfc3339();
+        assert_eq!(
+            store
+                .registry
+                .indexed_task_versions_for_workspace(&store.workspace_id)
+                .expect("index versions")
+                .get("ORB-00000"),
+            Some(&current_updated_at)
         );
     }
 

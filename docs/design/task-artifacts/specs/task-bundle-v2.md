@@ -72,7 +72,7 @@ workspace_id: orbit-a3f9c2
 
 `.orbit/tasks/` is a symlink projection to canonical bundles. Task mutations must make the canonical bundle and registry metadata durable before reporting success. If `.orbit/tasks/` is deleted, Orbit rebuilds projection links from `.orbit/config.yaml` and `index.sqlite`. If `.orbit/config.yaml` is missing, Orbit must prompt to rebind by matching the checkout path, repo root, and optional remote fingerprints against `index.sqlite`; ambiguous matches must not silently attach to a workspace.
 
-Delete removes the projection entry, removes the canonical bundle directory, and unregisters the task binding and generated index rows. A projection path that exists as a non-symlink must stop the delete rather than removing unrelated workspace files.
+Delete verifies that any projection entry is a symlink, unregisters the task binding and generated index rows, removes the canonical bundle directory, then removes the projection entry. A projection path that exists as a non-symlink must stop the delete before unregistering rather than removing unrelated workspace files.
 
 ## Envelope
 
@@ -182,11 +182,22 @@ The initial registry projections are:
 - `task_bundle_tags(task_id, workspace_id, tag)`.
 - `task_bundle_relations(source_task_id, workspace_id, relation_type, target_task_id)`.
 
-Indexes are generated data. The bundle envelope is canonical, and repair/rebuild paths may delete and regenerate index rows from bundles. Query paths should treat a missing or incomplete index as a reason to fall back to bundle reads, not as proof that tasks do not exist.
+Indexes are generated data. The bundle envelope is canonical, and repair/rebuild paths may delete and regenerate index rows from bundles. The `task_bundle_index.updated_at` value is the envelope version stamp. Query paths should treat a missing row, incomplete index, or `updated_at` mismatch as a cache miss: rebuild from registered bundles when possible, otherwise fall back to bundle reads rather than treating the index as proof that tasks do not exist.
 
 ## Local Locks
 
-Task lock reservations are not task artifacts. They remain local operational state in SQLite, keyed by workspace binding and canonical task IDs, with TTL/release semantics and audit events. File-overlap checks remain the conflict mechanism for actual work exclusion. During cutover, v2 reservations carry `workspace_id` alongside the legacy `.orbit` path so cleanup can still find older path-scoped rows; a later old-store removal can make `workspace_id` mandatory.
+Task lock reservations are not task artifacts. They remain local operational state in SQLite, keyed by workspace binding and canonical task IDs, with TTL/release semantics and audit events. File-overlap checks remain the conflict mechanism for actual work exclusion. During cutover, v2 reservations carry `workspace_id` alongside the legacy `.orbit` path so cleanup can still find older path-scoped rows; a later old-store removal can make `workspace_id` mandatory. In v2 mode, a missing `.orbit/config.yaml` workspace binding is an error at reservation write time.
+
+## Crash Consistency
+
+The file bundle does not provide all-or-nothing transactions across Markdown sidecars, JSONL logs, artifacts, envelope metadata, and generated SQLite indexes. The supported failure model is detect-and-repair:
+
+- `task.yaml` remains canonical for structured metadata.
+- JSONL tail corruption is repaired only at the final partial row; corruption before the tail is an error.
+- The last event with `to_status` must match `task.yaml.status`; mismatches are corruption and must fail reads.
+- Review-thread tombstones hide deleted thread IDs if a rewrite crashes before orphan file pruning.
+- Generated indexes are invalid when count or `updated_at` stamps differ from registered bundle envelopes and must be rebuilt from bundles.
+- Artifact manifest entries must reference existing relative files with matching size and SHA-256; unmanifested files are ignored until a future compaction/prune command removes them.
 
 ## Artifacts
 

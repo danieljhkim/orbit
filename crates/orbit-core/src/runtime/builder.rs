@@ -146,6 +146,7 @@ pub(crate) fn build_context_from_roots(
             task_delegate_approval,
             scoring_enabled,
             graph_editing,
+            runtime_config.task_artifact_store(),
             pr_config,
             v2_backend,
             workflow_base_branch,
