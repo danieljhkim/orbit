@@ -181,7 +181,7 @@ Biographies survive structural change *only* if KG `stable_id` survives the stru
 
 ## Task References
 
-- [T20260506-11] — Removed graph task attribution; superseded by this feature's [ADR-001](./4_decisions.md).
+- [T20260506-11] — Removed graph task attribution; superseded by this feature's [ADR-0121](./4_decisions.md).
 - [T20260506-15] — Added `orbit.task.locks.reserve` `files` shape and the `orbit-locks` skill; the originating-task lineage exemplar that motivates derivation-first edges.
 - [T20260510-17] — Removed agent-facing lock instructions; the authoring failure that surfaced lineage as a need.
 

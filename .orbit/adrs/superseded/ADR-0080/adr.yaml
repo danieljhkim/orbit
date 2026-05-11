@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0080
+title: Align graph task-ID grammar with task-store IDs
+status: superseded
+owner: legacy:knowledge-graph
+created_at: 2026-05-11T02:06:39.375430Z
+accepted_at: 2026-05-11T02:06:39.376247Z
+last_updated: 2026-05-11T02:06:39.457083Z
+related_features:
+- knowledge-graph
+related_tasks:
+- T20260428-1
+supersedes: []
+superseded_by: ADR-0083
+legacy_ids:
+- knowledge-graph/ADR-022
+validation_warnings: []
+legacy_validation: none

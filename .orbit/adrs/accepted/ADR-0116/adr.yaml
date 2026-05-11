@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0116
+title: Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one
+status: accepted
+owner: legacy:semantic-search
+created_at: 2026-05-11T02:06:39.420697Z
+accepted_at: 2026-05-11T02:06:39.421503Z
+last_updated: 2026-05-11T02:06:39.421503Z
+related_features:
+- semantic-search
+related_tasks:
+- T20260510-3
+- T20260510-9
+supersedes: []
+legacy_ids:
+- semantic-search/ADR-004
+validation_warnings: []
+legacy_validation: none

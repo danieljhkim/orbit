@@ -20,7 +20,7 @@ The task store is already growing past the point where lexical recall is suffici
 
 Lexical search via SQLite FTS5 (BM25) is part of the answer — it handles literal identifiers, error codes, and task IDs better than embeddings. But it misses the cases where the user's vocabulary doesn't match the document's. Semantic search via local embeddings handles that. The two are complementary, not competing, which is why phase 1 ships them together as a hybrid retrieval pipeline ([4_decisions.md ADR-004](./4_decisions.md)).
 
-The constraint that shapes every other decision: **the default `orbit` install is single-binary, no-daemon, and no cloud dependency**. That rules out hosted embedding APIs and rules out an always-on inference daemon. Phase 1 keeps the default `orbit` binary slim by moving fastembed-rs into a separate `orbit-embed-companion` binary that the user opts into via `orbit semantic install` ([4_decisions.md ADR-001](./4_decisions.md), [ADR-005](./4_decisions.md)).
+The constraint that shapes every other decision: **the default `orbit` install is single-binary, no-daemon, and no cloud dependency**. That rules out hosted embedding APIs and rules out an always-on inference daemon. Phase 1 keeps the default `orbit` binary slim by moving fastembed-rs into a separate `orbit-embed-companion` binary that the user opts into via `orbit semantic install` ([4_decisions.md ADR-001](./4_decisions.md), [ADR-0117](./4_decisions.md)).
 
 ---
 

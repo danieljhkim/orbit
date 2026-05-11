@@ -344,7 +344,7 @@ This path stays separate from `orbit.task.update` and generic deterministic meta
 
 Planning-duel writeback now reports `task_status: "in-progress"` instead of `status_unchanged`; the plan artifact still lands through `planning_duel_resolved`.
 
-After [T20260509-9], `writeback_planning_duel_task` also extracts a "Context Files" section from the normalized winning plan and replaces `task.context_files` with the canonicalized selectors when extraction succeeds. Section recognition is strict (`##` or `###` heading whose trimmed text is exactly `context files` or `context_files`, optional trailing `:`); unindented `- ` / `* ` bullets contribute one entry each, and each entry is canonicalized via `orbit_common::utility::selector::canonical_selector`. Sections that are absent or recognized but yield zero canonical entries leave `task.context_files` untouched; entries that fail canonicalization are dropped with an `OrbitEvent::PlanningDuelContextFileSkipped` event for observability. Plumbing is a single optional field on `TaskAutomationUpdate` (`context_files: Option<Vec<String>>`); `None` leaves the field untouched, matching the `TaskDocumentUpdateParams.context_files` semantics already documented in `orbit-store`. See [ADR-048](./4_decisions.md#adr-048--auto-populate-taskcontext_files-from-the-winning-duel-plan).
+After [T20260509-9], `writeback_planning_duel_task` also extracts a "Context Files" section from the normalized winning plan and replaces `task.context_files` with the canonicalized selectors when extraction succeeds. Section recognition is strict (`##` or `###` heading whose trimmed text is exactly `context files` or `context_files`, optional trailing `:`); unindented `- ` / `* ` bullets contribute one entry each, and each entry is canonicalized via `orbit_common::utility::selector::canonical_selector`. Sections that are absent or recognized but yield zero canonical entries leave `task.context_files` untouched; entries that fail canonicalization are dropped with an `OrbitEvent::PlanningDuelContextFileSkipped` event for observability. Plumbing is a single optional field on `TaskAutomationUpdate` (`context_files: Option<Vec<String>>`); `None` leaves the field untouched, matching the `TaskDocumentUpdateParams.context_files` semantics already documented in `orbit-store`. See [ADR-0010](./4_decisions.md#adr-048--auto-populate-taskcontext_files-from-the-winning-duel-plan).
 
 ### 8.11 Task PR handoff summaries
 
@@ -385,7 +385,7 @@ current surface:
 Shared host scaffolding (`ScriptedHost`, `Action`, job/step builders) lives
 in `tests/mod.rs` so each block module stays focused on its own invariants.
 New executor blocks must land with a sibling `*_tests.rs` covering the
-analogous invariants — see ADR-047.
+analogous invariants — see [ADR-0011].
 
 ---
 

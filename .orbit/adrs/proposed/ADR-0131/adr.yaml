@@ -1,0 +1,16 @@
+schema_version: 1
+id: ADR-0131
+title: Orphan branch as registry mechanism
+status: proposed
+owner: legacy:task-sync
+created_at: 2026-05-11T02:06:39.435725Z
+last_updated: 2026-05-11T02:06:39.436007Z
+related_features:
+- task-sync
+related_tasks:
+- T20260505-12
+supersedes: []
+legacy_ids:
+- task-sync/ADR-001
+validation_warnings: []
+legacy_validation: none

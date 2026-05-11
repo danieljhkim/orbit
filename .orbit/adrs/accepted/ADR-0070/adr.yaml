@@ -1,0 +1,17 @@
+schema_version: 1
+id: ADR-0070
+title: Keep scan-time graph inclusion separate from runtime policy access
+status: accepted
+owner: legacy:knowledge-graph
+created_at: 2026-05-11T02:06:39.361831Z
+accepted_at: 2026-05-11T02:06:39.362787Z
+last_updated: 2026-05-11T02:06:39.362787Z
+related_features:
+- knowledge-graph
+related_tasks:
+- T20260423-0452
+supersedes: []
+legacy_ids:
+- knowledge-graph/ADR-012
+validation_warnings: []
+legacy_validation: none

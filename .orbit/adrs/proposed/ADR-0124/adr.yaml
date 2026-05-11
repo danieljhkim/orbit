@@ -1,0 +1,15 @@
+schema_version: 1
+id: ADR-0124
+title: SQLite edge table, not per-task YAML
+status: proposed
+owner: legacy:task-lineage
+created_at: 2026-05-11T02:06:39.430338Z
+last_updated: 2026-05-11T02:06:39.430623Z
+related_features:
+- task-lineage
+related_tasks: []
+supersedes: []
+legacy_ids:
+- task-lineage/ADR-004
+validation_warnings: []
+legacy_validation: none

@@ -12,29 +12,29 @@ This document captures open questions that the v2 implementation should resolve,
 
 ### 1.1 Retire `4_decisions.md`, or auto-generate?
 
-**Resolved by [ADR-006](./4_decisions.md#adr-006--auto-generate-per-feature-4_decisionsmd-index).** Auto-generate from the store; `4_decisions.md` becomes a build artifact committed to git for reviewers without Orbit installed.
+**Resolved by [ADR-0020](./4_decisions.md#adr-006--auto-generate-per-feature-4_decisionsmd-index).** Auto-generate from the store; `4_decisions.md` becomes a build artifact committed to git for reviewers without Orbit installed.
 
 ### 1.2 Should ADR scope extend beyond feature folders?
 
-**Resolved by [ADR-007](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index).** Yes. Cross-cutting ADRs live in a dedicated `docs/design/cross-cutting/` pseudo-feature. CLAUDE.md rules that earn ADR status migrate there over time. The follow-up sweep — identifying which existing CLAUDE.md rules should become ADRs — is its own task.
+**Resolved by [ADR-0021](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index).** Yes. Cross-cutting ADRs live in a dedicated `docs/design/cross-cutting/` pseudo-feature. CLAUDE.md rules that earn ADR status migrate there over time. The follow-up sweep — identifying which existing CLAUDE.md rules should become ADRs — is its own task.
 
 ### 1.3 Should ADR creation block on task linkage?
 
-**Resolved by [ADR-008](./4_decisions.md#adr-008--adr-creation-does-not-require-task-linkage).** No. Empty `related_tasks` at creation is permitted; the task requirement applies only at the `proposed → accepted` transition. The decision is explicitly framed as "iterate before constraining" — most likely candidate for revision based on observed corpus behavior.
+**Resolved by [ADR-0022](./4_decisions.md#adr-008--adr-creation-does-not-require-task-linkage).** No. Empty `related_tasks` at creation is permitted; the task requirement applies only at the `proposed → accepted` transition. The decision is explicitly framed as "iterate before constraining" — most likely candidate for revision based on observed corpus behavior.
 
 ### 1.4 Markdown body vs. structured sub-fields
 
-The current design keeps Context / Decision / Consequences as one markdown body (see [ADR-004](./4_decisions.md#adr-004--markdown-body-structured-envelope)). Alternative: split each into a structured field, parseable for review (e.g., *"show me every ADR whose Cost line mentions latency"*).
+The current design keeps Context / Decision / Consequences as one markdown body (see [ADR-0018](./4_decisions.md#adr-004--markdown-body-structured-envelope)). Alternative: split each into a structured field, parseable for review (e.g., *"show me every ADR whose Cost line mentions latency"*).
 
 Splitting enables better queries; it also imposes a writing burden that today's markdown template doesn't. Re-evaluate once the corpus is large enough to know what queries would actually be useful. Remains open.
 
 ### 1.5 Review workflow
 
-**Resolved by [ADR-009](./4_decisions.md#adr-009--review-threads-on-adrs).** ADRs get `orbit.adr.review_thread.{add, list, reply, resolve}`, mirroring the task surface. Whether the `proposed → accepted` transition should require all threads resolved is a sub-question deferred until the surface has real use.
+**Resolved by [ADR-0023](./4_decisions.md#adr-009--review-threads-on-adrs).** ADRs get `orbit.adr.review_thread.{add, list, reply, resolve}`, mirroring the task surface. Whether the `proposed → accepted` transition should require all threads resolved is a sub-question deferred until the surface has real use.
 
 ### 1.6 Primary feature for cross-cutting ADRs
 
-**Resolved by [ADR-007](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index)** (combined with §1.2). A cross-cutting ADR's "primary" folder is `cross-cutting/`. Per-feature indexes still include cross-cutting ADRs that touch them via the existing `--feature` filter against `related_features`.
+**Resolved by [ADR-0021](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index)** (combined with §1.2). A cross-cutting ADR's "primary" folder is `cross-cutting/`. Per-feature indexes still include cross-cutting ADRs that touch them via the existing `--feature` filter against `related_features`.
 
 ---
 

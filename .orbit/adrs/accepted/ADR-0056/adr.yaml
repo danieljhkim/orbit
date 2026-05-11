@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0056
+title: Mechanical criteria verify at the checkpoint boundary
+status: accepted
+owner: legacy:groundhog
+created_at: 2026-05-11T02:06:39.345872Z
+accepted_at: 2026-05-11T02:06:39.346616Z
+last_updated: 2026-05-11T02:06:39.346616Z
+related_features:
+- groundhog
+related_tasks:
+- T20260420-0510
+- T20260420-0510-2
+supersedes: []
+legacy_ids:
+- groundhog/ADR-007
+validation_warnings: []
+legacy_validation: none

@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0048
+title: Workflow git commit identity is process-scoped
+status: accepted
+owner: legacy:auditability
+created_at: 2026-05-11T02:06:39.335411Z
+accepted_at: 2026-05-11T02:06:39.336291Z
+last_updated: 2026-05-11T02:06:39.336291Z
+related_features:
+- auditability
+related_tasks:
+- T20260509-12
+supersedes: []
+legacy_ids:
+- auditability/ADR-023
+validation_warnings:
+- Consequences missing labeled Cost bullet
+legacy_validation: warned

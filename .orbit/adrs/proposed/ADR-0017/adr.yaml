@@ -1,0 +1,15 @@
+schema_version: 1
+id: ADR-0017
+title: Three lifecycle states; no `rejected` or `withdrawn`
+status: proposed
+owner: legacy:adr-artifact
+created_at: 2026-05-11T02:06:39.299672Z
+last_updated: 2026-05-11T02:06:39.300073Z
+related_features:
+- adr-artifact
+related_tasks: []
+supersedes: []
+legacy_ids:
+- adr-artifact/ADR-003
+validation_warnings: []
+legacy_validation: none

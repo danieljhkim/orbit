@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0114
+title: Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade
+status: accepted
+owner: legacy:semantic-search
+created_at: 2026-05-11T02:06:39.417457Z
+accepted_at: 2026-05-11T02:06:39.418423Z
+last_updated: 2026-05-11T02:06:39.418423Z
+related_features:
+- semantic-search
+related_tasks:
+- T20260510-3
+- T20260510-9
+supersedes: []
+legacy_ids:
+- semantic-search/ADR-002
+validation_warnings: []
+legacy_validation: none

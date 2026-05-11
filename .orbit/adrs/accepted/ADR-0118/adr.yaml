@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0118
+title: Workspace-local semantic DB separate from global audit/tool DB
+status: accepted
+owner: legacy:semantic-search
+created_at: 2026-05-11T02:06:39.423392Z
+accepted_at: 2026-05-11T02:06:39.424315Z
+last_updated: 2026-05-11T02:06:39.424315Z
+related_features:
+- semantic-search
+related_tasks:
+- T20260510-9
+supersedes: []
+legacy_ids:
+- semantic-search/ADR-006
+validation_warnings:
+- Consequences missing labeled Cost bullet
+legacy_validation: warned

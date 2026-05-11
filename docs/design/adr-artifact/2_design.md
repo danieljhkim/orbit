@@ -36,7 +36,7 @@ legacy_ids:
   - activity-job/ADR-039
 ```
 
-`legacy_ids` is an array, not a scalar. A normal ADR migrates with one entry; a CONVENTIONS §4a **rollup** carries one entry per folded source heading. This is what lets `activity-job/ADR-003` (a folded heading with body removed) and `activity-job/ADR-005` (the rollup that absorbed it) both resolve through `orbit.adr.list --legacy-id=...` without producing body-less artifacts. See [ADR-002](./4_decisions.md#adr-002--global-adr-numbering-not-per-feature).
+`legacy_ids` is an array, not a scalar. A normal ADR migrates with one entry; a CONVENTIONS §4a **rollup** carries one entry per folded source heading. This is what lets `activity-job/ADR-003` (a folded heading with body removed) and `activity-job/ADR-005` (the rollup that absorbed it) both resolve through `orbit.adr.list --legacy-id=...` without producing body-less artifacts. See [ADR-0016](./4_decisions.md#adr-002--global-adr-numbering-not-per-feature).
 
 `body.md`:
 
@@ -52,7 +52,7 @@ legacy_ids:
 - Cost: <explicit tradeoff>
 ```
 
-The directory-per-ADR layout matches `orbit-store::task_store`, which uses `<status>/<yyyy-mm>/<id>/task.yaml` plus companion markdown files (`plan.md`, `execution-summary.md`) and an optional `artifacts/` subtree. Reusing the pattern means no new store primitives and lets future attachments (diagrams, supplementary specs, review threads) live next to the ADR without changing the storage contract. See [ADR-005](./4_decisions.md#adr-005--directory-per-adr-with-yaml-envelope-and-markdown-body).
+The directory-per-ADR layout matches `orbit-store::task_store`, which uses `<status>/<yyyy-mm>/<id>/task.yaml` plus companion markdown files (`plan.md`, `execution-summary.md`) and an optional `artifacts/` subtree. Reusing the pattern means no new store primitives and lets future attachments (diagrams, supplementary specs, review threads) live next to the ADR without changing the storage contract. See [ADR-0019](./4_decisions.md#adr-005--directory-per-adr-with-yaml-envelope-and-markdown-body).
 
 ---
 
@@ -126,7 +126,7 @@ Input: `query` string, optional filters. Output: ranked array of `{id, title, sc
 
 ### 4.7 `orbit.adr.review_thread.{add, list, reply, resolve}`
 
-Mirrors `orbit.task.review_thread.*`. Threads are scoped to a single ADR by `adr_id`; storage attaches under the per-ADR directory at `.orbit/adrs/<status>/<id>/review_threads/<thread_id>.yaml`, preserving the directory-per-ADR pattern. Whether the `proposed → accepted` transition blocks on unresolved threads is deferred — see [ADR-009](./4_decisions.md#adr-009--review-threads-on-adrs).
+Mirrors `orbit.task.review_thread.*`. Threads are scoped to a single ADR by `adr_id`; storage attaches under the per-ADR directory at `.orbit/adrs/<status>/<id>/review_threads/<thread_id>.yaml`, preserving the directory-per-ADR pattern. Whether the `proposed → accepted` transition blocks on unresolved threads is deferred — see [ADR-0023](./4_decisions.md#adr-009--review-threads-on-adrs).
 
 ---
 
@@ -170,7 +170,7 @@ Each `## ADR-NNN — <title>` heading starts a record. Status line, Context, Dec
 
 - **Normal ADRs**: one parsed entry → one artifact.
 - **Rollup ADRs** (CONVENTIONS §4a): one parsed rollup entry → one artifact whose `legacy_ids` carries the rollup's own source path *and* every folded heading's source path. Folded headings — recognizable by `Status: Superseded by ADR-NNN (folded)` and an empty body — do not produce their own artifacts.
-- **Lenient validation.** Entries that fail the CONVENTIONS §4 strict rules (missing Cost line, missing Consequences section, missing required body sections) are imported anyway with `validation_warnings` recorded on the artifact. They appear in `migration-report.md` (§7.6) so leads can clean them up post-migration. See [ADR-011](./4_decisions.md#adr-011--lenient-migration-mode-as-default). The strict rule applies to *new* ADRs going forward; existing entries get grandfathered with a flag.
+- **Lenient validation.** Entries that fail the CONVENTIONS §4 strict rules (missing Cost line, missing Consequences section, missing required body sections) are imported anyway with `validation_warnings` recorded on the artifact. They appear in `migration-report.md` (§7.6) so leads can clean them up post-migration. See [ADR-0025](./4_decisions.md#adr-011--lenient-migration-mode-as-default). The strict rule applies to *new* ADRs going forward; existing entries get grandfathered with a flag.
 
 ### 7.2 Allocate
 
@@ -199,7 +199,7 @@ Any reference that cannot be mechanically resolved is left as-is and logged to `
 
 ### 7.5 Regenerate `4_decisions.md`
 
-Per [ADR-006](./4_decisions.md#adr-006--auto-generate-per-feature-4_decisionsmd-index), each feature's `4_decisions.md` is rebuilt from the store via `orbit.adr.list --feature=<name> --format=md` with canonical ordering (ascending by legacy feature ADR number, then by global ID for legacy-less entries — see ADR-006). The migration tool emits the first generated version; subsequent updates run automatically. Cross-cutting ADRs ([ADR-007](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index)) populate `docs/design/cross-cutting/4_decisions.md` from the same generator.
+Per [ADR-0020](./4_decisions.md#adr-006--auto-generate-per-feature-4_decisionsmd-index), each feature's `4_decisions.md` is rebuilt from the store via `orbit.adr.list --feature=<name> --format=md` with canonical ordering (ascending by legacy feature ADR number, then by global ID for legacy-less entries — see [ADR-0020]). The migration tool emits the first generated version; subsequent updates run automatically. Cross-cutting ADRs ([ADR-0021](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index)) populate `docs/design/cross-cutting/4_decisions.md` from the same generator.
 
 ### 7.6 Migration report
 
@@ -245,7 +245,7 @@ Step 7.4 rewrites references where the mapping is unambiguous. Some change-histo
 
 ### 8.7 Lenient migration leaves corpus gaps in place
 
-Per [ADR-011](./4_decisions.md#adr-011--lenient-migration-mode-as-default), migration imports entries that fail the strict Cost-line or required-sections rules with `validation_warnings`, rather than aborting. The `activity-job` corpus has known examples: ADR-042 (no Consequences), ADR-044 / -047 / -048 (Consequences but no labeled Cost). Strict-mode would either reject these or force a rushed pre-migration cleanup. Lenient mode imports them as-is. The tradeoff: those gaps remain in the corpus until follow-up tasks fix them. The store accepts them, but the strict validator flags every read. Owners are expected to file remediation tasks; nothing automatic forces it.
+Per [ADR-0025](./4_decisions.md#adr-011--lenient-migration-mode-as-default), migration imports entries that fail the strict Cost-line or required-sections rules with `validation_warnings`, rather than aborting. The `activity-job` corpus has known examples: ADR-042 (no Consequences), ADR-044 / -047 / -048 (Consequences but no labeled Cost). Strict-mode would either reject these or force a rushed pre-migration cleanup. Lenient mode imports them as-is. The tradeoff: those gaps remain in the corpus until follow-up tasks fix them. The store accepts them, but the strict validator flags every read. Owners are expected to file remediation tasks; nothing automatic forces it.
 
 ### 8.8 Local-reference sweep has an ambiguity ceiling
 
