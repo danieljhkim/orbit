@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** Daniel
-**Last updated:** 2026-04-24
+**Last updated:** 2026-05-11
 
 I am dedicating this place to record some of the lessons we learned along the way. These lessons may not apply to everyone or in every case, but they shaped some of the decisions we made.
 
@@ -28,3 +28,13 @@ In short, v3 results suggest MCP tools win the matchup against a generic `exec_c
 **Lesson**: the original concern about MCP's higher token usage is real, and for esoteric tools without any competitors a CLI-based interface may work just fine without the additional MCP token tax. But when the goal is to expand the agent's toolset with specialized tools for specialized jobs, better pick the easier fight.
 
 ---
+
+## 2. The May 2026 Artifact Loss Incident
+
+On 2026-05-11, hundreds of task artifacts were wiped out due to our reckless workspace cleanup. These artifacts are now gone for good, and can never be recovered. The only way to prevent this from happening again is to implement a backup and recovery system for task artifacts [[ADR-0149](.orbit/adrs/proposed/ADR-0149)].
+
+This was catastraphic, but also gave us a chance to amend for the sins of our bad design decisions that have been plaguing us for a while now. [[docs/design/task-artifacts/4_decisions](task-artifacts/4_decisions.md)]
+
+**Lesson**: Backup and recovery are not optional for long-lived artifacts.
+
+----
