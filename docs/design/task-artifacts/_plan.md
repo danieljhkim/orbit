@@ -17,7 +17,7 @@ The design baseline is in place:
 - `docs/design/task-artifacts/specs/task-bundle-v2.md` defines the storage contract.
 - `docs/design/task-artifacts/4_decisions.md` records the proposed ADRs.
 
-Implementation has started. Phase 0 and Phase 1 landed in `c1f72a32`. Phase 2 is implemented in the working tree, pending review and commit. The next meaningful milestone is to replace the current task store with the v2 bundle store.
+Implementation has started. Phase 0 and Phase 1 landed in `c1f72a32`. Phase 2 landed in `1ae83804`. Phase 3 is in progress: the first working-tree slice adds v2 bundle read/write primitives, durable sidecar writes, JSONL append/tail repair, registry registration, and projection rebuild support. These primitives compile and pass module-local tests, but no live task backend consumes them yet; `task_store/mod.rs` carries a temporary `#[allow(dead_code)]` until the next slice wires them into `task add`, `task show`, and `task list`.
 
 ## Non-Goals
 
@@ -110,7 +110,7 @@ Exit criteria:
 
 ## Phase 3 - V2 Bundle Store
 
-**Status:** Not started
+**Status:** In progress
 
 Goal: replace status-directory storage with canonical home bundles plus symlink projection.
 
@@ -138,6 +138,19 @@ Exit criteria:
 - `task add`, `task show`, `task list`, and basic status updates work on v2 bundles.
 - No task operation requires status directories.
 - A task bundle can be inspected manually and matches the spec.
+
+### Phase 3 Progress
+
+Implemented in working tree:
+
+- Private v2 bundle abstraction under `crates/orbit-store/src/file/task_store/v2_bundle.rs`.
+- Durable creation for `task.yaml`, Markdown sidecars, `events.jsonl`, `comments.jsonl`, `review-threads/`, and `artifacts/files/`.
+- Registry-backed canonical bundle paths, task-bundle registration, and workspace projection rebuild after bundle creation.
+- Per-task create locking so same-ID bundle creation serializes before the existence check.
+- Projection rebuild failures after registration return degraded success rather than exposing a failed create for committed state.
+- Durable document rewrites through `atomic_write_text`.
+- JSONL append helpers with sibling file lock, tail repair, flush, and file sync.
+- Tests for round-trip storage, review-thread files, registry-backed listing, document rewrites, append behavior, tail repair, corruption rejection before the tail, concurrent appends, rename invariant rejection, projection degraded success, and cleanup after failed creation.
 
 ## Phase 4 - Task Operations And Local Indexes
 
@@ -213,7 +226,7 @@ Exit criteria:
 | Phase 0 - Prep And Guardrails | Implemented in working tree | Inventory recorded and v2 fixtures parse under test. |
 | Phase 1 - V2 Domain Types | Implemented in working tree | `orbit-common` domain contracts and focused tests are in place. |
 | Phase 2 - Home Registry And Workspace Binding | Implemented in working tree | `orbit-store` registry foundation and projection rebuild tests are in place. |
-| Phase 3 - V2 Bundle Store | Not started | Main storage replacement. |
+| Phase 3 - V2 Bundle Store | In progress | V2 bundle primitives are in working tree behind temporary dead-code allowance; CLI/store wiring remains. |
 | Phase 4 - Task Operations And Local Indexes | Not started | Restores workflow completeness. |
 | Phase 5 - Consumers And Search | Not started | Updates surfaces outside storage. |
 | Phase 6 - Remove Old Store Shape | Not started | Cleanup after v2 passes. |
@@ -226,7 +239,8 @@ Exit criteria:
 - `cargo test -p orbit-common`
 - `cargo fmt -p orbit-store`
 - `cargo test -p orbit-store`
+- `cargo test -p orbit-store v2_bundle`
 
-## Suggested First PR
+## Suggested Next Slice
 
-Start with Phase 2 plus the smallest slice of Phase 1 needed to allocate and validate `ORB-*` IDs. That proves the global local allocator, workspace binding, and projection-repair story before the broad task-store rewrite begins.
+Wire the v2 bundle store into the task backend constructor path, carrying the home task registry and workspace binding instead of hiding v2 behind the current status-directory root. The smallest useful surface is `create_task`, `get_task`, and `list_tasks`; document/history/review/artifact updates can follow once that spine works.
