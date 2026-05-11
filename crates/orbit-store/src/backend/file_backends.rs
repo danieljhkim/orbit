@@ -326,6 +326,10 @@ impl AdrStoreBackend for AdrFileStore {
     fn rebuild_index(&self) -> Result<(), OrbitError> {
         self.rebuild_index()
     }
+
+    fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        self.supersede_adr(old_id, new_id)
+    }
 }
 
 impl ScopedStore<Adr> for AdrFileStore {

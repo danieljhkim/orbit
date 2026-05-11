@@ -14,6 +14,13 @@ pub(super) fn execute(
     reservation_owner: Option<ReservationOwnerContext>,
 ) -> Result<Value, OrbitError> {
     match action {
+        OrbitBuiltinAction::AdrAdd => super::adr_tools::add(runtime, input, agent, model),
+        OrbitBuiltinAction::AdrShow => super::adr_tools::show(runtime, input),
+        OrbitBuiltinAction::AdrList => super::adr_tools::list(runtime, input),
+        OrbitBuiltinAction::AdrUpdate => super::adr_tools::update(runtime, input, agent, model),
+        OrbitBuiltinAction::AdrSupersede => {
+            super::adr_tools::supersede(runtime, input, agent, model)
+        }
         OrbitBuiltinAction::FrictionAdd => super::friction_tools::add(runtime, input, model),
         OrbitBuiltinAction::FrictionList => super::friction_tools::list(runtime, input),
         OrbitBuiltinAction::FrictionShow => super::friction_tools::show(runtime, input),

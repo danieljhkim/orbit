@@ -6,9 +6,10 @@ use orbit_embed::vector::{EmbedWorker, VectorStore};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
 use orbit_store::{
-    AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
-    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskDocumentStoreBackend,
+    TaskHistoryStoreBackend, TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
+    ToolStoreBackend,
 };
 use orbit_tools::ToolRegistry;
 
@@ -78,6 +79,7 @@ pub(crate) struct OrbitStores {
     pub(crate) task_history: Arc<dyn TaskHistoryStoreBackend>,
     pub(crate) task_review: Arc<dyn TaskReviewStoreBackend>,
     pub(crate) task_artifact: Arc<dyn TaskArtifactStoreBackend>,
+    pub(crate) adr: Arc<dyn AdrStoreBackend>,
     pub(crate) semantic_vector: Arc<VectorStore>,
     pub(crate) semantic_worker: Arc<EmbedWorker>,
     pub(crate) task_reservation: Arc<dyn TaskReservationStoreBackend>,
@@ -96,6 +98,7 @@ impl OrbitStores {
         task_history: Arc<dyn TaskHistoryStoreBackend>,
         task_review: Arc<dyn TaskReviewStoreBackend>,
         task_artifact: Arc<dyn TaskArtifactStoreBackend>,
+        adr: Arc<dyn AdrStoreBackend>,
         semantic_vector: Arc<VectorStore>,
         semantic_worker: Arc<EmbedWorker>,
         task_reservation: Arc<dyn TaskReservationStoreBackend>,
@@ -111,6 +114,7 @@ impl OrbitStores {
             task_history,
             task_review,
             task_artifact,
+            adr,
             semantic_vector,
             semantic_worker,
             task_reservation,

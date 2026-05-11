@@ -15,6 +15,7 @@ pub const V2_TOOL_WILDCARD_ROOTS: &[&str] = &[
     "orbit.friction.",
     "orbit.task.",
     "orbit.state.",
+    "orbit.semantic.",
     // Reserved for audit-session tools. No builtin tools currently live under
     // this root, so registry validation treats it as intentionally empty.
     "orbit.audit.",

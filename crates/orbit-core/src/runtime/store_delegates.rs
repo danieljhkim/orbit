@@ -1,20 +1,21 @@
 use orbit_common::types::{
-    AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics, OrbitError,
-    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    Adr, AdrStatus, AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
+    OrbitError, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment,
+    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_embed::vector::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, AuditEventFilter,
+    AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunQuery,
+    JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
+    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    ToolStoreBackend,
 };
 
 use crate::context::OrbitStores;
@@ -107,6 +108,12 @@ impl OrbitStores {
             artifact: self.task_artifact.as_ref(),
             semantic_vector: self.semantic_vector.as_ref(),
             semantic_worker: self.semantic_worker.as_ref(),
+        }
+    }
+
+    pub(crate) fn adrs(&self) -> AdrRecords<'_> {
+        AdrRecords {
+            store: self.adr.as_ref(),
         }
     }
 
@@ -628,5 +635,69 @@ impl PolicyDefRecords<'_> {
 
     pub(crate) fn upsert(&self, def: &PolicyDef) -> Result<(), OrbitError> {
         self.store.upsert_policy_def(def)
+    }
+}
+
+pub(crate) struct AdrRecords<'a> {
+    store: &'a dyn AdrStoreBackend,
+}
+
+impl AdrRecords<'_> {
+    pub(crate) fn add(&self, params: AdrCreateParams) -> Result<Adr, OrbitError> {
+        self.store.add_adr(params)
+    }
+
+    pub(crate) fn get(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
+        self.store.get_adr(id)
+    }
+
+    /// Unfiltered list. The tool surface uses [`Self::list_filtered`]; this
+    /// helper exists for maintenance / CLI tooling layered on top later.
+    #[allow(dead_code)]
+    pub(crate) fn list(&self) -> Result<Vec<Adr>, OrbitError> {
+        self.store.list_adrs()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn list_filtered(
+        &self,
+        status: Option<AdrStatus>,
+        owner: Option<&str>,
+        feature: Option<&str>,
+        task_id: Option<&str>,
+        legacy_id: Option<&str>,
+        validation_warned: Option<bool>,
+    ) -> Result<Vec<Adr>, OrbitError> {
+        self.store.list_adrs_filtered(
+            status,
+            owner,
+            feature,
+            task_id,
+            legacy_id,
+            validation_warned,
+        )
+    }
+
+    pub(crate) fn update_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
+        self.store.update_adr_status(id, new_status)
+    }
+
+    pub(crate) fn update_document(
+        &self,
+        id: &str,
+        fields: &AdrDocumentUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.store.update_adr_document(id, fields)
+    }
+
+    /// Removes an ADR from disk and index. Reserved for the future
+    /// migration / cleanup CLI; not exposed via the tool surface.
+    #[allow(dead_code)]
+    pub(crate) fn delete(&self, id: &str) -> Result<bool, OrbitError> {
+        self.store.delete_adr(id)
+    }
+
+    pub(crate) fn supersede(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        self.store.supersede_adr(old_id, new_id)
     }
 }

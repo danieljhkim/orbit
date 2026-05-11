@@ -280,6 +280,95 @@ impl AdrFileStore {
         Ok(true)
     }
 
+    /// Writes the bidirectional supersession edge between two ADRs.
+    ///
+    /// Validates that both ADRs exist, that `new` is `Accepted`, and that
+    /// `old` is not already `Superseded` or `Deleted`. Then performs three
+    /// sequential writes under per-ADR locks: clears `old`'s document
+    /// (`superseded_by = new`), moves `old` into the `superseded/` directory,
+    /// and appends `old` to `new.supersedes`.
+    ///
+    /// See the trait doc-comment on `AdrStoreBackend::supersede_adr` for the
+    /// atomicity caveat.
+    pub(crate) fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        validate_adr_id(old_id)?;
+        validate_adr_id(new_id)?;
+        if old_id == new_id {
+            return Err(OrbitError::InvalidInput(
+                "cannot supersede an ADR with itself".to_string(),
+            ));
+        }
+
+        // Hold locks for both ADRs for the duration. Acquire in ID order to
+        // avoid lock-order deadlocks when concurrent supersedes touch the
+        // same pair.
+        let (first, second) = if old_id < new_id {
+            (old_id, new_id)
+        } else {
+            (new_id, old_id)
+        };
+        let _lock_a = acquire_adr_lock(&self.root, first)?;
+        let _lock_b = acquire_adr_lock(&self.root, second)?;
+
+        let old = self
+            .get_adr(old_id)?
+            .ok_or_else(|| OrbitError::AdrNotFound(old_id.to_string()))?;
+        let new = self
+            .get_adr(new_id)?
+            .ok_or_else(|| OrbitError::AdrNotFound(new_id.to_string()))?;
+
+        if new.status != AdrStatus::Accepted {
+            return Err(OrbitError::AdrInvalidTransition(format!(
+                "supersede target {new_id} must be accepted (was {:?})",
+                new.status
+            )));
+        }
+        if old.status == AdrStatus::Superseded {
+            return Err(OrbitError::AdrInvalidTransition(format!(
+                "{old_id} is already superseded"
+            )));
+        }
+        if old.status == AdrStatus::Deleted {
+            return Err(OrbitError::AdrInvalidTransition(format!(
+                "cannot supersede a deleted ADR ({old_id})"
+            )));
+        }
+
+        // Write `old.superseded_by = new` first (in its current state dir,
+        // before the rename). The status transition update will pick up the
+        // new envelope from disk.
+        let old_dir = adr_dir(&self.root, AdrStateDir::from_status(old.status), old_id);
+        let mut old_bundle = read_bundle_at(&old_dir)?;
+        old_bundle.doc.adr.superseded_by = Some(new_id.to_string());
+        old_bundle.doc.adr.last_updated = Utc::now();
+        write_bundle_at(&old_dir, &old_bundle)?;
+
+        // Move `old` into superseded/.
+        let target_state = AdrStateDir::from_status(AdrStatus::Superseded);
+        let target_dir = adr_dir(&self.root, target_state, old_id);
+        if let Some(parent) = target_dir.parent() {
+            fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+        }
+        fs::rename(&old_dir, &target_dir).map_err(|e| OrbitError::Io(e.to_string()))?;
+        let mut moved = read_bundle_at(&target_dir)?;
+        moved.doc.adr.status = AdrStatus::Superseded;
+        moved.doc.adr.last_updated = Utc::now();
+        write_bundle_at(&target_dir, &moved)?;
+        self.upsert_index_row(&moved.doc.adr);
+
+        // Append `old` to `new.supersedes` (idempotent — skip if already present).
+        let new_dir = adr_dir(&self.root, AdrStateDir::Accepted, new_id);
+        let mut new_bundle = read_bundle_at(&new_dir)?;
+        if !new_bundle.doc.adr.supersedes.iter().any(|s| s == old_id) {
+            new_bundle.doc.adr.supersedes.push(old_id.to_string());
+            new_bundle.doc.adr.last_updated = Utc::now();
+            write_bundle_at(&new_dir, &new_bundle)?;
+            self.upsert_index_row(&new_bundle.doc.adr);
+        }
+
+        Ok(())
+    }
+
     /// Rebuilds the SQLite envelope index from the filesystem source of truth.
     ///
     /// Without an attached index this is a no-op (filesystem-only stores have

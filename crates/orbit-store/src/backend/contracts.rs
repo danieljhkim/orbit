@@ -347,6 +347,19 @@ pub trait AdrStoreBackend: Send + Sync {
     ) -> Result<(), OrbitError>;
     fn delete_adr(&self, id: &str) -> Result<bool, OrbitError>;
     fn rebuild_index(&self) -> Result<(), OrbitError>;
+
+    /// Writes the bidirectional supersession edge between two ADRs.
+    ///
+    /// On success: `old.status = Superseded`, `old.superseded_by = Some(new)`,
+    /// `new.supersedes` contains `old`. The implementation acquires per-ADR
+    /// locks for the duration so concurrent writers serialize.
+    ///
+    /// **Atomicity caveat:** the three filesystem writes (old document, old
+    /// status-directory rename, new document) are sequential, not transactional.
+    /// A crash between writes leaves the filesystem source-of-truth in a
+    /// recoverable state — both ADR bundles survive, and `rebuild_index`
+    /// reconstructs the SQLite index from disk.
+    fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
 }
 
 pub trait TaskDocumentStoreBackend: Send + Sync {

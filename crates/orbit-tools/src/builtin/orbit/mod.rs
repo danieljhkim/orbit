@@ -1,3 +1,4 @@
+pub mod adr;
 pub mod duel;
 pub mod friction;
 pub mod graph_history;
@@ -29,6 +30,11 @@ pub(super) struct OrbitIdentity {
 }
 
 pub fn register(registry: &mut ToolRegistry) {
+    registry.register(adr::add::OrbitAdrAddTool);
+    registry.register(adr::list::OrbitAdrListTool);
+    registry.register(adr::show::OrbitAdrShowTool);
+    registry.register(adr::supersede::OrbitAdrSupersedeTool);
+    registry.register(adr::update::OrbitAdrUpdateTool);
     registry.register(groundhog::checkpoint_success::OrbitGroundhogCheckpointSuccessTool);
     registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
     registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);

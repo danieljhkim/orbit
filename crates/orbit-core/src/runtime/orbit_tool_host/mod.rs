@@ -1,3 +1,4 @@
+mod adr_tools;
 mod dispatch;
 mod friction_tools;
 mod host;

@@ -60,6 +60,11 @@ pub use registry::ToolRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrbitBuiltinAction {
+    AdrAdd,
+    AdrShow,
+    AdrList,
+    AdrUpdate,
+    AdrSupersede,
     FrictionAdd,
     FrictionList,
     FrictionShow,

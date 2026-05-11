@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 #[derive(Debug, Clone)]
 pub(crate) struct PersistenceConfig {
     pub(crate) task_dir: PathBuf,
+    pub(crate) adr_dir: PathBuf,
     pub(crate) activity_dir: PathBuf,
     pub(crate) job_dir: PathBuf,
     pub(crate) skill_dir: PathBuf,
@@ -47,6 +48,7 @@ impl PersistenceConfig {
 
         Self {
             task_dir: paths.tasks_dir.clone(),
+            adr_dir: paths.adrs_dir.clone(),
             activity_dir: global_resources_dir.join("activities"),
             job_dir: global_resources_dir.join("jobs"),
             skill_dir: paths.skills_dir.clone(),
@@ -60,6 +62,7 @@ impl PersistenceConfig {
     pub(crate) fn as_json_value(&self) -> Value {
         json!({
             "task": { "path": self.task_dir.to_string_lossy() },
+            "adr": { "path": self.adr_dir.to_string_lossy() },
             "activity": { "path": self.activity_dir.to_string_lossy() },
             "job": { "path": self.job_dir.to_string_lossy() },
             "skill": { "path": self.skill_dir.to_string_lossy() },
