@@ -18,7 +18,7 @@ use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::job_store::JobFileStore;
 use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
-use crate::file::task_store::TaskFileStore;
+use crate::file::task_store::{TaskFileStore, TaskV2Store};
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 
 impl TaskStoreBackend for TaskFileStore {
@@ -87,6 +87,71 @@ impl ScopedStore<Task> for TaskFileStore {
     }
 }
 
+impl TaskStoreBackend for TaskV2Store {
+    fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError> {
+        self.create_task(params)
+    }
+
+    fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {
+        self.list_tasks()
+    }
+
+    fn list_tasks_by_tags(&self, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.list_tasks_by_tags(tags)
+    }
+
+    fn list_tasks_filtered(
+        &self,
+        status: Option<TaskStatus>,
+        priority: Option<TaskPriority>,
+        parent_id: Option<&str>,
+        batch_id: Option<&str>,
+        external_ref: Option<&ExternalRef>,
+        has_external_ref_system: Option<&str>,
+    ) -> Result<Vec<Task>, OrbitError> {
+        self.list_tasks_filtered(
+            status,
+            priority,
+            parent_id,
+            batch_id,
+            external_ref,
+            has_external_ref_system,
+        )
+    }
+
+    fn get_task(&self, id: &str) -> Result<Option<Task>, OrbitError> {
+        resolve::<Task, _>(self, id)
+    }
+
+    fn search_tasks(&self, query: &str) -> Result<Vec<Task>, OrbitError> {
+        self.search_tasks(query)
+    }
+
+    fn search_tasks_filtered(&self, query: &str, tags: &[String]) -> Result<Vec<Task>, OrbitError> {
+        self.search_tasks_filtered(query, tags)
+    }
+
+    fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {
+        self.delete_task(id)
+    }
+}
+
+impl ScopedStore<Task> for TaskV2Store {
+    type Err = OrbitError;
+
+    fn strategy(&self) -> ScopeStrategy {
+        ScopeStrategy::WorkspaceOnly
+    }
+
+    fn get_workspace(&self, key: &str) -> Result<Option<Task>, OrbitError> {
+        self.get_task(key)
+    }
+
+    fn get_global(&self, _key: &str) -> Result<Option<Task>, OrbitError> {
+        Ok(None)
+    }
+}
+
 impl TaskDocumentStoreBackend for TaskFileStore {
     fn update_task_document(
         &self,
@@ -118,6 +183,50 @@ impl TaskReviewStoreBackend for TaskFileStore {
 }
 
 impl TaskArtifactStoreBackend for TaskFileStore {
+    fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
+        self.get_task_artifacts(id)
+    }
+
+    fn upsert_task_artifacts(
+        &self,
+        id: &str,
+        params: TaskArtifactUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.upsert_task_artifacts(id, &params)
+    }
+}
+
+impl TaskDocumentStoreBackend for TaskV2Store {
+    fn update_task_document(
+        &self,
+        id: &str,
+        params: TaskDocumentUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.update_task_document(id, &params)
+    }
+}
+
+impl TaskHistoryStoreBackend for TaskV2Store {
+    fn update_task_history(
+        &self,
+        id: &str,
+        params: TaskHistoryUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.update_task_history(id, &params)
+    }
+}
+
+impl TaskReviewStoreBackend for TaskV2Store {
+    fn update_task_reviews(
+        &self,
+        id: &str,
+        params: TaskReviewUpdateParams,
+    ) -> Result<(), OrbitError> {
+        self.update_task_reviews(id, &params)
+    }
+}
+
+impl TaskArtifactStoreBackend for TaskV2Store {
     fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
         self.get_task_artifacts(id)
     }

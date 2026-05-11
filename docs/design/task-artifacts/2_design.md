@@ -177,6 +177,8 @@ Review threads get one metadata envelope and one Markdown body per thread. This 
 
 JSONL appends use a single-line JSON record, append mode, flush, and file sync before success. Readers tolerate a final unterminated or invalid line as tail corruption: valid preceding rows remain readable, and repair may truncate only the corrupt tail. Sidecar rewrites and review-thread YAML updates use write-temp-in-same-directory, file sync, atomic rename, and parent-directory sync.
 
+V2 does not provide cross-file transactions. A crash can leave an appended event before the envelope status update, artifact files before the manifest update, or updated review-thread files before stale thread files are removed. The store must keep every intermediate state readable and recoverable, but generated repair/indexing passes are responsible for reconciling partial multi-file mutations.
+
 ### 2.5 Artifact manifest
 
 Artifacts should support text and binary files. The current `TaskArtifact { path, content }` model only accepts UTF-8 text. V2 artifacts should use `artifacts/manifest.yaml`:
@@ -225,6 +227,8 @@ workspace_id: orbit-a3f9c2
 ```
 
 `workspace_id` is assigned once as `<slug>-<6char>`, where the slug is human-readable and the suffix prevents collisions. It survives repo renames and moves because Orbit reads it from `.orbit/config.yaml`, not from the directory name, remote URL, or path hash.
+
+During the cutover window, the runtime selects this store only when workspace `config.toml` sets `[task] artifact_store = "v2"`. That gate is transitional: once v2 covers indexes, locks, and delete semantics, the legacy status-directory store should be removed rather than preserved as a long-term compatibility mode.
 
 The workspace projection under `.orbit/tasks/<task-id>` is a symlink to the canonical bundle. Task writes through either the canonical path or the projection update the same files; there is no second writable copy and no bundle-level divergence protocol. If `.orbit/tasks/` is deleted, Orbit rebuilds the symlinks from `.orbit/config.yaml` and `index.sqlite`. If `.orbit/config.yaml` is lost, Orbit prompts to rebind by matching the current path, repo root, and optional remote fingerprints against `index.sqlite`; if no confident match exists, the user chooses or creates a workspace binding.
 
@@ -294,6 +298,8 @@ Lexical and semantic search should index each logical field independently:
 - selected artifact text, when media type permits
 
 This preserves field-aware semantic search while making file boundaries visible in snippets. The embedding index should store field names that match the v2 document names.
+
+Until the generated indexes land, the working implementation performs O(N x files-per-task) scans for list/search by reading every registered bundle and its sidecars. That is acceptable only as a cutover bridge; Phase 4 replaces it with generated status, tag, relation, terminal-month, and search inputs.
 
 Relations need their own generated index. The bundle stores directed relation entries; local indexes materialize `(source_task_id, relation_type, target_task_id)` and optional inverse views for efficient lineage queries. The initial relation type set is `blocks`, `parent_of`, `spawned_from`, `regression_from`, `supersedes`, and `related_to`. Writers validate relation types, reject self-edges and duplicates, and reject cycles for hierarchy and blocking relation families. Reciprocal labels such as `blocked_by` are read-side projections, not separately stored peer edges.
 

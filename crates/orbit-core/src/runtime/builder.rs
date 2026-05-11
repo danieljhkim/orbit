@@ -4,11 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_embed::vector::{EmbedWorker, VectorStore};
 use orbit_policy::PolicyEngine;
+use orbit_store::sqlite::task_registry::{
+    BindWorkspaceParams, TaskRegistryStore, WorkspaceConfig, read_workspace_config_optional,
+    task_registry_path, write_workspace_config,
+};
 use orbit_store::{
     Store, audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
     workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
-    workspace_policy_def_store, workspace_task_backends,
+    workspace_policy_def_store, workspace_task_backends, workspace_task_backends_v2,
 };
 
 use orbit_common::types::{DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths};
@@ -18,7 +22,7 @@ use orbit_tools::external::ExternalTool;
 use crate::OrbitContext;
 use crate::command::init::global_skills_dir;
 use crate::command::policy::seed_default_policies;
-use crate::config::RuntimeConfig;
+use crate::config::{RuntimeConfig, TaskArtifactStoreMode};
 use crate::context::{
     ActorIdentity, OrbitExecutionAssets, OrbitPolicyContext, OrbitRuntimeSettings, OrbitStores,
 };
@@ -56,7 +60,12 @@ pub(crate) fn build_context_from_roots(
         global_root.to_path_buf(),
     );
 
-    let task_backends = workspace_task_backends(persistence.task_dir.clone(), store.clone());
+    let task_backends = match runtime_config.task_artifact_store() {
+        TaskArtifactStoreMode::Legacy => {
+            workspace_task_backends(persistence.task_dir.clone(), store.clone())
+        }
+        TaskArtifactStoreMode::V2 => build_v2_task_backends(global_root, &paths)?,
+    };
     let adr_store = workspace_adr_backends(persistence.adr_dir.clone(), store.clone());
     let learning_store =
         workspace_learning_backend(persistence.learning_dir.clone(), store.clone());
@@ -157,6 +166,73 @@ fn registered_repo_root(global_root: &Path, workspace_root: &Path) -> Option<Pat
     })
 }
 
+fn build_v2_task_backends(
+    global_root: &Path,
+    paths: &WorkspacePaths,
+) -> Result<orbit_store::WorkspaceTaskBackends, OrbitError> {
+    let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
+    let config = read_workspace_config_optional(&paths.orbit_dir)?;
+    let workspace_id = if let Some(config) = &config {
+        Some(config.workspace_id.clone())
+    } else {
+        rebind_candidate_workspace_id(&registry, paths)?
+    };
+    let binding = registry.bind_workspace(BindWorkspaceParams {
+        workspace_id,
+        slug: workspace_slug(&paths.repo_root),
+        repo_root: paths.repo_root.clone(),
+        workspace_path: paths.repo_root.clone(),
+        orbit_dir: paths.orbit_dir.clone(),
+        repo_fingerprint: None,
+    })?;
+    if config
+        .as_ref()
+        .is_none_or(|config| config.workspace_id != binding.workspace_id)
+    {
+        write_workspace_config(
+            &paths.orbit_dir,
+            &WorkspaceConfig {
+                schema_version: 1,
+                workspace_id: binding.workspace_id.clone(),
+            },
+        )?;
+    }
+
+    Ok(workspace_task_backends_v2(
+        registry,
+        binding.workspace_id,
+        paths.orbit_dir.clone(),
+        Some(binding.workspace_path.to_string_lossy().into_owned()),
+        Some(binding.repo_root.to_string_lossy().into_owned()),
+    ))
+}
+
+fn rebind_candidate_workspace_id(
+    registry: &TaskRegistryStore,
+    paths: &WorkspacePaths,
+) -> Result<Option<String>, OrbitError> {
+    let candidates =
+        registry.find_rebind_candidates(&paths.repo_root, &paths.repo_root, &paths.orbit_dir)?;
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [candidate] => Ok(Some(candidate.workspace_id.clone())),
+        _ => Err(OrbitError::WorkspaceError(format!(
+            "workspace config is missing and multiple task artifact bindings match '{}'; restore .orbit/config.yaml or choose a workspace binding",
+            paths.orbit_dir.display()
+        ))),
+    }
+}
+
+fn workspace_slug(repo_root: &Path) -> String {
+    repo_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("workspace")
+        .to_string()
+}
+
 pub(super) struct TempDir(PathBuf);
 
 impl Drop for TempDir {
@@ -194,4 +270,141 @@ fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(),
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_common::types::TaskStatus;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::OrbitRuntime;
+    use crate::command::task::{TaskAddParams, TaskUpdateParams};
+
+    fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {
+        let root = tempdir().expect("tempdir");
+        let global_root = root.path().join("global");
+        let repo_root = root.path().join("repo");
+        let workspace_root = repo_root.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("create global root");
+        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+        std::fs::write(
+            workspace_root.join("config.toml"),
+            "[task]\nartifact_store = \"v2\"\n",
+        )
+        .expect("write config");
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+        (root, global_root, workspace_root, runtime)
+    }
+
+    #[test]
+    fn v2_task_backend_wires_through_runtime_add_show_list_and_update() {
+        let (_root, _global_root, workspace_root, runtime) = v2_runtime();
+
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Runtime v2 task".to_string(),
+                description: "Created through OrbitRuntime".to_string(),
+                plan: "1. Start it".to_string(),
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            })
+            .expect("create task");
+        assert_eq!(task.id, "ORB-00000");
+        assert!(!workspace_root.join("tasks/backlog").exists());
+        assert!(workspace_root.join("tasks/ORB-00000").exists());
+
+        let started = runtime
+            .start_task(&task.id, Some("start".to_string()), None)
+            .expect("start task");
+        assert_eq!(started.status, TaskStatus::InProgress);
+
+        let updated = runtime
+            .update_task(
+                &task.id,
+                TaskUpdateParams {
+                    comment: Some("Runtime comment".to_string()),
+                    execution_summary: Some("Finished the runtime smoke".to_string()),
+                    status: Some(TaskStatus::Review),
+                    ..Default::default()
+                },
+            )
+            .expect("update task");
+        assert_eq!(updated.status, TaskStatus::Review);
+        assert!(
+            updated
+                .comments
+                .iter()
+                .any(|comment| comment.message == "Runtime comment")
+        );
+        assert_eq!(runtime.list_tasks().expect("list tasks").len(), 1);
+        assert_eq!(
+            runtime
+                .search_tasks("runtime smoke")
+                .expect("search tasks")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn v2_task_backend_persists_workspace_binding_across_runtime_rebuild() {
+        let (_root, global_root, workspace_root, runtime) = v2_runtime();
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Persistent v2 task".to_string(),
+                description: "Survives runtime reconstruction".to_string(),
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            })
+            .expect("create task");
+        let workspace_config =
+            read_workspace_config_optional(&workspace_root).expect("read workspace config");
+        let workspace_id = workspace_config
+            .as_ref()
+            .map(|config| config.workspace_id.as_str())
+            .expect("workspace id");
+        assert!(workspace_id.starts_with("repo-"), "{workspace_id}");
+        assert_eq!(workspace_id.len(), "repo-000000".len());
+
+        let rebuilt =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
+        let fetched = rebuilt.get_task(&task.id).expect("get task after rebuild");
+        assert_eq!(fetched.title, "Persistent v2 task");
+        assert_eq!(
+            read_workspace_config_optional(&workspace_root)
+                .expect("read workspace config")
+                .map(|config| config.workspace_id),
+            workspace_config.map(|config| config.workspace_id)
+        );
+    }
+
+    #[test]
+    fn v2_task_backend_rebinds_when_workspace_config_is_missing() {
+        let (_root, global_root, workspace_root, runtime) = v2_runtime();
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Rebind v2 task".to_string(),
+                description: "Survives missing workspace config".to_string(),
+                status: Some(TaskStatus::Backlog),
+                ..Default::default()
+            })
+            .expect("create task");
+        let original_config =
+            read_workspace_config_optional(&workspace_root).expect("read workspace config");
+        std::fs::remove_file(workspace_root.join("config.yaml")).expect("remove workspace config");
+
+        let rebuilt =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
+        let fetched = rebuilt.get_task(&task.id).expect("get task after rebind");
+
+        assert_eq!(fetched.title, "Rebind v2 task");
+        assert_eq!(
+            read_workspace_config_optional(&workspace_root)
+                .expect("read rewritten workspace config")
+                .map(|config| config.workspace_id),
+            original_config.map(|config| config.workspace_id)
+        );
+    }
 }

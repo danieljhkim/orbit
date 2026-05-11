@@ -281,6 +281,7 @@ impl TaskRecords<'_> {
             self.artifact.upsert_task_artifacts(
                 id,
                 TaskArtifactUpdateParams {
+                    actor: params.actor.clone(),
                     upsert_artifacts: params.upsert_artifacts.clone(),
                 },
             )?;

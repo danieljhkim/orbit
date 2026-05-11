@@ -153,6 +153,7 @@ review-threads/<thread-id>.md
 
 The YAML file stores status, file path, line/range metadata, external review IDs, timestamps, and message metadata. The Markdown file stores message bodies in chronological order with stable message anchors.
 The YAML file must include `schema_version: 1`. YAML rewrites use write-temp-in-same-directory, file sync, atomic rename, and parent-directory sync.
+Review-thread rewrites must validate the complete replacement set before writing and must not remove `review-threads/` before the replacement is durable. Crash recovery may leave stale thread files behind, but it must not leave the bundle unreadable solely because the directory vanished.
 
 ## Relations
 
@@ -194,6 +195,8 @@ files:
 ```
 
 Artifact paths must be relative, UTF-8, slash-separated, canonical paths and must not contain `.`, `..`, or leading `./` components. Writers that ingest hand-authored manifests should normalize leading `./` before validation. `sha256` must be a 64-character lowercase hex SHA-256 digest; writer code should format digest bytes with lowercase hex (`{:x}`), not uppercase.
+
+The bundle format does not guarantee cross-file transactions. Writers must keep single-file updates atomic and keep partial multi-file states readable; generated repair/indexing commands reconcile cases such as appended events before envelope status rewrite or artifact files written before manifest rewrite.
 
 ## Cutover
 

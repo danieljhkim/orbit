@@ -132,6 +132,7 @@ pub struct TaskReviewUpdateParams {
 
 #[derive(Debug, Default, Clone)]
 pub struct TaskArtifactUpdateParams {
+    pub actor: String,
     /// Artifact files to write under the task bundle `artifacts/` directory.
     /// Existing files at the same relative path are overwritten.
     pub upsert_artifacts: Vec<TaskArtifact>,

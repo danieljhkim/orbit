@@ -17,7 +17,7 @@ The design baseline is in place:
 - `docs/design/task-artifacts/specs/task-bundle-v2.md` defines the storage contract.
 - `docs/design/task-artifacts/4_decisions.md` records the proposed ADRs.
 
-Implementation has started. Phase 0 and Phase 1 landed in `c1f72a32`. Phase 2 landed in `1ae83804`. Phase 3 is in progress: the first working-tree slice adds v2 bundle read/write primitives, durable sidecar writes, JSONL append/tail repair, registry registration, and projection rebuild support. These primitives compile and pass module-local tests, but no live task backend consumes them yet; `task_store/mod.rs` carries a temporary `#[allow(dead_code)]` until the next slice wires them into `task add`, `task show`, and `task list`.
+Implementation has started. Phase 0 and Phase 1 landed in `c1f72a32`. Phase 2 landed in `1ae83804`. Phase 3 landed its first bundle-primitive slice in `c14fa640`; the current working-tree slice adds the v2 task backend adapter, document/history/review/artifact mutations, trait wiring, and config-gated runtime construction via `[task] artifact_store = "v2"`. Delete, generated indexes, relation query acceleration, and task-lock rekeying remain open.
 
 ## Non-Goals
 
@@ -110,7 +110,7 @@ Exit criteria:
 
 ## Phase 3 - V2 Bundle Store
 
-**Status:** In progress
+**Status:** Implemented in working tree
 
 Goal: replace status-directory storage with canonical home bundles plus symlink projection.
 
@@ -144,30 +144,40 @@ Exit criteria:
 Implemented in working tree:
 
 - Private v2 bundle abstraction under `crates/orbit-store/src/file/task_store/v2_bundle.rs`.
+- `TaskV2Store` adapter under `crates/orbit-store/src/file/task_store/v2_store.rs` for create/get/list/filter/search plus document, history, review-thread, and artifact mutations.
+- `workspace_task_backends_v2` constructor that returns the normal task backend trait bundle over the v2 adapter.
+- Config-gated runtime construction through `[task] artifact_store = "v2"`.
 - Durable creation for `task.yaml`, Markdown sidecars, `events.jsonl`, `comments.jsonl`, `review-threads/`, and `artifacts/files/`.
 - Registry-backed canonical bundle paths, task-bundle registration, and workspace projection rebuild after bundle creation.
+- Missing `.orbit/config.yaml` rebind detection uses registry candidates before creating a new workspace binding.
 - Per-task create locking so same-ID bundle creation serializes before the existence check.
 - Projection rebuild failures after registration return degraded success rather than exposing a failed create for committed state.
-- Durable document rewrites through `atomic_write_text`.
+- Durable document rewrites through `atomic_write_text`, including `description.md`, `acceptance.md`, `plan.md`, `execution-summary.md`, review-thread YAML/Markdown, and artifact manifests.
 - JSONL append helpers with sibling file lock, tail repair, flush, and file sync.
-- Tests for round-trip storage, review-thread files, registry-backed listing, document rewrites, append behavior, tail repair, corruption rejection before the tail, concurrent appends, rename invariant rejection, projection degraded success, and cleanup after failed creation.
+- Typed missing-bundle handling maps missing `task.yaml` to `TaskNotFound` instead of error-string matching.
+- Runtime smoke coverage for add/show/list/search/start/update in v2 mode and workspace binding reuse across runtime rebuilds.
+- Tests for round-trip storage, review-thread files, registry-backed listing, document rewrites, history/comment/status appends, review-thread merge/replace, artifact manifest writes, append behavior, tail repair, corruption rejection before the tail, concurrent appends, rename invariant rejection, projection degraded success, and cleanup after failed creation.
+
+Known Phase 3/4 caveat: v2 single-file writes are atomic, but multi-file mutations are not transactional across files. The store keeps partial states readable; repair/indexing passes must reconcile cases such as events appended before envelope status rewrite or artifact files written before manifest rewrite.
 
 ## Phase 4 - Task Operations And Local Indexes
 
-**Status:** Not started
+**Status:** In progress
 
 Goal: restore the full task workflow on top of v2 storage.
 
 Work:
 
-- Update document updates to write Markdown sidecars.
-- Update comments to append `comments.jsonl`.
-- Update history/lifecycle writes to append `events.jsonl`.
-- Update review-thread commands to write per-thread YAML plus Markdown bodies.
-- Update artifact writes to use `artifacts/manifest.yaml` and `artifacts/files/`.
+- Update document updates to write Markdown sidecars. Done in working tree.
+- Update comments to append `comments.jsonl`. Done in working tree.
+- Update history/lifecycle writes to append `events.jsonl`. Done in working tree.
+- Update review-thread commands to write per-thread YAML plus Markdown bodies. Done in working tree.
+- Update artifact writes to use `artifacts/manifest.yaml` and `artifacts/files/`. Done in working tree for the current UTF-8 `TaskArtifact` API.
 - Maintain generated indexes for status, terminal month, relations, and tags.
+- Replace current O(N x files-per-task) v2 list/search scans with generated indexes.
 - Move task-lock keying to workspace binding plus canonical task IDs.
 - Preserve lifecycle validation rules, including execution summary before review.
+- Decide and implement v2 delete semantics.
 
 Exit criteria:
 
@@ -226,8 +236,8 @@ Exit criteria:
 | Phase 0 - Prep And Guardrails | Implemented in working tree | Inventory recorded and v2 fixtures parse under test. |
 | Phase 1 - V2 Domain Types | Implemented in working tree | `orbit-common` domain contracts and focused tests are in place. |
 | Phase 2 - Home Registry And Workspace Binding | Implemented in working tree | `orbit-store` registry foundation and projection rebuild tests are in place. |
-| Phase 3 - V2 Bundle Store | In progress | V2 bundle primitives are in working tree behind temporary dead-code allowance; CLI/store wiring remains. |
-| Phase 4 - Task Operations And Local Indexes | Not started | Restores workflow completeness. |
+| Phase 3 - V2 Bundle Store | Implemented in working tree | V2 create/get/list/update/review/artifact backend is wired behind `[task] artifact_store = "v2"`. |
+| Phase 4 - Task Operations And Local Indexes | In progress | Generated indexes, lock rekeying, relation query acceleration, and delete semantics remain. |
 | Phase 5 - Consumers And Search | Not started | Updates surfaces outside storage. |
 | Phase 6 - Remove Old Store Shape | Not started | Cleanup after v2 passes. |
 
@@ -240,7 +250,10 @@ Exit criteria:
 - `cargo fmt -p orbit-store`
 - `cargo test -p orbit-store`
 - `cargo test -p orbit-store v2_bundle`
+- `cargo test -p orbit-store v2_store`
+- `cargo test -p orbit-core task_artifact_store`
+- `cargo test -p orbit-core v2_task_backend`
 
 ## Suggested Next Slice
 
-Wire the v2 bundle store into the task backend constructor path, carrying the home task registry and workspace binding instead of hiding v2 behind the current status-directory root. The smallest useful surface is `create_task`, `get_task`, and `list_tasks`; document/history/review/artifact updates can follow once that spine works.
+Implement generated local indexes for status, tags, relations, and terminal grouping on top of v2 bundles, then re-key task lock reservations to workspace binding plus canonical `ORB-*` IDs. Decide whether v2 deletion removes canonical bundles immediately, tombstones them, or moves them into a local trash view before exposing delete through the runtime.

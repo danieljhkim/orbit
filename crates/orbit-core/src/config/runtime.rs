@@ -24,6 +24,12 @@ const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskArtifactStoreMode {
+    Legacy,
+    V2,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
     pub(crate) execution_env: ExecutionEnvPolicy,
@@ -33,6 +39,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
     pub(crate) graph_editing: bool,
+    pub(crate) task_artifact_store: TaskArtifactStoreMode,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
@@ -63,6 +70,7 @@ impl RuntimeConfig {
             pr: PrConfig::default(),
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
+            task_artifact_store: TaskArtifactStoreMode::Legacy,
             v2_backend: None,
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             agent_roles: BTreeMap::new(),
@@ -134,6 +142,7 @@ impl RuntimeConfig {
             .and_then(|g| g.editing)
             .unwrap_or(DEFAULT_GRAPH_EDITING);
 
+        let task_artifact_store = task_artifact_store_from_raw(parsed.task.as_ref())?;
         let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
 
         let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
@@ -162,6 +171,7 @@ impl RuntimeConfig {
             pr,
             scoring_enabled,
             graph_editing,
+            task_artifact_store,
             v2_backend,
             workflow_base_branch,
             agent_roles,
@@ -171,6 +181,10 @@ impl RuntimeConfig {
     /// Configured default backend for v2 `agent_loop` activities (§3.1 step 3).
     pub(crate) fn v2_backend(&self) -> Option<&str> {
         self.v2_backend.as_deref()
+    }
+
+    pub(crate) fn task_artifact_store(&self) -> TaskArtifactStoreMode {
+        self.task_artifact_store
     }
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
@@ -199,6 +213,22 @@ fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<St
         )));
     };
     Ok(Some(backend.as_str().to_string()))
+}
+
+fn task_artifact_store_from_raw(
+    raw: Option<&RawTaskSection>,
+) -> Result<TaskArtifactStoreMode, OrbitError> {
+    let Some(value) = raw.and_then(|section| section.artifact_store.as_deref()) else {
+        return Ok(TaskArtifactStoreMode::Legacy);
+    };
+    let trimmed = value.trim();
+    match trimmed {
+        "legacy" => Ok(TaskArtifactStoreMode::Legacy),
+        "v2" => Ok(TaskArtifactStoreMode::V2),
+        _ => Err(OrbitError::InvalidInput(format!(
+            "[task] artifact_store has invalid value '{trimmed}'; expected one of: legacy, v2"
+        ))),
+    }
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
@@ -615,5 +645,32 @@ mod tests {
         assert!(message.contains("[runtime] backend"));
         assert!(message.contains("clii"));
         assert!(message.contains("http, cli, auto"));
+    }
+
+    #[test]
+    fn task_artifact_store_loads_v2_from_workspace_config() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), "[task]\nartifact_store = \"v2\"\n");
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+
+        assert_eq!(config.task_artifact_store(), TaskArtifactStoreMode::V2);
+    }
+
+    #[test]
+    fn task_artifact_store_rejects_invalid_value() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), "[task]\nartifact_store = \"newish\"\n");
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("invalid artifact store must fail config load");
+        let message = error.to_string();
+
+        assert!(message.contains("[task] artifact_store"));
+        assert!(message.contains("newish"));
+        assert!(message.contains("legacy, v2"));
     }
 }

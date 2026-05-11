@@ -94,6 +94,7 @@ pub(super) struct RawCodexExecutionConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawTaskSection {
     pub(super) approval: Option<RawTaskApprovalConfig>,
+    pub(super) artifact_store: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

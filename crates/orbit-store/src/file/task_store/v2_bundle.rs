@@ -168,6 +168,48 @@ impl TaskBundleStoreV2 {
         atomic_write_text(&path, content).map_err(|err| OrbitError::Io(err.to_string()))
     }
 
+    pub(crate) fn rewrite_envelope(
+        &self,
+        task_id: &str,
+        envelope: &TaskEnvelopeV2,
+    ) -> Result<(), OrbitError> {
+        if envelope.id != task_id {
+            return Err(OrbitError::InvalidInput(format!(
+                "task envelope id '{}' does not match target task id '{task_id}'",
+                envelope.id
+            )));
+        }
+        envelope.validate()?;
+        write_yaml_file(
+            &self.bundle_path(task_id)?.join(TASK_ENVELOPE_FILE_NAME),
+            envelope,
+        )
+    }
+
+    pub(crate) fn rewrite_review_threads(
+        &self,
+        task_id: &str,
+        threads: &[TaskReviewThreadV2],
+    ) -> Result<(), OrbitError> {
+        let bundle_dir = self.bundle_path(task_id)?;
+        rewrite_review_threads(&bundle_dir, threads)
+    }
+
+    pub(crate) fn rewrite_artifact_manifest(
+        &self,
+        task_id: &str,
+        manifest: &ArtifactManifestV2,
+    ) -> Result<(), OrbitError> {
+        manifest.validate()?;
+        write_yaml_file(
+            &self
+                .bundle_path(task_id)?
+                .join(TASK_ARTIFACTS_DIR_NAME)
+                .join(TASK_ARTIFACT_MANIFEST_FILE_NAME),
+            manifest,
+        )
+    }
+
     pub(crate) fn append_event(
         &self,
         task_id: &str,
@@ -264,7 +306,12 @@ pub(crate) fn write_bundle_at(bundle_dir: &Path, bundle: &TaskBundleV2) -> Resul
 }
 
 pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitError> {
-    let envelope: TaskEnvelopeV2 = read_yaml_file(&bundle_dir.join(TASK_ENVELOPE_FILE_NAME))?;
+    let expected_task_id = task_id_from_bundle_dir(bundle_dir)?;
+    let envelope_path = bundle_dir.join(TASK_ENVELOPE_FILE_NAME);
+    if !envelope_path.is_file() {
+        return Err(OrbitError::TaskNotFound(expected_task_id));
+    }
+    let envelope: TaskEnvelopeV2 = read_yaml_file(&envelope_path)?;
     validate_bundle_dir_matches_task_id(bundle_dir, &envelope.id)?;
 
     let bundle = TaskBundleV2 {
@@ -313,12 +360,7 @@ fn ensure_bundle_dirs(bundle_dir: &Path) -> Result<(), OrbitError> {
 }
 
 fn validate_bundle_dir_matches_task_id(bundle_dir: &Path, task_id: &str) -> Result<(), OrbitError> {
-    let Some(name) = bundle_dir.file_name().and_then(|value| value.to_str()) else {
-        return Err(OrbitError::Store(format!(
-            "invalid task bundle path {}",
-            bundle_dir.display()
-        )));
-    };
+    let name = task_id_from_bundle_dir(bundle_dir)?;
     if name != task_id {
         return Err(OrbitError::Store(format!(
             "task bundle directory {} does not match task id {}",
@@ -327,6 +369,16 @@ fn validate_bundle_dir_matches_task_id(bundle_dir: &Path, task_id: &str) -> Resu
         )));
     }
     Ok(())
+}
+
+fn task_id_from_bundle_dir(bundle_dir: &Path) -> Result<String, OrbitError> {
+    bundle_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            OrbitError::Store(format!("invalid task bundle path {}", bundle_dir.display()))
+        })
 }
 
 fn write_yaml_file<T>(path: &Path, value: &T) -> Result<(), OrbitError>
@@ -508,6 +560,42 @@ fn write_review_threads(
         write_yaml_file(&base.with_extension("yaml"), &thread.metadata)?;
         atomic_write_text(&base.with_extension("md"), &thread.body)
             .map_err(|err| OrbitError::Io(err.to_string()))?;
+    }
+    Ok(())
+}
+
+fn rewrite_review_threads(
+    bundle_dir: &Path,
+    threads: &[TaskReviewThreadV2],
+) -> Result<(), OrbitError> {
+    for thread in threads {
+        thread.metadata.validate()?;
+    }
+
+    let thread_dir = bundle_dir.join(TASK_REVIEW_THREADS_DIR_NAME);
+    fs::create_dir_all(&thread_dir).map_err(|err| OrbitError::Io(err.to_string()))?;
+    let expected = threads
+        .iter()
+        .flat_map(|thread| {
+            let base = thread_dir.join(&thread.metadata.thread_id);
+            [base.with_extension("yaml"), base.with_extension("md")]
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    write_review_threads(bundle_dir, threads)?;
+
+    for entry in fs::read_dir(&thread_dir).map_err(|err| OrbitError::Io(err.to_string()))? {
+        let entry = entry.map_err(|err| OrbitError::Io(err.to_string()))?;
+        let path = entry.path();
+        if path.is_file()
+            && matches!(
+                path.extension().and_then(|value| value.to_str()),
+                Some("yaml" | "md")
+            )
+            && !expected.contains(&path)
+        {
+            fs::remove_file(&path).map_err(|err| OrbitError::Io(err.to_string()))?;
+        }
     }
     Ok(())
 }
@@ -1060,6 +1148,22 @@ mod tests {
     }
 
     #[test]
+    fn read_bundle_reports_missing_envelope_as_task_not_found() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = bundle_store(&temp);
+        let created = store
+            .create_bundle(&sample_bundle("ORB-00000"))
+            .expect("create bundle");
+        fs::remove_file(created.binding.canonical_path.join(TASK_ENVELOPE_FILE_NAME))
+            .expect("remove envelope");
+
+        assert!(matches!(
+            store.read_bundle("ORB-00000"),
+            Err(OrbitError::TaskNotFound(task_id)) if task_id == "ORB-00000"
+        ));
+    }
+
+    #[test]
     fn read_bundle_rejects_review_thread_metadata_without_body() {
         let temp = TempDir::new().expect("tempdir");
         let store = bundle_store(&temp);
@@ -1079,5 +1183,30 @@ mod tests {
             store.read_bundle("ORB-00000"),
             Err(OrbitError::Store(message)) if message.contains("missing task bundle file")
         ));
+    }
+
+    #[test]
+    fn rewrite_review_threads_validates_before_touching_existing_files() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = bundle_store(&temp);
+        let mut bundle = sample_bundle("ORB-00000");
+        bundle.review_threads = sample_review_threads();
+        store.create_bundle(&bundle).expect("create bundle");
+        let mut invalid = sample_review_threads();
+        invalid[0].metadata.path = Some("../escape.rs".to_string());
+
+        assert!(matches!(
+            store.rewrite_review_threads("ORB-00000", &invalid),
+            Err(OrbitError::InvalidInput(message)) if message.contains("..")
+        ));
+
+        let read = store.read_bundle("ORB-00000").expect("read bundle");
+        assert_eq!(
+            read.review_threads
+                .into_iter()
+                .map(|thread| thread.metadata.thread_id)
+                .collect::<Vec<_>>(),
+            vec!["RT-0001", "RT-0002"]
+        );
     }
 }
