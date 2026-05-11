@@ -84,45 +84,53 @@ pub(super) fn ingest(
     }
 
     // Third sub-pass: write real supersession edges (non-folded) now that the
-    // id_map is fully populated.
-    if !dry_run {
-        for entry in entries {
-            if let ParsedStatus::SupersededBy {
-                target_legacy,
-                folded: false,
-            } = &entry.status
-            {
-                let old_global = outcome
-                    .id_map
-                    .get(&(entry.feature.clone(), entry.legacy_id.clone()))
-                    .cloned();
-                let new_global = outcome
-                    .id_map
-                    .get(&(entry.feature.clone(), target_legacy.clone()))
-                    .cloned();
-                if let (Some(old_id), Some(new_id)) = (old_global, new_global) {
-                    if old_id == new_id {
-                        continue;
+    // id_map is fully populated. In dry-run we record the predicted edges
+    // without calling the store, so the report previews what the real run
+    // would do.
+    for entry in entries {
+        if let ParsedStatus::SupersededBy {
+            target_legacy,
+            folded: false,
+        } = &entry.status
+        {
+            let old_global = outcome
+                .id_map
+                .get(&(entry.feature.clone(), entry.legacy_id.clone()))
+                .cloned();
+            let new_global = outcome
+                .id_map
+                .get(&(entry.feature.clone(), target_legacy.clone()))
+                .cloned();
+            if let (Some(old_id), Some(new_id)) = (old_global, new_global) {
+                if old_id == new_id {
+                    continue;
+                }
+                if dry_run {
+                    outcome.supersedes.push(SupersedeRecord {
+                        old_global_id: old_id,
+                        new_global_id: new_id,
+                        source_path: entry.source_path.clone(),
+                    });
+                    continue;
+                }
+                // The supersession target must be accepted before the
+                // supersede edge is permitted.
+                let adrs = runtime.stores().adrs();
+                if let Some(target) = adrs.get(&new_id)?
+                    && target.status == AdrStatus::Proposed
+                {
+                    adrs.update_status(&new_id, AdrStatus::Accepted)?;
+                }
+                match adrs.supersede(&old_id, &new_id) {
+                    Ok(()) => outcome.supersedes.push(SupersedeRecord {
+                        old_global_id: old_id,
+                        new_global_id: new_id,
+                        source_path: entry.source_path.clone(),
+                    }),
+                    Err(OrbitError::AdrInvalidTransition(_)) => {
+                        // Already superseded or otherwise resolved — idempotent.
                     }
-                    // The supersession target must be accepted before the
-                    // supersede edge is permitted.
-                    let adrs = runtime.stores().adrs();
-                    if let Some(target) = adrs.get(&new_id)?
-                        && target.status == AdrStatus::Proposed
-                    {
-                        adrs.update_status(&new_id, AdrStatus::Accepted)?;
-                    }
-                    match adrs.supersede(&old_id, &new_id) {
-                        Ok(()) => outcome.supersedes.push(SupersedeRecord {
-                            old_global_id: old_id,
-                            new_global_id: new_id,
-                            source_path: entry.source_path.clone(),
-                        }),
-                        Err(OrbitError::AdrInvalidTransition(_)) => {
-                            // Already superseded or otherwise resolved — idempotent.
-                        }
-                        Err(err) => return Err(err),
-                    }
+                    Err(err) => return Err(err),
                 }
             }
         }

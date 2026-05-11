@@ -2,7 +2,7 @@
 
 # Agent / tool state
 .claude/
-.agents
+
 agentspace
 !.claude/settings.json
 # ...except the published plugin's MCP registration, which ships in the package.
@@ -27,7 +27,12 @@ critique.md
 orbit.db
 orbit.db-shm
 orbit.db-wal
-.orbit/
+# ADR artifacts are committed source-of-truth (adr-artifact ADR-002 amended,
+# ADR-005); the SQLite index is rebuildable from the YAML+markdown. Other
+# `.orbit/` state (tasks, runs, policies, audit DB, etc.) stays workspace-local.
+.orbit/*
+!.orbit/adrs/
+.orbit/adrs/index.sqlite*
 .monodev/
 
 # Python
@@ -48,3 +53,4 @@ build/
 .envrc
 .direnv/
 .gstack/
+.locks

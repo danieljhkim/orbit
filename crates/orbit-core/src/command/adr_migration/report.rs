@@ -76,5 +76,22 @@ pub(super) fn write_report(path: &Path, report: &MigrationReport) -> Result<(), 
         out.push('\n');
     }
 
+    out.push_str("## Supersession edges\n\n");
+    if report.supersedes.is_empty() {
+        out.push_str("_(none)_\n\n");
+    } else {
+        out.push_str("| Old | New | Source |\n");
+        out.push_str("|-----|-----|--------|\n");
+        for record in &report.supersedes {
+            out.push_str(&format!(
+                "| `{}` | `{}` | `{}` |\n",
+                record.old_global_id,
+                record.new_global_id,
+                record.source_path.display(),
+            ));
+        }
+        out.push('\n');
+    }
+
     fs::write(path, out).map_err(|e| OrbitError::Io(format!("write {}: {e}", path.display())))
 }

@@ -105,6 +105,9 @@ fn feature_for_path(design_root: &Path, file: &Path) -> Option<String> {
 }
 
 /// Sweep a single file. Returns `(new_contents, rewrites, unresolved)`.
+///
+/// Lines inside fenced code blocks (` ``` ` toggle) are passed through
+/// untouched — they're literal example content, not references.
 fn sweep_file(
     raw: &str,
     path: &Path,
@@ -116,7 +119,20 @@ fn sweep_file(
     let mut rewrites = Vec::new();
     let mut unresolved = Vec::new();
 
+    let mut in_fence = false;
     for (idx, line) in raw.lines().enumerate() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
         let line_no = idx + 1;
         let (rewritten, line_rewrites, line_unresolved) =
             sweep_line(line, path, line_no, feature, id_map, features_by_legacy);
@@ -146,7 +162,22 @@ fn sweep_line(
 
     let bytes = line.as_bytes();
     let mut i = 0;
+    // Track inline-code spans (single-backtick toggle) so literal example
+    // strings like `"activity-job/ADR-017"` aren't rewritten.
+    let mut in_inline_code = false;
     while i < bytes.len() {
+        if bytes[i] == b'`' {
+            in_inline_code = !in_inline_code;
+            result.push('`');
+            i += 1;
+            continue;
+        }
+        if in_inline_code {
+            let ch = line[i..].chars().next().unwrap_or('\0');
+            result.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
         // Form 4: explicit cross-feature `<feature>/ADR-NNN`. Recognized when
         // an alphanumeric/dash run is followed by `/ADR-` and digits, NOT
         // inside an existing bracket (we leave bracketed refs to form 1).
@@ -573,5 +604,79 @@ mod tests {
         );
         assert!(out.contains("[ADR-0042]"));
         assert!(rewrites.is_empty(), "should not rewrite global IDs");
+    }
+
+    #[test]
+    fn code_fenced_block_content_is_not_rewritten() {
+        // YAML examples like `legacy_ids: - activity-job/ADR-039` are literal
+        // illustrative content, not references.
+        let map = id_map(&[("activity-job", "ADR-039", "ADR-0042")]);
+        let fbl = features_by_legacy(&map);
+        let src = "\
+Some prose with `activity-job/ADR-039` ref.
+
+```yaml
+legacy_ids:
+  - activity-job/ADR-039
+```
+
+More prose.
+";
+        let (out, rewrites, _) = sweep_file(
+            src,
+            Path::new("docs/design/adr-artifact/2_design.md"),
+            Some("adr-artifact"),
+            &map,
+            &fbl,
+        );
+        // Inside the fence the literal must survive verbatim.
+        assert!(
+            out.contains("  - activity-job/ADR-039"),
+            "literal in fence rewritten: {out}"
+        );
+        // Outside-fence prose still gets rewritten — note that the prose
+        // mention is inside inline backticks so it should *also* be left
+        // alone (see backtick test). This test pins the fence behavior.
+        // Rewrites should be 0 because both occurrences are protected.
+        assert_eq!(rewrites.len(), 0, "unexpected rewrites: {rewrites:?}");
+    }
+
+    #[test]
+    fn inline_backtick_content_is_not_rewritten() {
+        // Example: `- legacy_id — set during migration (e.g. `"activity-job/ADR-017"`)`
+        // The string inside backticks is a literal example of what a
+        // legacy_id looks like, not a reference.
+        let map = id_map(&[("activity-job", "ADR-017", "ADR-0099")]);
+        let fbl = features_by_legacy(&map);
+        let src = "- `legacy_id` — set during migration (e.g. `\"activity-job/ADR-017\"`) so it resolves\n";
+        let (out, rewrites, _) = sweep_file(
+            src,
+            Path::new("docs/design/adr-artifact/1_overview.md"),
+            Some("adr-artifact"),
+            &map,
+            &fbl,
+        );
+        assert!(
+            out.contains("activity-job/ADR-017"),
+            "inline-backtick literal rewritten: {out}"
+        );
+        assert!(rewrites.is_empty(), "unexpected rewrites: {rewrites:?}");
+    }
+
+    #[test]
+    fn references_outside_code_spans_still_rewrite() {
+        // Sanity: the fence/backtick guards must not break the happy path.
+        let map = id_map(&[("activity-job", "ADR-048", "ADR-0042")]);
+        let fbl = features_by_legacy(&map);
+        let src = "See [ADR-048] for details.\n";
+        let (out, rewrites, _) = sweep_file(
+            src,
+            Path::new("docs/design/activity-job/2_design.md"),
+            Some("activity-job"),
+            &map,
+            &fbl,
+        );
+        assert!(out.contains("[ADR-0042]"), "should rewrite: {out}");
+        assert_eq!(rewrites.len(), 1);
     }
 }

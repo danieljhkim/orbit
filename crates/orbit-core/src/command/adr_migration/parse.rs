@@ -109,13 +109,27 @@ fn parse_string(raw: &str, feature: &str, source_path: &Path) -> Vec<ParsedAdrEn
 
         let mut warnings = Vec::new();
         let status_line = find_status_line(body_lines);
-        let status = match status_line {
+        let mut status = match status_line {
             Some(line) => parse_status(line),
             None => {
                 warnings.push("missing Status line".to_string());
                 ParsedStatus::Proposed
             }
         };
+        // CONVENTIONS §4 puts supersession inline on the Status line, but
+        // knowledge-graph and task-sync ADRs use `**Status:** Accepted` paired
+        // with a separate `**Superseded by:** ADR-NNN` bullet. If the Status
+        // line resolved to a non-supersession state and a bullet carries an
+        // ADR target, the bullet wins.
+        if matches!(status, ParsedStatus::Accepted | ParsedStatus::Proposed)
+            && let Some(bullet) = find_superseded_by_bullet(body_lines)
+            && let Some(target_legacy) = parse_superseded_by_bullet(bullet)
+        {
+            status = ParsedStatus::SupersededBy {
+                target_legacy,
+                folded: false,
+            };
+        }
         let tasks = status_line.map(extract_task_ids).unwrap_or_default();
 
         let (context, decision, consequences) = extract_sections(body_lines);
@@ -177,19 +191,46 @@ fn parse_status(line: &str) -> ParsedStatus {
     // Look at the first segment (separated by " · " or end-of-line).
     let first = payload.split(" · ").next().unwrap_or("").trim();
 
-    if first.eq_ignore_ascii_case("accepted") {
-        ParsedStatus::Accepted
-    } else if first.eq_ignore_ascii_case("proposed") {
-        ParsedStatus::Proposed
-    } else if let Some(rest) = first.strip_prefix("Superseded by ") {
+    // Prefix matching is intentional: corpus entries write things like
+    // `Accepted (with open question)` and `Proposed (cross-machine render
+    // deferred from minimal Phase 1)`. Check supersession first so the
+    // "Superseded by ..." prefix beats the "Superseded" / "Sup..." branches.
+    if let Some(rest) = first.strip_prefix("Superseded by ") {
         let folded = rest.contains("(folded)");
         let target_legacy = rest.replace("(folded)", "").trim().to_string();
         ParsedStatus::SupersededBy {
             target_legacy,
             folded,
         }
+    } else if first.starts_with("Accepted") {
+        ParsedStatus::Accepted
     } else {
+        // "Proposed", "Proposed (...)", or any other unrecognized form all
+        // fall back to Proposed — the lenient default.
         ParsedStatus::Proposed
+    }
+}
+
+fn find_superseded_by_bullet<'a>(body: &'a [&'a str]) -> Option<&'a str> {
+    body.iter()
+        .find(|line| line.trim_start().starts_with("**Superseded by:**"))
+        .copied()
+}
+
+/// Extracts the supersession target from a `**Superseded by:** ADR-NNN ...`
+/// bullet line. Returns `None` if the first token is not an ADR id (e.g.
+/// `**Superseded by:** [T20260506-11] for ...`).
+fn parse_superseded_by_bullet(line: &str) -> Option<String> {
+    let payload = line
+        .trim_start()
+        .trim_start_matches("**Superseded by:**")
+        .trim();
+    let token = payload.split_whitespace().next()?;
+    let cleaned = token.trim_end_matches(['.', ',', '/']);
+    if cleaned.starts_with("ADR-") {
+        Some(cleaned.to_string())
+    } else {
+        None
     }
 }
 
@@ -457,6 +498,79 @@ Folded into ADR-001's rollup.
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].legacy_id, "ADR-001");
         assert_eq!(entries[1].legacy_id, "ADR-002");
+    }
+
+    #[test]
+    fn superseded_by_bullet_with_adr_target_overrides_accepted_status() {
+        // knowledge-graph/ADR-004 shape: Status says Accepted, a separate
+        // bullet carries the supersession target.
+        let src = "\
+## ADR-004 — Shell out to the `git` CLI instead of an in-process library
+
+**Status:** Accepted · 2026-04 · [T20260421-0528]
+
+**Superseded by:** ADR-029 / [T20260506-11].
+
+**Context.** ctx.
+
+**Decision.** decision.
+
+**Consequences.**
+- Cost: per-commit fork overhead.
+";
+        let entries = parse_string(src, "knowledge-graph", &make_path());
+        match &entries[0].status {
+            ParsedStatus::SupersededBy {
+                target_legacy,
+                folded,
+            } => {
+                assert_eq!(target_legacy, "ADR-029");
+                assert!(!*folded);
+            }
+            other => panic!("expected SupersededBy from bullet, got {other:?}"),
+        }
+        // Tasks come from the Status line, not the bullet.
+        assert_eq!(entries[0].tasks, vec!["T20260421-0528"]);
+    }
+
+    #[test]
+    fn superseded_by_bullet_with_task_only_does_not_override_status() {
+        // knowledge-graph/ADR-010 shape: bullet has no ADR target, just a task.
+        let src = "\
+## ADR-010 — Orbit-owned symbol-level write operations
+
+**Status:** Proposed · 2026-04 · [T20260421-0543]
+
+**Superseded by:** [T20260506-11] for graph task-attribution preservation.
+
+**Context.** ctx.
+
+**Decision.** decision.
+
+**Consequences.**
+- Cost: tradeoff.
+";
+        let entries = parse_string(src, "knowledge-graph", &make_path());
+        assert_eq!(entries[0].status, ParsedStatus::Proposed);
+    }
+
+    #[test]
+    fn accepted_with_parenthetical_qualifier_still_parses_as_accepted() {
+        // knowledge-graph/ADR-005 shape: `Accepted (with open question)`.
+        let src = "\
+## ADR-005 — Some accepted decision with caveats
+
+**Status:** Accepted (with open question) · 2026-04 · [T20260411-0424]
+
+**Context.** ctx.
+
+**Decision.** decision.
+
+**Consequences.**
+- Cost: caveat.
+";
+        let entries = parse_string(src, "knowledge-graph", &make_path());
+        assert_eq!(entries[0].status, ParsedStatus::Accepted);
     }
 
     #[test]
