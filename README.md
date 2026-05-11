@@ -26,6 +26,7 @@ Full positioning, commercial model, and roadmap: [docs/POSITIONING.md](docs/POSI
 
 - **Conflict-aware parallel execution.** Each agent run is dispatched into its own git worktree, and the gate pipeline reserves task `context_files` as locks before fanning out — overlapping reservations are rejected up front rather than producing merge conflicts later. Locks auto-release when their owning run reaches a terminal state. Agents themselves do not call the lock APIs; coordination happens at the workflow plane. → [docs/design/activity-job/](docs/design/activity-job/)
 
+> **Platform:** OS-level sandbox enforcement is **macOS only** (via `sandbox-exec`). On Linux/Windows, FS policies still apply as in-process guards for HTTP-tool calls; the spawned agent subprocess runs without OS-level isolation.
 
 ---
 
@@ -45,17 +46,23 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install
 orbit init                                 # global state (~/.orbit)
 cd <repo> && orbit workspace init --mcp    # workspace state + MCP integration
 
+# launch interactive dashboard
+orbit web serve
+
 # create, approve, and ship a task
 TASK_ID=$(orbit task add \
   --title "..." \
   --description "..." \
   --acceptance-criteria "..." \
   --workspace .)
+
+# or simply ask an agent to create a task:
+"Claude can you create an orbit task to refactor the authentication 
+logic in ..."
+
 orbit task approve "$TASK_ID"
 
 orbit run ship-auto      # conflict-aware flush of the backlog tasks to PR
-
-orbit web serve          # launch interactive dashboard
 ```
 
 Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com).
@@ -73,42 +80,9 @@ Substrate primitives (`activity`, `job`, `policy`, `executor`, `tool`) are inspe
 
 ---
 
-## Architecture
-
-Layered Rust crates. Lower layers do not depend on higher layers.
-
-```mermaid
-flowchart LR
-  CLI["orbit-cli"] --> Core["orbit-core"]
-  CLI --> MCP["orbit-mcp"]
-  Core --> Engine["orbit-engine"]
-  Core --> Store["orbit-store"]
-  Core --> Tools["orbit-tools"]
-  Core --> Embed["orbit-embed"]
-  Engine --> Agent["orbit-agent"]
-  Engine --> Store
-  Tools --> Exec["orbit-exec"]
-  Tools --> Knowledge["orbit-knowledge"]
-  Tools --> Policy["orbit-policy"]
-  Exec --> Common["orbit-common"]
-  Knowledge --> Common
-  Policy --> Common
-  Store --> Common
-  Agent --> Common
-  Embed --> Common
-  MCP --> Common
-  Core --> Common
-```
-
-`orbit-knowledge` provides the graph substrate; `orbit-engine` and `orbit-agent` provide the execution substrate; `orbit-embed` provides workspace-local semantic search (SQLite-backed vector + FTS5 store, with inference delegated to a separately-installed `orbit-embed-companion` binary). v1 ships `backend: cli` (CLI-subprocess providers under `orbit-agent::providers/*`). Design docs: [docs/design/](docs/design/).
-
-> **Platform:** OS-level sandbox enforcement is **macOS only** (via `sandbox-exec`). On Linux/Windows, FS policies still apply as in-process guards for HTTP-tool calls; the spawned agent subprocess runs without OS-level isolation.
-
----
-
 ## Current Status
 
-Orbit is v0.3.x — work in progress.
+Orbit is v0.4.x — work in progress.
 
 - Core local execution, graph build/query, and audit infrastructure are usable today.
 - The execution substrate shows more internal machinery than the final product should; some historical CLI surfaces remain even though they're no longer central.
