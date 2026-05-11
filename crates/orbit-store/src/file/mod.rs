@@ -15,6 +15,7 @@ pub(crate) mod executor_def_store;
 pub(crate) mod friction_store;
 pub(crate) mod job_store;
 pub(crate) mod layout;
+pub(crate) mod learning_store;
 pub(crate) mod policy_def_store;
 pub(crate) mod scoreboard {
     pub(crate) mod duel_scoreboard;

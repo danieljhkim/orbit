@@ -35,6 +35,7 @@ pub mod friction;
 pub mod id;
 pub mod invocation;
 pub mod job;
+pub mod learning;
 pub mod metrics;
 pub mod policy_decision;
 pub mod policy_def;
@@ -84,6 +85,10 @@ pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
     JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics, RunEvent, StepCondition,
     default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
+};
+pub use learning::{
+    EvidenceKind, Learning, LearningEvidence, LearningScope, LearningStatus,
+    normalize_learning_paths, normalize_learning_tags,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;

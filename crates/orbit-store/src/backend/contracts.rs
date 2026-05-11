@@ -1,9 +1,10 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
     Adr, AdrStatus, AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
-    LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool,
-    Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
-    TaskType, normalize_task_tags, task_matches_tags,
+    Learning, LearningEvidence, LearningScope, LegacyValidation, OrbitError, OrbitId,
+    PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment,
+    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, normalize_task_tags,
+    task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -557,4 +558,65 @@ pub trait PolicyDefStoreBackend: Send + Sync {
     fn list_policy_defs(&self) -> Result<Vec<PolicyDef>, OrbitError>;
     fn get_policy_def(&self, name: &str) -> Result<Option<PolicyDef>, OrbitError>;
     fn upsert_policy_def(&self, def: &PolicyDef) -> Result<(), OrbitError>;
+}
+
+/// Parameters for creating a new [`Learning`] record.
+#[derive(Debug, Clone)]
+pub struct LearningCreateParams {
+    pub summary: String,
+    pub scope: LearningScope,
+    pub body: String,
+    pub evidence: Vec<LearningEvidence>,
+    pub created_by: Option<String>,
+}
+
+/// Partial update to an existing learning. Fields that are `None` are left
+/// unchanged. Mirrors the `*UpdateParams` convention used for tasks.
+#[derive(Debug, Clone, Default)]
+pub struct LearningUpdateParams {
+    pub summary: Option<String>,
+    pub scope: Option<LearningScope>,
+    pub body: Option<String>,
+    pub evidence: Option<Vec<LearningEvidence>>,
+}
+
+/// Search query for [`LearningStoreBackend::search_learnings`]. All fields
+/// are optional; an empty query returns the active set unfiltered (capped
+/// by `limit`).
+#[derive(Debug, Clone, Default)]
+pub struct LearningSearchParams {
+    pub path: Option<String>,
+    pub tag: Option<String>,
+    pub query: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// Result row from [`LearningStoreBackend::search_learnings`]. Carries
+/// `matched_by` so callers can attribute matches to their scope axis (path
+/// vs. tag vs. query) per the design's §5.3 result shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LearningSearchResult {
+    pub learning: Learning,
+    pub matched_by: Vec<String>,
+}
+
+pub trait LearningStoreBackend: Send + Sync {
+    fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
+    fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
+    fn list_learnings(
+        &self,
+        status: Option<orbit_common::types::LearningStatus>,
+    ) -> Result<Vec<Learning>, OrbitError>;
+    fn search_learnings(
+        &self,
+        params: LearningSearchParams,
+    ) -> Result<Vec<LearningSearchResult>, OrbitError>;
+    fn update_learning(
+        &self,
+        id: &str,
+        params: LearningUpdateParams,
+    ) -> Result<Learning, OrbitError>;
+    fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
+    fn delete_learning(&self, id: &str) -> Result<bool, OrbitError>;
+    fn reindex_learnings(&self) -> Result<(), OrbitError>;
 }

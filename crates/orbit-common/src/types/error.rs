@@ -22,6 +22,8 @@ pub enum OrbitError {
     AdrInvalidTransition(String),
     #[error("ADR not found: {0}")]
     AdrNotFound(String),
+    #[error("learning not found: {0}")]
+    LearningNotFound(String),
     #[error("agent session not found: {0}")]
     AgentSessionNotFound(String),
     #[error("companion not installed: {0}")]

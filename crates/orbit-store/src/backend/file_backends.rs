@@ -1,12 +1,14 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ExecutorDef, ExternalRef, JobRun, KnowledgeRunMetrics, OrbitError,
-    PipelineState, PolicyDef, Task, TaskArtifact, TaskPriority, TaskStatus,
+    Adr, AdrStatus, ExecutorDef, ExternalRef, JobRun, KnowledgeRunMetrics, Learning,
+    LearningStatus, OrbitError, PipelineState, PolicyDef, Task, TaskArtifact, TaskPriority,
+    TaskStatus,
 };
 
 use super::contracts::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
     TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
     TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
     TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
@@ -14,6 +16,7 @@ use super::contracts::{
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::job_store::JobFileStore;
+use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskFileStore;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
@@ -329,6 +332,65 @@ impl AdrStoreBackend for AdrFileStore {
 
     fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
         self.supersede_adr(old_id, new_id)
+    }
+}
+
+impl LearningStoreBackend for LearningFileStore {
+    fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
+        self.create_learning(params)
+    }
+
+    fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
+        // Learnings use the WorkspaceOnly strategy per `CLAUDE.md` Scoping
+        // Rules and ADR-003.
+        resolve::<Learning, _>(self, id)
+    }
+
+    fn list_learnings(&self, status: Option<LearningStatus>) -> Result<Vec<Learning>, OrbitError> {
+        self.list_learnings(status)
+    }
+
+    fn search_learnings(
+        &self,
+        params: LearningSearchParams,
+    ) -> Result<Vec<LearningSearchResult>, OrbitError> {
+        self.search_learnings(params)
+    }
+
+    fn update_learning(
+        &self,
+        id: &str,
+        params: LearningUpdateParams,
+    ) -> Result<Learning, OrbitError> {
+        self.update_learning(id, params)
+    }
+
+    fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError> {
+        self.supersede_learning(old_id, new_id)
+    }
+
+    fn delete_learning(&self, id: &str) -> Result<bool, OrbitError> {
+        self.delete_learning(id)
+    }
+
+    fn reindex_learnings(&self) -> Result<(), OrbitError> {
+        self.reindex_learnings()
+    }
+}
+
+impl ScopedStore<Learning> for LearningFileStore {
+    type Err = OrbitError;
+
+    fn strategy(&self) -> ScopeStrategy {
+        ScopeStrategy::WorkspaceOnly
+    }
+
+    fn get_workspace(&self, key: &str) -> Result<Option<Learning>, OrbitError> {
+        self.get_learning(key)
+    }
+
+    fn get_global(&self, _key: &str) -> Result<Option<Learning>, OrbitError> {
+        Ok(None)
     }
 }
 

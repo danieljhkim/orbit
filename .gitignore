@@ -33,6 +33,8 @@ orbit.db-wal
 .orbit/*
 !.orbit/adrs/
 .orbit/adrs/index.sqlite*
+# Project learnings travel with the repo (ADR-003 in docs/design/project-learnings/4_decisions.md).
+!.orbit/learnings/
 .monodev/
 
 # Python

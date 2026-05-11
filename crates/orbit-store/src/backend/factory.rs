@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use super::contracts::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskDocumentStoreBackend,
-    TaskHistoryStoreBackend, TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend,
-    ToolStoreBackend,
+    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
+    TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
@@ -15,6 +15,7 @@ use crate::Store;
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::job_store::JobFileStore;
+use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskFileStore;
 
@@ -47,6 +48,17 @@ pub fn workspace_job_run_store(root: PathBuf) -> Arc<dyn JobRunStoreBackend> {
 /// T20260511-2 wires it through `orbit-core`.
 pub fn workspace_adr_backends(adr_dir: PathBuf, store: Store) -> Arc<dyn AdrStoreBackend> {
     Arc::new(AdrFileStore::new_with_index(adr_dir, store))
+}
+
+/// Constructs the workspace-scoped project-learnings store backed by
+/// `learning_dir` on disk and indexed in the shared SQLite `store`. The
+/// returned `Arc<dyn LearningStoreBackend>` is the trait-object surface that
+/// `orbit-tools::orbit.learning.*` consumes in C2.
+pub fn workspace_learning_backend(
+    learning_dir: PathBuf,
+    store: Store,
+) -> Arc<dyn LearningStoreBackend> {
+    Arc::new(LearningFileStore::new_with_index(learning_dir, store))
 }
 
 pub fn global_executor_def_store(root: PathBuf) -> Arc<dyn ExecutorDefStoreBackend> {

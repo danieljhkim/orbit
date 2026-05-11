@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-11
 
 ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -36,7 +36,7 @@ The repeated failure mode the system exists to prevent is *agents not knowing th
 
 ## ADR-002 — Native Orbit primitive (`learning` resource) over a flat markdown directory
 
-**Status:** Proposed · 2026-05 · [T20260510-11]
+**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5]
 
 **Context.** Storage choice. Three plausible shapes:
 
@@ -60,7 +60,7 @@ A flat-markdown approach can be retrofitted with an index, but at that point it'
 
 ## ADR-003 — Workspace-scoped, checked into git (not workspace-private state)
 
-**Status:** Proposed · 2026-05 · [T20260510-11]
+**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5]
 
 **Context.** Where do learning records live on disk?
 

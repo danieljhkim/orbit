@@ -146,9 +146,36 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_audit_events_schema(conn)?;
     ensure_task_reservations_schema(conn)?;
     ensure_task_index_schema(conn)?;
+    ensure_learning_index_schema(conn)?;
     ensure_invocation_schema(conn)?;
 
     Ok(())
+}
+
+fn ensure_learning_index_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            -- Project-learnings envelope index. YAML records live on disk under
+            -- `<root>/<id>.yaml` (active) and `<root>/superseded/<id>.yaml`;
+            -- this table indexes the envelope fields for fast scope-glob
+            -- lookups. Arrays are stored as JSON strings for the same reason
+            -- the ADR index does it: phase-1 corpora are small and a junction
+            -- table is overkill. Per ADR-004, ranking and FTS over body
+            -- content are deferred to phase 2.
+            CREATE TABLE IF NOT EXISTS learnings_index (
+                id          TEXT PRIMARY KEY,
+                status      TEXT NOT NULL,
+                paths       TEXT NOT NULL,
+                tags        TEXT NOT NULL,
+                summary     TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS learnings_active
+                ON learnings_index(status) WHERE status = 'active';
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
 }
 
 fn ensure_agent_sessions_schema(conn: &Connection) -> Result<(), OrbitError> {

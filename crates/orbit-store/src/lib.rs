@@ -104,11 +104,12 @@ use chrono::{DateTime, Utc};
 pub use backend::{
     ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend,
     AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, PolicyDefStoreBackend, ReleasedTaskReservation,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict,
-    TaskLockHolder, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
+    ReleasedTaskReservation, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
@@ -116,8 +117,8 @@ pub use backend::{
     TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, WorkspaceTaskBackends,
     audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_adr_backends, workspace_job_run_store, workspace_policy_def_store,
-    workspace_task_backends,
+    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
+    workspace_policy_def_store, workspace_task_backends,
 };
 pub use invocation_store_impl::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,

@@ -30,7 +30,8 @@ fn error_code(err: &OrbitError) -> &'static str {
         | OrbitError::ActivityNotFound(_)
         | OrbitError::AgentSessionNotFound(_)
         | OrbitError::WorkspaceNotFound(_)
-        | OrbitError::AdrNotFound(_) => "not_found",
+        | OrbitError::AdrNotFound(_)
+        | OrbitError::LearningNotFound(_) => "not_found",
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::PolicyDenied(_) => "policy_denied",
         OrbitError::TaskApprovalRequired(_) => "approval_required",

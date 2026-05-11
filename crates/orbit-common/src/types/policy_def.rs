@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::{Component, Path};
 
 use chrono::{DateTime, Utc};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{OrbitError, validate_resource_name};
+use crate::utility::glob::{compile_glob_regex, match_glob, normalize_glob_path};
 
 pub const DEFAULT_POLICY_NAME: &str = "default";
 pub const UNRESTRICTED_FS_PROFILE: &str = "unrestricted";
@@ -207,7 +207,7 @@ impl PolicyDef {
         path: &str,
     ) -> Result<FsCheckResult, OrbitError> {
         let profile = self.effective_profile(profile_name)?;
-        let normalized_path = normalize_path(path)?;
+        let normalized_path = normalize_glob_path(path)?;
         let rules = match operation {
             FsOperation::Read => &profile.read,
             FsOperation::Modify => &profile.modify,
@@ -227,7 +227,7 @@ impl PolicyDef {
             if !negated {
                 saw_positive_rule = true;
             }
-            if rule_matches_path(pattern, &normalized_path)? {
+            if match_glob(pattern, &normalized_path)? {
                 decision = Some(FsCheckResult {
                     allowed: !negated,
                     matched_rule: if negated {
@@ -356,7 +356,7 @@ fn normalize_rule(rule: &str, label: &str) -> Result<String, OrbitError> {
         }
     }
 
-    compile_rule_regex(&normalized).map_err(|error| {
+    compile_glob_regex(&normalized).map_err(|error| {
         OrbitError::InvalidInput(format!(
             "{label} rule `{trimmed}` is not a valid filesystem glob: {error}"
         ))
@@ -369,52 +369,6 @@ fn normalize_rule(rule: &str, label: &str) -> Result<String, OrbitError> {
     })
 }
 
-fn normalize_path(path: &str) -> Result<String, OrbitError> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "filesystem path must not be empty".to_string(),
-        ));
-    }
-
-    let mut normalized = trimmed.replace('\\', "/");
-    while let Some(stripped) = normalized.strip_prefix("./") {
-        normalized = stripped.to_string();
-    }
-    if normalized == "." {
-        normalized.clear();
-    }
-    if normalized == "~"
-        || normalized.starts_with("~/")
-        || normalized.starts_with("../")
-        || normalized == ".."
-    {
-        return Err(OrbitError::InvalidInput(format!(
-            "filesystem path `{path}` must stay inside the workspace root"
-        )));
-    }
-
-    let path_ref = Path::new(&normalized);
-    if path_ref.is_absolute() {
-        return Err(OrbitError::InvalidInput(format!(
-            "filesystem path `{path}` must stay inside the workspace root"
-        )));
-    }
-
-    for component in path_ref.components() {
-        match component {
-            Component::CurDir | Component::Normal(_) => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(OrbitError::InvalidInput(format!(
-                    "filesystem path `{path}` must stay inside the workspace root"
-                )));
-            }
-        }
-    }
-
-    Ok(normalized)
-}
-
 fn split_rule(rule: &str) -> (bool, &str) {
     rule.strip_prefix('!')
         .map(|rest| (true, rest))
@@ -423,57 +377,4 @@ fn split_rule(rule: &str) -> (bool, &str) {
 
 fn negate_rule(rule: String) -> String {
     format!("!{rule}")
-}
-
-fn rule_matches_path(rule: &str, path: &str) -> Result<bool, OrbitError> {
-    let regex = compile_rule_regex(rule).map_err(|error| {
-        OrbitError::InvalidInput(format!("invalid filesystem glob `{rule}`: {error}"))
-    })?;
-    Ok(regex.is_match(path))
-}
-
-fn compile_rule_regex(rule: &str) -> Result<Regex, regex::Error> {
-    if rule == "." {
-        return Regex::new(r"^$");
-    }
-
-    if let Some(prefix) = rule.strip_suffix("/**") {
-        if prefix.is_empty() {
-            return Regex::new(r"^.*$");
-        }
-        let escaped = regex::escape(prefix);
-        return Regex::new(&format!("^{escaped}(?:/.*)?$"));
-    }
-
-    let chars: Vec<char> = rule.chars().collect();
-    let mut index = 0usize;
-    let mut pattern = String::from("^");
-    while index < chars.len() {
-        if chars[index] == '*' {
-            if index + 2 < chars.len() && chars[index + 1] == '*' && chars[index + 2] == '/' {
-                pattern.push_str("(?:.*/)?");
-                index += 3;
-                continue;
-            }
-            if index + 1 < chars.len() && chars[index + 1] == '*' {
-                pattern.push_str(".*");
-                index += 2;
-                continue;
-            }
-            pattern.push_str("[^/]*");
-            index += 1;
-            continue;
-        }
-
-        if chars[index] == '?' {
-            pattern.push_str("[^/]");
-            index += 1;
-            continue;
-        }
-
-        pattern.push_str(&regex::escape(&chars[index].to_string()));
-        index += 1;
-    }
-    pattern.push('$');
-    Regex::new(&pattern)
 }

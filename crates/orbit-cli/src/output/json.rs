@@ -55,5 +55,6 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::Io(_) => "io_error",
         OrbitError::AdrNotFound(_) => "adr_not_found",
         OrbitError::AdrInvalidTransition(_) => "adr_invalid_transition",
+        OrbitError::LearningNotFound(_) => "learning_not_found",
     }
 }
