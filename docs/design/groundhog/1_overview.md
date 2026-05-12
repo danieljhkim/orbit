@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-09 (split Groundhog runner module layout, [T20260509-19])
+**Last updated:** 2026-05-12
 
 > *"The agent gets to retry each checkpoint like Bill Murray in Groundhog Day — it wakes up fresh but remembers what it learned."*
 

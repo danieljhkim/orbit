@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-12
 
 This is the **minimal first-draft design**. It specifies only the primitives required to make the "oral history for agents" vision in [1_overview.md §1](./1_overview.md) real: the edge schema, three derivers, the bipartite task↔code bridge, the `feature` closure substrate, the symbol-biography renderer, and the load-bearing assumption that KG `stable_id` survives structural change.
 
@@ -85,7 +85,7 @@ Evidence is JSON, with a per-source schema. Phase 1 ships three sources:
 
 ```json
 // commit-grep
-{ "commit_sha": "d4f320f9", "path": "crates/.../skill.rs", "lines_changed": 14 }
+{ "commit_sha": "d4f320f9", "path": "crates/orbit-common/src/types/skill.rs", "lines_changed": 14 }
 
 // kg-attribution
 { "node_stable_id": "node:abc...", "build_ref": "agent-main@<oid>", "extractor": "rust" }

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-10
+**Last updated:** 2026-05-12
 
 Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts (phase 1) and, eventually, the knowledge-graph corpus (phase 2). Agents query it to find prior tasks by topic before adding duplicates; humans query it to recover work they remember by meaning rather than by literal substring. **Phase 1 ships in v1 as an opt-in feature**; phase 2 (graph integration) is reserved for a follow-up design once phase 1 is operational.
 
@@ -69,7 +69,7 @@ Phase 1 covers tasks only. Phase 2 will add `source_kind = symbol` rows that emb
 | `orbit semantic install/uninstall` CLI | [2_design.md §6.1](./2_design.md) | [T20260510-9] |
 | `orbit semantic search/related` CLI + MCP | [2_design.md §6](./2_design.md) | [T20260510-10] |
 | Index-on-mutation + reindex command | [2_design.md §7](./2_design.md) | [T20260510-9] |
-| Existing task store API | [crates/orbit-store/src/file/task_store/api.rs](../../../crates/orbit-store/src/file/task_store/api.rs) | — |
+| Existing task store API | [crates/orbit-store/src/file/task_store/v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs) | — |
 | Concerns & honest limitations | [2_design.md §8](./2_design.md) | [T20260510-3] |
 | ADR log | [4_decisions.md](./4_decisions.md) | [T20260510-3] |
 | Open questions, prior work | [3_vision.md](./3_vision.md) | [T20260510-3] |

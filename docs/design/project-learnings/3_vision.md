@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-12
 
 This document captures the questions phase 1 deliberately defers, the prior work the design draws on or rejects, what is specific to Orbit's situation, and external references for further reading. The questions in §1 are the most likely sources of post-phase-1 design pressure.
 
@@ -12,7 +12,7 @@ This document captures the questions phase 1 deliberately defers, the prior work
 
 ### 1.1 Symbol-aware scope (deferred to phase 2)
 
-Phase 1 scopes learnings by path globs and tags ([2_design.md §3](./2_design.md)). This breaks under renames: a learning scoped to `crates/orbit-engine/perf_runner.rs` becomes invisible the moment someone moves the file, even though the knowledge is still about the same logic.
+Phase 1 scopes learnings by path globs and tags ([2_design.md §3](./2_design.md)). This breaks under renames: a learning scoped to `crates/orbit-knowledge/src/graph_bench.rs` becomes invisible the moment someone moves the file, even though the knowledge is still about the same logic.
 
 The knowledge graph already tracks symbol identity across moves. A `scope.symbols: ["orbit-engine::perf_runner::run_benchmark"]` field would survive renames cleanly because the graph resolves symbols regardless of file location. Reasons phase 1 doesn't ship this:
 

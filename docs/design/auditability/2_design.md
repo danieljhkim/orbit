@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-10 (T20260510-13)
+**Last updated:** 2026-05-12
 
 This document describes Orbit's shipped auditability implementation across command audit rows, activity/job envelopes, loop-level provider/tool traces, blob storage, redaction, identity attribution, metrics-adjacent invocation records, and known limitations. See [1_overview.md](./1_overview.md) for the feature purpose and [3_vision.md](./3_vision.md) for future questions.
 
@@ -43,7 +43,7 @@ Some runtime paths write targeted command-audit rows directly:
 - `crates/orbit-core/src/command/tool.rs` records CLI and MCP tool invocations as `command: tool` with `subcommand: "run"` or `"run-mcp"`.
 - `crates/orbit-cli/src/command/mcp/mod.rs` records MCP preflight failures for unknown or unexposed tools before runtime dispatch.
 - `crates/orbit-core/src/runtime/orbit_tool_host/mod.rs` records task lock reservation checks, reservations, releases, and denials.
-- `crates/orbit-core/src/runtime/v2_host.rs` records gate-starvation failures for task bundles.
+- `crates/orbit-core/src/runtime/v2_host/pipeline_actions.rs` records gate-starvation failures for task bundles.
 
 These producers share the SQLite schema and must preserve the same status, target, actor, and redaction expectations as CLI rows. Prescriptive coverage expectations live in [specs/coverage-matrix.md](./specs/coverage-matrix.md).
 
@@ -98,7 +98,7 @@ The requirement is not to collapse every field into one value. It is that a revi
 
 ## 8. Query, Export, and Metrics Surfaces
 
-`crates/orbit-cli/src/command/audit.rs` exposes command rows through `orbit audit list`, `show`, `stats`, `export --format json`, `export --format csv`, and `prune`, with filters for time, tool, status, role, and limit. Exports include all command-audit columns, including sparse `stdout_truncated`, `stderr_truncated`, and `session_id`.
+`crates/orbit-cli/src/command/observe/audit.rs` exposes command rows through `orbit audit list`, `show`, `stats`, `export --format json`, `export --format csv`, and `prune`, with filters for time, tool, status, role, and limit. Exports include all command-audit columns, including sparse `stdout_truncated`, `stderr_truncated`, and `session_id`.
 
 V2 traces are exposed separately: `orbit run events` prints chronological envelopes, `orbit run trace` renders the parent tree, and `orbit run logs` extracts CLI stdout/stderr blobs. `orbit run history` and `orbit run show` expose job-run state rather than the full envelope stream. Metrics and scoreboard commands read invocation records; they summarize cost and usage, not transcript structure.
 

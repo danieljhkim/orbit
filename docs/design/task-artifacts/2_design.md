@@ -63,7 +63,7 @@ relations:
   - type: supersedes
     target: ORB-00000
 context_files:
-  - file:crates/orbit-store/src/file/task_store/doc.rs
+  - file:crates/orbit-store/src/file/task_store/v2_bundle.rs
 external_refs: []
 created_by: codex:gpt-5.5
 planned_by: null

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-10 (post-[T20260509-64], [T20260510-7])
+**Last updated:** 2026-05-12
 
 This document specifies the current knowledge graph: storage, build pipeline, query services, Orbit integration, locking, and limitations. The [T20260430-22] cleanup removes duplicated rationale already covered by [1_overview.md](./1_overview.md), [3_vision.md](./3_vision.md), and ADRs.
 
@@ -115,8 +115,8 @@ Canonical read behavior goes through `orbit_knowledge::commands::*` ([T20260510-
 
 A `Selector` is the universal addressing primitive. It accepts:
 
-- a bare location (`crates/foo/src/lib.rs`)
-- a location + kind disambiguator (`crates/foo/src/lib.rs:Foo:struct`) for distinguishing struct-vs-impl at the same qualified name
+- a bare location (`crates/orbit-common/src/types/error.rs`)
+- a location + kind disambiguator (`crates/orbit-common/src/types/error.rs:OrbitError:enum`) for distinguishing kind-specific selectors at the same qualified name
 - a node id directly
 
 All tool inputs that reference a node accept a selector string.

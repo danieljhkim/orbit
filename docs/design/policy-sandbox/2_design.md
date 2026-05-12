@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-10 (T20260508-13 sibling allowances reflected; T20260509-7, T20260509-28, T20260509-30)
+**Last updated:** 2026-05-12
 
 This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
@@ -87,7 +87,7 @@ The `fsProfile:` field on an activity flows through `crates/orbit-engine/src/act
 - `job_executor.rs` reads `t.fs_profile.as_deref()` from the activity spec at the call site of every step type.
 - `agent_loop_driver.rs` and `groundhog.rs` invoke `host.tool_context_for_activity(fs_profile, audit_logger)` to construct the `ToolContext` that fs builtins read from.
 
-`crates/orbit-core/src/runtime/v2_host.rs::tool_context_for_activity` is the single materialization point:
+`crates/orbit-core/src/runtime/v2_host/mod.rs::tool_context_for_activity` is the single materialization point:
 
 ```
 fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string())

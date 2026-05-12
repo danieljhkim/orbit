@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-11
+**Last updated:** 2026-05-12
 
 This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record, the phase-1 scope-matching algorithm (path globs + tags), the three-layer push-injection pipeline (engine pre-prompt + MCP sidecar + optional Claude Code hook), the pull surface (skill + tools), the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
@@ -265,7 +265,7 @@ orbit learning prune [--stale-only]       # report or delete stale learnings
       "id": "L20260509-0001",
       "summary": "Never declare a perf win on latency alone — ...",
       "tags": ["performance", "benchmarking"],
-      "matched_by": ["path:crates/orbit-engine/perf_runner.rs", "tag:performance"],
+      "matched_by": ["path:crates/orbit-knowledge/src/graph_bench.rs", "tag:performance"],
       "updated_at": "2026-05-09T18:00:00Z"
     }
   ]
@@ -337,7 +337,7 @@ This is acknowledged, not fixed. Phase 2's auto-extraction from review threads o
 
 ### 8.2 Path globs are brittle to large refactors
 
-A learning scoped to `crates/orbit-engine/perf_runner.rs` becomes invisible the day someone moves the file. Tags partly compensate (tag-based scoping survives renames) but require the author to anticipate the rename, which is rare.
+A learning scoped to `crates/orbit-knowledge/src/graph_bench.rs` becomes invisible the day someone moves the file. Tags partly compensate (tag-based scoping survives renames) but require the author to anticipate the rename, which is rare.
 
 Phase 2's symbol-aware scope handles renames cleanly because the knowledge graph tracks symbol identity across moves. Phase 1's mitigation is operational: when a refactor moves files, run `orbit learning prune --stale-only` and update or supersede affected records as part of the refactor task.
 

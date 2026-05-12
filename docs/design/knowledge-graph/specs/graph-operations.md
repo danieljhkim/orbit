@@ -1,8 +1,9 @@
 # Spec: Graph Operations (Parked)
 
 **Status:** Parked — no live consumer.
+**Last updated:** 2026-05-12
 
-This spec described the sidecar `.orbit/operations/<commit_sha>.json` log format and the eight-op taxonomy (`create`, `delete`, `rename`, `move`, `change_signature`, `change_body`, `split`, `merge`) for Orbit-owned symbol-level write operations. It was drafted under [T20260421-0543] when the read-side consumer was the task-attribution walker reserved at `crates/orbit-knowledge/src/pipeline/attribute.rs`.
+This spec described the sidecar `.orbit/operations/<commit_sha>.json` log format and the eight-op taxonomy (`create`, `delete`, `rename`, `move`, `change_signature`, `change_body`, `split`, `merge`) for Orbit-owned symbol-level write operations. It was drafted under [T20260421-0543] when the read-side consumer was the task-attribution walker that later lived under the knowledge pipeline.
 
 [T20260506-11] / ADR-029 removed graph task attribution after a 10-day audit found 0 uses of the reverse-lookup parameters across 961 graph tool calls. The walker, the `task_ids` field, and the read-side hook were deleted. This spec therefore has no live consumer — the operation log it defined is not read by any current pipeline stage.
 

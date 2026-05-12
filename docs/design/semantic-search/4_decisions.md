@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Owner:** claude
-**Last updated:** 2026-05-10
+**Last updated:** 2026-05-12
 
 ADR-style log of non-obvious semantic-search decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -155,7 +155,7 @@ Option A is what the design originally called "single binary install posture pre
 
 **Context.** [T20260510-9] landed phase-1 with logic split across the wrong crate boundary:
 
-- `crates/orbit-store/src/vector/mod.rs` (757 lines) hosted `VectorStore`, `EmbedWorker`, the BLAKE3 dedup, the paragraph chunker, and the cosine helper. It imported `orbit_embed::{Embedder, SubprocessEmbedder}` directly, so the dep arrow was `orbit-store → orbit-embed` and `orbit-store` leaked knowledge of the embedding feature.
+- The former `orbit-store::vector` module hosted `VectorStore`, `EmbedWorker`, the BLAKE3 dedup, the paragraph chunker, and the cosine helper. It imported `orbit_embed::{Embedder, SubprocessEmbedder}` directly, so the dep arrow was `orbit-store → orbit-embed` and `orbit-store` leaked knowledge of the embedding feature.
 - `crates/orbit-core/src/command/semantic.rs` (328 lines) hosted install / uninstall / reindex / stats logic plus HTTP companion download, model-dir wrangling, and companion version probe. None of that is `OrbitRuntime` orchestration.
 
 Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data + commands in `commands/{search,show,overview,…}.rs` and `orbit-core/src/command/graph.rs` is a six-line re-export. Phase-1 semantic search was three-crate-spread; the graph feature is one-crate-plus-thin-re-export.

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-09 (T20260509-2)
+**Last updated:** 2026-05-12
 
 Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions.
 
@@ -88,14 +88,14 @@ This layer also owns:
 | v2 job step grammar | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260418-2018] |
 | Job kinds (`workflow`, `subroutine`) | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260419-0339] |
 | Target-ref resolution | `crates/orbit-common/src/types/activity_job/catalog.rs` | [T20260418-2019] |
-| `run-v2` core entrypoints and host boundary | `crates/orbit-core/src/command/activity_v2.rs`, `crates/orbit-core/src/command/job_v2.rs` | [T20260418-2143], [T20260418-2210] |
+| `run-v2` core entrypoints and host boundary | `crates/orbit-core/src/command/activity_v2.rs`, `crates/orbit-core/src/command/job/exec.rs` | [T20260418-2143], [T20260418-2210] |
 | Backend resolution and loop/session constraints | `crates/orbit-core/src/command/backend_resolver.rs`, `crates/orbit-common/src/types/activity_job/backend.rs` | [T20260419-0104] |
 | v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor/` | [T20260418-2018], [T20260509-2] |
 | V2 audit envelope and disk sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002] |
-| `backend: cli` runtime path | `crates/orbit-engine/src/activity_job/cli_runner.rs` | [T20260419-0104] |
+| `backend: cli` runtime path | `crates/orbit-engine/src/activity_job/cli_runner/mod.rs` | [T20260419-0104] |
 | `fsProfile` enforcement | `crates/orbit-policy`, `tool_context_for_activity`, CLI describe/get surfaces | [T20260419-0503] |
 | Seeded reference activities and pipeline jobs | `crates/orbit-core/assets/activities/`, `crates/orbit-core/assets/jobs/` | [T20260419-2347], [T20260419-0622-3], [T20260419-0623], [T20260419-0623-2] |
-| Groundhog as a sibling activity kind | `crates/orbit-engine/src/activity_job/groundhog.rs` | [T20260420-0510-2] |
+| Groundhog as a sibling activity kind | `crates/orbit-engine/src/activity_job/groundhog/mod.rs` | [T20260420-0510-2] |
 
 ---
 

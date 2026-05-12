@@ -2,9 +2,9 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-12
 
-> **Sandbox backend status.** The only OS-level sandbox backend implemented today is `macos-sandbox-exec`. `ExecutorSandboxKind` (`crates/orbit-common/src/types/executor_def.rs`) defines no Linux or Windows variant, and `EnvironmentHost::resolve_executor_sandbox` (`crates/orbit-core/src/runtime/v2_host.rs`) rejects `macos-sandbox-exec` on non-macOS platforms. On Linux and Windows the spawned agent subprocess runs without OS-level isolation; HTTP-tool `fs.*` enforcement and process supervision still apply. A Linux backend is named in [3_vision.md](./3_vision.md) as future work but is not in `2_design.md`'s shipped contract. [T20260505-23]
+> **Sandbox backend status.** The only OS-level sandbox backend implemented today is `macos-sandbox-exec`. `ExecutorSandboxKind` (`crates/orbit-common/src/types/executor_def.rs`) defines no Linux or Windows variant, and `EnvironmentHost::resolve_executor_sandbox` (`crates/orbit-core/src/runtime/v2_host/sandbox.rs`) rejects `macos-sandbox-exec` on non-macOS platforms. On Linux and Windows the spawned agent subprocess runs without OS-level isolation; HTTP-tool `fs.*` enforcement and process supervision still apply. A Linux backend is named in [3_vision.md](./3_vision.md) as future work but is not in `2_design.md`'s shipped contract. [T20260505-23]
 
 Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. It combines v2 `PolicyDef` profiles, global `denyRead` / `denyModify` rules, HTTP-tool fs enforcement, optional macOS `sandbox-exec` wrapping for CLI agents, and `orbit-exec` process supervision. [2_design.md](./2_design.md) documents what ships today; [3_vision.md](./3_vision.md) names the gaps to a fuller isolation contract.
 
@@ -54,7 +54,7 @@ HTTP activities enforce policy in the `orbit-tools` `fs.*` builtins before any r
 | Allow/deny enum | `crates/orbit-common/src/types/policy_decision.rs` | [T20260426-0622] |
 | Policy facade | `crates/orbit-policy/src/{lib,engine,evaluator,decision}.rs` | [T20260416-0728] |
 | Profile resolution + deny injection | `crates/orbit-common/src/types/policy_def.rs` (`effective_profile`, `check_path`) | [T20260416-0728] |
-| Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host.rs` (`tool_context_for_activity`) | [T20260419-0503] |
+| Implicit `unrestricted` materialization | `crates/orbit-core/src/runtime/v2_host/mod.rs` (`tool_context_for_activity`) | [T20260419-0503] |
 | Tool-layer fs enforcement | `crates/orbit-tools/src/builtin/fs/mod.rs` (`enforce_fs_policy`, `emit_fs_event`) | [T20260419-0503] |
 | Activity `fsProfile:` binding | `crates/orbit-engine/src/activity_job/{dispatcher,job_executor,agent_loop_driver,groundhog}.rs` | [T20260419-0503] |
 | Exec spawn primitive | `crates/orbit-exec/src/{lib,runner,process,sandbox}.rs` | [T20260417-0550] |

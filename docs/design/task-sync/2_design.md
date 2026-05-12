@@ -165,8 +165,8 @@ Every sync-aware mutation must route through the new task-sync coordinator (intr
 | [crates/orbit-core/src/command/task/update.rs:58](../../../crates/orbit-core/src/command/task/update.rs) | Runtime task-update entry point. |
 | [crates/orbit-cli/src/command/task/add.rs:69](../../../crates/orbit-cli/src/command/task/add.rs) | CLI `orbit task add`. |
 | [crates/orbit-cli/src/command/task/update.rs:72](../../../crates/orbit-cli/src/command/task/update.rs) | CLI `orbit task update`. |
-| [crates/orbit-cli/src/command/web/api.rs:357](../../../crates/orbit-cli/src/command/web/api.rs) | Web dashboard task-create handler. |
-| [crates/orbit-cli/src/command/web/api.rs:387](../../../crates/orbit-cli/src/command/web/api.rs) | Web dashboard task-update handler. |
+| [crates/orbit-cli/src/command/web/api/tasks.rs:357](../../../crates/orbit-cli/src/command/web/api/tasks.rs) | Web dashboard task-create handler. |
+| [crates/orbit-cli/src/command/web/api/tasks.rs:387](../../../crates/orbit-cli/src/command/web/api/tasks.rs) | Web dashboard task-update handler. |
 | [crates/orbit-cli/src/command/task/command.rs:34](../../../crates/orbit-cli/src/command/task/command.rs) | Where the new `Sync(TaskSyncCommand)` subcommand attaches under `TaskSubcommand`. |
 
 All four mutation entry points (runtime, CLI, web) route through the same sync-aware service so the policy is consistent regardless of how a mutation arrives.

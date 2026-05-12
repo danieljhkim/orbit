@@ -10,17 +10,24 @@ flowchart LR
   Core --> Store["orbit-store"]
   Core --> Tools["orbit-tools"]
   Core --> Embed["orbit-embed"]
+  Core --> Knowledge["orbit-knowledge"]
+  Core --> Policy["orbit-policy"]
   Engine --> Agent["orbit-agent"]
   Engine --> Store
+  Engine --> Exec["orbit-exec"]
+  Engine --> Tools
+  Agent --> Tools
   Tools --> Exec["orbit-exec"]
-  Tools --> Knowledge["orbit-knowledge"]
-  Tools --> Policy["orbit-policy"]
+  Tools --> Knowledge
+  Tools --> Policy
   Exec --> Common["orbit-common"]
   Knowledge --> Common
   Policy --> Common
   Store --> Common
   Agent --> Common
   Embed --> Common
+  EmbedCompanion["orbit-embed-companion"] --> Embed
+  EmbedCompanion --> Common
   MCP --> Common
   Core --> Common
   Registry["orbit-registry"] --> Common
@@ -40,9 +47,9 @@ flowchart LR
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-embed::vector` (not `orbit-store`).
 - **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
 - **orbit-mcp**: Model Context Protocol adapter using `rmcp`. Depends only on `orbit-common`; consumed by `orbit-cli` via `orbit mcp serve`.
-- **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`. Also hosts HTTP `LoopTransport` primitives.
-- **orbit-engine**: activity/job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types.
-- **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding. Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
+- **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
+- **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
+- **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding, and thin command facades for graph, policy, tool, store, engine, and embedding features. Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
 - **orbit-cli**: clap-based CLI entry point.
 
 ---
@@ -86,4 +93,3 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | Command Audit   | GlobalOnly         | Single authoritative SQLite event trail          |
 | Semantic Index  | WorkspaceOnly      | Task-derived embeddings stay with the workspace  |
 | Run Traces      | WorkspaceOnly      | Per-repo activity/job JSONL and blob artifacts   |
-
