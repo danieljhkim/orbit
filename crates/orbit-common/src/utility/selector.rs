@@ -451,7 +451,48 @@ fn is_path_ancestor(parent: &str, child: &str) -> bool {
 mod tests {
     use super::*;
 
+    use proptest::prelude::*;
+    use proptest::test_runner::Config as ProptestConfig;
+    use std::str::FromStr;
     use tempfile::tempdir;
+
+    fn path_segment() -> impl Strategy<Value = String> {
+        prop::string::string_regex("[a-z][a-z0-9_]{0,8}").expect("valid path segment regex")
+    }
+
+    fn selector_path() -> impl Strategy<Value = String> {
+        prop::collection::vec(path_segment(), 1..5).prop_map(|segments| segments.join("/"))
+    }
+
+    fn identifier() -> impl Strategy<Value = String> {
+        prop::string::string_regex("[A-Za-z_][A-Za-z0-9_]{0,12}").expect("valid identifier regex")
+    }
+
+    fn symbol_name() -> impl Strategy<Value = String> {
+        prop_oneof![
+            identifier(),
+            (identifier(), identifier()).prop_map(|(module, name)| format!("{module}::{name}")),
+            (identifier(), identifier(), identifier())
+                .prop_map(|(ty, trait_name, method)| format!("<{ty} as {trait_name}>::{method}")),
+        ]
+    }
+
+    fn kind_name() -> impl Strategy<Value = String> {
+        prop::string::string_regex("[a-z][a-z_]{0,12}").expect("valid kind regex")
+    }
+
+    fn dir_selector() -> impl Strategy<Value = Selector> {
+        selector_path().prop_map(|path| Selector::Dir { path })
+    }
+
+    fn file_selector() -> impl Strategy<Value = Selector> {
+        selector_path().prop_map(|path| Selector::File { path })
+    }
+
+    fn symbol_selector() -> impl Strategy<Value = Selector> {
+        (selector_path(), symbol_name(), kind_name())
+            .prop_map(|(path, symbol, kind)| Selector::Symbol { path, symbol, kind })
+    }
 
     #[test]
     fn canonical_selector_handles_raw_paths_and_ranges() {
@@ -559,5 +600,24 @@ mod tests {
             ),
             1
         );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, .. ProptestConfig::default() })]
+
+        #[test]
+        fn dir_selector_display_parse_roundtrips(selector in dir_selector()) {
+            prop_assert_eq!(Selector::from_str(&selector.to_string()).unwrap(), selector);
+        }
+
+        #[test]
+        fn file_selector_display_parse_roundtrips(selector in file_selector()) {
+            prop_assert_eq!(Selector::from_str(&selector.to_string()).unwrap(), selector);
+        }
+
+        #[test]
+        fn symbol_selector_display_parse_roundtrips(selector in symbol_selector()) {
+            prop_assert_eq!(Selector::from_str(&selector.to_string()).unwrap(), selector);
+        }
     }
 }

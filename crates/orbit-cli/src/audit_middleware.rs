@@ -656,6 +656,7 @@ fn tool_run_input_identity(
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use serde_json::{Value, json};
 
     use crate::command::Cli;
 
@@ -768,6 +769,83 @@ mod tests {
         let meta = meta_for(&["orbit", "tool", "run", "orbit.graph.search"]);
 
         assert_eq!(meta.role, "agent");
+    }
+
+    #[test]
+    fn audit_guard_event_json_shapes_are_snapshotted() {
+        let events = vec![
+            audit_guard_event_json(AuditEventStatus::Success),
+            audit_guard_event_json(AuditEventStatus::Failure),
+            audit_guard_event_json(AuditEventStatus::Denied),
+        ];
+
+        let actual = serde_json::to_string_pretty(&events).expect("serialize audit snapshot");
+        assert_eq!(
+            actual,
+            include_str!("snapshots/audit_guard_event_json_shapes.json").trim_end()
+        );
+    }
+
+    fn audit_guard_event_json(status: AuditEventStatus) -> Value {
+        let _ = orbit_core::command::tool::take_tool_audit_recorded();
+        let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
+        {
+            let mut guard = AuditGuard::new(&runtime, snapshot_meta());
+            match status {
+                AuditEventStatus::Success => guard.mark_success(),
+                AuditEventStatus::Failure => {
+                    let error = OrbitError::InvalidInput("snapshot failure".to_string());
+                    guard.mark_failure(&error);
+                }
+                AuditEventStatus::Denied => guard.mark_denied("snapshot denied"),
+            }
+        }
+
+        let events = runtime
+            .list_audit_events(
+                None,
+                Some("orbit.task.update".to_string()),
+                Some(status),
+                None,
+                8,
+            )
+            .expect("list audit events");
+        assert_eq!(events.len(), 1);
+        let mut value = serde_json::to_value(&events[0]).expect("serialize audit event");
+        normalize_audit_event_json(&mut value);
+        value
+    }
+
+    fn snapshot_meta() -> CommandMeta {
+        CommandMeta {
+            command: "tool".to_string(),
+            subcommand: Some("run".to_string()),
+            tool_name: Some("orbit.task.update".to_string()),
+            target_type: Some("tool".to_string()),
+            target_id: Some("orbit.task.update".to_string()),
+            role: "gpt-5.5".to_string(),
+            arguments_json: Some(r#"{"id":"ORB-00002","model":"gpt-5.5"}"#.to_string()),
+        }
+    }
+
+    fn normalize_audit_event_json(value: &mut Value) {
+        let object = value
+            .as_object_mut()
+            .expect("audit event serializes to object");
+        object.insert("id".to_string(), json!(1));
+        object.insert("execution_id".to_string(), json!("<execution_id>"));
+        object.insert("timestamp".to_string(), json!("<timestamp>"));
+        object.insert("duration_ms".to_string(), json!(0));
+        object.insert(
+            "working_directory".to_string(),
+            json!("<working_directory>"),
+        );
+        object.insert("host".to_string(), json!("<host>"));
+        object.insert("pid".to_string(), json!(0));
+        object.insert("task_id".to_string(), Value::Null);
+        object.insert("job_run_id".to_string(), Value::Null);
+        object.insert("activity_id".to_string(), Value::Null);
+        object.insert("step_index".to_string(), Value::Null);
     }
 
     /// Integration tests that exercise the real `AuditGuard::Drop` against an

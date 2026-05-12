@@ -2197,6 +2197,7 @@ dependencies = [
  "libc",
  "lru",
  "orbit-common",
+ "proptest",
  "rayon",
  "regex",
  "rusqlite",
