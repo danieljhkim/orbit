@@ -207,15 +207,9 @@ fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result
         return Ok(());
     };
     let trimmed = value.trim();
-    match trimmed {
-        "v2" => Ok(()),
-        "legacy" => Err(OrbitError::InvalidInput(
-            "[task] artifact_store = \"legacy\" is no longer supported; remove the key because v2 task artifacts are always enabled".to_string(),
-        )),
-        _ => Err(OrbitError::InvalidInput(format!(
-            "[task] artifact_store has invalid value '{trimmed}'; expected: v2"
-        ))),
-    }
+    Err(OrbitError::InvalidInput(format!(
+        "[task] artifact_store is no longer supported; remove the key because v2 task artifacts are always enabled (found '{trimmed}')"
+    )))
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
@@ -635,41 +629,17 @@ mod tests {
     }
 
     #[test]
-    fn task_artifact_store_accepts_v2() {
+    fn task_artifact_store_rejects_removed_key() {
         let global = tempdir().expect("global tempdir");
         let workspace = tempdir().expect("workspace tempdir");
         write_config(workspace.path(), "[task]\nartifact_store = \"v2\"\n");
 
-        RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    }
-
-    #[test]
-    fn task_artifact_store_rejects_legacy() {
-        let global = tempdir().expect("global tempdir");
-        let workspace = tempdir().expect("workspace tempdir");
-        write_config(workspace.path(), "[task]\nartifact_store = \"legacy\"\n");
-
         let error = RuntimeConfig::load_layered(global.path(), workspace.path())
-            .expect_err("legacy artifact store must be rejected");
+            .expect_err("artifact store selector must be rejected");
         let message = error.to_string();
 
         assert!(message.contains("[task] artifact_store"));
-        assert!(message.contains("legacy"));
         assert!(message.contains("no longer supported"));
-    }
-
-    #[test]
-    fn task_artifact_store_rejects_invalid_value() {
-        let global = tempdir().expect("global tempdir");
-        let workspace = tempdir().expect("workspace tempdir");
-        write_config(workspace.path(), "[task]\nartifact_store = \"newish\"\n");
-
-        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
-            .expect_err("invalid artifact store must fail config load");
-        let message = error.to_string();
-
-        assert!(message.contains("[task] artifact_store"));
-        assert!(message.contains("newish"));
-        assert!(message.contains("expected: v2"));
+        assert!(message.contains("v2"));
     }
 }

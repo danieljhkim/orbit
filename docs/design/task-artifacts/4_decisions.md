@@ -133,7 +133,7 @@ Relation types are source-implied: `child_of`, `blocked_by`, `spawned_from`, `re
 
 ## ADR-008 — Forward-only YAML migration framework in `orbit-common`
 
-**Status:** Proposed · 2026-05
+**Status:** Accepted · 2026-05 · Forward-only YAML migration framework (`01928e76`)
 
 **Context.** Task-bundle YAML has bumped `schema_version` several times during the v2 rewrite and will keep evolving. Today the read path *rejects* anything that is not exactly `TASK_ARTIFACT_SCHEMA_VERSION`, so any future bump is a hard break — no way to roll forward an older bundle on disk without an ad-hoc one-off script per change. Other artifacts (review threads, artifact manifest, workspace config) carry the same `schema_version` shape and will inherit the same problem.
 

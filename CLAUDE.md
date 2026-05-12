@@ -4,12 +4,14 @@ Project instructions for agents working on Orbit.
 
 ## Rules
 
+- **Don't commit** until the Orbit task has been explicitly approved by the human.
+- **Don't invent task IDs** — get them from `orbit.task.add`. Don't edit task files directly — use `orbit.task.update`.
 - **Don't add cross-crate dependencies** without checking the architecture diagram below.
 - **Use subagents** for large tasks to keep your context window clean.
 
 ## Build / Lint
 
-`make build`, `make fmt` — all must pass before a task moves to `review`.
+`make build`, `make fmt`, `make ci` — all must pass before a task moves to `review`.
 
 ## Design Docs
 
@@ -42,6 +44,8 @@ orbit-common → orbit-policy, orbit-exec, orbit-knowledge, orbit-embed → orbi
             ↘ orbit-mcp ─────────────────────────────────────────────────────────────────────────────────────────↗
 ```
 
+`orbit-core` also depends directly on `orbit-knowledge` for graph workflow wrappers in `command::graph`.
+
 ## Maintainer Conventions
 
 - Order files for the next maintainer's first read: lead with the module's primary concept or entry point, then move into supporting detail.
@@ -59,7 +63,7 @@ orbit-common → orbit-policy, orbit-exec, orbit-knowledge, orbit-embed → orbi
 ## Commits & Authorship
 
 - Use the agent commit identity (e.g. `codex`, `claude`) as author/committer.
-- Include the Orbit task ID in commit messages when applicable (e.g. `[T20260320-001234]`). Task IDs are workspace-local search keys (`git log --grep '[T...]'`); when a task has a linked `external_ref`, include that tag too (`[T20260506-11] [ENG-1234] ...`) — cross-engineer reviewers resolve the external tag, not the Orbit one.
+- Include the Orbit task ID in commit messages when applicable (e.g. `[ORB-00042]`). Task IDs are allocation-authority search keys (`git log --grep '[ORB-00042]'`); when a task has a linked `external_ref`, include that tag too (`[ORB-00042] [ENG-1234] ...`) — cross-engineer reviewers resolve the external tag, not the Orbit one.
 - Use your model name (e.g. `claude-opus-4-7`, `gpt-5.5`, `gemini-3.1-pro`) when authoring tasks or docs. Cite relevant task IDs in any doc you write.
 
 ## Orbit Workflow

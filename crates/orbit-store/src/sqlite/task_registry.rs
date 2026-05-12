@@ -129,15 +129,15 @@ impl TaskRegistryStore {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         if let Some(existing) = workspace_by_orbit_dir(&tx, &orbit_dir)? {
-            if let Some(requested) = &requested_workspace_id {
-                if requested != &existing.workspace_id {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "orbit dir '{}' is already bound to workspace '{}', not '{}'",
-                        orbit_dir.display(),
-                        existing.workspace_id,
-                        requested
-                    )));
-                }
+            if let Some(requested) = &requested_workspace_id
+                && requested != &existing.workspace_id
+            {
+                return Err(OrbitError::InvalidInput(format!(
+                    "orbit dir '{}' is already bound to workspace '{}', not '{}'",
+                    orbit_dir.display(),
+                    existing.workspace_id,
+                    requested
+                )));
             }
             tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
             return Ok(existing);
@@ -827,10 +827,6 @@ fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
             ON task_bundle_index(workspace_id, status, created_at DESC, task_id ASC);
         CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_priority
             ON task_bundle_index(workspace_id, priority, created_at DESC, task_id ASC);
-        CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_job_run
-            ON task_bundle_index(workspace_id, job_run_id, created_at DESC, task_id ASC);
-        CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_terminal
-            ON task_bundle_index(workspace_id, terminal_month, task_id);
 
         CREATE TABLE IF NOT EXISTS task_bundle_tags (
             task_id TEXT NOT NULL,
@@ -864,9 +860,21 @@ fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
         "job_run_id",
         "ALTER TABLE task_bundle_index ADD COLUMN job_run_id TEXT",
     )?;
+    add_column_if_missing(
+        conn,
+        "task_bundle_index",
+        "terminal_month",
+        "ALTER TABLE task_bundle_index ADD COLUMN terminal_month TEXT",
+    )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_job_run
             ON task_bundle_index(workspace_id, job_run_id, created_at DESC, task_id ASC)",
+        [],
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_bundle_index_workspace_terminal
+            ON task_bundle_index(workspace_id, terminal_month, task_id)",
         [],
     )
     .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -1322,6 +1330,27 @@ mod tests {
         true
     }
 
+    fn table_columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare table info");
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect columns")
+    }
+
+    fn index_exists(conn: &Connection, index_name: &str) -> bool {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            [index_name],
+            |_| Ok(()),
+        )
+        .optional()
+        .expect("query sqlite_master")
+        .is_some()
+    }
+
     #[test]
     fn allocator_returns_monotonic_orb_ids() {
         let temp = TempDir::new().expect("tempdir");
@@ -1349,6 +1378,48 @@ mod tests {
         assert!(temp.path().join("tasks").join("workspaces").is_dir());
 
         let conn = Connection::open(path).expect("open registry sqlite");
+        assert_eq!(
+            registry_user_version(&conn).expect("read user_version"),
+            REGISTRY_SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn open_migrates_existing_task_index_columns_before_creating_indexes() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = registry_path(&temp);
+        fs::create_dir_all(path.parent().expect("registry parent")).expect("create parent");
+        let conn = Connection::open(&path).expect("open sqlite");
+        conn.execute_batch(
+            "
+            CREATE TABLE task_bundle_index (
+                task_id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            PRAGMA user_version = 2;
+            ",
+        )
+        .expect("seed old registry shape");
+        drop(conn);
+
+        let _store = TaskRegistryStore::open(&path).expect("open migrated registry");
+
+        let conn = Connection::open(&path).expect("reopen migrated sqlite");
+        let columns = table_columns(&conn, "task_bundle_index");
+        assert!(columns.iter().any(|column| column == "job_run_id"));
+        assert!(columns.iter().any(|column| column == "terminal_month"));
+        assert!(index_exists(
+            &conn,
+            "idx_task_bundle_index_workspace_job_run"
+        ));
+        assert!(index_exists(
+            &conn,
+            "idx_task_bundle_index_workspace_terminal"
+        ));
         assert_eq!(
             registry_user_version(&conn).expect("read user_version"),
             REGISTRY_SCHEMA_VERSION

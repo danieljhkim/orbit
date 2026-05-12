@@ -13,7 +13,7 @@ impl Tool for OrbitTaskArtifactPutTool {
         parameters.extend([
             ToolParam {
                 name: "source_path".to_string(),
-                description: "UTF-8 source file to store as a task artifact.".to_string(),
+                description: "Source file to store as a task artifact.".to_string(),
                 param_type: "string".to_string(),
                 required: true,
             },
@@ -30,7 +30,7 @@ impl Tool for OrbitTaskArtifactPutTool {
 
         ToolSchema {
             name: "orbit.task.artifact.put".to_string(),
-            description: "Store a UTF-8 source file under a task's artifacts directory".to_string(),
+            description: "Store a source file under a task's artifacts directory".to_string(),
             parameters,
             builtin: true,
         }
@@ -151,7 +151,7 @@ mod tests {
             .execute(
                 &ctx,
                 json!({
-                    "id": "T1",
+                    "id": "ORB-00001",
                     "source_path": "summary.md",
                     "path": "reports/summary.md",
                     "agent": "codex",
@@ -165,9 +165,12 @@ mod tests {
         assert_eq!(call.action, OrbitBuiltinAction::TaskUpdate);
         assert_eq!(call.agent.as_deref(), Some("codex"));
         assert_eq!(call.model.as_deref(), Some("gpt-5"));
-        assert_eq!(call.input["id"], "T1");
+        assert_eq!(call.input["id"], "ORB-00001");
         assert_eq!(call.input["artifacts"][0]["path"], "reports/summary.md");
-        assert_eq!(call.input["artifacts"][0]["content"], "done\n");
+        assert_eq!(
+            call.input["artifacts"][0]["content"],
+            json!([100, 111, 110, 101, 10])
+        );
         assert!(call.input.get("source_path").is_none());
     }
 }

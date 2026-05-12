@@ -28,7 +28,7 @@ pub struct WorkspaceTaskBackends {
     pub artifact: Arc<dyn TaskArtifactStoreBackend>,
 }
 
-pub fn workspace_task_backends_v2(
+pub fn workspace_task_backends(
     registry: TaskRegistryStore,
     workspace_id: String,
     workspace_orbit_dir: PathBuf,
@@ -117,7 +117,7 @@ mod tests {
     };
 
     #[test]
-    fn workspace_task_backends_v2_exposes_create_get_and_list_trait_surface() {
+    fn workspace_task_backends_exposes_create_get_and_list_trait_surface() {
         let temp = TempDir::new().expect("tempdir");
         let registry =
             TaskRegistryStore::open(&task_registry_path(temp.path())).expect("open registry");
@@ -134,7 +134,7 @@ mod tests {
                 repo_fingerprint: None,
             })
             .expect("bind workspace");
-        let backends = workspace_task_backends_v2(
+        let backends = workspace_task_backends(
             registry,
             binding.workspace_id,
             orbit_dir,

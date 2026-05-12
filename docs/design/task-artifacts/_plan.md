@@ -6,7 +6,7 @@
 
 This is the temporary execution tracker for the task-artifacts reset until Orbit tasks can track this work again. It intentionally assumes a pre-release reset: existing task artifacts were deleted, no external users depend on the old layout, and the implementation does not need a migration command, legacy lookup aliases, or old-schema compatibility shims.
 
-**Temporary exception:** this file is not stable design-contract material and does not belong in `references/`. It should be deleted or archived once Orbit task artifacts can track the remaining implementation work again.
+**Temporary exception:** this file is not stable design-contract material and does not belong in `references/`. It should be deleted or archived after the final validation gate passes and the remaining Phase 4/5 follow-ups are represented as real Orbit tasks.
 
 ## Current Position
 
@@ -17,7 +17,7 @@ The design baseline is in place:
 - `docs/design/task-artifacts/specs/task-bundle-v2.md` defines the storage contract.
 - `docs/design/task-artifacts/4_decisions.md` records the accepted and pending ADRs.
 
-Implementation is in final cutover. Phase 0 through the core Phase 5 search slices have landed. Phase 6 has removed the config gate, deleted the legacy status-directory store, pruned the transitional design-doc section, accepted six ADRs, removed `workspace_path`/`repo_root` from runtime task updates and the public task DTO, made lexical artifact search tolerate binary files, wired typed relations/job-run filtering, and lifted task artifacts to a binary-capable DTO. The remaining final-phase work is final naming and documentation cleanup.
+Implementation is in final cutover. Phase 0 through the core Phase 5 search slices have landed. Phase 6 has removed the config gate, deleted the legacy status-directory store, pruned the transitional design-doc section, accepted the task-artifacts ADR set through ADR-008, removed `workspace_path`/`repo_root` from runtime task updates and the public task DTO, made lexical artifact search tolerate binary files, wired typed relations/job-run filtering, lifted task artifacts to a binary-capable DTO, completed final naming/doc cleanup, and passed the full `make ci` gate. The remaining Phase 6 work is review; Phase 4/5 follow-ups remain tracked separately below.
 
 ## Non-Goals
 
@@ -146,7 +146,7 @@ Implemented in working tree:
 - Private v2 bundle abstraction under `crates/orbit-store/src/file/task_store/v2_bundle.rs`.
 - `TaskV2Store` adapter under `crates/orbit-store/src/file/task_store/v2_store.rs` for create/get/list/filter/search plus document, history, review-thread, and artifact mutations.
 - V2 task backend constructor that returns the normal task backend trait bundle over the v2 adapter.
-- Runtime construction that builds the v2 backend by default; the temporary `[task] artifact_store` selector is gone, with `"v2"` accepted only as a no-op during cutover and `"legacy"` rejected.
+- Runtime construction that builds the v2 backend by default; the temporary `[task] artifact_store` selector is gone and any remaining key is rejected with a cutover message.
 - Durable creation for `task.yaml`, Markdown sidecars, `events.jsonl`, `comments.jsonl`, `review-threads/`, and `artifacts/files/`.
 - Registry-backed canonical bundle paths, task-bundle registration, and workspace projection rebuild after bundle creation.
 - Missing `.orbit/config.yaml` rebind detection uses registry candidates before creating a new workspace binding.
@@ -271,7 +271,7 @@ Exit criteria:
 
 Landed:
 
-- **Config gate removed** (`e9582eba`). V2 is the only backend. `[task] artifact_store = "v2"` is accepted as a no-op and `"legacy"` is rejected with a migration error. `TaskArtifactStoreMode`, the legacy `workspace_task_backends` selector, and the `task_artifact_store()` accessors are gone from runtime/builder/context.
+- **Config gate removed** (`e9582eba`, hardened in Slice C). V2 is the only backend. `[task] artifact_store` is rejected for every value; stale configs must remove the key. `TaskArtifactStoreMode`, the legacy backend selector, and the `task_artifact_store()` accessors are gone from runtime/builder/context.
 - **Legacy store deleted** (`222f6020`). Removed `crates/orbit-store/src/file/task_store/{api,bundle,doc,lock,artifacts,constants,layout,type_migration}.rs`, `crates/orbit-store/src/sqlite/task_index.rs` and the `task_tags` SQL table, the legacy `TaskFileStore` trait impls in `backend/file_backends.rs`, the `workspace_task_backends` factory, the `migrate_legacy_friction_tasks` helper and `FrictionMigrationSummary` type in `friction_store.rs`, the `orbit-core` `command/friction.rs` + `command/migration.rs` runtime entry points, and the `orbit migrate {frictions,task-types}` CLI subcommands plus their tests and audit middleware arms.
 - **Design docs pruned and 5 ADRs accepted** (`123f89f7`). Deleted the "Current Implementation" section from `2_design.md`, dropped current/v2 dual framing from `1_overview.md`, and flipped ADR-001 (ORB-00000 IDs), ADR-002 (Envelope + Markdown sidecars), ADR-003 (Status-neutral task directories), ADR-004 (Append-heavy data leaves task.yaml), and ADR-007 (Home task store + symlink projection) to `Accepted` with implementing-commit citations.
 - **`workspace_path`/`repo_root` removed from the task update path** (`6beb14a2`). `TaskAutomationUpdate`, `TaskRecordUpdateParams`, and `TaskDocumentUpdateParams` no longer carry these fields; the v2 store's rejection arms for them are gone; worktree/parallel callers and the parallel-timeout mock no longer write them. `Task.workspace_path` and `Task.repo_root` remain on the public DTO (projected at read time from workspace metadata) pending the DTO surgery slice.
@@ -309,10 +309,11 @@ Implementation status:
 
 **Slice C — final naming/doc cleanup.**
 
-- Rename `workspace_task_backends_v2` to `workspace_task_backends` now that v2 is the only backend.
-- Decide whether to keep accepting `[task] artifact_store = "v2"` as a no-op. The code currently accepts it and rejects `"legacy"`; a stricter pre-release cleanup can remove the key entirely.
-- Update `docs/design/task-sync/` so it no longer describes status-directory task bundles as the current task shape.
-- Update AGENTS/CLAUDE commit guidance examples from `T...` to `ORB-...` once the task ID cutover is declared live.
+- **Done:** Renamed `workspace_task_backends_v2` to `workspace_task_backends` now that v2 is the only backend.
+- **Done:** Removed the `[task] artifact_store = "v2"` no-op. The key is no longer supported for any value because v2 task artifacts are unconditional.
+- **Done:** Updated `docs/design/task-sync/` so it describes the current `ORB-*`, `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`, status-neutral bundle shape instead of status directories.
+- **Done:** Updated AGENTS/CLAUDE and design-doc convention examples from `T...` to `ORB-...`.
+- **Done:** Accepted ADR-008 for the forward-only YAML migration framework and cited implementing commit `01928e76`.
 
 ## Status Board
 
@@ -322,13 +323,33 @@ Implementation status:
 | Phase 1 - V2 Domain Types | Implemented in working tree | `orbit-common` domain contracts and focused tests are in place. |
 | Phase 2 - Home Registry And Workspace Binding | Implemented in working tree | `orbit-store` registry foundation and projection rebuild tests are in place. |
 | Phase 3 - V2 Bundle Store | Implemented in working tree | V2 create/get/list/update/review/artifact backend is the runtime task store. |
-| Phase 4 - Task Operations And Local Indexes | In progress | Generated indexes, lock rekeying, relation query acceleration, delete semantics, and review-found repair guards are implemented; public relation query surfaces remain. |
+| Phase 4 - Task Operations And Local Indexes | In progress | Generated indexes, lock rekeying, relation indexes, delete semantics, and review-found repair guards are implemented; parent/lineage public filters still need to use the relation indexes directly. |
 | Phase 5 - Consumers And Search | In progress | First search slice covers v2 review threads/artifacts and semantic field names; consumer audit remains. |
-| Phase 6 - Remove Old Store Shape | In progress | Config gate, legacy task_store files, legacy migration commands, runtime/public DTO `workspace_path`/`repo_root` cleanup, lexical artifact binary-skip, v2 relations API, `job_run_id`, ADR-005, DTO/API surgery, and ADR-006 landed in working tree. Remaining: final naming/doc cleanup. |
+| Phase 6 - Remove Old Store Shape | In progress | Config gate, legacy task_store files, legacy migration commands, runtime/public DTO `workspace_path`/`repo_root` cleanup, lexical artifact binary-skip, v2 relations API, `job_run_id`, ADR-005, DTO/API surgery, ADR-006, ADR-008, backend naming cleanup, removed artifact-store config key, task-sync doc refresh, guidance examples, and `make ci` landed in working tree. Remaining: review. |
 
 ## Latest Validation
 
-2026-05-12:
+2026-05-12 (Slice C):
+
+- `make fmt`
+- `cargo check -p orbit-store -p orbit-core --tests`
+- `cargo test -p orbit-core task_artifact_store_rejects_removed_key -- --nocapture`
+- `cargo test -p orbit-store workspace_task_backends_exposes_create_get_and_list_trait_surface -- --nocapture`
+- `cargo test -p orbit-core v2_task_backend_wires_through_runtime_add_show_list_and_update -- --nocapture`
+- `cargo test -p orbit-core parse_task_lock_reservation_scope_requires_exactly_one_shape -- --nocapture`
+- `make build`
+- `git diff --check`
+- `cargo check -p orbit-common -p orbit-store -p orbit-core -p orbit-tools -p orbit-engine -p orbit-cli -p orbit-embed --tests`
+- `cargo test -p orbit-core runtime::v2_host::backlog_exclusion::tests -- --nocapture`
+- `cargo test -p orbit-tools builtin::orbit::task::artifact_put::tests::artifact_put_reads_relative_source_and_delegates_to_task_update -- --nocapture`
+- `cargo test -p orbit-store sqlite::task_registry -- --nocapture`
+- `cargo test -p orbit-store v2_store -- --nocapture`
+- `cargo run -p orbit-cli --bin orbit -- web serve --no-open --port 0` (smoke-started, then stopped)
+- `make ci`
+- `make install`
+- `orbit web serve --no-open --port 0` (installed-binary smoke-started, then stopped)
+
+2026-05-12 (earlier Phase 6 slices):
 
 - `make fmt`
 - `cargo check -p orbit-common -p orbit-store -p orbit-core -p orbit-tools -p orbit-engine -p orbit-cli -p orbit-embed --tests`
@@ -371,6 +392,8 @@ Implementation status:
 - `cargo test -p orbit-tools`
 - `git diff --check`
 
-## Suggested Next Slice
+## Suggested Next Slices
 
-Implement Slice C: rename the last v2-only backend constructors to unqualified names, decide whether `[task] artifact_store = "v2"` remains a no-op or is rejected, update task-sync/agent-facing docs from `T...`/status-directory examples to `ORB-*` bundle projection, and run the full validation gate.
+- **Mandatory Phase 6 closeout:** review the cutover diff now that `make ci` passes.
+- **Earlier-phase follow-ups:** finish Phase 4 relation-index use in public lineage filters and Phase 5 consumer/search parity work.
+- **Dogfood handoff:** create real Orbit tasks for any remaining follow-ups, then delete or archive this temporary `_plan.md`.

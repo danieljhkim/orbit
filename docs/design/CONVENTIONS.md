@@ -151,16 +151,16 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 ## 8. Cross-link Conventions
 
 - Relative paths only, always with `./` or `../` prefix: `[foo](./foo.md)`, `[bar](../other/bar.md)`.
-- Never link a task ID — `[T20260421-0528]` stays as plain bracketed text. It's searchable via `git log --grep=` regardless of where tasks are stored.
+- Never link a task ID — `[ORB-00042]` stays as plain bracketed text. It's searchable via `git log --grep=` regardless of where tasks are stored.
 - Section references use full paths: `[2_design.md §6.3]`, not a bare `§6.3` from a sibling doc.
 
 ---
 
 ## 9. Task ID Citation Format
 
-- Inline: plain bracketed text `[T20260421-0528]`.
+- Inline: plain bracketed text `[ORB-00042]`.
 - In ADRs: on the status line after the date.
-- Never cite a task without naming what that task did — `([T20260421-0528])` alone is opaque; always give a verb phrase.
+- Never cite a task without naming what that task did — `([ORB-00042])` alone is opaque; always give a verb phrase.
 
 ---
 

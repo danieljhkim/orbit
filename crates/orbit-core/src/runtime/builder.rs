@@ -12,7 +12,7 @@ use orbit_store::{
     Store, audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
     workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
-    workspace_policy_def_store, workspace_task_backends_v2,
+    workspace_policy_def_store, workspace_task_backends,
 };
 
 use orbit_common::types::{DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths};
@@ -193,7 +193,7 @@ fn build_v2_task_backends(
         )?;
     }
 
-    Ok(workspace_task_backends_v2(
+    Ok(workspace_task_backends(
         registry,
         binding.workspace_id,
         paths.orbit_dir.clone(),
@@ -283,11 +283,6 @@ mod tests {
         let workspace_root = repo_root.join(".orbit");
         std::fs::create_dir_all(&global_root).expect("create global root");
         std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-        std::fs::write(
-            workspace_root.join("config.toml"),
-            "[task]\nartifact_store = \"v2\"\n",
-        )
-        .expect("write config");
         let runtime =
             OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
         (root, global_root, workspace_root, runtime)

@@ -20,11 +20,6 @@ fn v2_test_runtime() -> (TempDir, OrbitRuntime, std::path::PathBuf) {
     let workspace_root = repo_root.join(".orbit");
     std::fs::create_dir_all(&global_root).expect("create global root");
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    std::fs::write(
-        workspace_root.join("config.toml"),
-        "[task]\nartifact_store = \"v2\"\n",
-    )
-    .expect("write v2 config");
     let runtime =
         OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build v2 runtime");
     (root, runtime, repo_root)

@@ -357,11 +357,11 @@ pub trait AdrStoreBackend: Send + Sync {
     /// `new.supersedes` contains `old`. The implementation acquires per-ADR
     /// locks for the duration so concurrent writers serialize.
     ///
-    /// **Atomicity caveat:** the three filesystem writes (old document, old
-    /// status-directory rename, new document) are sequential, not transactional.
-    /// A crash between writes leaves the filesystem source-of-truth in a
-    /// recoverable state — both ADR bundles survive, and `rebuild_index`
-    /// reconstructs the SQLite index from disk.
+    /// **Atomicity caveat:** the filesystem writes that update both ADR
+    /// documents are sequential, not transactional. A crash between writes
+    /// leaves the filesystem source-of-truth in a recoverable state — both ADR
+    /// bundles survive, and `rebuild_index` reconstructs the SQLite index from
+    /// disk.
     fn supersede_adr(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
 }
 

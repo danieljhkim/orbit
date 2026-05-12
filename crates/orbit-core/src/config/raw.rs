@@ -94,6 +94,8 @@ pub(super) struct RawCodexExecutionConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawTaskSection {
     pub(super) approval: Option<RawTaskApprovalConfig>,
+    /// Removed pre-release selector. Kept here only so config loading can
+    /// reject stale keys with an explicit task-artifacts cutover message.
     pub(super) artifact_store: Option<String>,
 }
 

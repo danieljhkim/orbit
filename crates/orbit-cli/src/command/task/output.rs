@@ -65,7 +65,7 @@ pub(crate) fn task_to_json_with_sidecars(
     task: &orbit_core::Task,
     status_by_id: &BTreeMap<String, TaskStatus>,
 ) -> Result<Value, OrbitError> {
-    let mut value = task_to_json(task, &status_by_id);
+    let mut value = task_to_json(task, status_by_id);
     let object = value.as_object_mut().ok_or_else(|| {
         OrbitError::Execution("task JSON projection did not produce an object".to_string())
     })?;

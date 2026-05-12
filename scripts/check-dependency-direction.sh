@@ -29,7 +29,7 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-embed orbit-engine orbit-policy orbit-store orbit-tools"
+      echo "orbit-common orbit-embed orbit-engine orbit-knowledge orbit-policy orbit-store orbit-tools"
       ;;
     orbit-mcp)
       echo "orbit-common orbit-tools"

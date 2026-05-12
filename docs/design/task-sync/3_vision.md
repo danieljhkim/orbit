@@ -2,9 +2,9 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-12
 
-This document captures the open questions task sync deliberately leaves unanswered, the prior work the design builds on or rejects, what the design contributes that's specific to Orbit, and external references for readers who want to dig deeper. The questions in §1 are the most likely sources of post-v2 design pressure; the prior work in §2 explains why the v2 design landed where it did.
+This document captures the open questions task sync deliberately leaves unanswered, the prior work the design builds on or rejects, what the design contributes that's specific to Orbit, and external references for readers who want to dig deeper. The questions in §1 are the most likely sources of post-sync design pressure; the prior work in §2 explains why the design landed where it did.
 
 ---
 
@@ -14,7 +14,7 @@ This document captures the open questions task sync deliberately leaves unanswer
 
 Every task lifecycle event is a commit on `refs/heads/orbit/tasks`. A team running 50 tasks/week through 5–10 status transitions each will produce 250–500 commits/week. After a year, the branch has tens of thousands of commits — cloning it gets slow, `git log` becomes useless without filtering, and the branch carries history for archived tasks no one wants to load.
 
-The v2 design ships without compaction. Three candidate strategies for a follow-up:
+The initial sync design ships without compaction. Three candidate strategies for a follow-up:
 
 - **Snapshot + prune.** Periodically write a "snapshot" commit that orphan-recreates the branch with current-state-only and discards prior history. Loses the per-task audit trail on the branch but preserves the YAML history field inside each task.
 - **Sparse fetch by age.** `task sync pull` defaults to the last N months; older tasks load on demand. Doesn't shrink the branch, just the local checkout.
@@ -22,9 +22,9 @@ The v2 design ships without compaction. Three candidate strategies for a follow-
 
 Decision deferred until operational pain manifests on a real team's branch.
 
-### 1.2 Should sync fold into v2 shared-host?
+### 1.2 Should sync fold into shared-host?
 
-Task sync is opt-in and orthogonal to the v2 shared-host coordinator. If shared-host ships, there are two coherent end states:
+Task sync is opt-in and orthogonal to the shared-host coordinator. If shared-host ships, there are two coherent end states:
 
 - **Sync remains.** Teams can choose: orphan-branch sync (no server, slower, partially manual) or shared-host (server, fast, central). Both ship.
 - **Sync is deprecated.** Shared-host becomes the team-coordination story; orphan-branch sync is removed because it duplicates functionality with worse properties.
@@ -35,11 +35,11 @@ The honest answer depends on demand. Some teams won't run a shared service. Some
 
 The recommended design proposes `assigned_to` as an advisory field, not a lock. Open questions:
 
-- Does `assigned_to` expire? If engineer A claims [T20260504-7] and is on vacation, engineer B should be able to take over without an admin intervention.
+- Does `assigned_to` expire? If engineer A claims `ORB-00042` and is on vacation, engineer B should be able to take over without an admin intervention.
 - Is there a "soft-stealing" warning when engineer B updates a task assigned to engineer A?
 - Is the field per-task or per-status (assignee for backlog vs. assignee for in_progress could be different)?
 
-These are UX questions that don't block the v2 transport design but matter for whether the feature is pleasant to use.
+These are UX questions that don't block the transport design but matter for whether the feature is pleasant to use.
 
 ### 1.4 CI-friendly task creation
 
@@ -53,17 +53,17 @@ Options for a follow-up:
 
 ### 1.5 Multi-remote and private tasks
 
-A team may want some tasks in a public-facing remote and others in a private one (security incidents, internal tooling). The v2 design assumes a single registry remote per workspace. Open questions:
+A team may want some tasks in a public-facing remote and others in a private one (security incidents, internal tooling). The initial design assumes a single registry remote per workspace. Open questions:
 
 - Should the config support multiple `[task.sync.<name>]` blocks, one per remote?
 - Should tasks carry a `visibility` field that routes them to the appropriate remote?
 - Or is this just outside Orbit's responsibility — the team should run two workspaces?
 
-The single-remote default keeps v2 simple; multi-remote is reserved for a follow-up.
+The single-remote default keeps the first release simple; multi-remote is reserved for a follow-up.
 
 ### 1.6 Whether to ever go event-sourced
 
-Operation-aware replay is the v2 choice precisely because it's incremental on the existing YAML-snapshot model. If conflict surfaces multiply — particularly the same-field-edit case in [2_design.md §3.1(d)](./2_design.md) becoming common — the event-sourced model becomes more attractive. The migration path from snapshot-canonical to event-canonical is non-trivial; the design preserves the option but does not preemptively pay the cost.
+Operation-aware replay is the current choice precisely because it's incremental on the existing bundle-snapshot model. If conflict surfaces multiply — particularly the same-field-edit case in [2_design.md §3.1(d)](./2_design.md) becoming common — the event-sourced model becomes more attractive. The migration path from snapshot-canonical to event-canonical is non-trivial; the design preserves the option but does not preemptively pay the cost.
 
 ### 1.7 Branch-protection enforcement at the Orbit layer
 
@@ -73,7 +73,7 @@ The honest answer is "this is a host concern, not Orbit's." But it's worth flagg
 
 ### 1.8 Tombstone retention
 
-`task.delete` writes a tombstone, not a hard removal. Tombstones accumulate. A pruning policy (e.g., tombstones older than 6 months get hard-removed) is a useful follow-up but not v2-blocking.
+`task.delete` writes a tombstone, not a hard removal. Tombstones accumulate. A pruning policy (e.g., tombstones older than 6 months get hard-removed) is a useful follow-up but not blocking for the first sync release.
 
 ---
 
@@ -85,7 +85,7 @@ Several projects use git itself as a coordination substrate for non-code data:
 
 - **`gh-pages`.** The original orphan-branch pattern. Documents are stored on a separate orphan branch in the same repo, deployed via `git push`. The pattern is operationally well-understood, but `gh-pages` is read-only on push (no concurrent-writer story) — task sync's contribution is the operation-aware replay layer.
 - **`git-notes`.** Annotates commits with metadata in a parallel ref namespace. Designed for CI metadata and code review. Conflict semantics are similar to ours (refs/notes are pushable, fetchable, and subject to non-fast-forward rejection), but git-notes assumes additive use; concurrent edits to the same note text fail to merge.
-- **`git-bug`.** A bug tracker that uses git refs as the storage. Closer in spirit to task sync than anything else. Uses an event-log model under separate refs (`refs/bugs/`). The design considered this approach explicitly and rejected event sourcing for v2 — see [4_decisions.md ADR-002](./4_decisions.md). git-bug is the strongest precedent that "tasks on git refs" is a coherent model.
+- **`git-bug`.** A bug tracker that uses git refs as the storage. Closer in spirit to task sync than anything else. Uses an event-log model under separate refs (`refs/bugs/`). The design considered this approach explicitly and rejected event sourcing for the first sync release — see [4_decisions.md ADR-002](./4_decisions.md). git-bug is the strongest precedent that "tasks on git refs" is a coherent model.
 - **`jj op log`.** The Jujutsu version-control system maintains an operations log as a parallel ref. Operations are first-class and replayable. Architecturally similar to event sourcing but at the VCS layer. Inspirational for the operation-aware replay model in [2_design.md §3.2](./2_design.md).
 - **`pijul`.** Patch-based VCS that side-steps the merge problem at a fundamental level. Out of scope for emulation but cited as an example of "git's three-way merge is not the only option."
 
@@ -113,9 +113,9 @@ The closest precedent is `git-bug`. Everything else assumes a server.
 
 Three properties distinguish task sync from the prior art:
 
-### 3.1 Direct layout reuse
+### 3.1 Direct bundle-shape reuse
 
-The on-branch tree mirrors the workspace `.orbit/tasks/` layout exactly. There is no translation layer between "what's on disk" and "what's on the branch." `git log refs/heads/orbit/tasks -- proposed/T20260505-12/task.yaml` returns the lifecycle of [T20260505-12] without an indirection. `git-bug` and `jj op log` use opaque structures readable only by their own tooling; task sync uses YAML at standard paths.
+The on-branch tree mirrors the canonical v2 bundle shape under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`. There is a projection step back into `.orbit/tasks/<task-id>` for local browsing, but no second task schema: `git log refs/heads/orbit/tasks -- workspaces/orbit-a3f9c2/ORB-00042/task.yaml` returns the metadata lifecycle of `ORB-00042` without an opaque store. `git-bug` and `jj op log` use opaque structures readable only by their own tooling; task sync uses YAML, Markdown, and JSONL at standard paths.
 
 ### 3.2 Operation-aware replay tailored to task semantics
 
@@ -123,7 +123,7 @@ The replay rules in [2_design.md §3.2](./2_design.md) are not generic — they 
 
 ### 3.3 No new auth surface
 
-Task sync inherits the team's existing git auth posture. Whatever the team uses for `git push origin main` works for `task add`. There is no separate token, separate ACL list, separate permission system. This matches the v1 non-negotiable: "self-hostable, no cloud dependency." It also bounds the security surface — a compromise of the registry ref is a compromise of the git remote, not a separate failure mode.
+Task sync inherits the team's existing git auth posture. Whatever the team uses for `git push origin main` works for `task add`. There is no separate token, separate ACL list, separate permission system. This matches the non-negotiable: "self-hostable, no cloud dependency." It also bounds the security surface — a compromise of the registry ref is a compromise of the git remote, not a separate failure mode.
 
 ---
 
@@ -132,7 +132,7 @@ Task sync inherits the team's existing git auth posture. Whatever the team uses 
 ### 4.1 Orbit-internal
 
 - [docs/POSITIONING.md](../../POSITIONING.md) — the per-engineer-deployment doctrine that motivates this design.
-- [README.md](../../../README.md) — `Direction of travel` section names shared-host as v2; task sync slots underneath that as a v2 mechanism.
+- [README.md](../../../README.md) — `Direction of travel` section names shared-host as the team-coordination direction; task sync slots underneath that as a git-native mechanism.
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
 - [docs/design/knowledge-graph/](../knowledge-graph/) — content-addressed branch-scoped storage; relevant precedent for "Orbit data lives in branch-aware structures."
 - [docs/design/auditability/](../auditability/) — relevant for understanding why audit DB is explicitly out-of-scope for task sync.
@@ -149,6 +149,6 @@ Task sync inherits the team's existing git auth posture. Whatever the team uses 
 
 ## Task References
 
-- [T20260505-12] — Design git-orphan-branch task sync (v2 feature). The task that produced this folder.
+- [T20260505-12] — Original git-orphan-branch task sync proposal. Historical reference; the design now targets the `ORB-*` task-artifact shape.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

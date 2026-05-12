@@ -2,9 +2,9 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-12
 
-This document specifies the v2 design for task sync: the registry mechanism, the conflict-resolution model and why it's the central design question, the call sites that need to become sync-aware, the CLI surface, the config schema, and the migration paths. v1 ships with sync disabled by default and the code path absent. The architectural boundary is explicit: the task store ([orbit-store/src/file/task_store/](../../../crates/orbit-store/src/file/task_store/)) keeps owning YAML layout and validation; a new task-sync coordinator above the store owns git transport.
+This document specifies the task-sync design on top of the current v2 task-artifact store: the registry mechanism, the conflict-resolution model and why it's the central design question, the call sites that need to become sync-aware, the CLI surface, the config schema, and the migration paths. Orbit currently ships with sync disabled and the code path absent. The architectural boundary is explicit: the task store ([v2_bundle.rs](../../../crates/orbit-store/src/file/task_store/v2_bundle.rs), [v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs), and [task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs)) keeps owning bundle layout, validation, allocation, and workspace binding; a future task-sync coordinator above the store owns git transport.
 
 ---
 
@@ -13,9 +13,9 @@ This document specifies the v2 design for task sync: the registry mechanism, the
 In scope for task sync:
 
 - Task YAML bundles (`task.yaml`).
-- Companion files: `plan.md`, `execution-summary.md`.
+- Companion files: `description.md`, `acceptance.md`, `plan.md`, `execution-summary.md`, `events.jsonl`, `comments.jsonl`, and `review-threads/**`.
 - Task artifacts under `<task-id>/artifacts/**`.
-- ID allocation against the registry's view of state, with the format `T<YYYYMMDD>-<N>` preserved for the future sync registry. Current v1 Orbit `task_id` values remain local-only search keys after [T20260506-11]; cross-engineer references use `external_refs`.
+- ID allocation against the registry's view of state, using the authority-scoped `ORB-00000` format defined by task-artifacts ADR-001.
 
 Out of scope (with rationale in [§7](#7-concerns--honest-limitations)):
 
@@ -42,36 +42,34 @@ The branch is created with `git checkout --orphan` (or equivalent in `git2`). It
 
 ### 2.3 On-branch layout
 
-The branch tree mirrors `.orbit/tasks/` exactly:
+The branch tree mirrors the canonical v2 task-bundle store, not the local `.orbit/tasks/` symlink projection:
 
 ```
 refs/heads/orbit/tasks (tree root)
-├── proposed/
-│   └── T20260505-12/
-│       ├── task.yaml
-│       ├── plan.md
-│       ├── execution-summary.md
-│       └── artifacts/                (optional)
-├── backlog/
-│   └── T20260504-7/
-│       ├── task.yaml
-│       └── ...
-├── in_progress/
-│   └── T20260503-2/
-│       └── ...
-├── done/
-│   └── 2026-05/                       (date-partitioned for terminal states)
-│       └── T20260501-3/
+├── workspaces/
+│   └── orbit-a3f9c2/
+│       ├── ORB-00042/
+│       │   ├── task.yaml
+│       │   ├── description.md
+│       │   ├── acceptance.md
+│       │   ├── plan.md
+│       │   ├── execution-summary.md
+│       │   ├── events.jsonl
+│       │   ├── comments.jsonl
+│       │   ├── review-threads/
+│       │   └── artifacts/
+│       └── ORB-00043/
 │           └── ...
-├── archived/
-│   └── 2026-05/
-│       └── ...
-└── rejected/
-    └── 2026-04/
-        └── ...
+├── workspace-bindings/
+│   └── orbit-a3f9c2.yaml
+└── _tombstones/
+    └── orbit-a3f9c2/
+        └── ORB-00042.yaml
 ```
 
-This layout matches the existing workspace task root passed into `TaskFileStore::new` (see [layout.rs:24](../../../crates/orbit-store/src/file/task_store/layout.rs)). Reusing the layout means the registry tree can be hydrated into `.orbit/tasks/` directly without translation, and `git log -- proposed/T20260505-12/task.yaml` works for inspecting a task's history.
+The on-branch `workspaces/<workspace-id>/<task-id>/` path maps to the local canonical path `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`. A pull updates canonical home bundles and then rebuilds `.orbit/tasks/<task-id>` projections from the local registry. A push stages canonical bundle content into the branch tree. There is no status-directory or terminal-month partitioning in the registry; lifecycle state lives in `task.yaml` and `events.jsonl`.
+
+The bundle format is the same contract described in [task-bundle-v2.md](../task-artifacts/specs/task-bundle-v2.md). Reusing that contract means `git log refs/heads/orbit/tasks -- workspaces/orbit-a3f9c2/ORB-00042/task.yaml` inspects the metadata history for a task, while sidecar paths reveal prose and append streams directly.
 
 ### 2.4 Commit shape
 
@@ -82,14 +80,14 @@ Each push contains exactly one logical operation, with a structured message:
 
 operation: <op-kind>
 task-id: <task-id>
-agent: <model-or-role>
+actor: <role-or-identity>
 host: <hostname>
 parent: <parent-commit>
 
-[T20260505-12]
+[ORB-00042]
 ```
 
-Where `<verb>` is one of `add`, `update`, `transition`, `comment`, `archive`, `delete`, and `<op-kind>` is the structured operation name (see [§3.2](#32-operation-aware-replay-the-recommended-mechanism)). The `agent` and `host` lines satisfy the auditability non-negotiable: every change to a task is attributable to a concrete agent identity on a concrete machine.
+Where `<verb>` is one of `add`, `update`, `transition`, `comment`, `archive`, `delete`, and `<op-kind>` is the structured operation name (see [§3.2](#32-operation-aware-replay-the-recommended-mechanism)). The `actor` and `host` lines satisfy the auditability non-negotiable: every change to a task is attributable to a concrete execution identity on a concrete machine without reintroducing durable `agent`/`model` task fields.
 
 Commits are signed with the operator's git config (same identity as code commits). Auth piggybacks on whatever credential helper the operator uses for `git push origin main` — see [4_decisions.md ADR-005](./4_decisions.md).
 
@@ -99,17 +97,17 @@ Commits are signed with the operator's git config (same identity as code commits
 
 This is the central design question. Standard git text merge cannot handle task-bundle structure honestly. Four options were evaluated against four concrete scenarios:
 
-- **(a) Counter collision on concurrent ADD.** Engineer A and engineer B each call `task add` on 2026-05-05 within the same second, before either has fetched the other's commit. Both compute `T20260505-13` from local state.
-- **(b) Status transition divergence.** Engineer A moves [T20260504-7] from `backlog/` to `in_progress/`. Engineer B simultaneously moves the same task from `backlog/` to `archived/2026-05/`. Both push.
-- **(c) Concurrent comment append.** Engineer A and engineer B each append a different comment to the `comments: []` array in [T20260504-7]/task.yaml. Both push.
-- **(d) Concurrent same-field edit.** Engineer A edits the `description` of [T20260504-7]. Engineer B edits the same `description` differently. Both push.
+- **(a) Counter collision on concurrent ADD.** Engineer A and engineer B each call `task add` before either has fetched the other's commit. Both compute `ORB-00042` from their local authority state.
+- **(b) Status transition divergence.** Engineer A moves `ORB-00042` from `backlog` to `in-progress`. Engineer B simultaneously moves the same task from `backlog` to `archived`. Both push.
+- **(c) Concurrent comment append.** Engineer A and engineer B each append a different row to `comments.jsonl` for `ORB-00042`. Both push.
+- **(d) Concurrent same-field edit.** Engineer A edits `description.md` for `ORB-00042`. Engineer B edits the same document differently. Both push.
 
 ### 3.1 The four options compared
 
 | Option | (a) ADD collision | (b) Status divergence | (c) Comment append | (d) Field edit |
 |--------|-------------------|------------------------|--------------------|-----------------|
 | **1. ADD-only sync** | Auto: re-fetch, re-allocate `-14`, push. | Stays local; not synced. | Stays local; not synced. | Stays local; not synced. |
-| **2. Operation-aware replay (recommended)** | Auto: re-fetch, re-allocate, push. | Re-fetch, see remote moved task to `archived/`; if local op was a transition from `backlog/`, refuse and surface to user — source state is no longer valid. | Auto: re-fetch task, re-append local comment to the new comments list, push. | Re-fetch, detect concurrent edit to the same field, surface to user as a structured conflict. |
+| **2. Operation-aware replay (recommended)** | Auto: re-fetch, re-allocate, push. | Re-fetch, see remote moved task to `archived`; if local op was a transition from `backlog`, refuse and surface to user — source state is no longer valid. | Auto: re-fetch task, re-append local comment row to the fresh JSONL stream, push. | Re-fetch, detect concurrent edit to the same field, surface to user as a structured conflict. |
 | **3. Event-sourced** | Auto: events have monotonic IDs; rebase appends. | Auto: both events serialize on rebase; final state is the result of applying both in commit order. Last operator wins. | Auto: both append events; both visible in materialized state. | Auto: last event in commit order wins; first edit visible in event log. |
 | **4. No sync** | N/A — no sync. | N/A. | N/A. | N/A. |
 
@@ -121,11 +119,11 @@ The chosen mechanism for v2. Key claim: the orphan branch holds canonical YAML *
 |-----------|-----------------|
 | `task.add` | Re-fetch, re-allocate next ID against new tip, rewrite bundle locally with new ID, retry push. |
 | `task.transition` | Re-fetch, check that task's current status on the registry still matches the operation's expected source state. If yes, retry. If no (someone else moved the task), surface conflict — user must inspect and re-issue. |
-| `task.comment.append` | Re-fetch task YAML, append the new comment to the fresh comments list, push. Always converges. |
+| `task.comment.append` | Re-fetch task bundle, append the new comment row to the fresh `comments.jsonl`, push. Always converges. |
 | `task.history.append` | Same as comments — append-only by construction. Always converges. |
 | `task.review.append` | Same. |
 | `task.field.update` (description, priority, plan, etc.) | Re-fetch, compute diff between operation's expected baseline and registry's current value. If unchanged on registry, retry. If changed, surface structured conflict. |
-| `task.external_refs.merge` | Re-fetch task YAML and union `external_refs` by `(system, id)`. Distinct keys from both replicas are preserved. When both replicas write the same `(system, id)` key with different `url` values, keep one entry and let the later replayed operation win for `url` only. The rest of the task remains governed by the operation that caused the replay. |
+| `task.external_refs.merge` | Re-fetch task bundle and union `external_refs` by `(system, id)`. Distinct keys from both replicas are preserved. When both replicas write the same `(system, id)` key with different `url` values, keep one entry and let the later replayed operation win for `url` only. The rest of the task remains governed by the operation that caused the replay. |
 | `task.artifacts.upsert` | Per-artifact: if the artifact is new on the registry too, surface conflict; if it's the same, no-op; otherwise overwrite. |
 | `task.delete` | Always replaces the task with a tombstone marker (see [§3.4](#34-deletion-via-tombstone)). |
 
@@ -139,11 +137,11 @@ The "structured conflict" path is critical. When operations cannot replay automa
 
 **Option 3 (event-sourced) was rejected for v2** because the architectural shift is not justified by the conflict-resolution gain. Operation-aware replay handles the same scenarios with materially less churn: the on-branch artifact remains a YAML snapshot inspectable with standard git tooling, the existing task store keeps owning YAML, and no event-replay materializer needs to be built. Event sourcing remains a candidate for a future iteration if the operation-replay model proves insufficient — see [3_vision.md §1](./3_vision.md).
 
-**Option 4 (no sync) was rejected** because the v1 per-engineer doctrine is honest about *what doesn't sync*, but it doesn't justify never building any sync. Once v2 ships shared-host, sync of some kind is required; an opt-in git-based sync is a less-disruptive incremental step than a coordinator daemon and serves teams that want visibility without infrastructure.
+**Option 4 (no sync) was rejected** because the per-engineer doctrine is honest about *what doesn't sync*, but it doesn't justify never building any sync. Once Orbit needs team-visible task coordination, sync of some kind is required; an opt-in git-based sync is a less-disruptive incremental step than a coordinator daemon and serves teams that want visibility without infrastructure.
 
 ### 3.4 Deletion via tombstone
 
-`task.delete` does *not* remove the task directory from the orphan branch. It writes a `_tombstones/<task-id>.yaml` entry recording the deletion timestamp and the deleting agent, and the regular task path is removed. Reads ignore tombstoned IDs. This preserves the auditability invariant — the history of a deleted task is still inspectable via `git log refs/heads/orbit/tasks -- 'proposed/<task-id>/'` — and prevents the "I deleted my task and it came back when engineer B pushed an old version" footgun.
+`task.delete` removes the active task directory from the orphan branch and writes a `_tombstones/<workspace-id>/<task-id>.yaml` entry recording the deletion timestamp and deleting actor. Reads ignore tombstoned IDs. This preserves the auditability invariant — the history of a deleted task is still inspectable via `git log refs/heads/orbit/tasks -- 'workspaces/<workspace-id>/<task-id>/'` — and prevents the "I deleted my task and it came back when engineer B pushed an old version" footgun.
 
 ---
 
@@ -151,21 +149,13 @@ The "structured conflict" path is critical. When operations cannot replay automa
 
 Every sync-aware mutation must route through the new task-sync coordinator (introduced in [§5.1](#51-architectural-boundary)). The call sites that need changes:
 
-### 4.1 In `crates/orbit-store/src/file/task_store/`
+### 4.1 In `crates/orbit-store/src/file/task_store/` and `sqlite/task_registry.rs`
 
-| File:line | Function | Change |
-|-----------|----------|--------|
-| [api.rs:28](../../../crates/orbit-store/src/file/task_store/api.rs) | `create_task` | Wrap with sync-coordinator call: fetch registry, then allocate, then write, then commit + push. |
-| [layout.rs:102-132](../../../crates/orbit-store/src/file/task_store/layout.rs) | `next_task_id` | Allocator must accept a "view" abstraction so it can scan against fetched registry state plus local unpushed tasks, while preserving the `T<YYYYMMDD>-<N>` format exactly. |
-| [api.rs:174](../../../crates/orbit-store/src/file/task_store/api.rs) | `update_task_document` | Wrap: fetch, detect remote movement, apply replay rules from [§3.2](#32-operation-aware-replay-the-recommended-mechanism), push. |
-| [api.rs:281](../../../crates/orbit-store/src/file/task_store/api.rs) | `update_task_history` | Same; uses `task.history.append` operation kind (always-converging). |
-| [api.rs:342](../../../crates/orbit-store/src/file/task_store/api.rs) | `update_task_reviews` | Same; uses `task.review.append`. |
-| [api.rs:374](../../../crates/orbit-store/src/file/task_store/api.rs) | `upsert_task_artifacts` | Per-artifact replay; see [§3.2](#32-operation-aware-replay-the-recommended-mechanism). |
-| [api.rs:389](../../../crates/orbit-store/src/file/task_store/api.rs) | `persist_bundle_update` | Central local mutation point. Status-directory move is the most conflict-prone operation; replay rule from [§3.2](#32-operation-aware-replay-the-recommended-mechanism) applies. |
-| [api.rs:411](../../../crates/orbit-store/src/file/task_store/api.rs) | `delete_task` | Tombstone semantics per [§3.4](#34-deletion-via-tombstone). |
-| [bundle.rs:26](../../../crates/orbit-store/src/file/task_store/bundle.rs) | `write_bundle_for_state` | Materializes `task.yaml` + `plan.md` + `execution-summary.md` to disk. The sync coordinator reads from this output and stages it into the registry tree. No direct git transport in this function. |
-| [bundle.rs:34](../../../crates/orbit-store/src/file/task_store/bundle.rs) | `write_bundle_at` | Same. |
-| [layout.rs:176](../../../crates/orbit-store/src/file/task_store/layout.rs), [:180](../../../crates/orbit-store/src/file/task_store/layout.rs), [:201](../../../crates/orbit-store/src/file/task_store/layout.rs), [:326](../../../crates/orbit-store/src/file/task_store/layout.rs) | State, task, artifact path helpers and status-move semantics | Layout helpers are reused as-is; the sync coordinator constructs equivalent on-branch paths via the same helpers. |
+| File | Function / responsibility | Sync change |
+|------|---------------------------|-------------|
+| [task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs) | `allocate_task_id`, workspace binding, canonical bundle registration | Fetch registry before allocation; after push/pull, reconcile authority state, workspace bindings, generated indexes, and tombstones. Preserve `ORB-00000` format and workspace-id scoping. |
+| [v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs) | `create_task`, document/history/review/artifact updates, delete | Wrap mutating entry points with sync-coordinator operation capture: fetch, apply local mutation, stage canonical bundle/tombstone, commit, push, replay on rejection. |
+| [v2_bundle.rs](../../../crates/orbit-store/src/file/task_store/v2_bundle.rs) | Bundle serialization, sidecars, JSONL append/recovery, artifacts | Remains the local source of bundle shape and validation. The sync coordinator stages this output into `workspaces/<workspace-id>/<task-id>/`; no git transport lives in the bundle layer. |
 
 ### 4.2 Upstream entry points
 
@@ -196,8 +186,8 @@ A new component, tentatively `orbit-store::sync::TaskSyncCoordinator`, sits *abo
 
 It does *not* own:
 
-- YAML serialization (still in [bundle.rs](../../../crates/orbit-store/src/file/task_store/bundle.rs)).
-- Layout (`<state>/<task-id>/...` paths still in [layout.rs](../../../crates/orbit-store/src/file/task_store/layout.rs)).
+- YAML and sidecar serialization (owned by [v2_bundle.rs](../../../crates/orbit-store/src/file/task_store/v2_bundle.rs)).
+- Workspace binding, ID allocation, and generated local indexes (owned by [task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs)).
 - Reservation locks (still per-machine in [task_reservation_store.rs](../../../crates/orbit-store/src/sqlite/task_reservation_store.rs); locks are out of scope at any version).
 
 Putting git transport above the file store keeps `orbit-store` mockable for tests and ensures sync policy can change without rewriting layout code.
@@ -222,7 +212,7 @@ Workspace-level configuration in `.orbit/config.toml`:
 
 ```toml
 [task.sync]
-enabled = false                              # default-off; preserves v1 per-machine behavior
+enabled = false                              # default-off; preserves per-machine behavior
 remote = "origin"                            # the git remote to fetch/push against
 ref = "refs/heads/orbit/tasks"               # the registry ref
 fetch_before_read = false                    # if true, every read does a background fetch first
@@ -230,7 +220,7 @@ retry_max_attempts = 5                       # exponential backoff on non-fast-f
 retry_base_delay_ms = 100
 ```
 
-`enabled = false` (or absent `[task.sync]`) is the v1 and v2-default behavior: workspaces continue exactly as today with no network calls, no orphan branch, no sync coordinator on the mutation path.
+`enabled = false` (or absent `[task.sync]`) is the default behavior: workspaces continue exactly as today with no network calls, no orphan branch, no sync coordinator on the mutation path.
 
 `enabled = true` activates online-mode for `task add` and mutating `task update`. Read paths (`task list`, `task show`) remain offline by default; `fetch_before_read = true` is an opt-in for teams that prefer freshness over latency.
 
@@ -240,10 +230,10 @@ Three new subcommands under `orbit task sync`:
 
 | Command | Behavior |
 |---------|----------|
-| `orbit task sync status` | Compares local task tree to fetched registry. Lists tasks that are local-only, registry-only, or have diverged content. Read-only. |
-| `orbit task sync pull` | Fetches the registry ref and updates `.orbit/tasks/` from it. Local-only changes are surfaced; user must explicitly stash or push them. |
+| `orbit task sync status` | Compares canonical home bundles and workspace binding metadata to the fetched registry. Lists tasks that are local-only, registry-only, or have diverged content. Read-only. |
+| `orbit task sync pull` | Fetches the registry ref, updates canonical home bundles, and rebuilds `.orbit/tasks/<task-id>` projections. Local-only changes are surfaced; user must explicitly stash or push them. |
 | `orbit task sync push` | Pushes local task changes. Used for the rare cases where automatic per-mutation push has been bypassed (e.g., `--offline-add` flag during a network outage). |
-| `orbit task sync push --init` | First-time enablement on a workspace with existing tasks. Verifies the registry ref does not exist (or is empty), then seeds it from local `.orbit/tasks/`. |
+| `orbit task sync push --init` | First-time enablement on a workspace with existing tasks. Verifies the registry ref does not exist (or is empty), then seeds it from local canonical home bundles and workspace binding metadata. |
 | `orbit task sync resolve <task-id>` | Walks the user through a structured conflict written by the replay logic. Conflicts live at `.orbit/tasks/_conflicts/<task-id>.yaml` until resolved. |
 
 ### 6.3 Failure modes
@@ -256,9 +246,9 @@ When `enabled = true` and the network is unavailable, mutations fail with an exp
 
 ### 7.1 Out of scope (at any version)
 
-The following are explicitly NOT synced by task sync, regardless of v1/v2 status:
+The following are explicitly NOT synced by task sync, regardless of release:
 
-- **File locks ([task_reservation_store.rs](../../../crates/orbit-store/src/sqlite/task_reservation_store.rs)).** Locks are ephemeral, TTL-based, and per-machine by design. Cross-machine lock coordination is a different problem with different consistency requirements; it belongs to v2 shared-host work, not task sync.
+- **File locks ([task_reservation_store.rs](../../../crates/orbit-store/src/sqlite/task_reservation_store.rs)).** Locks are ephemeral, TTL-based, and per-machine by design. Cross-machine lock coordination is a different problem with different consistency requirements; it belongs to shared-host work, not task sync.
 - **Audit DB (`~/.orbit/orbit.db`).** The audit store is `GlobalOnly` per the [scoping rules](../../../crates/orbit-store/src/scope.rs). Cross-machine aggregation of audit events is its own design problem and has different retention, query, and tamper-evidence requirements than task bundles.
 - **Scoreboards (`.orbit/state/scoreboard/*.json`).** Scoreboards use read-modify-write counter semantics that don't merge cleanly. Reconciliation requires either a coordinator or a fundamentally different model (event-sourced counters), neither of which fits inside task sync.
 - **Job runs (`.orbit/runs/`).** Job-run YAML bundles can be large, contain blob refs, and have their own lifecycle. They are workspace-local execution artifacts; making them team-shared is a separate design.
@@ -274,7 +264,7 @@ Even with operation-aware replay, some scenarios genuinely cannot resolve withou
 
 ### 7.4 Orphan-branch growth
 
-Every status transition is a commit. A team with high task throughput will accumulate commits on `refs/heads/orbit/tasks` indefinitely. v2 ships without compaction; once the branch becomes operationally painful, a follow-up design adds snapshot-and-prune semantics. See [3_vision.md §1](./3_vision.md).
+Every lifecycle transition is a commit. A team with high task throughput will accumulate commits on `refs/heads/orbit/tasks` indefinitely. The initial sync release ships without compaction; once the branch becomes operationally painful, a follow-up design adds snapshot-and-prune semantics. See [3_vision.md §1](./3_vision.md).
 
 ### 7.5 Soft-claim is advisory, not locking
 
@@ -292,9 +282,9 @@ Task sync inherits whatever auth posture the team uses for `git push`. If a team
 
 ## Task References
 
-- [T20260505-12] — Design git-orphan-branch task sync (v2 feature). The task that produced this folder.
+- [T20260505-12] — Original git-orphan-branch task sync proposal. Historical reference; the design now targets the `ORB-*` task-artifact shape.
 - [T20260421-0528] — Historical knowledge-graph task attribution. Superseded as a canonical load-bearing ID example by [T20260506-11].
 - [T20260506-9] — Adds first-class task `external_refs` metadata and documents the task-sync merge rule.
 - [T20260506-13] — Rejected follow-up; no standalone task-sync replay implementation is currently required for `external_refs`.
 
-Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+Resolve archival task references with `git log --grep=<ID>`; new Orbit tasks use `ORB-*` IDs.
