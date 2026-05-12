@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci bench check-design-docs
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci bench check-design-docs stability
 
 # ------------------------------------------------------------
 # Config
@@ -50,6 +50,7 @@ help:
 	@echo "  make tree         Print dependency tree"
 	@echo "  make ci           Full CI pass"
 	@echo "  make check-design-docs  Flag docs/design/* stale relative to referenced code"
+	@echo "  make stability    Verify per-crate stability tier markers"
 	@echo "  make install      Install CLI locally (INSTALL_PROFILE=debug optional)"
 	@echo "  make uninstall    Remove installed binary"
 	@echo "  make clean        Clean build artifacts"
@@ -110,6 +111,10 @@ ci:
 # Flag design docs older than the code they reference
 check-design-docs:
 	./scripts/check_design_doc_decay.py
+
+# Verify every workspace crate declares its stability tier
+stability:
+	./scripts/check-stability.sh
 
 # ------------------------------------------------------------
 # Install

@@ -23,6 +23,7 @@ flowchart LR
   Embed --> Common
   MCP --> Common
   Core --> Common
+  Registry["orbit-registry"] --> Common
 ```
 
 ---
@@ -34,6 +35,7 @@ flowchart LR
 - **orbit-exec**: process / sandbox / supervision primitives for shell-command execution under an `FsProfile`. Depends only on `orbit-common`.
 - **orbit-embed**: semantic-embedding feature crate. Owns the `Embedder` trait, JSON-Lines RPC types, `SubprocessEmbedder`, `NoopEmbedder`, the workspace-local vector store (`vector::VectorStore` with its own `rusqlite::Connection`, WAL + busy_timeout pragmas, idempotent `embeddings` / `tasks_fts` schema, `EmbedWorker`, paragraph chunker, BLAKE3 dedup, cosine helper), and the install/uninstall/reindex/stats `commands::*` surface. Depends only on `orbit-common`; does not depend on `orbit-store` or fastembed-rs.
 - **orbit-embed-companion**: separately installed embedding companion binary. Depends on `orbit-embed` and fastembed-rs; not linked into the default `orbit` CLI binary.
+- **orbit-registry**: generic replicated registry substrate for publication flows. Opaque-bytes payloads + caller-chosen merge classes; optional `transport-git2` feature for git-backed replicas. Depends only on `orbit-common`.
 - **orbit-knowledge**: knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript/TypeScript, Python). Depends on `orbit-common`; consumed by `orbit-tools`, which exposes graph tool and CLI-use-case facades upstream.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-embed::vector` (not `orbit-store`).
 - **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
@@ -42,6 +44,33 @@ flowchart LR
 - **orbit-engine**: activity/job execution, template rendering, retry logic. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types.
 - **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding. Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
 - **orbit-cli**: clap-based CLI entry point.
+
+---
+
+## Stability tiers
+
+Each workspace crate declares a stability tier in its `Cargo.toml` under `[package.metadata.orbit]`. `scripts/check-stability.sh` (wired into `make ci`) fails closed if a crate is missing the marker or sets a value outside the allowed set. The current contract is marker-only — no automated public-API diff — but the tiering exists to make refactor scope explicit for reviewers.
+
+- **stable** — Public-ish surface. Breaking changes need conscious owner sign-off. (No automated diff today; this is intent-signalling only.)
+- **experimental** — Free to refactor; downstream crates depend at their own risk.
+- **internal** — Refactor freely; no external/downstream guarantees.
+
+| Crate                 | Tier         |
+|-----------------------|--------------|
+| orbit-common          | stable       |
+| orbit-store           | stable       |
+| orbit-embed-companion | experimental |
+| orbit-registry        | experimental |
+| orbit-agent           | internal     |
+| orbit-cli             | internal     |
+| orbit-core            | internal     |
+| orbit-embed           | internal     |
+| orbit-engine          | internal     |
+| orbit-exec            | internal     |
+| orbit-knowledge       | internal     |
+| orbit-mcp             | internal     |
+| orbit-policy          | internal     |
+| orbit-tools           | internal     |
 
 ---
 

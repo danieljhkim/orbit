@@ -9,3 +9,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 "$repo_root/scripts/check-dependency-direction.sh"
 "$repo_root/scripts/check-cli-imports.sh"
+"$repo_root/scripts/check-stability.sh"
