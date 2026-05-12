@@ -5,13 +5,13 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Promote a passing `agent-main` commit to the project's integration
-    target (typically `main`). Fast-forwards the tracking branch, verifies
-    required checks have passed, and records the promotion as an audit
-    event. No LLM — this is a git + API surface only, so it declares no
-    `backend:` field.
+    Retired Phase 4 stub. The dispatcher intentionally rejects this action
+    instead of returning a skipped-success payload, because automatic
+    integration-branch promotion is not a shipped Orbit behavior. Use the
+    supported `git_merge`, `git_push`, and `pr_open` deterministic actions
+    when modeling v2 git flow.
 
-    Used by the T20260418-0421 pipeline as the success-path terminal step
+    Historical intent: used by the T20260418-0421 pipeline as the success-path terminal step
     after per-unit PRs have been reviewed and (optionally) merged into
     `agent-main`. Failure to meet any required-check gate is a hard error,
     not a silent no-op.

@@ -74,7 +74,9 @@ spec:
         base: agent-main
         strategy: pr_merge
 
-    # Success terminal: promote agent-main once the merge lands cleanly.
+    # Retired/fenced example terminal. `promote_agent_main` intentionally
+    # fails loudly until real integration-branch promotion ships; model
+    # supported git flow with git_merge/git_push/pr_open instead.
     - id: promote
       when: "{{ input.auto_merge }} == true"
       target: activity:promote_agent_main
@@ -82,8 +84,9 @@ spec:
         target_branch: main
         source_branch: agent-main
 
-    # Failure safety valve. Guarded off by default — dispatched by the CI
-    # observer when a merged commit subsequently turns agent-main red.
+    # Retired/fenced example safety valve. Guarded off by default and
+    # intentionally rejected by the dispatcher until real revert-on-red
+    # behavior ships.
     - id: revert_on_failure
       when: "false"
       target: activity:revert_on_red

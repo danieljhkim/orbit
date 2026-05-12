@@ -56,8 +56,8 @@ impl RuntimeHost for OrbitRuntime {
         )))
     }
 
-    fn get_job(&self, _job_id: &str) -> Result<Option<orbit_common::types::Job>, OrbitError> {
-        Ok(None)
+    fn get_job(&self, job_id: &str) -> Result<Option<orbit_common::types::Job>, OrbitError> {
+        OrbitRuntime::get_job(self, job_id)
     }
 
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {

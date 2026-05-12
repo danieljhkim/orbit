@@ -5,14 +5,15 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Revert a merged commit on `agent-main` when CI goes red for that commit.
-    Safety valve for the T20260418-0421 pipeline: if a per-unit PR merges
-    but the integration build fails, this activity reverts the offending
-    commit and opens a follow-up issue. Emits §7 audit events on every
-    invocation — a red build is an operational signal and the revert trail
-    must be queryable after the fact.
+    Retired Phase 4 stub. The dispatcher intentionally rejects this action
+    instead of returning a skipped-success payload, because automatic
+    revert-on-red is not a shipped Orbit behavior. Use an explicit git
+    revert/manual incident task until a real deterministic revert action is
+    implemented.
 
-    No LLM — deterministic git + API actions only.
+    Historical intent: revert a merged commit on `agent-main` when CI goes
+    red for that commit and open a follow-up issue. No LLM — deterministic
+    git + API actions only.
   input_schema_json:
     type: object
     required: [commit_sha, branch]

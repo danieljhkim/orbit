@@ -165,8 +165,10 @@ impl OrbitRuntime {
         Ok(audits)
     }
 
-    pub fn get_job(&self, _job_id: &str) -> Result<Option<orbit_common::types::Job>, OrbitError> {
-        Ok(None)
+    pub fn get_job(&self, job_id: &str) -> Result<Option<orbit_common::types::Job>, OrbitError> {
+        Err(OrbitError::Execution(format!(
+            "v1 job lookup is retired; refusing to resolve job '{job_id}' through OrbitRuntime::get_job. Use schemaVersion: 2 job assets with `orbit job run` or `orbit run` instead."
+        )))
     }
 
     pub fn execution_env_config(&self) -> (bool, Vec<String>) {
@@ -646,6 +648,18 @@ spec:
         let catalog = runtime.v2_activity_catalog().expect("activity catalog");
 
         assert!(catalog.get("audit_tools").is_some());
+    }
+
+    #[test]
+    fn get_job_rejects_retired_v1_lookup() {
+        let (_root, runtime, _global_root, _workspace_root) = test_runtime();
+        let err = runtime
+            .get_job("legacy_job")
+            .expect_err("v1 job lookup should be fenced");
+
+        let message = err.to_string();
+        assert!(message.contains("v1 job lookup is retired"), "{message}");
+        assert!(message.contains("orbit job run"), "{message}");
     }
 
     #[test]

@@ -61,13 +61,11 @@ pub(super) fn run_deterministic(
             action: action.to_string(),
             message: format!("{err}"),
         }),
-        // Phase 4 stub handlers. Real git/API logic lands in a follow-up
-        // task once the per-asset migration ports the rest of the
-        // pipeline dependencies (worktree_setup, pr_open, pr_merge, …).
-        // Returning a structured result keeps the activities dispatchable
-        // so the §7 `activity.started` / `activity.finished` envelope is
-        // emitted end-to-end — an operator running the pipeline today
-        // sees the intent even while the implementation is stubbed.
+        // Retired Phase 4 stubs. These used to return structured skipped
+        // success, which made unavailable git/API behavior look like a
+        // completed deterministic action. Keep the action names registered
+        // so legacy assets fail with an actionable message instead of an
+        // "unknown action" error.
         "promote_agent_main" => {
             let target = input
                 .get("target_branch")
@@ -77,25 +75,24 @@ pub(super) fn run_deterministic(
                 .get("source_branch")
                 .and_then(Value::as_str)
                 .unwrap_or("agent-main");
-            Ok(serde_json::json!({
-                "promoted": false,
-                "target_sha": null,
-                "skipped_reason":
-                    format!("stub: real promotion from `{source}` to `{target}` lands in a follow-up"),
-            }))
+            Err(DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!(
+                    "deterministic action `promote_agent_main` is a retired stub; refusing to report promotion from `{source}` to `{target}` as skipped success. Use shipped `git_merge` plus `git_push`, or the `pr_open` workflow, for supported v2 git flow."
+                ),
+            })
         }
         "revert_on_red" => {
             let sha = input
                 .get("commit_sha")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            Ok(serde_json::json!({
-                "reverted": false,
-                "revert_sha": null,
-                "follow_up_issue": null,
-                "skipped_reason":
-                    format!("stub: real revert of `{sha}` lands in a follow-up"),
-            }))
+            Err(DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!(
+                    "deterministic action `revert_on_red` is a retired stub; no automatic revert implementation ships today, so commit `{sha}` was not reverted. Use an explicit git revert/manual incident task or add a real deterministic action before wiring this workflow."
+                ),
+            })
         }
         "context_conflict_check" => {
             let task_ids = parse_task_ids(input).map_err(|error| {
@@ -297,6 +294,57 @@ mod tests {
                     message.contains("missing `run_ids`"),
                     "unexpected validation message: {message}"
                 );
+            }
+            other => panic!("expected registered action failure, got {other}"),
+        }
+    }
+
+    #[test]
+    fn promote_agent_main_stub_is_loudly_fenced() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let err = runtime
+            .run_deterministic(
+                "promote_agent_main",
+                &json!({}),
+                &json!({
+                    "source_branch": "agent-main",
+                    "target_branch": "main",
+                }),
+                ToolContext::default(),
+            )
+            .expect_err("retired promotion stub should fail loudly");
+
+        match err {
+            DispatchError::DeterministicActionFailed { action, message } => {
+                assert_eq!(action, "promote_agent_main");
+                assert!(message.contains("retired stub"), "{message}");
+                assert!(message.contains("git_merge"), "{message}");
+                assert!(message.contains("git_push"), "{message}");
+            }
+            other => panic!("expected registered action failure, got {other}"),
+        }
+    }
+
+    #[test]
+    fn revert_on_red_stub_is_loudly_fenced() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let err = runtime
+            .run_deterministic(
+                "revert_on_red",
+                &json!({}),
+                &json!({
+                    "commit_sha": "abc123",
+                    "branch": "agent-main",
+                }),
+                ToolContext::default(),
+            )
+            .expect_err("retired revert stub should fail loudly");
+
+        match err {
+            DispatchError::DeterministicActionFailed { action, message } => {
+                assert_eq!(action, "revert_on_red");
+                assert!(message.contains("retired stub"), "{message}");
+                assert!(message.contains("manual incident task"), "{message}");
             }
             other => panic!("expected registered action failure, got {other}"),
         }
