@@ -587,7 +587,7 @@ mod tests {
         });
         let server = OrbitToolServer::new(host);
         // Legacy dotted name from an older client falls through unchanged so
-        // the host's own ToolNotFound handling still runs.
+        // the host's own tool-not-found handling still runs.
         assert_eq!(
             server.canonical_name("orbit.task.add").unwrap(),
             "orbit.task.add"

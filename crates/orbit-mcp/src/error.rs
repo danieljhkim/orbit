@@ -1,4 +1,4 @@
-use orbit_common::types::OrbitError;
+use orbit_common::types::{NotFoundKind, OrbitError};
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 
@@ -22,16 +22,18 @@ fn error_payload(err: &OrbitError) -> Value {
 
 fn error_code(err: &OrbitError) -> &'static str {
     match err {
-        OrbitError::ToolNotFound(_) => "tool_not_found",
-        OrbitError::TaskNotFound(_)
-        | OrbitError::SkillNotFound(_)
-        | OrbitError::JobNotFound(_)
-        | OrbitError::JobRunNotFound(_)
-        | OrbitError::ActivityNotFound(_)
-        | OrbitError::AgentSessionNotFound(_)
-        | OrbitError::WorkspaceNotFound(_)
-        | OrbitError::AdrNotFound(_)
-        | OrbitError::LearningNotFound(_) => "not_found",
+        OrbitError::NotFound { kind, .. } => match kind {
+            NotFoundKind::Tool => "tool_not_found",
+            NotFoundKind::Task
+            | NotFoundKind::Skill
+            | NotFoundKind::Job
+            | NotFoundKind::JobRun
+            | NotFoundKind::Activity
+            | NotFoundKind::Adr
+            | NotFoundKind::Learning
+            | NotFoundKind::AgentSession
+            | NotFoundKind::Workspace => "not_found",
+        },
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::PolicyDenied(_) => "policy_denied",
         OrbitError::TaskApprovalRequired(_) => "approval_required",

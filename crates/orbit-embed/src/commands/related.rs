@@ -1,4 +1,4 @@
-use orbit_common::types::{OrbitError, Task};
+use orbit_common::types::{NotFoundKind, OrbitError, Task};
 use serde::{Deserialize, Serialize};
 
 use crate::commands::resolve_query_model;
@@ -52,7 +52,7 @@ pub(crate) fn run_with_embedder(
     let target = tasks
         .iter()
         .find(|task| task.id == params.task_id)
-        .ok_or_else(|| OrbitError::TaskNotFound(params.task_id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, params.task_id.clone()))?;
     let query = format!("{}\n\n{}", target.title.trim(), target.description.trim());
     let query = query.trim();
     if query.is_empty() {

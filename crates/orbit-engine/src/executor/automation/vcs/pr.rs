@@ -610,8 +610,8 @@ mod tests {
 
     use chrono::Utc;
     use orbit_common::types::{
-        Activity, Job, JobTargetType, OrbitEvent, Role, TaskArtifact, TaskPriority, TaskType,
-        push_external_ref_if_missing,
+        Activity, Job, JobTargetType, NotFoundKind, OrbitEvent, Role, TaskArtifact, TaskPriority,
+        TaskType, push_external_ref_if_missing,
     };
     use orbit_tools::ToolContext;
     use serde_json::{Value, json};
@@ -678,7 +678,7 @@ mod tests {
                 .iter()
                 .find(|task| task.id == task_id)
                 .cloned()
-                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+                .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.to_string()))
         }
 
         fn get_task_artifacts(&self, _task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
@@ -771,7 +771,7 @@ mod tests {
             let task = tasks
                 .iter_mut()
                 .find(|task| task.id == task_id)
-                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))?;
+                .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.to_string()))?;
             if let Some(status) = update.status {
                 task.status = status;
             }
@@ -850,7 +850,7 @@ mod tests {
                 "github.pr.view" => Ok(json!({
                     "pull_request": { "number": 42 }
                 })),
-                other => Err(OrbitError::ToolNotFound(other.to_string())),
+                other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
             }
         }
 

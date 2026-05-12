@@ -2,8 +2,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use orbit_common::types::{
-    ExternalRef, OrbitError, TaskArtifact, TaskComplexity, TaskPriority, TaskStatus, TaskType,
-    media_type_for_artifact_path, optional_string, optional_string_alias, optional_u32_alias,
+    ExternalRef, NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority, TaskStatus,
+    TaskType, media_type_for_artifact_path, optional_string, optional_string_alias,
+    optional_u32_alias,
 };
 use orbit_store::state_io;
 use orbit_tools::OrbitTaskScope;
@@ -49,7 +50,7 @@ pub(super) fn resolve_state_dir(
     })?;
 
     state_io::resolve_active_run_state_dir(&orbit_root, &run_id)?
-        .ok_or(OrbitError::JobRunNotFound(run_id))
+        .ok_or(OrbitError::not_found(NotFoundKind::JobRun, run_id))
 }
 
 pub(super) fn resolve_step_index(input: &Value) -> Result<u32, OrbitError> {

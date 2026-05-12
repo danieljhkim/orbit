@@ -1,6 +1,6 @@
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::runtime::run_audit::RunAuditStep;
-use orbit_core::{JobRun, JobRunStep, JobTargetType, OrbitError, OrbitRuntime};
+use orbit_core::{JobRun, JobRunStep, JobTargetType, NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use super::format::{format_duration, format_timestamp, summarize_error_message};
@@ -12,7 +12,7 @@ pub(crate) fn resolve_run(
     if let Some(run_id) = run_id {
         return runtime
             .show_job_run(run_id)
-            .map_err(|_| OrbitError::JobRunNotFound(run_id.to_string()));
+            .map_err(|_| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()));
     }
 
     runtime
@@ -22,7 +22,7 @@ pub(crate) fn resolve_run(
         })?
         .into_iter()
         .next()
-        .ok_or_else(|| OrbitError::JobRunNotFound("latest".to_string()))
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, "latest".to_string()))
 }
 
 pub(crate) fn resolve_run_step(

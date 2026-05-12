@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::types::{NotFoundKind, OrbitError, ToolSchema};
 use serde_json::Value;
 
 use crate::{Tool, ToolContext};
@@ -36,7 +36,7 @@ impl ToolRegistry {
         let tool = self
             .tools
             .get(name)
-            .ok_or_else(|| OrbitError::ToolNotFound(name.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
         tool.execute(ctx, input)
     }
 

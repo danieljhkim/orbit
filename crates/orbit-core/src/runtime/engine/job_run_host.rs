@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState, KnowledgeRunMetrics, OrbitError};
+use orbit_common::types::{JobRun, JobRunState, KnowledgeRunMetrics, NotFoundKind, OrbitError};
 use orbit_engine::JobRunHost;
 use orbit_store::{JobRunStepParams, TaskReservationReleaseReason};
 
@@ -102,7 +102,10 @@ impl JobRunHost for OrbitRuntime {
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
         match self.show_job_run(run_id) {
             Ok(run) => Ok(Some(run)),
-            Err(OrbitError::JobRunNotFound(_)) => Ok(None),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::JobRun,
+                ..
+            }) => Ok(None),
             Err(error) => Err(error),
         }
     }

@@ -85,20 +85,16 @@ impl TaskGraphService {
                     ) {
                         Ok(true) => match pack_result() {
                             Ok(pack) => Ok(pack),
-                            Err(retry_error) => Err(KnowledgeError {
-                                kind: "knowledge_unavailable".to_string(),
-                                reason: format!(
+                            Err(retry_error) => {
+                                Err(KnowledgeError::knowledge_unavailable(format!(
                                     "failed to load knowledge pack: {first_error}; retry after rebuild failed: {retry_error}"
-                                ),
-                            }),
+                                )))
+                            }
                         },
                         Ok(false) => Err(first_error),
-                        Err(rebuild_error) => Err(KnowledgeError {
-                            kind: "knowledge_unavailable".to_string(),
-                            reason: format!(
-                                "failed to load knowledge pack: {first_error}; rebuild attempt failed: {rebuild_error}"
-                            ),
-                        }),
+                        Err(rebuild_error) => Err(KnowledgeError::knowledge_unavailable(format!(
+                            "failed to load knowledge pack: {first_error}; rebuild attempt failed: {rebuild_error}"
+                        ))),
                     }
                 };
 

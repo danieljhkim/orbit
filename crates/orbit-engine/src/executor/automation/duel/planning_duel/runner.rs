@@ -151,8 +151,9 @@ mod tests {
 
     use chrono::Utc;
     use orbit_common::types::{
-        Activity, InvocationTrace, Job, JobTargetType, OrbitEvent, PlanningRoleAssignment, Role,
-        Task, TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType,
+        Activity, InvocationTrace, Job, JobTargetType, NotFoundKind, OrbitError, OrbitEvent,
+        PlanningRoleAssignment, Role, Task, TaskArtifact, TaskComment, TaskPriority, TaskStatus,
+        TaskType,
     };
     use orbit_store::{InvocationQuery, InvocationRecord};
     use orbit_tools::ToolContext;
@@ -226,7 +227,8 @@ mod tests {
             if task.id == task_id {
                 Ok(task)
             } else {
-                Err(orbit_common::types::OrbitError::TaskNotFound(
+                Err(OrbitError::not_found(
+                    NotFoundKind::Task,
                     task_id.to_string(),
                 ))
             }

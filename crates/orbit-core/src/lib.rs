@@ -46,7 +46,6 @@ pub use command::workflow::{
     find_workflow, validate_workflow_flags,
 };
 pub use context::{ActorIdentity, ActorKind, OrbitContext};
-pub use orbit_common::types::OrbitError;
 pub use orbit_common::types::{
     Activity, AuditEvent, AuditEventStatus, AuditStats, EvidenceKind, ExecutorDef, ExternalRef,
     GITHUB_PR_EXTERNAL_REF_SYSTEM, Job, JobRun, JobRunState, JobRunStep, JobScheduleState, JobStep,
@@ -57,6 +56,7 @@ pub use orbit_common::types::{
     resolve_task_dependencies, task_dependencies_ready, task_matches_tags, unmet_task_dependencies,
     validate_task_dependencies,
 };
+pub use orbit_common::types::{NotFoundKind, OrbitError};
 pub use orbit_common::utility::redaction::{
     redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,
     redact_sensitive_env_text,

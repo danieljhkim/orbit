@@ -1,7 +1,8 @@
 use orbit_common::types::{
     Adr, AdrStatus, AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
-    Learning, LearningStatus, OrbitError, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact,
-    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    Learning, LearningStatus, NotFoundKind, OrbitError, PolicyDef, ReviewThread, StoredTool, Task,
+    TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
+    TaskType,
 };
 use orbit_embed::vector::{EmbedWorker, VectorStore};
 use orbit_store::{
@@ -295,7 +296,7 @@ impl TaskRecords<'_> {
 
         let task = self
             .get(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))?;
         if params.has_document_changes()
             || params.has_history_changes()
             || params.has_review_changes()

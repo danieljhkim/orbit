@@ -263,6 +263,7 @@ fn build_job_run_input(pairs: &[String]) -> Result<Value, OrbitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_core::NotFoundKind;
 
     fn write_replay_job(runtime: &OrbitRuntime, name: &str) -> PathBuf {
         let jobs_dir = runtime.data_root().join("resources/jobs");
@@ -325,6 +326,12 @@ spec:
         .execute(&runtime)
         .expect_err("unknown source run should fail");
 
-        assert!(matches!(error, OrbitError::JobRunNotFound(_)));
+        assert!(matches!(
+            error,
+            OrbitError::NotFound {
+                kind: NotFoundKind::JobRun,
+                ..
+            }
+        ));
     }
 }

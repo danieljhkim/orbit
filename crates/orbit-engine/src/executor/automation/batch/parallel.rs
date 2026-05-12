@@ -668,7 +668,8 @@ mod tests {
 
     use chrono::Utc;
     use orbit_common::types::{
-        Activity, ExternalRef, Job, JobTargetType, OrbitEvent, TaskArtifact, TaskPriority, TaskType,
+        Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitEvent, TaskArtifact,
+        TaskPriority, TaskType,
     };
 
     use crate::context::{TaskReadHost, TaskWriteHost};
@@ -790,7 +791,7 @@ mod tests {
                 .iter()
                 .find(|task| task.id == task_id)
                 .cloned()
-                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))
+                .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.to_string()))
         }
 
         fn get_task_artifacts(&self, _task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
@@ -883,7 +884,7 @@ mod tests {
             let task = tasks
                 .iter_mut()
                 .find(|task| task.id == task_id)
-                .ok_or_else(|| OrbitError::TaskNotFound(task_id.to_string()))?;
+                .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.to_string()))?;
             if let Some(status) = update.status {
                 task.status = status;
                 if status == TaskStatus::Blocked {
@@ -991,7 +992,7 @@ mod tests {
                         }).collect::<Vec<_>>()
                     }))
                 }
-                other => Err(OrbitError::ToolNotFound(other.to_string())),
+                other => Err(OrbitError::not_found(NotFoundKind::Tool, other.to_string())),
             }
         }
 

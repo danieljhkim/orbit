@@ -3,8 +3,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use orbit_common::types::{
-    AuditEventStatus, OrbitError, OrbitEvent, Role, StoredTool, ToolParam, audit_execution_id,
-    normalize_agent_family_for_model, normalize_optional_attribution_label,
+    AuditEventStatus, NotFoundKind, OrbitError, OrbitEvent, Role, StoredTool, ToolParam,
+    audit_execution_id, normalize_agent_family_for_model, normalize_optional_attribution_label,
 };
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::{ReservationOwnerContext, ToolContext};
@@ -449,7 +449,7 @@ impl OrbitRuntime {
         let schema = self
             .tool_registry()
             .get_schema(name)
-            .ok_or_else(|| OrbitError::ToolNotFound(name.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
 
         let stored = self.stores().tools().get(name)?;
         let enabled = stored.is_none_or(|s| s.enabled);
@@ -517,7 +517,7 @@ impl OrbitRuntime {
         self.with_mutation(|| {
             let deleted = self.stores().tools().delete(name)?;
             if !deleted {
-                return Err(OrbitError::ToolNotFound(name.to_string()));
+                return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
             }
             Ok((
                 (),
@@ -586,7 +586,7 @@ impl OrbitRuntime {
 
     fn set_tool_enabled_state(&self, name: &str, enabled: bool) -> Result<(), OrbitError> {
         if !self.tool_registry().has(name) {
-            return Err(OrbitError::ToolNotFound(name.to_string()));
+            return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
         }
 
         let existing = self.stores().tools().get(name)?;
@@ -594,7 +594,7 @@ impl OrbitRuntime {
             let schema = self
                 .tool_registry()
                 .get_schema(name)
-                .ok_or_else(|| OrbitError::ToolNotFound(name.to_string()))?;
+                .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
             let tool = StoredTool {
                 name: name.to_string(),
                 path: String::new(),

@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{JobRun, JobRunState, OrbitError, OrbitEvent, PipelineState};
+use orbit_common::types::{
+    JobRun, JobRunState, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
+};
 use orbit_store::{JobRunQuery, TaskReservationReleaseReason};
 use serde::Serialize;
 use serde_json::Value;
@@ -46,7 +48,7 @@ impl OrbitRuntime {
     ) -> Result<JobRunCancelResult, OrbitError> {
         let run = self
             .get_job_run_backend(run_id)?
-            .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
         run.state
             .try_transition(orbit_common::types::RunEvent::Cancel)
             .map_err(|msg| {
@@ -71,7 +73,7 @@ impl OrbitRuntime {
         )?;
         let cancelled_run = self
             .get_job_run_backend(run_id)?
-            .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
         if cancelled_run.state != JobRunState::Cancelled {
             let detail = cancelled_run
                 .state
@@ -233,10 +235,10 @@ impl OrbitRuntime {
     pub fn show_job_run(&self, run_id: &str) -> Result<JobRun, OrbitError> {
         let run = self
             .get_job_run_backend(run_id)?
-            .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
         self.reconcile_stale_job_run(&run)?;
         self.get_job_run_backend(run_id)?
-            .ok_or_else(|| OrbitError::JobRunNotFound(run_id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))
     }
 
     pub(crate) fn reconcile_stale_job_runs(

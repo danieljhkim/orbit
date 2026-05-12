@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    ExternalRef, OrbitError, ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
-    prune_missing_context_files,
+    ExternalRef, NotFoundKind, OrbitError, ReviewThread, Task, TaskArtifact, TaskComment,
+    TaskHistoryEntry, prune_missing_context_files,
 };
 
 use crate::OrbitRuntime;
@@ -12,35 +12,35 @@ impl OrbitRuntime {
         self.stores()
             .tasks()
             .get(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn get_task_artifacts(&self, id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
         self.stores()
             .tasks()
             .get_artifacts(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn get_task_comments(&self, id: &str) -> Result<Vec<TaskComment>, OrbitError> {
         self.stores()
             .tasks()
             .get_comments(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn get_task_history(&self, id: &str) -> Result<Vec<TaskHistoryEntry>, OrbitError> {
         self.stores()
             .tasks()
             .get_history(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn get_task_review_threads(&self, id: &str) -> Result<Vec<ReviewThread>, OrbitError> {
         self.stores()
             .tasks()
             .get_review_threads(id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>, OrbitError> {

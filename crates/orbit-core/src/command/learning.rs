@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use orbit_common::types::{EvidenceKind, Learning, LearningStatus, OrbitError};
+use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
 use orbit_store::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
 };
@@ -23,7 +23,7 @@ impl OrbitRuntime {
         self.stores()
             .learnings()
             .get(id)?
-            .ok_or_else(|| OrbitError::LearningNotFound(id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.to_string()))
     }
 
     pub fn list_learnings(

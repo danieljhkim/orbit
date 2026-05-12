@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{Learning, LearningStatus, OrbitError};
+use orbit_common::types::{Learning, LearningStatus, NotFoundKind, OrbitError};
 
 use super::constants::LEARNING_SCHEMA_VERSION;
 use super::doc::{LearningFileDocument, serialize_learning_doc_yaml};
 use super::layout::validate_learning_id;
 use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
 
-/// Read a learning YAML file at the given path. Returns `LearningNotFound`
+/// Read a learning YAML file at the given path. Returns a learning not-found error
 /// when the file is missing on disk.
 pub(super) fn read_learning_file(path: &Path) -> Result<Learning, OrbitError> {
     if !path.exists() {
@@ -17,7 +17,7 @@ pub(super) fn read_learning_file(path: &Path) -> Result<Learning, OrbitError> {
             .and_then(|n| n.to_str())
             .unwrap_or("<unknown>")
             .to_string();
-        return Err(OrbitError::LearningNotFound(id));
+        return Err(OrbitError::not_found(NotFoundKind::Learning, id));
     }
     let doc: LearningFileDocument = read_yaml_with(path, |path, err| {
         OrbitError::Store(format!("invalid learning file {}: {err}", path.display()))

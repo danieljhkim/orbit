@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskPriority, TaskRelationType, TaskStatus,
-    format_orb_task_id, normalize_task_tags, validate_orb_task_id,
+    NotFoundKind, ORB_TASK_ID_MAX, OrbitError, TaskEnvelopeV2, TaskPriority, TaskRelationType,
+    TaskStatus, format_orb_task_id, normalize_task_tags, validate_orb_task_id,
 };
 use orbit_common::utility::fs::{atomic_write_text, create_dir_symlink};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
@@ -193,7 +193,7 @@ impl TaskRegistryStore {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         if workspace_by_id(&tx, &workspace_id)?.is_none() {
-            return Err(OrbitError::WorkspaceNotFound(workspace_id));
+            return Err(OrbitError::not_found(NotFoundKind::Workspace, workspace_id));
         }
 
         let next: i64 = tx
@@ -255,7 +255,7 @@ impl TaskRegistryStore {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         if workspace_by_id(&tx, &workspace_id)?.is_none() {
-            return Err(OrbitError::WorkspaceNotFound(workspace_id));
+            return Err(OrbitError::not_found(NotFoundKind::Workspace, workspace_id));
         }
 
         let now = now_string();
@@ -358,7 +358,7 @@ impl TaskRegistryStore {
             .map_err(|e| OrbitError::Store(e.to_string()))?;
 
         let binding = task_bundle_by_id(&tx, &envelope.id)?
-            .ok_or_else(|| OrbitError::TaskNotFound(envelope.id.clone()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, envelope.id.clone()))?;
         if binding.workspace_id != workspace_id {
             return Err(OrbitError::InvalidInput(format!(
                 "task '{}' is registered to workspace '{}', not '{}'",

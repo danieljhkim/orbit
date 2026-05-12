@@ -7,10 +7,10 @@ use std::path::PathBuf;
 
 use orbit_common::types::OrbitError;
 
-use crate::KnowledgeError;
 use crate::graph::object_store::{GraphObjectStore, resolve_graph_read_target};
 use crate::graph::{GraphIndexReader, GraphReadOptions};
 use crate::service::TaskGraphService;
+use crate::{KnowledgeError, KnowledgeErrorKind};
 
 pub mod callers;
 pub mod deps;
@@ -106,9 +106,11 @@ pub(crate) fn knowledge_error_from_orbit(error: OrbitError) -> KnowledgeError {
 /// `knowledge_invalid` kind maps to `InvalidInput` because callers treat it
 /// as user-input error; every other kind maps to `Execution`.
 pub fn knowledge_error_to_orbit(error: KnowledgeError) -> OrbitError {
-    if error.kind == "knowledge_invalid" {
-        OrbitError::InvalidInput(error.reason)
-    } else {
-        OrbitError::Execution(error.to_string())
+    let KnowledgeError { kind, reason } = error;
+    match kind {
+        KnowledgeErrorKind::Invalid => OrbitError::InvalidInput(reason),
+        KnowledgeErrorKind::Unavailable | KnowledgeErrorKind::Io => {
+            OrbitError::Execution(format!("{kind}: {reason}"))
+        }
     }
 }

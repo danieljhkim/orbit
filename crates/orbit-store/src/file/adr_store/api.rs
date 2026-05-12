@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use chrono::Utc;
-use orbit_common::types::{Adr, AdrStatus, LegacyValidation, OrbitError};
+use orbit_common::types::{Adr, AdrStatus, LegacyValidation, NotFoundKind, OrbitError};
 use rusqlite::params;
 
 use super::bundle::{AdrBundle, bundle_to_adr, read_bundle_at, validate_bundle, write_bundle_at};
@@ -185,7 +185,7 @@ impl AdrFileStore {
         let _lock = acquire_adr_lock(&self.root, id)?;
 
         let Some((current_state, current_dir)) = self.locate_adr(id)? else {
-            return Err(OrbitError::AdrNotFound(id.to_string()));
+            return Err(OrbitError::not_found(NotFoundKind::Adr, id.to_string()));
         };
         let current_status = current_state.to_status();
         if current_status == new_status {
@@ -224,7 +224,7 @@ impl AdrFileStore {
         let _lock = acquire_adr_lock(&self.root, id)?;
 
         let Some((_, current_dir)) = self.locate_adr(id)? else {
-            return Err(OrbitError::AdrNotFound(id.to_string()));
+            return Err(OrbitError::not_found(NotFoundKind::Adr, id.to_string()));
         };
         let mut bundle = read_bundle_at(&current_dir)?;
 
@@ -312,10 +312,10 @@ impl AdrFileStore {
 
         let old = self
             .get_adr(old_id)?
-            .ok_or_else(|| OrbitError::AdrNotFound(old_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, old_id.to_string()))?;
         let new = self
             .get_adr(new_id)?
-            .ok_or_else(|| OrbitError::AdrNotFound(new_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, new_id.to_string()))?;
 
         if new.status != AdrStatus::Accepted {
             return Err(OrbitError::AdrInvalidTransition(format!(
@@ -395,7 +395,7 @@ impl AdrFileStore {
             let dir = adr_dir(&self.root, *state, id);
             if dir.is_dir() {
                 // A stray same-named dir without adr.yaml still counts as "located"
-                // here so the caller gets a sensible AdrNotFound / corruption error
+                // here so the caller gets a sensible missing-ADR / corruption error
                 // from read_bundle_at.
                 return Ok(Some((*state, dir)));
             }

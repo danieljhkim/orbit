@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use orbit_common::types::{
-    AuditEventStatus, OrbitError, Task, TaskStatus, audit_execution_id,
+    AuditEventStatus, NotFoundKind, OrbitError, Task, TaskStatus, audit_execution_id,
     normalize_optional_attribution_label, optional_string_list_alias, optional_u32_alias,
     prune_missing_context_files, required_string,
 };
@@ -374,7 +374,7 @@ pub(crate) fn requested_task_files(
     for task_id in task_ids {
         let task = task_map
             .get(task_id)
-            .ok_or_else(|| OrbitError::TaskNotFound(task_id.clone()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.clone()))?;
         requested_files.extend(existing_context_files(runtime, task));
     }
 

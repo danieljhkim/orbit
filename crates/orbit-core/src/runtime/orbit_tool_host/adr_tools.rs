@@ -6,9 +6,9 @@
 use std::str::FromStr;
 
 use orbit_common::types::{
-    Adr, AdrStatus, AuditEventStatus, LegacyValidation, OrbitError, audit_execution_id,
-    normalize_optional_attribution_label, optional_string, optional_string_alias,
-    optional_string_list_alias, required_string,
+    Adr, AdrStatus, AuditEventStatus, LegacyValidation, NotFoundKind, OrbitError,
+    audit_execution_id, normalize_optional_attribution_label, optional_string,
+    optional_string_alias, optional_string_list_alias, required_string,
 };
 use orbit_store::{AdrCreateParams, AdrDocumentUpdateParams};
 use serde_json::{Value, json};
@@ -73,10 +73,10 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         matches
             .into_iter()
             .next()
-            .ok_or_else(|| OrbitError::AdrNotFound(id_value.clone()))?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
     } else {
         adrs.get(&id_value)?
-            .ok_or_else(|| OrbitError::AdrNotFound(id_value.clone()))?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
     };
     Ok(adr_to_json(&adr))
 }
@@ -113,7 +113,7 @@ pub(super) fn update(
     let adrs = runtime.stores().adrs();
     let existing = adrs
         .get(&id)?
-        .ok_or_else(|| OrbitError::AdrNotFound(id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
 
     let new_status = optional_string(&input, "status")?
         .map(|raw| AdrStatus::from_str(&raw).map_err(OrbitError::InvalidInput))
@@ -192,7 +192,7 @@ pub(super) fn update(
 
     let updated = adrs
         .get(&id)?
-        .ok_or_else(|| OrbitError::AdrNotFound(id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
     Ok(adr_to_json(&updated))
 }
 
@@ -207,7 +207,7 @@ pub(super) fn supersede(
     let adrs = runtime.stores().adrs();
     let before = adrs
         .get(&old_id)?
-        .ok_or_else(|| OrbitError::AdrNotFound(old_id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, old_id.clone()))?;
     adrs.supersede(&old_id, &new_id)?;
     record_transition_audit(
         runtime,
@@ -222,7 +222,7 @@ pub(super) fn supersede(
     )?;
     let updated = adrs
         .get(&old_id)?
-        .ok_or_else(|| OrbitError::AdrNotFound(old_id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, old_id.clone()))?;
     Ok(adr_to_json(&updated))
 }
 
@@ -329,6 +329,7 @@ fn record_transition_audit(
 mod tests {
     use super::*;
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
+    use orbit_common::types::NotFoundKind;
 
     fn assert_adr_field(value: &Value, field: &str, expected: &str) {
         let actual = value
@@ -432,7 +433,13 @@ mod tests {
     fn show_missing_returns_not_found() {
         let (_guard, runtime, _repo_root) = test_runtime();
         let err = show(&runtime, json!({"id": "ADR-9999"})).expect_err("missing");
-        assert!(matches!(err, OrbitError::AdrNotFound(_)));
+        assert!(matches!(
+            err,
+            OrbitError::NotFound {
+                kind: NotFoundKind::Adr,
+                ..
+            }
+        ));
     }
 
     #[test]

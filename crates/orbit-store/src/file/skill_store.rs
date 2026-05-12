@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::json_schema::validate_schema_document;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
-use orbit_common::types::OrbitError;
+use orbit_common::types::{NotFoundKind, OrbitError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -152,7 +152,10 @@ impl SkillCatalog {
         // otherwise fall through to the global default.
         match resolve::<LoadedSkill, _>(self, skill_id)? {
             Some(skill) => Ok(skill),
-            None => Err(OrbitError::SkillNotFound(skill_id.to_string())),
+            None => Err(OrbitError::not_found(
+                NotFoundKind::Skill,
+                skill_id.to_string(),
+            )),
         }
     }
 

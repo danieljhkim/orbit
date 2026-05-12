@@ -4,8 +4,8 @@ use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::{
-    ArtifactManifestFileV2, ArtifactManifestV2, ExternalRef, OrbitError, OrbitId, ReviewMessage,
-    ReviewThread, ReviewThreadMessageMetadataV2, ReviewThreadMetadataV2,
+    ArtifactManifestFileV2, ArtifactManifestV2, ExternalRef, NotFoundKind, OrbitError, OrbitId,
+    ReviewMessage, ReviewThread, ReviewThreadMessageMetadataV2, ReviewThreadMetadataV2,
     TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TASK_ARTIFACTS_DIR_NAME, Task,
     TaskArtifact, TaskComment, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2, TaskHistoryEntry,
     TaskPriority, TaskRelation, TaskRelationType, TaskStatus, normalize_task_tags,
@@ -203,7 +203,10 @@ impl TaskV2Store {
         orbit_common::types::validate_orb_task_id(id)?;
         match self.bundle_store.read_bundle(id) {
             Ok(bundle) => self.task_from_bundle(bundle).map(Some),
-            Err(OrbitError::TaskNotFound(_)) => Ok(None),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -500,7 +503,10 @@ impl TaskV2Store {
         orbit_common::types::validate_orb_task_id(id)?;
         let bundle = match self.bundle_store.read_bundle(id) {
             Ok(bundle) => bundle,
-            Err(OrbitError::TaskNotFound(_)) => return Ok(None),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => return Ok(None),
             Err(err) => return Err(err),
         };
         let Some(manifest) = bundle.artifact_manifest else {
@@ -766,7 +772,10 @@ impl TaskV2Store {
                     })
                     .collect(),
             )),
-            Err(OrbitError::TaskNotFound(_)) => Ok(None),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -791,7 +800,10 @@ impl TaskV2Store {
                     })
                     .collect(),
             )),
-            Err(OrbitError::TaskNotFound(_)) => Ok(None),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -809,14 +821,20 @@ impl TaskV2Store {
                     .map(review_thread_from_v2)
                     .collect(),
             )),
-            Err(OrbitError::TaskNotFound(_)) => Ok(None),
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => Ok(None),
             Err(err) => Err(err),
         }
     }
 
     fn read_existing_bundle(&self, id: &str) -> Result<TaskBundleV2, OrbitError> {
         self.bundle_store.read_bundle(id).map_err(|err| match err {
-            OrbitError::TaskNotFound(_) => OrbitError::TaskNotFound(id.to_string()),
+            OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            } => OrbitError::not_found(NotFoundKind::Task, id.to_string()),
             other => other,
         })
     }

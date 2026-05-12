@@ -9,8 +9,8 @@
 use std::str::FromStr;
 
 use orbit_common::types::{
-    EvidenceKind, LearningEvidence, LearningScope, LearningStatus, OrbitError, optional_string,
-    optional_string_alias, required_string,
+    EvidenceKind, LearningEvidence, LearningScope, LearningStatus, NotFoundKind, OrbitError,
+    optional_string, optional_string_alias, required_string,
 };
 use orbit_store::{LearningCreateParams, LearningSearchParams, LearningUpdateParams};
 use serde_json::{Value, json};
@@ -54,7 +54,7 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .stores()
         .learnings()
         .get(&id)?
-        .ok_or_else(|| OrbitError::LearningNotFound(id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
     Ok(learning_to_json(&learning))
 }
 
@@ -154,12 +154,12 @@ pub(super) fn supersede(
         .stores()
         .learnings()
         .get(&id)?
-        .ok_or_else(|| OrbitError::LearningNotFound(id.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
     let new = runtime
         .stores()
         .learnings()
         .get(&with)?
-        .ok_or_else(|| OrbitError::LearningNotFound(with.clone()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, with.clone()))?;
     Ok(json!({
         "old": learning_to_json(&old),
         "new": learning_to_json(&new),

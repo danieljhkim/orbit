@@ -4,7 +4,8 @@ use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Learning, LearningStatus, OrbitError, normalize_learning_paths, normalize_learning_tags,
+    Learning, LearningStatus, NotFoundKind, OrbitError, normalize_learning_paths,
+    normalize_learning_tags,
 };
 use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 
@@ -170,7 +171,10 @@ impl LearningFileStore {
         let _lock = acquire_learning_lock(&self.root, id)?;
 
         let Some((state, path)) = locate_learning(&self.root, id)? else {
-            return Err(OrbitError::LearningNotFound(id.to_string()));
+            return Err(OrbitError::not_found(
+                NotFoundKind::Learning,
+                id.to_string(),
+            ));
         };
         let mut learning = read_learning_file(&path)?;
 
@@ -237,9 +241,9 @@ impl LearningFileStore {
         let _new_lock = acquire_learning_lock(&self.root, new_id)?;
 
         let (old_state, old_path) = locate_learning(&self.root, old_id)?
-            .ok_or_else(|| OrbitError::LearningNotFound(old_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, old_id.to_string()))?;
         let (_, new_path) = locate_learning(&self.root, new_id)?
-            .ok_or_else(|| OrbitError::LearningNotFound(new_id.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, new_id.to_string()))?;
 
         let mut old = read_learning_file(&old_path)?;
         let mut new = read_learning_file(&new_path)?;

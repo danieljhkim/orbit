@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{Adr, OrbitError};
+use orbit_common::types::{Adr, NotFoundKind, OrbitError};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
 use super::doc::{AdrFileDocument, serialize_adr_doc_yaml};
@@ -31,7 +31,7 @@ pub(super) fn read_bundle_at(adr_dir: &Path) -> Result<AdrBundle, OrbitError> {
             .and_then(|n| n.to_str())
             .unwrap_or("<unknown>")
             .to_string();
-        return Err(OrbitError::AdrNotFound(id));
+        return Err(OrbitError::not_found(NotFoundKind::Adr, id));
     }
 
     let doc: AdrFileDocument = read_yaml_with(&doc_path, |path, err| {
@@ -62,7 +62,7 @@ fn read_companion_text(path: &Path) -> Result<String, OrbitError> {
 mod tests {
     use chrono::TimeZone;
     use chrono::Utc;
-    use orbit_common::types::{Adr, AdrStatus, LegacyValidation};
+    use orbit_common::types::{Adr, AdrStatus, LegacyValidation, NotFoundKind};
     use tempfile::tempdir;
 
     use super::super::constants::ADR_SCHEMA_VERSION;
@@ -129,8 +129,14 @@ mod tests {
         let err = read_bundle_at(&dir).expect_err("missing dir should error");
 
         assert!(
-            matches!(err, OrbitError::AdrNotFound(ref id) if id == "ADR-9999"),
-            "expected AdrNotFound, got {err:?}"
+            matches!(
+                err,
+                OrbitError::NotFound {
+                    kind: NotFoundKind::Adr,
+                    ref id,
+                } if id == "ADR-9999"
+            ),
+            "expected missing ADR error, got {err:?}"
         );
     }
 }

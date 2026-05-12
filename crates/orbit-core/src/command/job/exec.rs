@@ -12,7 +12,7 @@ use orbit_common::types::activity_job::{
     validate_job_loop_session_backends,
 };
 use orbit_common::types::{
-    JobRun, JobRunState, JobTargetType, OrbitError, OrbitEvent, PipelineState,
+    JobRun, JobRunState, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, PipelineState,
 };
 use orbit_engine::activity_job::{
     DispatchError, JobOutcome, V2AuditWriter, execute_job, resolve_job_catalog_refs_for_execution,
@@ -92,7 +92,7 @@ impl OrbitRuntime {
                 .jobs()
                 .mark_run_running(&run.run_id, started_at, std::process::id())?;
         if !changed {
-            return Err(OrbitError::JobRunNotFound(run.run_id));
+            return Err(OrbitError::not_found(NotFoundKind::JobRun, run.run_id));
         }
         self.record_event(OrbitEvent::JobRunStarted {
             job_id: run.job_id.clone(),

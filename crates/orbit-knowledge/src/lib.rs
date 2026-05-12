@@ -47,7 +47,7 @@ pub mod workflows;
 pub mod working_graph;
 
 pub use commands::knowledge_error_to_orbit;
-pub use error::KnowledgeError;
+pub use error::{KnowledgeError, KnowledgeErrorKind};
 pub use graph::GraphReadOptions;
 pub use selector::{Selector, SelectorParseError};
 pub use service::{TaskGraphScope, TaskGraphService, default_knowledge_dir};

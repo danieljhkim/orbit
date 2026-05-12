@@ -14,7 +14,9 @@ use std::time::Instant;
 use clap::{Args, Subcommand};
 use orbit_common::types::{AuditEventStatus, ToolSchema, audit_execution_id};
 use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
-use orbit_core::{AuditEventInsertParams, OrbitError, OrbitRuntime, redact_sensitive_env_text};
+use orbit_core::{
+    AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, redact_sensitive_env_text,
+};
 use orbit_mcp::McpHost;
 use serde_json::Value;
 
@@ -93,7 +95,7 @@ fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
     if is_mcp_tool_exposed(name) {
         Ok(())
     } else {
-        Err(OrbitError::ToolNotFound(name.to_string()))
+        Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
     }
 }
 
@@ -294,7 +296,7 @@ impl McpHost for EmptyMcpHost {
     }
 
     fn call_tool(&self, name: &str, _input: Value) -> Result<Value, OrbitError> {
-        Err(OrbitError::ToolNotFound(name.to_string()))
+        Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
     }
 }
 

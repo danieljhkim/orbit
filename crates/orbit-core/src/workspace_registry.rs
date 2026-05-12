@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{OrbitError, Workspace, WorkspaceRegistry, WorkspaceStatus};
+use orbit_common::types::{
+    NotFoundKind, OrbitError, Workspace, WorkspaceRegistry, WorkspaceStatus,
+};
 
 use orbit_common::utility::fs::atomic_write_text;
 
@@ -79,7 +81,7 @@ pub fn remove_workspace(
         .workspaces
         .iter()
         .position(|w| w.id == id_or_name || w.name == id_or_name)
-        .ok_or_else(|| OrbitError::WorkspaceNotFound(id_or_name.to_string()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Workspace, id_or_name.to_string()))?;
     let removed = registry.workspaces.remove(idx);
     // Also remove any path overrides pointing to this workspace
     registry
@@ -134,7 +136,10 @@ pub fn set_path_override(
 ) -> Result<(), OrbitError> {
     // Verify the workspace exists
     if !registry.workspaces.iter().any(|w| w.id == workspace_id) {
-        return Err(OrbitError::WorkspaceNotFound(workspace_id.to_string()));
+        return Err(OrbitError::not_found(
+            NotFoundKind::Workspace,
+            workspace_id.to_string(),
+        ));
     }
     registry
         .path_overrides

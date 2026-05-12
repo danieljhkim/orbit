@@ -269,7 +269,7 @@ fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::TaskStatus;
+    use orbit_common::types::{NotFoundKind, TaskStatus};
     use tempfile::tempdir;
 
     use super::*;
@@ -343,7 +343,10 @@ mod tests {
             .expect("delete v2 task");
         assert!(matches!(
             runtime.get_task(&updated.id),
-            Err(OrbitError::TaskNotFound(_))
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            })
         ));
     }
 

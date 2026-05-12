@@ -1,5 +1,5 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::{NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -86,7 +86,7 @@ pub(crate) fn print_legacy_logs_summary(
 ) -> Result<(), OrbitError> {
     let run = runtime
         .show_job_run(run_id)
-        .map_err(|_| OrbitError::JobRunNotFound(run_id.to_string()))?;
+        .map_err(|_| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
     let steps = filtered_steps(&run, step_id)?;
 
     if json_output {

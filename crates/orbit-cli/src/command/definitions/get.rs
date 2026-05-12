@@ -1,6 +1,6 @@
 use clap::Args;
 use orbit_common::types::ResourceKind;
-use orbit_core::{OrbitError, OrbitRuntime};
+use orbit_core::{NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
@@ -151,7 +151,7 @@ fn show_activity(runtime: &OrbitRuntime, id: &str, as_json: bool) -> Result<(), 
         .map_err(|err| OrbitError::Store(format!("v2 activity catalog: {err}")))?;
     let activity = catalog
         .get(id)
-        .ok_or_else(|| OrbitError::ActivityNotFound(id.to_string()))?;
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Activity, id.to_string()))?;
     if as_json {
         let value = json!({
             "id": id,

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    JobRun, JobRunState, JobRunStep, KnowledgeRunMetrics, OrbitError, PipelineState,
+    JobRun, JobRunState, JobRunStep, KnowledgeRunMetrics, NotFoundKind, OrbitError, PipelineState,
 };
 
 use crate::backend::JobRunStepParams;
@@ -404,7 +404,10 @@ impl JobFileStore {
 
     pub(crate) fn archive_run(&self, run_id: &str) -> Result<String, OrbitError> {
         let Some((job_id, src)) = self.find_run_path(run_id)? else {
-            return Err(OrbitError::JobRunNotFound(run_id.to_string()));
+            return Err(OrbitError::not_found(
+                NotFoundKind::JobRun,
+                run_id.to_string(),
+            ));
         };
         let dst = self.archived_run_bundle_dir(&job_id, run_id);
         let parent = dst.parent().ok_or_else(|| {
@@ -439,7 +442,10 @@ impl JobFileStore {
         state: &PipelineState,
     ) -> Result<(), OrbitError> {
         let Some((_job_id, run_dir)) = self.find_run_path(run_id)? else {
-            return Err(OrbitError::JobRunNotFound(run_id.to_string()));
+            return Err(OrbitError::not_found(
+                NotFoundKind::JobRun,
+                run_id.to_string(),
+            ));
         };
         let content =
             serde_json::to_string_pretty(state).map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -455,7 +461,10 @@ impl JobFileStore {
             fs::remove_dir_all(&dir).map_err(|e| OrbitError::Io(e.to_string()))?;
             return Ok(job_id);
         }
-        Err(OrbitError::JobRunNotFound(run_id.to_string()))
+        Err(OrbitError::not_found(
+            NotFoundKind::JobRun,
+            run_id.to_string(),
+        ))
     }
 }
 

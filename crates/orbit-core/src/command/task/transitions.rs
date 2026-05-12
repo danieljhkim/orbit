@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus, build_task_status_index,
-    unmet_task_dependencies,
+    NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus,
+    build_task_status_index, unmet_task_dependencies,
 };
 
 use crate::OrbitRuntime;
@@ -504,7 +504,7 @@ impl OrbitRuntime {
         self.with_mutation(|| {
             let deleted = self.stores().tasks().delete(id)?;
             if !deleted {
-                return Err(OrbitError::TaskNotFound(id.to_string()));
+                return Err(OrbitError::not_found(NotFoundKind::Task, id.to_string()));
             }
             Ok(((), OrbitEvent::TaskDeleted { id: id.to_string() }))
         })

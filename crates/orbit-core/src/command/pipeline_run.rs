@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use orbit_common::types::{
-    AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, OrbitError, OrbitEvent,
-    PipelineState, audit_execution_id,
+    AuditEventStatus, JobRun, JobRunState, JobScheduleState, JobTargetType, NotFoundKind,
+    OrbitError, OrbitEvent, PipelineState, audit_execution_id,
 };
 use orbit_store::{AuditEventInsertParams, JobRunStepParams, TaskReservationReleaseReason};
 use serde::Serialize;
@@ -365,7 +365,10 @@ impl OrbitRuntime {
             .map(|run_id| {
                 let run = match self.show_job_run(run_id) {
                     Ok(run) => run,
-                    Err(OrbitError::JobRunNotFound(_)) => {
+                    Err(OrbitError::NotFound {
+                        kind: NotFoundKind::JobRun,
+                        ..
+                    }) => {
                         return Ok(PipelineWaitEntry {
                             run_id: run_id.clone(),
                             status: "failed".to_string(),

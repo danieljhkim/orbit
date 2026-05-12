@@ -76,7 +76,7 @@ pub use duel::{
     PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, Roles, Scores, Severity,
     TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
 };
-pub use error::OrbitError;
+pub use error::{NotFoundKind, OrbitError};
 pub use event::OrbitEvent;
 pub use executor_def::{ExecutorDef, ExecutorSandboxKind, ExecutorType, StdoutFormat};
 pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord};

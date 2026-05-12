@@ -80,26 +80,15 @@ pub fn redact_home_dir(text: &str) -> String {
 pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
     match error {
         OrbitError::PolicyDenied(m) => OrbitError::PolicyDenied(redact_sensitive_env_text(&m)),
-        OrbitError::ToolNotFound(m) => OrbitError::ToolNotFound(redact_sensitive_env_text(&m)),
-        OrbitError::TaskNotFound(m) => OrbitError::TaskNotFound(redact_sensitive_env_text(&m)),
+        OrbitError::NotFound { kind, id } => OrbitError::NotFound {
+            kind,
+            id: redact_sensitive_env_text(&id),
+        },
         OrbitError::TaskApprovalRequired(m) => {
             OrbitError::TaskApprovalRequired(redact_sensitive_env_text(&m))
         }
-        OrbitError::SkillNotFound(m) => OrbitError::SkillNotFound(redact_sensitive_env_text(&m)),
-        OrbitError::JobNotFound(m) => OrbitError::JobNotFound(redact_sensitive_env_text(&m)),
-        OrbitError::JobRunNotFound(m) => OrbitError::JobRunNotFound(redact_sensitive_env_text(&m)),
-        OrbitError::ActivityNotFound(m) => {
-            OrbitError::ActivityNotFound(redact_sensitive_env_text(&m))
-        }
         OrbitError::AdrInvalidTransition(m) => {
             OrbitError::AdrInvalidTransition(redact_sensitive_env_text(&m))
-        }
-        OrbitError::AdrNotFound(m) => OrbitError::AdrNotFound(redact_sensitive_env_text(&m)),
-        OrbitError::LearningNotFound(m) => {
-            OrbitError::LearningNotFound(redact_sensitive_env_text(&m))
-        }
-        OrbitError::AgentSessionNotFound(m) => {
-            OrbitError::AgentSessionNotFound(redact_sensitive_env_text(&m))
         }
         OrbitError::CompanionNotInstalled(m) => {
             OrbitError::CompanionNotInstalled(redact_sensitive_env_text(&m))
@@ -124,9 +113,6 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             OrbitError::JobRunStateTransition(redact_sensitive_env_text(&m))
         }
         OrbitError::Io(m) => OrbitError::Io(redact_sensitive_env_text(&m)),
-        OrbitError::WorkspaceNotFound(m) => {
-            OrbitError::WorkspaceNotFound(redact_sensitive_env_text(&m))
-        }
         OrbitError::WorkspaceError(m) => OrbitError::WorkspaceError(redact_sensitive_env_text(&m)),
         OrbitError::Migration(m) => OrbitError::Migration(redact_sensitive_env_text(&m)),
     }

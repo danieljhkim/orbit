@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 
 use orbit_common::migration::Plan;
 use orbit_common::types::{
-    ArtifactManifestV2, OrbitError, ReviewThreadMetadataV2, TASK_ACCEPTANCE_FILE_NAME,
-    TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_MANIFEST_FILE_NAME, TASK_ARTIFACTS_DIR_NAME,
-    TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME, TASK_ENVELOPE_FILE_NAME,
-    TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME, TASK_PLAN_FILE_NAME,
-    TASK_REVIEW_THREADS_DIR_NAME, TaskCommentRowV2, TaskEnvelopeV2, TaskEventRowV2,
+    ArtifactManifestV2, NotFoundKind, OrbitError, ReviewThreadMetadataV2,
+    TASK_ACCEPTANCE_FILE_NAME, TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_MANIFEST_FILE_NAME,
+    TASK_ARTIFACTS_DIR_NAME, TASK_COMMENTS_FILE_NAME, TASK_DESCRIPTION_FILE_NAME,
+    TASK_ENVELOPE_FILE_NAME, TASK_EVENTS_FILE_NAME, TASK_EXECUTION_SUMMARY_FILE_NAME,
+    TASK_PLAN_FILE_NAME, TASK_REVIEW_THREADS_DIR_NAME, TaskCommentRowV2, TaskEnvelopeV2,
+    TaskEventRowV2,
 };
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde::de::DeserializeOwned;
@@ -363,7 +364,7 @@ pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitErr
     let expected_task_id = task_id_from_bundle_dir(bundle_dir)?;
     let envelope_path = bundle_dir.join(TASK_ENVELOPE_FILE_NAME);
     if !envelope_path.is_file() {
-        return Err(OrbitError::TaskNotFound(expected_task_id));
+        return Err(OrbitError::not_found(NotFoundKind::Task, expected_task_id));
     }
     let envelope: TaskEnvelopeV2 =
         read_migrated_yaml_file(&envelope_path, task_migrations::envelope_plan())?;
@@ -868,7 +869,7 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use orbit_common::types::{
-        ArtifactManifestFileV2, ReviewThreadMessageMetadataV2, ReviewThreadStatus,
+        ArtifactManifestFileV2, NotFoundKind, ReviewThreadMessageMetadataV2, ReviewThreadStatus,
         TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACT_SCHEMA_VERSION, TaskPriority, TaskStatus,
         TaskType,
     };
@@ -1096,7 +1097,10 @@ mod tests {
         );
         assert!(matches!(
             store.read_bundle("ORB-00000"),
-            Err(OrbitError::TaskNotFound(_))
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            })
         ));
         assert!(!store.delete_bundle("ORB-00000").expect("delete missing"));
     }
@@ -1398,7 +1402,10 @@ mod tests {
 
         assert!(matches!(
             store.read_bundle("ORB-00000"),
-            Err(OrbitError::TaskNotFound(task_id)) if task_id == "ORB-00000"
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                id: task_id,
+            }) if task_id == "ORB-00000"
         ));
     }
 

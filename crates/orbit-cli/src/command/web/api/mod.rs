@@ -222,9 +222,18 @@ pub(super) fn v2_loop_dir(runtime: &OrbitRuntime) -> PathBuf {
 pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
     match e {
         orbit_core::OrbitError::InvalidInput(msg) => bad_request(msg),
-        orbit_core::OrbitError::TaskNotFound(msg) => not_found(format!("task not found: {msg}")),
-        orbit_core::OrbitError::JobNotFound(msg) => not_found(format!("job not found: {msg}")),
-        orbit_core::OrbitError::JobRunNotFound(msg) => not_found(format!("run not found: {msg}")),
+        orbit_core::OrbitError::NotFound {
+            kind: orbit_core::NotFoundKind::Task,
+            id,
+        } => not_found(format!("task not found: {id}")),
+        orbit_core::OrbitError::NotFound {
+            kind: orbit_core::NotFoundKind::Job,
+            id,
+        } => not_found(format!("job not found: {id}")),
+        orbit_core::OrbitError::NotFound {
+            kind: orbit_core::NotFoundKind::JobRun,
+            id,
+        } => not_found(format!("run not found: {id}")),
         other => server_error(other),
     }
 }

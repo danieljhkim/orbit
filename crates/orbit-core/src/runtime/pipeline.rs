@@ -6,7 +6,7 @@ use orbit_common::utility::redaction::{redact_sensitive_env_error, redact_sensit
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
-use crate::{OrbitError, OrbitRuntime};
+use crate::{NotFoundKind, OrbitError, OrbitRuntime};
 
 impl OrbitRuntime {
     pub fn run_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
@@ -117,7 +117,7 @@ impl OrbitRuntime {
         let schema = self
             .tool_registry()
             .get_schema(name)
-            .ok_or_else(|| OrbitError::ToolNotFound(name.to_string()))?;
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Tool, name.to_string()))?;
 
         let mut tool_context = ToolContext {
             cwd: std::env::current_dir()

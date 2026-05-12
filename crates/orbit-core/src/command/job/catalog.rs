@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{JobKind, JobRun, JobScheduleState, JobV2, OrbitError, load_job_asset};
+use orbit_common::types::{
+    JobKind, JobRun, JobScheduleState, JobV2, NotFoundKind, OrbitError, load_job_asset,
+};
 use orbit_common::utility::fs::write_text_with_parent;
 use serde_json::Value;
 
@@ -132,7 +134,7 @@ impl OrbitRuntime {
                 path: asset.path.clone(),
                 spec: asset.spec.clone(),
             })
-            .ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))
     }
 
     fn load_v2_job_assets(&self) -> Result<BTreeMap<String, V2JobAssetEntry>, OrbitError> {
@@ -188,7 +190,7 @@ impl OrbitRuntime {
                 selected = Some(found);
             }
         }
-        selected.ok_or_else(|| OrbitError::JobNotFound(job_id.to_string()))
+        selected.ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))
     }
 }
 

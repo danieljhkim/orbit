@@ -1,4 +1,4 @@
-use orbit_core::OrbitError;
+use orbit_core::{NotFoundKind, OrbitError};
 use serde_json::{Value, json};
 
 pub fn print(value: &Value) -> Result<(), OrbitError> {
@@ -32,14 +32,19 @@ pub fn error_payload(error: &OrbitError) -> Value {
 fn error_code(error: &OrbitError) -> &'static str {
     match error {
         OrbitError::PolicyDenied(_) => "policy_denied",
-        OrbitError::ToolNotFound(_) => "tool_not_found",
-        OrbitError::TaskNotFound(_) => "task_not_found",
+        OrbitError::NotFound { kind, .. } => match kind {
+            NotFoundKind::Tool => "tool_not_found",
+            NotFoundKind::Task => "task_not_found",
+            NotFoundKind::Skill => "skill_not_found",
+            NotFoundKind::Job => "job_not_found",
+            NotFoundKind::JobRun => "job_run_not_found",
+            NotFoundKind::Activity => "activity_not_found",
+            NotFoundKind::Adr => "adr_not_found",
+            NotFoundKind::Learning => "learning_not_found",
+            NotFoundKind::AgentSession => "agent_session_not_found",
+            NotFoundKind::Workspace => "workspace_not_found",
+        },
         OrbitError::TaskApprovalRequired(_) => "task_approval_required",
-        OrbitError::SkillNotFound(_) => "skill_not_found",
-        OrbitError::JobNotFound(_) => "job_not_found",
-        OrbitError::JobRunNotFound(_) => "job_run_not_found",
-        OrbitError::ActivityNotFound(_) => "activity_not_found",
-        OrbitError::AgentSessionNotFound(_) => "agent_session_not_found",
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::InvalidInput(_) => "invalid_input",
         OrbitError::SkillValidation(_) => "skill_validation_failed",
@@ -50,12 +55,9 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::Store(_) => "store_error",
         OrbitError::TaskStatusTransition(_) => "task_status_transition",
         OrbitError::JobRunStateTransition(_) => "job_run_state_transition",
-        OrbitError::WorkspaceNotFound(_) => "workspace_not_found",
         OrbitError::WorkspaceError(_) => "workspace_error",
         OrbitError::Io(_) => "io_error",
-        OrbitError::AdrNotFound(_) => "adr_not_found",
         OrbitError::AdrInvalidTransition(_) => "adr_invalid_transition",
-        OrbitError::LearningNotFound(_) => "learning_not_found",
         OrbitError::Migration(_) => "migration_failed",
     }
 }
