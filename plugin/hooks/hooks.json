@@ -1,0 +1,17 @@
+{
+  "description": "Warn at session start when cwd is not inside an initialized Orbit workspace.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/check-workspace.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

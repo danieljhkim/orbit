@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.3
+
+### Features
+
+- **Claude Code plugin SessionStart hook**: the Orbit plugin now ships a `SessionStart` hook (`plugin/hooks/check-workspace.sh`) that detects an uninitialized workspace via a pure filesystem walk and surfaces a `systemMessage` instructing the user to run `orbit init` / `orbit workspace init`. Closes the silent-no-op gap where `orbit mcp serve` would attach with zero tools and no in-session signal. ([ORB-00018])
+
+### Fixes
+
+- **No-diff PR handoffs**: `pr_open` now treats branches with zero commits ahead of the configured base as successful repository-noop handoffs, moves completed tasks to `review`, returns `pr_created: false`, and avoids creating an empty GitHub PR. ([ORB-00016])
+
+### Chores
+
+- **Workspace lint guardrails**: codified Rust practice lints for panic surfaces, stdout/stderr usage, and async lock guards in `[workspace.lints]`, with scoped allowlists and `CLAUDE.md` updated to separate enforced rules from conventions. ([ORB-00013])
+- **README workspace and MCP surface docs**: documented the `.orbit/` workspace layout, committed project-memory directories, and the agent-facing MCP tool namespaces. ([commit b99d3796])
+
 ## 0.5.1
 
 ### Fixes

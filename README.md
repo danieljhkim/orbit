@@ -45,6 +45,8 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install
 # platform-matched orbit binary from GitHub Releases via @orbit-tools/cli).
 # After install you get the Orbit MCP tool surface (orbit.task.*,
 # orbit.graph.*, etc.) plus the orbit skills and orchestration subagents.
+# A SessionStart hook checks for an initialized workspace and prompts you
+# to run `orbit init` / `orbit workspace init` if none is found.
 # Verified weekly on macOS and Linux; Windows is not supported by the npm
 # install path. Release procedure: docs/RELEASE.md.
 
@@ -83,6 +85,59 @@ Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com
 - **Locks** — explicit claims on files or code regions; reserved before dispatch to prevent overlapping edits.
 
 Substrate primitives (`activity`, `job`, `policy`, `executor`, `tool`) are inspectable on purpose but not the product story.
+
+---
+
+## Agent Tool Surface (MCP)
+
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini). Names are canonically dot-separated (`orbit.task.add`); MCP clients that reject `.` see the underscored form (`orbit_task_add`) — both resolve to the same tool.
+
+| Namespace | Tool | Purpose |
+|---|---|---|
+| **task** | `orbit.task.add` | Create a new task |
+| | `orbit.task.update` | Mutate task fields (status, plan, acceptance criteria) |
+| | `orbit.task.show` | Fetch full task detail |
+| | `orbit.task.list` | List tasks filtered by status / scope |
+| | `orbit.task.search` | Search tasks by text or metadata |
+| | `orbit.task.start` | Transition into in-progress |
+| | `orbit.task.artifact.put` | Attach a generated artifact to a task |
+| **review** | `orbit.task.review_thread.add` | Open a review thread on a task |
+| | `orbit.task.review_thread.list` | List review threads on a task |
+| | `orbit.task.review_thread.reply` | Reply to a thread |
+| | `orbit.task.review_thread.resolve` | Close a thread |
+| **graph** | `orbit.graph.search` | Find symbols / files in the parsed graph |
+| | `orbit.graph.show` | Show a node by id |
+| | `orbit.graph.overview` | Crate / module structural summary |
+| | `orbit.graph.callers` | List callers of a symbol |
+| | `orbit.graph.deps` | List outbound dependencies |
+| | `orbit.graph.implementors` | List trait implementors |
+| | `orbit.graph.refs` | List references to a symbol |
+| | `orbit.graph.history` | Git history for a symbol |
+| | `orbit.graph.pack` | Bundle a connected slice of the graph for a prompt |
+| **semantic** | `orbit.semantic.search` | Embedding search over graph content |
+| | `orbit.semantic.related` | Find semantically related nodes |
+| **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
+| | `orbit.adr.update` | Edit an ADR |
+| | `orbit.adr.show` | Fetch an ADR |
+| | `orbit.adr.list` | List ADRs by status |
+| | `orbit.adr.supersede` | Mark an ADR superseded by another |
+| **learning** | `orbit.learning.add` | Author a project learning |
+| | `orbit.learning.update` | Edit a learning |
+| | `orbit.learning.show` | Fetch a learning |
+| | `orbit.learning.list` | List learnings by tag / scope |
+| | `orbit.learning.search` | Search learnings by path, tag, or text |
+| | `orbit.learning.supersede` | Mark a learning superseded |
+| | `orbit.learning.prune` | Report or archive stale learnings |
+| | `orbit.learning.reindex` | Rebuild the SQLite envelope index from YAML |
+| **friction** | `orbit.friction.add` | Record an operational friction |
+| | `orbit.friction.update` | Edit a friction |
+| | `orbit.friction.show` | Fetch a friction |
+| | `orbit.friction.list` | List frictions by tag / status |
+| | `orbit.friction.stats` | Aggregate frictions by tag and recency |
+| | `orbit.friction.resolve` | Mark a friction resolved |
+| | `orbit.friction.delete` | Delete a friction |
+
+Substrate-internal namespaces (`orbit.state.*`, `orbit.pipeline.*`, `orbit.policy.*`, `orbit.task.locks.*`, `orbit.graph.{add,move,write,delete}`) are also registered but are called by the workflow plane, not by agent prompts. Full schemas are discoverable via the MCP `tools/list` call against the running server.
 
 ---
 
@@ -127,64 +182,6 @@ Global state — credentials, the canonical task store, and cross-workspace conf
 
 ---
 
-## Agent Tool Surface (MCP)
-
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini). Names are canonically dot-separated (`orbit.task.add`); MCP clients that reject `.` see the underscored form (`orbit_task_add`) — both resolve to the same tool.
-
-| Namespace | Tool | Purpose |
-|---|---|---|
-| **task** | `orbit.task.add` | Create a new task |
-| | `orbit.task.update` | Mutate task fields (status, plan, acceptance criteria) |
-| | `orbit.task.show` | Fetch full task detail |
-| | `orbit.task.list` | List tasks filtered by status / scope |
-| | `orbit.task.search` | Search tasks by text or metadata |
-| | `orbit.task.delete` | Remove a task |
-| | `orbit.task.start` | Transition into in-progress |
-| | `orbit.task.approve` | Human approval gate (proposed → backlog) |
-| | `orbit.task.reject` | Reject and close a task |
-| | `orbit.task.lint` | Validate a draft against authoring rules |
-| | `orbit.task.artifact.put` | Attach a generated artifact to a task |
-| **review** | `orbit.task.review_thread.add` | Open a review thread on a task |
-| | `orbit.task.review_thread.list` | List review threads on a task |
-| | `orbit.task.review_thread.reply` | Reply to a thread |
-| | `orbit.task.review_thread.resolve` | Close a thread |
-| **graph** | `orbit.graph.search` | Find symbols / files in the parsed graph |
-| | `orbit.graph.show` | Show a node by id |
-| | `orbit.graph.overview` | Crate / module structural summary |
-| | `orbit.graph.callers` | List callers of a symbol |
-| | `orbit.graph.deps` | List outbound dependencies |
-| | `orbit.graph.implementors` | List trait implementors |
-| | `orbit.graph.refs` | List references to a symbol |
-| | `orbit.graph.history` | Git history for a symbol |
-| | `orbit.graph.pack` | Bundle a connected slice of the graph for a prompt |
-| **semantic** | `orbit.semantic.search` | Embedding search over graph content |
-| | `orbit.semantic.related` | Find semantically related nodes |
-| **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
-| | `orbit.adr.update` | Edit an ADR |
-| | `orbit.adr.show` | Fetch an ADR |
-| | `orbit.adr.list` | List ADRs by status |
-| | `orbit.adr.supersede` | Mark an ADR superseded by another |
-| **learning** | `orbit.learning.add` | Author a project learning |
-| | `orbit.learning.update` | Edit a learning |
-| | `orbit.learning.show` | Fetch a learning |
-| | `orbit.learning.list` | List learnings by tag / scope |
-| | `orbit.learning.search` | Search learnings by path, tag, or text |
-| | `orbit.learning.supersede` | Mark a learning superseded |
-| | `orbit.learning.prune` | Report or archive stale learnings |
-| | `orbit.learning.reindex` | Rebuild the SQLite envelope index from YAML |
-| **friction** | `orbit.friction.add` | Record an operational friction |
-| | `orbit.friction.update` | Edit a friction |
-| | `orbit.friction.show` | Fetch a friction |
-| | `orbit.friction.list` | List frictions by tag / status |
-| | `orbit.friction.stats` | Aggregate frictions by tag and recency |
-| | `orbit.friction.resolve` | Mark a friction resolved |
-| | `orbit.friction.reject` | Reject a friction |
-| | `orbit.friction.delete` | Delete a friction |
-
-Substrate-internal namespaces (`orbit.state.*`, `orbit.pipeline.*`, `orbit.policy.*`, `orbit.task.locks.*`, `orbit.graph.{add,move,write,delete}`) are also registered but are called by the workflow plane, not by agent prompts. Full schemas are discoverable via the MCP `tools/list` call against the running server.
-
----
-
 ## Current Status
 
 Orbit is v0.5.x — work in progress.
@@ -194,12 +191,6 @@ Orbit is v0.5.x — work in progress.
 - Production or multi-machine deployments are not yet recommended.
 
 Intentional technical debt on the path toward a tighter product focused on the audit and task layer.
-
----
-
-## Commercial Model
-
-OSS (this repo, MIT/Apache 2.0) is the full solo-wedge experience — free forever for self-hosted individuals and small teams. **Orbit Team** is a planned hosted multi-tenant SKU for engineering organizations. Full structure: [POSITIONING § Commercial model](docs/POSITIONING.md#commercial-model-open-core-two-tiers).
 
 ---
 
