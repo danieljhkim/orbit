@@ -32,7 +32,45 @@ You drive Claude Code, Codex, or Gemini CLI against real code, often in parallel
 
 ## Quick Start
 
+### Setup via Agent Prompt (clone & build) - Recommended
+
+Cloning is the recommended and best way to get started with Orbit. Curl/brew/plugin paths give you a binary; cloning gives you a customizable framework to mold into your team's conventions. No need to contribute back to Orbit unless you want to, you can just fork it.
+
+- If you need to build your custom workflow, ask the agent directly.
+- If you don't like any orbit conventions, ask the agent to tweak it.
+- If something doesn't work, ask the agent to fix it.
+- If you need a new feature, ask the agent to add it.
+
+Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) **from inside the repo where you want to use Orbit**. The agent clones Orbit, builds from source, sets up MCP, and reads the key docs so it can drive the workflow on your behalf afterwards.
+
+<details>
+<summary><strong>Agent setup prompt</strong> — copy this into your agent (click to expand)</summary>
+
+> Clone https://github.com/danieljhkim/orbit, build and install the `orbit` CLI from source, then set up Orbit on this current repo. Become an expert in Orbit's model along the way.
+>
+> 1. Ask me where to clone the Orbit repo (suggest something tweakable like `~/code/orbit`). Clone it there.
+> 2. From the cloned repo, run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
+> 3. Run `orbit init` to initialize global state at `~/.orbit`.
+> 4. From this current working directory (NOT the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini).
+> 5. Read these files in the cloned Orbit repo to internalize the model and conventions:
+>    - `README.md` — feature surface, install model, plugin vs CLI
+>    - `docs/POSITIONING.md` — what Orbit is for, what it isn't
+>    - `CLAUDE.md` — agent operating rules (commit timing, task ID convention, lint constraints)
+>    - `ARCHITECTURE.md` — crate layering and dependency rules
+>    - `docs/design/CONVENTIONS.md` — design-doc structure
+> 6. Report what you ran, what you read, and the output of `orbit task list` + `orbit semantic stats`. If any step failed, **stop and ask me** before continuing.
+>
+> Don't run anything destructive (overwriting files, modifying shell config) without confirming. If `make install` would write outside `~/.cargo/bin`, ask me first.
+
+</details>
+<br>
+
+### Manual Setup (not recommended) 
+
 **Prerequisites:** at least one supported agent CLI (Codex, Claude Code, or Gemini CLI), authenticated. For PR-based workflows (i.e., `orbit run ship-auto`), `gh` installed and authenticated; otherwise use `--mode local`.
+
+<details>
+<summary><strong>Manual setup commands</strong> — copy these into your terminal (click to expand)</summary>
 
 ```bash
 # install
@@ -65,7 +103,11 @@ orbit task approve "$TASK_ID"
 orbit run ship-auto # conflict-aware, parallel flush of the backlog tasks to PRs
 ```
 
+</details>
+<br>
+
 Full command reference: `orbit --help` and [orbit-cli.com](https://orbit-cli.com).
+
 
 ---
 
@@ -183,10 +225,10 @@ Substrate-internal namespaces (`orbit.state.*`, `orbit.pipeline.*`, `orbit.polic
 └── learnings/    # durable project learnings — pull-surface knowledge for agents
 ```
 
-Three things to note:
+Couple things to note:
 - **`tasks/`** is a projection. Canonical task bundles live under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/` so they survive repo moves; `.orbit/tasks/` is rebuildable from the canonical store. See [docs/design/task-artifacts/](docs/design/task-artifacts/).
 
-Global state — credentials, the canonical task store, and cross-workspace config — lives under `~/.orbit/`, created by `orbit init`. The recommended `.gitignore` pattern is `.orbit/*` with `!.orbit/adrs/` and `!.orbit/learnings/` un-ignored, so local runtime state stays out of the repo while project memory stays in.
+- Global state — credentials, the canonical task store, and cross-workspace config — lives under `~/.orbit/`, created by `orbit init`. The recommended `.gitignore` pattern is `.orbit/*` with `!.orbit/adrs/` and `!.orbit/learnings/` un-ignored, so local runtime state stays out of the repo while project memory stays in.
 
 ---
 
