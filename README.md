@@ -22,11 +22,11 @@ You drive Claude Code, Codex, or Gemini CLI against real code, often in parallel
 
 - **Design docs with decay checks.** Scaffold, inspect, and lint `docs/design/<feature>/` folders through `orbit.design.*`; `orbit design check` flags docs whose `**Last updated:**` predates referenced `crates/...rs` code, with conventions anchored in [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md).
 
-- **Auditability.** Every tool call, provider request/response, and task transition becomes a structured, queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
+- **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
 
 - **Knowledge-graph–aware tooling.** Agents query a parsed, content-addressed graph (symbols, imports, callers, implementors) instead of grep. Branch-scoped and safe for parallel rebuild; numbers in [`benchmarks/graph/`](benchmarks/graph/). → [docs/design/knowledge-graph/](docs/design/knowledge-graph/)
 
-- **Conflict-aware parallel execution workflow** For `orbit run ship-auto`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later. [see merge-throughput](docs/assets/merge-throughput.png). → [docs/design/activity-job/](docs/design/activity-job/)
+- **Conflict-aware parallel execution.** For `orbit run ship-auto`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
 - **Sandboxed-by-default execution.** Dispatched agent CLIs run under an OS-level sandbox out of the box — FS access scoped to the worktree, network egress gated by per-activity policy. **macOS only today** (via `sandbox-exec`); on Linux/Windows the agent subprocess runs unsandboxed, with in-process FS guards still covering HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
 
@@ -130,9 +130,19 @@ After install, task writes are embedded automatically in the background; `reinde
 
 ---
 
-## Plugin vs CLI
+## Claude Code Plugin vs CLI
 
-Two install surfaces. Cli gives you the full power of Orbit. Choose plugin if you just want to have a taste of orbit.
+Two install surfaces. The CLI gives you the full power of Orbit. Choose the plugin if you just want a taste. Plugin will strap orbit's MCP tools automatically.
+
+```bash
+/plugin marketplace add danieljhkim/orbit
+
+# Install the plugin
+/plugin install orbit
+```
+
+<details>
+<summary><strong>Plugin vs. CLI</strong> — (click to expand)</summary>
 
 |   | **Claude Code plugin** | **CLI (curl / brew)** |
 |---|---|---|
@@ -143,15 +153,13 @@ Two install surfaces. Cli gives you the full power of Orbit. Choose plugin if yo
 | Works with Codex / Gemini CLI | No (Claude Code only) | Yes |
 | workflows (i.e. `orbit run ship-auto`) | No | Yes |
 
-**On Claude Code, install the plugin** — it wires MCP automatically and ships subagents that don't exist on the CLI path. Add the CLI alongside if you also want the dashboard (`orbit web serve`) or terminal-driven workflows; the two share `~/.orbit/` global state.
-
-**On Codex or Gemini CLI, use the CLI install.** `orbit workspace init --mcp` auto-detects installed MCP clients and registers Orbit with each; the MCP tool surface is identical, and `orbit init` seeds the skill set into the workspace.
+</details>
 
 ---
 
 ## Agent Tool Surface (MCP)
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini). Names are canonically dot-separated (`orbit.task.add`); MCP clients that reject `.` see the underscored form (`orbit_task_add`) — both resolve to the same tool.
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as plugin. Expand below to see the full tool surface.
 
 <details>
 <summary><strong>Full tool reference</strong> — task, review, graph, semantic, adr, design, learning, friction (click to expand)
@@ -209,11 +217,9 @@ Two install surfaces. Cli gives you the full power of Orbit. Choose plugin if yo
 </details>
 <br>
 
-Substrate-internal namespaces (`orbit.state.*`, `orbit.pipeline.*`, `orbit.policy.*`, `orbit.task.locks.*`, `orbit.graph.{add,move,write,delete}`) are also registered but are called by the workflow plane, not by agent prompts. Full schemas are discoverable via the MCP `tools/list` call against the running server.
-
 ---
 
-## Workspace Layout (`.orbit/`)
+## Workspace Layout of `.orbit`
 
 `orbit workspace init` creates a `.orbit/` directory at the repo root. All workspace state lives here — the directory is the source of truth, and removing it returns the workspace to a pre-init state.
 
@@ -245,11 +251,7 @@ Couple things to note:
 
 Orbit is v0.5.x — work in progress.
 
-- Core local execution, graph build/query, and audit infrastructure are usable today.
-- The execution substrate shows more internal machinery than the final product should; some historical CLI surfaces remain even though they're no longer central.
-- Production or multi-machine deployments are not yet recommended.
-
-Intentional technical debt on the path toward a tighter product focused on the audit and task layer.
+- Core local execution, graph build/query, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today.
 
 ---
 
