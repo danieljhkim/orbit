@@ -15,6 +15,7 @@ pub(crate) const SYSTEM_AUDIT_IDENTITY: &str = "system";
 pub mod activity;
 pub mod activity_v2;
 pub mod adr_migration;
+pub mod agent_rules;
 pub mod audit_event;
 pub mod backend_resolver;
 pub mod design;

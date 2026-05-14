@@ -1,6 +1,7 @@
 use chrono::Utc;
 use clap::{Args, Subcommand};
 use orbit_common::types::{Workspace, WorkspaceStatus};
+use orbit_core::command::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_core::command::design::seed_design_conventions;
 use orbit_core::command::init::{
     InitOptions, build_initial_graph, init_workspace_at_root, seed_default_orbitignore,
@@ -45,6 +46,9 @@ pub struct WorkspaceInitArgs {
     /// Seed docs/design/CONVENTIONS.md when it does not already exist.
     #[arg(long)]
     pub design: bool,
+    /// Inject (or refresh) an Orbit workflow-rules block in CLAUDE.md and AGENTS.md at the workspace root.
+    #[arg(long)]
+    pub inject_agent_rules: bool,
     /// No-op (kept for backwards compatibility — defaults are always refreshed on init)
     #[arg(long, hide = true)]
     pub refresh_defaults: bool,
@@ -94,6 +98,7 @@ impl WorkspaceInitArgs {
             OrbitRuntime::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mcp = self.mcp;
+        let inject_rules = self.inject_agent_rules;
         let init_result = self.execute_at_path(&cwd, &orbit_dir, &global_root, &registry_path)?;
 
         println!("workspace '{}' initialized", init_result.name);
@@ -113,6 +118,23 @@ impl WorkspaceInitArgs {
             }
         } else {
             println!("  mcp:       skipped (pass --mcp to set up integrations)");
+        }
+
+        if inject_rules {
+            let outcome = inject_agent_rules(&init_result.root)?;
+            for entry in &outcome.outcomes {
+                let label = entry
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| entry.path.display().to_string());
+                let verb = match entry.action {
+                    InjectionAction::Created => "created with Orbit rules block",
+                    InjectionAction::AppendedBlock => "Orbit rules block appended",
+                    InjectionAction::ReplacedBlock => "Orbit rules block refreshed",
+                };
+                println!("  rules:     {label}: {verb}");
+            }
         }
 
         eprintln!("graph build: scanning {}", init_result.root.display());
@@ -234,6 +256,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: true,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -294,6 +317,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -347,6 +371,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -394,6 +419,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -437,6 +463,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -480,6 +507,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -523,6 +551,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(Some(custom_root.as_path()));
@@ -588,6 +617,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -629,6 +659,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: true,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -675,6 +706,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -724,6 +756,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(None);
@@ -771,6 +804,7 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             design: false,
+            inject_agent_rules: false,
             refresh_defaults: false,
         }
         .execute_without_runtime(Some(custom_root.as_path()));
