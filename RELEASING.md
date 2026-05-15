@@ -2,6 +2,8 @@
 
 Runbook for cutting an Orbit release. Codified from [T20260510-23] (v0.4.0).
 
+See also [docs/RELEASE.md](docs/RELEASE.md) for the npm package, plugin manifest, and GitHub Release publishing steps.
+
 ## Versioning policy
 
 Pre-1.0 semver: `0.<minor>.<patch>`.

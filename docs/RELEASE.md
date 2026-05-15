@@ -7,6 +7,8 @@ plugin manifest, and the GitHub Release tag must all agree, or the
 [`plugin/.mcp.json`](../plugin/.mcp.json) downloads a binary that does not
 match the plugin manifest.
 
+See also [../RELEASING.md](../RELEASING.md) for the higher-level release runbook and versioning policy.
+
 ## Account setup (one-time)
 
 The `@orbit-tools` scope has **publish-time 2FA** enabled, and npm no longer
