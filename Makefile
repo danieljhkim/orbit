@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci bench check-design-docs stability release-check
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast bench check-design-docs stability release-check
 
 # ------------------------------------------------------------
 # Config
@@ -48,7 +48,8 @@ help:
 	@echo "  make bench        Run graph build benchmark (ARGS=... optional)"
 	@echo "  make audit        Cargo audit (security)"
 	@echo "  make tree         Print dependency tree"
-	@echo "  make ci           Full CI pass"
+	@echo "  make ci           Full CI pass (clippy + tests + doc + guardrails; also runs on PRs)"
+	@echo "  make ci-fast      Pre-handoff gate for agents (fmt-check + guardrail scripts; no compile)"
 	@echo "  make check-design-docs  Flag docs/design/* stale relative to referenced code"
 	@echo "  make stability    Verify per-crate stability tier markers"
 	@echo "  make release-check  Verify /plugin install orbit version lockstep (see docs/RELEASE.md)"
@@ -108,6 +109,13 @@ tree:
 # Full CI pass
 ci:
 	./scripts/ci-guardrails.sh
+
+# Pre-handoff gate for agents: fast checks, no compile. Full make ci runs on PRs.
+ci-fast:
+	cargo fmt --all -- --check
+	./scripts/check-dependency-direction.sh
+	./scripts/check-cli-imports.sh
+	./scripts/check-stability.sh
 
 # Flag design docs older than the code they reference
 check-design-docs:

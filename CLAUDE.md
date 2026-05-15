@@ -11,13 +11,9 @@ Project instructions for agents working on Orbit.
 
 ## Build / Lint
 
-`make build`, `make fmt`, `make ci` — all must pass before a task moves to `review`. `make ci` runs `cargo clippy --workspace --all-targets -- -D warnings`; lint-enforced mechanical rules live in `[workspace.lints]` in the root `Cargo.toml`, not in this file. Add to the lint table rather than to prose when something can be checked automatically.
+`make ci-fast` (fmt-check + guardrail scripts; no compile) must pass before a task moves to `review`. The full `make ci` is the canonical merge gate via [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on every PR — don't run it per task locally.
 
-When full CI fails, classify the failure before handing off:
-
-- **Caused by the task:** fix it before handoff.
-- **Unrelated pre-existing blocker:** do not broaden task scope just to make global CI green. Record the failing command and evidence, preserve the worktree changes, return a `validation_blocked_unrelated`-style outcome if the harness supports it, and do not move the task to `review`.
-- **Unclear attribution:** treat it as a task failure and report the evidence.
+Mechanical lint rules belong in `[workspace.lints]` in the root `Cargo.toml`, not in this file. If PR CI fails for reasons unrelated to the task, record evidence and surface to a reviewer rather than broadening scope.
 
 ## Architecture
 
