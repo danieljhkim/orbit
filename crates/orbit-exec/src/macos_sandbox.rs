@@ -42,8 +42,8 @@ const TRUSTED_SANDBOX_EXEC_PATHS: &[&str] = &["/usr/bin/sandbox-exec"];
 ///   provider APIs;
 /// - allows writes inside the resolved `modify` scope plus a small set of
 ///   well-known scratch areas (`/tmp`, `/private/tmp`,
-///   `/private/var/folders`, `~/Library/Caches`) that tools and the
-///   filesystem layer expect to write to;
+///   `/private/var/folders`, `~/Library/Caches`, and the HOME-derived Orbit
+///   JSONL log directory) that tools and the filesystem layer expect to write to;
 /// - appends explicit `(deny ...)` clauses for any negated entry in
 ///   `read` / `modify` so global `denyRead` / `denyModify` rules win
 ///   under SBPL's last-match-wins evaluation.
@@ -118,13 +118,13 @@ fn compile_macos_sandbox_profile_with_env(
             sbpl_escape(&home)
         ));
         // The agent CLI inherits the sandbox into its `orbit mcp serve` child
-        // (and any other `orbit ...` calls it makes). Those processes need
-        // write access to the global Orbit data root so audit events, the
-        // SQLite store, and run-state files can be persisted. Without this
-        // the inherited child fails with `readonly database` and MCP tool
-        // calls round-trip empty.
+        // (and any other `orbit ...` calls it makes). Logging initializes
+        // before the child can resolve Orbit's runtime roots, so the profile
+        // carries the one HOME-derived path that must be writable up front.
+        // Runtime-specific store/artifact paths are appended by orbit-core's
+        // sandbox resolver instead of granting the whole HOME/.orbit tree.
         out.push_str(&format!(
-            "(allow file-write* (subpath \"{}/.orbit\"))\n",
+            "(allow file-write* (subpath \"{}/.orbit/state/logs\"))\n",
             sbpl_escape(&home)
         ));
     }
@@ -150,10 +150,9 @@ fn compile_macos_sandbox_profile_with_env(
             ));
             continue;
         }
-        let path = subpath_root(rule);
         out.push_str(&format!(
-            "(allow file-write* (subpath \"{}\"))\n",
-            sbpl_escape(&path)
+            "(allow file-write* {})\n",
+            sbpl_filter_for_allow_rule(rule)
         ));
     }
 
@@ -412,7 +411,7 @@ fn sbpl_escape(value: &str) -> String {
 }
 
 fn sbpl_filter_for_deny_rule(rule: &str) -> String {
-    if deny_rule_can_use_subpath(rule) {
+    if rule_can_use_subpath(rule) {
         let path = subpath_root(rule);
         format!("(subpath \"{}\")", sbpl_escape(&path))
     } else {
@@ -421,7 +420,17 @@ fn sbpl_filter_for_deny_rule(rule: &str) -> String {
     }
 }
 
-fn deny_rule_can_use_subpath(rule: &str) -> bool {
+fn sbpl_filter_for_allow_rule(rule: &str) -> String {
+    if rule_can_use_subpath(rule) {
+        let path = subpath_root(rule);
+        format!("(subpath \"{}\")", sbpl_escape(&path))
+    } else {
+        let regex = glob_rule_to_regex(rule);
+        format!("(regex \"{}\")", sbpl_escape(&regex))
+    }
+}
+
+fn rule_can_use_subpath(rule: &str) -> bool {
     let trimmed = rule.trim_end_matches('/');
     if !contains_glob(trimmed) {
         return true;
@@ -546,11 +555,12 @@ mod tests {
     }
 
     #[test]
-    fn compile_grants_write_access_to_global_orbit_data_root() {
+    fn compile_grants_write_access_to_global_orbit_log_dir() {
         // The agent CLI inherits the sandbox into `orbit mcp serve` and any
-        // other `orbit ...` calls; those need to write to ~/.orbit (audit
-        // events, SQLite stores, run state). Without this clause the
-        // inherited child fails with `readonly database`.
+        // other `orbit ...` calls. The JSONL tracing layer resolves its
+        // HOME-based path before runtime root resolution, so only the log
+        // directory is granted here; store and artifact roots are appended by
+        // the runtime sandbox resolver.
         let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
         let text = compile_with_env(
             &resolved,
@@ -560,8 +570,12 @@ mod tests {
             },
         );
         assert!(
-            text.contains("(allow file-write* (subpath \"/Users/test/.orbit\"))"),
-            "missing ~/.orbit write allow: {text}"
+            text.contains("(allow file-write* (subpath \"/Users/test/.orbit/state/logs\"))"),
+            "missing ~/.orbit/state/logs write allow: {text}"
+        );
+        assert!(
+            !text.contains("(allow file-write* (subpath \"/Users/test/.orbit\"))"),
+            "profile must not broadly allow HOME/.orbit writes: {text}"
         );
     }
 
@@ -577,8 +591,8 @@ mod tests {
             },
         );
         assert!(
-            text.contains("(allow file-write* (subpath \"/Users/test/.orbit\"))"),
-            "missing injected HOME/.orbit write allow: {text}"
+            text.contains("(allow file-write* (subpath \"/Users/test/.orbit/state/logs\"))"),
+            "missing injected HOME/.orbit/state/logs write allow: {text}"
         );
         assert_eq!(
             std::env::var_os("HOME"),
@@ -779,6 +793,120 @@ mod tests {
         assert!(
             !text.contains("/src/**"),
             "subpath should not contain glob marker: {text}"
+        );
+    }
+
+    #[test]
+    fn compile_uses_regex_for_non_subpath_positive_modify_glob() {
+        let resolved = profile(
+            "default",
+            &["/Users/test/repo"],
+            &["/Users/test/.orbit/orbit.db*"],
+        );
+        let text = compile_with_env(&resolved, EnvOverrides::default());
+        assert!(
+            text.contains(
+                "(allow file-write* (regex \"^/Users/test/\\\\.orbit/orbit\\\\.db[^/]*$\"))"
+            ),
+            "missing regex allow for SQLite sidecar glob: {text}"
+        );
+        assert!(
+            !text.contains("(allow file-write* (subpath \"/Users/test/.orbit\"))"),
+            "positive file glob must not collapse to the whole Orbit root: {text}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallow() {
+        use std::process::Command;
+
+        if !sandbox_exec_can_apply() {
+            return;
+        }
+
+        let parent = sandbox_test_parent("orbit-runtime-roots");
+        let _cleanup = ScopeGuard(parent.clone());
+        let home = parent.join("home");
+        let global = home.join(".orbit");
+        let workspace = parent.join("repo/.orbit");
+        std::fs::create_dir_all(global.join("state/logs")).expect("global log dir");
+        std::fs::create_dir_all(global.join("tasks")).expect("global tasks dir");
+        std::fs::create_dir_all(workspace.join("state")).expect("workspace state dir");
+
+        let log_path = global.join("state/logs/orbit.jsonl");
+        let db_wal_path = global.join("orbit.db-wal");
+        let artifact_path = global
+            .join("tasks/workspaces/orbit-test/ORB-00009/artifacts/files/planning-duel")
+            .join("gemini-gemini-3.1-pro.md");
+        let semantic_wal_path = workspace.join("state/semantic.db-wal");
+        let denied_path = global.join("not-allowed.txt");
+
+        let resolved = ResolvedFsProfile {
+            name: "gemini-direct-agent".to_string(),
+            read: vec![parent.display().to_string()],
+            modify: vec![
+                format!("{}/state/logs/**", global.display()),
+                format!("{}/orbit.db*", global.display()),
+                format!("{}/tasks/**", global.display()),
+                format!("{}/state/semantic.db*", workspace.display()),
+            ],
+        };
+        let home_str = home.to_string_lossy().into_owned();
+        let profile_text = compile_with_env(
+            &resolved,
+            EnvOverrides {
+                home: Some(&home_str),
+                ..Default::default()
+            },
+        );
+        let mut profile_file = tempfile::Builder::new()
+            .prefix("orbit-sandbox-test-")
+            .suffix(".sb")
+            .tempfile()
+            .expect("tempfile");
+        use std::io::Write;
+        profile_file
+            .write_all(profile_text.as_bytes())
+            .expect("write profile");
+        profile_file.flush().expect("flush");
+
+        let script = format!(
+            "set -e\n: > {}\n: > {}\nmkdir -p {}\nprintf '%s\\n' '*authored by: gemini / gemini-3.1-pro*' > {}\n: > {}\nif : > {} 2>/dev/null; then exit 99; else exit 0; fi\n",
+            shell_escape(&log_path),
+            shell_escape(&db_wal_path),
+            shell_escape(artifact_path.parent().expect("artifact parent")),
+            shell_escape(&artifact_path),
+            shell_escape(&semantic_wal_path),
+            shell_escape(&denied_path),
+        );
+        let status = Command::new(sandbox_exec_path_for_test())
+            .arg("-f")
+            .arg(profile_file.path())
+            .arg("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .env("HOME", &home)
+            .status()
+            .expect("run sandbox-exec");
+
+        assert!(
+            status.success(),
+            "expected Orbit runtime writes to succeed while arbitrary HOME/.orbit write is denied; status={status:?}"
+        );
+        assert!(log_path.exists(), "log file should be writable");
+        assert!(db_wal_path.exists(), "SQLite sidecar should be writable");
+        assert!(
+            artifact_path.exists(),
+            "planner artifact should be writable"
+        );
+        assert!(
+            semantic_wal_path.exists(),
+            "semantic sidecar should be writable"
+        );
+        assert!(
+            !denied_path.exists(),
+            "arbitrary HOME/.orbit write should remain denied"
         );
     }
 
@@ -1514,7 +1642,7 @@ mod tests {
             let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
             if let Some(home) = non_empty_env_path(home.as_deref()) {
                 roots.push(home.join("Library/Caches"));
-                roots.push(home.join(".orbit"));
+                roots.push(home.join(".orbit/state/logs"));
             }
             roots.extend(provider_state_dirs(
                 home.as_deref(),

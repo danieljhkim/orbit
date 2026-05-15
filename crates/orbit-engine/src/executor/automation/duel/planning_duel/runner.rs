@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, PlanningRoleAssignment};
 use serde_json::{Value, json};
 
+use super::types::PlanningDuelPlanArtifact;
 use super::{artifacts, metrics, roles};
 use crate::context::{ActivityInvocationResult, RuntimeHost, TaskHost};
 use crate::executor::automation::input::{input_string_field, required_input_string};
@@ -16,6 +17,78 @@ fn join_activity_result(
         Err(_) => Err(OrbitError::Execution(format!(
             "{label} activity thread panicked"
         ))),
+    }
+}
+
+fn require_plan_artifact_for_assignment<'a>(
+    plan_artifacts: &'a [PlanningDuelPlanArtifact],
+    assignment: &PlanningRoleAssignment,
+    invocation: &ActivityInvocationResult,
+) -> Result<&'a PlanningDuelPlanArtifact, OrbitError> {
+    artifacts::plan_artifact_for_assignment(plan_artifacts, assignment).map_err(|error| {
+        OrbitError::Execution(format!(
+            "{error}; {}",
+            planner_invocation_diagnostics(invocation)
+        ))
+    })
+}
+
+fn planner_invocation_diagnostics(invocation: &ActivityInvocationResult) -> String {
+    let mut parts = vec![
+        format!("exit_code={:?}", invocation.exit_code),
+        format!("duration_ms={}", invocation.duration_ms),
+    ];
+
+    if let Some(response) = invocation.response_json.as_ref().and_then(Value::as_object) {
+        for key in [
+            "provider",
+            "exit_code",
+            "timed_out",
+            "stdout_blob_ref",
+            "stderr_blob_ref",
+            "error",
+            "error_message",
+        ] {
+            if let Some(value) = response.get(key) {
+                parts.push(format!("{key}={}", diagnostic_value(value)));
+            }
+        }
+        if let Some(stdout_text) = response.get("stdout_text").and_then(Value::as_str) {
+            parts.push(format!(
+                "stdout_text={}",
+                compact_diagnostic_text(stdout_text)
+            ));
+        }
+    }
+
+    let tool_calls = invocation
+        .invocation_trace
+        .tool_calls
+        .iter()
+        .map(|call| call.tool_name.trim())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    if !tool_calls.is_empty() {
+        parts.push(format!("tool_calls={}", tool_calls.join(",")));
+    }
+
+    format!("child invocation diagnostics: {}", parts.join(", "))
+}
+
+fn diagnostic_value(value: &Value) -> String {
+    value
+        .as_str()
+        .map(compact_diagnostic_text)
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn compact_diagnostic_text(value: &str) -> String {
+    const LIMIT: usize = 240;
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= LIMIT {
+        compact
+    } else {
+        format!("{}...", compact.chars().take(LIMIT).collect::<String>())
     }
 }
 
@@ -74,8 +147,16 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
 
     let planner_artifacts = host.get_task_artifacts(task_id)?;
     let plan_artifacts = artifacts::planning_duel_plan_artifacts(&planner_artifacts)?;
-    let _ = artifacts::plan_artifact_for_assignment(&plan_artifacts, &planning_roles.planner_a)?;
-    let _ = artifacts::plan_artifact_for_assignment(&plan_artifacts, &planning_roles.planner_b)?;
+    let _ = require_plan_artifact_for_assignment(
+        &plan_artifacts,
+        &planning_roles.planner_a,
+        &planner_a_result,
+    )?;
+    let _ = require_plan_artifact_for_assignment(
+        &plan_artifacts,
+        &planning_roles.planner_b,
+        &planner_b_result,
+    )?;
 
     let arbiter_result = host.invoke_activity(
         roles::arbiter_activity(),
@@ -178,6 +259,7 @@ mod tests {
         workflow_admissions: AtomicUsize,
         task_starts: AtomicUsize,
         last_automation_update: Mutex<Option<TaskAutomationUpdate>>,
+        omit_planner_artifacts: AtomicUsize,
     }
 
     impl PlanningDuelHost {
@@ -197,6 +279,7 @@ mod tests {
                 workflow_admissions: AtomicUsize::new(0),
                 task_starts: AtomicUsize::new(0),
                 last_automation_update: Mutex::new(None),
+                omit_planner_artifacts: AtomicUsize::new(0),
             }
         }
 
@@ -218,6 +301,10 @@ mod tests {
 
         fn start_count(&self) -> usize {
             self.task_starts.load(Ordering::SeqCst)
+        }
+
+        fn omit_planner_artifacts(&self) {
+            self.omit_planner_artifacts.store(1, Ordering::SeqCst);
         }
     }
 
@@ -399,15 +486,23 @@ mod tests {
             let model = model.unwrap_or("unknown-model");
             match activity.id.as_str() {
                 "propose_duel_plan" => {
-                    self.artifacts
-                        .lock()
-                        .expect("artifacts lock")
-                        .push(TaskArtifact::from_text(
-                            format!("planning-duel/{agent_cli}-{model}.md"),
-                            format!(
-                                "*authored by: {agent_cli} / {model}*\n## Plan\nPreserve task status.\n"
-                            ),
-                        ));
+                    let should_omit = self
+                        .omit_planner_artifacts
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                            remaining.checked_sub(1)
+                        })
+                        .is_ok();
+                    if !should_omit {
+                        self.artifacts
+                            .lock()
+                            .expect("artifacts lock")
+                            .push(TaskArtifact::from_text(
+                                format!("planning-duel/{agent_cli}-{model}.md"),
+                                format!(
+                                    "*authored by: {agent_cli} / {model}*\n## Plan\nPreserve task status.\n"
+                                ),
+                            ));
+                    }
                 }
                 "arbitrate_duel_plan" => {
                     let winner =
@@ -433,8 +528,21 @@ mod tests {
             }
 
             Ok(ActivityInvocationResult {
-                response_json: Some(json!({})),
-                invocation_trace: InvocationTrace::default(),
+                response_json: Some(json!({
+                    "provider": agent_cli,
+                    "stdout_blob_ref": "stdout-digest",
+                    "stderr_blob_ref": "stderr-digest",
+                    "stdout_text": "orbit.duel.plan.add failed: store_error: attempt to write a readonly database",
+                })),
+                invocation_trace: InvocationTrace {
+                    tool_calls: vec![orbit_common::types::ToolCallTrace {
+                        seq: 1,
+                        tool_name: "orbit.duel.plan.add".to_string(),
+                        result_bytes: 91,
+                        result_payload: None,
+                    }],
+                    ..InvocationTrace::default()
+                },
                 exit_code: Some(0),
                 duration_ms: 1,
             })
@@ -572,6 +680,40 @@ mod tests {
             assert_eq!(host.admission_count(), 0, "{status}");
             assert_eq!(host.start_count(), 0, "{status}");
         }
+    }
+
+    #[test]
+    fn missing_planner_artifact_error_includes_child_invocation_diagnostics() {
+        let host = PlanningDuelHost::new(TaskStatus::InProgress);
+        host.omit_planner_artifacts();
+
+        let err = run_planning_duel(
+            &host,
+            &json!({
+                "task_id": "T20260430-STATUS",
+                "run_id": "jrun-missing-planner-artifact"
+            }),
+            false,
+        )
+        .expect_err("missing planner artifact should fail");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("missing planning duel artifact for"),
+            "{message}"
+        );
+        assert!(
+            message.contains("stderr_blob_ref=stderr-digest"),
+            "{message}"
+        );
+        assert!(
+            message.contains("store_error: attempt to write a readonly database"),
+            "{message}"
+        );
+        assert!(
+            message.contains("tool_calls=orbit.duel.plan.add"),
+            "{message}"
+        );
     }
 
     fn install_planning_duel_artifacts(host: &PlanningDuelHost, plan_body: &str) {

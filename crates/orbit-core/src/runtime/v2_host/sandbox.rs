@@ -48,6 +48,7 @@ pub(super) fn resolve_executor_sandbox(
                         ))
                     })?;
                 append_codex_side_write_roots(runtime, provider, &mut resolved)?;
+                append_orbit_child_runtime_write_roots(runtime, &mut resolved);
                 append_active_worktree_root(runtime, subprocess_cwd, &mut resolved);
                 Ok(Some(ResolvedSandbox {
                     kind,
@@ -142,6 +143,51 @@ fn append_codex_side_write_roots(
         resolved.modify.push(root);
     }
     Ok(())
+}
+
+/// Allow the nested Orbit processes launched by provider CLIs to initialize
+/// only the runtime stores they need while staying inside the outer sandbox.
+///
+/// Gemini and Claude do not have a codex-style `--add-dir` side channel, but
+/// their MCP/tool calls still execute `orbit ...` as a sandbox-inherited child.
+/// Those child processes initialize the global audit/tool database, the global
+/// task registry + canonical task bundles, and the workspace-local semantic
+/// index before a planner can persist `planning-duel/<agent>-<model>.md`.
+/// Keep the grants path-shaped instead of re-allowing the whole home directory.
+#[cfg(target_os = "macos")]
+fn append_orbit_child_runtime_write_roots(
+    runtime: &OrbitRuntime,
+    resolved: &mut ResolvedFsProfile,
+) {
+    let global_root = runtime
+        .paths()
+        .global_dir
+        .canonicalize()
+        .unwrap_or_else(|_| runtime.paths().global_dir.clone());
+    let global = global_root.display().to_string();
+
+    let workspace_orbit = runtime
+        .paths()
+        .orbit_dir
+        .canonicalize()
+        .unwrap_or_else(|_| runtime.paths().orbit_dir.clone());
+    let workspace = workspace_orbit.display().to_string();
+
+    for root in [
+        format!("{global}/state/logs/**"),
+        format!("{global}/orbit.db*"),
+        format!("{global}/tasks/**"),
+        format!("{workspace}/state/semantic.db*"),
+    ] {
+        append_unique_modify_root(resolved, root);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn append_unique_modify_root(resolved: &mut ResolvedFsProfile, root: String) {
+    if !resolved.modify.iter().any(|entry| entry == &root) {
+        resolved.modify.push(root);
+    }
 }
 
 /// Re-allow the active job-run worktree under `<workspace>/.orbit/state/worktrees/`
@@ -332,6 +378,101 @@ mod tests {
         assert!(
             modify.iter().any(|entry| entry == &global_orbit),
             "codex side write roots should include global .orbit: {modify:?}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_reallow() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+        seed_executor(
+            &runtime,
+            "gemini",
+            Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        );
+
+        let resolved = runtime
+            .resolve_executor_sandbox("gemini", None, None)
+            .expect("resolve")
+            .expect("descriptor");
+        let modify = &resolved.fs_profile.modify;
+        let global = runtime
+            .paths()
+            .global_dir
+            .canonicalize()
+            .unwrap_or_else(|_| runtime.paths().global_dir.clone())
+            .display()
+            .to_string();
+        let workspace_orbit = runtime
+            .paths()
+            .orbit_dir
+            .canonicalize()
+            .unwrap_or_else(|_| runtime.paths().orbit_dir.clone())
+            .display()
+            .to_string();
+        let expected = [
+            format!("{global}/state/logs/**"),
+            format!("{global}/orbit.db*"),
+            format!("{global}/tasks/**"),
+            format!("{workspace_orbit}/state/semantic.db*"),
+        ];
+        for root in expected {
+            assert!(
+                modify.iter().any(|entry| entry == &root),
+                "gemini sandbox should allow Orbit runtime root {root}; modify={modify:?}"
+            );
+        }
+        assert!(
+            !modify.iter().any(|entry| entry == &global),
+            "gemini sandbox must not re-allow the whole global Orbit root: {modify:?}"
+        );
+        assert!(
+            !modify.iter().any(|entry| entry == &workspace_orbit),
+            "gemini sandbox must not re-allow the whole workspace .orbit root: {modify:?}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn resolve_executor_sandbox_appends_workspace_semantic_store_after_policy_deny() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+        seed_executor(
+            &runtime,
+            "gemini",
+            Some(orbit_common::types::ExecutorSandboxKind::MacosSandboxExec),
+        );
+
+        let resolved = runtime
+            .resolve_executor_sandbox("gemini", None, None)
+            .expect("resolve")
+            .expect("descriptor");
+        let modify = &resolved.fs_profile.modify;
+        let workspace_orbit = runtime
+            .paths()
+            .orbit_dir
+            .canonicalize()
+            .unwrap_or_else(|_| runtime.paths().orbit_dir.clone())
+            .display()
+            .to_string();
+        let workspace_orbit_deny = format!("!{workspace_orbit}/**");
+        let deny_pos = modify
+            .iter()
+            .position(|entry| entry == &workspace_orbit_deny)
+            .unwrap_or_else(|| {
+                panic!(
+                    "default policy should deny workspace .orbit writes via {workspace_orbit_deny}; modify={modify:?}"
+                )
+            });
+        let semantic_store = format!("{workspace_orbit}/state/semantic.db*");
+        let allow_pos = modify
+            .iter()
+            .position(|entry| entry == &semantic_store)
+            .unwrap_or_else(|| {
+                panic!("semantic store should be re-allowed under sandbox: {modify:?}")
+            });
+        assert!(
+            deny_pos < allow_pos,
+            "semantic store re-allow must come after policy deny: {modify:?}"
         );
     }
 

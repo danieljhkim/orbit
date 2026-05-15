@@ -98,6 +98,41 @@ fn task_add_tool_creates_proposed_tasks_for_agents() {
 }
 
 #[test]
+fn duel_plan_add_persists_gemini_planner_artifact() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Gemini planning duel artifact",
+        "Exercise the planner artifact write path used by direct-agent duels.",
+        TaskStatus::InProgress,
+        &[],
+    );
+    let content = "*authored by: gemini / gemini-3.1-pro*\n## Plan\nPersist through Orbit tools.";
+
+    runtime
+        .execute_tool_command(
+            "orbit.duel.plan.add",
+            json!({
+                "id": task.id.clone(),
+                "content": content,
+            }),
+            Some("gemini".to_string()),
+            Some("gemini-3.1-pro".to_string()),
+        )
+        .expect("gemini duel plan add succeeds");
+
+    let artifacts = runtime
+        .get_task_artifacts(&task.id)
+        .expect("read task artifacts");
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.path == "planning-duel/gemini-gemini-3.1-pro.md")
+        .expect("gemini planner artifact");
+    assert_eq!(artifact.text_content(), Some(content));
+}
+
+#[test]
 fn task_add_tool_rejects_dropped_task_types_and_friction_status() {
     let (_root, runtime, _repo_root) = test_runtime();
 
