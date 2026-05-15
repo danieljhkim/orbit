@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
 use orbit_knowledge::commands::overview::{
-    self, GraphOverview, GraphOverviewSummary, OverviewBody, OverviewFormat, OverviewInput,
+    self, DowngradeReason, GraphOverview, GraphOverviewSummary, OverviewBody, OverviewFormat,
+    OverviewInput,
 };
 use serde_json::{Value, json};
 
@@ -54,7 +55,8 @@ impl Tool for OrbitKnowledgeOverviewTool {
             OverviewBody::Summary {
                 summary,
                 downgraded,
-            } => summary_response(summary, requested_format, downgraded),
+                downgrade_reason,
+            } => summary_response(summary, requested_format, downgraded, downgrade_reason),
         })
     }
 }
@@ -114,6 +116,7 @@ fn summary_response(
     summary: GraphOverviewSummary,
     requested_format: &str,
     downgraded: bool,
+    downgrade_reason: Option<DowngradeReason>,
 ) -> Value {
     let top_files: Vec<Value> = summary
         .top_files
@@ -127,7 +130,7 @@ fn summary_response(
         })
         .collect();
 
-    json!({
+    let mut response = json!({
         "mode": "summary",
         "requested_format": requested_format,
         "downgraded": downgraded,
@@ -139,9 +142,28 @@ fn summary_response(
         "dir_file_counts": summary.dir_file_counts,
         "top_files": top_files,
         "hint": summary.hint,
-    })
+    });
+    if let Some(reason) = downgrade_reason
+        && let Some(object) = response.as_object_mut()
+    {
+        object.insert(
+            "downgrade_reason".to_string(),
+            downgrade_reason_value(reason),
+        );
+    }
+    response
 }
 
 fn sorted_counts(counts: HashMap<String, usize>) -> BTreeMap<String, usize> {
     counts.into_iter().collect()
+}
+
+fn downgrade_reason_value(reason: DowngradeReason) -> Value {
+    match reason {
+        DowngradeReason::FileThreshold { threshold, actual } => json!({
+            "kind": "file_threshold",
+            "threshold": threshold,
+            "actual": actual,
+        }),
+    }
 }

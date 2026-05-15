@@ -482,6 +482,41 @@ fn overview_defaults_to_summary_for_broad_scope() {
 }
 
 #[test]
+fn overview_requested_full_downgrade_response_includes_reason() {
+    let fixture = write_graph_fixture(large_overview_graph(101, 1));
+
+    let response = execute_graph_tool(
+        fixture.path(),
+        "orbit.graph.overview",
+        json!({"prefix":"src/","format":"full"}),
+    );
+
+    assert_eq!(response["mode"], "summary");
+    assert_eq!(response["requested_format"], "full");
+    assert_eq!(response["downgraded"], true);
+    assert_eq!(
+        response["downgrade_reason"],
+        json!({
+            "kind": "file_threshold",
+            "threshold": 50,
+            "actual": 101,
+        })
+    );
+    assert!(
+        response["hint"]
+            .as_str()
+            .unwrap()
+            .contains("file count 101 exceeds threshold 50")
+    );
+    assert!(
+        response["hint"]
+            .as_str()
+            .unwrap()
+            .contains("file_threshold")
+    );
+}
+
+#[test]
 fn overview_summary_uses_sql_index_without_by_id_graph_read() {
     let fixture = write_graph_fixture(large_overview_graph(120, 12));
     let knowledge_dir = fixture.path().join(".orbit/knowledge");

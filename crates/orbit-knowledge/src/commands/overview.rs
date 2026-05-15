@@ -10,6 +10,18 @@ const FILE_THRESHOLD: usize = 50;
 pub const SUMMARY_HINT: &str =
     "Use `prefix` to narrow the overview and get per-file symbol listings.";
 
+/// Machine-readable reason an overview request was downgraded from full to summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DowngradeReason {
+    /// The requested full overview exceeded the maximum file count for full mode.
+    FileThreshold {
+        /// Maximum file count allowed before full mode is downgraded.
+        threshold: usize,
+        /// Actual file count observed for the requested scope.
+        actual: usize,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverviewFormat {
     Full,
@@ -50,6 +62,7 @@ pub enum OverviewBody {
     Summary {
         summary: GraphOverviewSummary,
         downgraded: bool,
+        downgrade_reason: Option<DowngradeReason>,
     },
 }
 
@@ -65,6 +78,7 @@ pub fn run(input: OverviewInput) -> Result<OverviewResult, KnowledgeError> {
             body: OverviewBody::Summary {
                 summary: summary.summary,
                 downgraded: summary.downgraded,
+                downgrade_reason: summary.downgrade_reason,
             },
         });
     }
@@ -72,19 +86,34 @@ pub fn run(input: OverviewInput) -> Result<OverviewResult, KnowledgeError> {
     let graph = input.context.read_graph(GraphReadOptions::default())?;
     let svc = GraphContextService::new(&graph);
     let overview = svc.overview(input.prefix.as_deref());
-    let resolved_format = input
-        .requested_format
-        .unwrap_or_else(|| default_format_for_scope(input.prefix.as_deref(), overview.files.len()));
-    let downgraded = matches!(input.requested_format, Some(OverviewFormat::Full))
-        && overview.files.len() > FILE_THRESHOLD;
+    Ok(result_from_overview(
+        overview,
+        input.prefix.as_deref(),
+        input.requested_format,
+        requested_format,
+    ))
+}
+
+fn result_from_overview(
+    overview: GraphOverview,
+    prefix: Option<&str>,
+    input_format: Option<OverviewFormat>,
+    requested_format: RequestedOverviewFormat,
+) -> OverviewResult {
+    let resolved_format =
+        input_format.unwrap_or_else(|| default_format_for_scope(prefix, overview.files.len()));
+    let downgrade_reason = downgrade_reason(input_format, overview.files.len());
+    let downgraded = downgrade_reason.is_some();
     let use_summary = matches!(resolved_format, OverviewFormat::Summary) || downgraded;
 
-    Ok(if use_summary {
+    if use_summary {
+        let hint = summary_hint(downgrade_reason.as_ref());
         OverviewResult {
             requested_format,
             body: OverviewBody::Summary {
-                summary: compact_from_overview(&overview, input.prefix.as_deref(), SUMMARY_HINT),
+                summary: compact_from_overview(&overview, prefix, &hint),
                 downgraded,
+                downgrade_reason,
             },
         }
     } else {
@@ -92,7 +121,7 @@ pub fn run(input: OverviewInput) -> Result<OverviewResult, KnowledgeError> {
             requested_format,
             body: OverviewBody::Full(overview),
         }
-    })
+    }
 }
 
 fn requested_format(format: Option<OverviewFormat>) -> RequestedOverviewFormat {
@@ -111,9 +140,33 @@ fn default_format_for_scope(prefix: Option<&str>, file_count: usize) -> Overview
     }
 }
 
+fn downgrade_reason(
+    requested_format: Option<OverviewFormat>,
+    file_count: usize,
+) -> Option<DowngradeReason> {
+    if matches!(requested_format, Some(OverviewFormat::Full)) && file_count > FILE_THRESHOLD {
+        Some(DowngradeReason::FileThreshold {
+            threshold: FILE_THRESHOLD,
+            actual: file_count,
+        })
+    } else {
+        None
+    }
+}
+
+fn summary_hint(downgrade_reason: Option<&DowngradeReason>) -> String {
+    match downgrade_reason {
+        Some(DowngradeReason::FileThreshold { threshold, actual }) => format!(
+            "Downgrade reason file_threshold: file count {actual} exceeds threshold {threshold}. {SUMMARY_HINT}"
+        ),
+        None => SUMMARY_HINT.to_string(),
+    }
+}
+
 struct SqlOverviewSummary {
     summary: GraphOverviewSummary,
     downgraded: bool,
+    downgrade_reason: Option<DowngradeReason>,
 }
 
 fn try_summary_via_sql_index(
@@ -133,8 +186,8 @@ fn try_summary_via_sql_index(
     })?;
     let resolved_format =
         requested_format.unwrap_or_else(|| default_format_for_scope(None, total_files));
-    let downgraded =
-        matches!(requested_format, Some(OverviewFormat::Full)) && total_files > FILE_THRESHOLD;
+    let downgrade_reason = downgrade_reason(requested_format, total_files);
+    let downgraded = downgrade_reason.is_some();
     let use_summary = matches!(resolved_format, OverviewFormat::Summary) || downgraded;
     if !use_summary {
         return Ok(None);
@@ -152,6 +205,7 @@ fn try_summary_via_sql_index(
             symbol_count,
         })
         .collect();
+    let hint = summary_hint(downgrade_reason.as_ref());
 
     Ok(Some(SqlOverviewSummary {
         summary: GraphOverviewSummary {
@@ -174,9 +228,10 @@ fn try_summary_via_sql_index(
                 ))
             })?,
             top_files,
-            hint: SUMMARY_HINT.to_string(),
+            hint,
         },
         downgraded,
+        downgrade_reason,
     }))
 }
 
@@ -212,6 +267,59 @@ mod tests {
         assert!(downgraded);
     }
 
+    #[test]
+    fn requested_full_below_threshold_has_no_downgrade_reason() {
+        let result = overview_result_for_fixture(FILE_THRESHOLD, None, Some(OverviewFormat::Full));
+
+        assert!(matches!(result.body, OverviewBody::Full(_)));
+    }
+
+    #[test]
+    fn requested_full_above_threshold_reports_file_threshold_reason() {
+        let actual = 101;
+        let result = overview_result_for_fixture(actual, None, Some(OverviewFormat::Full));
+
+        let OverviewBody::Summary {
+            summary,
+            downgraded,
+            downgrade_reason,
+        } = result.body
+        else {
+            panic!("expected summary overview");
+        };
+
+        assert!(downgraded);
+        assert_eq!(summary.total_files, actual);
+        assert_eq!(
+            downgrade_reason,
+            Some(DowngradeReason::FileThreshold {
+                threshold: FILE_THRESHOLD,
+                actual,
+            })
+        );
+        assert!(summary.hint.contains("file_threshold"));
+        assert!(summary.hint.contains(&format!(
+            "file count {actual} exceeds threshold {FILE_THRESHOLD}"
+        )));
+    }
+
+    #[test]
+    fn requested_summary_above_threshold_has_no_downgrade_reason() {
+        let result = overview_result_for_fixture(101, None, Some(OverviewFormat::Summary));
+
+        let OverviewBody::Summary {
+            downgraded,
+            downgrade_reason,
+            ..
+        } = result.body
+        else {
+            panic!("expected summary overview");
+        };
+
+        assert!(!downgraded);
+        assert_eq!(downgrade_reason, None);
+    }
+
     fn overview_body_snapshot(graph: &CodebaseGraphV1, prefix: Option<&str>) -> String {
         let svc = GraphContextService::new(graph);
         let overview = svc.overview(prefix);
@@ -229,6 +337,22 @@ mod tests {
                 overview.total_dirs, overview.total_files, overview.total_symbols, downgraded
             )
         }
+    }
+
+    fn overview_result_for_fixture(
+        file_count: usize,
+        prefix: Option<&str>,
+        input_format: Option<OverviewFormat>,
+    ) -> OverviewResult {
+        let graph = fixture_graph(file_count);
+        let svc = GraphContextService::new(&graph);
+        let overview = svc.overview(prefix);
+        result_from_overview(
+            overview,
+            prefix,
+            input_format,
+            requested_format(input_format),
+        )
     }
 
     fn fixture_graph(file_count: usize) -> CodebaseGraphV1 {
