@@ -96,6 +96,10 @@ impl GraphCommandContext {
 pub(crate) fn knowledge_error_from_orbit(error: OrbitError) -> KnowledgeError {
     match error {
         OrbitError::InvalidInput(message) => KnowledgeError::invalid_data(message),
+        OrbitError::InvalidInputDiagnostic {
+            message,
+            did_you_mean,
+        } => KnowledgeError::invalid_data_with_suggestions(message, did_you_mean),
         OrbitError::Execution(message) => KnowledgeError::knowledge_unavailable(message),
         other => KnowledgeError::knowledge_unavailable(other.to_string()),
     }
@@ -106,9 +110,15 @@ pub(crate) fn knowledge_error_from_orbit(error: OrbitError) -> KnowledgeError {
 /// `knowledge_invalid` kind maps to `InvalidInput` because callers treat it
 /// as user-input error; every other kind maps to `Execution`.
 pub fn knowledge_error_to_orbit(error: KnowledgeError) -> OrbitError {
-    let KnowledgeError { kind, reason } = error;
+    let KnowledgeError {
+        kind,
+        reason,
+        did_you_mean,
+    } = error;
     match kind {
-        KnowledgeErrorKind::Invalid => OrbitError::InvalidInput(reason),
+        KnowledgeErrorKind::Invalid => {
+            OrbitError::invalid_input_with_suggestions(reason, did_you_mean)
+        }
         KnowledgeErrorKind::Unavailable | KnowledgeErrorKind::Io => {
             OrbitError::Execution(format!("{kind}: {reason}"))
         }

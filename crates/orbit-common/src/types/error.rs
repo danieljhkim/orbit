@@ -50,6 +50,11 @@ pub enum OrbitError {
     CompanionNotInstalled(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error("invalid input: {message}")]
+    InvalidInputDiagnostic {
+        message: String,
+        did_you_mean: Vec<String>,
+    },
     #[error("skill validation failed: {0}")]
     SkillValidation(String),
     #[error("job validation failed: {0}")]
@@ -79,6 +84,29 @@ impl OrbitError {
         Self::NotFound {
             kind,
             id: id.into(),
+        }
+    }
+
+    pub fn invalid_input_with_suggestions(
+        message: impl Into<String>,
+        did_you_mean: Vec<String>,
+    ) -> Self {
+        if did_you_mean.is_empty() {
+            Self::InvalidInput(message.into())
+        } else {
+            Self::InvalidInputDiagnostic {
+                message: message.into(),
+                did_you_mean,
+            }
+        }
+    }
+
+    pub fn did_you_mean(&self) -> Option<&[String]> {
+        match self {
+            Self::InvalidInputDiagnostic { did_you_mean, .. } if !did_you_mean.is_empty() => {
+                Some(did_you_mean)
+            }
+            _ => None,
         }
     }
 }

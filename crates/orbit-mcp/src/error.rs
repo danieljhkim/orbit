@@ -14,10 +14,16 @@ pub(crate) fn tool_error_result(err: &OrbitError) -> CallToolResult {
 }
 
 fn error_payload(err: &OrbitError) -> Value {
-    json!({
+    let mut payload = json!({
         "code": error_code(err),
         "message": err.to_string(),
-    })
+    });
+    if let Some(did_you_mean) = err.did_you_mean()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("did_you_mean".to_string(), json!(did_you_mean));
+    }
+    payload
 }
 
 fn error_code(err: &OrbitError) -> &'static str {
@@ -38,7 +44,7 @@ fn error_code(err: &OrbitError) -> &'static str {
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::PolicyDenied(_) => "policy_denied",
         OrbitError::TaskApprovalRequired(_) => "approval_required",
-        OrbitError::InvalidInput(_) => "invalid_input",
+        OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
         OrbitError::SkillValidation(_) | OrbitError::JobValidation(_) => "validation_failed",
         OrbitError::TaskStatusTransition(_)
         | OrbitError::JobRunStateTransition(_)

@@ -27,6 +27,8 @@ impl std::fmt::Display for KnowledgeErrorKind {
 pub struct KnowledgeError {
     pub kind: KnowledgeErrorKind,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub did_you_mean: Vec<String>,
 }
 
 impl KnowledgeError {
@@ -34,6 +36,7 @@ impl KnowledgeError {
         Self {
             kind: KnowledgeErrorKind::Unavailable,
             reason: reason.into(),
+            did_you_mean: Vec::new(),
         }
     }
 
@@ -41,6 +44,18 @@ impl KnowledgeError {
         Self {
             kind: KnowledgeErrorKind::Invalid,
             reason: reason.into(),
+            did_you_mean: Vec::new(),
+        }
+    }
+
+    pub(crate) fn invalid_data_with_suggestions(
+        reason: impl Into<String>,
+        did_you_mean: Vec<String>,
+    ) -> Self {
+        Self {
+            kind: KnowledgeErrorKind::Invalid,
+            reason: reason.into(),
+            did_you_mean,
         }
     }
 
@@ -48,6 +63,7 @@ impl KnowledgeError {
         Self {
             kind: KnowledgeErrorKind::Io,
             reason: reason.into(),
+            did_you_mean: Vec::new(),
         }
     }
 }
@@ -61,6 +77,7 @@ mod tests {
         let error = KnowledgeError {
             kind: KnowledgeErrorKind::Invalid,
             reason: "bad selector".to_string(),
+            did_you_mean: Vec::new(),
         };
 
         let value = serde_json::to_value(error).expect("serialize knowledge error");
@@ -70,6 +87,26 @@ mod tests {
             serde_json::json!({
                 "kind": "knowledge_invalid",
                 "reason": "bad selector"
+            })
+        );
+    }
+
+    #[test]
+    fn knowledge_error_serializes_suggestions_when_present() {
+        let error = KnowledgeError {
+            kind: KnowledgeErrorKind::Invalid,
+            reason: "bad selector".to_string(),
+            did_you_mean: vec!["symbol:src/lib.rs#good:method".to_string()],
+        };
+
+        let value = serde_json::to_value(error).expect("serialize knowledge error");
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "knowledge_invalid",
+                "reason": "bad selector",
+                "did_you_mean": ["symbol:src/lib.rs#good:method"]
             })
         );
     }

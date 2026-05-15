@@ -97,6 +97,16 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             OrbitError::CompanionNotInstalled(redact_sensitive_env_text(&m))
         }
         OrbitError::InvalidInput(m) => OrbitError::InvalidInput(redact_sensitive_env_text(&m)),
+        OrbitError::InvalidInputDiagnostic {
+            message,
+            did_you_mean,
+        } => OrbitError::InvalidInputDiagnostic {
+            message: redact_sensitive_env_text(&message),
+            did_you_mean: did_you_mean
+                .into_iter()
+                .map(|suggestion| redact_sensitive_env_text(&suggestion))
+                .collect(),
+        },
         OrbitError::SkillValidation(m) => {
             OrbitError::SkillValidation(redact_sensitive_env_text(&m))
         }

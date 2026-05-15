@@ -23,10 +23,16 @@ pub fn render(value: &Value, pretty: bool) -> Result<String, OrbitError> {
 }
 
 pub fn error_payload(error: &OrbitError) -> Value {
-    json!({
+    let mut payload = json!({
         "error": error.to_string(),
         "code": error_code(error),
-    })
+    });
+    if let Some(did_you_mean) = error.did_you_mean()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("did_you_mean".to_string(), json!(did_you_mean));
+    }
+    payload
 }
 
 fn error_code(error: &OrbitError) -> &'static str {
@@ -47,7 +53,7 @@ fn error_code(error: &OrbitError) -> &'static str {
         },
         OrbitError::TaskApprovalRequired(_) => "task_approval_required",
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
-        OrbitError::InvalidInput(_) => "invalid_input",
+        OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
         OrbitError::SkillValidation(_) => "skill_validation_failed",
         OrbitError::JobValidation(_) => "job_validation_failed",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
