@@ -72,7 +72,7 @@ fn step_failure_short_circuits_remaining_steps() {
     ]);
     let writer = std::sync::Arc::new(test_writer("run-shortcircuit"));
 
-    let err = execute_job(&job, Value::Null, "run-shortcircuit", writer, &host)
+    let err = execute_job(&job, Value::Null, "run-shortcircuit", writer.clone(), &host)
         .expect_err("first step error must surface");
 
     assert!(matches!(
@@ -80,6 +80,73 @@ fn step_failure_short_circuits_remaining_steps() {
         DispatchError::DeterministicActionFailed { ref action, .. } if action == "first"
     ));
     assert_eq!(host.call_count("second"), 0, "second step must not run");
+    let events = writer.events_snapshot().expect("audit");
+    let step_finished = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::StepFinished {
+                step_id,
+                outcome,
+                error_message,
+            } if step_id == "step1" => Some((outcome, error_message)),
+            _ => None,
+        })
+        .expect("step finished event");
+    assert_eq!(step_finished.0, "error");
+    assert_eq!(
+        step_finished.1.as_deref(),
+        Some("deterministic action `first` failed: boom")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn non_success_step_outcome_copies_step_message_to_finished_audit_event() {
+    let host = ScriptedHost::new([("unused", Vec::new())]);
+    let step = JobV2Step {
+        id: "shell_fail".to_string(),
+        when: None,
+        retry: None,
+        recovery_activity: None,
+        resolved_recovery_activity: None,
+        body: JobV2StepBody::Target(TargetStep {
+            spec: ActivityV2Spec::Shell(orbit_common::types::activity_job::ShellSpec {
+                program: "/bin/sh".to_string(),
+                args: vec!["-c".to_string(), "exit 7".to_string()],
+                allowed_programs: vec!["/bin/sh".to_string()],
+                timeout_seconds: 0,
+                expected_exit_codes: vec![0],
+            }),
+            activity_name: None,
+            fs_profile: None,
+            default_input: None,
+            timeout_seconds: 0,
+            session: None,
+            role: None,
+        }),
+    };
+    let job = job_with_steps(vec![step]);
+    let writer = std::sync::Arc::new(test_writer("run-shell-fail"));
+
+    let outcome =
+        execute_job(&job, Value::Null, "run-shell-fail", writer.clone(), &host).expect("run job");
+
+    assert!(!outcome.success);
+    assert_eq!(outcome.message.as_deref(), Some("exit 7 not in [0]"));
+    let events = writer.events_snapshot().expect("audit");
+    let step_finished = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::StepFinished {
+                step_id,
+                outcome,
+                error_message,
+            } if step_id == "shell_fail" => Some((outcome, error_message)),
+            _ => None,
+        })
+        .expect("step finished event");
+    assert_eq!(step_finished.0, "failed");
+    assert_eq!(step_finished.1.as_deref(), Some("exit 7 not in [0]"));
 }
 
 #[test]

@@ -162,6 +162,11 @@ impl OrbitRuntime {
                                 .to_string();
                             step.state = Some(outcome.clone());
                             step.outcome = Some(outcome);
+                            step.error_message = event
+                                .raw
+                                .get("error_message")
+                                .and_then(Value::as_str)
+                                .map(str::to_string);
                         }
                         Some("step_skipped") => {
                             step.state = Some("skipped".to_string());
@@ -470,6 +475,73 @@ mod tests {
             .collect_run_cli_invocations("jrun-missing")
             .expect("collect records");
         assert!(records.is_empty());
+    }
+
+    #[test]
+    fn collect_run_audit_steps_reads_step_finished_error_message_and_tolerates_absence() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let audit_root = runtime.data_root().join("state").join("audit");
+        let jsonl_dir = audit_root.join("v2_loop");
+        std::fs::create_dir_all(&jsonl_dir).expect("create jsonl dir");
+        let run_id = "jrun-step-errors";
+        let events = [
+            json!({
+                "event_id": "evt-step-one",
+                "ts": "2026-04-26T07:00:01Z",
+                "run_id": run_id,
+                "body_kind": "step_started",
+                "step_id": "plan"
+            }),
+            json!({
+                "event_id": "evt-step-one-finished",
+                "ts": "2026-04-26T07:00:02Z",
+                "run_id": run_id,
+                "body_kind": "step_finished",
+                "step_id": "plan",
+                "outcome": "error",
+                "error_message": "planning duel failed"
+            }),
+            json!({
+                "event_id": "evt-step-two",
+                "ts": "2026-04-26T07:00:03Z",
+                "run_id": run_id,
+                "body_kind": "step_started",
+                "step_id": "review"
+            }),
+            json!({
+                "event_id": "evt-step-two-finished",
+                "ts": "2026-04-26T07:00:04Z",
+                "run_id": run_id,
+                "body_kind": "step_finished",
+                "step_id": "review",
+                "outcome": "success"
+            }),
+        ];
+        let jsonl = events
+            .iter()
+            .map(|event| serde_json::to_string(event).expect("serialize event"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(
+            jsonl_dir.join(format!("{run_id}.jsonl")),
+            format!("{jsonl}\n"),
+        )
+        .expect("write jsonl");
+
+        let steps = runtime
+            .collect_run_audit_steps(run_id)
+            .expect("collect steps");
+
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].step_id, "plan");
+        assert_eq!(steps[0].outcome.as_deref(), Some("error"));
+        assert_eq!(
+            steps[0].error_message.as_deref(),
+            Some("planning duel failed")
+        );
+        assert_eq!(steps[1].step_id, "review");
+        assert_eq!(steps[1].outcome.as_deref(), Some("success"));
+        assert_eq!(steps[1].error_message, None);
     }
 
     #[test]

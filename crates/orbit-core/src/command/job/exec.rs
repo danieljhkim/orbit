@@ -252,13 +252,14 @@ impl OrbitRuntime {
             execute_job(&asset.spec, input, &run_id, writer.clone(), self)
                 .map_err(|err| OrbitError::Execution(format!("v2 job dispatch: {err}")));
 
-        let outcome_str = match &outcome_res {
-            Ok(o) if o.success => "success",
-            Ok(_) => "failed",
-            Err(_) => "error",
+        let (outcome_str, error_message) = match &outcome_res {
+            Ok(o) if o.success => ("success", None),
+            Ok(o) => ("failed", o.message.clone()),
+            Err(err) => ("error", Some(err.to_string())),
         };
         let _ = writer.emit(V2AuditEventKind::RunFinished {
             outcome: outcome_str.to_string(),
+            error_message,
         });
         self.record_event(OrbitEvent::ActivityRunCompleted {
             id: asset.name.clone(),
@@ -733,6 +734,27 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
                 .as_deref()
                 .is_some_and(|message| message.contains("deterministic action not registered"))
         }));
+        let audit_jsonl = repo_root
+            .join(".orbit/state/audit/v2_loop")
+            .join(format!("{}.jsonl", run.run_id));
+        let run_finished = std::fs::read_to_string(&audit_jsonl)
+            .expect("read audit jsonl")
+            .lines()
+            .find(|line| line.contains(r#""body_kind":"run_finished""#))
+            .expect("run_finished audit event")
+            .to_string();
+        let event: serde_json::Value =
+            serde_json::from_str(&run_finished).expect("parse run_finished");
+        assert_eq!(
+            event.get("outcome").and_then(serde_json::Value::as_str),
+            Some("error")
+        );
+        assert!(
+            event
+                .get("error_message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| message.contains("deterministic action not registered"))
+        );
         assert!(
             runtime
                 .read_run_state(&run.run_id)

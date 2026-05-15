@@ -699,6 +699,8 @@ mod tests {
         let line = serde_json::json!({
             "event_type": "run.finished",
             "ts": finished_at.to_rfc3339(),
+            "outcome": "success",
+            "error_message": null,
         });
         std::fs::write(dir.join(format!("{run_id}.jsonl")), format!("{line}\n"))
             .expect("write audit event");

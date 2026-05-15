@@ -53,7 +53,9 @@ pub(super) fn emit_job_tracing(job_run_id: &str, task_id: Option<&str>, kind: &V
                 "step started",
             );
         }
-        V2AuditEventKind::StepFinished { step_id, outcome } => {
+        V2AuditEventKind::StepFinished {
+            step_id, outcome, ..
+        } => {
             let success = outcome == "success";
             if success {
                 tracing::info!(

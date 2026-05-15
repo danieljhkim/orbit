@@ -107,6 +107,11 @@ fn smoke_dispatch_shell(
 
     let _ = writer.emit(V2AuditEventKind::RunFinished {
         outcome: if outcome.success { "success" } else { "failed" }.into(),
+        error_message: if outcome.success {
+            None
+        } else {
+            outcome.message.clone()
+        },
     });
 
     if !outcome.success {

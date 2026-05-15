@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Schema version for the §7 v2 audit envelope. Per §12 Q10 resolution,
 /// versioning is PER EVENT TYPE — each variant of `V2AuditEventKind` can be
@@ -7,7 +7,7 @@ use serde::Serialize;
 pub const AUDIT_ENVELOPE_SCHEMA_VERSION: u32 = 1;
 
 /// Common envelope fields wrapping every v2 audit event (§7).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct V2AuditEnvelope {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
@@ -27,7 +27,7 @@ pub struct V2AuditEnvelope {
 }
 
 /// §7 v2 audit event — the envelope plus a type-specific body.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct V2AuditEvent {
     #[serde(flatten)]
     pub envelope: V2AuditEnvelope,
@@ -40,7 +40,7 @@ pub struct V2AuditEvent {
 /// events. Loop-engine http.* and tool.call.* events continue to be emitted
 /// by the loop engine and are referenced via `parent_event_id` from Activity
 /// events.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "body_kind", rename_all = "snake_case")]
 pub enum V2AuditEventKind {
     RunStarted {
@@ -50,6 +50,8 @@ pub enum V2AuditEventKind {
     },
     RunFinished {
         outcome: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
     },
     StepStarted {
         step_id: String,
@@ -57,6 +59,8 @@ pub enum V2AuditEventKind {
     StepFinished {
         step_id: String,
         outcome: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
     },
     StepSkipped {
         step_id: String,
@@ -173,8 +177,91 @@ pub enum V2AuditEventKind {
     },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BranchOutcome {
     pub branch_id: String,
     pub outcome: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use serde_json::json;
+
+    #[test]
+    fn step_finished_error_message_round_trips_and_absence_defaults_to_none() {
+        let encoded = serde_json::to_value(V2AuditEventKind::StepFinished {
+            step_id: "plan".to_string(),
+            outcome: "error".to_string(),
+            error_message: Some("dispatch failed".to_string()),
+        })
+        .expect("serialize step finished");
+
+        assert_eq!(encoded["error_message"], "dispatch failed");
+        let decoded: V2AuditEventKind =
+            serde_json::from_value(encoded).expect("deserialize step finished");
+        assert!(matches!(
+            decoded,
+            V2AuditEventKind::StepFinished {
+                step_id,
+                outcome,
+                error_message: Some(message)
+            } if step_id == "plan" && outcome == "error" && message == "dispatch failed"
+        ));
+
+        let decoded: V2AuditEventKind = serde_json::from_value(json!({
+            "body_kind": "step_finished",
+            "step_id": "plan",
+            "outcome": "error"
+        }))
+        .expect("deserialize legacy step finished");
+        assert!(matches!(
+            decoded,
+            V2AuditEventKind::StepFinished {
+                error_message: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn run_finished_error_message_round_trips_and_absence_defaults_to_none() {
+        let encoded = serde_json::to_value(V2AuditEventKind::RunFinished {
+            outcome: "error".to_string(),
+            error_message: Some("job failed".to_string()),
+        })
+        .expect("serialize run finished");
+
+        assert_eq!(encoded["error_message"], "job failed");
+        let decoded: V2AuditEventKind =
+            serde_json::from_value(encoded).expect("deserialize run finished");
+        assert!(matches!(
+            decoded,
+            V2AuditEventKind::RunFinished {
+                outcome,
+                error_message: Some(message)
+            } if outcome == "error" && message == "job failed"
+        ));
+
+        let encoded = serde_json::to_value(V2AuditEventKind::RunFinished {
+            outcome: "success".to_string(),
+            error_message: None,
+        })
+        .expect("serialize successful run finished");
+        assert!(encoded.get("error_message").is_none());
+
+        let decoded: V2AuditEventKind = serde_json::from_value(json!({
+            "body_kind": "run_finished",
+            "outcome": "success"
+        }))
+        .expect("deserialize legacy run finished");
+        assert!(matches!(
+            decoded,
+            V2AuditEventKind::RunFinished {
+                error_message: None,
+                ..
+            }
+        ));
+    }
 }

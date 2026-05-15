@@ -60,6 +60,7 @@ fn emit_job_event_dual_writes_step_lifecycle_to_audit_and_tracing() {
             V2AuditEventKind::StepFinished {
                 step_id: "build".to_string(),
                 outcome: "success".to_string(),
+                error_message: None,
             },
         )
         .expect("StepFinished emit");
@@ -95,7 +96,7 @@ fn emit_job_event_dual_writes_step_lifecycle_to_audit_and_tracing() {
     ));
     assert!(matches!(
         snapshot[1].kind,
-        V2AuditEventKind::StepFinished { ref step_id, ref outcome }
+        V2AuditEventKind::StepFinished { ref step_id, ref outcome, .. }
             if step_id == "build" && outcome == "success"
     ));
 }
@@ -129,6 +130,7 @@ fn emit_job_event_routes_step_finished_failure_to_error_level() {
             V2AuditEventKind::StepFinished {
                 step_id: "deploy".to_string(),
                 outcome: "failed".to_string(),
+                error_message: Some("deploy failed".to_string()),
             },
         )
         .expect("StepFinished failed emit");
@@ -316,6 +318,7 @@ fn emit_job_event_audit_snapshot_matches_direct_emit_for_same_kinds() {
             V2AuditEventKind::StepFinished {
                 step_id: "build".to_string(),
                 outcome: "success".to_string(),
+                error_message: None,
             },
         ]
     };

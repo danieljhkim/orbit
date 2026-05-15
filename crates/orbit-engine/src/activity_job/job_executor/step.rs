@@ -37,10 +37,10 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
     let result = run_step_with_retry(step, ctx);
 
     let _ = ctx.audit.pop_parent();
-    let outcome_str = match &result {
-        Ok(StepOutcome { success: true, .. }) => "success",
-        Ok(_) => "failed",
-        Err(_) => "error",
+    let (outcome_str, error_message) = match &result {
+        Ok(StepOutcome { success: true, .. }) => ("success", None),
+        Ok(StepOutcome { message, .. }) => ("failed", message.clone()),
+        Err(err) => ("error", Some(err.to_string())),
     };
     let _ = emit_job_event(
         &ctx.audit,
@@ -48,6 +48,7 @@ pub(super) fn run_step(step: &JobV2Step, ctx: &ExecCtx<'_>) -> Result<StepOutcom
         V2AuditEventKind::StepFinished {
             step_id: step.id.clone(),
             outcome: outcome_str.to_string(),
+            error_message,
         },
     );
 
