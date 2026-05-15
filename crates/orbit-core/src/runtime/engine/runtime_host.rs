@@ -164,6 +164,13 @@ impl RuntimeHost for OrbitRuntime {
         self.context.graph_editing()
     }
 
+    fn actor_model_identity(&self) -> Option<String> {
+        matches!(self.actor().kind, crate::context::ActorKind::Agent)
+            .then(|| self.actor_label().trim())
+            .filter(|label| !label.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
     fn pr_config(&self) -> orbit_engine::PrConfig {
         OrbitRuntime::pr_config(self).clone()
     }

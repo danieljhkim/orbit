@@ -477,6 +477,11 @@ pub trait RuntimeHost {
     }
     fn scoring_enabled(&self) -> bool;
     fn graph_editing(&self) -> bool;
+    /// Return the current agent model identity when this runtime is operating
+    /// as an agent, or `None` when there is no model-bearing actor.
+    fn actor_model_identity(&self) -> Option<String> {
+        None
+    }
     fn pr_config(&self) -> PrConfig {
         PrConfig::default()
     }
@@ -958,6 +963,10 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
 
     fn graph_editing(&self) -> bool {
         self.runtime.graph_editing()
+    }
+
+    fn actor_model_identity(&self) -> Option<String> {
+        self.runtime.actor_model_identity()
     }
 
     fn scoreboard_dir(&self) -> &Path {

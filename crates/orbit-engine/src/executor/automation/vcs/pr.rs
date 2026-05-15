@@ -276,10 +276,17 @@ pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default_pr_title(&completed_tasks));
     let pr_config = host.pr_config();
+    let pr_opener_model = host.actor_model_identity();
     let body = input_string_field(input, "body")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| {
-            build_batch_pr_body(&completed_tasks, &freshness, &changed_files, &pr_config)
+            build_batch_pr_body(
+                &completed_tasks,
+                &freshness,
+                &changed_files,
+                &pr_config,
+                pr_opener_model.as_deref(),
+            )
         });
 
     let tool_context = ToolContext {
@@ -418,6 +425,7 @@ fn build_batch_pr_body(
     freshness: &super::freshness::BranchFreshness,
     changed_files: &[&str],
     pr_config: &PrConfig,
+    pr_opener_model: Option<&str>,
 ) -> String {
     let mut body = if let [task] = tasks {
         build_single_task_pr_body(task, freshness, pr_config)
@@ -425,7 +433,7 @@ fn build_batch_pr_body(
         build_legacy_batch_pr_body(tasks, freshness, changed_files, pr_config)
     };
 
-    if let Some(signature) = batch_pr_signature(tasks) {
+    if let Some(signature) = batch_pr_signature(tasks, pr_opener_model) {
         body.push_str("\n\n");
         body.push_str(&signature);
     }
@@ -613,14 +621,19 @@ fn default_pr_title(tasks: &[Task]) -> String {
     }
 }
 
-fn batch_pr_signature(tasks: &[Task]) -> Option<String> {
-    tasks.iter().find_map(|task| {
-        let model = task
-            .implemented_by
-            .as_deref()
-            .or(task.created_by.as_deref())?;
-        Some(format!("*authored by: {model}*"))
-    })
+fn batch_pr_signature(tasks: &[Task], pr_opener_model: Option<&str>) -> Option<String> {
+    let model = tasks
+        .iter()
+        .find_map(|task| {
+            let model = task.implemented_by.as_deref()?.trim();
+            (!model.is_empty()).then_some(model)
+        })
+        .or_else(|| {
+            pr_opener_model
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+        })?;
+    Some(format!("*authored by: {model}*"))
 }
 
 fn task_required_revision<H: TaskHost + ?Sized>(host: &H, task: &Task) -> Result<bool, OrbitError> {
@@ -1139,6 +1152,7 @@ mod tests {
             &freshness(),
             &[],
             &test_pr_config(None),
+            None,
         );
         let task_line = body
             .lines()
@@ -1163,6 +1177,7 @@ mod tests {
             &freshness(),
             &["crates/orbit-core/src/runtime/engine/task_host.rs"],
             &test_pr_config(None),
+            None,
         );
 
         assert!(body.contains("- T20260427-24 System attribution fix"));
@@ -1188,6 +1203,7 @@ mod tests {
             &freshness(),
             &[],
             &test_pr_config(None),
+            None,
         );
 
         assert!(body.contains("- T20260427-32 Include execution summaries"));
@@ -1214,6 +1230,7 @@ mod tests {
             &freshness(),
             &["crates/orbit-engine/src/executor/automation/vcs/pr.rs"],
             &test_pr_config(None),
+            Some("gpt-5.5"),
         );
 
         assert_eq!(
@@ -1236,6 +1253,7 @@ mod tests {
             &freshness(),
             &["crates/orbit-engine/src/executor/automation/vcs/pr.rs"],
             &test_pr_config(None),
+            Some("gpt-5.5"),
         );
 
         let headings = body
@@ -1283,6 +1301,7 @@ mod tests {
             &freshness(),
             &[],
             &test_pr_config(None),
+            None,
         );
 
         assert!(body.contains("## Task"));
@@ -1290,6 +1309,104 @@ mod tests {
         assert!(!body.contains("<details>"));
         assert!(body.contains("## Validation"));
         assert!(body.contains("## Branch Freshness"));
+    }
+
+    #[test]
+    fn single_task_pr_signature_uses_implemented_by_when_present() {
+        let mut task = task_with_contract(
+            "T20260515-1",
+            "Keep implementation attribution",
+            "done",
+            "Preserve implemented_by attribution.",
+            &["implemented_by remains authoritative.".to_string()],
+            None,
+        );
+        task.created_by = Some("Y".to_string());
+        task.implemented_by = Some("X".to_string());
+
+        let body =
+            build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), Some("Z"));
+
+        assert!(body.contains("*authored by: X*"));
+    }
+
+    #[test]
+    fn single_task_pr_signature_does_not_fallback_to_created_by() {
+        let mut task = task_with_contract(
+            "T20260515-2",
+            "Do not attribute task creator",
+            "done",
+            "created_by is not implementation attribution.",
+            &["created_by is not rendered as author.".to_string()],
+            None,
+        );
+        task.created_by = Some("Y".to_string());
+        task.implemented_by = None;
+
+        let body = build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), None);
+        let created_by_signature =
+            regex::Regex::new(r"(?m)^\*authored by: Y\*$").expect("valid authored-by regex");
+
+        assert!(!created_by_signature.is_match(&body));
+    }
+
+    #[test]
+    fn single_task_pr_signature_uses_pr_opener_model_when_implemented_by_absent() {
+        let mut task = task_with_contract(
+            "T20260515-3",
+            "Use opener attribution",
+            "done",
+            "The PR opener is the fallback implementation source.",
+            &["opener model is rendered as author.".to_string()],
+            None,
+        );
+        task.created_by = Some("Y".to_string());
+        task.implemented_by = None;
+
+        let body =
+            build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), Some("Z"));
+
+        assert!(body.contains("*authored by: Z*"));
+    }
+
+    #[test]
+    fn single_task_pr_signature_omits_author_without_implemented_by_or_opener() {
+        let mut task = task_with_contract(
+            "T20260515-4",
+            "Omit unknown attribution",
+            "done",
+            "No implementation attribution is available.",
+            &["no authored-by line is rendered.".to_string()],
+            None,
+        );
+        task.created_by = Some("Y".to_string());
+        task.implemented_by = None;
+
+        let body = build_batch_pr_body(&[task], &freshness(), &[], &test_pr_config(None), None);
+
+        assert!(!body.contains("authored by:"));
+    }
+
+    #[test]
+    fn multi_task_pr_signature_uses_first_implemented_by() {
+        let mut first = task("T20260515-5A", "First task", "done");
+        first.implemented_by = Some("A".to_string());
+        let mut second = task("T20260515-5B", "Second task", "done");
+        second.implemented_by = Some("B".to_string());
+
+        let body = build_batch_pr_body(
+            &[first, second],
+            &freshness(),
+            &[],
+            &test_pr_config(None),
+            Some("Z"),
+        );
+        let signature_lines = body
+            .lines()
+            .filter(|line| line.starts_with("*authored by:"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(signature_lines, vec!["*authored by: A*"]);
     }
 
     #[test]
