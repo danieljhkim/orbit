@@ -6,7 +6,6 @@ const STATUS_ORDER = [
   "review",
   "blocked",
   "proposed",
-  "friction",
   "backlog",
   "someday",
   "rejected",
@@ -398,8 +397,8 @@ function buildTaskDetail(task) {
   return detail;
 }
 
-const APPROVE_STATUSES = new Set(["proposed", "friction", "review"]);
-const REJECT_STATUSES = new Set(["proposed", "friction", "review", "backlog"]);
+const APPROVE_STATUSES = new Set(["proposed", "review"]);
+const REJECT_STATUSES = new Set(["proposed", "review", "backlog"]);
 
 function buildActionsRow(task, detail) {
   const actions = el("div", { class: "actions" });
