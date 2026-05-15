@@ -12,6 +12,9 @@ const STATUS_ORDER = [
 ];
 
 const DEFAULT_INACTIVE_STATUSES = new Set(["someday"]);
+const STATUS_UPDATE_TARGETS = STATUS_ORDER
+  .filter((status) => !["friction", "rejected", "archived"].includes(status))
+  .concat(["done"]);
 
 const params = new URLSearchParams(window.location.search);
 function positiveIntParam(name, fallback) {
@@ -39,6 +42,7 @@ let activeTab = "tasks";
 let activeDiagSubtab = "runs";
 let expandedTaskIds = new Set();
 let isRefreshing = false;
+let taskActionNotice = null;
 
 // Audit tab state
 let lastAudit = [];
@@ -428,7 +432,56 @@ function buildActionsRow(task, detail) {
     });
     actions.appendChild(btn);
   }
+  const statusSelect = buildStatusUpdateControl(task, detail);
+  if (statusSelect) actions.appendChild(statusSelect);
   return actions;
+}
+
+function buildStatusUpdateControl(task, detail) {
+  const targets = STATUS_UPDATE_TARGETS.filter((status) => status !== task.status);
+  if (targets.length === 0) return null;
+
+  const select = el("select", {
+    class: "action status-update",
+    title: `Update status for ${task.id}`,
+  });
+  const placeholder = el("option", { text: "set status" });
+  placeholder.value = "";
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  select.appendChild(placeholder);
+
+  for (const status of targets) {
+    const option = el("option", { text: status });
+    option.value = status;
+    select.appendChild(option);
+  }
+
+  select.addEventListener("click", (e) => e.stopPropagation());
+  select.addEventListener("change", (e) => {
+    e.stopPropagation();
+    const targetStatus = select.value;
+    if (!targetStatus) return;
+    runAction(
+      task,
+      "status",
+      detail,
+      { status: targetStatus },
+      select,
+      {
+        method: "PATCH",
+        path: `/api/tasks/${encodeURIComponent(task.id)}`,
+        collapseOnSuccess: targetStatus === "done",
+        successNotice: targetStatus === "done"
+          ? `Task ${task.id} marked done; it is no longer shown in the default dashboard list.`
+          : null,
+        onFailure: () => {
+          select.value = "";
+        },
+      },
+    );
+  });
+  return select;
 }
 
 function showRejectForm(task, detail, actions) {
@@ -460,11 +513,11 @@ function showRejectForm(task, detail, actions) {
   ta.focus();
 }
 
-async function runAction(task, kind, detail, body, btnNode) {
-  // Disable buttons while in flight to prevent double-clicks
-  for (const b of detail.querySelectorAll("button.action")) b.disabled = true;
+async function runAction(task, kind, detail, body, btnNode, opts = {}) {
+  // Disable action controls while in flight to prevent double-clicks.
+  for (const b of detail.querySelectorAll(".action")) b.disabled = true;
   let oldText = "";
-  if (btnNode) {
+  if (btnNode && btnNode.tagName === "BUTTON") {
     oldText = btnNode.textContent;
     btnNode.innerHTML = `<span class="spinner"></span>wait`;
   }
@@ -472,8 +525,8 @@ async function runAction(task, kind, detail, body, btnNode) {
   const prior = detail.querySelector(".action-error");
   if (prior) prior.remove();
   try {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/${kind}`, {
-      method: "POST",
+    const res = await fetch(opts.path || `/api/tasks/${encodeURIComponent(task.id)}/${kind}`, {
+      method: opts.method || "POST",
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -487,19 +540,31 @@ async function runAction(task, kind, detail, body, btnNode) {
       }
       throw new Error(msg);
     }
-    expandedTaskIds.delete(task.id);
+    if (opts.collapseOnSuccess !== false) expandedTaskIds.delete(task.id);
+    if (opts.successNotice) taskActionNotice = opts.successNotice;
     await refreshDashboard();
   } catch (err) {
-    for (const b of detail.querySelectorAll("button.action")) b.disabled = false;
-    if (btnNode) btnNode.textContent = oldText;
+    for (const b of detail.querySelectorAll(".action")) b.disabled = false;
+    if (btnNode && btnNode.tagName === "BUTTON") btnNode.textContent = oldText;
+    if (opts.onFailure) opts.onFailure();
     const errEl = el("div", { class: "action-error", text: String(err.message || err) });
     detail.prepend(errEl);
   }
 }
 
+function takeTaskActionNotice() {
+  if (!taskActionNotice) return null;
+  const notice = el("div", { class: "task-action-notice", text: taskActionNotice });
+  notice.dataset.key = "task-action-notice";
+  notice.dataset.hash = taskActionNotice;
+  taskActionNotice = null;
+  return notice;
+}
+
 function renderTasks(tasks) {
   const body = $("tasks-body");
   const frag = document.createDocumentFragment();
+  const notice = takeTaskActionNotice();
   
   const filtered = filterTasks(tasks);
   $("tasks-count").textContent =
@@ -508,13 +573,15 @@ function renderTasks(tasks) {
       : `${filtered.length}/${tasks.length}`;
   if (filtered.length === 0) {
     const defaultText = tasks.length === 0 ? "No tasks available." : "No tasks match filter.";
-    syncNodes(body, [el("div", { class: "empty-state" }, [
+    const emptyState = el("div", { class: "empty-state" }, [
       el("div", { class: "icon", text: "✧" }),
       el("div", { class: "text", text: defaultText })
-    ])]);
+    ]);
+    syncNodes(body, notice ? [notice, emptyState] : [emptyState]);
     return;
   }
   const groups = new Map();
+  if (notice) frag.appendChild(notice);
   for (const t of filtered) {
     if (!groups.has(t.status)) groups.set(t.status, []);
     groups.get(t.status).push(t);

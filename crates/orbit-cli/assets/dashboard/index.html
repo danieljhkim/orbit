@@ -613,6 +613,23 @@
         border-color: var(--fg);
         color: var(--fg); 
       }
+
+      .action.status-update {
+        border: 1px solid var(--accent);
+        color: var(--accent-hi);
+        background: var(--bg);
+        min-width: 128px;
+      }
+      .action.status-update:hover:not(:disabled),
+      .action.status-update:focus {
+        border-color: var(--accent-hover);
+        color: var(--fg);
+        outline: none;
+      }
+      .action.status-update option {
+        color: var(--fg);
+        background: var(--bg);
+      }
       
       .action.cancel { 
         border: 1px solid transparent; 
@@ -670,6 +687,16 @@
         font-family: var(--font-mono);
         font-size: 12px;
         background: rgba(239, 68, 68, 0.1);
+      }
+
+      .task-action-notice {
+        padding: 8px 12px;
+        border-left: 3px solid var(--state-success);
+        border-radius: 4px;
+        color: var(--state-success);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        background: rgba(16, 185, 129, 0.1);
       }
       
       .pill {
