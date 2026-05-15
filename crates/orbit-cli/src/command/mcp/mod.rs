@@ -70,17 +70,30 @@ pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
 pub(crate) const SEMANTIC_READ_TOOL_NAMES: &[&str] =
     &["orbit.semantic.search", "orbit.semantic.related"];
 
+pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
+    "orbit.learning.add",
+    "orbit.learning.list",
+    "orbit.learning.search",
+    "orbit.learning.show",
+    "orbit.learning.update",
+    "orbit.learning.supersede",
+    "orbit.learning.prune",
+    "orbit.learning.reindex",
+];
+
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     let mut names = Vec::with_capacity(
         TASK_TOOL_NAMES.len()
             + FRICTION_TOOL_NAMES.len()
             + GRAPH_READ_TOOL_NAMES.len()
-            + SEMANTIC_READ_TOOL_NAMES.len(),
+            + SEMANTIC_READ_TOOL_NAMES.len()
+            + LEARNING_TOOL_NAMES.len(),
     );
     names.extend_from_slice(TASK_TOOL_NAMES);
     names.extend_from_slice(FRICTION_TOOL_NAMES);
     names.extend_from_slice(GRAPH_READ_TOOL_NAMES);
     names.extend_from_slice(SEMANTIC_READ_TOOL_NAMES);
+    names.extend_from_slice(LEARNING_TOOL_NAMES);
     names
 }
 
@@ -89,6 +102,7 @@ pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
         || FRICTION_TOOL_NAMES.contains(&name)
         || GRAPH_READ_TOOL_NAMES.contains(&name)
         || SEMANTIC_READ_TOOL_NAMES.contains(&name)
+        || LEARNING_TOOL_NAMES.contains(&name)
 }
 
 fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
@@ -308,8 +322,8 @@ mod tests {
     use orbit_mcp::McpHost;
 
     use super::{
-        GRAPH_READ_TOOL_NAMES, RuntimeMcpHost, SEMANTIC_READ_TOOL_NAMES, TASK_TOOL_NAMES,
-        is_mcp_tool_exposed, safe_mcp_tool_names,
+        GRAPH_READ_TOOL_NAMES, LEARNING_TOOL_NAMES, RuntimeMcpHost, SEMANTIC_READ_TOOL_NAMES,
+        TASK_TOOL_NAMES, is_mcp_tool_exposed, safe_mcp_tool_names,
     };
 
     #[test]
@@ -351,6 +365,24 @@ mod tests {
             assert!(is_mcp_tool_exposed(name));
         }
 
+        for name in LEARNING_TOOL_NAMES {
+            assert!(
+                names.contains(*name),
+                "missing runtime learning tool: {name}"
+            );
+            assert!(is_mcp_tool_exposed(name));
+        }
+
+        for name in names
+            .iter()
+            .filter(|name| name.starts_with("orbit.learning."))
+        {
+            assert!(
+                safe_names.contains(name.as_str()),
+                "runtime learning tool missing from safe MCP surface: {name}"
+            );
+        }
+
         for name in [
             "orbit.graph.add",
             "orbit.graph.delete",
@@ -389,6 +421,13 @@ mod tests {
             assert!(
                 listed.contains(*name),
                 "client-visible MCP tool list missing semantic read tool: {name}"
+            );
+        }
+
+        for name in LEARNING_TOOL_NAMES {
+            assert!(
+                listed.contains(*name),
+                "client-visible MCP tool list missing learning tool: {name}"
             );
         }
 
@@ -474,6 +513,14 @@ mod tests {
             assert_eq!(events.len(), 1, "exactly one audit row for happy path");
             assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
             assert_eq!(events[0].status, AuditEventStatus::Success);
+        }
+
+        #[test]
+        fn learning_search_is_exposed_to_mcp_dispatch() {
+            let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+            let value = audited_mcp_call(&runtime, "orbit.learning.search", json!({}))
+                .expect("learning search dispatch ok");
+            assert!(value.is_array(), "learning search returns an array");
         }
 
         #[test]
