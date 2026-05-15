@@ -83,9 +83,28 @@ impl TaskBundleStoreV2 {
     ) -> Result<TaskBundleCreateResult, OrbitError> {
         let task_id = bundle.envelope.id.clone();
         let bundle_dir = self.bundle_path(&task_id)?;
-        let create_lock_path = create_lock_path(&bundle_dir, &task_id)?;
-        with_exclusive_file_lock(&create_lock_path, "task bundle create", || {
-            self.create_bundle_locked(&task_id, &bundle_dir, bundle)
+        let lock_sentinel_path = task_bundle_lock_sentinel_path(&bundle_dir)?;
+        with_exclusive_file_lock(&bundle_dir, "task bundle create", || {
+            let result = self.create_bundle_locked(&task_id, &bundle_dir, bundle);
+            match (
+                result,
+                remove_task_bundle_lock_sentinel(&lock_sentinel_path),
+            ) {
+                (Ok(created), Ok(())) => Ok(created),
+                (Err(err), Ok(())) => Err(err),
+                (Ok(_), Err(cleanup_err)) => Err(cleanup_err),
+                (Err(err), Err(cleanup_err)) => {
+                    orbit_common::tracing::warn!(
+                        target: "orbit.store.task_bundle_v2",
+                        task_id,
+                        lock_path = %lock_sentinel_path.display(),
+                        original_error = %err,
+                        cleanup_error = %cleanup_err,
+                        "failed to clean up task bundle lock sentinel",
+                    );
+                    Err(err)
+                }
+            }
         })
     }
 
@@ -258,14 +277,25 @@ impl TaskBundleStoreV2 {
     }
 }
 
-fn create_lock_path(bundle_dir: &Path, task_id: &str) -> Result<PathBuf, OrbitError> {
-    let parent = bundle_dir.parent().ok_or_else(|| {
-        OrbitError::Store(format!(
-            "task bundle path {} has no parent directory",
-            bundle_dir.display()
-        ))
-    })?;
-    Ok(parent.join(format!(".{task_id}.create")))
+fn task_bundle_lock_sentinel_path(bundle_dir: &Path) -> Result<PathBuf, OrbitError> {
+    let file_name = bundle_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            OrbitError::Store(format!(
+                "task bundle path {} has no file name",
+                bundle_dir.display()
+            ))
+        })?;
+    Ok(bundle_dir.with_file_name(format!(".{file_name}.lock")))
+}
+
+fn remove_task_bundle_lock_sentinel(lock_path: &Path) -> Result<(), OrbitError> {
+    match fs::remove_file(lock_path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(OrbitError::Io(err.to_string())),
+    }
 }
 
 fn ensure_projection_entry_removable(
@@ -990,6 +1020,34 @@ mod tests {
         TaskBundleStoreV2::new(registry, binding.workspace_id, orbit_dir)
     }
 
+    fn task_lock_path(bundle_dir: &Path) -> PathBuf {
+        let file_name = bundle_dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("bundle path has file name");
+        bundle_dir.with_file_name(format!(".{file_name}.lock"))
+    }
+
+    fn legacy_double_dot_lock_path(bundle_dir: &Path, task_id: &str) -> PathBuf {
+        bundle_dir.with_file_name(format!("..{task_id}.create.lock"))
+    }
+
+    fn lock_entries_for_task(tasks_dir: &Path, task_id: &str) -> Vec<String> {
+        let mut entries = fs::read_dir(tasks_dir)
+            .expect("read task workspace dir")
+            .map(|entry| {
+                entry
+                    .expect("read task workspace entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|name| name.contains(task_id) && name.ends_with(".lock"))
+            .collect::<Vec<_>>();
+        entries.sort();
+        entries
+    }
+
     #[test]
     fn write_and_read_bundle_round_trips_v2_shape() {
         let temp = TempDir::new().expect("tempdir");
@@ -1052,6 +1110,92 @@ mod tests {
                 .join(TASK_REVIEW_THREADS_DIR_NAME)
                 .join("RT-0001.md")
                 .is_file()
+        );
+    }
+
+    #[test]
+    fn create_bundle_removes_lock_sentinel_after_success() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = bundle_store(&temp);
+        let bundle_dir = store.bundle_path("ORB-00000").expect("bundle path");
+        let tasks_dir = bundle_dir.parent().expect("bundle parent");
+
+        let created = store
+            .create_bundle(&sample_bundle("ORB-00000"))
+            .expect("create bundle");
+
+        assert_eq!(created.binding.task_id, "ORB-00000");
+        assert!(bundle_dir.is_dir());
+        assert_eq!(
+            lock_entries_for_task(tasks_dir, "ORB-00000"),
+            Vec::<String>::new()
+        );
+        assert!(!task_lock_path(&bundle_dir).exists());
+        assert!(!legacy_double_dot_lock_path(&bundle_dir, "ORB-00000").exists());
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum CreateOutcome {
+        Created,
+        AlreadyExists,
+        Unexpected(String),
+    }
+
+    #[test]
+    fn create_bundle_serializes_concurrent_duplicate_creators() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = Arc::new(bundle_store(&temp));
+        let bundle = Arc::new(sample_bundle("ORB-00000"));
+        let bundle_dir = store.bundle_path("ORB-00000").expect("bundle path");
+        let tasks_dir = bundle_dir.parent().expect("bundle parent").to_path_buf();
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = (0..2)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                let bundle = Arc::clone(&bundle);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    match store.create_bundle(bundle.as_ref()) {
+                        Ok(_) => CreateOutcome::Created,
+                        Err(OrbitError::Store(message)) if message.contains("already exists") => {
+                            CreateOutcome::AlreadyExists
+                        }
+                        Err(err) => CreateOutcome::Unexpected(err.to_string()),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let outcomes = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("join creator"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, CreateOutcome::Created))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, CreateOutcome::AlreadyExists))
+                .count(),
+            1
+        );
+        assert!(
+            !outcomes
+                .iter()
+                .any(|outcome| matches!(outcome, CreateOutcome::Unexpected(_))),
+            "unexpected outcomes: {outcomes:?}"
+        );
+        assert!(bundle_dir.is_dir());
+        assert_eq!(
+            lock_entries_for_task(&tasks_dir, "ORB-00000"),
+            Vec::<String>::new()
         );
     }
 
@@ -1337,15 +1481,22 @@ mod tests {
     }
 
     #[test]
-    fn create_bundle_cleans_partial_directory_on_validation_error() {
+    fn create_bundle_cleans_partial_directory_and_lock_on_validation_error() {
         let temp = TempDir::new().expect("tempdir");
         let store = bundle_store(&temp);
         let mut bundle = sample_bundle("ORB-00000");
         bundle.envelope.title = " ".to_string();
         let bundle_path = store.bundle_path("ORB-00000").expect("bundle path");
+        let tasks_dir = bundle_path.parent().expect("bundle parent").to_path_buf();
 
         assert!(store.create_bundle(&bundle).is_err());
         assert!(!bundle_path.exists());
+        assert_eq!(
+            lock_entries_for_task(&tasks_dir, "ORB-00000"),
+            Vec::<String>::new()
+        );
+        assert!(!task_lock_path(&bundle_path).exists());
+        assert!(!legacy_double_dot_lock_path(&bundle_path, "ORB-00000").exists());
     }
 
     #[test]
