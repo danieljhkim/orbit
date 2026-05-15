@@ -1,6 +1,6 @@
 # Spec: Leaf ID Uniqueness
 
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-15
 
 Every extractor that emits `ExtractedLeaf` records must finish with leaf IDs that are unique within the extracted file. The selector envelope remains `symbol:{path}#{qualified_name}:{kind}`; the contract is that no two leaves for the same `path` share the same `(qualified_name, kind)` after extractor finalization.
 

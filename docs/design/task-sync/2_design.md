@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-15
 
 This document specifies the task-sync design on top of the current v2 task-artifact store: the registry mechanism, the conflict-resolution model and why it's the central design question, the call sites that need to become sync-aware, the CLI surface, the config schema, and the migration paths. Orbit currently ships with sync disabled and the code path absent. The architectural boundary is explicit: the task store ([v2_bundle.rs](../../../crates/orbit-store/src/file/task_store/v2_bundle.rs), [v2_store.rs](../../../crates/orbit-store/src/file/task_store/v2_store.rs), and [task_registry.rs](../../../crates/orbit-store/src/sqlite/task_registry.rs)) keeps owning bundle layout, validation, allocation, and workspace binding; a future task-sync coordinator above the store owns git transport.
 

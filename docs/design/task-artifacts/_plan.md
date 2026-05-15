@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-15
 
 This is the temporary execution tracker for the task-artifacts reset until Orbit tasks can track this work again. It intentionally assumes a pre-release reset: existing task artifacts were deleted, no external users depend on the old layout, and the implementation does not need a migration command, legacy lookup aliases, or old-schema compatibility shims.
 

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-15
 
 This document describes the v2 task artifact implementation. The v2 store is the only task backend; the legacy status-directory store and its `[task] artifact_store` config gate were removed once Phase 6 began (`e9582eba`), and stale `artifact_store` keys are now rejected for every value. Sections below are prescriptive about invariants the live store maintains rather than aspirational about a target.
 

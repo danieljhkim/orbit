@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.4
+
+### Features
+
+- **Project-learnings push-injection (L1/L2/L3)**: relevant learning summaries are now injected into agent context at three layers — engine pre-prompt before runtime spawn, MCP sidecar on path-bearing tools (`orbit.graph.show`, `orbit.graph.refs`, `orbit.task.show`), and a Claude Code `PreToolUse` hook on `Edit | Write | Read`. Summary-only payloads with per-session dedup, per-call caps, and an `ORBIT_SESSION_ID` envelope for cross-process dedup. ([ORB-00009])
+- **First-class design-docs surface (`orbit.design.*` + `orbit design check` CLI)**: four MCP tools (`init`, `list`, `show`, `check`) plus a Rust port of the design-doc decay checker, with `orbit workspace init --design` seeding `docs/design/CONVENTIONS.md` when absent. `make check-design-docs` and `scripts/check_design_doc_decay.py` now wrap the Rust path. ([ORB-00019])
+- **Default-seeded skills aligned across asset, registry, plugin, and router catalogs**: `orbit-learning` and `orbit-design` onboarded; `orbit-review-task` and `orbit-semantic` brought into the default seed and the plugin's `skills/` symlinks; three drift-detection unit tests guard the four catalogs against recurrence. Default seed bumped 7 → 11. ([ORB-00020], [ORB-00022])
+- **`orbit workspace init --inject-agent-rules`**: opt-in flag writes an idempotent Orbit-rules block into `CLAUDE.md` and `AGENTS.md` at the workspace root, delimited by `<!-- orbit-managed:start/end -->` markers. Block content sourced from an editable asset; malformed marker pairs refuse to write. ([ORB-00023])
+- **Inline task status transitions in the dashboard**: per-task actions row gains a status selector wired through the existing `PATCH /tasks/:id` backend, ordered by `STATUS_ORDER` with `done` last and excluding `rejected`/`archived`/`friction`. Surfaces a "no longer shown in dashboard list" notice when transitioning to `done`. ([ORB-00025])
+- **`orbit.learning.*` exposed over MCP**: the full eight-tool learning surface (`add`, `list`, `search`, `show`, `update`, `supersede`, `prune`, `reindex`) is now reachable from every MCP client, not just `orbit tool run`. Restores parity with the `orbit-learning` skill instructions. ([ORB-00039])
+
+### Fixes
+
+- **PID identity & stale-run probe stability**: versioned `ps-lstart-utc-v1:` token replaces raw `lstart` output (recorded under `TZ=UTC`/`LC_ALL=C`) so live workers are no longer falsely marked failed across timezone changes; a new `OwnerIdentity::ProbeUnavailable` outcome distinguishes transient `ps` failures from genuinely dead PIDs, preventing single-probe terminalization of live workers. Adds arbiter-side `orbit.duel.plan.winner` regression coverage. Backward-compat read path (`LegacyLiveUnverified`) handles existing persisted tokens. ([ORB-00036], [ORB-00037])
+- **Job-step error messages reach the dashboard**: `V2AuditEventKind::{StepFinished, RunFinished}` gain an optional `error_message` field; the failure reason is preserved at emit time and surfaced by the audit reader so the Steps and Events tabs no longer show a bare red dot. Backward-compatible — older audit files load unchanged. ([ORB-00026])
+- **Gemini direct-agent sandbox + planner/arbiter artifact persistence**: narrow macOS sandbox allowances for Orbit child-runtime writes (global logs, DB sidecars, task workspace bundles, workspace semantic DB), tightened HOME-derived defaults, and improved planning-duel missing-artifact diagnostics so `orbit.duel.plan.add`/`winner` work under sandbox without home-directory re-allow. ([ORB-00027], [commit f3919a99], [commit e706d596])
+- **Gemini CLI token accounting**: the shared response usage parser now reads `stats.models.<model>.tokens.{input,prompt,cached,candidates}` without double-counting role aggregates, so Gemini direct-agent invocations no longer persist as zero-token traces. ([ORB-00028])
+- **Graph diagnostics quality**: `orbit.graph.show` now returns `did_you_mean` suggestions for unresolvable method selectors; exact-name `orbit.graph.search` ranks definition kinds (`trait`/`struct`/`enum`/`type`/`function`/`module`) above impl-method selectors; `orbit.graph.pack` carries typed `unresolved` reasons (`not_found` / `outside_indexed_roots` / `stale_snapshot`); `orbit.graph.overview` carries a typed `downgrade_reason` with threshold/actual. ([ORB-00029], [ORB-00030], [ORB-00031], [ORB-00032])
+- **Task bundle creation no longer leaks a lock sentinel or double-dots its name**: `TaskBundleStoreV2::create_bundle` now locks on the bundle directory target and unlinks the `.ORB-XXXXX.lock` sentinel inside the locked closure; the old pre-dotted `create_lock_path` helper was removed. Concurrent-create serialization preserved. ([ORB-00033])
+- **PR signature attribution corrected**: `batch_pr_signature` no longer falls back to `created_by` (which often names a planner or a human filer); when no task carries `implemented_by`, the signature falls back to the PR-opening agent's model identity, which is by construction the author of the commits. ([ORB-00034])
+- **Dashboard AGENT LOGS rendering**: `<pre>` switched to `white-space: pre` with horizontal scroll so long single-line stdout (e.g. Codex JSON envelopes) and multi-word stderr stay legible instead of fragmenting one token per row. ([ORB-00035])
+- **Dashboard friction-chip cleanup**: removed dead `friction` task-status references from `STATUS_ORDER` and the approve/reject eligibility sets. The diagnostics-tab friction surface (`/api/diagnostics/friction`) is untouched. ([ORB-00024])
+
+### Chores
+
+- **`make ci-fast` introduced for pre-handoff checks**: fmt-check + guardrail scripts, no compile. `make ci` stays the canonical merge gate via PR CI. Agent guidance updated to clarify when `make ci` failures classify as unrelated CI blockers vs task regressions. ([commit 4c22fa19], [commit 89ebc578])
+- **Release docs cross-linked**: `RELEASING.md` and `docs/RELEASE.md` now reference each other so a first-time releaser landing on either file finds both. ([ORB-00040])
+- **Deprecated activity/executor YAML assets removed**: cleanup of seeded resources that are no longer referenced by the runtime. ([commit c9cf36cc])
+- **`devalue` bumped 5.7.1 → 5.8.1** in `website/`. ([commit f08446e1])
+
 ## 0.5.3
 
 ### Features

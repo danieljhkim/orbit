@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-15
 
 Auditability is Orbit's answer to the operator question that matters after an agent touches a real repository: what happened, why, and who is accountable? The contract spans command rows, Orbit tool mutations, activity/job runs, provider turns, tool calls, filesystem denials, task attribution, metrics, and redacted payload storage. [2_design.md](./2_design.md) describes the shipped implementation; [3_vision.md](./3_vision.md) names the remaining gaps.
 

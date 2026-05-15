@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-15
 
 Task sync is an opt-in, git-orphan-branch task registry that lets engineers on the same team see each other's tasks without running a shared Orbit instance. **Sync is a future feature.** Orbit still ships per-engineer per the [README](../../../README.md) and [POSITIONING](../../POSITIONING.md) doctrines — each operator runs Orbit on their own machine, with locks and audit DB local to that machine. This document captures the sync design on top of the current v2 task-artifact store: canonical task bundles live under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`, workspace checkouts expose `.orbit/tasks/<task-id>` projections, and task IDs use `ORB-00000`. Historical `T...` task references in this folder are archival references, not current sync-design inputs.
 
