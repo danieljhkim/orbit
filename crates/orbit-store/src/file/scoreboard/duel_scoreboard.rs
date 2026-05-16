@@ -30,7 +30,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use orbit_common::types::{Ambiguity, Decision, DuelRun, OrbitError, TaskScope, Verdict};
+use orbit_common::types::{
+    Ambiguity, Decision, DuelRun, OrbitError, TaskScope, Verdict, all_agent_families,
+    resolve_agent_model_pair,
+};
 use serde::{Deserialize, Serialize};
 
 use orbit_common::utility::fs::{
@@ -297,6 +300,39 @@ pub fn aggregate(runs: &[DuelRun], filter: AggregateFilter) -> Aggregates {
         None => &[RoleAxis::Implementer, RoleAxis::Reviewer, RoleAxis::Arbiter],
     };
 
+    let seed_segments: Vec<String> = if filter.segment_by == SegmentBy::None {
+        vec![String::new()]
+    } else {
+        let mut segments: BTreeSet<String> = runs
+            .iter()
+            .map(|run| segment_key_for(run, filter.segment_by))
+            .collect();
+        if segments.is_empty() {
+            segments.insert(String::new());
+        }
+        segments.into_iter().collect()
+    };
+
+    for segment_key in seed_segments {
+        for role in roles_to_emit {
+            let role_name = match role {
+                RoleAxis::Implementer => "implementer",
+                RoleAxis::Reviewer => "reviewer",
+                RoleAxis::Arbiter => "arbiter",
+            };
+            for family in all_agent_families() {
+                buckets
+                    .entry((
+                        segment_key.clone(),
+                        role_name,
+                        family.to_string(),
+                        default_orchestrator_model(family),
+                    ))
+                    .or_default();
+            }
+        }
+    }
+
     for run in runs {
         let segment_key = segment_key_for(run, filter.segment_by);
         for role in roles_to_emit {
@@ -354,6 +390,12 @@ pub fn aggregate(runs: &[DuelRun], filter: AggregateFilter) -> Aggregates {
         .collect();
 
     Aggregates { rows }
+}
+
+fn default_orchestrator_model(family: &str) -> String {
+    resolve_agent_model_pair(family)
+        .map(|pair| pair.orchestrator)
+        .unwrap_or_else(|| family.to_string())
 }
 
 fn segment_key_for(run: &DuelRun, axis: SegmentBy) -> String {
@@ -488,6 +530,24 @@ mod tests {
             .map(|index| format!("run-{index:02}"))
             .collect();
         assert_eq!(run_ids, expected);
+    }
+
+    #[test]
+    fn aggregate_emits_zero_rows_for_known_families() {
+        let aggregates = aggregate(&[], AggregateFilter::default());
+
+        assert!(aggregates.rows.iter().any(|row| row.role == "implementer"
+            && row.agent == "grok"
+            && row.model == "grok-4"
+            && row.runs == 0));
+        assert!(aggregates.rows.iter().any(|row| row.role == "reviewer"
+            && row.agent == "grok"
+            && row.model == "grok-4"
+            && row.runs == 0));
+        assert!(aggregates.rows.iter().any(|row| row.role == "arbiter"
+            && row.agent == "grok"
+            && row.model == "grok-4"
+            && row.runs == 0));
     }
 
     fn test_run(run_id: String) -> DuelRun {

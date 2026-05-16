@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    FrictionFrontmatter, FrictionRecord, OrbitError, Task, TaskStatus,
-    normalize_optional_attribution_label,
+    FrictionFrontmatter, FrictionRecord, OrbitError, Task, TaskStatus, all_agent_families,
+    normalize_optional_attribution_label, resolve_agent_model_pair,
 };
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
@@ -162,6 +162,7 @@ pub fn friction_stats(frictions_root: &Path, tasks: &[Task]) -> Result<Value, Or
         }
     }
     models.extend(tasks_done.keys().cloned());
+    models.extend(known_family_model_keys());
 
     let mut by_model = serde_json::Map::new();
     for model in &models {
@@ -420,6 +421,14 @@ fn completed_tasks_by_model(tasks: &[Task]) -> BTreeMap<String, u64> {
     counts
 }
 
+fn known_family_model_keys() -> impl Iterator<Item = String> {
+    all_agent_families().into_iter().map(|family| {
+        resolve_agent_model_pair(family)
+            .map(|pair| pair.orchestrator)
+            .unwrap_or_else(|| family.to_string())
+    })
+}
+
 fn rate_row(frictions: u64, tasks_done: u64) -> Value {
     let rate = if tasks_done == 0 {
         json!("n/a")
@@ -487,6 +496,21 @@ mod tests {
         assert_eq!(
             stats["by_model"]["gpt-done"]["frictions_per_10_tasks"],
             json!(0.0)
+        );
+    }
+
+    #[test]
+    fn stats_render_zero_rows_for_known_grok_family() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+
+        let stats = friction_stats(root, &[]).expect("stats");
+
+        assert_eq!(stats["by_model"]["grok-4"]["frictions"], json!(0));
+        assert_eq!(stats["by_model"]["grok-4"]["tasks_done"], json!(0));
+        assert_eq!(
+            stats["by_model"]["grok-4"]["frictions_per_10_tasks"],
+            json!("n/a")
         );
     }
 

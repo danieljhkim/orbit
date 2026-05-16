@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, PlannerSlot, PlanningDuelRun};
+use orbit_common::types::{
+    OrbitError, PlannerSlot, PlanningDuelRun, all_agent_families, resolve_agent_model_pair,
+};
 use serde::{Deserialize, Serialize};
 
 use orbit_common::utility::fs::{
@@ -74,6 +76,18 @@ pub struct Aggregates {
     pub rows: Vec<AggregateRow>,
 }
 
+#[derive(Default)]
+struct Bucket {
+    runs: u32,
+    points: u32,
+    wall_ms_sum: u128,
+    tool_calls_sum: u128,
+    token_sum: u128,
+    token_count: u32,
+    byte_proxy_sum: u128,
+    byte_proxy_count: u32,
+}
+
 // ============================================================================
 // Append + load
 // ============================================================================
@@ -115,18 +129,6 @@ fn load_scoreboard_file(path: &Path) -> Result<PlanningDuelScoreboardFile, Orbit
 
 /// Reduce `runs` into an [`Aggregates`] report.
 pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregates {
-    #[derive(Default)]
-    struct Bucket {
-        runs: u32,
-        points: u32,
-        wall_ms_sum: u128,
-        tool_calls_sum: u128,
-        token_sum: u128,
-        token_count: u32,
-        byte_proxy_sum: u128,
-        byte_proxy_count: u32,
-    }
-
     let mut buckets: BTreeMap<(String, &'static str, String, String), Bucket> = BTreeMap::new();
 
     let roles_to_emit: &[RoleAxis] = match filter.role {
@@ -135,6 +137,8 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
         Some(RoleAxis::Arbiter) => &[RoleAxis::Arbiter],
         None => &[RoleAxis::PlannerA, RoleAxis::PlannerB, RoleAxis::Arbiter],
     };
+
+    seed_zero_family_rows(&mut buckets, roles_to_emit);
 
     for run in runs {
         for role in roles_to_emit {
@@ -213,6 +217,39 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
     Aggregates { rows }
 }
 
+fn seed_zero_family_rows(
+    buckets: &mut BTreeMap<(String, &'static str, String, String), Bucket>,
+    roles_to_emit: &[RoleAxis],
+) {
+    for role in roles_to_emit {
+        let role_name = role_name(*role);
+        for family in all_agent_families() {
+            buckets
+                .entry((
+                    role_name.to_string(),
+                    role_name,
+                    family.to_string(),
+                    default_orchestrator_model(family),
+                ))
+                .or_default();
+        }
+    }
+}
+
+fn role_name(role: RoleAxis) -> &'static str {
+    match role {
+        RoleAxis::PlannerA => "planner_a",
+        RoleAxis::PlannerB => "planner_b",
+        RoleAxis::Arbiter => "arbiter",
+    }
+}
+
+fn default_orchestrator_model(family: &str) -> String {
+    resolve_agent_model_pair(family)
+        .map(|pair| pair.orchestrator)
+        .unwrap_or_else(|| family.to_string())
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -262,6 +299,24 @@ mod tests {
             .map(|index| format!("run-{index:02}"))
             .collect();
         assert_eq!(run_ids, expected);
+    }
+
+    #[test]
+    fn aggregate_emits_zero_rows_for_known_families() {
+        let aggregates = aggregate(&[], AggregateFilter::default());
+
+        assert!(aggregates.rows.iter().any(|row| row.role == "planner_a"
+            && row.agent == "grok"
+            && row.model == "grok-4"
+            && row.runs == 0));
+        assert!(aggregates.rows.iter().any(|row| row.role == "planner_b"
+            && row.agent == "grok"
+            && row.model == "grok-4"
+            && row.runs == 0));
+        assert!(aggregates.rows.iter().any(|row| row.role == "arbiter"
+            && row.agent == "grok"
+            && row.model == "grok-4"
+            && row.runs == 0));
     }
 
     fn test_run(run_id: String) -> PlanningDuelRun {

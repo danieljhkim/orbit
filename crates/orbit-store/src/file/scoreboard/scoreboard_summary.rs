@@ -4,8 +4,8 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    JobRun, JobRunState, OrbitError, PlannerSlot, Task, TaskStatus, normalize_attribution_label,
-    normalize_optional_attribution_label,
+    JobRun, JobRunState, OrbitError, PlannerSlot, Task, TaskStatus, all_agent_families,
+    normalize_attribution_label, normalize_optional_attribution_label, resolve_agent_model_pair,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -200,6 +200,7 @@ pub fn generate_summary_with_inputs(
 ) -> Result<ScoreboardSummary, OrbitError> {
     let audit_tool_calls = inputs.audit_tool_calls;
     let mut agents: BTreeMap<String, AgentSummary> = BTreeMap::new();
+    seed_known_family_agents(&mut agents);
 
     let pr = read_model_scoreboard(scoreboard_dir, "pr.json")?;
     overlay_nested_metric(&mut agents, &pr, "pr-review-comments", |summary, value| {
@@ -532,6 +533,18 @@ fn model_key(model: &str) -> String {
     normalize_attribution_label(model, None)
 }
 
+fn seed_known_family_agents(agents: &mut BTreeMap<String, AgentSummary>) {
+    for family in all_agent_families() {
+        let model = resolve_agent_model_pair(family)
+            .map(|pair| pair.orchestrator)
+            .unwrap_or_else(|| family.to_string());
+        let key = model_key(&model);
+        if !key.is_empty() {
+            agents.entry(key).or_default();
+        }
+    }
+}
+
 fn normalize_model_scoreboard(parsed: Value) -> Result<ModelScoreboard, OrbitError> {
     let mut normalized = ModelScoreboard::new();
     let Value::Object(metrics) = parsed else {
@@ -610,6 +623,18 @@ mod tests {
         let gpt5 = summary.agents.get("gpt-5").expect("gpt-5 summary");
         assert_eq!(gpt5.tool_calls, 3);
         assert_eq!(gpt5.failed_tool_calls, 2);
+    }
+
+    #[test]
+    fn summary_includes_zero_rows_for_known_families() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+
+        let summary = generate_summary(temp.path(), &[]).expect("generate summary");
+
+        let grok = summary.agents.get("grok-4").expect("grok summary");
+        assert_eq!(grok.tasks_completed, 0);
+        assert_eq!(grok.duels.participated, 0);
+        assert_eq!(grok.task_review.threads, 0);
     }
 
     #[test]

@@ -475,6 +475,7 @@ mod tests {
                     "gemini-3.1-pro-preview",
                     "gemini-3-flash-preview",
                 )),
+                "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
                 _ => None,
             }
         }
@@ -677,5 +678,28 @@ mod tests {
         assert_eq!(scoreable_review_model(&host, "human"), None);
         assert_eq!(scoreable_review_model(&host, "system"), None);
         assert_eq!(scoreable_review_model(&host, "daniel"), None);
+    }
+
+    #[test]
+    fn scoreable_review_model_scores_grok_threads() {
+        let temp = tempdir().expect("create tempdir");
+        let host = TestHost::new(
+            fixture_task(temp.path()),
+            temp.path().to_path_buf(),
+            temp.path().join("scoreboard"),
+        );
+
+        assert_eq!(
+            scoreable_review_model(&host, "grok-4").as_deref(),
+            Some("grok-4")
+        );
+        assert_eq!(
+            scoreable_review_model(&host, "grok / grok-4").as_deref(),
+            Some("grok-4")
+        );
+        assert_eq!(
+            scoreable_review_model(&host, "grok / grok-3").as_deref(),
+            Some("grok-3")
+        );
     }
 }

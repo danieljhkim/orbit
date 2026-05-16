@@ -12,19 +12,12 @@ use crate::context::RuntimeHost;
 
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
+use super::super::{role_permutation_at, validate_role_permutation};
+
 pub(super) const PLANNER_ACTIVITY_ID: &str = "propose_duel_plan";
 pub(super) const ARBITER_ACTIVITY_ID: &str = "arbitrate_duel_plan";
 pub(super) const PLANNER_TIMEOUT_SECONDS: u64 = 1800;
 pub(super) const ARBITER_TIMEOUT_SECONDS: u64 = 900;
-
-const PERMUTATIONS: [[usize; 3]; 6] = [
-    [0, 1, 2],
-    [0, 2, 1],
-    [1, 0, 2],
-    [1, 2, 0],
-    [2, 0, 1],
-    [2, 1, 0],
-];
 
 const PLANNING_DUEL_INSTRUCTION: &str = r#"Only use skills listed in this activity's skill_refs. Ignore all others.
 You are a PLANNER in an Orbit planning duel. Inspect the task and surrounding
@@ -117,17 +110,18 @@ thread_local! {
         const { RefCell::new(VecDeque::new()) };
 }
 
-fn next_permutation() -> [usize; 3] {
+fn next_permutation() -> Result<[usize; 3], OrbitError> {
+    let family_count = all_agent_families().len();
     let from_test = TEST_PERMUTATION_QUEUE.with(|cell| cell.borrow_mut().pop_front());
     if let Some(perm) = from_test {
-        return perm;
+        return validate_role_permutation(perm, family_count, "select_planning_duel_roles");
     }
 
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    PERMUTATIONS[(nanos as usize) % PERMUTATIONS.len()]
+    role_permutation_at(family_count, nanos as usize)
 }
 
 fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
@@ -158,16 +152,10 @@ fn build_roles_output<H: RuntimeHost + ?Sized>(
     perm: [usize; 3],
 ) -> Result<Value, OrbitError> {
     let families = all_agent_families();
+    let perm = validate_role_permutation(perm, families.len(), "select_planning_duel_roles")?;
     let planner_a = families[perm[0]];
     let planner_b = families[perm[1]];
     let arbiter = families[perm[2]];
-
-    if planner_a == planner_b || planner_b == arbiter || planner_a == arbiter {
-        return Err(OrbitError::Execution(format!(
-            "select_planning_duel_roles produced non-distinct families: \
-             planner_a={planner_a}, planner_b={planner_b}, arbiter={arbiter}"
-        )));
-    }
 
     let started_at = Utc::now().to_rfc3339();
 
@@ -307,7 +295,7 @@ pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
     input: &Value,
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
-    let perm = next_permutation();
+    let perm = next_permutation()?;
     let output = build_roles_output(host, perm)?;
 
     Ok(json!({
@@ -321,4 +309,141 @@ pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
         "arbiter_model": output["arbiter_model"].clone(),
         "planning_duel_roles": output["planning_duel_roles"].clone(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use orbit_common::types::{Activity, AgentModelPair, Job, JobTargetType, OrbitEvent, Role};
+    use orbit_store::InvocationRecord;
+    use orbit_tools::ToolContext;
+
+    use crate::context::{JobRunResult, RuntimeHost};
+    use crate::executor::registry::ActivityExecutorRegistry;
+
+    use super::*;
+
+    struct TestHost {
+        data_root: PathBuf,
+        scoreboard_dir: PathBuf,
+        registry: ActivityExecutorRegistry,
+    }
+
+    impl TestHost {
+        fn new() -> Self {
+            let temp_root = std::env::temp_dir().join("orbit-planning-duel-role-test");
+            Self {
+                scoreboard_dir: temp_root.join("scoreboard"),
+                data_root: temp_root,
+                registry: ActivityExecutorRegistry::default(),
+            }
+        }
+    }
+
+    impl RuntimeHost for TestHost {
+        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn repo_root(&self) -> Result<String, OrbitError> {
+            Ok(self.data_root.to_string_lossy().to_string())
+        }
+
+        fn data_root(&self) -> &Path {
+            &self.data_root
+        }
+
+        fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
+            &self.registry
+        }
+
+        fn run_job_now_with_input_debug(
+            &self,
+            _job_id: &str,
+            _input: Value,
+            _debug: bool,
+        ) -> Result<JobRunResult, OrbitError> {
+            unimplemented!("not needed by planning-duel role tests")
+        }
+
+        fn validate_activity_target_exists(
+            &self,
+            _target_type: JobTargetType,
+            _target_id: &str,
+        ) -> Result<Activity, OrbitError> {
+            unimplemented!("not needed by planning-duel role tests")
+        }
+
+        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
+            Ok(None)
+        }
+
+        fn invocation_records(
+            &self,
+            _query: orbit_store::InvocationQuery,
+        ) -> Result<Vec<InvocationRecord>, OrbitError> {
+            Ok(Vec::new())
+        }
+
+        fn run_tool_with_context_and_role(
+            &self,
+            _name: &str,
+            _input: Value,
+            _role: Role,
+            _tool_context: ToolContext,
+        ) -> Result<Value, OrbitError> {
+            unimplemented!("not needed by planning-duel role tests")
+        }
+
+        fn maybe_create_failure_task(
+            &self,
+            _job_id: &str,
+            _run_id: &str,
+            _error_code: &str,
+            _error_message: &str,
+            _agent: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<(), OrbitError> {
+            Ok(())
+        }
+
+        fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
+            match agent_cli {
+                "codex" => Some(AgentModelPair::new("gpt-5.5", "gpt-5.4-mini")),
+                "claude" => Some(AgentModelPair::new("opus-4.7", "sonnet-4.6")),
+                "gemini" => Some(AgentModelPair::new("pro", "flash")),
+                "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
+                _ => None,
+            }
+        }
+
+        fn scoring_enabled(&self) -> bool {
+            false
+        }
+
+        fn graph_editing(&self) -> bool {
+            false
+        }
+
+        fn scoreboard_dir(&self) -> &Path {
+            &self.scoreboard_dir
+        }
+    }
+
+    #[test]
+    fn planning_duel_role_output_can_assign_grok() {
+        let host = TestHost::new();
+        let output = build_roles_output(&host, [3, 0, 1]).expect("roles output");
+
+        assert_eq!(output["planner_a_agent_cli"], "grok");
+        assert_eq!(output["planner_a_model"], "grok-4");
+        assert_eq!(output["planning_duel_roles"]["planner_a"]["agent"], "grok");
+        assert_eq!(
+            output["planning_duel_roles"]["planner_a"]["model"],
+            "grok-4"
+        );
+        assert_eq!(output["planner_b_agent_cli"], "codex");
+        assert_eq!(output["arbiter_agent_cli"], "claude");
+    }
 }

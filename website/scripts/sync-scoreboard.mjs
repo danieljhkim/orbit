@@ -15,6 +15,7 @@ const scoreboardPath = path.join(metricsDir, 'scoreboard.md');
 const legacyPath = path.join(docsRoot, 'scoreboard.md');
 
 const HIDDEN_AGENTS = new Set(['human', 'agent', 'system', 'admin']);
+const KNOWN_AGENT_FAMILIES = ['claude', 'codex', 'gemini', 'grok'];
 const TOP_TOOLS_RENDER_LIMIT = 20;
 
 const summary = await loadSummary(sourcePath);
@@ -116,19 +117,24 @@ async function loadDuelStats(filePath) {
     if (err.code !== 'ENOENT') throw err;
   }
 
-  const stats = new Map();
-  const bump = (model, key) => {
-    if (!model || HIDDEN_AGENTS.has(model)) return;
-    if (!stats.has(model)) {
-      stats.set(model, { wins: 0, losses: 0, plannerRuns: 0, arbiterRuns: 0 });
+  const stats = new Map(
+    KNOWN_AGENT_FAMILIES.map((family) => [
+      family,
+      { wins: 0, losses: 0, plannerRuns: 0, arbiterRuns: 0 },
+    ]),
+  );
+  const bump = (agent, key) => {
+    if (!agent || HIDDEN_AGENTS.has(agent)) return;
+    if (!stats.has(agent)) {
+      stats.set(agent, { wins: 0, losses: 0, plannerRuns: 0, arbiterRuns: 0 });
     }
-    stats.get(model)[key] += 1;
+    stats.get(agent)[key] += 1;
   };
 
   for (const run of runs) {
-    const a = run.roles?.planner_a?.model;
-    const b = run.roles?.planner_b?.model;
-    const arb = run.roles?.arbiter?.model;
+    const a = run.roles?.planner_a?.agent ?? run.roles?.planner_a?.model;
+    const b = run.roles?.planner_b?.agent ?? run.roles?.planner_b?.model;
+    const arb = run.roles?.arbiter?.agent ?? run.roles?.arbiter?.model;
     const winner = run.outcome?.winner;
 
     if (a) bump(a, 'plannerRuns');
@@ -285,7 +291,6 @@ function renderPrsTable(agents) {
 
 function renderDuelsTable(duelsByModel) {
   const rows = duelsByModel
-    .filter(([, d]) => d.wins + d.losses + d.plannerRuns + d.arbiterRuns > 0)
     .map(([name, d]) => {
       const decided = d.wins + d.losses;
       const rate = decided > 0 ? d.wins / decided : null;

@@ -173,7 +173,7 @@ fn provider_state_dirs(
     codex_home: Option<&OsStr>,
     claude_config_dir: Option<&OsStr>,
 ) -> Vec<PathBuf> {
-    let mut dirs = Vec::with_capacity(3);
+    let mut dirs = Vec::with_capacity(4);
     if let Some(dir) = codex_state_dir(home, codex_home) {
         dirs.push(dir);
     }
@@ -181,6 +181,9 @@ fn provider_state_dirs(
         dirs.push(dir);
     }
     if let Some(dir) = gemini_state_dir(home) {
+        dirs.push(dir);
+    }
+    if let Some(dir) = grok_state_dir(home) {
         dirs.push(dir);
     }
     dirs
@@ -217,6 +220,12 @@ pub fn claude_state_dir_from_env() -> Option<PathBuf> {
 /// it through `SandboxCompileEnv` here.
 fn gemini_state_dir(home: Option<&OsStr>) -> Option<PathBuf> {
     non_empty_env_path(home).map(|path| path.join(".gemini"))
+}
+
+/// Grok Build follows the common CLI convention and stores state under
+/// `$HOME/.grok`.
+fn grok_state_dir(home: Option<&OsStr>) -> Option<PathBuf> {
+    non_empty_env_path(home).map(|path| path.join(".grok"))
 }
 
 fn non_empty_env_path(value: Option<&OsStr>) -> Option<PathBuf> {
@@ -737,7 +746,7 @@ mod tests {
     #[test]
     fn compile_emits_all_provider_state_dirs() {
         // Active provider is not threaded through SBPL compilation; emitting
-        // all three keeps the profile symmetric and avoids per-provider
+        // every supported provider keeps the profile symmetric and avoids per-provider
         // branching at compile time.
         let resolved = profile("default", &["/Users/test/repo"], &["/Users/test/repo/src"]);
         let text = compile_with_env(
@@ -747,7 +756,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        for dir in [".codex", ".claude", ".gemini"] {
+        for dir in [".codex", ".claude", ".gemini", ".grok"] {
             let needle = format!("(allow file-write* (subpath \"/Users/test/{dir}\"))");
             assert!(
                 text.contains(&needle),
@@ -1402,11 +1411,11 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn compiled_profile_allows_writes_to_claude_and_gemini_state_dirs() {
+    fn compiled_profile_allows_writes_to_provider_state_dirs() {
         // Documented equivalent for AC #2 / #3 of T20260428-14: rather than
         // executing real provider binaries, exercise the same SBPL allow
-        // clause Claude/Gemini rely on at startup. If the kernel permits a
-        // write under the synthetic `.claude` / `.gemini` subpaths, the same
+        // clause provider CLIs rely on at startup. If the kernel permits a
+        // write under the synthetic provider state subpaths, the same
         // mechanism unblocks the real CLIs writing settings/sessions there.
         use std::process::Command;
 
@@ -1422,8 +1431,10 @@ mod tests {
             .expect("synthetic home tempdir");
         let claude_dir = synthetic_home.path().join(".claude");
         let gemini_dir = synthetic_home.path().join(".gemini");
+        let grok_dir = synthetic_home.path().join(".grok");
         std::fs::create_dir_all(&claude_dir).expect("claude dir");
         std::fs::create_dir_all(&gemini_dir).expect("gemini dir");
+        std::fs::create_dir_all(&grok_dir).expect("grok dir");
 
         let resolved = ResolvedFsProfile {
             name: "default".to_string(),
@@ -1453,6 +1464,7 @@ mod tests {
         for (label, target) in [
             ("claude", claude_dir.join("ok")),
             ("gemini", gemini_dir.join("ok")),
+            ("grok", grok_dir.join("ok")),
         ] {
             let status = Command::new(sandbox_exec_path_for_test())
                 .arg("-f")

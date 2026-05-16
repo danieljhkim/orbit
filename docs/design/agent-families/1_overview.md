@@ -40,6 +40,7 @@ The authoritative list lives in `all_agent_families()` in `crates/orbit-common/s
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family (epic)
 - ORB-00043: Add Grok to agent_from_model, all_agent_families, and provider_from_model
+- ORB-00048: Harden duels, scoreboards, review sync, friction stats, and analytics for the fourth family
 - ADR-0151: Add Grok (xAI) as a fourth peer agent family
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

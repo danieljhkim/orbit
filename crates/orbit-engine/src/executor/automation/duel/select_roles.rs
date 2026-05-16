@@ -1,7 +1,7 @@
 //! `select_duel_roles` automation.
 //!
-//! Generates a random permutation of the three agent families
-//! (`codex`, `claude`, `gemini`) across the three duel roles
+//! Generates a random ordered selection of three distinct agent families
+//! from Orbit's current family set across the three duel roles
 //! (implementer, reviewer, arbiter) and writes them into the current
 //! job input so downstream steps can resolve per-role agent CLIs via
 //! `agent_cli_from_input` / `model_from_input`.
@@ -27,40 +27,29 @@ use serde_json::{Value, json};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 
 use super::super::input::required_input_string;
-
-/// The six permutations of `[0, 1, 2]`, used to assign families to
-/// `(implementer, reviewer, arbiter)` slots.
-const PERMUTATIONS: [[usize; 3]; 6] = [
-    [0, 1, 2],
-    [0, 2, 1],
-    [1, 0, 2],
-    [1, 2, 0],
-    [2, 0, 1],
-    [2, 1, 0],
-];
+use super::{role_permutation_at, validate_role_permutation};
 
 thread_local! {
     /// Test seam. When non-empty, each call to the executor pops the
     /// front entry and uses it as the permutation instead of consulting
-    /// the clock.  Populated via [`push_test_permutations`].
+    /// the clock.
     static TEST_PERMUTATION_QUEUE: RefCell<VecDeque<[usize; 3]>> =
         const { RefCell::new(VecDeque::new()) };
 }
 
-/// Seed the thread-local test permutation queue. Each subsequent call
-/// to `select_duel_roles` on this thread consumes one entry.
 /// Pick the next permutation of family indices — test override first,
 /// otherwise derive from `SystemTime` nanoseconds.
-fn next_permutation() -> [usize; 3] {
+fn next_permutation() -> Result<[usize; 3], OrbitError> {
+    let family_count = all_agent_families().len();
     let from_test = TEST_PERMUTATION_QUEUE.with(|cell| cell.borrow_mut().pop_front());
     if let Some(perm) = from_test {
-        return perm;
+        return validate_role_permutation(perm, family_count, "select_duel_roles");
     }
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    PERMUTATIONS[(nanos as usize) % PERMUTATIONS.len()]
+    role_permutation_at(family_count, nanos as usize)
 }
 
 /// Shape of the JSON object this executor writes into current_input.
@@ -73,18 +62,10 @@ fn build_roles_output<H: RuntimeHost + ?Sized>(
     perm: [usize; 3],
 ) -> Result<Value, OrbitError> {
     let families = all_agent_families();
+    let perm = validate_role_permutation(perm, families.len(), "select_duel_roles")?;
     let implementer = families[perm[0]];
     let reviewer = families[perm[1]];
     let arbiter = families[perm[2]];
-
-    // Sanity check — the permutation generator must produce distinct
-    // indices. A failure here means PERMUTATIONS was corrupted.
-    if implementer == reviewer || reviewer == arbiter || implementer == arbiter {
-        return Err(OrbitError::Execution(format!(
-            "select_duel_roles produced non-distinct families: \
-             implementer={implementer}, reviewer={reviewer}, arbiter={arbiter}"
-        )));
-    }
 
     let implementer_model = orchestrator_model_for(host, implementer)?;
     let reviewer_model = orchestrator_model_for(host, reviewer)?;
@@ -132,7 +113,7 @@ pub(in crate::executor::automation) fn select_duel_roles<H: RuntimeHost + TaskHo
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
 
-    let perm = next_permutation();
+    let perm = next_permutation()?;
     let output = build_roles_output(host, perm)?;
 
     // Stamp the implementer onto the task's actor identity so that the
