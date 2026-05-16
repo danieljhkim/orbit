@@ -66,7 +66,13 @@ let auditFilter = {
 let expandedAuditIds = new Set();
 let activeAuditSubtab = "events";
 let lastAuditPolicy = null;
-let policySort = { by_profile: "count", by_target: "count", by_run: "count", by_agent: "count" };
+let policySort = {
+  by_profile: "count",
+  by_target: "count",
+  by_run: "count",
+  by_execution: "count",
+  by_agent: "count",
+};
 
 // Health strip state
 let lastSummary = null;
@@ -1751,12 +1757,41 @@ function renderSparkline(buckets) {
 }
 
 const POLICY_TABLES = [
-  { id: "by_profile", label: "By Profile",  nameField: "name",   filterKey: "profile" },
-  { id: "by_target",  label: "By Target",   nameField: "name",   filterKey: null },
-  // Real JobRun ids from the v2 audit envelope. Click routes to Run Detail
-  // rather than filtering Events (audit Events only knows execution_id).
-  { id: "by_run",     label: "By Run",      nameField: "run_id", navigateTo: "run" },
-  { id: "by_agent",   label: "By Agent",    nameField: "agent",  filterKey: "role" },
+  {
+    id: "by_profile",
+    label: "By Profile",
+    nameField: "name",
+    header: "profile",
+    filterKey: "profile",
+  },
+  {
+    id: "by_target",
+    label: "By Target",
+    nameField: "name",
+    header: "target",
+    filterKey: null,
+  },
+  {
+    id: "by_run",
+    label: "By JobRun",
+    nameField: "run_id",
+    header: "job_run_id",
+    navigateTo: "job_run",
+  },
+  {
+    id: "by_execution",
+    label: "By Audit Invocation",
+    nameField: "execution_id",
+    header: "execution_id",
+    navigateTo: "audit_execution",
+  },
+  {
+    id: "by_agent",
+    label: "By Agent",
+    nameField: "agent",
+    header: "agent",
+    filterKey: "role",
+  },
 ];
 
 function renderPolicy(data) {
@@ -1771,6 +1806,12 @@ function renderPolicy(data) {
     ])]);
     return;
   }
+
+  const sections = [];
+  const recent = buildRecentDenials(data.recent_denials || []);
+  const causes = buildTopCauses(data.top_causes || []);
+  if (recent) sections.push(recent);
+  if (causes) sections.push(causes);
 
   const grid = el("div", { class: "policy-grid" });
   for (const tbl of POLICY_TABLES) {
@@ -1787,14 +1828,15 @@ function renderPolicy(data) {
     cell.appendChild(buildPolicyTable(tbl, rawRows, sortMode));
     grid.appendChild(cell);
   }
-  syncNodes(body, [grid]);
+  sections.push(grid);
+  syncNodes(body, sections);
 }
 
 function buildPolicyTable(spec, rows, sortMode) {
   const table = el("table", { class: "policy-table" });
   const thead = el("thead");
   const headRow = el("tr");
-  const nameTh = el("th", { text: spec.nameField });
+  const nameTh = el("th", { text: spec.header || spec.nameField });
   if (sortMode === "name") {
     const arrow = el("span", { class: "sort-arrow", text: "▼" });
     nameTh.appendChild(arrow);
@@ -1830,11 +1872,14 @@ function buildPolicyTable(spec, rows, sortMode) {
       const tr = el("tr", { title: name });
       tr.appendChild(el("td", { class: "value-name", text: name }));
       tr.appendChild(el("td", { class: "num", text: String(row.count || 0) }));
-      if (spec.navigateTo === "run") {
-        tr.style.cursor = "pointer";
+      if (spec.navigateTo === "job_run") {
+        tr.classList.add("clickable");
         tr.addEventListener("click", () => navigateToRun(name));
+      } else if (spec.navigateTo === "audit_execution") {
+        tr.classList.add("clickable");
+        tr.addEventListener("click", () => navigateToAuditExecution(name));
       } else if (spec.filterKey) {
-        tr.style.cursor = "pointer";
+        tr.classList.add("clickable");
         tr.addEventListener("click", () => {
           auditFilter[spec.filterKey] = name;
           activeAuditSubtab = "events";
@@ -1846,6 +1891,121 @@ function buildPolicyTable(spec, rows, sortMode) {
   }
   table.appendChild(tbody);
   return table;
+}
+
+function buildTopCauses(rows) {
+  if (!rows.length) return null;
+  const section = el("div", { class: "policy-section" });
+  section.appendChild(el("h5", { text: "Top Causes" }));
+  const table = el("table", { class: "policy-table policy-cause-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const label of ["cause", "target", "count", "latest"]) {
+    headRow.appendChild(el("th", { class: label === "count" ? "num" : "", text: label }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    tr.appendChild(el("td", {
+      class: "value-name",
+      text: row.cause || "-",
+      title: row.cause || "",
+    }));
+    tr.appendChild(el("td", {
+      class: "value-name muted",
+      text: row.target || "-",
+      title: row.target || "",
+    }));
+    tr.appendChild(el("td", { class: "num", text: String(row.count || 0) }));
+    tr.appendChild(el("td", {
+      class: "muted mono",
+      text: row.latest_ts ? fmtRelative(row.latest_ts) : "-",
+    }));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+function buildRecentDenials(rows) {
+  if (!rows.length) return null;
+  const section = el("div", { class: "policy-section" });
+  section.appendChild(el("h5", { text: "Recent Denials" }));
+  const table = el("table", { class: "policy-table policy-recent-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const label of ["time", "target", "cause", "identity", "details"]) {
+    headRow.appendChild(el("th", { text: label }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    tr.appendChild(el("td", {
+      class: "muted mono",
+      text: row.timestamp ? fmtRelative(row.timestamp) : "-",
+    }));
+    tr.appendChild(el("td", {
+      class: "value-name",
+      text: row.target || "-",
+      title: row.target || "",
+    }));
+    tr.appendChild(el("td", {
+      class: "value-name",
+      text: row.cause || row.denial_kind || "-",
+      title: row.cause || "",
+    }));
+    const identity = el("td");
+    identity.appendChild(buildPolicyIdentityAction(row));
+    tr.appendChild(identity);
+    const details = policyDetailText(row);
+    tr.appendChild(el("td", { class: "policy-detail", text: details, title: details }));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+function buildPolicyIdentityAction(row) {
+  const identityId = row.identity_id || row.job_run_id || row.execution_id || "";
+  if (!identityId) return el("span", { class: "muted", text: "-" });
+  const isJobRun = row.identity_type === "job_run" && row.job_run_id;
+  const label = isJobRun ? "JobRun" : "Audit";
+  const btn = el("button", {
+    class: "policy-link",
+    text: `${label} ${truncate(identityId, 18)}`,
+    title: identityId,
+  });
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (isJobRun) navigateToRun(identityId);
+    else navigateToAuditExecution(identityId);
+  });
+  return btn;
+}
+
+function policyDetailText(row) {
+  const parts = [];
+  if (row.actor) parts.push(`actor ${row.actor}`);
+  const taskIds = row.requested_task_ids || [];
+  if (taskIds.length) parts.push(`tasks ${taskIds.join(", ")}`);
+  const files = row.requested_files || [];
+  if (files.length) {
+    const suffix = files.length > 2 ? " +" + (files.length - 2) : "";
+    parts.push(`files ${files.slice(0, 2).join(", ")}${suffix}`);
+  }
+  const conflicts = row.conflicts || [];
+  if (conflicts.length) {
+    const first = conflicts[0] || {};
+    const holder = [first.held_by, first.held_by_id].filter(Boolean).join(" ");
+    parts.push(holder ? `held by ${holder}` : `${conflicts.length} conflicts`);
+  }
+  return parts.join(" · ") || row.denial_kind || "-";
 }
 
 function refreshLabel() {
@@ -1860,6 +2020,22 @@ function navigateToRun(runId) {
   activeRunDetail = null;
   activeRunEvents = [];
   setActiveTab(`runs/${encodeURIComponent(runId)}`);
+}
+
+function navigateToAuditExecution(executionId) {
+  auditFilter = {
+    status: null,
+    q: "",
+    tool: null,
+    role: null,
+    execution_id: executionId,
+    profile: null,
+    since: null,
+    policyKind: null,
+  };
+  activeAuditSubtab = "events";
+  syncAuditControls();
+  window.location.hash = buildAuditHash();
 }
 
 /// Navigates to the Audit tab pre-filtered by `role` (audit `role` ≈ scoreboard
