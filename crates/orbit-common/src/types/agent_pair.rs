@@ -45,9 +45,9 @@ impl AgentModelPair {
 /// The return type is a fixed-size array rather than a `Vec` so the
 /// cardinality is enforced at compile time: adding a family requires
 /// changing the array size, which in turn surfaces any call site that
-/// made assumptions about exactly three families.
-pub const fn all_agent_families() -> [&'static str; 3] {
-    ["codex", "claude", "gemini"]
+/// made assumptions about the previous number of families.
+pub const fn all_agent_families() -> [&'static str; 4] {
+    ["codex", "claude", "gemini", "grok"]
 }
 
 /// Normalize an `agent_cli` value into a stable, lowercased family identifier
@@ -81,6 +81,10 @@ pub fn infer_agent_family_from_model(model: &str) -> Option<String> {
     }
     if model.starts_with("gemini-") {
         return Some("gemini".to_string());
+    }
+    // Grok (xAI) — supports both grok-4 style and the shorter grok3* naming
+    if model.starts_with("grok-") || model.starts_with("grok3") {
+        return Some("grok".to_string());
     }
 
     None
@@ -144,9 +148,10 @@ pub fn resolve_agent_model_pair_or(
         "codex" => Some(AgentModelPair::new("gpt-5.4", "gpt-5.4-mini")),
         "claude" => Some(AgentModelPair::new("opus-4.6", "sonnet-4.6")),
         "gemini" => Some(AgentModelPair::new(
-            "gemini-3.1-pro-preview",
-            "gemini-3-flash-preview",
+            "pro",
+            "flash",
         )),
+        "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
         _ => None,
     }
 }
