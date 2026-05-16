@@ -32,6 +32,9 @@
         --status-rejected: #ef4444; /* red-500 */
         --status-archived: #52525b; /* zinc-600 */
         --status-someday: #71717a; /* zinc-500 */
+        --status-open: #f59e0b; /* amber-500 */
+        --status-triaged: #06b6d4; /* cyan-500 */
+        --status-resolved: #10b981; /* emerald-500 */
         
         --priority-high: #ef4444;
         --priority-medium: #f59e0b;
@@ -199,7 +202,8 @@
       #task-search,
       #audit-search,
       #learning-search,
-      #adr-search {
+      #adr-search,
+      #friction-search {
         flex: 1 1 200px;
         min-width: 160px;
         background: var(--bg);
@@ -216,7 +220,8 @@
       #task-search:focus,
       #audit-search:focus,
       #learning-search:focus,
-      #adr-search:focus {
+      #adr-search:focus,
+      #friction-search:focus {
         border-color: var(--accent);
       }
       
@@ -1528,23 +1533,29 @@
 
       /* Knowledge tab */
       .learning-stats,
-      .adr-stats {
+      .adr-stats,
+      .friction-stats {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         border-bottom: 1px solid var(--border);
       }
       @media (max-width: 800px) {
         .learning-stats,
-        .adr-stats { grid-template-columns: 1fr; }
+        .adr-stats,
+        .friction-stats { grid-template-columns: 1fr; }
         .learning-row,
-        .adr-row { grid-template-columns: 120px minmax(0, 1fr) 76px; }
+        .adr-row,
+        .friction-row { grid-template-columns: 120px minmax(0, 1fr) 76px; }
         .learning-row .evidence,
         .learning-row .updated,
         .adr-row .feature,
-        .adr-row .accepted { display: none; }
+        .adr-row .accepted,
+        .friction-row .tags,
+        .friction-row .reported { display: none; }
       }
       .learning-row,
-      .adr-row {
+      .adr-row,
+      .friction-row {
         display: grid;
         gap: 12px;
         padding: 9px 16px;
@@ -1560,12 +1571,18 @@
       .adr-row {
         grid-template-columns: 120px minmax(220px, 1.2fr) 110px 140px 130px;
       }
+      .friction-row {
+        grid-template-columns: 130px minmax(220px, 1.2fr) minmax(150px, 0.8fr) 104px 120px;
+      }
       .learning-row:hover,
-      .adr-row:hover { background: rgba(255, 255, 255, 0.03); }
+      .adr-row:hover,
+      .friction-row:hover { background: rgba(255, 255, 255, 0.03); }
       .learning-row.active,
-      .adr-row.active { background: rgba(110, 159, 255, 0.06); }
+      .adr-row.active,
+      .friction-row.active { background: rgba(110, 159, 255, 0.06); }
       .learning-row.header,
-      .adr-row.header {
+      .adr-row.header,
+      .friction-row.header {
         color: var(--fg-dim);
         font-size: 10px;
         font-weight: 600;
@@ -1582,14 +1599,24 @@
       .adr-row .id,
       .adr-row .title,
       .adr-row .feature,
-      .adr-row .accepted {
+      .adr-row .accepted,
+      .friction-row .id,
+      .friction-row .title,
+      .friction-row .reported {
         color: var(--fg-dim);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       .adr-row .title { color: var(--fg); }
+      .friction-row .title { color: var(--fg); }
       .learning-row .scope {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-width: 0;
+      }
+      .friction-row .tags {
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
@@ -1600,13 +1627,15 @@
         text-align: right;
       }
       #learning-detail,
-      #adr-detail {
+      #adr-detail,
+      #friction-detail {
         padding: 16px;
         display: grid;
         gap: 12px;
       }
       .learning-detail-meta,
-      .adr-detail-meta {
+      .adr-detail-meta,
+      .friction-detail-meta {
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
@@ -1615,7 +1644,8 @@
         color: var(--fg-dim);
       }
       .learning-detail-meta .value,
-      .adr-detail-meta .value {
+      .adr-detail-meta .value,
+      .friction-detail-meta .value {
         color: var(--fg);
         background: rgba(255, 255, 255, 0.05);
         padding: 2px 6px;
@@ -1628,7 +1658,8 @@
         gap: 6px;
       }
       .learning-detail-body,
-      .adr-detail-body {
+      .adr-detail-body,
+      .friction-detail-body {
         margin: 0;
         background: var(--bg);
         border: 1px solid var(--border);
@@ -1642,6 +1673,48 @@
         word-break: break-word;
         max-height: 420px;
         overflow: auto;
+      }
+      .friction-control-grid {
+        display: grid;
+        grid-template-columns: minmax(140px, 0.4fr) minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+      }
+      @media (max-width: 800px) {
+        .friction-control-grid { grid-template-columns: 1fr; }
+      }
+      .friction-control {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+      .friction-control-label {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--fg-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .friction-tag-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .friction-tag-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        color: var(--fg);
+        background: var(--bg);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .friction-tag-option input {
+        accent-color: var(--accent);
       }
 
       /* Custom scrollbar */
@@ -1962,6 +2035,7 @@
           <nav class="subtabs" id="knowledge-subtabs">
             <button class="subtab" data-subtab="learnings" type="button">Learnings</button>
             <button class="subtab" data-subtab="adrs" type="button">ADRs</button>
+            <button class="subtab" data-subtab="frictions" type="button">Frictions</button>
           </nav>
           <div class="learning-stats" id="learning-stats">
             <div class="tile">
@@ -1997,9 +2071,27 @@
               <span class="glyph">SUP</span>
             </div>
           </div>
+          <div class="friction-stats" id="friction-stats" style="display: none;">
+            <div class="tile">
+              <span class="label">Open</span>
+              <span class="value" id="friction-open-value">-</span>
+              <span class="glyph">OPN</span>
+            </div>
+            <div class="tile">
+              <span class="label">Triaged</span>
+              <span class="value" id="friction-triaged-value">-</span>
+              <span class="glyph">TRI</span>
+            </div>
+            <div class="tile">
+              <span class="label">Resolved This Month</span>
+              <span class="value" id="friction-resolved-month-value">-</span>
+              <span class="glyph">RSL</span>
+            </div>
+          </div>
           <div class="controls">
             <input type="search" id="learning-search" placeholder="Search learnings..." autocomplete="off" spellcheck="false" />
             <input type="search" id="adr-search" placeholder="Search ADRs..." autocomplete="off" spellcheck="false" style="display: none;" />
+            <input type="search" id="friction-search" placeholder="Search frictions..." autocomplete="off" spellcheck="false" style="display: none;" />
           </div>
           <div class="body scoreboard-table-wrap" id="learnings-body">
             <div class="skeleton-state">
@@ -2009,6 +2101,13 @@
             </div>
           </div>
           <div class="body scoreboard-table-wrap" id="adrs-body" style="display: none;">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+          <div class="body scoreboard-table-wrap" id="frictions-body" style="display: none;">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
               <div class="skeleton skeleton-row" style="width: 80%"></div>
@@ -2031,6 +2130,15 @@
             <div class="empty-state">
               <div class="icon">✧</div>
               <div class="text">No ADR selected.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel" id="friction-detail-panel" style="display: none;">
+          <header><span>Friction Detail</span><span class="count" id="friction-detail-count">-</span></header>
+          <div class="body" id="friction-detail">
+            <div class="empty-state">
+              <div class="icon">✧</div>
+              <div class="text">No friction selected.</div>
             </div>
           </div>
         </section>

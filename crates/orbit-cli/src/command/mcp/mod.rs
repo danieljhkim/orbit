@@ -51,8 +51,11 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
 pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
     "orbit.friction.add",
     "orbit.friction.list",
+    "orbit.friction.resolve",
     "orbit.friction.show",
     "orbit.friction.stats",
+    "orbit.friction.tags",
+    "orbit.friction.update",
 ];
 
 pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[

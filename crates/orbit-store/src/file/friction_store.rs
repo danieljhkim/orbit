@@ -2,11 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use orbit_common::friction::DEFAULT_FRICTION_TAGS;
 use orbit_common::types::{
-    FrictionFrontmatter, FrictionRecord, OrbitError, Task, TaskStatus, all_agent_families,
-    normalize_optional_attribution_label, resolve_agent_model_pair,
+    FrictionFrontmatter, FrictionRecord, FrictionStatus, OrbitError, Task, TaskStatus,
+    all_agent_families, normalize_optional_attribution_label, resolve_agent_model_pair,
 };
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
@@ -25,9 +25,18 @@ pub struct FrictionAddParams {
 #[derive(Debug, Clone, Default)]
 pub struct FrictionListFilter {
     pub model: Option<String>,
+    pub status: Option<FrictionStatus>,
     pub tag: Option<String>,
+    pub q: Option<String>,
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrictionUpdateParams {
+    pub status: Option<FrictionStatus>,
+    pub tags: Option<Vec<String>>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +72,9 @@ pub fn add_friction(
                 id,
                 model: params.model.trim().to_string(),
                 created_at: params.created_at,
+                status: FrictionStatus::Open,
                 tags,
+                resolved_at: None,
                 during_task: params.during_task,
                 body: params.body,
             },
@@ -89,6 +100,12 @@ pub fn list_frictions(
             continue;
         }
         if filter
+            .status
+            .is_some_and(|status| stored.record.status != status)
+        {
+            continue;
+        }
+        if filter
             .tag
             .as_deref()
             .is_some_and(|tag| !stored.record.tags.iter().any(|value| value == tag))
@@ -102,6 +119,13 @@ pub fn list_frictions(
             continue;
         }
         if filter.to.is_some_and(|to| stored.record.created_at > to) {
+            continue;
+        }
+        if filter
+            .q
+            .as_deref()
+            .is_some_and(|query| !record_matches_query(&stored.record, query))
+        {
             continue;
         }
         records.push(stored);
@@ -129,8 +153,96 @@ pub fn show_friction(
     Ok(Some(read_record_at(&path)?))
 }
 
+pub fn update_friction(
+    frictions_root: &Path,
+    id: &str,
+    params: FrictionUpdateParams,
+) -> Result<StoredFrictionRecord, OrbitError> {
+    validate_friction_id(id)?;
+    let month = &id[1..8];
+    let nnn = &id[9..12];
+    let path = frictions_root.join(month).join(format!("F{nnn}.md"));
+    if !path.exists() {
+        return Err(OrbitError::InvalidInput(format!(
+            "friction record not found: {id}"
+        )));
+    }
+
+    let lock_target = frictions_root.join(month).join(".triage");
+    with_exclusive_file_lock(&lock_target, "friction record update", || {
+        let mut stored = read_record_at(&path)?;
+        if let Some(tags) = params.tags {
+            let taxonomy = load_tag_taxonomy(frictions_root)?;
+            stored.record.tags = normalize_and_validate_tags(tags, &taxonomy)?;
+        }
+        if let Some(status) = params.status {
+            stored.record.status = status;
+            stored.record.resolved_at = match status {
+                FrictionStatus::Resolved => {
+                    Some(stored.record.resolved_at.unwrap_or(params.updated_at))
+                }
+                FrictionStatus::Open | FrictionStatus::Triaged => None,
+            };
+        }
+        write_record_at(&path, &stored.record)
+    })
+}
+
+pub fn resolve_friction(
+    frictions_root: &Path,
+    id: &str,
+    resolved_at: DateTime<Utc>,
+) -> Result<StoredFrictionRecord, OrbitError> {
+    update_friction(
+        frictions_root,
+        id,
+        FrictionUpdateParams {
+            status: Some(FrictionStatus::Resolved),
+            tags: None,
+            updated_at: resolved_at,
+        },
+    )
+}
+
 pub fn friction_stats(frictions_root: &Path, tasks: &[Task]) -> Result<Value, OrbitError> {
     let records = list_frictions(frictions_root, &FrictionListFilter::default())?;
+    let now = Utc::now();
+    let month_start = Utc
+        .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
+        .single()
+        .ok_or_else(|| OrbitError::Store("compute current friction month".to_string()))?;
+    let (next_year, next_month) = if now.month() == 12 {
+        (now.year() + 1, 1)
+    } else {
+        (now.year(), now.month() + 1)
+    };
+    let next_month_start = Utc
+        .with_ymd_and_hms(next_year, next_month, 1, 0, 0, 0)
+        .single()
+        .ok_or_else(|| OrbitError::Store("compute next friction month".to_string()))?;
+    let open = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Open)
+        .count() as u64;
+    let triaged = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Triaged)
+        .count() as u64;
+    let resolved = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Resolved)
+        .count() as u64;
+    let resolved_this_month = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Resolved)
+        .filter(|stored| {
+            let resolved_at = stored
+                .record
+                .resolved_at
+                .unwrap_or(stored.record.created_at);
+            resolved_at >= month_start && resolved_at < next_month_start
+        })
+        .count() as u64;
     let tasks_done = completed_tasks_by_model(tasks);
     let mut frictions_by_model: BTreeMap<String, u64> = BTreeMap::new();
     let mut frictions_by_tag_model: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
@@ -171,9 +283,18 @@ pub fn friction_stats(frictions_root: &Path, tasks: &[Task]) -> Result<Value, Or
     }
 
     Ok(json!({
+        "total": records.len() as u64,
+        "open": open,
+        "triaged": triaged,
+        "resolved": resolved,
+        "resolved_this_month": resolved_this_month,
         "by_model": Value::Object(by_model),
         "by_tag": Value::Object(by_tag),
     }))
+}
+
+pub fn friction_tags(frictions_root: &Path) -> Result<Vec<String>, OrbitError> {
+    Ok(load_tag_taxonomy(frictions_root)?.into_iter().collect())
 }
 
 pub fn ensure_default_tag_taxonomy(frictions_root: &Path) -> Result<PathBuf, OrbitError> {
@@ -227,6 +348,25 @@ fn collect_tags_from_yaml(value: &serde_yaml::Value, out: &mut BTreeSet<String>)
         }
         _ => {}
     }
+}
+
+fn record_matches_query(record: &FrictionRecord, raw_query: &str) -> bool {
+    let query = raw_query.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    record.id.to_lowercase().contains(&query)
+        || record.model.to_lowercase().contains(&query)
+        || record.status.as_str().contains(&query)
+        || record
+            .during_task
+            .as_deref()
+            .is_some_and(|task| task.to_lowercase().contains(&query))
+        || record
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(&query))
+        || record.body.to_lowercase().contains(&query)
 }
 
 fn normalize_and_validate_tags(
@@ -301,7 +441,9 @@ fn write_record_at(
         id: record.id.clone(),
         model: record.model.clone(),
         created_at: record.created_at,
+        status: record.status,
         tags: record.tags.clone(),
+        resolved_at: record.resolved_at,
         during_task: record.during_task.clone(),
     };
     let yaml = serde_yaml::to_string(&frontmatter)
@@ -334,7 +476,9 @@ fn read_record_at(path: &Path) -> Result<StoredFrictionRecord, OrbitError> {
             id: frontmatter.id,
             model: frontmatter.model,
             created_at: frontmatter.created_at,
+            status: frontmatter.status,
             tags: frontmatter.tags,
+            resolved_at: frontmatter.resolved_at,
             during_task: frontmatter.during_task,
             body: body.trim_start_matches('\n').trim_end().to_string(),
         },

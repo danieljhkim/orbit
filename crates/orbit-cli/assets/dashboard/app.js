@@ -27,9 +27,11 @@ const AUDIT_LIMIT = positiveIntParam("audit", 50);
 const RUN_EVENTS_LIMIT = positiveIntParam("events", 100);
 const LEARNING_LIMIT = positiveIntParam("learnings", 100);
 const ADR_LIMIT = positiveIntParam("adrs", 100);
+const FRICTION_LIMIT = positiveIntParam("frictions", 100);
 
 const AUDIT_STATUSES = ["success", "failure", "denied"];
 const CANCELLABLE_RUN_STATES = new Set(["pending", "running"]);
+const FRICTION_STATUSES = ["open", "triaged", "resolved"];
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,6 +44,7 @@ let lastRuns = [];
 let lastDiagnostics = { metrics: [], errors: [] };
 let lastLearningPayload = { stats: {}, items: [] };
 let lastAdrPayload = { stats: {}, items: [] };
+let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
 let activeKnowledgeSubtab = "learnings";
@@ -53,6 +56,8 @@ let activeLearningId = null;
 let learningSearchQuery = "";
 let activeAdrId = null;
 let adrSearchQuery = "";
+let activeFrictionId = null;
+let frictionSearchQuery = "";
 
 // Audit tab state
 let lastAudit = [];
@@ -135,10 +140,10 @@ function fetchJson(path) {
     });
 }
 
-function postJson(path, body) {
+function requestJson(path, method, body) {
   const headers = { accept: "application/json" };
   const opts = {
-    method: "POST",
+    method,
     headers,
   };
   if (body !== undefined) {
@@ -153,6 +158,14 @@ function postJson(path, body) {
     }
     return body;
   });
+}
+
+function postJson(path, body) {
+  return requestJson(path, "POST", body);
+}
+
+function patchJson(path, body) {
+  return requestJson(path, "PATCH", body);
 }
 
 function runIsCancellable(run) {
@@ -1590,6 +1603,220 @@ async function supersedeLearning(learning, by, btn, detail) {
   }
 }
 
+function frictionTagNodes(tags = []) {
+  const values = Array.isArray(tags) ? tags : [];
+  if (values.length === 0) return [el("span", { class: "pill", text: "-" })];
+  return values.map((tag) => el("span", { class: "pill mono", text: tag, title: tag }));
+}
+
+function renderFrictionStats(stats = {}) {
+  $("friction-open-value").textContent = formatBigInt(stats.open || 0);
+  $("friction-triaged-value").textContent = formatBigInt(stats.triaged || 0);
+  $("friction-resolved-month-value").textContent = formatBigInt(stats.resolved_this_month || 0);
+}
+
+function renderFrictions(payload) {
+  const body = $("frictions-body");
+  if (!body) return;
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const stats = (payload && payload.stats) || {};
+  renderFrictionStats(stats);
+  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
+
+  if (items.length > 0 && !items.some((item) => item.id === activeFrictionId)) {
+    activeFrictionId = items[0].id;
+  }
+  if (items.length === 0) activeFrictionId = null;
+
+  if (items.length === 0) {
+    syncNodes(body, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No frictions match the current filter." }),
+    ])]);
+    renderFrictionDetail(null);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  const header = el("div", { class: "friction-row header" }, [
+    el("span", { text: "id" }),
+    el("span", { text: "title" }),
+    el("span", { class: "tags", text: "tags" }),
+    el("span", { text: "status" }),
+    el("span", { class: "reported", text: "reported" }),
+  ]);
+  header.dataset.key = "friction-header";
+  header.dataset.hash = "friction-header";
+  frag.appendChild(header);
+
+  for (const friction of items) {
+    const title = friction.title || friction.id;
+    const row = el("div", { class: "friction-row", title }, [
+      el("span", { class: "id", text: friction.id, title: friction.id }),
+      el("span", { class: "title", text: title }),
+      el("span", { class: "tags" }, frictionTagNodes(friction.tags)),
+      statusPill(friction.status || "open"),
+      el("span", { class: "reported", text: fmtTimestamp(friction.created_at), title: fmtAbsTime(friction.created_at) }),
+    ]);
+    row.dataset.key = `friction-${friction.id}`;
+    row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${activeFrictionId === friction.id}`;
+    if (activeFrictionId === friction.id) row.classList.add("active");
+    row.addEventListener("click", () => {
+      activeFrictionId = friction.id;
+      renderFrictions(lastFrictionPayload);
+    });
+    frag.appendChild(row);
+  }
+
+  syncNodes(body, Array.from(frag.children));
+  renderFrictionDetail(items.find((item) => item.id === activeFrictionId) || items[0]);
+}
+
+function renderFrictionDetail(friction) {
+  const detail = $("friction-detail");
+  if (!detail) return;
+  const count = $("friction-detail-count");
+  if (!friction) {
+    if (count) count.textContent = "-";
+    syncNodes(detail, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No friction selected." }),
+    ])]);
+    return;
+  }
+  if (count) count.textContent = friction.status || "open";
+
+  const title = el("div", { class: "field-block" }, [
+    el("h4", { text: friction.id }),
+    el("div", { class: "markdown-body", text: friction.title || "" }),
+  ]);
+
+  const meta = el("div", { class: "friction-detail-meta" });
+  const addMeta = (label, value) => {
+    if (value == null || value === "") return;
+    meta.appendChild(el("span", {}, [
+      document.createTextNode(`${label}: `),
+      el("span", { class: "value", text: String(value) }),
+    ]));
+  };
+  addMeta("status", friction.status || "open");
+  addMeta("model", friction.model);
+  addMeta("reported", fmtAbsTime(friction.created_at));
+  addMeta("resolved", friction.resolved_at ? fmtAbsTime(friction.resolved_at) : null);
+  addMeta("task", friction.during_task);
+
+  const controls = el("div", { class: "field-block friction-controls" }, [
+    el("h4", { text: "triage" }),
+  ]);
+  const controlGrid = el("div", { class: "friction-control-grid" });
+  controlGrid.appendChild(buildFrictionStatusControl(friction, detail));
+  controlGrid.appendChild(buildFrictionTagPicker(friction, detail));
+  controls.appendChild(controlGrid);
+
+  const bodyBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "body" }),
+    el("pre", { class: "friction-detail-body", text: friction.body || "" }),
+  ]);
+
+  const actions = el("div", { class: "actions" });
+  const resolve = el("button", {
+    class: "action approve",
+    text: "Resolve",
+    title: `Resolve ${friction.id}`,
+  });
+  resolve.disabled = friction.status === "resolved";
+  resolve.addEventListener("click", () => resolveFriction(friction, resolve, detail));
+  actions.appendChild(resolve);
+
+  syncNodes(detail, [title, meta, controls, bodyBlock, actions]);
+}
+
+function buildFrictionStatusControl(friction, detail) {
+  const wrap = el("label", { class: "friction-control" });
+  wrap.appendChild(el("span", { class: "friction-control-label", text: "status" }));
+  const select = el("select", { class: "action status-update", title: `Status for ${friction.id}` });
+  for (const status of FRICTION_STATUSES) {
+    const option = el("option", { text: status });
+    option.value = status;
+    option.selected = (friction.status || "open") === status;
+    select.appendChild(option);
+  }
+  select.addEventListener("change", () => {
+    patchFriction(friction, { status: select.value }, select, detail);
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function buildFrictionTagPicker(friction, detail) {
+  const wrap = el("div", { class: "friction-control friction-tag-picker" }, [
+    el("span", { class: "friction-control-label", text: "tags" }),
+  ]);
+  const options = Array.isArray(lastFrictionPayload.tags) ? lastFrictionPayload.tags : [];
+  const selected = new Set(Array.isArray(friction.tags) ? friction.tags : []);
+  const grid = el("div", { class: "friction-tag-options" });
+  const checkboxes = new Map();
+  if (options.length === 0) {
+    grid.appendChild(el("span", { class: "pill", text: "-" }));
+  }
+  for (const tag of options) {
+    const id = `friction-tag-${friction.id}-${tag}`;
+    const checkbox = el("input");
+    checkbox.type = "checkbox";
+    checkbox.id = id;
+    checkbox.checked = selected.has(tag);
+    checkboxes.set(tag, checkbox);
+    checkbox.addEventListener("change", () => {
+      const tags = options.filter((option) => checkboxes.get(option)?.checked);
+      if (tags.length === 0) {
+        checkbox.checked = true;
+        return;
+      }
+      patchFriction(friction, { tags }, checkbox, detail);
+    });
+    const label = el("label", { class: "friction-tag-option", title: tag }, [
+      checkbox,
+      el("span", { text: tag }),
+    ]);
+    grid.appendChild(label);
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+async function patchFriction(friction, patch, control, detail) {
+  if (!friction || !friction.id) return;
+  if (control) control.disabled = true;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    const updated = await patchJson(`/api/frictions/${encodeURIComponent(friction.id)}`, patch);
+    activeFrictionId = updated.id || friction.id;
+    await fetchAndRenderFrictions();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || "friction update failed" }));
+    if (patch.status && control) control.value = friction.status || "open";
+  } finally {
+    if (control) control.disabled = false;
+  }
+}
+
+async function resolveFriction(friction, btn, detail) {
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>wait`;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    const updated = await postJson(`/api/frictions/${encodeURIComponent(friction.id)}/resolve`);
+    activeFrictionId = updated.id || friction.id;
+    await fetchAndRenderFrictions();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || "resolve failed" }));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 function adrList(adr, field) {
   return Array.isArray(adr && adr[field]) ? adr[field] : [];
 }
@@ -1895,11 +2122,24 @@ function wireAdrSearch() {
   });
 }
 
+function wireFrictionSearch() {
+  const input = $("friction-search");
+  if (!input) return;
+  let debounce = null;
+  input.addEventListener("input", (e) => {
+    frictionSearchQuery = e.target.value.trim();
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (activeTab === "knowledge") fetchAndRenderFrictions().catch(console.error);
+    }, 200);
+  });
+}
+
 const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const AUDIT_SUBTABS = ["events", "policy"];
-const KNOWLEDGE_SUBTABS = ["learnings", "adrs"];
+const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
 
 function parseHashRoute(raw) {
   const trimmed = String(raw || "").replace(/^#/, "");
@@ -2096,18 +2336,24 @@ function setKnowledgeSubtab(name) {
     btn.classList.toggle("active", btn.dataset.subtab === name);
   }
   const isAdrs = name === "adrs";
+  const isFrictions = name === "frictions";
+  const isLearnings = name === "learnings";
   const toggle = (id, show) => {
     const node = $(id);
     if (node) node.style.display = show ? "" : "none";
   };
-  toggle("learning-stats", !isAdrs);
-  toggle("learning-search", !isAdrs);
-  toggle("learnings-body", !isAdrs);
-  toggle("learning-detail-panel", !isAdrs);
+  toggle("learning-stats", isLearnings);
+  toggle("learning-search", isLearnings);
+  toggle("learnings-body", isLearnings);
+  toggle("learning-detail-panel", isLearnings);
   toggle("adr-stats", isAdrs);
   toggle("adr-search", isAdrs);
   toggle("adrs-body", isAdrs);
   toggle("adr-detail-panel", isAdrs);
+  toggle("friction-stats", isFrictions);
+  toggle("friction-search", isFrictions);
+  toggle("frictions-body", isFrictions);
+  toggle("friction-detail-panel", isFrictions);
 }
 
 function initTabs() {
@@ -2307,7 +2553,13 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "knowledge") {
-    jobs.push(activeKnowledgeSubtab === "adrs" ? fetchAndRenderAdrs() : fetchAndRenderLearnings());
+    if (activeKnowledgeSubtab === "adrs") {
+      jobs.push(fetchAndRenderAdrs());
+    } else if (activeKnowledgeSubtab === "frictions") {
+      jobs.push(fetchAndRenderFrictions());
+    } else {
+      jobs.push(fetchAndRenderLearnings());
+    }
     return jobs;
   }
 
@@ -2452,6 +2704,20 @@ function fetchAndRenderAdrs() {
   return fetchJson(`/api/adrs?${sp.toString()}`).then((payload) => {
     lastAdrPayload = payload || { stats: {}, items: [] };
     renderAdrs(lastAdrPayload);
+  });
+}
+
+function fetchAndRenderFrictions() {
+  const sp = new URLSearchParams();
+  sp.set("limit", String(FRICTION_LIMIT));
+  if (frictionSearchQuery) sp.set("q", frictionSearchQuery);
+  return Promise.all([
+    fetchJson(`/api/frictions?${sp.toString()}`),
+    fetchJson("/api/frictions/stats"),
+  ]).then(([payload, stats]) => {
+    lastFrictionPayload = payload || { stats: {}, tags: [], items: [] };
+    lastFrictionPayload.stats = stats || lastFrictionPayload.stats || {};
+    renderFrictions(lastFrictionPayload);
   });
 }
 
@@ -3504,13 +3770,14 @@ async function refreshDashboard() {
   isRefreshing = false;
   if (activeTab === "tasks") fitLogPanelToViewport();
   
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,learnings,adrs,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
+  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,learnings,adrs,frictions,frictions/stats,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();
 wireSearch();
 wireLearningSearch();
 wireAdrSearch();
+wireFrictionSearch();
 buildAuditChips();
 wireAuditSearch();
 $("refresh-btn").addEventListener("click", refreshDashboard);

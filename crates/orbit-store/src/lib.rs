@@ -48,8 +48,9 @@ pub mod skill_store {
 
 pub mod friction_store {
     pub use crate::file::friction_store::{
-        FrictionAddParams, FrictionListFilter, StoredFrictionRecord, add_friction,
-        ensure_default_tag_taxonomy, friction_stats, list_frictions, show_friction,
+        FrictionAddParams, FrictionListFilter, FrictionUpdateParams, StoredFrictionRecord,
+        add_friction, ensure_default_tag_taxonomy, friction_stats, friction_tags, list_frictions,
+        resolve_friction, show_friction, update_friction,
     };
 }
 

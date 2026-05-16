@@ -46,8 +46,11 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
     registry.register(friction::add::OrbitFrictionAddTool);
     registry.register(friction::list::OrbitFrictionListTool);
+    registry.register(friction::resolve::OrbitFrictionResolveTool);
     registry.register(friction::show::OrbitFrictionShowTool);
     registry.register(friction::stats::OrbitFrictionStatsTool);
+    registry.register(friction::tags::OrbitFrictionTagsTool);
+    registry.register(friction::update::OrbitFrictionUpdateTool);
     registry.register(task::add::OrbitTaskAddTool);
     registry.register(task::artifact_put::OrbitTaskArtifactPutTool);
     registry.register(task::approve::OrbitTaskApproveTool);

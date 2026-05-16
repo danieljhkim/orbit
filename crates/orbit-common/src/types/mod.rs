@@ -82,7 +82,7 @@ pub use event::OrbitEvent;
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
-pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord};
+pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use job::{

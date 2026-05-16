@@ -22,6 +22,7 @@ mod adrs;
 mod audit;
 mod denials;
 mod diagnostics;
+mod frictions;
 mod jobs;
 mod learnings;
 mod log;
@@ -314,6 +315,16 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
         .route("/adrs/:id", get(adrs::get_adr))
         .route("/adrs/:id/accept", post(adrs::accept_adr_action))
         .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
+        .route("/frictions", get(frictions::list_frictions))
+        .route("/frictions/stats", get(frictions::friction_stats))
+        .route(
+            "/frictions/:id",
+            get(frictions::get_friction).patch(frictions::update_friction_action),
+        )
+        .route(
+            "/frictions/:id/resolve",
+            post(frictions::resolve_friction_action),
+        )
         .route("/jobs", get(jobs::list_jobs))
         .route("/job-runs", get(jobs::list_job_runs))
         .route("/runs/:id", get(runs::get_run))
