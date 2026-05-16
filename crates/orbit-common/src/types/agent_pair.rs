@@ -147,10 +147,7 @@ pub fn resolve_agent_model_pair_or(
     match family.as_str() {
         "codex" => Some(AgentModelPair::new("gpt-5.5", "gpt-5.4-mini")),
         "claude" => Some(AgentModelPair::new("opus-4.7", "sonnet-4.6")),
-        "gemini" => Some(AgentModelPair::new(
-            "pro",
-            "flash",
-        )),
+        "gemini" => Some(AgentModelPair::new("pro", "flash")),
         "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
         _ => None,
     }

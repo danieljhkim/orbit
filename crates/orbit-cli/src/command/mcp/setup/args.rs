@@ -8,18 +8,19 @@ use super::workspace::{env_home_dir, resolve_workspace_layout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum ScopeArg {
-    /// Write to user-level config (~/.claude, ~/.codex, ~/.gemini).
+    /// Write to user-level config (~/.claude, ~/.codex, ~/.gemini, ~/.grok).
     Home,
-    /// Write to repo-local config (.mcp.json, .codex/, .gemini/). Default.
+    /// Write to repo-local config (.mcp.json, .codex/, .gemini/, .grok/). Default.
     #[default]
     Workspace,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub(super) enum McpProvider {
     Claude,
     Codex,
     Gemini,
+    Grok,
     Cursor,
     Vscode,
     Windsurf,
@@ -31,6 +32,7 @@ impl McpProvider {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Gemini => "gemini",
+            Self::Grok => "grok",
             Self::Cursor => "cursor",
             Self::Vscode => "vscode",
             Self::Windsurf => "windsurf",
@@ -58,6 +60,9 @@ pub struct ProviderSelectionArgs {
     /// Use auto-detected provider targets for the current workspace.
     #[arg(long)]
     pub auto: bool,
+    /// Target a supported MCP client integration. Can be repeated.
+    #[arg(long = "client", value_enum, value_name = "CLIENT")]
+    clients: Vec<McpProvider>,
     /// Target Claude Code integration only.
     #[arg(long)]
     pub claude: bool,
@@ -67,6 +72,9 @@ pub struct ProviderSelectionArgs {
     /// Target Gemini CLI integration only.
     #[arg(long)]
     pub gemini: bool,
+    /// Target Grok Build integration only.
+    #[arg(long)]
+    pub grok: bool,
     /// Target Cursor integration only.
     #[arg(long)]
     pub cursor: bool,
@@ -83,18 +91,25 @@ pub struct ProviderSelectionArgs {
 
 impl ProviderSelectionArgs {
     fn any_explicit_provider(&self) -> bool {
-        self.claude || self.codex || self.gemini || self.cursor || self.vscode || self.windsurf
+        !self.clients.is_empty()
+            || self.claude
+            || self.codex
+            || self.gemini
+            || self.grok
+            || self.cursor
+            || self.vscode
+            || self.windsurf
     }
 
     fn resolve_mode(&self) -> Result<ProviderSelectionMode, OrbitError> {
         if self.auto && (self.any_explicit_provider() || self.all) {
             return Err(OrbitError::InvalidInput(
-                "--auto cannot be combined with --claude, --codex, --gemini, --cursor, --vscode, --windsurf, or --all".to_string(),
+                "--auto cannot be combined with --client, --claude, --codex, --gemini, --grok, --cursor, --vscode, --windsurf, or --all".to_string(),
             ));
         }
         if self.all && self.any_explicit_provider() {
             return Err(OrbitError::InvalidInput(
-                "--all cannot be combined with --claude, --codex, --gemini, --cursor, --vscode, or --windsurf".to_string(),
+                "--all cannot be combined with --client, --claude, --codex, --gemini, --grok, --cursor, --vscode, or --windsurf".to_string(),
             ));
         }
         if self.auto || (!self.any_explicit_provider() && !self.all) {
@@ -105,6 +120,7 @@ impl ProviderSelectionArgs {
                 McpProvider::Claude,
                 McpProvider::Codex,
                 McpProvider::Gemini,
+                McpProvider::Grok,
                 McpProvider::Cursor,
                 McpProvider::Vscode,
                 McpProvider::Windsurf,
@@ -112,25 +128,33 @@ impl ProviderSelectionArgs {
         }
 
         let mut providers = Vec::new();
-        if self.claude {
-            providers.push(McpProvider::Claude);
-        }
-        if self.codex {
-            providers.push(McpProvider::Codex);
-        }
-        if self.gemini {
-            providers.push(McpProvider::Gemini);
-        }
-        if self.cursor {
-            providers.push(McpProvider::Cursor);
-        }
-        if self.vscode {
-            providers.push(McpProvider::Vscode);
-        }
-        if self.windsurf {
-            providers.push(McpProvider::Windsurf);
+        for provider in [
+            McpProvider::Claude,
+            McpProvider::Codex,
+            McpProvider::Gemini,
+            McpProvider::Grok,
+            McpProvider::Cursor,
+            McpProvider::Vscode,
+            McpProvider::Windsurf,
+        ] {
+            if self.explicit_provider_requested(provider) {
+                providers.push(provider);
+            }
         }
         Ok(ProviderSelectionMode::Explicit(providers))
+    }
+
+    fn explicit_provider_requested(&self, provider: McpProvider) -> bool {
+        self.clients.contains(&provider)
+            || match provider {
+                McpProvider::Claude => self.claude,
+                McpProvider::Codex => self.codex,
+                McpProvider::Gemini => self.gemini,
+                McpProvider::Grok => self.grok,
+                McpProvider::Cursor => self.cursor,
+                McpProvider::Vscode => self.vscode,
+                McpProvider::Windsurf => self.windsurf,
+            }
     }
 }
 
@@ -250,6 +274,7 @@ mod tests {
                     McpProvider::Claude,
                     McpProvider::Codex,
                     McpProvider::Gemini,
+                    McpProvider::Grok,
                     McpProvider::Cursor,
                     McpProvider::Vscode,
                     McpProvider::Windsurf,
@@ -261,12 +286,14 @@ mod tests {
 
     #[test]
     fn provider_selection_rejects_auto_combined_with_new_flags() {
-        for flag in ["cursor", "vscode", "windsurf"] {
+        for flag in ["client", "grok", "cursor", "vscode", "windsurf"] {
             let mut args = ProviderSelectionArgs {
                 auto: true,
                 ..ProviderSelectionArgs::default()
             };
             match flag {
+                "client" => args.clients.push(McpProvider::Grok),
+                "grok" => args.grok = true,
                 "cursor" => args.cursor = true,
                 "vscode" => args.vscode = true,
                 "windsurf" => args.windsurf = true,
@@ -276,6 +303,21 @@ mod tests {
                 args.resolve_mode().is_err(),
                 "--auto + --{flag} should error"
             );
+        }
+    }
+
+    #[test]
+    fn provider_selection_accepts_client_aliases() {
+        let args = ProviderSelectionArgs {
+            clients: vec![McpProvider::Grok, McpProvider::Codex, McpProvider::Grok],
+            grok: true,
+            ..ProviderSelectionArgs::default()
+        };
+        match args.resolve_mode().expect("resolve mode") {
+            ProviderSelectionMode::Explicit(providers) => {
+                assert_eq!(providers, vec![McpProvider::Codex, McpProvider::Grok]);
+            }
+            ProviderSelectionMode::Auto => panic!("expected explicit provider set"),
         }
     }
 }
