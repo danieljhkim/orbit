@@ -11,6 +11,7 @@
 //! Shared leaf crate for the Orbit workspace.
 //!
 //! The public surface is intentionally split into four namespaces:
+//! - [`friction`] for shared friction taxonomy defaults
 //! - [`groundhog`] for Groundhog checkpoint lineage and append-only chronicle
 //!   serialization
 //! - [`migration`] for forward-only schema migrations of YAML artifacts
@@ -19,6 +20,7 @@
 //!   and blob storage
 //! - [`tracing`] as the shared structured-event facade used by Orbit crates
 
+pub mod friction;
 pub mod groundhog;
 pub mod migration;
 pub mod types;

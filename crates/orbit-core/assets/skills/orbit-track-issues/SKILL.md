@@ -31,6 +31,19 @@ There is no task lifecycle, triage state, rejection penalty, or precomputed scor
 
 Do **not ignore friction**. Always create a report.
 
+## Valid Tags
+
+| Tag | Use for |
+| --- | --- |
+| `build` | make/fmt/lint friction |
+| `docs` | Stale or missing CLAUDE.md or design docs |
+| `lifecycle` | Task lifecycle confusion or transition issues |
+| `naming` | Naming drift or duplicated sources of truth |
+| `other` | Fallback when no specific tag fits |
+| `policy` | fsProfile or sandboxing surprises |
+| `skill-guidance` | Misleading or incorrect skill instructions |
+| `tooling` | Orbit tool/CLI/MCP failures |
+
 ## How to Create the Report
 
 Two surfaces, identical JSON args. See the `orbit` skill for the full mapping.

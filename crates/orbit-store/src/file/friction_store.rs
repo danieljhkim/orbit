@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use orbit_common::friction::DEFAULT_FRICTION_TAGS;
 use orbit_common::types::{
     FrictionFrontmatter, FrictionRecord, OrbitError, Task, TaskStatus, all_agent_families,
     normalize_optional_attribution_label, resolve_agent_model_pair,
@@ -11,19 +12,6 @@ use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
 
 const TAGS_FILENAME: &str = "tags.yaml";
-const DEFAULT_TAGS: &[(&str, &str)] = &[
-    ("tooling", "Orbit tool/CLI/MCP failures"),
-    (
-        "skill-guidance",
-        "Misleading or incorrect skill instructions",
-    ),
-    ("docs", "Stale or missing CLAUDE.md or design docs"),
-    ("lifecycle", "Task lifecycle confusion or transition issues"),
-    ("build", "make/fmt/lint friction"),
-    ("naming", "Naming drift or duplicated sources of truth"),
-    ("policy", "fsProfile or sandboxing surprises"),
-    ("other", "Fallback"),
-];
 
 #[derive(Debug, Clone)]
 pub struct FrictionAddParams {
@@ -192,7 +180,7 @@ pub fn ensure_default_tag_taxonomy(frictions_root: &Path) -> Result<PathBuf, Orb
     let path = frictions_root.join(TAGS_FILENAME);
     if !path.exists() {
         let mut body = String::new();
-        for (tag, description) in DEFAULT_TAGS {
+        for (tag, description) in DEFAULT_FRICTION_TAGS {
             body.push_str(&format!("{tag}: \"{description}\"\n"));
         }
         atomic_write_text(&path, &body).map_err(|error| OrbitError::Io(error.to_string()))?;

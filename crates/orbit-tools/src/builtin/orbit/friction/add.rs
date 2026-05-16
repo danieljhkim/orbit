@@ -1,3 +1,4 @@
+use orbit_common::friction::friction_tags_literal;
 use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
 use serde_json::Value;
 
@@ -21,8 +22,10 @@ impl Tool for OrbitFrictionAddTool {
                 },
                 ToolParam {
                     name: "tags".to_string(),
-                    description: "Friction taxonomy tags as a string or array; defaults to other"
-                        .to_string(),
+                    description: format!(
+                        "Friction taxonomy tags as a string or array; valid tags: {}; defaults to other",
+                        friction_tags_literal()
+                    ),
                     param_type: "string_list".to_string(),
                     required: false,
                 },
@@ -47,5 +50,35 @@ impl Tool for OrbitFrictionAddTool {
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         super::super::reject_agent_field(&input, "orbit.friction.add")?;
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::FrictionAdd)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_common::friction::{DEFAULT_FRICTION_TAGS, friction_tags_literal};
+
+    use super::*;
+
+    #[test]
+    fn tags_parameter_description_lists_default_taxonomy() {
+        let schema = OrbitFrictionAddTool.schema();
+        let tags_param = schema
+            .parameters
+            .iter()
+            .find(|param| param.name == "tags")
+            .expect("tags parameter");
+
+        assert!(
+            tags_param.description.contains(&friction_tags_literal()),
+            "{}",
+            tags_param.description
+        );
+        for (tag, _description) in DEFAULT_FRICTION_TAGS {
+            assert!(
+                tags_param.description.contains(tag),
+                "tags description should include {tag}: {}",
+                tags_param.description
+            );
+        }
     }
 }
