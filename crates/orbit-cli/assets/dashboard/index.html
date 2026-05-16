@@ -198,7 +198,8 @@
       
       #task-search,
       #audit-search,
-      #learning-search {
+      #learning-search,
+      #adr-search {
         flex: 1 1 200px;
         min-width: 160px;
         background: var(--bg);
@@ -214,7 +215,8 @@
       
       #task-search:focus,
       #audit-search:focus,
-      #learning-search:focus {
+      #learning-search:focus,
+      #adr-search:focus {
         border-color: var(--accent);
       }
       
@@ -1507,20 +1509,25 @@
       .knowledge-empty { color: var(--fg-dim); font-family: var(--font-mono); font-size: 12px; }
 
       /* Knowledge tab */
-      .learning-stats {
+      .learning-stats,
+      .adr-stats {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         border-bottom: 1px solid var(--border);
       }
       @media (max-width: 800px) {
-        .learning-stats { grid-template-columns: 1fr; }
-        .learning-row { grid-template-columns: 120px minmax(0, 1fr) 76px; }
+        .learning-stats,
+        .adr-stats { grid-template-columns: 1fr; }
+        .learning-row,
+        .adr-row { grid-template-columns: 120px minmax(0, 1fr) 76px; }
         .learning-row .evidence,
-        .learning-row .updated { display: none; }
+        .learning-row .updated,
+        .adr-row .feature,
+        .adr-row .accepted { display: none; }
       }
-      .learning-row {
+      .learning-row,
+      .adr-row {
         display: grid;
-        grid-template-columns: 140px minmax(180px, 1fr) 96px 110px 110px;
         gap: 12px;
         padding: 9px 16px;
         align-items: center;
@@ -1529,9 +1536,18 @@
         font-size: 12px;
         cursor: pointer;
       }
-      .learning-row:hover { background: rgba(255, 255, 255, 0.03); }
-      .learning-row.active { background: rgba(110, 159, 255, 0.06); }
-      .learning-row.header {
+      .learning-row {
+        grid-template-columns: 140px minmax(180px, 1fr) 96px 110px 110px;
+      }
+      .adr-row {
+        grid-template-columns: 120px minmax(220px, 1.2fr) 110px 140px 130px;
+      }
+      .learning-row:hover,
+      .adr-row:hover { background: rgba(255, 255, 255, 0.03); }
+      .learning-row.active,
+      .adr-row.active { background: rgba(110, 159, 255, 0.06); }
+      .learning-row.header,
+      .adr-row.header {
         color: var(--fg-dim);
         font-size: 10px;
         font-weight: 600;
@@ -1544,12 +1560,17 @@
         z-index: 1;
       }
       .learning-row .id,
-      .learning-row .updated {
+      .learning-row .updated,
+      .adr-row .id,
+      .adr-row .title,
+      .adr-row .feature,
+      .adr-row .accepted {
         color: var(--fg-dim);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .adr-row .title { color: var(--fg); }
       .learning-row .scope {
         display: flex;
         flex-wrap: wrap;
@@ -1560,12 +1581,14 @@
         color: var(--fg-dim);
         text-align: right;
       }
-      #learning-detail {
+      #learning-detail,
+      #adr-detail {
         padding: 16px;
         display: grid;
         gap: 12px;
       }
-      .learning-detail-meta {
+      .learning-detail-meta,
+      .adr-detail-meta {
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
@@ -1573,18 +1596,21 @@
         font-size: 11px;
         color: var(--fg-dim);
       }
-      .learning-detail-meta .value {
+      .learning-detail-meta .value,
+      .adr-detail-meta .value {
         color: var(--fg);
         background: rgba(255, 255, 255, 0.05);
         padding: 2px 6px;
         border-radius: 2px;
       }
-      .learning-detail-scope {
+      .learning-detail-scope,
+      .adr-detail-list {
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
       }
-      .learning-detail-body {
+      .learning-detail-body,
+      .adr-detail-body {
         margin: 0;
         background: var(--bg);
         border: 1px solid var(--border);
@@ -1917,6 +1943,7 @@
           <header><span>Knowledge</span><span class="count" id="knowledge-count">-</span></header>
           <nav class="subtabs" id="knowledge-subtabs">
             <button class="subtab" data-subtab="learnings" type="button">Learnings</button>
+            <button class="subtab" data-subtab="adrs" type="button">ADRs</button>
           </nav>
           <div class="learning-stats" id="learning-stats">
             <div class="tile">
@@ -1935,10 +1962,35 @@
               <span class="glyph">IDX</span>
             </div>
           </div>
+          <div class="adr-stats" id="adr-stats" style="display: none;">
+            <div class="tile">
+              <span class="label">Proposed</span>
+              <span class="value" id="adr-proposed-value">-</span>
+              <span class="glyph">PRP</span>
+            </div>
+            <div class="tile">
+              <span class="label">Accepted</span>
+              <span class="value" id="adr-accepted-value">-</span>
+              <span class="glyph">ACC</span>
+            </div>
+            <div class="tile">
+              <span class="label">Superseded</span>
+              <span class="value" id="adr-superseded-value">-</span>
+              <span class="glyph">SUP</span>
+            </div>
+          </div>
           <div class="controls">
             <input type="search" id="learning-search" placeholder="Search learnings..." autocomplete="off" spellcheck="false" />
+            <input type="search" id="adr-search" placeholder="Search ADRs..." autocomplete="off" spellcheck="false" style="display: none;" />
           </div>
           <div class="body scoreboard-table-wrap" id="learnings-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+          <div class="body scoreboard-table-wrap" id="adrs-body" style="display: none;">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
               <div class="skeleton skeleton-row" style="width: 80%"></div>
@@ -1952,6 +2004,15 @@
             <div class="empty-state">
               <div class="icon">✧</div>
               <div class="text">No learning selected.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel" id="adr-detail-panel" style="display: none;">
+          <header><span>ADR Detail</span><span class="count" id="adr-detail-count">-</span></header>
+          <div class="body" id="adr-detail">
+            <div class="empty-state">
+              <div class="icon">✧</div>
+              <div class="text">No ADR selected.</div>
             </div>
           </div>
         </section>

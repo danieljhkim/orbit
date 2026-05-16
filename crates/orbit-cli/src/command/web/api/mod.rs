@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 use url::Url;
 
+mod adrs;
 mod audit;
 mod denials;
 mod diagnostics;
@@ -239,6 +240,13 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
             kind: orbit_core::NotFoundKind::Learning,
             id,
         } => not_found(format!("learning not found: {id}")),
+        orbit_core::OrbitError::NotFound {
+            kind: orbit_core::NotFoundKind::Adr,
+            id,
+        } => not_found(format!("ADR not found: {id}")),
+        orbit_core::OrbitError::AdrInvalidTransition(message) => {
+            bad_request(format!("Invalid ADR status transition: {message}"))
+        }
         other => server_error(other),
     }
 }
@@ -301,6 +309,10 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
             "/learnings/:id/supersede",
             post(learnings::supersede_learning_action),
         )
+        .route("/adrs", get(adrs::list_adrs))
+        .route("/adrs/:id", get(adrs::get_adr))
+        .route("/adrs/:id/accept", post(adrs::accept_adr_action))
+        .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
         .route("/jobs", get(jobs::list_jobs))
         .route("/job-runs", get(jobs::list_job_runs))
         .route("/runs/:id", get(runs::get_run))

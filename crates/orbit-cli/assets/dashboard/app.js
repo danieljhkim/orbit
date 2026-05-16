@@ -26,6 +26,7 @@ const DIAG_LIMIT = positiveIntParam("diag", 50);
 const AUDIT_LIMIT = positiveIntParam("audit", 50);
 const RUN_EVENTS_LIMIT = positiveIntParam("events", 100);
 const LEARNING_LIMIT = positiveIntParam("learnings", 100);
+const ADR_LIMIT = positiveIntParam("adrs", 100);
 
 const AUDIT_STATUSES = ["success", "failure", "denied"];
 const CANCELLABLE_RUN_STATES = new Set(["pending", "running"]);
@@ -40,6 +41,7 @@ let lastTasks = [];
 let lastRuns = [];
 let lastDiagnostics = { metrics: [], errors: [] };
 let lastLearningPayload = { stats: {}, items: [] };
+let lastAdrPayload = { stats: {}, items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
 let activeKnowledgeSubtab = "learnings";
@@ -49,6 +51,8 @@ let isRefreshing = false;
 let taskActionNotice = null;
 let activeLearningId = null;
 let learningSearchQuery = "";
+let activeAdrId = null;
+let adrSearchQuery = "";
 
 // Audit tab state
 let lastAudit = [];
@@ -1492,6 +1496,239 @@ async function supersedeLearning(learning, by, btn, detail) {
   }
 }
 
+function adrList(adr, field) {
+  return Array.isArray(adr && adr[field]) ? adr[field] : [];
+}
+
+function adrPrimaryFeature(adr) {
+  const features = adrList(adr, "related_features");
+  if (features.length === 0) return "-";
+  if (features.length === 1) return features[0];
+  return `${features[0]} +${features.length - 1}`;
+}
+
+function renderAdrStats(stats = {}) {
+  $("adr-proposed-value").textContent = formatBigInt(stats.proposed || 0);
+  $("adr-accepted-value").textContent = formatBigInt(stats.accepted || 0);
+  $("adr-superseded-value").textContent = formatBigInt(stats.superseded || 0);
+}
+
+function renderAdrs(payload) {
+  const body = $("adrs-body");
+  if (!body) return;
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const stats = (payload && payload.stats) || {};
+  renderAdrStats(stats);
+  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
+
+  if (items.length > 0 && !items.some((item) => item.id === activeAdrId)) {
+    activeAdrId = items[0].id;
+  }
+  if (items.length === 0) activeAdrId = null;
+
+  if (items.length === 0) {
+    syncNodes(body, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No ADRs match the current filter." }),
+    ])]);
+    renderAdrDetail(null);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  const header = el("div", { class: "adr-row header" }, [
+    el("span", { text: "id" }),
+    el("span", { text: "title" }),
+    el("span", { text: "status" }),
+    el("span", { class: "feature", text: "feature" }),
+    el("span", { class: "accepted", text: "accepted-at" }),
+  ]);
+  header.dataset.key = "adr-header";
+  header.dataset.hash = "adr-header";
+  frag.appendChild(header);
+
+  for (const adr of items) {
+    const feature = adrPrimaryFeature(adr);
+    const accepted = adr.accepted_at ? fmtTimestamp(adr.accepted_at) : "-";
+    const row = el("div", { class: "adr-row", title: adr.title || adr.id }, [
+      el("span", { class: "id", text: adr.id, title: adr.id }),
+      el("span", { class: "title", text: adr.title || "" }),
+      statusPill(adr.status || "proposed"),
+      el("span", { class: "feature", text: feature, title: adrList(adr, "related_features").join(", ") }),
+      el("span", { class: "accepted", text: accepted, title: fmtAbsTime(adr.accepted_at) }),
+    ]);
+    row.dataset.key = `adr-${adr.id}`;
+    row.dataset.hash = `${adr.id}-${adr.status}-${adr.accepted_at || ""}-${adr.superseded_by || ""}-${activeAdrId === adr.id}`;
+    if (activeAdrId === adr.id) row.classList.add("active");
+    row.addEventListener("click", () => {
+      activeAdrId = adr.id;
+      renderAdrs(lastAdrPayload);
+    });
+    frag.appendChild(row);
+  }
+
+  syncNodes(body, Array.from(frag.children));
+  renderAdrDetail(items.find((item) => item.id === activeAdrId) || items[0]);
+}
+
+function buildAdrValueList(values, opts = {}) {
+  const wrap = el("div", { class: "adr-detail-list" });
+  if (!values || values.length === 0) {
+    wrap.appendChild(el("span", { class: "pill", text: "-" }));
+    return wrap;
+  }
+  for (const value of values) {
+    if (opts.taskLinks) {
+      const btn = el("button", { class: "relation-target mono", text: value, title: `Open task ${value}` });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openTaskFromKnowledge(value);
+      });
+      wrap.appendChild(btn);
+    } else {
+      wrap.appendChild(el("span", { class: "pill mono", text: value, title: value }));
+    }
+  }
+  return wrap;
+}
+
+function openTaskFromKnowledge(taskId) {
+  activeStatuses = new Set(STATUS_ORDER);
+  searchQuery = "";
+  const taskSearch = $("task-search");
+  if (taskSearch) taskSearch.value = "";
+  setActiveTab("tasks", { refresh: false });
+  const open = () => openVisibleTask(taskId);
+  if (lastTasks.length > 0) {
+    open();
+    return;
+  }
+  fetchJson("/api/tasks").then((tasks) => {
+    lastTasks = tasks;
+    renderTasks(tasks);
+    open();
+  }).catch(() => copyTaskIdWithNotice(taskId));
+}
+
+function renderAdrDetail(adr) {
+  const detail = $("adr-detail");
+  if (!detail) return;
+  const count = $("adr-detail-count");
+  if (!adr) {
+    if (count) count.textContent = "-";
+    syncNodes(detail, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No ADR selected." }),
+    ])]);
+    return;
+  }
+  if (count) count.textContent = adr.status || "proposed";
+
+  const title = el("div", { class: "field-block" }, [
+    el("h4", { text: adr.id }),
+    el("div", { class: "markdown-body", text: adr.title || "" }),
+  ]);
+
+  const meta = el("div", { class: "adr-detail-meta" });
+  const addMeta = (label, value) => {
+    if (value == null || value === "") return;
+    meta.appendChild(el("span", {}, [
+      document.createTextNode(`${label}: `),
+      el("span", { class: "value", text: String(value) }),
+    ]));
+  };
+  addMeta("status", adr.status || "proposed");
+  addMeta("owner", adr.owner);
+  addMeta("created", fmtAbsTime(adr.created_at));
+  addMeta("accepted", fmtAbsTime(adr.accepted_at));
+  addMeta("updated", fmtAbsTime(adr.last_updated));
+
+  const featuresBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "related_features" }),
+    buildAdrValueList(adrList(adr, "related_features")),
+  ]);
+  const tasksBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "related_tasks" }),
+    buildAdrValueList(adrList(adr, "related_tasks"), { taskLinks: true }),
+  ]);
+  const edgesBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "supersession" }),
+    buildAdrValueList([
+      ...adrList(adr, "supersedes").map((id) => `supersedes ${id}`),
+      ...(adr.superseded_by ? [`superseded_by ${adr.superseded_by}`] : []),
+    ]),
+  ]);
+  const bodyBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "body" }),
+    el("pre", { class: "adr-detail-body", text: adr.body || "" }),
+  ]);
+
+  const actions = el("div", { class: "actions" });
+  if (adr.status === "proposed") {
+    const accept = el("button", {
+      class: "action approve",
+      text: "Accept",
+      title: `Accept ${adr.id}`,
+    });
+    accept.addEventListener("click", () => acceptAdr(adr, accept, detail));
+    actions.appendChild(accept);
+  }
+  if (adr.status === "accepted") {
+    const supersede = el("button", {
+      class: "action archive",
+      text: "Supersede",
+      title: `Supersede ${adr.id}`,
+    });
+    supersede.addEventListener("click", () => {
+      const by = window.prompt(`Replacement ADR ID for ${adr.id}`);
+      if (!by || !by.trim()) return;
+      supersedeAdr(adr, by.trim(), supersede, detail);
+    });
+    actions.appendChild(supersede);
+  }
+
+  const nodes = [title, meta, featuresBlock, tasksBlock, edgesBlock, bodyBlock];
+  if (actions.children.length > 0) nodes.push(actions);
+  syncNodes(detail, nodes);
+}
+
+async function acceptAdr(adr, btn, detail) {
+  await runAdrAction(
+    adr,
+    btn,
+    detail,
+    () => postJson(`/api/adrs/${encodeURIComponent(adr.id)}/accept`),
+    "accept failed",
+  );
+}
+
+async function supersedeAdr(adr, by, btn, detail) {
+  await runAdrAction(
+    adr,
+    btn,
+    detail,
+    () => postJson(`/api/adrs/${encodeURIComponent(adr.id)}/supersede`, { by }),
+    "supersede failed",
+  );
+}
+
+async function runAdrAction(adr, btn, detail, action, fallbackMessage) {
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>wait`;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    await action();
+    activeAdrId = adr.id;
+    await fetchAndRenderAdrs();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || fallbackMessage }));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 function refreshChips() {
   for (const chip of document.querySelectorAll("#task-filter .chip")) {
     const status = chip.dataset.status;
@@ -1551,11 +1788,24 @@ function wireLearningSearch() {
   });
 }
 
+function wireAdrSearch() {
+  const input = $("adr-search");
+  if (!input) return;
+  let debounce = null;
+  input.addEventListener("input", (e) => {
+    adrSearchQuery = e.target.value.trim();
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (activeTab === "knowledge") fetchAndRenderAdrs().catch(console.error);
+    }, 200);
+  });
+}
+
 const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const AUDIT_SUBTABS = ["events", "policy"];
-const KNOWLEDGE_SUBTABS = ["learnings"];
+const KNOWLEDGE_SUBTABS = ["learnings", "adrs"];
 
 function parseHashRoute(raw) {
   const trimmed = String(raw || "").replace(/^#/, "");
@@ -1751,6 +2001,19 @@ function setKnowledgeSubtab(name) {
   for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
     btn.classList.toggle("active", btn.dataset.subtab === name);
   }
+  const isAdrs = name === "adrs";
+  const toggle = (id, show) => {
+    const node = $(id);
+    if (node) node.style.display = show ? "" : "none";
+  };
+  toggle("learning-stats", !isAdrs);
+  toggle("learning-search", !isAdrs);
+  toggle("learnings-body", !isAdrs);
+  toggle("learning-detail-panel", !isAdrs);
+  toggle("adr-stats", isAdrs);
+  toggle("adr-search", isAdrs);
+  toggle("adrs-body", isAdrs);
+  toggle("adr-detail-panel", isAdrs);
 }
 
 function initTabs() {
@@ -1950,7 +2213,7 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "knowledge") {
-    jobs.push(fetchAndRenderLearnings());
+    jobs.push(activeKnowledgeSubtab === "adrs" ? fetchAndRenderAdrs() : fetchAndRenderLearnings());
     return jobs;
   }
 
@@ -2085,6 +2348,16 @@ function fetchAndRenderLearnings() {
   return fetchJson(`/api/learnings?${sp.toString()}`).then((payload) => {
     lastLearningPayload = payload || { stats: {}, items: [] };
     renderLearnings(lastLearningPayload);
+  });
+}
+
+function fetchAndRenderAdrs() {
+  const sp = new URLSearchParams();
+  sp.set("limit", String(ADR_LIMIT));
+  if (adrSearchQuery) sp.set("q", adrSearchQuery);
+  return fetchJson(`/api/adrs?${sp.toString()}`).then((payload) => {
+    lastAdrPayload = payload || { stats: {}, items: [] };
+    renderAdrs(lastAdrPayload);
   });
 }
 
@@ -3137,12 +3410,13 @@ async function refreshDashboard() {
   isRefreshing = false;
   if (activeTab === "tasks") fitLogPanelToViewport();
   
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,learnings,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
+  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,learnings,adrs,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();
 wireSearch();
 wireLearningSearch();
+wireAdrSearch();
 buildAuditChips();
 wireAuditSearch();
 $("refresh-btn").addEventListener("click", refreshDashboard);
