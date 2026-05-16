@@ -2,8 +2,11 @@
 
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::{Path, State};
+use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
+use orbit_common::types::validate_relative_artifact_path;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
     ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
@@ -167,6 +170,45 @@ pub(super) async fn get_task(
         },
         Err(e) => map_runtime_error(e),
     }
+}
+
+pub(super) async fn get_task_artifact(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path((id, path)): Path<(String, String)>,
+) -> Response {
+    let id = match validate_id(&id) {
+        Ok(id) => id,
+        Err(message) => return bad_request(message),
+    };
+    let path = match validate_artifact_request_path(&path) {
+        Ok(path) => path,
+        Err(message) => return bad_request(message),
+    };
+    match runtime.get_task_artifact(id, &path) {
+        Ok(Some(artifact)) => {
+            let content_type = match HeaderValue::from_str(&artifact.media_type) {
+                Ok(value) => value,
+                Err(error) => {
+                    return server_error(orbit_core::OrbitError::Store(format!(
+                        "invalid artifact media type '{}': {error}",
+                        artifact.media_type
+                    )));
+                }
+            };
+            let mut response = Response::new(Body::from(artifact.content));
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, content_type);
+            response
+        }
+        Ok(None) => super::not_found(format!("artifact not found: {id}/{path}")),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+fn validate_artifact_request_path(path: &str) -> Result<String, String> {
+    validate_relative_artifact_path(path).map_err(|error| error.to_string())?;
+    Ok(path.to_string())
 }
 
 pub(super) async fn create_task_action(

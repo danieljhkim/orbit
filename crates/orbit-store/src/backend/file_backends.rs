@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, Crew, ExecutorDef, ExternalRef, JobRun, KnowledgeRunMetrics, Learning,
-    LearningStatus, OrbitError, PipelineState, PolicyDef, ReviewThread, Task, TaskArtifact,
-    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    Adr, AdrStatus, ArtifactManifestFileV2, Crew, ExecutorDef, ExternalRef, JobRun,
+    KnowledgeRunMetrics, Learning, LearningStatus, OrbitError, PipelineState, PolicyDef,
+    ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
@@ -129,8 +129,19 @@ impl TaskReviewStoreBackend for TaskV2Store {
 }
 
 impl TaskArtifactStoreBackend for TaskV2Store {
+    fn get_task_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        self.get_task_artifact_manifest(id)
+    }
+
     fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
         self.get_task_artifacts(id)
+    }
+
+    fn get_task_artifact(&self, id: &str, path: &str) -> Result<Option<TaskArtifact>, OrbitError> {
+        self.get_task_artifact(id, path)
     }
 
     fn upsert_task_artifacts(

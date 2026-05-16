@@ -533,6 +533,60 @@ impl TaskV2Store {
         Ok(Some(artifacts))
     }
 
+    pub(crate) fn get_task_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        orbit_common::types::validate_orb_task_id(id)?;
+        let bundle = match self.bundle_store.read_bundle(id) {
+            Ok(bundle) => bundle,
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let Some(manifest) = bundle.artifact_manifest else {
+            return Ok(Some(Vec::new()));
+        };
+        let mut files = manifest.files;
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(Some(files))
+    }
+
+    pub(crate) fn get_task_artifact(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        orbit_common::types::validate_orb_task_id(id)?;
+        let path = normalize_v2_artifact_path(path)?;
+        let bundle = match self.bundle_store.read_bundle(id) {
+            Ok(bundle) => bundle,
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let Some(manifest) = bundle.artifact_manifest else {
+            return Ok(None);
+        };
+        let Some(file) = manifest.files.into_iter().find(|file| file.path == path) else {
+            return Ok(None);
+        };
+        let bundle_dir = self.bundle_store.bundle_path(id)?;
+        let Some(artifact_file) = resolve_v2_artifact_file_path(&bundle_dir, &file.path)? else {
+            return Ok(None);
+        };
+        let content = fs::read(&artifact_file).map_err(|err| OrbitError::Io(err.to_string()))?;
+        Ok(Some(TaskArtifact {
+            path: file.path,
+            media_type: file.media_type,
+            content,
+        }))
+    }
+
     pub(crate) fn upsert_task_artifacts(
         &self,
         id: &str,
@@ -1133,6 +1187,31 @@ fn normalize_v2_artifact_path(raw: &str) -> Result<String, OrbitError> {
         }
     }
     Ok(parts.join("/"))
+}
+
+fn resolve_v2_artifact_file_path(
+    bundle_dir: &Path,
+    path: &str,
+) -> Result<Option<PathBuf>, OrbitError> {
+    let files_dir = bundle_dir
+        .join(TASK_ARTIFACTS_DIR_NAME)
+        .join(TASK_ARTIFACT_FILES_DIR_NAME);
+    let files_root = match fs::canonicalize(&files_dir) {
+        Ok(path) => path,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(OrbitError::Io(err.to_string())),
+    };
+    let artifact_file = match fs::canonicalize(files_dir.join(path)) {
+        Ok(path) => path,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(OrbitError::Io(err.to_string())),
+    };
+    if !artifact_file.starts_with(&files_root) {
+        return Err(OrbitError::InvalidInput(format!(
+            "artifact path '{path}' resolves outside the task artifact directory"
+        )));
+    }
+    Ok(Some(artifact_file))
 }
 
 fn render_acceptance(criteria: &[String]) -> String {

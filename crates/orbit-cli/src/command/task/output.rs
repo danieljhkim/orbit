@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::TaskArtifact;
+use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
 use orbit_core::{
     OrbitError, OrbitRuntime, TaskStatus, build_task_status_index, resolve_task_dependencies,
 };
@@ -84,6 +84,10 @@ pub(crate) fn task_to_json_with_sidecars(
         "review_threads".to_string(),
         serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
             .map_err(|e| OrbitError::Io(e.to_string()))?,
+    );
+    object.insert(
+        "artifacts".to_string(),
+        task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );
     if let Some(projection) = runtime.resolved_crew_projection(task)? {
         object.insert("resolved_crew".to_string(), Value::String(projection.name));
@@ -401,6 +405,24 @@ pub(crate) fn task_artifacts_to_json(artifacts: &[TaskArtifact]) -> Value {
                     object.insert("content".to_string(), Value::String(content.to_string()));
                 }
                 Value::Object(object)
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn task_artifact_manifest_to_json(files: &[ArtifactManifestFileV2]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|file| {
+                json!({
+                    "path": file.path,
+                    "media_type": file.media_type,
+                    "size_bytes": file.size_bytes,
+                    "sha256": file.sha256,
+                    "created_by": file.created_by,
+                    "created_at": file.created_at.to_rfc3339(),
+                })
             })
             .collect(),
     )

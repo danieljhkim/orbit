@@ -1,8 +1,8 @@
 use orbit_common::types::{
-    Adr, AdrStatus, AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
-    Learning, LearningStatus, NotFoundKind, OrbitError, PolicyDef, ReviewThread, StoredTool, Task,
-    TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
-    TaskType,
+    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, ExecutorDef, ExternalRef, JobRun,
+    JobRunState, KnowledgeRunMetrics, Learning, LearningStatus, NotFoundKind, OrbitError,
+    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
+    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
 };
 use orbit_embed::{EmbedWorker, VectorStore};
 use orbit_store::{
@@ -183,6 +183,21 @@ impl TaskRecords<'_> {
 
     pub(crate) fn get_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
         self.artifact.get_task_artifacts(id)
+    }
+
+    pub(crate) fn get_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        self.artifact.get_task_artifact_manifest(id)
+    }
+
+    pub(crate) fn get_artifact(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        self.artifact.get_task_artifact(id, path)
     }
 
     pub(crate) fn get_comments(&self, id: &str) -> Result<Option<Vec<TaskComment>>, OrbitError> {

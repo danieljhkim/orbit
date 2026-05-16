@@ -300,6 +300,7 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
             "/tasks/:id",
             get(tasks::get_task).patch(tasks::update_task_action),
         )
+        .route("/tasks/:id/artifacts/*path", get(tasks::get_task_artifact))
         .route("/tasks/:id/approve", post(tasks::approve_task_action))
         .route("/tasks/:id/reject", post(tasks::reject_task_action))
         .route("/tasks/:id/archive", post(tasks::archive_task_action))
@@ -558,3 +559,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }
+
+#[cfg(test)]
+mod tasks_tests;

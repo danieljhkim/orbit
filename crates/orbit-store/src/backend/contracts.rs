@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun, JobRunState,
-    KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, LegacyValidation, OrbitError,
-    OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment,
-    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, normalize_task_tags,
-    task_matches_tags,
+    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
+    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, LegacyValidation,
+    OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact,
+    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -395,7 +395,24 @@ pub trait TaskReviewStoreBackend: Send + Sync {
 }
 
 pub trait TaskArtifactStoreBackend: Send + Sync {
+    fn get_task_artifact_manifest(
+        &self,
+        _id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        Err(OrbitError::Store(
+            "task artifact manifest read is not supported by this backend".to_string(),
+        ))
+    }
     fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError>;
+    fn get_task_artifact(
+        &self,
+        _id: &str,
+        _path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        Err(OrbitError::Store(
+            "task artifact read is not supported by this backend".to_string(),
+        ))
+    }
     fn upsert_task_artifacts(
         &self,
         id: &str,

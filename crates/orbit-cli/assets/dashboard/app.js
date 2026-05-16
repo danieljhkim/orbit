@@ -430,6 +430,96 @@ function buildReviewThreads(threads) {
   return wrap;
 }
 
+function fmtSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return "0 bytes";
+  if (value < 1024) return `${value} bytes`;
+  const kb = value / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+function artifactUrl(taskId, path) {
+  const encodedPath = String(path)
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodedPath}`;
+}
+
+function artifactMediaType(artifact, response) {
+  return String(
+    response.headers.get("content-type") || artifact.media_type || "application/octet-stream",
+  ).split(";")[0].trim().toLowerCase();
+}
+
+function renderArtifactText(mediaType, text) {
+  if (mediaType === "text/markdown" && typeof marked !== "undefined") {
+    const view = el("div", { class: "markdown-body" });
+    view.innerHTML = marked.parse(text);
+    return view;
+  }
+  return el("pre", { text });
+}
+
+function buildArtifactPreview(artifact, response) {
+  const mediaType = artifactMediaType(artifact, response);
+  if (
+    mediaType === "text/markdown" ||
+    mediaType === "application/json" ||
+    mediaType.endsWith("/yaml") ||
+    mediaType.endsWith("+yaml") ||
+    mediaType.startsWith("text/")
+  ) {
+    return response.text().then((text) => renderArtifactText(mediaType, text));
+  }
+  return response.blob().then((blob) => {
+    const link = el("a", { text: `Download ${artifact.path}` });
+    link.href = URL.createObjectURL(blob);
+    link.download = String(artifact.path).split("/").pop() || artifact.path;
+    return link;
+  });
+}
+
+function buildArtifacts(task) {
+  const wrap = el("div", { class: "artifacts" });
+  for (const artifact of task.artifacts) {
+    const path = String(artifact.path || "");
+    const mediaType = String(artifact.media_type || "application/octet-stream");
+    const row = el("div", {
+      class: "artifact-row",
+      text: `${path} · ${mediaType} · ${fmtSize(artifact.size_bytes)}`,
+    });
+    const preview = el("div", { class: "artifact-preview" });
+    preview.hidden = true;
+    row.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (preview.dataset.loaded === "true" && !preview.hidden) {
+        preview.hidden = true;
+        return;
+      }
+      if (preview.dataset.loaded === "true") {
+        preview.hidden = false;
+        return;
+      }
+      preview.hidden = false;
+      preview.textContent = "loading...";
+      try {
+        const response = await fetch(artifactUrl(task.id, path));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        preview.replaceChildren(await buildArtifactPreview(artifact, response));
+        preview.dataset.loaded = "true";
+      } catch (error) {
+        preview.textContent = `Unable to load ${path}: ${error.message}`;
+      }
+    });
+    wrap.appendChild(row);
+    wrap.appendChild(preview);
+  }
+  return wrap;
+}
+
 function buildTaskDetail(task) {
   const detail = el("div", { class: "row-detail split-layout" });
   detail.addEventListener("click", (e) => e.stopPropagation());
@@ -500,6 +590,10 @@ function buildTaskDetail(task) {
 
   if (Array.isArray(task.review_threads) && task.review_threads.length > 0) {
     addField(leftCol, "review threads", buildReviewThreads(task.review_threads), true, true);
+  }
+
+  if (Array.isArray(task.artifacts) && task.artifacts.length > 0) {
+    addField(leftCol, "artifacts", buildArtifacts(task), true, true);
   }
 
   if (Array.isArray(task.tags) && task.tags.length > 0) {
