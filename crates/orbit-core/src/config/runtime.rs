@@ -304,7 +304,22 @@ fn workflow_default_crew_from_raw(
 ) -> Result<Option<String>, OrbitError> {
     let value = raw.and_then(|workflow| workflow.default_crew.as_deref());
     let Some(value) = value else {
-        return Ok(Some("opus-codex".to_string()).filter(|name| crews.contains_key(name)));
+        // No explicit [workflow].default_crew. Fall back to the seeded default
+        // when its crew is still present; otherwise demand the user pick one
+        // explicitly so downstream `start`/`show` calls don't surprise them
+        // with a generic "no crew selected" error.
+        if crews.contains_key("opus-codex") {
+            return Ok(Some("opus-codex".to_string()));
+        }
+        if crews.is_empty() {
+            return Ok(None);
+        }
+        let mut names: Vec<&str> = crews.keys().map(String::as_str).collect();
+        names.sort();
+        return Err(OrbitError::InvalidInput(format!(
+            "[workflow].default_crew must be set when defining [crews.*]; choose one of: {}",
+            names.join(", ")
+        )));
     };
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -808,6 +823,50 @@ default_crew = "missing"
 
         assert!(matches!(error, OrbitError::InvalidInputDiagnostic { .. }));
         assert_eq!(error.did_you_mean(), Some(&["opus-codex".to_string()][..]));
+    }
+
+    #[test]
+    fn default_crew_unset_with_custom_crews_fails_load() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        // Only a non-"opus-codex" crew defined; no [workflow] table at all.
+        write_config(
+            workspace.path(),
+            r#"
+[crews.my-team]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+"#,
+        );
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("missing default_crew with non-seeded crews must fail");
+
+        let message = error.to_string();
+        assert!(matches!(error, OrbitError::InvalidInput(_)), "{message}");
+        assert!(message.contains("[workflow].default_crew"), "{message}");
+        assert!(message.contains("my-team"), "{message}");
+    }
+
+    #[test]
+    fn default_crew_unset_with_seeded_crew_still_loads() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        // opus-codex is still present, so the historical fallback applies.
+        write_config(
+            workspace.path(),
+            r#"
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+"#,
+        );
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+        assert_eq!(config.default_crew.as_deref(), Some("opus-codex"));
     }
 
     #[test]

@@ -75,3 +75,4 @@ pub use orbit_store::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
 };
 pub use runtime::OrbitRuntime;
+pub use runtime::engine::ResolvedCrewProjection;

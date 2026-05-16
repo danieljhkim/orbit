@@ -13,7 +13,7 @@
 
 pub mod audit;
 pub mod builder;
-mod engine;
+pub mod engine;
 pub mod event_bus;
 pub mod mutation;
 pub(crate) mod orbit_tool_host;

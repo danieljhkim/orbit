@@ -168,16 +168,31 @@ impl OrbitRuntime {
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let task = self.get_task(id)?;
-        let resolved_crew =
-            self.resolve_crew_for_task(crew_override.as_deref(), task.crew.as_deref())?;
-        tracing::info!(
-            task_id = id,
-            resolved_crew = %resolved_crew.name,
-            planner_model = %resolved_crew.planner.model,
-            implementer_model = %resolved_crew.implementer.model,
-            reviewer_model = %resolved_crew.reviewer.model,
-            "crew resolved for task start",
-        );
+        // Validate status before crew resolution so a misleading
+        // "no crew selected" error can't mask the real problem
+        // (e.g. trying to restart a task that's already in-progress).
+        match task.status {
+            TaskStatus::Proposed
+            | TaskStatus::Friction
+            | TaskStatus::Backlog
+            | TaskStatus::Someday
+            | TaskStatus::Blocked => {}
+            TaskStatus::InProgress => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task '{id}' is already in-progress"
+                )));
+            }
+            other => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task '{id}' is in status '{other}'; start requires 'proposed', 'friction', 'backlog', 'someday', or 'blocked'"
+                )));
+            }
+        }
+        self.resolve_and_log_crew_for_task_start(
+            id,
+            crew_override.as_deref(),
+            task.crew.as_deref(),
+        )?;
         let dependency_status_index = build_task_status_index(&self.list_tasks()?);
         let unmet_dependencies = unmet_task_dependencies(&task, &dependency_status_index);
         if in_progress_transition_requires_plan(task.status) {

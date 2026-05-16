@@ -31,7 +31,8 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 **Consequences.**
 - "Crew" was chosen over "profile" because profiles sound user-scoped, and over "pair" because the lineup contains planner, implementer, and reviewer.
 - Run records persist the resolved crew plus the three role model strings so audit trails survive later config edits.
-- Deferred: duel-plan participant configuration, per-role task overrides, and planner-vs-executor workflow split.
+- The v2 `agent_loop` dispatch path reads role models from the crew registry (`crates/orbit-core/src/runtime/engine/environment_host.rs`). The v1 envelope/identity path and the orbit-store scoreboard/friction projections still resolve through `resolve_agent_model_pair*` in `crates/orbit-common/src/types/agent_pair.rs`; those callers do not yet have access to a crew-aware context, so this PR keeps the legacy resolver as a scoreboard-rendering shim. Migrating them is tracked as a follow-up.
+- Deferred: duel-plan participant configuration, per-role task overrides, planner-vs-executor workflow split, and the legacy-resolver migration noted above.
 - Cost: old workspaces with only `[agent.planner]`, `[agent.implementer]`, and `[agent.reviewer]` must migrate before config load succeeds.
 
 ## Task References

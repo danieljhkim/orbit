@@ -85,44 +85,21 @@ pub(crate) fn task_to_json_with_sidecars(
         serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
             .map_err(|e| OrbitError::Io(e.to_string()))?,
     );
-    if let Some(run_id) = task.job_run_id.as_deref()
-        && let Ok(run) = runtime.show_job_run(run_id)
-        && let (
-            Some(resolved_crew),
-            Some(planner_model),
-            Some(implementer_model),
-            Some(reviewer_model),
-        ) = (
-            run.resolved_crew,
-            run.planner_model,
-            run.implementer_model,
-            run.reviewer_model,
-        )
-    {
-        object.insert("resolved_crew".to_string(), Value::String(resolved_crew));
-        object.insert("planner_model".to_string(), Value::String(planner_model));
+    if let Some(projection) = runtime.resolved_crew_projection(task)? {
+        object.insert("resolved_crew".to_string(), Value::String(projection.name));
+        object.insert(
+            "planner_model".to_string(),
+            Value::String(projection.planner_model),
+        );
         object.insert(
             "implementer_model".to_string(),
-            Value::String(implementer_model),
+            Value::String(projection.implementer_model),
         );
-        object.insert("reviewer_model".to_string(), Value::String(reviewer_model));
-        return Ok(value);
+        object.insert(
+            "reviewer_model".to_string(),
+            Value::String(projection.reviewer_model),
+        );
     }
-
-    let crew = runtime.resolved_crew_for_task_projection(task)?;
-    object.insert("resolved_crew".to_string(), Value::String(crew.name));
-    object.insert(
-        "planner_model".to_string(),
-        Value::String(crew.planner.model),
-    );
-    object.insert(
-        "implementer_model".to_string(),
-        Value::String(crew.implementer.model),
-    );
-    object.insert(
-        "reviewer_model".to_string(),
-        Value::String(crew.reviewer.model),
-    );
     Ok(value)
 }
 

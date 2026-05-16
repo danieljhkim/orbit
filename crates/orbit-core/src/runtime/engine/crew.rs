@@ -3,6 +3,30 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 
+/// Crew/role-model strings to surface on a task projection.
+///
+/// Decouples projection consumers from the full `Crew` type so this struct can
+/// also be hydrated directly from persisted run-record fields, which carry only
+/// the model strings (not provider/backend).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedCrewProjection {
+    pub name: String,
+    pub planner_model: String,
+    pub implementer_model: String,
+    pub reviewer_model: String,
+}
+
+impl ResolvedCrewProjection {
+    fn from_crew(crew: Crew) -> Self {
+        Self {
+            name: crew.name,
+            planner_model: crew.planner.model,
+            implementer_model: crew.implementer.model,
+            reviewer_model: crew.reviewer.model,
+        }
+    }
+}
+
 impl OrbitRuntime {
     pub fn validate_crew_name(&self, crew: Option<&str>) -> Result<(), OrbitError> {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -43,8 +67,50 @@ impl OrbitRuntime {
         self.resolve_crew_for_task(cli_override, task_crew.as_deref())
     }
 
-    pub fn resolved_crew_for_task_projection(&self, task: &Task) -> Result<Crew, OrbitError> {
+    /// Resolve a crew/role-model projection for `orbit.task.show` consumers.
+    ///
+    /// Audit-trail truth comes first: when the task points at a run record that
+    /// persisted the resolved crew, those four strings win — they reflect what
+    /// actually ran, even if the workspace registry has been edited since.
+    ///
+    /// Best-effort otherwise: if neither the task nor the workspace can name a
+    /// crew, `Ok(None)` so readers (CLI, MCP) can omit the fields instead of
+    /// failing the entire task readout. Genuine misconfigurations (stale crew
+    /// name in `task.crew` or `default_crew`) still surface as `Err`.
+    pub fn resolved_crew_projection(
+        &self,
+        task: &Task,
+    ) -> Result<Option<ResolvedCrewProjection>, OrbitError> {
+        if let Some(run_id) = task.job_run_id.as_deref()
+            && let Some(run) = self.get_job_run_backend(run_id)?
+            && let (
+                Some(resolved_crew),
+                Some(planner_model),
+                Some(implementer_model),
+                Some(reviewer_model),
+            ) = (
+                run.resolved_crew,
+                run.planner_model,
+                run.implementer_model,
+                run.reviewer_model,
+            )
+        {
+            return Ok(Some(ResolvedCrewProjection {
+                name: resolved_crew,
+                planner_model,
+                implementer_model,
+                reviewer_model,
+            }));
+        }
+
+        let has_resolvable_name = task.crew.is_some() || self.context.default_crew().is_some();
+        if !has_resolvable_name {
+            return Ok(None);
+        }
+
         self.resolve_crew_for_task(None, task.crew.as_deref())
+            .map(ResolvedCrewProjection::from_crew)
+            .map(Some)
     }
 
     pub(crate) fn record_run_crew_from_input(
@@ -62,6 +128,24 @@ impl OrbitRuntime {
             "crew resolved for run",
         );
         self.stores().jobs().record_run_crew(run_id, &crew)?;
+        Ok(crew)
+    }
+
+    pub(crate) fn resolve_and_log_crew_for_task_start(
+        &self,
+        task_id: &str,
+        crew_override: Option<&str>,
+        task_crew: Option<&str>,
+    ) -> Result<Crew, OrbitError> {
+        let crew = self.resolve_crew_for_task(crew_override, task_crew)?;
+        tracing::info!(
+            task_id,
+            resolved_crew = %crew.name,
+            planner_model = %crew.planner.model,
+            implementer_model = %crew.implementer.model,
+            reviewer_model = %crew.reviewer.model,
+            "crew resolved for task start",
+        );
         Ok(crew)
     }
 

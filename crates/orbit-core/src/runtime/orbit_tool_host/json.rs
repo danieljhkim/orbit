@@ -128,43 +128,21 @@ fn insert_resolved_crew(
     task: &Task,
     object: &mut Map<String, Value>,
 ) -> Result<(), OrbitError> {
-    if let Some(run_id) = task.job_run_id.as_deref()
-        && let Some(run) = runtime.get_job_run_backend(run_id)?
-        && let (
-            Some(resolved_crew),
-            Some(planner_model),
-            Some(implementer_model),
-            Some(reviewer_model),
-        ) = (
-            run.resolved_crew,
-            run.planner_model,
-            run.implementer_model,
-            run.reviewer_model,
-        )
-    {
-        object.insert("resolved_crew".to_string(), Value::String(resolved_crew));
-        object.insert("planner_model".to_string(), Value::String(planner_model));
-        object.insert(
-            "implementer_model".to_string(),
-            Value::String(implementer_model),
-        );
-        object.insert("reviewer_model".to_string(), Value::String(reviewer_model));
+    let Some(projection) = runtime.resolved_crew_projection(task)? else {
         return Ok(());
-    }
-
-    let crew = runtime.resolved_crew_for_task_projection(task)?;
-    object.insert("resolved_crew".to_string(), Value::String(crew.name));
+    };
+    object.insert("resolved_crew".to_string(), Value::String(projection.name));
     object.insert(
         "planner_model".to_string(),
-        Value::String(crew.planner.model),
+        Value::String(projection.planner_model),
     );
     object.insert(
         "implementer_model".to_string(),
-        Value::String(crew.implementer.model),
+        Value::String(projection.implementer_model),
     );
     object.insert(
         "reviewer_model".to_string(),
-        Value::String(crew.reviewer.model),
+        Value::String(projection.reviewer_model),
     );
     Ok(())
 }

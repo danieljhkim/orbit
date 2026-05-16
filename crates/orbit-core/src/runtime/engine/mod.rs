@@ -9,3 +9,5 @@ mod paths;
 mod runtime_host;
 mod summary;
 mod task_host;
+
+pub use crew::ResolvedCrewProjection;
