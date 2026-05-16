@@ -28,8 +28,10 @@ editing = false
 
 [workflow]
 # Default base branch for `orbit run ship`, `ship-auto`, and `duel-plan`.
-# Override per-invocation with `--base <branch>`. Repos that keep an
-# `agent-main` buffer branch in front of `main` set this to `"agent-main"`.
+# Override per-invocation with `--base <branch>`. The Orbit repo itself uses
+# this two-branch pattern: `main` is the release/production branch, and
+# `agent-main` is the dev integration branch where task PRs land — set
+# `base_branch = "agent-main"` for the same layout in your own repo.
 base_branch = "main"
 
 # [agent.<role>] — per-role agent settings written by `orbit init`.

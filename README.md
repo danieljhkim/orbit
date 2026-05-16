@@ -81,7 +81,7 @@ Not recommended unless you're a contrarian or you're in a highly restricted envi
 
 ```bash
 # install
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | sh
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 # or: brew install danieljhkim/tap/orbit
 # or, in Claude Code:
 #   /plugin marketplace add danieljhkim/orbit

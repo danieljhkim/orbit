@@ -140,6 +140,18 @@ git push origin v<X.Y.Z>
 
 Branch first, then tag — this lets release CI resolve the tag against an already-pushed commit.
 
+### 10b. Promote to `main`
+
+After the tag pushes and release CI goes green, open a PR `agent-main → main` so the release reaches the production branch:
+
+```sh
+gh pr create --base main --head agent-main \
+  --title "release: v<X.Y.Z>" \
+  --body "Promotes v<X.Y.Z>. See CHANGELOG.md."
+```
+
+Merge with a **merge commit** (not squash) so the release tag remains reachable from `main`'s history. The PR is a fast-forward unless a hotfix landed on `main` since the last release — in that case resolve via merge, not rebase. See [Hotfix flow](#hotfix-flow) for the inverse direction.
+
 ### 11. Mark the Orbit task done
 
 Update with `status: done`, `implemented_by: <agent>`, and an `execution_summary` that records the commit SHA and tag. Future releases will discover this task via the `release` tag.
@@ -166,3 +178,29 @@ Watch the Actions tab after pushing the tag. Real failure modes seen historicall
 - **Tag pushed pointing at the wrong commit**: do NOT force-update the tag. Cut the next patch release with the fix instead.
 - **Release CI fails after the tag landed**: leave the tag, fix forward in the next patch release. The GitHub Release can be re-run from the Actions UI once the underlying issue is resolved (if the failure was infrastructure, not artifact-correctness).
 - **Breaking change discovered post-tag that wasn't in the CHANGELOG**: amend the next release's CHANGELOG with a backdated note rather than rewriting the prior section.
+
+## Hotfix flow
+
+For critical fixes against a released `main` (when waiting for the next `agent-main` release cycle isn't acceptable):
+
+1. **Branch from `main`**:
+
+   ```sh
+   git checkout -b hotfix/<slug> main
+   ```
+
+2. **Land the fix via PR targeting `main`** (same CI gate as release PRs). Keep the diff minimal — hotfixes are not the place for refactors.
+
+3. **Cut a patch release on `main`**: follow steps 1–10 of the [Release checklist](#release-checklist) but with `main` as the branch, ending with `git push origin main && git push origin v<X.Y.Z+1>`. Skip step 10b (promote) — the fix is already on `main`.
+
+4. **Back-merge `main` → `agent-main`** in the same session — never defer:
+
+   ```sh
+   git checkout agent-main
+   git merge --no-ff main
+   git push origin agent-main  # or via PR if branch-protected
+   ```
+
+   This prevents the hotfix from being silently re-overwritten by the next `agent-main → main` release merge. The back-merge runs CI so regressions surface immediately.
+
+5. If the hotfix touches a file with in-flight agent work on `agent-main`, resolve in the back-merge PR; do not rebase agent branches onto the new `agent-main` tip.

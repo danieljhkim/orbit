@@ -14,7 +14,7 @@ Orbit's CLI runs on macOS, Linux, and Windows, but **OS-level sandbox enforcemen
 The recommended install is the install script:
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | sh
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 ```
 
 It detects your platform, downloads the matching release binary, and places it on your `PATH`.
@@ -47,8 +47,8 @@ make install
 ### Pinned versions and custom install directory
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | ORBIT_VERSION=v0.3.1 sh
-curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/agent-main/install.sh | ORBIT_INSTALL_DIR="$HOME/.local/bin" sh
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_VERSION=v0.3.1 sh
+curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ## Initialize State
