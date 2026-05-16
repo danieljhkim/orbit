@@ -404,6 +404,57 @@
         font-size: 11px;
         text-align: right;
       }
+      .detail-side .meta-item .value a,
+      .external-ref-line a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .detail-side .meta-item .value a:hover,
+      .external-ref-line a:hover {
+        text-decoration: underline;
+      }
+      .detail-tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .detail-tag-row .chip {
+        cursor: default;
+      }
+      .external-ref-line {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      .relation-group {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .relation-group:last-child {
+        margin-bottom: 0;
+      }
+      .relation-group .label {
+        min-width: 112px;
+        color: var(--fg-dim);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+      .relation-target {
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        background: var(--bg);
+        color: var(--accent);
+        cursor: pointer;
+        padding: 3px 7px;
+        font-size: 11px;
+      }
+      .relation-target:hover {
+        border-color: var(--accent);
+      }
       
       .row-detail .meta-line {
         font-family: var(--font-mono);
@@ -566,6 +617,19 @@
       
       .row-detail .history-line .actor,
       .row-detail .comment-line .author { color: var(--accent-hover); font-weight: 500; }
+      .review-thread {
+        margin-bottom: 12px;
+      }
+      .review-thread:last-child {
+        margin-bottom: 0;
+      }
+      .review-thread-header {
+        color: var(--fg);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        margin-bottom: 6px;
+        overflow-wrap: anywhere;
+      }
       
       .row-detail .actions {
         display: flex;

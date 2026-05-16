@@ -289,9 +289,142 @@ const TASK_META_FIELDS = [
   ["created_by", "created_by"],
   ["pr_number", "pr"],
   ["pr_status", "pr_status"],
+  ["job_run_id", "job_run"],
   ["created_at", "created"],
   ["updated_at", "updated"],
 ];
+
+const RELATION_GROUPS = [
+  ["blocked_by", "BlockedBy"],
+  ["child_of", "ChildOf"],
+  ["spawned_from", "SpawnedFrom"],
+  ["regression_from", "RegressionFrom"],
+  ["supersedes", "Supersedes"],
+  ["related_to", "RelatedTo"],
+];
+const RELATION_GROUP_LABELS = new Map(RELATION_GROUPS);
+
+function relationTypeKey(value) {
+  if (!value) return "";
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/-/g, "_")
+    .toLowerCase();
+}
+
+function copyTaskIdWithNotice(taskId) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(taskId).catch(() => {});
+  }
+  taskActionNotice = `${taskId} is not in the filtered task list; copied ID`;
+  renderTasks(lastTasks);
+}
+
+function findTaskRow(taskId) {
+  return Array.from(document.querySelectorAll("#tasks-body .row"))
+    .find((row) => row.dataset.key === `task-${taskId}`) || null;
+}
+
+function openVisibleTask(taskId) {
+  const visible = filterTasks(lastTasks).some((task) => task.id === taskId);
+  if (!visible) {
+    copyTaskIdWithNotice(taskId);
+    return;
+  }
+  expandedTaskIds.add(taskId);
+  renderTasks(lastTasks);
+  requestAnimationFrame(() => {
+    const row = findTaskRow(taskId);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("data-changed");
+    setTimeout(() => row.classList.remove("data-changed"), 1200);
+  });
+}
+
+function buildTagRow(tags) {
+  const wrap = el("div", { class: "detail-tag-row" });
+  for (const tag of tags) {
+    wrap.appendChild(el("span", { class: "chip", text: tag }));
+  }
+  return wrap;
+}
+
+function buildExternalRefs(refs) {
+  const wrap = el("div");
+  for (const ref of refs) {
+    const label = `${ref.system || "external"}:${ref.id || ""}`;
+    const line = el("div", { class: "external-ref-line" });
+    if (ref.url) {
+      const link = el("a", { text: label });
+      link.href = ref.url;
+      line.appendChild(link);
+    } else {
+      line.textContent = label;
+    }
+    wrap.appendChild(line);
+  }
+  return wrap;
+}
+
+function buildRelations(relations) {
+  const byType = new Map(RELATION_GROUPS.map(([key]) => [key, []]));
+  for (const relation of relations) {
+    const key = relationTypeKey(relation.relation_type || relation.type);
+    const target = relation.target == null ? "" : String(relation.target);
+    if (!RELATION_GROUP_LABELS.has(key) || !target) continue;
+    byType.get(key).push(target);
+  }
+
+  const wrap = el("div");
+  for (const [key, label] of RELATION_GROUPS) {
+    const targets = byType.get(key);
+    if (!targets || targets.length === 0) continue;
+    const group = el("div", { class: "relation-group" }, [
+      el("span", { class: "label", text: label }),
+    ]);
+    for (const target of targets) {
+      const btn = el("button", { class: "relation-target mono", text: target });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openVisibleTask(target);
+      });
+      group.appendChild(btn);
+    }
+    wrap.appendChild(group);
+  }
+  return wrap;
+}
+
+function reviewThreadStatus(thread) {
+  const status = String(thread.status || "open").toLowerCase();
+  return status === "resolved" ? "resolved" : "open";
+}
+
+function buildReviewThreads(threads) {
+  const wrap = el("div", { class: "review-threads" });
+  for (const thread of threads) {
+    const messages = Array.isArray(thread.messages) ? thread.messages : [];
+    const location = thread.path
+      ? `${thread.path}${thread.line == null ? "" : `:${thread.line}`}`
+      : "general";
+    const block = el("div", { class: "review-thread" });
+    block.appendChild(el("div", {
+      class: "review-thread-header",
+      text: `[${reviewThreadStatus(thread)}] ${location} · ${messages.length} messages`,
+    }));
+    for (const msg of messages) {
+      const line = el("div", { class: "comment-line" }, [
+        document.createTextNode(`[${fmtAbsTime(msg.at)}] `),
+        el("span", { class: "author", text: msg.by || "?" }),
+        document.createTextNode(`: ${msg.body || ""}`),
+      ]);
+      block.appendChild(line);
+    }
+    wrap.appendChild(block);
+  }
+  return wrap;
+}
 
 function buildTaskDetail(task) {
   const detail = el("div", { class: "row-detail split-layout" });
@@ -361,20 +494,45 @@ function buildTaskDetail(task) {
     addField(leftCol, "execution summary", view, true, true);
   }
 
+  if (Array.isArray(task.review_threads) && task.review_threads.length > 0) {
+    addField(leftCol, "review threads", buildReviewThreads(task.review_threads), true, true);
+  }
+
+  if (Array.isArray(task.tags) && task.tags.length > 0) {
+    rightCol.appendChild(buildTagRow(task.tags));
+  }
+
   const meta = el("div", { class: "meta-list" });
   let metaCount = 0;
   for (const [key, label] of TASK_META_FIELDS) {
     const v = task[key];
     if (v == null || v === "") continue;
     const display = key.endsWith("_at") ? fmtAbsTime(v) : String(v);
+    const value = el("span", { class: "value" });
+    if (key === "job_run_id") {
+      const link = el("a", { text: display });
+      link.href = `#runs?run_id=${encodeURIComponent(display)}`;
+      value.appendChild(link);
+    } else {
+      value.textContent = display;
+    }
     const span = el("div", { class: "meta-item" }, [
       el("span", { class: "label", text: `${label}` }),
-      el("span", { class: "value", text: display }),
+      value,
     ]);
     meta.appendChild(span);
     metaCount++;
   }
   if (metaCount > 0) addField(rightCol, "details", meta);
+
+  if (Array.isArray(task.external_refs) && task.external_refs.length > 0) {
+    addField(rightCol, "external refs", buildExternalRefs(task.external_refs));
+  }
+
+  if (Array.isArray(task.relations) && task.relations.length > 0) {
+    const relations = buildRelations(task.relations);
+    if (relations.children.length > 0) addField(rightCol, "relations", relations);
+  }
 
   if (Array.isArray(task.context_files) && task.context_files.length > 0) {
     const ul = el("ul", { class: "file-list" });
@@ -1412,6 +1570,9 @@ function parseHashRoute(raw) {
 function setActiveTab(raw, opts = {}) {
   const { segments, query } = parseHashRoute(raw);
   const head = segments[0] || "tasks";
+  if (head === "runs" && !segments[1] && query.get("run_id")) {
+    segments[1] = encodeURIComponent(query.get("run_id"));
+  }
   let top;
   if (head === "runs" && segments[1]) {
     top = "run-detail";
