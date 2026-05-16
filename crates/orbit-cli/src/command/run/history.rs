@@ -5,8 +5,8 @@ use serde_json::json;
 
 use crate::command::Execute;
 
-use super::format::{format_timestamp, summarize_error_message};
-use super::job::job_run_to_json;
+use super::format::{format_timestamp, format_waiting_line, summarize_error_message};
+use super::job::job_run_to_json_with_state;
 
 pub(crate) const DEFAULT_HISTORY_LIMIT: usize = 50;
 
@@ -52,8 +52,17 @@ pub(crate) fn print_run_history(
         })?,
     };
 
+    let states = runs
+        .iter()
+        .map(|run| runtime.read_run_state(&run.run_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
     if json_output {
-        let values = runs.iter().map(job_run_to_json).collect::<Vec<_>>();
+        let values = runs
+            .iter()
+            .zip(states.iter())
+            .map(|(run, state)| job_run_to_json_with_state(run, state.as_ref()))
+            .collect::<Vec<_>>();
         return crate::output::json::print_pretty(&json!({ "runs": values }));
     }
 
@@ -101,5 +110,10 @@ pub(crate) fn print_run_history(
         table.add_row(row);
     }
     println!("{table}");
+    for (run, state) in runs.iter().zip(states.iter()) {
+        if let Some(line) = format_waiting_line(run.state, state.as_ref()) {
+            println!("{line}");
+        }
+    }
     Ok(())
 }

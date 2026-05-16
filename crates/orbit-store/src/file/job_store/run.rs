@@ -119,6 +119,7 @@ impl JobFileStore {
             .map_err(OrbitError::JobRunStateTransition)?;
         run.finished_at = Some(finished_at);
         self.write_run(&job_id, &run)?;
+        clear_run_waiting_reasons_at(&run_dir)?;
         Ok(true)
     }
 
@@ -195,6 +196,7 @@ impl JobFileStore {
         let mut run = self.read_run_at(&run_dir)?;
         // Preserve existing no-op behavior for terminal states.
         if run.state.is_terminal() {
+            clear_run_waiting_reasons_at(&run_dir)?;
             return Ok(true);
         }
         let event = match state {
@@ -216,6 +218,7 @@ impl JobFileStore {
         run.finished_at = Some(finished_at);
         run.duration_ms = duration_ms;
         self.write_run(&job_id, &run)?;
+        clear_run_waiting_reasons_at(&run_dir)?;
         Ok(true)
     }
 
@@ -517,4 +520,25 @@ fn encode_step_target_id_for_filename(target_id: &str) -> String {
 
 fn validate_run_id(run_id: &str) -> Result<(), OrbitError> {
     validate_path_stem(run_id, "job run")
+}
+
+fn clear_run_waiting_reasons_at(run_dir: &Path) -> Result<(), OrbitError> {
+    let state_path = run_dir.join("state.json");
+    if !state_path.exists() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&state_path).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let mut state: PipelineState = serde_json::from_str(&raw).map_err(|e| {
+        OrbitError::Store(format!(
+            "invalid state.json '{}': {e}",
+            state_path.display()
+        ))
+    })?;
+    if state.waiting_on_deps.is_none() && state.waiting_on_locks.is_none() {
+        return Ok(());
+    }
+    state.clear_waiting_reasons();
+    let content =
+        serde_json::to_string_pretty(&state).map_err(|e| OrbitError::Store(e.to_string()))?;
+    write_atomic(&state_path, &content).map_err(Into::into)
 }

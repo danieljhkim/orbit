@@ -1,7 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use orbit_common::types::Role;
+use orbit_common::types::{
+    OrbitError, Role, build_task_status_index, optional_string_list_alias, unmet_task_dependencies,
+};
 use orbit_engine::DispatchError;
 use orbit_engine::{StateExecutionContext, execute_deterministic_action};
 use orbit_tools::ToolContext;
@@ -196,17 +198,44 @@ pub(super) fn run_deterministic(
         // `steps.<id>.output.reserved` directly without leaking the
         // generic `{tool_name, args}` envelope into the activity's
         // input_schema.
-        "reserve_locks" => runtime
-            .run_tool_with_context_and_role(
-                "orbit.task.locks.reserve",
-                input.clone(),
-                Role::Admin,
-                tool_context,
-            )
-            .map_err(|err| DispatchError::DeterministicActionFailed {
-                action: action.to_string(),
-                message: format!("{err}"),
-            }),
+        "reserve_locks" => {
+            let waiting_on_deps =
+                unmet_dependency_ids_for_input(runtime, input).map_err(|err| {
+                    DispatchError::DeterministicActionFailed {
+                        action: action.to_string(),
+                        message: format!("{err}"),
+                    }
+                })?;
+            if !waiting_on_deps.is_empty() {
+                update_run_waiting_reasons(
+                    runtime,
+                    input,
+                    Some(waiting_on_deps.clone()),
+                    None,
+                    action,
+                )?;
+                return Ok(serde_json::json!({
+                    "reserved": false,
+                    "waiting_on_deps": waiting_on_deps,
+                    "conflicts": [],
+                }));
+            }
+
+            let output = runtime
+                .run_tool_with_context_and_role(
+                    "orbit.task.locks.reserve",
+                    input.clone(),
+                    Role::Admin,
+                    tool_context,
+                )
+                .map_err(|err| DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: format!("{err}"),
+                })?;
+            let waiting_on_locks = waiting_locks_from_reserve_output(&output);
+            update_run_waiting_reasons(runtime, input, None, non_empty(waiting_on_locks), action)?;
+            Ok(output)
+        }
         // Thin passthrough over `orbit.task.locks.release` so workflows
         // can free admission-window reservations after child runs finish.
         "release_locks" => runtime
@@ -247,9 +276,35 @@ pub(super) fn run_deterministic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::task::TaskAddParams;
+    use chrono::Utc;
+    use orbit_common::types::{PipelineState, TaskPriority, TaskStatus, TaskType};
     use orbit_engine::V2RuntimeHost;
     use orbit_tools::ToolContext;
     use serde_json::json;
+
+    fn seed_task(
+        runtime: &OrbitRuntime,
+        title: &str,
+        status: TaskStatus,
+        dependencies: Vec<String>,
+    ) -> String {
+        runtime
+            .add_task(TaskAddParams {
+                title: title.to_string(),
+                description: format!("Fixture task: {title}"),
+                acceptance_criteria: vec!["Fixture task is observable.".to_string()],
+                dependencies,
+                plan: "Fixture plan.".to_string(),
+                workspace_path: Some(".".to_string()),
+                priority: TaskPriority::Medium,
+                task_type: Some(TaskType::Chore),
+                status: Some(status),
+                ..Default::default()
+            })
+            .expect("seed task")
+            .id
+    }
 
     #[test]
     fn run_planning_duel_is_registered_for_v2_deterministic_dispatch() {
@@ -349,4 +404,148 @@ mod tests {
             other => panic!("expected registered action failure, got {other}"),
         }
     }
+
+    #[test]
+    fn reserve_locks_records_unmet_dependencies_in_run_state() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let dependency = seed_task(&runtime, "Dependency", TaskStatus::Backlog, Vec::new());
+        let blocked = seed_task(
+            &runtime,
+            "Blocked",
+            TaskStatus::Backlog,
+            vec![dependency.clone()],
+        );
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run("task_gate_pipeline", 1, Utc::now(), Some(json!({})), None)
+            .expect("insert run");
+        runtime
+            .stores()
+            .jobs()
+            .write_run_state(
+                &run.run_id,
+                &PipelineState::new(run.run_id.clone(), run.job_id.clone(), json!({})),
+            )
+            .expect("write state");
+
+        let output = runtime
+            .run_deterministic(
+                "reserve_locks",
+                &json!({}),
+                &json!({
+                    "run_id": run.run_id,
+                    "task_ids": [blocked],
+                }),
+                ToolContext::default(),
+            )
+            .expect("reserve locks");
+
+        assert_eq!(output["reserved"], json!(false));
+        assert_eq!(output["waiting_on_deps"], json!([dependency]));
+        let state = runtime
+            .read_run_state(&run.run_id)
+            .expect("read run state")
+            .expect("state exists");
+        assert_eq!(state.waiting_on_deps, Some(vec![dependency]));
+        assert_eq!(state.waiting_on_locks, None);
+    }
+
+    #[test]
+    fn waiting_locks_from_reserve_output_extracts_unique_conflict_files() {
+        let locks = waiting_locks_from_reserve_output(&json!({
+            "reserved": false,
+            "conflicts": [
+                { "file": "file:src/lib.rs", "held_by_id": "ORB-1" },
+                { "file": "file:src/lib.rs", "held_by_id": "reservation-1" },
+                { "file": "dir:crates/orbit-core/src", "held_by_id": "ORB-2" }
+            ],
+        }));
+
+        assert_eq!(
+            locks,
+            vec![
+                "dir:crates/orbit-core/src".to_string(),
+                "file:src/lib.rs".to_string()
+            ]
+        );
+    }
+}
+
+fn unmet_dependency_ids_for_input(
+    runtime: &OrbitRuntime,
+    input: &Value,
+) -> Result<Vec<String>, OrbitError> {
+    let Some(raw_task_ids) =
+        optional_string_list_alias(input, &["task_ids", "taskIds", "task-ids"])?
+    else {
+        return Ok(Vec::new());
+    };
+    let task_ids = parse_task_ids(&serde_json::json!({ "task_ids": raw_task_ids }))?;
+    let tasks = runtime.stores().tasks().list()?;
+    let status_by_id = build_task_status_index(&tasks);
+    let task_by_id = tasks
+        .into_iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+    let mut unmet = BTreeSet::new();
+    for task_id in task_ids {
+        let task = task_by_id
+            .get(&task_id)
+            .ok_or_else(|| OrbitError::not_found(crate::NotFoundKind::Task, task_id.clone()))?;
+        for dependency in unmet_task_dependencies(task, &status_by_id) {
+            unmet.insert(dependency.id);
+        }
+    }
+    Ok(unmet.into_iter().collect())
+}
+
+fn waiting_locks_from_reserve_output(output: &Value) -> Vec<String> {
+    output
+        .get("conflicts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|conflict| conflict.get("file").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn update_run_waiting_reasons(
+    runtime: &OrbitRuntime,
+    input: &Value,
+    waiting_on_deps: Option<Vec<String>>,
+    waiting_on_locks: Option<Vec<String>>,
+    action: &str,
+) -> Result<(), DispatchError> {
+    let Some(run_id) = input.get("run_id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(mut state) =
+        runtime
+            .read_run_state(run_id)
+            .map_err(|err| DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!("{err}"),
+            })?
+    else {
+        return Ok(());
+    };
+    state.set_waiting_reasons(waiting_on_deps, waiting_on_locks);
+    runtime
+        .stores()
+        .jobs()
+        .write_run_state(run_id, &state)
+        .map_err(|err| DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!("{err}"),
+        })
+}
+
+fn non_empty(values: Vec<String>) -> Option<Vec<String>> {
+    (!values.is_empty()).then_some(values)
 }

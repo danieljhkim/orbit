@@ -4,10 +4,10 @@ use serde_json::{Value, json};
 
 use crate::command::Execute;
 
-use super::job::job_run_to_json;
+use super::job::job_run_to_json_with_state;
 use super::steps::{
-    filtered_steps, legacy_step_to_json, print_run_header, print_step_record,
-    print_step_summary_table, resolve_run, resolve_run_step,
+    filtered_steps, legacy_step_to_json, print_run_header, print_run_header_with_state,
+    print_step_record, print_step_summary_table, resolve_run, resolve_run_step,
 };
 
 #[derive(Args)]
@@ -58,12 +58,12 @@ pub(crate) fn print_run_show(
 
     if json_output {
         return crate::output::json::print_pretty(&json!({
-            "run": job_run_to_json(&run),
+            "run": job_run_to_json_with_state(&run, state.as_ref()),
             "pipeline_state": state,
         }));
     }
 
-    print_run_header(&run);
+    print_run_header_with_state(&run, state.as_ref());
     if let Some(state) = &state {
         println!(
             "{} iteration={} step_outputs={} updated_at={}",
