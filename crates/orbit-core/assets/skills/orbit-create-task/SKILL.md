@@ -47,6 +47,21 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 - Orbit fills `created_by`, `planned_by`, and `implemented_by` automatically from execution context when those roles are authored during the task lifecycle.
 - Valid task types are `feature`, `bug`, `refactor`, and `chore`. Use `orbit-track-issues` for agent self-reported friction instead of task types.
 
+## Optional but Behavior-Affecting Fields
+
+### Tier 1 - Nudge
+- `complexity: "hard"` trigger: set when the task obviously cannot share a batch (large surface, multi-crate cross-cut, ambiguous design).
+  Behavior anchor: `crates/orbit-engine/src/executor/automation/batch/dispatch.rs` `task_prefers_single_batch`.
+- `dependencies: ["ORB-NNNN", ...]` trigger: set when prerequisite tasks must reach a dependency-satisfying status before this task starts.
+  Behavior anchor: `crates/orbit-common/src/types/task.rs` `task_dependencies_ready`.
+
+### Tier 2 - Mention
+- `parent_id: "ORB-NNNN"` metadata: only for real subtask-of relationships; display/list grouping and batch relatedness.
+- `source_task_id: "ORB-NNNN"` metadata: for `type: bug`, names the task that introduced the defect; display-only today.
+
+### Tier 3 - Tags
+Tags are indexed by `orbit.semantic.search`; use existing tags where they fit before inventing new ones, because speculative tag soup is costly.
+
 ## Task Quality Standards
 
 ### Validation Environment checklist
@@ -94,6 +109,7 @@ orbit tool run orbit.task.add --input '{
   "priority": "<low|medium|high|critical>",
   "type": "<feature|bug|refactor|chore>",
   "model": "<model_name>" # gpt-5.4, claude-opus-4-6, gemini-2.5-pro, etc
+  # Optional: complexity, dependencies, parent_id, source_task_id, tags - see "Optional but Behavior-Affecting Fields"
 }'
 ```
 
@@ -109,6 +125,7 @@ orbit_task_add({
   "priority": "<low|medium|high|critical>",
   "type": "<feature|bug|refactor|chore>",
   "model": "<model_name>"
+  # Optional: complexity, dependencies, parent_id, source_task_id, tags - see "Optional but Behavior-Affecting Fields"
 })
 ```
 
