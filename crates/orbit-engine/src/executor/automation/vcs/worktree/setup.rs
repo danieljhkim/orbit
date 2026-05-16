@@ -7,7 +7,10 @@ use sha2::{Digest, Sha256};
 use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
-use super::super::git::{base_sync_mode_from_input, git_success, resolve_worktree_start_point};
+use super::super::git::{
+    base_sync_mode_from_input, git_command_success, git_output, git_success,
+    resolve_worktree_start_point,
+};
 use super::resolve_worktree_path_from_prefix;
 
 const DEFAULT_BASE: &str = "main";
@@ -115,14 +118,35 @@ fn ensure_worktree(
     start_point: &str,
     branch_name: &str,
 ) -> Result<(), OrbitError> {
+    let target = git_output(
+        repo_root,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("{start_point}^{{commit}}"),
+        ],
+    )?;
+
     if worktree_path.exists() {
-        let target = super::super::git::git_output(repo_root, &["rev-parse", start_point])?;
-        git_success(
-            worktree_path,
-            &["checkout", "-B", branch_name, target.trim()],
-        )?;
-        git_success(worktree_path, &["clean", "-fd"])?;
-        return Ok(());
+        if git_command_success(worktree_path, &["rev-parse", "--is-inside-work-tree"])? {
+            git_success(worktree_path, &["checkout", "-B", branch_name, &target])?;
+            git_success(worktree_path, &["clean", "-fd"])?;
+            return Ok(());
+        }
+
+        if is_empty_dir(worktree_path)? {
+            std::fs::remove_dir(worktree_path).map_err(|error| {
+                OrbitError::Execution(format!(
+                    "failed to remove empty invalid worktree path '{}': {error}",
+                    worktree_path.display()
+                ))
+            })?;
+        } else {
+            return Err(OrbitError::Execution(format!(
+                "worktree path '{}' exists but is not a Git worktree; move it aside or remove it before retrying",
+                worktree_path.display()
+            )));
+        }
     }
 
     if let Some(parent) = worktree_path.parent() {
@@ -134,6 +158,8 @@ fn ensure_worktree(
         })?;
     }
 
+    git_success(repo_root, &["worktree", "prune"])?;
+    let worktree_path_arg = worktree_path.to_string_lossy();
     git_success(
         repo_root,
         &[
@@ -141,10 +167,30 @@ fn ensure_worktree(
             "add",
             "-B",
             branch_name,
-            &worktree_path.to_string_lossy(),
-            start_point,
+            &worktree_path_arg,
+            &target,
         ],
     )
+}
+
+fn is_empty_dir(path: &Path) -> Result<bool, OrbitError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to inspect worktree path '{}': {error}",
+            path.display()
+        ))
+    })?;
+    if !metadata.is_dir() {
+        return Ok(false);
+    }
+
+    let mut entries = std::fs::read_dir(path).map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to read worktree path '{}': {error}",
+            path.display()
+        ))
+    })?;
+    Ok(entries.next().is_none())
 }
 
 fn task_ids_from_input(input: &Value) -> Result<Vec<String>, OrbitError> {
@@ -230,6 +276,85 @@ mod tests {
     }
 
     #[test]
+    fn ensure_worktree_reuses_orphan_branch_from_failed_attempt() {
+        let temp = tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let worktree = temp.path().join("worktree");
+        init_repo(&repo, "agent-main");
+        let first_base = commit_file(&repo, "base.txt", "v1");
+        git(&repo, &["branch", "orbit/test", &first_base]);
+
+        let second_base = commit_file(&repo, "base.txt", "v2");
+        ensure_worktree(&repo, &worktree, &second_base, "orbit/test").unwrap();
+
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), second_base);
+    }
+
+    #[test]
+    fn ensure_worktree_prunes_dangling_metadata_from_failed_attempt() {
+        let temp = tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let worktree = temp.path().join("worktree");
+        init_repo(&repo, "agent-main");
+        let base = commit_file(&repo, "base.txt", "v1");
+
+        ensure_worktree(&repo, &worktree, &base, "orbit/test").unwrap();
+        fs::remove_dir_all(&worktree).unwrap();
+
+        ensure_worktree(&repo, &worktree, &base, "orbit/test").unwrap();
+
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), base);
+    }
+
+    #[test]
+    fn ensure_worktree_reuses_empty_path_from_failed_attempt() {
+        let temp = tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let worktree = temp.path().join("worktree");
+        init_repo(&repo, "agent-main");
+        let base = commit_file(&repo, "base.txt", "v1");
+        fs::create_dir_all(&worktree).unwrap();
+
+        ensure_worktree(&repo, &worktree, &base, "orbit/test").unwrap();
+
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), base);
+    }
+
+    #[test]
+    fn ensure_worktree_uses_commit_start_point_without_upstream_config() {
+        let temp = tempdir().unwrap();
+        let remote = temp.path().join("remote.git");
+        let seed = temp.path().join("seed");
+        let local = temp.path().join("local");
+        let worktree = temp.path().join("worktree");
+
+        git(temp.path(), &["init", "--bare", remote.to_str().unwrap()]);
+        init_repo(&seed, "agent-main");
+        let remote_head = commit_file(&seed, "base.txt", "v1");
+        git(
+            &seed,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        git(&seed, &["push", "-u", "origin", "agent-main"]);
+        git(
+            temp.path(),
+            &[
+                "clone",
+                "--branch",
+                "agent-main",
+                remote.to_str().unwrap(),
+                local.to_str().unwrap(),
+            ],
+        );
+
+        ensure_worktree(&local, &worktree, "origin/agent-main", "orbit/test").unwrap();
+
+        assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), remote_head);
+        assert_git_fails(&local, &["config", "--get", "branch.orbit/test.remote"]);
+        assert_git_fails(&local, &["config", "--get", "branch.orbit/test.merge"]);
+    }
+
+    #[test]
     fn worktree_setup_output_includes_legacy_batch_id_alias() {
         let output = worktree_setup_output(
             "jrun-test",
@@ -272,5 +397,21 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn assert_git_fails(current_dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(current_dir)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "git {} unexpectedly succeeded in {}:\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            current_dir.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
