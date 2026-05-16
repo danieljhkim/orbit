@@ -35,9 +35,23 @@ See full ADR-0151 for context, alternatives considered, and cost analysis.
 - Deferred: duel-plan participant configuration, per-role task overrides, planner-vs-executor workflow split, and the legacy-resolver migration noted above.
 - Cost: old workspaces with only `[agent.planner]`, `[agent.implementer]`, and `[agent.reviewer]` must migrate before config load succeeds.
 
+## ADR-0153 — Scope duel-plan candidate and model overrides to `[duel]`
+
+**Status:** Accepted · 2026-05 · [ORB-00072]
+
+**Context.** Duel-plan previously walked the full `all_agent_families()` registry and used the same model-pair resolution chain as non-duel callers. That made local CLI availability load-bearing for every supported family and made reproducible planning-duel scoreboards depend on executor YAML state.
+
+**Decision.** Add a workspace `[duel]` section with `candidates` as a normalized subset of `all_agent_families()` and `[duel.models]` as flat orchestrator-only per-family overrides. Duel role selection reads those values through `RuntimeHost`; non-duel callers continue to use executor overrides and builtin model pairs.
+
+**Consequences.**
+- Duel permutations remain dynamic but require at least three distinct configured families.
+- `[duel.models]` wins only for duel role-model lookup; helper models and non-duel model identity are unchanged.
+- The crew registry remains separate from duel participant selection. Reusing `[crews.*]` for duels was rejected because duels need a family pool, not a fixed planner/implementer/reviewer lineup.
+
 ## Task References
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
 - ORB-00058: Introduce per-task crew override for agent model selection.
+- ORB-00072: Make duel-plan agent pool and per-family model configurable via `[duel]`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

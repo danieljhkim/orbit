@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use orbit_common::types::{
-    Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, resolve_crew,
+    Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, all_agent_families, resolve_crew,
 };
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
@@ -12,8 +12,9 @@ use crate::paths;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
-    RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawExecutionEnvConfig, RawPrSection,
-    RawRuntimeConfig, RawRuntimeSection, RawTaskSection, RawWorkflowConfig,
+    RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
+    RawExecutionEnvConfig, RawPrSection, RawRuntimeConfig, RawRuntimeSection, RawTaskSection,
+    RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -45,6 +46,25 @@ pub(crate) struct RuntimeConfig {
     /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
     pub(crate) crews: BTreeMap<String, Crew>,
     pub(crate) default_crew: Option<String>,
+    pub(crate) duel: DuelConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DuelConfig {
+    pub(crate) candidates: Vec<String>,
+    pub(crate) models: BTreeMap<String, String>,
+}
+
+impl Default for DuelConfig {
+    fn default() -> Self {
+        Self {
+            candidates: all_agent_families()
+                .iter()
+                .map(|family| (*family).to_string())
+                .collect(),
+            models: BTreeMap::new(),
+        }
+    }
 }
 
 impl Default for RuntimeConfig {
@@ -67,6 +87,7 @@ impl RuntimeConfig {
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             crews: default_crews(),
             default_crew: Some("opus-codex".to_string()),
+            duel: DuelConfig::default(),
         }
     }
 
@@ -143,6 +164,7 @@ impl RuntimeConfig {
         let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
         let crews = crews_from_raw(parsed.crews.as_ref())?;
         let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
+        let duel = duel_from_raw(parsed.duel.as_ref())?;
         let pr = pr_config_from_raw(parsed.pr.as_ref());
 
         if parsed
@@ -170,6 +192,7 @@ impl RuntimeConfig {
             workflow_base_branch,
             crews,
             default_crew,
+            duel,
         })
     }
 
@@ -184,6 +207,10 @@ impl RuntimeConfig {
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr
+    }
+
+    pub(crate) fn duel_config(&self) -> &DuelConfig {
+        &self.duel
     }
 }
 
@@ -222,6 +249,92 @@ fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
     PrConfig {
         task_url_template: raw.and_then(|section| section.task_url_template.clone()),
     }
+}
+
+fn duel_from_raw(raw: Option<&RawDuelSection>) -> Result<DuelConfig, OrbitError> {
+    let Some(raw) = raw else {
+        return Ok(DuelConfig::default());
+    };
+
+    let candidates = duel_candidates_from_raw(raw.candidates.as_deref())?;
+    let models = duel_models_from_raw(raw.models.as_ref(), &candidates)?;
+    Ok(DuelConfig { candidates, models })
+}
+
+fn duel_candidates_from_raw(raw: Option<&[String]>) -> Result<Vec<String>, OrbitError> {
+    let Some(raw_candidates) = raw else {
+        return Ok(DuelConfig::default().candidates);
+    };
+    if raw_candidates.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "[duel] candidates must contain at least 3 entries; valid candidates: {}",
+            valid_duel_candidates()
+        )));
+    }
+
+    let valid: BTreeSet<&str> = all_agent_families().into_iter().collect();
+    let mut seen = BTreeSet::new();
+    let mut candidates = Vec::new();
+    for candidate in raw_candidates {
+        let normalized = candidate.trim().to_ascii_lowercase();
+        if !seen.insert(normalized.clone()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel] candidates contains duplicate '{normalized}' after normalization; valid candidates: {}",
+                valid_duel_candidates()
+            )));
+        }
+        if !valid.contains(normalized.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel] candidates contains unknown entry '{normalized}'; valid candidates: {}",
+                valid_duel_candidates()
+            )));
+        }
+        candidates.push(normalized);
+    }
+
+    if candidates.len() < 3 {
+        return Err(OrbitError::InvalidInput(format!(
+            "[duel] candidates must contain at least 3 distinct entries after normalization (got {}: {}); valid candidates: {}",
+            candidates.len(),
+            candidates.join(", "),
+            valid_duel_candidates()
+        )));
+    }
+
+    Ok(candidates)
+}
+
+fn duel_models_from_raw(
+    raw: Option<&BTreeMap<String, String>>,
+    candidates: &[String],
+) -> Result<BTreeMap<String, String>, OrbitError> {
+    let Some(raw_models) = raw else {
+        return Ok(BTreeMap::new());
+    };
+    let candidate_set: BTreeSet<&str> = candidates.iter().map(String::as_str).collect();
+    let candidate_list = candidates.join(", ");
+    let mut models = BTreeMap::new();
+    for (family, model) in raw_models {
+        let normalized_family = family.trim().to_ascii_lowercase();
+        if !candidate_set.contains(normalized_family.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel.models] contains key '{normalized_family}' that is not in resolved [duel].candidates ({candidate_list}); valid candidates: {}",
+                valid_duel_candidates()
+            )));
+        }
+        let trimmed_model = model.trim();
+        if trimmed_model.is_empty() {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel.models].{normalized_family} must not be empty (found '{model}'); configured candidates: {candidate_list}"
+            )));
+        }
+        models.insert(normalized_family, trimmed_model.to_string());
+    }
+    Ok(models)
+}
+
+fn valid_duel_candidates() -> String {
+    all_agent_families().join(", ")
 }
 
 fn reject_stale_agent_role_tables(
@@ -662,6 +775,133 @@ mod tests {
 
     fn write_config(dir: &Path, body: &str) {
         std::fs::write(dir.join("config.toml"), body).expect("write config");
+    }
+
+    fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), body);
+        RuntimeConfig::load_layered(global.path(), workspace.path())
+    }
+
+    fn assert_invalid_duel_config(body: &str, substrings: &[&str]) {
+        let error = load_config(body).expect_err("invalid duel config must fail");
+        let message = error.to_string();
+        assert!(matches!(error, OrbitError::InvalidInput(_)), "{message}");
+        for substring in substrings {
+            assert!(
+                message.contains(substring),
+                "expected {message:?} to contain {substring:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn duel_config_loads_candidates_and_models() {
+        let config = load_config(
+            r#"
+[duel]
+candidates = [" Codex ", "CLAUDE", "gemini"]
+
+[duel.models]
+" Codex " = " gpt-5.5 "
+CLAUDE = " opus-4.7 "
+"#,
+        )
+        .expect("config loads");
+
+        let mut expected_models = BTreeMap::new();
+        expected_models.insert("claude".to_string(), "opus-4.7".to_string());
+        expected_models.insert("codex".to_string(), "gpt-5.5".to_string());
+        assert_eq!(
+            config.duel,
+            DuelConfig {
+                candidates: vec![
+                    "codex".to_string(),
+                    "claude".to_string(),
+                    "gemini".to_string()
+                ],
+                models: expected_models,
+            }
+        );
+    }
+
+    #[test]
+    fn duel_config_defaults_to_all_families_without_section() {
+        let config = load_config("[scoring]\nenabled = true\n").expect("config loads");
+
+        assert_eq!(
+            config.duel.candidates,
+            all_agent_families()
+                .iter()
+                .map(|family| (*family).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(config.duel.models.is_empty());
+    }
+
+    #[test]
+    fn duel_config_rejects_empty_candidates() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = []\n",
+            &["candidates", "at least 3", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_fewer_than_three_distinct_candidates() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = [\"codex\", \"claude\"]\n",
+            &["3 distinct", "codex, claude", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_duplicate_candidates_after_normalization() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = [\"codex\", \" Codex \", \"claude\"]\n",
+            &["duplicate", "codex", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_unknown_candidate() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = [\"codex\", \"claude\", \"notabot\"]\n",
+            &["notabot", "valid candidates", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_model_key_outside_resolved_candidates() {
+        assert_invalid_duel_config(
+            r#"
+[duel]
+candidates = ["codex", "claude", "gemini"]
+
+[duel.models]
+grok = "grok-4"
+"#,
+            &[
+                "grok",
+                "resolved [duel].candidates",
+                "codex, claude, gemini",
+            ],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_empty_model_value() {
+        assert_invalid_duel_config(
+            r#"
+[duel]
+candidates = ["codex", "claude", "gemini"]
+
+[duel.models]
+codex = "   "
+"#,
+            &["duel.models", "codex", "   "],
+        );
     }
 
     #[test]

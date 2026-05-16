@@ -5,7 +5,7 @@ use orbit_common::types::{
     Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, Job, JobRun, JobRunState,
     JobTargetType, KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, ReviewThread, Role,
     Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
-    resolve_agent_model_pair,
+    all_agent_families, resolve_agent_model_pair,
 };
 use orbit_common::utility::redaction::{redact_sensitive_env_json, redact_sensitive_env_option};
 use orbit_exec::EnvironmentMode;
@@ -467,6 +467,15 @@ pub trait RuntimeHost {
     ) -> Result<(), OrbitError>;
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
         resolve_agent_model_pair(agent_cli)
+    }
+    fn duel_candidate_families(&self) -> Vec<String> {
+        all_agent_families()
+            .iter()
+            .map(|family| (*family).to_string())
+            .collect()
+    }
+    fn duel_orchestrator_model(&self, _family: &str) -> Option<String> {
+        None
     }
     fn canonical_model_name(&self, _agent_cli: &str, model: Option<&str>) -> Option<String> {
         model
@@ -950,6 +959,14 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
 
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
         self.runtime.resolved_agent_model_pair(agent_cli)
+    }
+
+    fn duel_candidate_families(&self) -> Vec<String> {
+        self.runtime.duel_candidate_families()
+    }
+
+    fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
+        self.runtime.duel_orchestrator_model(family)
     }
 
     fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {
