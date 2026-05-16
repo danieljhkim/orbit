@@ -109,6 +109,7 @@ pub(crate) fn build_context_from_roots(
     let workflow_base_branch = runtime_config.workflow_base_branch().to_string();
     let crews = runtime_config.crews.clone();
     let default_crew = runtime_config.default_crew.clone();
+    let duel = runtime_config.duel_config().clone();
 
     Ok(OrbitContext::new(
         paths,
@@ -147,6 +148,7 @@ pub(crate) fn build_context_from_roots(
             workflow_base_branch,
             crews,
             default_crew,
+            duel,
         ),
     ))
 }

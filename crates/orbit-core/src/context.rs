@@ -13,7 +13,7 @@ use orbit_store::{
 };
 use orbit_tools::ToolRegistry;
 
-use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
+use crate::config::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
@@ -182,6 +182,7 @@ pub(crate) struct OrbitRuntimeSettings {
     workflow_base_branch: String,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
+    duel: DuelConfig,
 }
 
 impl OrbitRuntimeSettings {
@@ -198,6 +199,7 @@ impl OrbitRuntimeSettings {
         workflow_base_branch: String,
         crews: std::collections::BTreeMap<String, Crew>,
         default_crew: Option<String>,
+        duel: DuelConfig,
     ) -> Self {
         Self {
             persistence,
@@ -211,6 +213,7 @@ impl OrbitRuntimeSettings {
             workflow_base_branch,
             crews,
             default_crew,
+            duel,
         }
     }
 
@@ -232,6 +235,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn default_crew(&self) -> Option<&str> {
         self.default_crew.as_deref()
+    }
+
+    pub(crate) fn duel_config(&self) -> &DuelConfig {
+        &self.duel
     }
 }
 
@@ -344,6 +351,10 @@ impl OrbitContext {
 
     pub(crate) fn default_crew(&self) -> Option<&str> {
         self.runtime.default_crew()
+    }
+
+    pub(crate) fn duel_config(&self) -> &DuelConfig {
+        self.runtime.duel_config()
     }
 }
 

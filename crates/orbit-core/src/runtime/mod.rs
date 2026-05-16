@@ -244,6 +244,10 @@ impl OrbitRuntime {
         self.context.workflow_base_branch()
     }
 
+    pub(crate) fn duel_config(&self) -> &crate::config::DuelConfig {
+        self.context.duel_config()
+    }
+
     /// Build the activity catalog for `target: activity:<name>` resolution
     /// (Phase 4). Loads from the layered Orbit data dirs using §9.1
     /// `MergeByKey` semantics — global provides defaults, workspace overrides.

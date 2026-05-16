@@ -14,6 +14,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
     pub(super) workflow: Option<RawWorkflowConfig>,
+    pub(super) duel: Option<RawDuelSection>,
     /// Removed in ORB-00058. Kept only so config loading can reject stale
     /// `[agent.<role>]` tables with an explicit migration error.
     pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
@@ -32,6 +33,12 @@ pub(super) struct RawWorkflowConfig {
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
     pub(super) default_crew: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawDuelSection {
+    pub(super) candidates: Option<Vec<String>>,
+    pub(super) models: Option<BTreeMap<String, String>>,
 }
 
 /// Schema for a single role assignment in `[crews.<name>]`.

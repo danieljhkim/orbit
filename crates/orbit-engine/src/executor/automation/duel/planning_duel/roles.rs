@@ -3,9 +3,7 @@ use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
-use orbit_common::types::{
-    Activity, OrbitError, PlanningRoleAssignment, PlanningRoles, all_agent_families,
-};
+use orbit_common::types::{Activity, OrbitError, PlanningRoleAssignment, PlanningRoles};
 use serde_json::{Value, json};
 
 use crate::context::RuntimeHost;
@@ -110,8 +108,8 @@ thread_local! {
         const { RefCell::new(VecDeque::new()) };
 }
 
-fn next_permutation() -> Result<[usize; 3], OrbitError> {
-    let family_count = all_agent_families().len();
+fn next_permutation<H: RuntimeHost + ?Sized>(host: &H) -> Result<[usize; 3], OrbitError> {
+    let family_count = host.duel_candidate_families().len();
     let from_test = TEST_PERMUTATION_QUEUE.with(|cell| cell.borrow_mut().pop_front());
     if let Some(perm) = from_test {
         return validate_role_permutation(perm, family_count, "select_planning_duel_roles");
@@ -128,6 +126,9 @@ fn orchestrator_model_for<H: RuntimeHost + ?Sized>(
     host: &H,
     family: &str,
 ) -> Result<String, OrbitError> {
+    if let Some(model) = host.duel_orchestrator_model(family) {
+        return Ok(model);
+    }
     host.resolved_agent_model_pair(family)
         .map(|pair| pair.orchestrator)
         .ok_or_else(|| {
@@ -151,11 +152,11 @@ fn build_roles_output<H: RuntimeHost + ?Sized>(
     host: &H,
     perm: [usize; 3],
 ) -> Result<Value, OrbitError> {
-    let families = all_agent_families();
+    let families = host.duel_candidate_families();
     let perm = validate_role_permutation(perm, families.len(), "select_planning_duel_roles")?;
-    let planner_a = families[perm[0]];
-    let planner_b = families[perm[1]];
-    let arbiter = families[perm[2]];
+    let planner_a = families[perm[0]].as_str();
+    let planner_b = families[perm[1]].as_str();
+    let arbiter = families[perm[2]].as_str();
 
     let started_at = Utc::now().to_rfc3339();
 
@@ -295,7 +296,7 @@ pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
     input: &Value,
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
-    let perm = next_permutation()?;
+    let perm = next_permutation(host)?;
     let output = build_roles_output(host, perm)?;
 
     Ok(json!({
@@ -328,15 +329,21 @@ mod tests {
         data_root: PathBuf,
         scoreboard_dir: PathBuf,
         registry: ActivityExecutorRegistry,
+        duel_model: Option<String>,
     }
 
     impl TestHost {
         fn new() -> Self {
+            Self::with_duel_model(None)
+        }
+
+        fn with_duel_model(duel_model: Option<&str>) -> Self {
             let temp_root = std::env::temp_dir().join("orbit-planning-duel-role-test");
             Self {
                 scoreboard_dir: temp_root.join("scoreboard"),
                 data_root: temp_root,
                 registry: ActivityExecutorRegistry::default(),
+                duel_model: duel_model.map(ToOwned::to_owned),
             }
         }
     }
@@ -410,11 +417,19 @@ mod tests {
 
         fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
             match agent_cli {
-                "codex" => Some(AgentModelPair::new("gpt-5.5", "gpt-5.4-mini")),
+                "codex" => Some(AgentModelPair::new("M_exec", "_")),
                 "claude" => Some(AgentModelPair::new("opus-4.7", "sonnet-4.6")),
                 "gemini" => Some(AgentModelPair::new("pro", "flash")),
                 "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
                 _ => None,
+            }
+        }
+
+        fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
+            if family == "codex" {
+                self.duel_model.clone()
+            } else {
+                None
             }
         }
 
@@ -445,5 +460,34 @@ mod tests {
         );
         assert_eq!(output["planner_b_agent_cli"], "codex");
         assert_eq!(output["arbiter_agent_cli"], "claude");
+    }
+
+    fn queue_permutation(perm: [usize; 3]) {
+        TEST_PERMUTATION_QUEUE.with(|cell| {
+            let mut queue = cell.borrow_mut();
+            queue.clear();
+            queue.push_back(perm);
+        });
+    }
+
+    #[test]
+    fn planning_duel_roles_prefer_duel_model_then_resolved_pair() {
+        queue_permutation([0, 1, 2]);
+        let host = TestHost::with_duel_model(Some("M_duel"));
+        let output = select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" }))
+            .expect("planning role selection uses duel model");
+        assert_eq!(
+            output["planning_duel_roles"]["planner_a"]["model"],
+            "M_duel"
+        );
+
+        queue_permutation([0, 1, 2]);
+        let host = TestHost::with_duel_model(None);
+        let output = select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" }))
+            .expect("planning role selection falls back to resolved pair");
+        assert_eq!(
+            output["planning_duel_roles"]["planner_a"]["model"],
+            "M_exec"
+        );
     }
 }
