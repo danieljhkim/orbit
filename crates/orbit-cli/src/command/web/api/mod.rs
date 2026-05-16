@@ -20,6 +20,7 @@ use url::Url;
 
 mod adrs;
 mod audit;
+mod crews;
 mod denials;
 mod diagnostics;
 mod frictions;
@@ -302,6 +303,7 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
             "/tasks/:id",
             get(tasks::get_task).patch(tasks::update_task_action),
         )
+        .route("/crews", get(crews::list_crews))
         .route("/tasks/:id/artifacts/*path", get(tasks::get_task_artifact))
         .route("/tasks/:id/approve", post(tasks::approve_task_action))
         .route("/tasks/:id/reject", post(tasks::reject_task_action))
@@ -395,6 +397,50 @@ mod tests {
             .expect("response")
     }
 
+    async fn request_crews(runtime: OrbitRuntime) -> Response {
+        router()
+            .with_state(Arc::new(runtime))
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/crews")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    fn runtime_with_custom_crews() -> (tempfile::TempDir, OrbitRuntime) {
+        let root = tempfile::tempdir().expect("create tempdir");
+        let global_root = root.path().join("global");
+        let repo_root = root.path().join("repo");
+        let workspace_root = repo_root.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("create global root");
+        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+        std::fs::write(
+            workspace_root.join("config.toml"),
+            r#"
+[crews.silver]
+planner = { model = "claude-silver-plan", provider = "claude", backend = "cli" }
+implementer = { model = "codex-silver-impl", provider = "codex", backend = "cli" }
+reviewer = { model = "codex-silver-review", provider = "codex", backend = "cli" }
+
+[crews.alpha]
+planner = { model = "alpha-plan-model", provider = "claude", backend = "cli" }
+implementer = { model = "alpha-impl-model", provider = "codex", backend = "cli" }
+reviewer = { model = "alpha-review-model", provider = "codex", backend = "cli" }
+
+[workflow]
+default_crew = "silver"
+"#,
+        )
+        .expect("write config");
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+        (root, runtime)
+    }
+
     fn seed_task(
         runtime: &OrbitRuntime,
         title: &str,
@@ -411,6 +457,29 @@ mod tests {
                 ..Default::default()
             })
             .expect("create task")
+    }
+
+    #[tokio::test]
+    async fn crews_endpoint_returns_sorted_runtime_registry() {
+        let (_root, runtime) = runtime_with_custom_crews();
+
+        let response = request_crews(runtime).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["default_crew"], json!("silver"));
+        let crews = body["crews"].as_array().expect("crews array");
+        assert_eq!(crews.len(), 2);
+        assert_eq!(crews[0]["name"], json!("alpha"));
+        assert_eq!(crews[0]["is_default"], json!(false));
+        assert_eq!(crews[0]["planner_model"], json!("alpha-plan-model"));
+        assert_eq!(crews[0]["implementer_model"], json!("alpha-impl-model"));
+        assert_eq!(crews[0]["reviewer_model"], json!("alpha-review-model"));
+        assert_eq!(crews[1]["name"], json!("silver"));
+        assert_eq!(crews[1]["is_default"], json!(true));
+        assert_eq!(crews[1]["planner_model"], json!("claude-silver-plan"));
+        assert_eq!(crews[1]["implementer_model"], json!("codex-silver-impl"));
+        assert_eq!(crews[1]["reviewer_model"], json!("codex-silver-review"));
     }
 
     #[tokio::test]

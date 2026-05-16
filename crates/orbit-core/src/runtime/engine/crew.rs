@@ -1,7 +1,37 @@
 use orbit_common::types::{Crew, OrbitError, Task, resolve_crew};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+
+/// Runtime crew registry projection for dashboard/API consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfiguredCrewRegistryProjection {
+    pub default_crew: Option<String>,
+    pub crews: Vec<ConfiguredCrewProjection>,
+}
+
+/// Named crew and role-model strings from the active runtime configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfiguredCrewProjection {
+    pub name: String,
+    pub planner_model: String,
+    pub implementer_model: String,
+    pub reviewer_model: String,
+    pub is_default: bool,
+}
+
+impl ConfiguredCrewProjection {
+    fn from_crew(crew: &Crew, is_default: bool) -> Self {
+        Self {
+            name: crew.name.clone(),
+            planner_model: crew.planner.model.clone(),
+            implementer_model: crew.implementer.model.clone(),
+            reviewer_model: crew.reviewer.model.clone(),
+            is_default,
+        }
+    }
+}
 
 /// Crew/role-model strings to surface on a task projection.
 ///
@@ -28,6 +58,26 @@ impl ResolvedCrewProjection {
 }
 
 impl OrbitRuntime {
+    pub fn configured_crew_registry_projection(&self) -> ConfiguredCrewRegistryProjection {
+        let default_crew = self.context.default_crew().map(ToString::to_string);
+        let mut crews = self
+            .context
+            .crews()
+            .values()
+            .map(|crew| {
+                ConfiguredCrewProjection::from_crew(
+                    crew,
+                    default_crew.as_deref() == Some(crew.name.as_str()),
+                )
+            })
+            .collect::<Vec<_>>();
+        crews.sort_by(|left, right| left.name.cmp(&right.name));
+        ConfiguredCrewRegistryProjection {
+            default_crew,
+            crews,
+        }
+    }
+
     pub fn validate_crew_name(&self, crew: Option<&str>) -> Result<(), OrbitError> {
         let Some(crew) = crew.map(str::trim).filter(|value| !value.is_empty()) else {
             return Ok(());

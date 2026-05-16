@@ -40,6 +40,7 @@ let activeStatuses = new Set(
   STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s)),
 );
 let lastTasks = [];
+let lastCrewPayload = { default_crew: null, crews: [] };
 let lastRuns = [];
 let lastDiagnostics = { metrics: [], errors: [] };
 let lastLearningPayload = { stats: {}, items: [] };
@@ -52,6 +53,7 @@ let runSort = { key: "when", dir: "desc" };
 let expandedTaskIds = new Set();
 let isRefreshing = false;
 let taskActionNotice = null;
+let crewUpdateErrors = new Map();
 let activeLearningId = null;
 let learningSearchQuery = "";
 let activeAdrId = null;
@@ -166,6 +168,57 @@ function postJson(path, body) {
 
 function patchJson(path, body) {
   return requestJson(path, "PATCH", body);
+}
+
+function normalizeCrewPayload(payload) {
+  const crews = Array.isArray(payload && payload.crews)
+    ? payload.crews
+      .filter((crew) => crew && crew.name)
+      .map((crew) => ({
+        name: String(crew.name),
+        planner_model: crew.planner_model == null ? "" : String(crew.planner_model),
+        implementer_model: crew.implementer_model == null ? "" : String(crew.implementer_model),
+        reviewer_model: crew.reviewer_model == null ? "" : String(crew.reviewer_model),
+        is_default: Boolean(crew.is_default),
+      }))
+    : [];
+  crews.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    default_crew: payload && payload.default_crew ? String(payload.default_crew) : null,
+    crews,
+  };
+}
+
+function crewOptionsSignature() {
+  return JSON.stringify(lastCrewPayload);
+}
+
+function explicitCrewValue(task) {
+  return task && task.crew ? String(task.crew) : "";
+}
+
+function resolvedCrewName(task) {
+  if (lastCrewPayload.default_crew) return lastCrewPayload.default_crew;
+  if (!explicitCrewValue(task) && task && task.resolved_crew) {
+    return String(task.resolved_crew);
+  }
+  return "workspace";
+}
+
+function crewOptionTitle(crew) {
+  const parts = [
+    `planner=${crew.planner_model || "-"}`,
+    `implementer=${crew.implementer_model || "-"}`,
+    `reviewer=${crew.reviewer_model || "-"}`,
+  ];
+  return parts.join(" · ");
+}
+
+function applyUpdatedTask(updatedTask) {
+  const index = lastTasks.findIndex((task) => task.id === updatedTask.id);
+  if (index >= 0) {
+    lastTasks[index] = updatedTask;
+  }
 }
 
 function runIsCancellable(run) {
@@ -771,6 +824,89 @@ function buildStatusUpdateControl(task, detail) {
   return select;
 }
 
+function buildCrewUpdateControl(task) {
+  const cell = el("span", { class: "crew-cell" });
+  const select = el("select", {
+    class: "task-crew-select mono",
+    title: `Update crew for ${task.id}`,
+  });
+  const currentValue = explicitCrewValue(task);
+  select.dataset.currentValue = currentValue;
+
+  const defaultOption = el("option", {
+    text: `default: ${resolvedCrewName(task)}`,
+  });
+  defaultOption.value = "";
+  select.appendChild(defaultOption);
+
+  const crews = Array.isArray(lastCrewPayload.crews) ? lastCrewPayload.crews : [];
+  for (const crew of crews) {
+    const option = el("option", {
+      text: crew.name,
+      title: crewOptionTitle(crew),
+    });
+    option.value = crew.name;
+    select.appendChild(option);
+  }
+
+  if (currentValue && !crews.some((crew) => crew.name === currentValue)) {
+    const option = el("option", {
+      text: currentValue,
+      title: "Configured crew no longer found",
+    });
+    option.value = currentValue;
+    select.appendChild(option);
+  }
+
+  if (crews.length === 0) {
+    select.disabled = true;
+    defaultOption.textContent = "crew unavailable";
+  }
+
+  select.value = currentValue;
+  for (const eventName of ["pointerdown", "mousedown", "click", "keydown"]) {
+    select.addEventListener(eventName, (event) => event.stopPropagation());
+  }
+  select.addEventListener("change", (event) => {
+    event.stopPropagation();
+    updateTaskCrew(task, select);
+  });
+
+  cell.appendChild(select);
+  const error = crewUpdateErrors.get(task.id);
+  if (error) {
+    cell.appendChild(el("span", { class: "crew-error", text: error }));
+  }
+  return cell;
+}
+
+async function updateTaskCrew(task, select) {
+  const previousValue = select.dataset.currentValue || "";
+  const nextValue = select.value || "";
+  if (nextValue === previousValue) return;
+
+  crewUpdateErrors.delete(task.id);
+  select.disabled = true;
+  try {
+    const updatedTask = await patchJson(`/api/tasks/${encodeURIComponent(task.id)}`, {
+      crew: nextValue || null,
+    });
+    applyUpdatedTask(updatedTask);
+    crewUpdateErrors.delete(task.id);
+    renderTasks(lastTasks);
+  } catch (error) {
+    select.value = previousValue;
+    select.dataset.currentValue = previousValue;
+    select.disabled = false;
+    crewUpdateErrors.set(
+      task.id,
+      `crew update failed: ${error.message || String(error)}`,
+    );
+    renderTasks(lastTasks);
+    console.error(error);
+  }
+}
+
 function showRejectForm(task, detail, actions) {
   const form = el("div", { class: "reject-form" });
   form.addEventListener("click", (e) => e.stopPropagation());
@@ -903,10 +1039,11 @@ function renderTasks(tasks) {
         el("span", { class: "title", text: t.title }),
         priorityCell(t.priority),
         el("span", { class: "type mono", text: t.type }),
+        buildCrewUpdateControl(t),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);
@@ -1985,13 +2122,11 @@ function openTaskFromKnowledge(taskId) {
   if (taskSearch) taskSearch.value = "";
   setActiveTab("tasks", { refresh: false });
   const open = () => openVisibleTask(taskId);
-  if (lastTasks.length > 0) {
+  if (lastTasks.length > 0 && lastCrewPayload.crews.length > 0) {
     open();
     return;
   }
-  fetchJson("/api/tasks").then((tasks) => {
-    lastTasks = tasks;
-    renderTasks(tasks);
+  fetchAndRenderTasks().then(() => {
     open();
   }).catch(() => copyTaskIdWithNotice(taskId));
 }
@@ -2589,17 +2724,29 @@ function renderDiagnostics() {
   );
 }
 
+function fetchAndCacheCrews() {
+  return fetchJson("/api/crews").then((payload) => {
+    lastCrewPayload = normalizeCrewPayload(payload);
+    return lastCrewPayload;
+  });
+}
+
+function fetchAndRenderTasks() {
+  return Promise.all([
+    fetchJson("/api/tasks"),
+    fetchAndCacheCrews(),
+  ]).then(([tasks]) => {
+    lastTasks = tasks;
+    renderTasks(tasks);
+  });
+}
+
 function activeRefreshJobs() {
   // The health strip is global; refresh on every tick alongside the active tab.
   const jobs = [fetchAndRenderSummary()];
 
   if (activeTab === "tasks") {
-    jobs.push(
-      fetchJson("/api/tasks").then((tasks) => {
-        lastTasks = tasks;
-        renderTasks(tasks);
-      }),
-    );
+    jobs.push(fetchAndRenderTasks());
     if (!document.hidden) jobs.push(fetchAndRenderTaskLocks());
     return jobs;
   }
@@ -3840,7 +3987,7 @@ async function refreshDashboard() {
   isRefreshing = false;
   if (activeTab === "tasks") fitLogPanelToViewport();
   
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,tasks/locks,learnings,adrs,frictions,frictions/stats,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
+  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,tasks/locks,crews,learnings,adrs,frictions,frictions/stats,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();

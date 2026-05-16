@@ -10,4 +10,6 @@ mod runtime_host;
 mod summary;
 mod task_host;
 
-pub use crew::ResolvedCrewProjection;
+pub use crew::{
+    ConfiguredCrewProjection, ConfiguredCrewRegistryProjection, ResolvedCrewProjection,
+};

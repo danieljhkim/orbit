@@ -317,12 +317,12 @@
       
       .row {
         display: grid;
-        grid-template-columns: 130px 1fr 80px 80px;
+        grid-template-columns: 130px minmax(140px, 1fr) 72px 82px minmax(138px, 180px);
         gap: 12px;
         padding: 8px 16px;
         margin: 0;
         border-radius: 0;
-        align-items: baseline;
+        align-items: center;
         cursor: pointer;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         border-bottom: 1px solid var(--border);
@@ -338,10 +338,90 @@
         border-color: var(--border);
       }
       
-      .row .id { color: var(--fg-dim); font-size: 12px; transition: color 0.1s ease; }
+      .row .id {
+        color: var(--fg-dim);
+        font-size: 12px;
+        transition: color 0.1s ease;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
       .row .id:hover { color: var(--accent); cursor: copy; }
-      .row .title { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 13px; }
+      .row .title {
+        color: var(--fg);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 500;
+        font-size: 13px;
+        min-width: 0;
+      }
       .row .priority, .row .type { font-size: 12px; color: var(--fg-dim); text-align: right; }
+      .row .crew-cell {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+      .task-crew-select {
+        width: 100%;
+        min-width: 0;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        background: var(--bg);
+        color: var(--fg);
+        font-size: 11px;
+        padding: 4px 24px 4px 8px;
+        outline: none;
+      }
+      .task-crew-select:hover:not(:disabled),
+      .task-crew-select:focus {
+        border-color: var(--accent);
+      }
+      .task-crew-select:disabled {
+        color: var(--fg-dim);
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+      .task-crew-select option {
+        color: var(--fg);
+        background: var(--bg);
+      }
+      .crew-error {
+        color: var(--state-failed);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 1.25;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 760px) {
+        .row {
+          grid-template-columns: minmax(84px, 0.7fr) minmax(0, 1fr) minmax(128px, 0.8fr);
+          grid-template-areas:
+            "id title crew"
+            "priority type crew";
+          gap: 4px 8px;
+        }
+        .row .id { grid-area: id; }
+        .row .title { grid-area: title; }
+        .row .priority { grid-area: priority; text-align: left; }
+        .row .type { grid-area: type; text-align: left; }
+        .row .crew-cell { grid-area: crew; align-self: stretch; }
+      }
+
+      @media (max-width: 520px) {
+        .row {
+          grid-template-columns: minmax(74px, 0.65fr) minmax(0, 1fr);
+          grid-template-areas:
+            "id title"
+            "priority crew"
+            "type crew";
+        }
+      }
       
       .row-detail {
         padding: 16px 20px;
