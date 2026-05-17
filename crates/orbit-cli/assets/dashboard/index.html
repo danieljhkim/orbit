@@ -229,6 +229,7 @@
         display: flex;
         gap: 6px;
         flex-wrap: wrap;
+        max-width: 480px;
       }
       
       .chip {
@@ -366,6 +367,7 @@
       .task-crew-select {
         width: 100%;
         min-width: 0;
+        max-width: 100%;
         height: 28px;
         border: 1px solid var(--border);
         border-radius: 2px;
@@ -374,6 +376,8 @@
         font-size: 11px;
         padding: 4px 24px 4px 8px;
         outline: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .task-crew-select:hover:not(:disabled),
       .task-crew-select:focus {
@@ -411,6 +415,7 @@
         .row .priority { grid-area: priority; text-align: left; }
         .row .type { grid-area: type; text-align: left; }
         .row .crew-cell { grid-area: crew; align-self: stretch; }
+        #task-filter { max-width: none; }
       }
 
       @media (max-width: 520px) {
@@ -1920,7 +1925,7 @@
       }
       .log-line {
         display: grid;
-        grid-template-columns: 64px 72px 36px minmax(0, 1fr);
+        grid-template-columns: 64px 72px 42px minmax(120px, 1fr);
         gap: 10px;
         padding: 0 16px;
         font-size: 11.5px; line-height: 22px;
