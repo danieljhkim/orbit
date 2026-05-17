@@ -1,0 +1,25 @@
+schema_version: 1
+id: ADR-0151
+title: Add Grok (xAI) as a fourth peer agent family
+status: accepted
+owner: grok
+created_at: 2026-05-16T02:20:08.898995Z
+accepted_at: 2026-05-16T19:07:25.023260Z
+last_updated: 2026-05-16T19:07:25.023260Z
+related_features:
+- agent-families
+- activity-job
+- policy-sandbox
+related_tasks:
+- ORB-00042
+- ORB-00043
+- ORB-00044
+- ORB-00045
+- ORB-00046
+- ORB-00049
+- ORB-00050
+- ORB-00052
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

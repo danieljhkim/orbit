@@ -1,0 +1,19 @@
+schema_version: 1
+id: L20260517-1
+status: active
+scope:
+  paths:
+  - scripts/tests/fixtures/**
+  - scripts/tests/**/*.py
+  tags:
+  - testing
+  - fixtures
+summary: Keep test fixture payloads out of `.orbit`-named directories because repo ignore rules hide them
+body: When adding test fixtures that model Orbit workspace state, do not place the fixture payload under a literal `.orbit/` directory inside the fixture tree. The repo ignore rules hide `.orbit` paths, so `git add -A` will skip the fixture data even though local tests pass. Use a tracked neutral directory name such as `orbit/`, then have the test copy it into a temporary workspace as `.orbit/`.
+evidence:
+- kind: task
+  reference: ORB-00081
+created_at: 2026-05-17T02:01:52.569140Z
+updated_at: 2026-05-17T02:01:52.569140Z
+created_by: gpt-5.5
+priority: 80

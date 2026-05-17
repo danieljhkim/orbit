@@ -1,0 +1,20 @@
+schema_version: 1
+id: L20260517-3
+status: active
+scope:
+  paths:
+  - crates/orbit-core/src/runtime/engine/**/*.rs
+  - crates/orbit-core/src/command/task/**/*.rs
+  tags:
+  - rust
+  - tests
+  - attribution
+summary: Unset managed `ORBIT_AGENT_*` env vars when validating tests that expect human/system actor defaults
+body: Some Orbit runtime tests intentionally assert the default actor path (`human` or `system`). When those tests run inside an agent-managed activity, inherited `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL` make `ActorIdentity::from_env()` resolve to the current agent instead, so assertions can fail with labels such as `gpt-5.5`. For focused local validation of those default-actor tests, run the command with the managed actor env removed, for example `env -u ORBIT_AGENT_NAME -u ORBIT_AGENT_MODEL -u ORBIT_MANAGED_RUN_CONTEXT -u ORBIT_RUN_ID cargo test ...`. This is a validation-environment issue, not necessarily a product regression.
+evidence:
+- kind: task
+  reference: ORB-00091
+created_at: 2026-05-17T03:30:27.207734Z
+updated_at: 2026-05-17T03:30:27.207734Z
+created_by: codex
+priority: 80
