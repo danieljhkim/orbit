@@ -277,6 +277,7 @@ pub(super) async fn update_task_action(
         comment: body.comment,
         status: body.status,
         task_type: body.task_type,
+        source_task_id: None,
         planned_by: None,
         implemented_by: None,
         pr_status: None,
