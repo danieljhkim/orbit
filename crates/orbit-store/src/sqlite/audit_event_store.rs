@@ -1,8 +1,9 @@
 //! Audit-event SQL queries backing the `orbit audit list` CLI.
 //!
 //! L20260517-9: callers should reach audit data via `orbit audit list --json` —
-//! reading `.orbit/orbit.db` directly can yield a stale or partial mirror of the
-//! canonical store the CLI consults.
+//! `<workspace>/.orbit/orbit.db` (and -shm/-wal siblings) is an abandoned
+//! leftover from pre-two-root binaries, not a mirror of the canonical global
+//! `~/.orbit/orbit.db`. The CLI and runtime always use the global store.
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{AuditEvent, AuditEventStatus, OrbitError};
