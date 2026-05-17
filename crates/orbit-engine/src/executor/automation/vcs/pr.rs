@@ -139,16 +139,11 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .any(|requires_revision| requires_revision);
-    let batch_author = batch_tasks.iter().find_map(|task| {
-        normalize_optional_attribution_label(
-            task.implemented_by
-                .as_deref()
-                .or(task.created_by.as_deref()),
-            task.implemented_by.as_deref(),
-        )
-    });
+    let batch_author = batch_tasks.iter().find_map(ship_done_attribution);
 
-    // Advance ALL batch tasks to Done status
+    // Preserve ship attribution per task across the Review -> Done transition.
+    // See `merge_batch_pr_preserves_task_attribution_per_task`: the source of
+    // truth is task.implemented_by -> task.created_by -> system fallback.
     for task in &batch_tasks {
         host.apply_task_automation_update(
             &task.id,
@@ -159,6 +154,7 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
                     None
                 },
                 external_refs: vec![ExternalRef::github_pr(pr_number.clone())?],
+                model: ship_done_attribution(task),
                 ..TaskAutomationUpdate::default()
             },
         )?;
@@ -175,6 +171,15 @@ pub(super) fn merge_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     }
 
     Ok(json!({ "merged": true }))
+}
+
+fn ship_done_attribution(task: &Task) -> Option<String> {
+    normalize_optional_attribution_label(
+        task.implemented_by
+            .as_deref()
+            .or(task.created_by.as_deref()),
+        task.implemented_by.as_deref(),
+    )
 }
 
 pub(super) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
@@ -682,6 +687,7 @@ mod tests {
     struct PrOpenTestHost {
         tasks: Mutex<Vec<Task>>,
         tool_calls: Mutex<Vec<ToolCall>>,
+        automation_updates: Mutex<Vec<(String, TaskAutomationUpdate)>>,
         repo_root: PathBuf,
         data_root: PathBuf,
         scoreboard_dir: PathBuf,
@@ -695,6 +701,7 @@ mod tests {
             Self {
                 tasks: Mutex::new(tasks),
                 tool_calls: Mutex::new(Vec::new()),
+                automation_updates: Mutex::new(Vec::new()),
                 repo_root,
                 data_root,
                 scoreboard_dir,
@@ -717,6 +724,13 @@ mod tests {
                         .map(ToOwned::to_owned)
                 })
                 .expect("github.pr.create body")
+        }
+
+        fn automation_updates(&self) -> Vec<(String, TaskAutomationUpdate)> {
+            self.automation_updates
+                .lock()
+                .expect("automation updates lock")
+                .clone()
         }
     }
 
@@ -819,11 +833,28 @@ mod tests {
             task_id: &str,
             update: TaskAutomationUpdate,
         ) -> Result<(), OrbitError> {
+            self.automation_updates
+                .lock()
+                .expect("automation updates lock")
+                .push((task_id.to_string(), update.clone()));
+
             let mut tasks = self.tasks.lock().expect("tasks lock");
             let task = tasks
                 .iter_mut()
                 .find(|task| task.id == task_id)
                 .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.to_string()))?;
+            let transition_implemented_by =
+                if matches!(update.status, Some(TaskStatus::Review | TaskStatus::Done)) {
+                    Some(
+                        update
+                            .model
+                            .clone()
+                            .or(update.agent.clone())
+                            .unwrap_or_else(|| "system".to_string()),
+                    )
+                } else {
+                    None
+                };
             if let Some(status) = update.status {
                 task.status = status;
             }
@@ -832,6 +863,9 @@ mod tests {
             }
             if let Some(execution_summary) = update.execution_summary {
                 task.execution_summary = execution_summary;
+            }
+            if let Some(implemented_by) = transition_implemented_by {
+                task.implemented_by = Some(implemented_by);
             }
             Ok(())
         }
@@ -896,6 +930,7 @@ mod tests {
 
             match name {
                 "git.push" => Ok(json!({})),
+                "github.pr.merge" => Ok(json!({})),
                 "github.pr.create" => Ok(json!({
                     "url": "https://github.example/orbit/orbit/pull/42"
                 })),
@@ -963,6 +998,21 @@ mod tests {
         let mut task = task(id, title, execution_summary);
         task.status = TaskStatus::InProgress;
         task.job_run_id = Some("batch-1".to_string());
+        task
+    }
+
+    fn review_batch_task(id: &str, implemented_by: Option<&str>, created_by: Option<&str>) -> Task {
+        let mut task = task(
+            id,
+            "Ship attribution",
+            "Outcome: success\n\nChanges:\n- Ready.",
+        );
+        task.status = TaskStatus::Review;
+        task.pr_status = Some("approved".to_string());
+        task.job_run_id = Some("batch-1".to_string());
+        task.implemented_by = implemented_by.map(ToOwned::to_owned);
+        task.created_by = created_by.map(ToOwned::to_owned);
+        task.external_refs = vec![ExternalRef::github_pr("42").expect("github pr ref")];
         task
     }
 
@@ -1051,6 +1101,15 @@ mod tests {
             "workspace_path": repo.to_string_lossy(),
             "job_run_id": "batch-1",
             "completed_task_ids": completed_task_ids,
+            "base": "agent-main",
+            "base_sync": "local",
+        })
+    }
+
+    fn merge_batch_pr_input(repo: &Path) -> Value {
+        json!({
+            "workspace_path": repo.to_string_lossy(),
+            "job_run_id": "batch-1",
             "base": "agent-main",
             "base_sync": "local",
         })
@@ -1410,6 +1469,81 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(signature_lines, vec!["*authored by: A*"]);
+    }
+
+    #[test]
+    fn merge_batch_pr_preserves_task_attribution_per_task() {
+        let workspace = pr_workspace();
+        let cases = [
+            ("T-CLAUDE", "claude"),
+            ("T-CODEX", "codex"),
+            ("T-GEMINI", "gemini"),
+            ("T-GROK", "grok"),
+        ];
+        let tasks = cases
+            .iter()
+            .map(|(id, implemented_by)| review_batch_task(id, Some(implemented_by), None))
+            .collect::<Vec<_>>();
+        let host = PrOpenTestHost::new(tasks, workspace.repo.clone());
+
+        let result =
+            merge_batch_pr(&host, &merge_batch_pr_input(&workspace.repo)).expect("merge batch pr");
+
+        assert_eq!(result["merged"], json!(true));
+        for (task_id, expected) in cases {
+            let task = host.get_task(task_id).expect("updated task");
+            assert_eq!(task.status, TaskStatus::Done, "{task_id}");
+            assert_eq!(task.implemented_by.as_deref(), Some(expected), "{task_id}");
+
+            let (_, update) = host
+                .automation_updates()
+                .into_iter()
+                .find(|(updated_task_id, _)| updated_task_id == task_id)
+                .expect("task automation update");
+            assert_eq!(update.model.as_deref(), Some(expected), "{task_id}");
+        }
+    }
+
+    #[test]
+    fn merge_batch_pr_uses_created_by_when_implemented_by_missing() {
+        let workspace = pr_workspace();
+        let host = PrOpenTestHost::new(
+            vec![review_batch_task("T-CREATED-BY", None, Some("codex"))],
+            workspace.repo.clone(),
+        );
+
+        merge_batch_pr(&host, &merge_batch_pr_input(&workspace.repo)).expect("merge batch pr");
+
+        let task = host.get_task("T-CREATED-BY").expect("updated task");
+        assert_eq!(task.status, TaskStatus::Done);
+        assert_eq!(task.implemented_by.as_deref(), Some("codex"));
+        let (_, update) = host
+            .automation_updates()
+            .into_iter()
+            .find(|(updated_task_id, _)| updated_task_id == "T-CREATED-BY")
+            .expect("task automation update");
+        assert_eq!(update.model.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn merge_batch_pr_actorless_task_falls_back_to_system() {
+        let workspace = pr_workspace();
+        let host = PrOpenTestHost::new(
+            vec![review_batch_task("T-SYSTEM", None, None)],
+            workspace.repo.clone(),
+        );
+
+        merge_batch_pr(&host, &merge_batch_pr_input(&workspace.repo)).expect("merge batch pr");
+
+        let task = host.get_task("T-SYSTEM").expect("updated task");
+        assert_eq!(task.status, TaskStatus::Done);
+        assert_eq!(task.implemented_by.as_deref(), Some("system"));
+        let (_, update) = host
+            .automation_updates()
+            .into_iter()
+            .find(|(updated_task_id, _)| updated_task_id == "T-SYSTEM")
+            .expect("task automation update");
+        assert_eq!(update.model, None);
     }
 
     #[test]

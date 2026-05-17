@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-17 (ORB-00090)
+**Last updated:** 2026-05-17 (ORB-00106)
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -304,6 +304,21 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ---
 
+## ADR-0164 — Ship Done transitions preserve task implementer attribution
+
+**Status:** Accepted · 2026-05 · [ORB-00106]
+
+**Context.** `orbit run ship` reached the Review -> Done transition through system-owned automation even when each task already carried agent provenance. Prior attribution fixes in [ORB-00067], [ORB-00089], and [ORB-00091] covered adjacent automation paths, but the batch PR merge loop still had two real alternatives: trust the ship actor/runtime context, or carry each task provenance explicitly.
+
+**Decision.** Ship-path Done transitions use per-task provenance as the source of truth: `task.implemented_by` wins, then `task.created_by`, then the genuine actor-less fallback remains `system`. The merge loop passes that resolved value on the task update for each task, and the regression test exercises distinct identities in one batch so a batch-level author cannot homogenize them.
+
+**Consequences.**
+- Shipped task records, ship scoreboards, and follow-on git author derivation can preserve the implementer family that actually produced each task.
+- Actor-less automation still records `system` instead of panicking or fabricating a family label.
+- Cost: the ship pipeline must explicitly bridge task provenance into the automation update payload, so future edits to that loop need to preserve the regression test rather than assuming runtime actor context is enough.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -334,7 +349,11 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
+- **[ORB-00067]** — Earlier automation attribution work that did not close the ship batch PR Done transition gap.
+- **[ORB-00089]** — Earlier system-attribution gap that informed the ship-path fallback rule.
+- **[ORB-00091]** — Prior fix for automation-driven status attribution that did not cover the ship merge loop.
 - **[ORB-00080]** — Collapse Orbit agent identity to family and isolate exact model strings to invocation/configuration surfaces.
 - **[ORB-00090]** — Align agent-facing docs and tool descriptions with the family-as-identity convention.
+- **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

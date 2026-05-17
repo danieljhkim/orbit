@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-17 (ORB-00090)
+**Last updated:** 2026-05-17 (ORB-00106)
 
 This document describes Orbit's shipped auditability implementation across command audit rows, activity/job envelopes, loop-level provider/tool traces, blob storage, redaction, identity attribution, metrics-adjacent invocation records, and known limitations. See [1_overview.md](./1_overview.md) for the feature purpose and [3_vision.md](./3_vision.md) for future questions.
 
@@ -90,6 +90,8 @@ Orbit currently carries identity through related fields rather than one universa
 
 Task attribution remains automatic by default: non-empty plan writes stamp `planned_by`, and transitions into `review` or `done` stamp `implemented_by`. After [T20260427-47], `orbit.task.update` and direct `orbit task update` can explicitly set or clear those fields; explicit values win within the same update.
 
+For `orbit run ship`, the batch PR merge path preserves task-authored implementation provenance during the Review -> Done transition. The ship loop resolves attribution per task as `task.implemented_by` first, then `task.created_by`, then `system` only for genuinely actor-less automation, and passes that value through the automation update payload. This keeps mixed-family batches from collapsing to one ship actor while retaining the legitimate system fallback. [ORB-00106]
+
 After [T20260508-22] and [T20260509-12], `git_commit` automation carries that task attribution into git metadata. Per-task commits use process-scoped author and committer identity derived from `task.implemented_by` (`claude`, `gemini`, or `codex` family identities), leaving repository `git config user.name` and `user.email` untouched. Multi-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and committer and add `Co-Authored-By` trailers for each distinct implementer identity.
 
 The requirement is not to collapse every field into one value. It is that a reviewer can follow task state, command rows, run envelopes, provider/tool traces, and metrics back to a concrete human or agent family. A unified identity glossary and query join story remain open.
@@ -162,5 +164,6 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
 - **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
 - **[ORB-00090]** — Aligned agent-facing provenance wording with the family-as-identity convention.
+- **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
