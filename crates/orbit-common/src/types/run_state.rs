@@ -40,6 +40,12 @@ pub struct PipelineState {
     /// Current loop iteration (0-based). Updated at each loop boundary.
     #[serde(default)]
     pub iteration: u32,
+    /// Task dependencies currently blocking this run, when the run is parked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on_deps: Option<Vec<String>>,
+    /// Task lock resource identifiers currently blocking this run, when parked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on_locks: Option<Vec<String>>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -57,6 +63,8 @@ impl PipelineState {
             next_step_index: 0,
             previous_step_state: None,
             iteration: 0,
+            waiting_on_deps: None,
+            waiting_on_locks: None,
             updated_at: Utc::now(),
         }
     }
@@ -94,6 +102,22 @@ impl PipelineState {
 
     pub fn set_iteration(&mut self, iteration: u32) {
         self.iteration = iteration;
+        self.updated_at = Utc::now();
+    }
+
+    pub fn set_waiting_reasons(
+        &mut self,
+        waiting_on_deps: Option<Vec<String>>,
+        waiting_on_locks: Option<Vec<String>>,
+    ) {
+        self.waiting_on_deps = waiting_on_deps;
+        self.waiting_on_locks = waiting_on_locks;
+        self.updated_at = Utc::now();
+    }
+
+    pub fn clear_waiting_reasons(&mut self) {
+        self.waiting_on_deps = None;
+        self.waiting_on_locks = None;
         self.updated_at = Utc::now();
     }
 

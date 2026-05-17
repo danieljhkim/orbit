@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-10 (T20260510-13)
+**Last updated:** 2026-05-17 (ORB-00106)
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -164,17 +164,17 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - CLI, dashboard backend, and dashboard UI share one log vocabulary and escaping boundary.
 - Cost: stream rotation/truncation handling is best-effort, and the visual panel ships separately under UI ownership.
 
-## ADR-014 — Tool-call provenance is model-first
+## ADR-014 — Tool-call provenance was model-first
 
-**Status:** Accepted · 2026-04 · [T20260427-52]
+**Status:** Superseded by [agent-families ADR-0154](../agent-families/4_decisions.md#adr-0154--collapse-agent-identity-to-family-and-move-model-strings-to-configuration) · 2026-05 · [ORB-00080]
 
 **Context.** Asking agents to pass both `agent` and `model` duplicated information and allowed exact models to be paired with the wrong family.
 
-**Decision.** Deprecate `agent` as a normal tool-call input, prefer exact `model`, infer the agent family from known model names, and reject inconsistent legacy pairs.
+**Decision.** Originally deprecated `agent` as a normal tool-call input and used `model` for provenance. [Agent-families ADR-0154](../agent-families/4_decisions.md#adr-0154--collapse-agent-identity-to-family-and-move-model-strings-to-configuration) superseded the exact-model convention: `model` now carries the canonical agent family, with full model strings accepted only as compatibility input that normalizes to family.
 
 **Consequences.**
-- Seeded skills and instructions can use shorter model-only tool calls while task records still retain both fields internally.
-- Cost: unknown or ambiguous models still need a compatible legacy `agent` value when family-specific dispatch matters.
+- Seeded skills and instructions still use a single `model` provenance field, but examples teach family values (`codex`, `claude`, `gemini`, `grok`).
+- Cost: compatibility normalization must remain for historical full-model inputs and external callers that have not migrated yet.
 
 ## ADR-015 — Task attribution can be corrected explicitly
 
@@ -304,6 +304,21 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 
 ---
 
+## ADR-0164 — Ship PR transitions preserve task implementer attribution
+
+**Status:** Accepted · 2026-05 · [ORB-00106]
+
+**Context.** `orbit run ship` reached PR-open Review handoff and PR-merge Done handoff through system-owned automation even when the workflow had a resolved implementer identity. Prior attribution fixes in [ORB-00067], [ORB-00089], and [ORB-00091] covered adjacent automation paths, but the ship PR loops still had two real alternatives: trust the ship actor/runtime context, or carry task/run provenance explicitly.
+
+**Decision.** Ship-path PR transitions carry attribution on each automation update. The Review handoff uses existing `task.implemented_by`, then the pipeline's resolved implementer identity, then task-authored fallback fields (`planned_by`, `created_by`), leaving the genuine actor-less fallback as `system`. The Done handoff preserves existing `implemented_by`, otherwise uses `created_by`, then `system`. Regression tests exercise PR-open review stamping and distinct Done identities in one batch so a batch-level actor cannot homogenize them.
+
+**Consequences.**
+- Shipped task records, ship scoreboards, and follow-on git author derivation can preserve the implementer family that actually produced each task before and after PR review.
+- Actor-less automation still records `system` instead of panicking or fabricating a family label.
+- Cost: the ship pipeline must explicitly bridge task/run provenance into automation update payloads, so future edits to PR-open or PR-merge loops need to preserve the regression tests rather than assuming runtime actor context is enough.
+
+---
+
 ## Task References
 
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
@@ -334,5 +349,11 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
+- **[ORB-00067]** — Earlier automation attribution work that did not close the ship batch PR Done transition gap.
+- **[ORB-00089]** — Earlier system-attribution gap that informed the ship-path fallback rule.
+- **[ORB-00091]** — Prior fix for automation-driven status attribution that did not cover the ship merge loop.
+- **[ORB-00080]** — Collapse Orbit agent identity to family and isolate exact model strings to invocation/configuration surfaces.
+- **[ORB-00090]** — Align agent-facing docs and tool descriptions with the family-as-identity convention.
+- **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

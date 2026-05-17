@@ -1,10 +1,9 @@
-use orbit_common::types::OrbitError;
 use orbit_common::types::activity_job::{AgentRole, Backend, Provider};
+use orbit_common::types::{CrewRoleAssignment, OrbitError};
 use orbit_engine::{AgentRoleConfig, EnvironmentHost, ExecutorLookupHost};
 
 use super::paths::codex_workspace_write_writable_dirs;
 use crate::OrbitRuntime;
-use crate::config::RawAgentRoleConfig;
 
 impl EnvironmentHost for OrbitRuntime {
     fn agent_provider_config(&self) -> std::collections::HashMap<String, String> {
@@ -54,49 +53,52 @@ impl EnvironmentHost for OrbitRuntime {
     }
 
     fn agent_role_config(&self, role: AgentRole) -> Option<AgentRoleConfig> {
-        let raw = self.context.agent_role(role.as_str())?;
-        Some(typed_role_config_from_raw(role, raw))
+        let crew = self
+            .context
+            .default_crew()
+            .and_then(|name| self.context.crews().get(name))?;
+        let raw = crew.role(role.as_str())?;
+        Some(typed_role_config_from_assignment(role, raw))
     }
 }
 
-/// Convert the on-disk `[agent.<role>]` block (string fields) into the typed
+/// Convert a crew role assignment (string fields) into the typed
 /// [`AgentRoleConfig`] surface used by the engine resolver. Unrecognized
 /// `provider` / `backend` values yield `None` for that field with a warn-log
 /// — silently coercing dispatch onto a different runtime would defeat the
 /// point of the override.
-fn typed_role_config_from_raw(role: AgentRole, raw: &RawAgentRoleConfig) -> AgentRoleConfig {
-    let provider = raw.provider.as_deref().and_then(|raw_value| {
+pub(crate) fn typed_role_config_from_assignment(
+    role: AgentRole,
+    raw: &CrewRoleAssignment,
+) -> AgentRoleConfig {
+    let provider = Some(raw.provider.as_str()).and_then(|raw_value| {
         let parsed = parse_provider(raw_value);
         if parsed.is_none() {
             tracing::warn!(
-                target: "orbit.config.agent_role",
+                target: "orbit.config.crew",
                 role = role.as_str(),
                 raw = raw_value,
-                "[agent.<role>].provider has an unrecognized value; falling back to inline activity provider",
+                "[crews.<name>].provider has an unrecognized value; falling back to inline activity provider",
             );
         }
         parsed
     });
 
-    let backend = raw.backend.as_deref().and_then(|raw_value| {
+    let backend = Some(raw.backend.as_str()).and_then(|raw_value| {
         let parsed = Backend::parse(raw_value);
         if parsed.is_none() {
             tracing::warn!(
-                target: "orbit.config.agent_role",
+                target: "orbit.config.crew",
                 role = role.as_str(),
                 raw = raw_value,
-                "[agent.<role>].backend has an unrecognized value; falling back to inline activity backend",
+                "[crews.<name>].backend has an unrecognized value; falling back to inline activity backend",
             );
         }
         parsed
     });
 
-    let model = raw
-        .model
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
+    let model = raw.model.trim();
+    let model = (!model.is_empty()).then(|| model.to_string());
 
     AgentRoleConfig {
         provider,
@@ -110,6 +112,7 @@ fn parse_provider(raw: &str) -> Option<Provider> {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
         "gemini" => Some(Provider::Gemini),
+        "grok" => Some(Provider::Grok),
         "ollama" => Some(Provider::Ollama),
         "openai_compat" | "openai-compat" => Some(Provider::OpenaiCompat),
         _ => None,

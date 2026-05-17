@@ -49,6 +49,7 @@ pub use orbit_store::{
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
 
+pub use command::learning::migrate_learning_layout_at;
 pub use command::task_template::TaskTemplate;
 pub use command::workflow::{
     WORKFLOWS, Workflow, WorkflowInput, build_workflow_input, build_workflow_input_for,
@@ -58,20 +59,25 @@ pub use context::{ActorIdentity, ActorKind, OrbitContext};
 pub use orbit_common::types::{
     Activity, AuditEvent, AuditEventStatus, AuditStats, EvidenceKind, ExecutorDef, ExternalRef,
     GITHUB_PR_EXTERNAL_REF_SYSTEM, Job, JobRun, JobRunState, JobRunStep, JobScheduleState, JobStep,
-    JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus,
+    JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus, LearningVoteSummary,
     ResolvedTaskDependency, ReviewMessage, ReviewThread, ReviewThreadStatus, Role, Skill, Task,
     TaskComment, TaskComplexity, TaskPriority, TaskStatus, TaskType, build_task_status_index,
     normalize_task_dependencies, normalize_task_tags, push_external_ref_if_missing,
     resolve_task_dependencies, task_dependencies_ready, task_matches_tags, unmet_task_dependencies,
     validate_task_dependencies,
 };
-pub use orbit_common::types::{NotFoundKind, OrbitError};
+pub use orbit_common::types::{LearningComment, NotFoundKind, OrbitError};
 pub use orbit_common::utility::redaction::{
     redact_sensitive_env_error, redact_sensitive_env_json, redact_sensitive_env_option,
     redact_sensitive_env_text,
 };
 pub use orbit_store::AuditEventInsertParams;
+pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{
-    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
+    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams,
+    LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
 };
 pub use runtime::OrbitRuntime;
+pub use runtime::engine::{
+    ConfiguredCrewProjection, ConfiguredCrewRegistryProjection, ResolvedCrewProjection,
+};

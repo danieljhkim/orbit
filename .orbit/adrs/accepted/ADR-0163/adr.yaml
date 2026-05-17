@@ -1,0 +1,18 @@
+schema_version: 1
+id: ADR-0163
+title: '`init_feature` refuses to clobber an existing folder'
+status: accepted
+owner: claude
+created_at: 2026-05-17T06:07:12.417560Z
+accepted_at: 2026-05-17T06:07:29.037535Z
+last_updated: 2026-05-17T06:07:29.037535Z
+related_features:
+- design-docs
+related_tasks:
+- ORB-00019
+- ORB-00103
+supersedes: []
+legacy_ids:
+- design-docs/ADR-006
+validation_warnings: []
+legacy_validation: none

@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use orbit_common::types::{
-    ExternalRef, NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority, TaskStatus,
-    TaskType, media_type_for_artifact_path, optional_string, optional_string_alias,
-    optional_u32_alias,
+    ExternalRef, NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority,
+    TaskRelation, TaskStatus, TaskType, media_type_for_artifact_path, optional_string,
+    optional_string_alias, optional_u32_alias,
 };
 use orbit_store::state_io;
 use orbit_tools::OrbitTaskScope;
@@ -203,6 +203,25 @@ pub(super) fn parse_external_refs(input: &Value) -> Result<Vec<ExternalRef>, Orb
             .map_err(|error| OrbitError::InvalidInput(format!("invalid `external_refs`: {error}"))),
         _ => Err(OrbitError::InvalidInput(
             "`external_refs` must be an array of {system, id, url?} objects".to_string(),
+        )),
+    }
+}
+
+pub(super) fn parse_relations(input: &Value) -> Result<Option<Vec<TaskRelation>>, OrbitError> {
+    let Some(value) = input.get("relations").or_else(|| input.get("relation")) else {
+        return Ok(None);
+    };
+
+    match value {
+        Value::Null => Ok(Some(Vec::new())),
+        Value::Array(_) => serde_json::from_value::<Vec<TaskRelation>>(value.clone())
+            .map(Some)
+            .map_err(|error| OrbitError::InvalidInput(format!("invalid `relations`: {error}"))),
+        Value::Object(_) => serde_json::from_value::<TaskRelation>(value.clone())
+            .map(|relation| Some(vec![relation]))
+            .map_err(|error| OrbitError::InvalidInput(format!("invalid `relations`: {error}"))),
+        _ => Err(OrbitError::InvalidInput(
+            "`relations` must be an array of {type, target} objects".to_string(),
         )),
     }
 }

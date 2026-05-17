@@ -101,6 +101,17 @@ pub struct ExecutorDef {
     /// should encode runtime model selection in `args`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_pair_override: Option<ModelPairOverride>,
+    /// CLI flag name used to pass `JobStep.model` to a direct-agent subprocess.
+    ///
+    /// Carries only the flag name, for example `"-m"` or `"--model"`. At
+    /// invocation time, when both `model_flag` and the step's runtime model are
+    /// present, `direct_agent` appends `[model_flag, step.model]` after the
+    /// operator-declared `args`. Orbit does not inspect `args` for duplicates;
+    /// the CLI's own last-wins behavior resolves repeated model flags. When
+    /// either field is absent, nothing is injected, so operators can still
+    /// hardcode fixed model arguments such as `--model X` in `args`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_flag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
@@ -154,6 +165,7 @@ impl ExecutorDef {
             stdout_format,
             model_pair_override,
             legacy_models,
+            model_flag,
             timeout_seconds,
             env,
             sandbox,
@@ -177,6 +189,7 @@ impl ExecutorDef {
             args,
             stdout_format,
             model_pair_override: model_pair_override.or(legacy_models),
+            model_flag,
             timeout_seconds,
             env,
             sandbox,
@@ -275,6 +288,7 @@ spec:
   model_pair_override:
     strong: gemini-3.1-pro
     weak: gemini-3-flash
+  model_flag: "-m"
 "#,
             "roundtrip",
         );
@@ -286,11 +300,16 @@ spec:
                 weak: "gemini-3-flash".to_string(),
             })
         );
+        assert_eq!(def.model_flag.as_deref(), Some("-m"));
 
         let serialized = serde_yaml::to_string(&def).expect("serialize executor def");
         assert!(
             serialized.contains("model_pair_override:"),
             "serialized executor def should use new key: {serialized}"
+        );
+        assert!(
+            serialized.contains("model_flag: -m"),
+            "serialized executor def should include model flag: {serialized}"
         );
         assert!(
             !serialized.contains("models:"),

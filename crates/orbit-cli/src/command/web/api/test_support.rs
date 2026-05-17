@@ -79,6 +79,10 @@ pub(super) fn seed_run(
         input: None,
         retry_source_run_id: None,
         knowledge_metrics: None,
+        resolved_crew: None,
+        planner_model: None,
+        implementer_model: None,
+        reviewer_model: None,
         steps: Vec::new(),
     };
     let run_dir = runtime

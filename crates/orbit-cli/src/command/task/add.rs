@@ -62,6 +62,9 @@ pub struct TaskAddArgs {
     /// For bug tasks: the originating task whose implementation introduced the defect
     #[arg(long = "source-task")]
     pub source_task: Option<String>,
+    /// Named crew to use when running this task
+    #[arg(long)]
+    pub crew: Option<String>,
     /// Explicit agent name to persist on the task artifact
     #[arg(long)]
     pub agent: Option<String>,
@@ -115,6 +118,7 @@ impl Execute for TaskAddArgs {
                 description,
                 acceptance_criteria: self.acceptance_criteria,
                 dependencies: crate::parse::csv_to_vec(&self.dependencies),
+                relations: Vec::new(),
                 tags: self.tags,
                 plan,
                 comment: self.comment,
@@ -131,6 +135,7 @@ impl Execute for TaskAddArgs {
                     .map(|raw| ExternalRef::parse_key(raw))
                     .collect::<Result<Vec<_>, _>>()?,
                 source_task_id: self.source_task.clone(),
+                crew: self.crew,
             },
             self.agent,
             self.model,

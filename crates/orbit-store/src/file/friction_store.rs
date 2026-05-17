@@ -2,28 +2,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
+use orbit_common::friction::DEFAULT_FRICTION_TAGS;
 use orbit_common::types::{
-    FrictionFrontmatter, FrictionRecord, OrbitError, Task, TaskStatus,
-    normalize_optional_attribution_label,
+    FrictionFrontmatter, FrictionRecord, FrictionStatus, OrbitError, Task, TaskStatus,
+    all_agent_families, infer_agent_family_from_model, normalize_optional_attribution_label,
 };
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
 
+pub use orbit_common::types::validate_friction_id;
+
 const TAGS_FILENAME: &str = "tags.yaml";
-const DEFAULT_TAGS: &[(&str, &str)] = &[
-    ("tooling", "Orbit tool/CLI/MCP failures"),
-    (
-        "skill-guidance",
-        "Misleading or incorrect skill instructions",
-    ),
-    ("docs", "Stale or missing CLAUDE.md or design docs"),
-    ("lifecycle", "Task lifecycle confusion or transition issues"),
-    ("build", "make/fmt/lint friction"),
-    ("naming", "Naming drift or duplicated sources of truth"),
-    ("policy", "fsProfile or sandboxing surprises"),
-    ("other", "Fallback"),
-];
 
 #[derive(Debug, Clone)]
 pub struct FrictionAddParams {
@@ -37,12 +27,23 @@ pub struct FrictionAddParams {
 #[derive(Debug, Clone, Default)]
 pub struct FrictionListFilter {
     pub model: Option<String>,
+    pub status: Option<FrictionStatus>,
     pub tag: Option<String>,
+    pub q: Option<String>,
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
+pub struct FrictionUpdateParams {
+    pub status: Option<FrictionStatus>,
+    pub tags: Option<Vec<String>>,
+    pub resolved_by_task: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+/// Persisted friction record wrapper. The identity in `record.model` is per-invocation actual execution (sourced from the friction add call site).
 pub struct StoredFrictionRecord {
     pub record: FrictionRecord,
     pub path: PathBuf,
@@ -75,8 +76,11 @@ pub fn add_friction(
                 id,
                 model: params.model.trim().to_string(),
                 created_at: params.created_at,
+                status: FrictionStatus::Open,
                 tags,
+                resolved_at: None,
                 during_task: params.during_task,
+                resolved_by_task: None,
                 body: params.body,
             },
         )
@@ -101,6 +105,12 @@ pub fn list_frictions(
             continue;
         }
         if filter
+            .status
+            .is_some_and(|status| stored.record.status != status)
+        {
+            continue;
+        }
+        if filter
             .tag
             .as_deref()
             .is_some_and(|tag| !stored.record.tags.iter().any(|value| value == tag))
@@ -114,6 +124,13 @@ pub fn list_frictions(
             continue;
         }
         if filter.to.is_some_and(|to| stored.record.created_at > to) {
+            continue;
+        }
+        if filter
+            .q
+            .as_deref()
+            .is_some_and(|query| !record_matches_query(&stored.record, query))
+        {
             continue;
         }
         records.push(stored);
@@ -141,57 +158,185 @@ pub fn show_friction(
     Ok(Some(read_record_at(&path)?))
 }
 
+pub fn update_friction(
+    frictions_root: &Path,
+    id: &str,
+    params: FrictionUpdateParams,
+) -> Result<StoredFrictionRecord, OrbitError> {
+    validate_friction_id(id)?;
+    let month = &id[1..8];
+    let nnn = &id[9..12];
+    let path = frictions_root.join(month).join(format!("F{nnn}.md"));
+    if !path.exists() {
+        return Err(OrbitError::InvalidInput(format!(
+            "friction record not found: {id}"
+        )));
+    }
+
+    let lock_target = frictions_root.join(month).join(".triage");
+    with_exclusive_file_lock(&lock_target, "friction record update", || {
+        let mut stored = read_record_at(&path)?;
+        if let Some(tags) = params.tags {
+            let taxonomy = load_tag_taxonomy(frictions_root)?;
+            stored.record.tags = normalize_and_validate_tags(tags, &taxonomy)?;
+        }
+        if let Some(status) = params.status {
+            stored.record.status = status;
+            stored.record.resolved_at = match status {
+                FrictionStatus::Resolved => {
+                    Some(stored.record.resolved_at.unwrap_or(params.updated_at))
+                }
+                FrictionStatus::Open | FrictionStatus::Triaged => {
+                    stored.record.resolved_by_task = None;
+                    None
+                }
+            };
+        }
+        if let Some(resolved_by_task) = params.resolved_by_task {
+            stored.record.resolved_by_task = Some(
+                stored
+                    .record
+                    .resolved_by_task
+                    .clone()
+                    .unwrap_or(resolved_by_task),
+            );
+        }
+        write_record_at(&path, &stored.record)
+    })
+}
+
+pub fn resolve_friction(
+    frictions_root: &Path,
+    id: &str,
+    resolved_at: DateTime<Utc>,
+) -> Result<StoredFrictionRecord, OrbitError> {
+    update_friction(
+        frictions_root,
+        id,
+        FrictionUpdateParams {
+            status: Some(FrictionStatus::Resolved),
+            tags: None,
+            resolved_by_task: None,
+            updated_at: resolved_at,
+        },
+    )
+}
+
+pub fn resolve_friction_by_task(
+    frictions_root: &Path,
+    id: &str,
+    task_id: &str,
+    resolved_at: DateTime<Utc>,
+) -> Result<StoredFrictionRecord, OrbitError> {
+    update_friction(
+        frictions_root,
+        id,
+        FrictionUpdateParams {
+            status: Some(FrictionStatus::Resolved),
+            tags: None,
+            resolved_by_task: Some(task_id.to_string()),
+            updated_at: resolved_at,
+        },
+    )
+}
+
 pub fn friction_stats(frictions_root: &Path, tasks: &[Task]) -> Result<Value, OrbitError> {
     let records = list_frictions(frictions_root, &FrictionListFilter::default())?;
-    let tasks_done = completed_tasks_by_model(tasks);
-    let mut frictions_by_model: BTreeMap<String, u64> = BTreeMap::new();
-    let mut frictions_by_tag_model: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
-    let mut models = BTreeSet::new();
+    let now = Utc::now();
+    let month_start = Utc
+        .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
+        .single()
+        .ok_or_else(|| OrbitError::Store("compute current friction month".to_string()))?;
+    let (next_year, next_month) = if now.month() == 12 {
+        (now.year() + 1, 1)
+    } else {
+        (now.year(), now.month() + 1)
+    };
+    let next_month_start = Utc
+        .with_ymd_and_hms(next_year, next_month, 1, 0, 0, 0)
+        .single()
+        .ok_or_else(|| OrbitError::Store("compute next friction month".to_string()))?;
+    let open = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Open)
+        .count() as u64;
+    let triaged = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Triaged)
+        .count() as u64;
+    let resolved = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Resolved)
+        .count() as u64;
+    let resolved_this_month = records
+        .iter()
+        .filter(|stored| stored.record.status == FrictionStatus::Resolved)
+        .filter(|stored| {
+            let resolved_at = stored
+                .record
+                .resolved_at
+                .unwrap_or(stored.record.created_at);
+            resolved_at >= month_start && resolved_at < next_month_start
+        })
+        .count() as u64;
+    let tasks_done = completed_tasks_by_family(tasks);
+    let mut frictions_by_family: BTreeMap<String, u64> = BTreeMap::new();
+    let mut frictions_by_tag_family: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    let mut families = BTreeSet::new();
 
     for stored in &records {
-        models.insert(stored.record.model.clone());
-        *frictions_by_model
-            .entry(stored.record.model.clone())
-            .or_insert(0) += 1;
+        let family = friction_family_key(&stored.record.model);
+        families.insert(family.clone());
+        *frictions_by_family.entry(family.clone()).or_insert(0) += 1;
         for tag in &stored.record.tags {
-            *frictions_by_tag_model
+            *frictions_by_tag_family
                 .entry(tag.clone())
                 .or_default()
-                .entry(stored.record.model.clone())
+                .entry(family.clone())
                 .or_insert(0) += 1;
         }
     }
-    models.extend(tasks_done.keys().cloned());
+    families.extend(tasks_done.keys().cloned());
+    families.extend(known_family_keys());
 
-    let mut by_model = serde_json::Map::new();
-    for model in &models {
-        let frictions = frictions_by_model.get(model).copied().unwrap_or(0);
-        let done = tasks_done.get(model).copied().unwrap_or(0);
-        by_model.insert(model.clone(), rate_row(frictions, done));
+    let mut by_family = serde_json::Map::new();
+    for family in &families {
+        let frictions = frictions_by_family.get(family).copied().unwrap_or(0);
+        let done = tasks_done.get(family).copied().unwrap_or(0);
+        by_family.insert(family.clone(), rate_row(frictions, done));
     }
 
     let mut by_tag = serde_json::Map::new();
-    for (tag, by_model_counts) in frictions_by_tag_model {
+    for (tag, by_family_counts) in frictions_by_tag_family {
         let mut tag_map = serde_json::Map::new();
-        for model in &models {
-            let frictions = by_model_counts.get(model).copied().unwrap_or(0);
-            let done = tasks_done.get(model).copied().unwrap_or(0);
-            tag_map.insert(model.clone(), rate_row(frictions, done));
+        for family in &families {
+            let frictions = by_family_counts.get(family).copied().unwrap_or(0);
+            let done = tasks_done.get(family).copied().unwrap_or(0);
+            tag_map.insert(family.clone(), rate_row(frictions, done));
         }
         by_tag.insert(tag, Value::Object(tag_map));
     }
 
     Ok(json!({
-        "by_model": Value::Object(by_model),
+        "total": records.len() as u64,
+        "open": open,
+        "triaged": triaged,
+        "resolved": resolved,
+        "resolved_this_month": resolved_this_month,
+        "by_family": Value::Object(by_family),
         "by_tag": Value::Object(by_tag),
     }))
+}
+
+pub fn friction_tags(frictions_root: &Path) -> Result<Vec<String>, OrbitError> {
+    Ok(load_tag_taxonomy(frictions_root)?.into_iter().collect())
 }
 
 pub fn ensure_default_tag_taxonomy(frictions_root: &Path) -> Result<PathBuf, OrbitError> {
     let path = frictions_root.join(TAGS_FILENAME);
     if !path.exists() {
         let mut body = String::new();
-        for (tag, description) in DEFAULT_TAGS {
+        for (tag, description) in DEFAULT_FRICTION_TAGS {
             body.push_str(&format!("{tag}: \"{description}\"\n"));
         }
         atomic_write_text(&path, &body).map_err(|error| OrbitError::Io(error.to_string()))?;
@@ -238,6 +383,25 @@ fn collect_tags_from_yaml(value: &serde_yaml::Value, out: &mut BTreeSet<String>)
         }
         _ => {}
     }
+}
+
+fn record_matches_query(record: &FrictionRecord, raw_query: &str) -> bool {
+    let query = raw_query.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    record.id.to_lowercase().contains(&query)
+        || record.model.to_lowercase().contains(&query)
+        || record.status.as_str().contains(&query)
+        || record
+            .during_task
+            .as_deref()
+            .is_some_and(|task| task.to_lowercase().contains(&query))
+        || record
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(&query))
+        || record.body.to_lowercase().contains(&query)
 }
 
 fn normalize_and_validate_tags(
@@ -312,8 +476,11 @@ fn write_record_at(
         id: record.id.clone(),
         model: record.model.clone(),
         created_at: record.created_at,
+        status: record.status,
         tags: record.tags.clone(),
+        resolved_at: record.resolved_at,
         during_task: record.during_task.clone(),
+        resolved_by_task: record.resolved_by_task.clone(),
     };
     let yaml = serde_yaml::to_string(&frontmatter)
         .map_err(|error| OrbitError::Store(format!("serialize friction frontmatter: {error}")))?;
@@ -345,8 +512,11 @@ fn read_record_at(path: &Path) -> Result<StoredFrictionRecord, OrbitError> {
             id: frontmatter.id,
             model: frontmatter.model,
             created_at: frontmatter.created_at,
+            status: frontmatter.status,
             tags: frontmatter.tags,
+            resolved_at: frontmatter.resolved_at,
             during_task: frontmatter.during_task,
+            resolved_by_task: frontmatter.resolved_by_task,
             body: body.trim_start_matches('\n').trim_end().to_string(),
         },
         path: path.to_path_buf(),
@@ -385,25 +555,7 @@ fn friction_record_paths(frictions_root: &Path) -> Result<Vec<PathBuf>, OrbitErr
     Ok(paths)
 }
 
-fn validate_friction_id(id: &str) -> Result<(), OrbitError> {
-    let bytes = id.as_bytes();
-    let valid = bytes.len() == 12
-        && bytes[0] == b'F'
-        && bytes[5] == b'-'
-        && bytes[8] == b'-'
-        && bytes[1..5].iter().all(u8::is_ascii_digit)
-        && bytes[6..8].iter().all(u8::is_ascii_digit)
-        && bytes[9..12].iter().all(u8::is_ascii_digit);
-    if valid {
-        Ok(())
-    } else {
-        Err(OrbitError::InvalidInput(format!(
-            "friction id must match FYYYY-MM-NNN, got '{id}'"
-        )))
-    }
-}
-
-fn completed_tasks_by_model(tasks: &[Task]) -> BTreeMap<String, u64> {
+fn completed_tasks_by_family(tasks: &[Task]) -> BTreeMap<String, u64> {
     let mut counts = BTreeMap::new();
     for task in tasks {
         if !matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
@@ -415,9 +567,20 @@ fn completed_tasks_by_model(tasks: &[Task]) -> BTreeMap<String, u64> {
         ) else {
             continue;
         };
-        *counts.entry(model).or_insert(0) += 1;
+        *counts.entry(friction_family_key(&model)).or_insert(0) += 1;
     }
     counts
+}
+
+fn friction_family_key(value: &str) -> String {
+    let normalized = normalize_optional_attribution_label(Some(value), None).unwrap_or_default();
+    infer_agent_family_from_model(&normalized).unwrap_or(normalized)
+}
+
+fn known_family_keys() -> impl Iterator<Item = String> {
+    all_agent_families()
+        .into_iter()
+        .map(|family| family.to_string())
 }
 
 fn rate_row(frictions: u64, tasks_done: u64) -> Value {
@@ -475,18 +638,33 @@ mod tests {
     fn stats_render_zero_task_model_rate_as_na() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path();
-        add_friction(root, params("gpt-zero", Utc::now(), vec!["tooling"])).expect("add friction");
+        add_friction(root, params("grok", Utc::now(), vec!["tooling"])).expect("add friction");
         let mut done = task("T1", TaskStatus::Done);
-        done.implemented_by = Some("gpt-done".to_string());
+        done.implemented_by = Some("codex".to_string());
 
         let stats = friction_stats(root, &[done]).expect("stats");
         assert_eq!(
-            stats["by_model"]["gpt-zero"]["frictions_per_10_tasks"],
+            stats["by_family"]["grok"]["frictions_per_10_tasks"],
             json!("n/a")
         );
         assert_eq!(
-            stats["by_model"]["gpt-done"]["frictions_per_10_tasks"],
+            stats["by_family"]["codex"]["frictions_per_10_tasks"],
             json!(0.0)
+        );
+    }
+
+    #[test]
+    fn stats_render_zero_rows_for_known_grok_family() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+
+        let stats = friction_stats(root, &[]).expect("stats");
+
+        assert_eq!(stats["by_family"]["grok"]["frictions"], json!(0));
+        assert_eq!(stats["by_family"]["grok"]["tasks_done"], json!(0));
+        assert_eq!(
+            stats["by_family"]["grok"]["frictions_per_10_tasks"],
+            json!("n/a")
         );
     }
 
@@ -522,6 +700,7 @@ mod tests {
             external_refs: Vec::new(),
             relations: Vec::new(),
             job_run_id: None,
+            crew: None,
             created_at: now,
             updated_at: now,
         }

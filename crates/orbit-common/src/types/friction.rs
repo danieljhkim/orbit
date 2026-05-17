@@ -1,16 +1,64 @@
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::types::ActorIdentity;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrictionStatus {
+    #[default]
+    Open,
+    Triaged,
+    Resolved,
+}
+
+impl Display for FrictionStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FrictionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FrictionStatus::Open => "open",
+            FrictionStatus::Triaged => "triaged",
+            FrictionStatus::Resolved => "resolved",
+        }
+    }
+}
+
+impl FromStr for FrictionStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "open" => Ok(FrictionStatus::Open),
+            "triaged" => Ok(FrictionStatus::Triaged),
+            "resolved" => Ok(FrictionStatus::Resolved),
+            other => Err(format!("unknown friction status: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrictionRecord {
     pub id: String,
+    /// Model identifier for this friction record (per-invocation actual execution).
     pub model: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub status: FrictionStatus,
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub during_task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by_task: Option<String>,
     #[serde(default)]
     pub body: String,
 }
@@ -20,9 +68,15 @@ pub struct FrictionFrontmatter {
     pub id: String,
     pub model: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub status: FrictionStatus,
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub during_task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by_task: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,4 +94,31 @@ pub struct FrictionEntry {
     /// Typed identity of the actor that triggered this friction event.
     #[serde(default)]
     pub actor_identity: ActorIdentity,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn friction_frontmatter_without_resolved_by_task_deserializes() {
+        let yaml = r#"
+id: F2026-05-007
+model: codex
+created_at: 2026-05-17T04:05:00Z
+status: open
+tags:
+  - tooling
+during_task: ORB-00093
+"#;
+
+        let frontmatter: FrictionFrontmatter = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(frontmatter.id, "F2026-05-007");
+        assert_eq!(frontmatter.resolved_by_task, None);
+
+        let serialized = serde_yaml::to_string(&frontmatter).unwrap();
+        let round_trip: FrictionFrontmatter = serde_yaml::from_str(&serialized).unwrap();
+        assert_eq!(round_trip.resolved_by_task, None);
+    }
 }

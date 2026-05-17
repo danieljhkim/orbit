@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-16
 
 This ADR log records the decisions that define the current Activity / Job substrate. Entries are append-only and stay in place when later ADRs supersede or fold them. See [1_overview.md](./1_overview.md) for the feature summary, [2_design.md](./2_design.md) for the current implementation, and [3_vision.md](./3_vision.md) for the questions that may force more decisions.
 
@@ -257,7 +257,7 @@ Folded instances:
 | ADR-029 | The first direct-shipment recovery default was deterministic and conservative. |
 | ADR-030 | Default recovery is step-scoped and agent-driven. |
 | ADR-033 | Auto-backlog lock exclusions are structured output. |
-| ADR-034 | `ship-auto` reports operator workflow status from durable pipeline state. |
+| ADR-034 | Auto shipment reports operator workflow status from durable pipeline state. |
 | ADR-035 | Gate reservations release after terminal child waits. |
 | ADR-037 | Accepted friction reports enter auto-backlog by status. |
 | ADR-039 | Run-owned task-lock reservations clean up at owner terminal. |
@@ -342,7 +342,7 @@ Folded into ADR-002's rollup for explicit agent dispatch boundaries.
 
 Folded into ADR-023's rollup for seeded task-shipment workflow automation.
 
-## ADR-034 — `ship-auto` reports operator workflow status from durable pipeline state
+## ADR-034 — Auto shipment reports operator workflow status from durable pipeline state
 
 **Status:** Superseded by ADR-023 (folded) · 2026-04 · [T20260430-27], [T20260430-30]
 
@@ -492,7 +492,7 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 
 **Context.** `task_auto_pipeline` needed to skip its success guard for empty backlog runs, but its seeded `bundle_count > 0` guard rendered to an unsupported comparison and failed before the step could be skipped. Orbit could either extend the shared evaluator with numeric ordering or express the guard in the existing grammar.
 
-**Decision.** Keep the shared condition grammar to `==` and `!=`, with `&&` and `||` composition, and express skip-on-empty guards with equality-compatible forms such as `!= 0` and `!= []`. The `ship-auto` guard uses `{{ steps.validate_bundles.output.bundle_count }} != 0`, so zero bundles skip the guard and populated fan-out still checks child gate success.
+**Decision.** Keep the shared condition grammar to `==` and `!=`, with `&&` and `||` composition, and express skip-on-empty guards with equality-compatible forms such as `!= 0` and `!= []`. The `task_auto_pipeline` guard uses `{{ steps.validate_bundles.output.bundle_count }} != 0`, so zero bundles skip the guard and populated fan-out still checks child gate success.
 
 **Consequences.**
 - The evaluator stays string-based and shared between `StepCondition::Expr`, v2 `when:`, and loop `break_when:` without adding numeric coercion rules.
@@ -524,6 +524,20 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - Timeout return no longer depends on the worker's thread or agent process eventually exiting.
 - Timed-out child work gets the same run-cancellation path operators use elsewhere, including bounded process-group signaling for running pipeline workers.
 - Cost: the retained legacy path now depends on the v2 pipeline tool surface and polls active workers, so completion can lag by the polling interval rather than waking on an in-process channel send.
+
+## ADR-052 — Unified async ship dispatch
+
+**Status:** Proposed · 2026-05 · [ORB-00075]
+
+**Context.** Orbit had three shipment aliases: `ship`, `ship-local`, and `ship-auto`. Operators used the auto path because it already queued behind dependency and lock gates, while explicit shipment still failed fast before the waiting-reason surfaces could explain parked work.
+
+**Decision.** Use `orbit run ship` as the only public shipment command. Omitted task IDs run backlog auto mode, provided task IDs seed explicit singleton bundles, and both forms submit `task_auto_pipeline`; mode still routes inside `task_gate_pipeline` to `task_{{ input.mode }}_pipeline`. The companion global ADR is ADR-0152.
+
+**Consequences.**
+- Explicit task selection now waits inside the gated job path instead of failing at CLI dispatch time.
+- `orbit run ship` returns after `submit_pipeline_run`, and operators inspect waiting or terminal state with `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`.
+- The deprecated `ship-auto` CLI form errors toward `orbit run ship`, and `ship-local` is no longer a workflow alias.
+- Cost: dispatch output no longer contains the former synchronous auto-shipment summary because terminal pipeline state is unavailable at submit time.
 
 ---
 
@@ -574,8 +588,8 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 - **[T20260430-26]** — Release task-gate reservations after terminal child shipment runs and expose active reservations through the lock view.
-- **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
-- **[T20260430-30]** — Make `ship-auto` default text output human-readable while preserving JSON fields.
+- **[T20260430-27]** — Make auto shipment output distinguish empty backlog, gated no-op, and waiting gate children.
+- **[T20260430-30]** — Make auto shipment default text output human-readable while preserving JSON fields.
 - **[T20260430-31]** — Require populated execution summaries before opening task PRs.
 - **[T20260505-2]** — Admit accepted backlog friction reports in automatic backlog listing.
 - **[T20260505-8]** — Add dashboard/runtime controls to cancel active job runs.
@@ -589,7 +603,8 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 - **[T20260509-7]** — Establish focused test coverage for the activity/job DAG executor (linear, retry, parallel, fan-out, loop, pipeline durability) and the macOS sandbox / policy boundary.
 - **[T20260509-9]** — Auto-populate `task.context_files` from the winning planning-duel plan after resolution.
-- **[T20260509-11]** — Keep condition guards on equality-only grammar and repair the `ship-auto` empty-backlog guard.
+- **[T20260509-11]** — Keep condition guards on equality-only grammar and repair the `task_auto_pipeline` empty-backlog guard.
+- **[ORB-00075]** — Unify ship aliases into async `orbit run ship`.
 - **[T20260509-38]** — Run legacy parallel-batch workers through cancellable pipeline runs so timeout failure paths return promptly.
 - **[T20260509-40]** — Run CLI subprocesses in killable process groups and bound timeout-path output reader joins.
 

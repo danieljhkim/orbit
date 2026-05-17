@@ -1,23 +1,24 @@
 use orbit_common::types::{
-    Adr, AdrStatus, AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
-    Learning, LearningStatus, NotFoundKind, OrbitError, PolicyDef, ReviewThread, StoredTool, Task,
-    TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus,
-    TaskType,
+    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, ExecutorDef, ExternalRef, JobRun,
+    JobRunState, KnowledgeRunMetrics, Learning, LearningStatus, NotFoundKind, OrbitError,
+    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
+    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
 use orbit_embed::{EmbedWorker, VectorStore};
 use orbit_store::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, AuditEventFilter,
     AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
+    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
+    LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
+    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    ToolStoreBackend,
 };
 
 use crate::context::OrbitStores;
@@ -29,6 +30,7 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) description: Option<String>,
     pub(crate) acceptance_criteria: Option<Vec<String>>,
     pub(crate) dependencies: Option<Vec<String>>,
+    pub(crate) relations: Option<Vec<TaskRelation>>,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) plan: Option<String>,
     pub(crate) execution_summary: Option<String>,
@@ -44,6 +46,7 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) pr_status: Option<Option<String>>,
     pub(crate) source_task_id: Option<Option<String>>,
     pub(crate) job_run_id: Option<Option<String>>,
+    pub(crate) crew: Option<Option<String>>,
     pub(crate) status_event: Option<String>,
     pub(crate) status_note: Option<String>,
     pub(crate) append_history: Vec<TaskHistoryEntry>,
@@ -59,6 +62,7 @@ impl TaskRecordUpdateParams {
             || self.description.is_some()
             || self.acceptance_criteria.is_some()
             || self.dependencies.is_some()
+            || self.relations.is_some()
             || self.tags.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
@@ -73,6 +77,7 @@ impl TaskRecordUpdateParams {
             || self.pr_status.is_some()
             || self.source_task_id.is_some()
             || self.job_run_id.is_some()
+            || self.crew.is_some()
     }
 
     fn has_history_changes(&self) -> bool {
@@ -183,6 +188,21 @@ impl TaskRecords<'_> {
         self.artifact.get_task_artifacts(id)
     }
 
+    pub(crate) fn get_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        self.artifact.get_task_artifact_manifest(id)
+    }
+
+    pub(crate) fn get_artifact(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        self.artifact.get_task_artifact(id, path)
+    }
+
     pub(crate) fn get_comments(&self, id: &str) -> Result<Option<Vec<TaskComment>>, OrbitError> {
         self.history.get_task_comments(id)
     }
@@ -242,6 +262,7 @@ impl TaskRecords<'_> {
                     description: params.description.clone(),
                     acceptance_criteria: params.acceptance_criteria.clone(),
                     dependencies: params.dependencies.clone(),
+                    relations: params.relations.clone(),
                     tags: params.tags.clone(),
                     plan: params.plan.clone(),
                     execution_summary: params.execution_summary.clone(),
@@ -256,6 +277,7 @@ impl TaskRecords<'_> {
                     pr_status: params.pr_status.clone(),
                     source_task_id: params.source_task_id.clone(),
                     job_run_id: params.job_run_id.clone(),
+                    crew: params.crew.clone(),
                 },
             )?;
         }
@@ -459,6 +481,14 @@ impl JobRecords<'_> {
         metrics: KnowledgeRunMetrics,
     ) -> Result<bool, OrbitError> {
         self.run.record_job_run_knowledge_metrics(run_id, metrics)
+    }
+
+    pub(crate) fn record_run_crew(
+        &self,
+        run_id: &str,
+        crew: &orbit_common::types::Crew,
+    ) -> Result<bool, OrbitError> {
+        self.run.record_job_run_crew(run_id, crew)
     }
 
     pub(crate) fn finalize_run(
@@ -740,6 +770,43 @@ impl LearningRecords<'_> {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         self.store.search_learnings(params)
+    }
+
+    pub(crate) fn upvote(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.store.upvote_learning(params)
+    }
+
+    pub(crate) fn vote_summary(
+        &self,
+        id: &str,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.store.learning_vote_summary(id)
+    }
+
+    pub(crate) fn add_comment(
+        &self,
+        params: LearningCommentAddParams,
+    ) -> Result<orbit_common::types::LearningComment, OrbitError> {
+        self.store.add_learning_comment(params)
+    }
+
+    pub(crate) fn list_comments(
+        &self,
+        learning_id: &str,
+        include_deleted: bool,
+    ) -> Result<Vec<orbit_common::types::LearningComment>, OrbitError> {
+        self.store
+            .list_learning_comments(learning_id, include_deleted)
+    }
+
+    pub(crate) fn delete_comment(
+        &self,
+        params: LearningCommentDeleteParams,
+    ) -> Result<(), OrbitError> {
+        self.store.delete_learning_comment(params)
     }
 
     pub(crate) fn update(

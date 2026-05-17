@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::command::task::{canonicalize_context_files_for_read, context_workspace_root};
+use crate::runtime::run_input::singular_task_id_from_input;
 
 pub(super) fn associated_task_ids(input: &Value) -> Vec<String> {
     let mut task_ids = Vec::new();
@@ -54,33 +55,6 @@ pub(super) fn task_context_for_agent_input(
         input,
         &runtime.paths().repo_root,
     )))
-}
-
-pub(super) fn singular_task_id_from_input(input: &Value) -> Option<&str> {
-    fn non_empty(value: &str) -> Option<&str> {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then_some(trimmed)
-    }
-
-    input
-        .get("task_id")
-        .and_then(Value::as_str)
-        .and_then(non_empty)
-        .or_else(|| {
-            input
-                .get("task")
-                .and_then(|task| task.get("id"))
-                .and_then(Value::as_str)
-                .and_then(non_empty)
-        })
-        .or_else(|| {
-            let items = input.get("task_ids")?.as_array()?;
-            if items.len() == 1 {
-                items.first()?.as_str().and_then(non_empty)
-            } else {
-                None
-            }
-        })
 }
 
 fn agent_task_context_json(task: &Task, input: &Value, fallback_repo_root: &Path) -> Value {

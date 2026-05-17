@@ -64,7 +64,14 @@ spec:
     6. If a fix cannot be applied (ambiguity, missing context, scope
        boundary), leave the thread `open` and move on. Open threads will
        surface to human reviewers via the existing PR review-thread sync.
-    7. Stop when no further blocking issues remain. Do not synthesize a
+    7. Before stopping, run the learning checkpoint: if this review surfaced a
+       contradicted assumption, recurring failure mode, non-obvious gotcha that
+       took more than 10 minutes to debug, or incident-style root cause, follow
+       the `orbit-learning` skill and call the `add` action on
+       `orbit.learning` (or use that skill's update/supersede flow when it
+       points to existing guidance).
+       Skip if none apply.
+    8. Stop when no further blocking issues remain. Do not synthesize a
        summary in the response — the review-thread records are the result.
   tools:
     - orbit.task.*
@@ -74,6 +81,12 @@ spec:
     - orbit.learning.search
     - orbit.learning.show
     - orbit.learning.list
+    - orbit.learning.add
+    - orbit.learning.comment.add
+    - orbit.learning.comment.list
+    - orbit.learning.comment.delete
+    - orbit.learning.update
+    - orbit.learning.supersede
     - fs.read
     - fs.delete
     - proc.spawn

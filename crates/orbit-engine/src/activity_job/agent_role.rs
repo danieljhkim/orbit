@@ -1,16 +1,15 @@
 //! Per-role agent settings resolver (ADR-029).
 //!
 //! Bridges the role tag on an `agent_loop` / `groundhog` activity (or its
-//! enclosing `TargetStep`) to the `[agent.<role>]` block written by
-//! `orbit init` (ADR-027). The host returns parsed [`AgentRoleConfig`]
-//! values, and this module collapses them with the inline `provider`,
-//! `model`, and `backend` fields on the activity into a single
-//! [`ResolvedAgentSettings`] triple.
+//! enclosing `TargetStep`) to the selected `[crews.<name>]` role assignment.
+//! The host returns parsed [`AgentRoleConfig`] values, and this module
+//! collapses them with the inline `provider`, `model`, and `backend` fields
+//! on the activity into a single [`ResolvedAgentSettings`] triple.
 //!
 //! # Precedence
 //!
 //! For each field independently:
-//! 1. The matching field on `[agent.<role>]` if the host returned `Some`.
+//! 1. The matching field from the selected crew if the host returned `Some`.
 //! 2. Otherwise the inline value on the activity's [`AgentLoopSpec`].
 //!
 //! No validation happens here — `Provider`/`Backend` were already parsed at
@@ -39,8 +38,9 @@ pub fn resolve_agent_settings(
     role: AgentRole,
     host: &dyn V2RuntimeHost,
     inline: &AgentLoopSpec,
+    input: &serde_json::Value,
 ) -> ResolvedAgentSettings {
-    let config = host.agent_role_config(role);
+    let config = host.agent_role_config_for_input(role, input);
     resolve_from_config(config.as_ref(), inline)
 }
 

@@ -1,10 +1,10 @@
-use orbit_common::types::EfficiencyMetrics;
+use orbit_common::types::{AgentFamily, EfficiencyMetrics, PlanningRoleAssignment, RoleSlot};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct PlanningDuelRoleMetrics {
-    pub agent: String,
-    pub model: String,
+    pub family: AgentFamily,
+    pub slot: RoleSlot,
     pub activity_id: String,
     pub efficiency: PlanningDuelEfficiency,
 }
@@ -24,17 +24,20 @@ pub(super) struct PlanningDuelEfficiency {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(super) struct PlanningDuelWinnerArtifact {
-    pub winner_agent_cli: String,
-    pub winner_model: String,
+    pub winner_family: AgentFamily,
+    pub winner_slot: Option<RoleSlot>,
     pub artifact_path: String,
-    pub arbiter_agent_cli: String,
-    pub arbiter_model: String,
+    pub arbiter_family: AgentFamily,
     pub arbiter_rationale: String,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(super) struct PlanningDuelWinnerMarker {
+    #[serde(default)]
+    pub winner_slot: Option<RoleSlot>,
+    #[serde(default)]
     pub winner_agent_cli: String,
+    #[serde(default)]
     pub winner_model: String,
     #[serde(default)]
     pub artifact_path: Option<String>,
@@ -42,6 +45,8 @@ pub(super) struct PlanningDuelWinnerMarker {
     pub arbiter_agent_cli: Option<String>,
     #[serde(default)]
     pub arbiter_model: Option<String>,
+    #[serde(default)]
+    pub arbiter_family: Option<AgentFamily>,
     pub arbiter_rationale: String,
 }
 
@@ -49,7 +54,8 @@ pub(super) struct PlanningDuelWinnerMarker {
 pub(super) struct PlanningDuelPlanArtifact {
     pub path: String,
     pub content: String,
-    pub author: orbit_common::types::PlanningRoleAssignment,
+    pub author: PlanningRoleAssignment,
+    pub slot: Option<RoleSlot>,
 }
 
 pub(super) fn into_efficiency_metrics(value: PlanningDuelEfficiency) -> EfficiencyMetrics {

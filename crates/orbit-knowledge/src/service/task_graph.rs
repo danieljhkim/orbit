@@ -43,13 +43,13 @@ impl TaskGraphService {
         &self,
         selectors: &[Selector],
         workspace_root: Option<&Path>,
-        explicit_knowledge_dir: bool,
+        skip_auto_refresh: bool,
         explicit_ref: Option<&str>,
         read_options: GraphReadOptions,
         selector_timeout_ms: Option<u64>,
     ) -> Result<Value, OrbitError> {
         if explicit_ref.is_none() {
-            self.maybe_refresh_knowledge_graph(workspace_root, explicit_knowledge_dir);
+            self.maybe_refresh_knowledge_graph(workspace_root, skip_auto_refresh);
         }
 
         let read_target = resolve_graph_read_target(workspace_root, explicit_ref)?;
@@ -85,7 +85,7 @@ impl TaskGraphService {
                 } else {
                     match self.rebuild_default_knowledge_graph(
                         workspace_root,
-                        explicit_knowledge_dir,
+                        skip_auto_refresh,
                         &first_error,
                     ) {
                         Ok(true) => match pack_result() {
@@ -245,12 +245,8 @@ impl TaskGraphService {
         }
     }
 
-    fn maybe_refresh_knowledge_graph(
-        &self,
-        workspace_root: Option<&Path>,
-        explicit_knowledge_dir: bool,
-    ) {
-        if explicit_knowledge_dir {
+    fn maybe_refresh_knowledge_graph(&self, workspace_root: Option<&Path>, skip_refresh: bool) {
+        if skip_refresh {
             return;
         }
 
@@ -270,10 +266,10 @@ impl TaskGraphService {
     fn rebuild_default_knowledge_graph(
         &self,
         workspace_root: Option<&Path>,
-        explicit_knowledge_dir: bool,
+        skip_rebuild: bool,
         first_error: &KnowledgeError,
     ) -> Result<bool, String> {
-        if explicit_knowledge_dir {
+        if skip_rebuild {
             return Ok(false);
         }
 

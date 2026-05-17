@@ -1,10 +1,62 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+### Release scope
+
+- **Grok onboarded as the fourth first-class agent family**: `all_agent_families()` 3 → 4, sandbox profile, MCP init, executor YAML, commit identity, and a parity sweep across scoreboards/duels/docs. ([ORB-00043], [ORB-00044], [ORB-00045], [ORB-00046], [ORB-00047], [ORB-00048], [ORB-00049], [ORB-00050], [ORB-00052])
+- **Agent identity collapsed to family**: model strings are configuration-only; family (`codex` / `claude` / `gemini` / `grok`) is the durable identity across tasks, scoreboards, friction, audit, planning-duel artifacts, and git author lines. ([ORB-00080], [ORB-00081], [ORB-00088], [ORB-00089], [ORB-00090], [ORB-00091], [ORB-00106])
+- **Per-task `crew` abstraction**: replaces role-keyed `[agent.<role>]` config with named `[crews.*]` registries selectable per task, and gives the duel-plan agent pool the same configurable surface. ([ORB-00058], [ORB-00072], [ORB-00076], [ORB-00078])
+- **First-class Knowledge tab in dashboard**: Learnings/Frictions/ADRs subtabs with inline lifecycle controls, plus task-detail enrichment (tags, external_refs, relations, job_run_id, review_threads, locked-files panel, per-task crew selector). ([ORB-00060], [ORB-00061], [ORB-00062], [ORB-00063], [ORB-00067], [ORB-00068], [ORB-00069], [ORB-00073], [ORB-00076], [ORB-00082], [ORB-00083], [ORB-00084], [ORB-00097])
+
+### Breaking Changes
+
+- **Branching model flipped**: `main` is now the release/production branch; `agent-main` is the dev integration branch where task PRs land. Each release tags on `agent-main` then promotes to `main` via merge commit; hotfixes branch from `main` and back-merge to `agent-main`. Install URLs in `README.md` and the website now point at `main`. Retired stub `crates/orbit-core/assets/activities/examples/promote_agent_main.yaml` removed. See `RELEASING.md` §10b and §Hotfix flow. ([ORB-00054])
+- **Crew registry replaces role-keyed agent config**: `[agent.planner]`, `[agent.implementer]`, `[agent.reviewer]` blocks are removed in favor of named `[crews.<name>]` registries selected via `[workflow].default_crew` or per-task `crew`. Workspaces with stale schema are rejected at load. ([ORB-00058])
+- **`ship-auto` and `ship-local` aliases removed**: `orbit run ship` is now the unified async-by-default command — empty task IDs trigger auto-backlog mode, explicit IDs queue-and-wait instead of fail-fast. ([ORB-00075])
+- **Agent identity schema collapsed to family**: `PlanningRoleAssignment` drops `model`; planning-duel artifact paths and signatures rename to `{slot}.md` and `*authored by: {family} / {slot}*`; `resolve_agent_model_pair*` helpers and alias canonicalization removed; scoreboard `by_model` → `by_family`. Includes a read-side migration; downstream consumers indexing on `by_model` keys break. ([ORB-00080])
+- **Family-identity migration script required after upgrade**: `scripts/migrate_family_identity.py` rewrites persisted task/friction/run/audit/scoreboard records and four SQLite stores to family-keyed shapes. Dry-run by default; back up before applying. ([ORB-00081])
+- **Audit `task.locks.*` and `job run-pipeline-worker` events populate `task_id`/`job_run_id` semantically**: previously these overloaded `target_id`. Downstream analytics joining on `target_id` for these events need updating. ([ORB-00085])
+- **`FrictionStatus::Default` derive swap**: enum default impl moved from a hand-rolled `impl` to `#[derive(Default)]` to satisfy a clippy-deny lint. Behaviorally a no-op; listed for completeness. ([ORB-00086])
+- **Task relation enum gains `Produces`/`Resolves`; frictions auto-close on Review → Done**: relation enum extension is additive but the auto-friction-close on task completion is a semantics change. A `resolved_by_task` back-pointer is added to friction records. ([ORB-00093])
+- **Learning storage layout: flat → per-entity directories**: `.orbit/learnings/<L-id>.yaml` moves to `.orbit/learnings/<L-id>/learning.yaml`. Legacy-layout load returns a typed error directing operators at `orbit learning migrate-layout`. ([ORB-00096])
+- **ADR allocation policy**: new ADR headings must first allocate globally via `orbit.adr.add`; local 3-digit ADR headings under `4_decisions.md` are grandfathered. `docs/design/CONVENTIONS.md` §4 updated. ([ORB-00098])
+- **Knowledge-graph workspace_root attribution fixed**: graph refs are now keyed on the worktree's actual branch rather than falling back to the main repo's `agent-main`; the missing-ref case rebuilds rather than silently reading the default branch. Cached selectors keyed off the old behavior may need refresh. ([ORB-00099], [ORB-00105])
+- **`orbit.task.update` persists `source_task_id`**: the property was previously silently dropped on writes; clients that depended on the drop now see persistence. Empty-string clears the field. ([ORB-00101])
+- **MCP schema emitter no longer degrades `object_list` params to `"string"`**: `evidence` and similar fields now emit array-shaped schemas. MCP clients that worked around the bug by string-encoding payloads must send arrays. ([ORB-00102])
+- **Ship batch commit message template**: `feat: parallel batch [ORB-id]` is replaced by a deterministic template — `<type>: <truncated title>… [ORB-id] [EXT-id]…` with an optional full-title line, execution-summary paragraph, and `Planned-By` / `Implemented-By` trailers. Release-note builders and `git log --grep 'parallel batch'` workflows break. ([ORB-00107])
+
+### Features
+
+- **Grok onboarded as fourth agent family**: sandbox state dir + SBPL allowances; CLI runner + executor YAML; `orbit mcp init --client grok` writes `.grok/config.toml`; duel / scoreboard / friction-stats render zero-grok rows; design folder, commit identity, and docs updated. ([ORB-00043], [ORB-00044], [ORB-00045], [ORB-00046], [ORB-00047], [ORB-00048], [ORB-00049], [ORB-00050], [ORB-00052])
+- **Knowledge tab in dashboard**: Learnings subtab (list, supersede, stats), Frictions subtab (triage, resolve, stats, tag-picker sourced from YAML), ADRs subtab (accept, supersede, related-task deep-links), task-detail enrichment, Locked Files panel, per-task crew selector, markdown rendering. ([ORB-00060], [ORB-00061], [ORB-00062], [ORB-00063], [ORB-00067], [ORB-00068], [ORB-00069], [ORB-00073], [ORB-00076], [ORB-00083])
+- **Duel-plan agent pool configurable** via `[duel] candidates` + `[duel.models]` in `config.toml`; runtime-host trait methods for candidate/model resolution; preserves fallback for non-duel callers. ([ORB-00072])
+- **Cross-artifact task relations**: `Produces` / `Resolves` variants enable typed task ↔ friction / learning links; auto-resolves frictions on Review → Done with a `resolved_by_task` back-pointer. ([ORB-00093])
+- **Learning enrichments**: per-learning `comments.jsonl` with push-injection rendering; decay-weighted upvotes with task-anchored idempotency; learning-creation wired into agent activity loops with a checkpoint. ([ORB-00077], [ORB-00094], [ORB-00095])
+- **Direct-agent runtime model injection**: `ExecutorDef.model_flag` enables data-driven `-m` / `--model` flag dispatch per step. ([ORB-00053])
+- **Ship command unified to async-by-default**: `orbit run ship` empty-task-IDs → auto mode, explicit IDs → gated; waiting-reason fields surfaced through `orbit run history` / `show`. ([ORB-00074], [ORB-00075])
+- **Backlog dependency gating**: `list_backlog_tasks` filters by `task_dependencies_ready`, fixing out-of-order auto-pipeline execution. ([ORB-00057])
+- **Skill quality nudges**: `orbit-create-task` now teaches optional `complexity`, `dependencies`, `parent_id`, and cross-artifact `relations`; `orbit.friction.add` description enumerates the tag taxonomy from YAML. ([ORB-00064], [ORB-00070], [ORB-00104])
+
+### Fixes
+
+- **Identity attribution end-to-end**: runtime ToolContext wire-up, automation-driven Review / Done transitions, git author resolver, and the ship-batch Done loop closed the recurring `implemented_by: "system"` bug across PR-open, ship, and review paths. ([ORB-00067], [ORB-00088], [ORB-00089], [ORB-00090], [ORB-00091], [ORB-00106])
+- **Concurrent worktree setup**: SHA-resolution + bounded retry eliminates `.git/config` lock races; post-failure cleanup is idempotent. ([ORB-00059])
+- **Policy dashboard denial identity**: real `JobRun` IDs are separated from synthetic audit `execution_id`; task-lock denials now expose actor / requested-files / conflicts. ([ORB-00066])
+- **CI failure-recovery task type**: corrected from invalid `"issue"` to `"bug"` (valid types: feature / bug / refactor / chore). ([ORB-00056])
+- **Clippy `expect()` violations** in `orbit-store::legacy_models_warns` that blocked PRs after the branching flip. ([ORB-00055])
+- **Dashboard task-row ID column** no longer leaves 50px of dead space before the title — column sizes to content. ([ORB-00097])
+- **YAML stack-overflow advisory** resolved (pre-ORB-scheme task). ([T20260430-16])
 
 ### Chores
 
-- **Branching model flipped**: `main` is now the release/production branch; `agent-main` is the dev integration branch where task PRs land. Each release tags on `agent-main` then promotes to `main` via merge commit; hotfixes branch from `main` and back-merge to `agent-main`. Install URLs in `README.md` and the website now point at `main`. Retired stub `crates/orbit-core/assets/activities/examples/promote_agent_main.yaml` removed. See `RELEASING.md` §10b and §Hotfix flow. ([ORB-00054])
+- **Family-identity migration script** (`scripts/migrate_family_identity.py`) ships with backups, dry-run-by-default, SQLite normalization, and scoreboard regeneration. ([ORB-00081])
+- **Learning storage migration helper** (`orbit learning migrate-layout`) ships alongside the flat → per-entity layout flip. ([ORB-00096])
+- **ADR corpus reconciled**: backfilled agent-families, project-learnings, and design-docs orphan ADRs into the global allocation. ([ORB-00103])
+- **ORB-00080 coverage gap closed**: end-to-end planning-duel regression test, crew-driven CLI invocation test, and projection field labeling. ([ORB-00087])
+- **Dashboard cleanup**: API route inventory footer removed; "rejected" status chip removed. ([ORB-00082], [ORB-00084])
+- **Local CI cleanup**: warning-deny clippy across MCP / tools / core / engine / CLI (large-enum boxing, items-after-test ordering, expect formatting, bind-vs-map); task-review scoring coverage extended to the Grok reviewer; design-doc `Last updated:` refresh across eight docs. ([ORB-00108])
+- **Unattributed commits**: README refreshes ([commit b35724da], [commit 836b307c], [commit 64f9685d], [commit f9397605], [commit 008d172a]); artifact backfill (ADR-0164, L20260517-7, L20260517-8) ([commit 44889e63]); `make cleanup-branches` target ([commit 51d0777a]); `.gitignore` lock files ([commit 8f00912a]); track `.orbit/learnings/` + `.orbit/adrs/` in git ([commit 0106ff3a]); duel configuration in orbit settings ([commit bcefa2a4]); learning-search absolute-path handling fix ([commit 052376ff]); agent model-pair updates for Codex and Claude ([commit 0657b991]); rename executor model-pair override (PR #240) ([commit 2925a4b7]).
 
 ## 0.5.4
 
@@ -75,7 +127,7 @@
 ### Features
 
 - **ADR-artifact subsystem (`orbit.adr.*`)**: ADRs lift out of per-feature `4_decisions.md` markdown into first-class artifacts at `.orbit/adrs/<status>/<id>/{adr.yaml,body.md}` with globally-unique `ADR-NNNN` IDs and a three-state lifecycle (proposed/accepted/superseded). Ships domain types, a SQLite envelope index, a file store with per-ADR `fs2` locks, five tools (`add`, `show`, `list`, `update`, `supersede`) with lifecycle audit rows, an `orbit adr migrate` one-shot, and a parser/sweeper hardened against rollup-bullet form and code-fenced examples. Migration imported 142 ADRs (97 accepted / 39 proposed / 6 superseded) across the existing corpus. The envelope's `legacy_id: String` field was renamed to `legacy_ids: Vec<String>` mid-development per the ADR-002 amendment; pre-GA churn, no external consumers yet. ([T20260510-27], [T20260510-28], [T20260511-1], [T20260511-2], [T20260511-3], [T20260511-11])
-- **Project learnings subsystem (`orbit.learning.*`)**: workspace-scoped `LearningFileStore` under `.orbit/learnings/<id>.yaml` with a SQLite `learnings_index` for fast scope-glob lookups on the injection hot path. Eight MCP tools (`add`, `list`, `search`, `show`, `update`, `supersede`, `reindex`, `prune`) plus matching `orbit learning <verb>` CLI; learnings travel with the repo via a carved-out `.gitignore` entry. End-to-end dispatch latency p95 ≈ 0.04 ms at 500 records. ([T20260511-5], [T20260511-6])
+- **Project learnings subsystem (`orbit.learning.*`)**: workspace-scoped `LearningFileStore` under `.orbit/learnings/<id>/learning.yaml` with a SQLite `learnings_index` for fast scope-glob lookups on the injection hot path. Eight MCP tools (`add`, `list`, `search`, `show`, `update`, `supersede`, `reindex`, `prune`) plus matching `orbit learning <verb>` CLI; `orbit learning migrate-layout` upgrades legacy flat workspaces. Learnings travel with the repo via a carved-out `.gitignore` entry. End-to-end dispatch latency p95 ≈ 0.04 ms at 500 records. ([T20260511-5], [T20260511-6], [ORB-00096])
 - **Plugin install contract locked down**: `make release-check` enforces version lockstep across `plugin/npm/package.json`, `plugin/.claude-plugin/plugin.json`, `npm view @orbit-tools/cli`, and `gh release list -L 1`; `scripts/smoke-plugin-install.sh` exercises the published `@orbit-tools/cli@latest` postinstall + MCP `tools/list` handshake; `.github/workflows/smoke-plugin-install.yml` runs the smoke weekly and on every `v*` tag on macOS and Linux; `docs/RELEASE.md` codifies the chain. v0.5.0 switched the npm publish step to manual after the workflow ran into account-level 2FA. ([ORB-00012], [ORB-00014])
 - **Typed error discriminators**: `KnowledgeError.kind` is now the typed `KnowledgeErrorKind` enum, and ten per-kind `OrbitError::*NotFound(String)` variants consolidate into `NotFound { kind: NotFoundKind, id: String }` with exhaustive matches in every error-code translator. JSON wire shape is preserved via `#[serde]`; internal Rust matchers move to the typed kind. ([ORB-00001])
 - **Property + snapshot tests on protocol boundaries**: proptest-backed `Selector` display/parse roundtrip (256 cases per variant), multi-threaded `GraphLockGuard`/`LockStore` concurrency with a 5-second deadline, and committed JSON-snapshot coverage for `AuditGuard` success/failure/denied events. ([ORB-00002])

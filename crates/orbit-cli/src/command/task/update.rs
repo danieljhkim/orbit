@@ -53,6 +53,9 @@ pub struct TaskUpdateArgs {
     /// Job run ID to associate with the task (empty string clears)
     #[arg(long)]
     pub job_run_id: Option<String>,
+    /// Named crew to use when running this task (empty string clears)
+    #[arg(long)]
+    pub crew: Option<String>,
     /// Comma-separated task context selectors (empty string clears). Prefer
     /// `file:`, `dir:`, or `symbol:` forms; legacy raw paths are accepted and upgraded.
     #[arg(long = "context", alias = "context-files")]
@@ -89,6 +92,7 @@ impl Execute for TaskUpdateArgs {
             implemented_by,
             pr_status,
             job_run_id,
+            crew,
             context_files,
             artifacts,
             agent,
@@ -104,6 +108,13 @@ impl Execute for TaskUpdateArgs {
             }
         });
         let job_run_id = job_run_id.map(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        });
+        let crew = crew.map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
@@ -146,6 +157,7 @@ impl Execute for TaskUpdateArgs {
                 implemented_by,
                 pr_status,
                 job_run_id,
+                crew,
                 context_files: context_files.map(|c| crate::parse::csv_to_vec(&c)),
                 upsert_artifacts,
                 ..Default::default()

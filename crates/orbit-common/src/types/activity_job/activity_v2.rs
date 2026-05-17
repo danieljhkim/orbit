@@ -166,6 +166,7 @@ pub enum Provider {
     Claude,
     Codex,
     Gemini,
+    Grok,
     Ollama,
     #[serde(rename = "openai_compat", alias = "openai-compat")]
     OpenaiCompat,
@@ -177,6 +178,7 @@ impl Provider {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
             Provider::Gemini => "gemini",
+            Provider::Grok => "grok",
             Provider::Ollama => "ollama",
             Provider::OpenaiCompat => "openai_compat",
         }

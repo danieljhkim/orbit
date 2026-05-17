@@ -130,6 +130,10 @@ pub fn agent_from_model(model: &str) -> Option<&'static str> {
     if model.starts_with("ollama:") {
         return Some("ollama");
     }
+    // Grok (xAI) family — covers grok-4, grok-3, and grok3* short names
+    if model.starts_with("grok-") || model.starts_with("grok3") {
+        return Some("grok");
+    }
 
     None
 }
@@ -141,6 +145,7 @@ pub fn provider_from_model(model: &str) -> Option<&'static str> {
         "codex" => Some("openai"),
         "gemini" => Some("google"),
         "ollama" => Some("ollama"),
+        "grok" => Some("xai"),
         _ => None,
     }
 }
@@ -286,6 +291,8 @@ mod tests {
         assert_eq!(agent_from_model("gpt-5.5"), Some("codex"));
         assert_eq!(agent_from_model("gemini-3.1-pro-preview"), Some("gemini"));
         assert_eq!(agent_from_model("ollama:llama3.2"), Some("ollama"));
+        assert_eq!(agent_from_model("grok-4"), Some("grok"));
+        assert_eq!(agent_from_model("grok3-latest"), Some("grok"));
     }
 
     #[test]
@@ -300,6 +307,8 @@ mod tests {
         assert_eq!(provider_from_model("gpt-5.5"), Some("openai"));
         assert_eq!(provider_from_model("gemini-3-pro"), Some("google"));
         assert_eq!(provider_from_model("ollama:mistral"), Some("ollama"));
+        assert_eq!(provider_from_model("grok-4"), Some("xai"));
+        assert_eq!(provider_from_model("grok3-mini"), Some("xai"));
         assert_eq!(provider_from_model("unknown-model"), None);
     }
 }

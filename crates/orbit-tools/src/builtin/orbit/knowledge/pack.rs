@@ -65,18 +65,18 @@ impl Tool for OrbitKnowledgePackTool {
         let refresh = parse_refresh(&input)?;
         let explicit_ref = super::super::optional_string(&input, "ref")?;
         let explicit_knowledge_dir = super::has_explicit_knowledge_dir(&input);
-        let mut pack = pack::run(PackInput {
+        let pack_result = pack::run(PackInput {
             context: super::command_context(ctx, &input)?,
             selectors,
             hydrate_leaf_source: !summary,
             refresh,
             selector_timeout_ms,
         })
-        .map_err(super::knowledge_error_to_orbit)?
-        .pack;
+        .map_err(super::knowledge_error_to_orbit)?;
+        let mut pack = pack_result.pack;
         add_refresh_diagnostics(
             &mut pack,
-            refresh,
+            pack_result.auto_refresh_skipped,
             explicit_ref.as_deref(),
             explicit_knowledge_dir,
         );
@@ -144,11 +144,11 @@ fn parse_refresh(input: &Value) -> Result<bool, OrbitError> {
 
 fn add_refresh_diagnostics(
     pack: &mut Value,
-    refresh: bool,
+    auto_refresh_skipped: bool,
     explicit_ref: Option<&str>,
     explicit_knowledge_dir: bool,
 ) {
-    if refresh || explicit_ref.is_some() || explicit_knowledge_dir {
+    if !auto_refresh_skipped || explicit_ref.is_some() || explicit_knowledge_dir {
         return;
     }
     let Some(obj) = pack.as_object_mut() else {
@@ -199,4 +199,25 @@ fn summarize_pack_entry(entry: &mut Value) {
         return;
     };
     obj.insert("file".to_string(), Value::String(file_path));
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::add_refresh_diagnostics;
+
+    #[test]
+    fn refresh_diagnostics_only_report_actual_auto_refresh_skips() {
+        let mut refreshed_pack = json!({"entries": []});
+        add_refresh_diagnostics(&mut refreshed_pack, false, None, false);
+        assert!(refreshed_pack.get("diagnostics").is_none());
+
+        let mut skipped_pack = json!({"entries": []});
+        add_refresh_diagnostics(&mut skipped_pack, true, None, false);
+        assert_eq!(
+            skipped_pack["diagnostics"]["auto_refresh"]["status"],
+            "skipped"
+        );
+    }
 }

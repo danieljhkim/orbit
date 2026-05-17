@@ -1,10 +1,17 @@
 /target
 
-# Agent / tool state
+# Agent / tool state directories (Claude Code, Codex, Gemini, Grok Build)
 .claude/
+.codex/
+.gemini/
+.grok/
 
 agentspace
 !.claude/settings.json
+!.claude/hooks/
+!.codex/config.toml
+!.gemini/settings.json
+!.grok/config.toml
 # ...except the published plugin's MCP registration, which ships in the package.
 !plugin/.mcp.json
 
@@ -58,4 +65,4 @@ build/
 .direnv/
 .gstack/
 .locks
-.orbit
+*.lock

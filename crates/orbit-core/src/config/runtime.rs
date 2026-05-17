@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, activity_job::Backend};
+use orbit_common::types::{
+    Crew, CrewRoleAssignment, OrbitError, activity_job::Backend, all_agent_families, resolve_crew,
+};
 use orbit_common::utility::redaction::redact_home_dir;
 use orbit_engine::PrConfig;
 
@@ -10,8 +12,9 @@ use crate::paths;
 
 use super::persistence::PersistenceConfig;
 use super::raw::{
-    RawAgentRoleConfig, RawCodexExecutionConfig, RawExecutionEnvConfig, RawPrSection,
-    RawRuntimeConfig, RawRuntimeSection, RawTaskSection, RawWorkflowConfig,
+    RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
+    RawExecutionEnvConfig, RawPrSection, RawRuntimeConfig, RawRuntimeSection, RawTaskSection,
+    RawWorkflowConfig,
 };
 
 const DEFAULT_ENV_INHERIT: bool = false;
@@ -36,14 +39,32 @@ pub(crate) struct RuntimeConfig {
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
     pub(crate) v2_backend: Option<String>,
-    /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
+    /// Default base branch for ship/duel-plan workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
     /// when no key is set.
     pub(crate) workflow_base_branch: String,
-    /// `[agent.<role>]` role-keyed overrides written by `orbit init` per
-    /// ADR-027 and consumed at v2 dispatch time per ADR-029. Empty when no
-    /// `[agent.*]` block is present.
-    pub(crate) agent_roles: BTreeMap<String, RawAgentRoleConfig>,
+    /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
+    pub(crate) crews: BTreeMap<String, Crew>,
+    pub(crate) default_crew: Option<String>,
+    pub(crate) duel: DuelConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DuelConfig {
+    pub(crate) candidates: Vec<String>,
+    pub(crate) models: BTreeMap<String, String>,
+}
+
+impl Default for DuelConfig {
+    fn default() -> Self {
+        Self {
+            candidates: all_agent_families()
+                .iter()
+                .map(|family| (*family).to_string())
+                .collect(),
+            models: BTreeMap::new(),
+        }
+    }
 }
 
 impl Default for RuntimeConfig {
@@ -64,7 +85,9 @@ impl RuntimeConfig {
             graph_editing: DEFAULT_GRAPH_EDITING,
             v2_backend: None,
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
-            agent_roles: BTreeMap::new(),
+            crews: default_crews(),
+            default_crew: Some("opus-codex".to_string()),
+            duel: DuelConfig::default(),
         }
     }
 
@@ -136,7 +159,12 @@ impl RuntimeConfig {
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
         let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
 
+        reject_stale_agent_role_tables(parsed.agent.as_ref())?;
+
         let workflow_base_branch = workflow_base_branch_from_raw(parsed.workflow.as_ref())?;
+        let crews = crews_from_raw(parsed.crews.as_ref())?;
+        let default_crew = workflow_default_crew_from_raw(parsed.workflow.as_ref(), &crews)?;
+        let duel = duel_from_raw(parsed.duel.as_ref())?;
         let pr = pr_config_from_raw(parsed.pr.as_ref());
 
         if parsed
@@ -147,8 +175,6 @@ impl RuntimeConfig {
         {
             warn_deprecated_task_id_pattern(&config_path);
         }
-
-        let agent_roles = parsed.agent.clone().unwrap_or_default();
 
         Ok(Self {
             execution_env: ExecutionEnvPolicy::from_raw(
@@ -164,7 +190,9 @@ impl RuntimeConfig {
             graph_editing,
             v2_backend,
             workflow_base_branch,
-            agent_roles,
+            crews,
+            default_crew,
+            duel,
         })
     }
 
@@ -180,12 +208,240 @@ impl RuntimeConfig {
     pub(crate) fn pr_config(&self) -> &PrConfig {
         &self.pr
     }
+
+    pub(crate) fn duel_config(&self) -> &DuelConfig {
+        &self.duel
+    }
+}
+
+pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
+    let mut crews = BTreeMap::new();
+    crews.insert(
+        "opus-codex".to_string(),
+        Crew {
+            name: "opus-codex".to_string(),
+            planner: crew_role("claude-opus-4-7", "claude", "cli"),
+            implementer: crew_role("gpt-5.5", "codex", "cli"),
+            reviewer: crew_role("gpt-5.5", "codex", "cli"),
+        },
+    );
+    crews.insert(
+        "all-claude".to_string(),
+        Crew {
+            name: "all-claude".to_string(),
+            planner: crew_role("claude-opus-4-7", "claude", "cli"),
+            implementer: crew_role("claude-sonnet-4-6", "claude", "cli"),
+            reviewer: crew_role("claude-opus-4-7", "claude", "cli"),
+        },
+    );
+    crews
+}
+
+fn crew_role(model: &str, provider: &str, backend: &str) -> CrewRoleAssignment {
+    CrewRoleAssignment {
+        model: model.to_string(),
+        provider: provider.to_string(),
+        backend: backend.to_string(),
+    }
 }
 
 fn pr_config_from_raw(raw: Option<&RawPrSection>) -> PrConfig {
     PrConfig {
         task_url_template: raw.and_then(|section| section.task_url_template.clone()),
     }
+}
+
+fn duel_from_raw(raw: Option<&RawDuelSection>) -> Result<DuelConfig, OrbitError> {
+    let Some(raw) = raw else {
+        return Ok(DuelConfig::default());
+    };
+
+    let candidates = duel_candidates_from_raw(raw.candidates.as_deref())?;
+    let models = duel_models_from_raw(raw.models.as_ref(), &candidates)?;
+    Ok(DuelConfig { candidates, models })
+}
+
+fn duel_candidates_from_raw(raw: Option<&[String]>) -> Result<Vec<String>, OrbitError> {
+    let Some(raw_candidates) = raw else {
+        return Ok(DuelConfig::default().candidates);
+    };
+    if raw_candidates.is_empty() {
+        return Err(OrbitError::InvalidInput(format!(
+            "[duel] candidates must contain at least 3 entries; valid candidates: {}",
+            valid_duel_candidates()
+        )));
+    }
+
+    let valid: BTreeSet<&str> = all_agent_families().into_iter().collect();
+    let mut seen = BTreeSet::new();
+    let mut candidates = Vec::new();
+    for candidate in raw_candidates {
+        let normalized = candidate.trim().to_ascii_lowercase();
+        if !seen.insert(normalized.clone()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel] candidates contains duplicate '{normalized}' after normalization; valid candidates: {}",
+                valid_duel_candidates()
+            )));
+        }
+        if !valid.contains(normalized.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel] candidates contains unknown entry '{normalized}'; valid candidates: {}",
+                valid_duel_candidates()
+            )));
+        }
+        candidates.push(normalized);
+    }
+
+    if candidates.len() < 3 {
+        return Err(OrbitError::InvalidInput(format!(
+            "[duel] candidates must contain at least 3 distinct entries after normalization (got {}: {}); valid candidates: {}",
+            candidates.len(),
+            candidates.join(", "),
+            valid_duel_candidates()
+        )));
+    }
+
+    Ok(candidates)
+}
+
+fn duel_models_from_raw(
+    raw: Option<&BTreeMap<String, String>>,
+    candidates: &[String],
+) -> Result<BTreeMap<String, String>, OrbitError> {
+    let Some(raw_models) = raw else {
+        return Ok(BTreeMap::new());
+    };
+    let candidate_set: BTreeSet<&str> = candidates.iter().map(String::as_str).collect();
+    let candidate_list = candidates.join(", ");
+    let mut models = BTreeMap::new();
+    for (family, model) in raw_models {
+        let normalized_family = family.trim().to_ascii_lowercase();
+        if !candidate_set.contains(normalized_family.as_str()) {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel.models] contains key '{normalized_family}' that is not in resolved [duel].candidates ({candidate_list}); valid candidates: {}",
+                valid_duel_candidates()
+            )));
+        }
+        let trimmed_model = model.trim();
+        if trimmed_model.is_empty() {
+            return Err(OrbitError::InvalidInput(format!(
+                "[duel.models].{normalized_family} must not be empty (found '{model}'); configured candidates: {candidate_list}"
+            )));
+        }
+        models.insert(normalized_family, trimmed_model.to_string());
+    }
+    Ok(models)
+}
+
+fn valid_duel_candidates() -> String {
+    all_agent_families().join(", ")
+}
+
+fn reject_stale_agent_role_tables(
+    raw: Option<&BTreeMap<String, RawAgentRoleConfig>>,
+) -> Result<(), OrbitError> {
+    if raw.is_some() {
+        return Err(OrbitError::InvalidInput(
+            "config schema changed in ORB-00058; remove [agent.<role>] tables and migrate to [crews.<name>] with [workflow].default_crew".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn crews_from_raw(
+    raw: Option<&BTreeMap<String, RawCrewEntry>>,
+) -> Result<BTreeMap<String, Crew>, OrbitError> {
+    let Some(raw_crews) = raw else {
+        return Ok(default_crews());
+    };
+    let mut crews = BTreeMap::new();
+    for (name, entry) in raw_crews {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "[crews] names must not be empty".to_string(),
+            ));
+        }
+        let crew = Crew {
+            name: trimmed.to_string(),
+            planner: required_role_assignment(trimmed, "planner", entry.planner.as_ref())?,
+            implementer: required_role_assignment(
+                trimmed,
+                "implementer",
+                entry.implementer.as_ref(),
+            )?,
+            reviewer: required_role_assignment(trimmed, "reviewer", entry.reviewer.as_ref())?,
+        };
+        crews.insert(trimmed.to_string(), crew);
+    }
+    if crews.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "[crews] must define at least one crew".to_string(),
+        ));
+    }
+    Ok(crews)
+}
+
+fn required_role_assignment(
+    crew: &str,
+    role: &str,
+    raw: Option<&RawAgentRoleConfig>,
+) -> Result<CrewRoleAssignment, OrbitError> {
+    let raw = raw.ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "[crews.{crew}] must define {role} = {{ model, provider, backend }}"
+        ))
+    })?;
+    Ok(CrewRoleAssignment {
+        model: required_role_field(crew, role, "model", raw.model.as_deref())?,
+        provider: required_role_field(crew, role, "provider", raw.provider.as_deref())?,
+        backend: required_role_field(crew, role, "backend", raw.backend.as_deref())?,
+    })
+}
+
+fn required_role_field(
+    crew: &str,
+    role: &str,
+    field: &str,
+    value: Option<&str>,
+) -> Result<String, OrbitError> {
+    let value = value.map(str::trim).filter(|value| !value.is_empty());
+    value.map(ToOwned::to_owned).ok_or_else(|| {
+        OrbitError::InvalidInput(format!("[crews.{crew}].{role}.{field} must not be empty"))
+    })
+}
+
+fn workflow_default_crew_from_raw(
+    raw: Option<&RawWorkflowConfig>,
+    crews: &BTreeMap<String, Crew>,
+) -> Result<Option<String>, OrbitError> {
+    let value = raw.and_then(|workflow| workflow.default_crew.as_deref());
+    let Some(value) = value else {
+        // No explicit [workflow].default_crew. Fall back to the seeded default
+        // when its crew is still present; otherwise demand the user pick one
+        // explicitly so downstream `start`/`show` calls don't surprise them
+        // with a generic "no crew selected" error.
+        if crews.contains_key("opus-codex") {
+            return Ok(Some("opus-codex".to_string()));
+        }
+        if crews.is_empty() {
+            return Ok(None);
+        }
+        let mut names: Vec<&str> = crews.keys().map(String::as_str).collect();
+        names.sort();
+        return Err(OrbitError::InvalidInput(format!(
+            "[workflow].default_crew must be set when defining [crews.*]; choose one of: {}",
+            names.join(", ")
+        )));
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "workflow.default_crew must not be empty".to_string(),
+        ));
+    }
+    resolve_crew(trimmed, crews)?;
+    Ok(Some(trimmed.to_string()))
 }
 
 fn runtime_backend_from_raw(raw: Option<&RawRuntimeSection>) -> Result<Option<String>, OrbitError> {
@@ -521,6 +777,133 @@ mod tests {
         std::fs::write(dir.join("config.toml"), body).expect("write config");
     }
 
+    fn load_config(body: &str) -> Result<RuntimeConfig, OrbitError> {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(workspace.path(), body);
+        RuntimeConfig::load_layered(global.path(), workspace.path())
+    }
+
+    fn assert_invalid_duel_config(body: &str, substrings: &[&str]) {
+        let error = load_config(body).expect_err("invalid duel config must fail");
+        let message = error.to_string();
+        assert!(matches!(error, OrbitError::InvalidInput(_)), "{message}");
+        for substring in substrings {
+            assert!(
+                message.contains(substring),
+                "expected {message:?} to contain {substring:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn duel_config_loads_candidates_and_models() {
+        let config = load_config(
+            r#"
+[duel]
+candidates = [" Codex ", "CLAUDE", "gemini"]
+
+[duel.models]
+" Codex " = " gpt-5.5 "
+CLAUDE = " opus-4.7 "
+"#,
+        )
+        .expect("config loads");
+
+        let mut expected_models = BTreeMap::new();
+        expected_models.insert("claude".to_string(), "opus-4.7".to_string());
+        expected_models.insert("codex".to_string(), "gpt-5.5".to_string());
+        assert_eq!(
+            config.duel,
+            DuelConfig {
+                candidates: vec![
+                    "codex".to_string(),
+                    "claude".to_string(),
+                    "gemini".to_string()
+                ],
+                models: expected_models,
+            }
+        );
+    }
+
+    #[test]
+    fn duel_config_defaults_to_all_families_without_section() {
+        let config = load_config("[scoring]\nenabled = true\n").expect("config loads");
+
+        assert_eq!(
+            config.duel.candidates,
+            all_agent_families()
+                .iter()
+                .map(|family| (*family).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert!(config.duel.models.is_empty());
+    }
+
+    #[test]
+    fn duel_config_rejects_empty_candidates() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = []\n",
+            &["candidates", "at least 3", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_fewer_than_three_distinct_candidates() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = [\"codex\", \"claude\"]\n",
+            &["3 distinct", "codex, claude", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_duplicate_candidates_after_normalization() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = [\"codex\", \" Codex \", \"claude\"]\n",
+            &["duplicate", "codex", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_unknown_candidate() {
+        assert_invalid_duel_config(
+            "[duel]\ncandidates = [\"codex\", \"claude\", \"notabot\"]\n",
+            &["notabot", "valid candidates", "codex, claude, gemini, grok"],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_model_key_outside_resolved_candidates() {
+        assert_invalid_duel_config(
+            r#"
+[duel]
+candidates = ["codex", "claude", "gemini"]
+
+[duel.models]
+grok = "grok-4"
+"#,
+            &[
+                "grok",
+                "resolved [duel].candidates",
+                "codex, claude, gemini",
+            ],
+        );
+    }
+
+    #[test]
+    fn duel_config_rejects_empty_model_value() {
+        assert_invalid_duel_config(
+            r#"
+[duel]
+candidates = ["codex", "claude", "gemini"]
+
+[duel.models]
+codex = "   "
+"#,
+            &["duel.models", "codex", "   "],
+        );
+    }
+
     #[test]
     fn deprecated_task_id_pattern_loads_valid_regex_from_workspace_config() {
         let global = tempdir().expect("global tempdir");
@@ -624,6 +1007,127 @@ mod tests {
         assert!(message.contains("[runtime] backend"));
         assert!(message.contains("clii"));
         assert!(message.contains("http, cli, auto"));
+    }
+
+    #[test]
+    fn crews_load_when_present_and_well_formed() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            r#"
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+
+[workflow]
+default_crew = "opus-codex"
+"#,
+        );
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+
+        assert_eq!(config.default_crew.as_deref(), Some("opus-codex"));
+        assert_eq!(
+            config
+                .crews
+                .get("opus-codex")
+                .expect("crew exists")
+                .implementer
+                .model,
+            "gpt-5.5"
+        );
+    }
+
+    #[test]
+    fn default_crew_must_reference_defined_crew() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            r#"
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+
+[workflow]
+default_crew = "missing"
+"#,
+        );
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("unknown default crew fails");
+
+        assert!(matches!(error, OrbitError::InvalidInputDiagnostic { .. }));
+        assert_eq!(error.did_you_mean(), Some(&["opus-codex".to_string()][..]));
+    }
+
+    #[test]
+    fn default_crew_unset_with_custom_crews_fails_load() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        // Only a non-"opus-codex" crew defined; no [workflow] table at all.
+        write_config(
+            workspace.path(),
+            r#"
+[crews.my-team]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+"#,
+        );
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("missing default_crew with non-seeded crews must fail");
+
+        let message = error.to_string();
+        assert!(matches!(error, OrbitError::InvalidInput(_)), "{message}");
+        assert!(message.contains("[workflow].default_crew"), "{message}");
+        assert!(message.contains("my-team"), "{message}");
+    }
+
+    #[test]
+    fn default_crew_unset_with_seeded_crew_still_loads() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        // opus-codex is still present, so the historical fallback applies.
+        write_config(
+            workspace.path(),
+            r#"
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+"#,
+        );
+
+        let config =
+            RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
+        assert_eq!(config.default_crew.as_deref(), Some("opus-codex"));
+    }
+
+    #[test]
+    fn crews_with_incomplete_role_fail_load() {
+        let global = tempdir().expect("global tempdir");
+        let workspace = tempdir().expect("workspace tempdir");
+        write_config(
+            workspace.path(),
+            r#"
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+"#,
+        );
+
+        let error = RuntimeConfig::load_layered(global.path(), workspace.path())
+            .expect_err("incomplete crew fails");
+
+        assert!(matches!(error, OrbitError::InvalidInput(_)));
+        assert!(error.to_string().contains("[crews.opus-codex]"));
+        assert!(error.to_string().contains("reviewer"));
     }
 
     #[test]

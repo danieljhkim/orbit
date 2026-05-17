@@ -13,3 +13,4 @@ mod templates;
 mod update;
 
 pub use command::{TaskCommand, TaskSubcommand};
+pub(crate) use list::task_locks_json;

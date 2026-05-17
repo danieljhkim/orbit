@@ -13,13 +13,14 @@
 
 pub mod audit;
 pub mod builder;
-mod engine;
+pub mod engine;
 pub mod event_bus;
 pub mod mutation;
 pub(crate) mod orbit_tool_host;
 pub mod pipeline;
 mod resolve;
 pub mod run_audit;
+pub(crate) mod run_input;
 mod store_delegates;
 mod task_reservation_cleanup;
 mod v2_host;
@@ -237,11 +238,15 @@ impl OrbitRuntime {
         self.context.v2_backend()
     }
 
-    /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
+    /// Default base branch for ship/duel-plan workflows. Sourced
     /// from `[workflow] base_branch` in the active `config.toml`; defaults
     /// to `"main"` when no key is present.
     pub fn workflow_base_branch(&self) -> &str {
         self.context.workflow_base_branch()
+    }
+
+    pub(crate) fn duel_config(&self) -> &crate::config::DuelConfig {
+        self.context.duel_config()
     }
 
     /// Build the activity catalog for `target: activity:<name>` resolution

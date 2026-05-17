@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use orbit_common::types::{Task, TaskStatus, TaskType, prune_missing_context_files};
+use orbit_common::types::{
+    Task, TaskStatus, TaskType, build_task_status_index, prune_missing_context_files,
+    task_dependencies_ready,
+};
 use orbit_common::utility::path::workspace_relative_paths_overlap;
 use orbit_common::utility::selector::canonical_selector_in_workspace;
 use orbit_engine::DispatchError;
@@ -139,11 +142,14 @@ pub(super) fn list_backlog_tasks(
             .cloned()
             .map(|task| (task.id.clone(), task))
             .collect();
+        let status_by_id = build_task_status_index(&all_tasks);
         let workspace_root = runtime.paths().repo_root.as_path();
         let lock_holders = active_task_lock_holders(task_lookup.values(), workspace_root);
         let mut backlog: Vec<Task> = all_tasks
             .into_iter()
-            .filter(|task| task.status == TaskStatus::Backlog)
+            .filter(|task| {
+                task.status == TaskStatus::Backlog && task_dependencies_ready(task, &status_by_id)
+            })
             .collect();
         backlog.sort_by(|a, b| {
             let rank = |p: orbit_common::types::TaskPriority| match p {

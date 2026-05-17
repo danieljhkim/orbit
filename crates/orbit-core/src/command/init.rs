@@ -46,10 +46,10 @@ pub struct InitOptions {
     /// When true, create/update user-level skill symlinks for global skills.
     pub link_global_skills: bool,
     /// Per-role agent settings to embed in the freshly seeded `config.toml`
-    /// as `[agent.<role>]` blocks. Keyed by role name (`reviewer`,
-    /// `implementer`, `planner`). `None` and an empty map both mean "leave
-    /// `[agent.*]` unset". Ignored when config.toml already exists — init
-    /// remains idempotent.
+    /// as a `[crews.custom]` table. Keyed by role name (`reviewer`,
+    /// `implementer`, `planner`). `None` and an empty map both mean "use
+    /// the default crew template". Ignored when config.toml already exists
+    /// — init remains idempotent.
     pub role_settings: Option<BTreeMap<String, RawAgentRoleConfig>>,
 }
 
@@ -718,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn global_init_writes_role_settings_to_config_toml() {
+    fn global_init_writes_role_settings_as_custom_crew_to_config_toml() {
         let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let previous_home = std::env::var_os("HOME");
@@ -748,7 +748,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("gemini".into()),
                 backend: Some("http".into()),
-                model: None,
+                model: Some("gemini-3.1-pro".into()),
             },
         );
 
@@ -768,20 +768,21 @@ mod tests {
 
         let config_path = home.path().join(".orbit").join("config.toml");
         let contents = fs::read_to_string(&config_path).expect("read config");
-        assert!(contents.contains("[agent.reviewer]"));
-        assert!(contents.contains("[agent.implementer]"));
-        assert!(contents.contains("[agent.planner]"));
+        assert!(!contents.contains("[agent.reviewer]"));
+        assert!(contents.contains("default_crew = \"custom\""));
         assert!(contents.contains("provider = \"codex\""));
         assert!(contents.contains("model = \"claude-opus-4-7\""));
 
-        // Round-trips through toml: agent table contains all three roles.
+        // Round-trips through toml: custom crew contains all three roles.
         let parsed: toml::Value = toml::from_str(&contents).expect("parse");
-        let agent = parsed
-            .get("agent")
+        let custom = parsed
+            .get("crews")
             .and_then(|v| v.as_table())
-            .expect("agent table");
-        assert_eq!(agent.len(), 3);
-        let reviewer = agent
+            .and_then(|v| v.get("custom"))
+            .and_then(|v| v.as_table())
+            .expect("custom crew table");
+        assert_eq!(custom.len(), 3);
+        let reviewer = custom
             .get("reviewer")
             .and_then(|v| v.as_table())
             .expect("reviewer table");
@@ -789,12 +790,14 @@ mod tests {
             reviewer.get("provider").and_then(|v| v.as_str()),
             Some("claude")
         );
-        let planner = agent
+        let planner = custom
             .get("planner")
             .and_then(|v| v.as_table())
             .expect("planner table");
-        // None model field → absent from TOML.
-        assert!(planner.get("model").is_none());
+        assert_eq!(
+            planner.get("model").and_then(|v| v.as_str()),
+            Some("gemini-3.1-pro")
+        );
     }
 
     #[test]
@@ -864,14 +867,15 @@ mod tests {
         assert!(result.created_config);
         let config_path = home.path().join(".orbit").join("config.toml");
         let contents = fs::read_to_string(&config_path).expect("read config");
-        // Commented documentation block is allowed; an actual `[agent.<role>]`
-        // section header (uncommented) must NOT appear.
         for line in contents.lines() {
             assert!(
                 !line.trim_start().starts_with("[agent."),
                 "unexpected uncommented agent section: {line}",
             );
         }
+        assert!(contents.contains("[crews.opus-codex]"));
+        assert!(contents.contains("[crews.all-claude]"));
+        assert!(contents.contains("default_crew = \"opus-codex\""));
     }
 
     fn assert_skill_link_exists(path: PathBuf) {

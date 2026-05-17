@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use orbit_common::types::{
     OrbitError, PlanningDuelRun, PlanningEfficiency, PlanningOutcome, PlanningRoleAssignment,
-    PlanningRoles,
+    PlanningRoles, RoleSlot,
 };
 use orbit_store::{InvocationRecord, planning_duel_scoreboard};
 use serde_json::{Value, json};
@@ -41,12 +41,13 @@ fn efficiency_from_invocation(invocation: &ActivityInvocationResult) -> Planning
 
 pub(super) fn role_metrics_from_invocation(
     role: &PlanningRoleAssignment,
+    slot: RoleSlot,
     activity_id: &str,
     invocation: &ActivityInvocationResult,
 ) -> PlanningDuelRoleMetrics {
     PlanningDuelRoleMetrics {
-        agent: role.agent.clone(),
-        model: role.model.clone(),
+        family: role.family,
+        slot,
         activity_id: activity_id.to_string(),
         efficiency: efficiency_from_invocation(invocation),
     }
@@ -92,31 +93,39 @@ fn role_metrics_for_activity<H: RuntimeHost + ?Sized>(
     host: &H,
     job_run_id: &str,
     role_id: &PlanningRoleAssignment,
+    slot: RoleSlot,
     activity_id: &str,
 ) -> Result<PlanningDuelRoleMetrics, OrbitError> {
     let all_records = host.invocation_records_for_job_run_and_activity(job_run_id, activity_id)?;
-    let matching_records = all_records
-        .iter()
-        .filter(|record| {
-            record.agent == role_id.agent && record.model.as_deref() == Some(role_id.model.as_str())
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let matching_records = matching_role_records(&all_records, role_id, slot);
 
     if matching_records.is_empty() && !all_records.is_empty() {
         return Err(OrbitError::Execution(format!(
             "activity '{activity_id}' for job run '{job_run_id}' did not produce invocations \
              attributed to expected {}/{}",
-            role_id.agent, role_id.model
+            role_id.family, slot
         )));
     }
 
     Ok(PlanningDuelRoleMetrics {
-        agent: role_id.agent.clone(),
-        model: role_id.model.clone(),
+        family: role_id.family,
+        slot,
         activity_id: activity_id.to_string(),
         efficiency: summarize_role_metrics(&matching_records),
     })
+}
+
+#[allow(dead_code)]
+fn matching_role_records(
+    records: &[InvocationRecord],
+    role_id: &PlanningRoleAssignment,
+    slot: RoleSlot,
+) -> Vec<InvocationRecord> {
+    records
+        .iter()
+        .filter(|record| record.agent == role_id.family.as_str() && record.slot == Some(slot))
+        .cloned()
+        .collect()
 }
 
 #[allow(dead_code)]
@@ -139,18 +148,21 @@ pub(super) fn record_planning_duel_efficiency<H: RuntimeHost + ?Sized>(
         host,
         &job_run_id,
         &planning_roles.planner_a,
+        RoleSlot::PlannerA,
         &planner_a_activity_id,
     )?;
     let planner_b_metrics = role_metrics_for_activity(
         host,
         &job_run_id,
         &planning_roles.planner_b,
+        RoleSlot::PlannerB,
         &planner_b_activity_id,
     )?;
     let arbiter_metrics = role_metrics_for_activity(
         host,
         &job_run_id,
         &planning_roles.arbiter,
+        RoleSlot::Arbiter,
         &arbiter_activity_id,
     )?;
 
@@ -208,35 +220,32 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
     .map_err(|err| OrbitError::InvalidInput(format!("invalid roles.arbiter payload: {err}")))?;
 
     let PlanningDuelRoleMetrics {
-        agent: planner_a_agent,
-        model: planner_a_model,
+        family: planner_a_family,
+        slot: _,
         activity_id: _,
         efficiency: planner_a_efficiency,
     } = planner_a_role;
     let PlanningDuelRoleMetrics {
-        agent: planner_b_agent,
-        model: planner_b_model,
+        family: planner_b_family,
+        slot: _,
         activity_id: _,
         efficiency: planner_b_efficiency,
     } = planner_b_role;
     let PlanningDuelRoleMetrics {
-        agent: arbiter_agent,
-        model: arbiter_model,
+        family: arbiter_family,
+        slot: _,
         activity_id: _,
         efficiency: arbiter_efficiency,
     } = arbiter_role;
     let roles = PlanningRoles {
         planner_a: PlanningRoleAssignment {
-            agent: planner_a_agent,
-            model: planner_a_model,
+            family: planner_a_family,
         },
         planner_b: PlanningRoleAssignment {
-            agent: planner_b_agent,
-            model: planner_b_model,
+            family: planner_b_family,
         },
         arbiter: PlanningRoleAssignment {
-            agent: arbiter_agent,
-            model: arbiter_model,
+            family: arbiter_family,
         },
     };
     let artifacts = host.get_task_artifacts(task_id)?;
@@ -244,34 +253,27 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
     let winner = winner_artifact_from_artifacts(&artifacts, Some(&roles))?;
     let winner_assignment = winner_assignment(&winner);
     let winner_plan = plan_artifact_by_path(&plan_artifacts, &winner.artifact_path)?;
-    if winner_plan.author != winner_assignment {
+    if winner_plan.author.family != winner_assignment.family {
         return Err(OrbitError::InvalidInput(format!(
-            "winner artifact `{}` is authored by {}/{} instead of declared winner {}/{}",
-            winner.artifact_path,
-            winner_plan.author.agent,
-            winner_plan.author.model,
-            winner_assignment.agent,
-            winner_assignment.model
+            "winner artifact `{}` is authored by {} instead of declared winner {}",
+            winner.artifact_path, winner_plan.author.family, winner_assignment.family
         )));
     }
     let winner_slot = winner_slot_for_assignment(&roles, &winner_assignment)?;
-    if winner.arbiter_agent_cli != roles.arbiter.agent
-        || winner.arbiter_model != roles.arbiter.model
-    {
+    if winner.arbiter_family != roles.arbiter.family {
         return Err(OrbitError::InvalidInput(format!(
-            "winner artifact arbiter {}/{} does not match recorded arbiter {}/{}",
-            winner.arbiter_agent_cli,
-            winner.arbiter_model,
-            roles.arbiter.agent,
-            roles.arbiter.model
+            "winner artifact arbiter {} does not match recorded arbiter {}",
+            winner.arbiter_family, roles.arbiter.family
         )));
     }
-    let planner_a_artifact_path = plan_artifact_for_assignment(&plan_artifacts, &roles.planner_a)?
-        .path
-        .clone();
-    let planner_b_artifact_path = plan_artifact_for_assignment(&plan_artifacts, &roles.planner_b)?
-        .path
-        .clone();
+    let planner_a_artifact_path =
+        plan_artifact_for_assignment(&plan_artifacts, &roles.planner_a, RoleSlot::PlannerA)?
+            .path
+            .clone();
+    let planner_b_artifact_path =
+        plan_artifact_for_assignment(&plan_artifacts, &roles.planner_b, RoleSlot::PlannerB)?
+            .path
+            .clone();
 
     let completed_at = chrono::Utc::now();
     let run = PlanningDuelRun {
@@ -282,7 +284,9 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
         planner_a_artifact_path,
         planner_b_artifact_path,
         outcome: PlanningOutcome {
-            winner: winner_slot,
+            winner: winner_slot.planner_slot().ok_or_else(|| {
+                OrbitError::InvalidInput("planning duel winner cannot be arbiter".to_string())
+            })?,
             arbiter_rationale: winner.arbiter_rationale,
         },
         efficiency: PlanningEfficiency {
@@ -298,4 +302,71 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
         "run_id": run.run_id,
         "recorded": true,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use orbit_common::types::AgentFamily;
+
+    use super::*;
+
+    #[test]
+    fn metrics_attribute_invocations_by_family_and_slot_not_model() {
+        let role = PlanningRoleAssignment {
+            family: AgentFamily::Gemini,
+        };
+        let records = vec![
+            invocation_record(
+                "propose_duel_plan",
+                "gemini",
+                Some("gemini-3.1-pro"),
+                Some(RoleSlot::PlannerA),
+            ),
+            invocation_record(
+                "propose_duel_plan",
+                "gemini",
+                Some("pro"),
+                Some(RoleSlot::PlannerB),
+            ),
+            invocation_record(
+                "propose_duel_plan",
+                "claude",
+                Some("claude-opus-4-7"),
+                Some(RoleSlot::PlannerA),
+            ),
+        ];
+
+        let matching = matching_role_records(&records, &role, RoleSlot::PlannerA);
+
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].model.as_deref(), Some("gemini-3.1-pro"));
+        assert_eq!(matching[0].slot, Some(RoleSlot::PlannerA));
+    }
+
+    fn invocation_record(
+        activity_id: &str,
+        agent: &str,
+        model: Option<&str>,
+        slot: Option<RoleSlot>,
+    ) -> InvocationRecord {
+        InvocationRecord {
+            id: 1,
+            ts: Utc::now(),
+            job_run_id: "jrun-1".to_string(),
+            activity_id: activity_id.to_string(),
+            agent: agent.to_string(),
+            model: model.map(ToOwned::to_owned),
+            slot,
+            duration_ms: 100,
+            input_tokens: 1,
+            cache_read_tokens: 0,
+            cache_create_tokens: 0,
+            output_tokens: 1,
+            total_tokens: 2,
+            tool_call_count: 1,
+            task_ids: Vec::new(),
+            tool_calls: Vec::new(),
+        }
+    }
 }

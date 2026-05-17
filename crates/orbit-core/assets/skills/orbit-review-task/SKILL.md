@@ -11,7 +11,7 @@ Review someone else's work and surface issues as Orbit review threads — withou
 
 ## Tool Invocation
 
-Both surfaces accept the same JSON. **`model` is required** for `review_thread.add` and `.reply`; those calls reject without it. `review_thread.add` creates the scored finding, while `.reply` preserves attributed follow-up without creating a new finding. `review_thread.list` and `.resolve` do not require `model`, but the examples include it for consistent provenance. Use your model name for agent-attributed feedback; pass `model: "human"` to opt out of scoring for human-attributed feedback.
+Both surfaces accept the same JSON. **`model` is required** for `review_thread.add` and `.reply`; those calls reject without it. `review_thread.add` creates the scored finding, while `.reply` preserves attributed follow-up without creating a new finding. `review_thread.list` and `.resolve` do not require `model`, but the examples include it for consistent provenance. Use your agent family (`codex`, `claude`, `gemini`, or `grok`) for agent-attributed feedback; pass `model: "human"` to opt out of scoring for human-attributed feedback.
 
 ```bash
 orbit tool run orbit.task.review_thread.add --input '{
@@ -19,26 +19,26 @@ orbit tool run orbit.task.review_thread.add --input '{
   "body": "<finding>",
   "path": "<repo-relative path>",
   "line": "<line>",
-  "model": "<your-model>"
+  "model": "<agent-family>"
 }'
 
 orbit tool run orbit.task.review_thread.list --input '{
   "id": "<task-id>",
   "status": "open",
-  "model": "<your-model>"
+  "model": "<agent-family>"
 }'
 
 orbit tool run orbit.task.review_thread.reply --input '{
   "id": "<task-id>",
   "thread_id": "<thread-id>",
   "body": "<reply>",
-  "model": "<your-model>"
+  "model": "<agent-family>"
 }'
 
 orbit tool run orbit.task.review_thread.resolve --input '{
   "id": "<task-id>",
   "thread_id": "<thread-id>",
-  "model": "<your-model>"
+  "model": "<agent-family>"
 }'
 ```
 

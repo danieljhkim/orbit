@@ -2,17 +2,19 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-17 (ORB-00098)
 
-ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
+ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are keyed by global ADR ID and ordered ascending. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill.
 
-Format for each entry: **Status · Date · Task(s)**, then *Context → Decision → Consequences*. Every ADR names at least one cost. ADRs in this file carry status `Proposed` until the implementing task ships; they flip to `Accepted` with the implementing task ID at that point.
+Format for each entry: **Status · Date · Task(s) · legacy_id (if backfilled)**, then *Context → Decision → Consequences*. Every ADR names at least one cost.
+
+Historical note: entries below were originally numbered ADR-001 through ADR-006 within this folder. ADR-001 through ADR-005 were imported into the global store on 2026-05-11 (`ADR-0108`–`ADR-0112`) with `legacy_ids` set; ADR-006 was added directly to this file by [ORB-00095] without a global allocation and was backfilled as `ADR-0157` per [ORB-00098]. Each heading now carries the global ID; the original local IDs survive as `legacy_ids` so prior citations still resolve via `orbit.adr.list --legacy-id=project-learnings/ADR-NNN`.
 
 ---
 
-## ADR-001 — Push-based discovery via context injection, not pull-only via search
+## ADR-0108 — Push-based discovery via context injection, not pull-only via search
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [ORB-00009]
+**Status:** Accepted · 2026-05 · [T20260510-11] · [ORB-00009] · legacy_id: `project-learnings/ADR-001`
 
 **Context.** Three classes of discovery were on the table:
 
@@ -34,9 +36,9 @@ The repeated failure mode the system exists to prevent is *agents not knowing th
 
 ---
 
-## ADR-002 — Native Orbit primitive (`learning` resource) over a flat markdown directory
+## ADR-0109 — Native Orbit primitive (`learning` resource) over a flat markdown directory
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5]
+**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5] · legacy_id: `project-learnings/ADR-002`
 
 **Context.** Storage choice. Three plausible shapes:
 
@@ -48,7 +50,7 @@ The injection layers ([2_design.md §4](./2_design.md)) are the forcing function
 
 A flat-markdown approach can be retrofitted with an index, but at that point it's a native primitive with extra steps and a less convenient on-disk format.
 
-**Decision.** Phase 1 implements `learning` as a first-class Orbit resource: YAML records under `.orbit/learnings/<id>.yaml`, SQLite index under `learnings_index`, MCP/CLI surface mirroring `orbit.task.*`. Tasks were the model because they're the closest existing primitive in shape and lifecycle.
+**Decision.** Phase 1 implements `learning` as a first-class Orbit resource: YAML records under `.orbit/learnings/<id>/learning.yaml`, SQLite index under `learnings_index`, MCP/CLI surface mirroring `orbit.task.*`. Tasks were the model because they're the closest existing primitive in shape and lifecycle.
 
 **Consequences.**
 - Hot-path queries are indexed, sub-10ms, and don't pay filesystem-walk cost.
@@ -58,21 +60,23 @@ A flat-markdown approach can be retrofitted with an index, but at that point it'
 
 ---
 
-## ADR-003 — Workspace-scoped, checked into git (not workspace-private state)
+## ADR-0110 — Workspace-scoped, checked into git (not workspace-private state)
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5]
+**Status:** Accepted · 2026-05 · [T20260510-11] · [T20260511-5] · legacy_id: `project-learnings/ADR-003`
 
 **Context.** Where do learning records live on disk?
 
 - **Workspace state** (`.orbit/state/learnings/`, gitignored). Same locality as job runs, command audit, etc. Workspace-private; doesn't survive collaborator handoff.
-- **Workspace-scoped, checked in** (`.orbit/learnings/<id>.yaml`, in git). Same locality as tasks. Travels with the repo across machines and collaborators.
+- **Workspace-scoped, checked in** (`.orbit/learnings/<id>/learning.yaml`, in git). Same locality as tasks. Travels with the repo across machines and collaborators.
 - **Global** (`~/.orbit/learnings/`). Like the global skills location. Cross-workspace; requires conflict semantics if multiple workspaces author overlapping records.
 
 Per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), tasks are `WorkspaceOnly` and live in `.orbit/tasks/` checked in. Job runs are also `WorkspaceOnly` but under `.orbit/state/`, gitignored, because they're execution artifacts. Learnings sit closer to tasks in shape — durable project artifacts authored over time — so the task locality is the right precedent.
 
 The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but secondary: most learnings are repo-specific, and the cross-cutting ones are best handled by tag-driven promotion later, not by making the default storage location global.
 
-**Decision.** Phase 1 stores learnings at `.orbit/learnings/<id>.yaml`, scoped `WorkspaceOnly` per the Scoping Rules table, checked into git. The SQLite index lives under `.orbit/state/` and is rebuildable from the YAML; it does not need to be checked in.
+**Decision.** Phase 1 stores learnings at `.orbit/learnings/<id>/learning.yaml`, scoped `WorkspaceOnly` per the Scoping Rules table, checked into git. The SQLite index lives under `.orbit/state/` and is rebuildable from the YAML; it does not need to be checked in.
+
+**Amendment — ORB-00096.** Learnings moved from the original flat `.orbit/learnings/<id>.yaml` / `.orbit/learnings/superseded/<id>.yaml` layout to per-entity directories at `.orbit/learnings/<id>/learning.yaml`. Status now lives only in the YAML body, and the explicit `orbit learning migrate-layout` command performs the one-way migration.
 
 **Consequences.**
 - Learnings travel with the repo. New collaborator clones, gets all the project knowledge from day zero.
@@ -82,9 +86,9 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 
 ---
 
-## ADR-004 — Phase-1 scope = path globs + tags, ranked by recency; semantic and symbol-aware deferred
+## ADR-0111 — Phase-1 scope = path globs + tags; semantic and symbol-aware deferred
 
-**Status:** Accepted · 2026-05 · [T20260511-6]
+**Status:** Accepted · 2026-05 · [T20260511-6] · legacy_id: `project-learnings/ADR-004`
 
 **Context.** A learning's scope (when does it match?) and ranking (which match wins?) have multiple plausible designs:
 
@@ -97,13 +101,13 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 
 | Ranking | Profile |
 |---------|---------|
-| **Recency (`updated_at` desc)** | Trivial. Wrong when an old, important learning loses to a recent, marginal one. |
+| **Recency (`updated_at` desc)** | Trivial. Wrong when an old, important learning loses to a recent, marginal one. Superseded as the primary ranking key by [ADR-0157]. |
 | **Manual `priority`** | Author-supplied. Honest signal when used; degenerates to "everything is high priority" without curation discipline. |
 | **Semantic similarity** | Best signal. Requires embeddings. Cost = embed every learning + run cosine on every query. |
 
 Phase 1's binding constraint is: ship before semantic-search reaches Accepted ([T20260510-3]). That rules out semantic similarity for both scope and ranking. Symbol-aware scope is *technically* available — the knowledge graph already exists — but coupling the learning store to graph rebuilds adds dependency surface and mainly pays off when fused with semantic ranking. Doing one without the other yields a clunky middle state.
 
-**Decision.** Phase 1 supports two scope axes, evaluated as logical OR: path globs (matched via the `orbit-policy` glob engine) and tags (matched as exact strings). Ranking is `updated_at` desc with optional `priority` tagging as a tie-breaker. The schema reserves `scope.symbols` and `scope.semantic_seed` fields for phase 2 forward compatibility, but neither is read in phase 1.
+**Decision.** Phase 1 supports two scope axes, evaluated as logical OR: path globs (matched via the `orbit-policy` glob engine) and tags (matched as exact strings). The schema reserves `scope.symbols` and `scope.semantic_seed` fields for phase 2 forward compatibility, but neither is read in phase 1. Initial ranking used `updated_at` desc with optional `priority`; [ADR-0157] adds decay-weighted upvotes ahead of those tie-breakers.
 
 Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symbol-aware scope and semantic ranking once semantic-search ships.
 
@@ -111,13 +115,13 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 - Phase 1 is implementable in parallel with semantic-search work, not gated on it.
 - Path globs cover the common case (most learnings are file-area-scoped) and tags cover the cross-cutting case.
 - The schema is forward-compatible; phase 2 is additive, not a migration.
-- Cost: recency-only ranking has known failure modes ([3_vision.md §1.2](./3_vision.md)) — old-but-important learnings get out-ranked by recent-but-marginal ones. Path globs are brittle to renames; the documented mitigation is "run `orbit learning prune --stale-only` after refactors that move files," which is operational discipline, not automation. Both costs are accepted as the price of shipping phase 1 ahead of semantic-search.
+- Cost: path globs are brittle to renames; the documented mitigation is "run `orbit learning prune --stale-only` after refactors that move files," which is operational discipline, not automation. Ranking still lacks semantic similarity until phase 2, even after [ADR-0157]'s vote signal.
 
 ---
 
-## ADR-005 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
+## ADR-0112 — Three-layer push pipeline (engine pre-prompt + MCP sidecar + Claude Code hook), not single-layer
 
-**Status:** Accepted · 2026-05 · [T20260510-11] · [ORB-00009]
+**Status:** Accepted · 2026-05 · [T20260510-11] · [ORB-00009] · legacy_id: `project-learnings/ADR-005`
 
 **Context.** The push-injection layer ([2_design.md §4](./2_design.md)) has multiple natural placements, each with different coverage:
 
@@ -135,6 +139,34 @@ The vendor-locked single-layer options are non-starters because the project supp
 - Agents see relevant learnings at multiple natural moments — task start, MCP tool call, individual edit — without being drowned in repeats (dedup set).
 - The architecture admits a future "layer 4" (Orbit-side proxy for agents without hooks) without restructuring, but doesn't require it ([3_vision.md §1.5](./3_vision.md)).
 - Cost: three injection sites means three places to maintain. A schema change to learning records (new field surfaced at injection time) requires touching `orbit-engine`, `orbit-mcp`, and the Claude Code hook script. The dedup set is agent-local; if context is compressed mid-session, the set may reset and the same learning may inject twice. Both costs are accepted as the price of robust coverage; collapsing to a single layer would mean choosing one failure mode (vendor lock-in, coarse scope, or missing built-in tools) and living with it.
+
+---
+
+## ADR-0157 — Rank matched learnings by task-anchored decay-weighted upvotes
+
+**Status:** Accepted · 2026-05 · [ORB-00095] · legacy_id: `project-learnings/ADR-006`
+
+**Context.** Recency and manual priority do not capture whether a learning is still load-bearing. An older learning that agents keep relying on should outrank a newer marginal note, but `updated_at` only moves when the learning body changes. The natural re-validation moment is duplicate-check: an agent reads a candidate learning, decides it already covers the concern, and does not author a competing record.
+
+Alternatives considered:
+
+| Approach | Profile |
+|----------|---------|
+| **Keep recency + priority only** | No new state. Continues conflating "was once written" with "is still useful." |
+| **Global vote count** | Simple. Lets ancient high-volume learnings outrank recently useful ones forever. |
+| **Task-anchored decayed votes** | Captures repeated usefulness across work contexts while letting old signal fade. Requires a sidecar file and idempotency policy. |
+| **SQLite vote mirror first** | Fast summaries. Adds schema/cache complexity before measured need. |
+
+**Decision.** Each learning may have `.orbit/learnings/<id>/votes.jsonl`, created lazily on first vote. Each row records `learning_id`, `voter_model`, `voted_at`, and `task_id`. V1 rejects votes without `task_id`; idempotency key is `(learning_id, voter_model, task_id)`. Search ranking filters by scope first, then sorts by decay-weighted vote score, `priority`, `updated_at`, and `id`. Default half-life is 180 days; `ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay for raw-count behavior.
+
+Votes are derived from per-learning JSONL on read. `orbit learning reindex` validates vote files but does not rewrite them or mirror them into SQLite.
+
+**Consequences.**
+- Load-bearing learnings accrue a ranking signal without mutating the YAML body or bumping `updated_at`.
+- Duplicate-check becomes constructive: "this already exists" reinforces the existing record instead of producing a duplicate.
+- Per-learning files keep write contention local; same-learning upvotes serialize with a per-learning lock and append atomically.
+- Cost: vote spam is possible if agents upvote reflexively. Task anchoring, idempotency, and decay reduce but do not eliminate that risk.
+- Cost: search now opens one small votes file per matched learning. This is acceptable for the expected 1-20 row matched sets; a SQLite summary mirror is deferred until measurement shows a need.
 
 ---
 

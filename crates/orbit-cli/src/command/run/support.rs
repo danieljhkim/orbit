@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime, find_workflow};
 use serde_json::{Value, json};
 
-const SHIP_AUTO_WORKFLOW: &str = "ship-auto";
+const TASK_AUTO_PIPELINE_JOB: &str = "task_auto_pipeline";
 
 #[derive(Clone)]
 pub(crate) struct WorkflowDispatchResult {
@@ -87,6 +87,7 @@ pub(crate) fn dispatch_workflow(
     workflow_alias: &'static str,
     input: &Value,
     debug: bool,
+    wait_for_completion: bool,
     loop_count: u32,
 ) -> Result<Vec<WorkflowDispatchResult>, OrbitError> {
     let workflow = find_workflow(workflow_alias)
@@ -97,12 +98,26 @@ pub(crate) fn dispatch_workflow(
         ));
     }
 
-    let timeout_seconds = OrbitRuntime::normalize_pipeline_wait_timeout(None)?;
-    let poll_interval_seconds = OrbitRuntime::normalize_pipeline_wait_poll_interval(None);
-
     let mut results = Vec::with_capacity(loop_count as usize);
     for _ in 0..loop_count {
         let invoke = runtime.submit_pipeline_run(workflow.job_id, input.clone(), None, None)?;
+        if !wait_for_completion {
+            let state = if invoke.queued { "queued" } else { "submitted" };
+            results.push(WorkflowDispatchResult {
+                workflow_alias,
+                job_id: invoke.job_name,
+                run_id: invoke.run_id,
+                state: state.to_string(),
+                attempt: 1,
+                error_code: None,
+                error_message: None,
+                ship_auto: None,
+            });
+            continue;
+        }
+
+        let timeout_seconds = OrbitRuntime::normalize_pipeline_wait_timeout(None)?;
+        let poll_interval_seconds = OrbitRuntime::normalize_pipeline_wait_poll_interval(None);
         let wait = runtime.wait_pipeline_runs(
             std::slice::from_ref(&invoke.run_id),
             timeout_seconds,
@@ -128,7 +143,7 @@ pub(crate) fn dispatch_workflow(
                     .flatten()
                     .map(|state| state.pipeline)
             });
-        let ship_auto = if workflow_alias == SHIP_AUTO_WORKFLOW {
+        let ship_auto = if workflow.job_id == TASK_AUTO_PIPELINE_JOB {
             Some(derive_ship_auto_summary(runtime, pipeline.as_ref()))
         } else {
             None
@@ -248,6 +263,22 @@ fn workflow_dispatch_result_to_json(run: &WorkflowDispatchResult) -> Value {
 fn workflow_dispatch_result_lines(run: &WorkflowDispatchResult) -> Vec<String> {
     if let Some(summary) = &run.ship_auto {
         return ship_auto_dispatch_result_lines(run, summary);
+    }
+
+    if matches!(run.state.as_str(), "submitted" | "queued")
+        && run.error_code.is_none()
+        && run.error_message.is_none()
+    {
+        return vec![
+            format!("Workflow: {}", run.workflow_alias),
+            format!("Job ID: {}", run.job_id),
+            format!("Run ID: {}", run.run_id),
+            format!("State: {}", run.state),
+            format!(
+                "Inspect: orbit run history -j {} | orbit run show {}",
+                run.job_id, run.run_id
+            ),
+        ];
     }
 
     let error_code = run.error_code.clone().unwrap_or_else(|| "-".to_string());
@@ -647,12 +678,65 @@ impl ShipAutoConflict {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
+
+    const SHIP_WORKFLOW: &str = "ship";
+
+    #[test]
+    fn async_ship_dispatch_returns_run_identity_without_waiting() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let jobs_dir = runtime.data_root().join("resources/jobs");
+        std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+        std::fs::write(
+            jobs_dir.join("task_auto_pipeline.yaml"),
+            r#"schemaVersion: 2
+kind: Job
+metadata:
+  name: task_auto_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  steps:
+    - id: marker
+      spec:
+        type: deterministic
+        action: sleep
+        config:
+          seconds: 0
+"#,
+        )
+        .expect("write task_auto_pipeline fixture");
+        let started = Instant::now();
+        let runs = dispatch_workflow(
+            &runtime,
+            SHIP_WORKFLOW,
+            &json!({
+                "mode": "pr",
+                "base_branch": "main",
+            }),
+            false,
+            false,
+            1,
+        )
+        .expect("dispatch workflow");
+
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "dispatch waited too long"
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].workflow_alias, SHIP_WORKFLOW);
+        assert_eq!(runs[0].job_id, TASK_AUTO_PIPELINE_JOB);
+        assert!(matches!(runs[0].state.as_str(), "submitted" | "queued"));
+        assert!(runs[0].ship_auto.is_none());
+    }
 
     fn ship_auto_run(summary: ShipAutoDispatchSummary) -> WorkflowDispatchResult {
         WorkflowDispatchResult {
-            workflow_alias: SHIP_AUTO_WORKFLOW,
-            job_id: "task_auto_pipeline".to_string(),
+            workflow_alias: SHIP_WORKFLOW,
+            job_id: TASK_AUTO_PIPELINE_JOB.to_string(),
             run_id: "jrun-parent".to_string(),
             state: "succeeded".to_string(),
             attempt: 1,
@@ -678,11 +762,44 @@ mod tests {
         ] {
             assert!(value.get(key).is_some(), "missing json key {key}");
         }
-        assert_eq!(value["workflow"], json!("ship-auto"));
+        assert_eq!(value["workflow"], json!("ship"));
         assert_eq!(value["job_id"], json!("task_auto_pipeline"));
         assert_eq!(value["run_id"], json!("jrun-parent"));
         assert_eq!(value["state"], json!("succeeded"));
         assert_eq!(value["attempt"], json!(1));
+    }
+
+    #[test]
+    fn async_dispatch_lines_point_to_history_and_show() {
+        let run = WorkflowDispatchResult {
+            workflow_alias: SHIP_WORKFLOW,
+            job_id: TASK_AUTO_PIPELINE_JOB.to_string(),
+            run_id: "jrun-submitted".to_string(),
+            state: "submitted".to_string(),
+            attempt: 1,
+            error_code: None,
+            error_message: None,
+            ship_auto: None,
+        };
+
+        assert_eq!(
+            workflow_dispatch_result_lines(&run),
+            vec![
+                "Workflow: ship",
+                "Job ID: task_auto_pipeline",
+                "Run ID: jrun-submitted",
+                "State: submitted",
+                "Inspect: orbit run history -j task_auto_pipeline | orbit run show jrun-submitted",
+            ]
+        );
+
+        let value = workflow_dispatch_result_to_json(&run);
+        assert_eq!(value["workflow"], json!("ship"));
+        assert_eq!(value["job_id"], json!("task_auto_pipeline"));
+        assert_eq!(value["state"], json!("submitted"));
+        assert_eq!(value["error_code"], Value::Null);
+        assert_eq!(value["error_message"], Value::Null);
+        assert!(value.get("ship_auto").is_none());
     }
 
     #[test]
@@ -715,7 +832,7 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "Workflow: ship-auto",
+                "Workflow: ship",
                 "Job ID: task_auto_pipeline",
                 "Run ID: jrun-parent",
                 "Parent state: succeeded",

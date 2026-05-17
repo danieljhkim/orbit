@@ -22,23 +22,48 @@ enabled = true
 [graph]
 editing = false
 
-[agent.implementer]
-backend = "cli"
-model = "gpt-5.5"
-provider = "codex"
-
-[agent.planner]
-backend = "cli"
-model = "claude-opus-4-7"
-provider = "claude"
-
-[agent.reviewer]
-backend = "cli"
-model = "gpt-5.5"
-provider = "codex"
-
 [workflow]
 base_branch = "agent-main"
+default_crew = "opus-codex"
 
 [pr]
 task_url_template = "https://orbit-cli.com/tasks/{task_id}"
+
+[duel]
+candidates = ["codex", "claude", "gemini", "grok"]
+
+[duel.models]                             
+codex  = "gpt-5.5"
+claude = "claude-opus-4-7"
+gemini = "pro"
+grok = "grok-build"
+
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+
+[crews.silver]
+planner = { model = "pro", provider = "gemini", backend = "cli" }
+implementer = { model = "grok-build", provider = "grok", backend = "cli" }
+reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+
+[crews.all-claude]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "claude-sonnet-4-6", provider = "claude", backend = "cli" }
+reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+
+[crews.all-codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+
+[crews.all-gemini]
+planner = { model = "pro", provider = "gemini", backend = "cli" }
+implementer = { model = "auto", provider = "gemini", backend = "cli" }
+reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+
+[crews.all-grok]
+planner = { model = "grok-build", provider = "grok", backend = "cli" }
+implementer = { model = "grok-build", provider = "grok", backend = "cli" }
+reviewer = { model = "grok-build", provider = "grok", backend = "cli" }

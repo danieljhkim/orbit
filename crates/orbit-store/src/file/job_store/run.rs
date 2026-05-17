@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    JobRun, JobRunState, JobRunStep, KnowledgeRunMetrics, NotFoundKind, OrbitError, PipelineState,
+    Crew, JobRun, JobRunState, JobRunStep, KnowledgeRunMetrics, NotFoundKind, OrbitError,
+    PipelineState,
 };
 
 use crate::backend::JobRunStepParams;
@@ -45,6 +46,10 @@ impl JobFileStore {
             created_at: Utc::now(),
             steps: vec![],
             knowledge_metrics: None,
+            resolved_crew: None,
+            planner_model: None,
+            implementer_model: None,
+            reviewer_model: None,
         };
         self.write_run(job_id, &run)?;
         Ok(run)
@@ -114,6 +119,7 @@ impl JobFileStore {
             .map_err(OrbitError::JobRunStateTransition)?;
         run.finished_at = Some(finished_at);
         self.write_run(&job_id, &run)?;
+        clear_run_waiting_reasons_at(&run_dir)?;
         Ok(true)
     }
 
@@ -160,6 +166,23 @@ impl JobFileStore {
         Ok(true)
     }
 
+    pub(crate) fn record_job_run_crew(
+        &self,
+        run_id: &str,
+        crew: &Crew,
+    ) -> Result<bool, OrbitError> {
+        let Some((job_id, run_dir)) = self.find_run_path(run_id)? else {
+            return Ok(false);
+        };
+        let mut run = self.read_run_at(&run_dir)?;
+        run.resolved_crew = Some(crew.name.clone());
+        run.planner_model = Some(crew.planner.model.clone());
+        run.implementer_model = Some(crew.implementer.model.clone());
+        run.reviewer_model = Some(crew.reviewer.model.clone());
+        self.write_run(&job_id, &run)?;
+        Ok(true)
+    }
+
     pub(crate) fn finalize_job_run(
         &self,
         run_id: &str,
@@ -173,6 +196,7 @@ impl JobFileStore {
         let mut run = self.read_run_at(&run_dir)?;
         // Preserve existing no-op behavior for terminal states.
         if run.state.is_terminal() {
+            clear_run_waiting_reasons_at(&run_dir)?;
             return Ok(true);
         }
         let event = match state {
@@ -194,6 +218,7 @@ impl JobFileStore {
         run.finished_at = Some(finished_at);
         run.duration_ms = duration_ms;
         self.write_run(&job_id, &run)?;
+        clear_run_waiting_reasons_at(&run_dir)?;
         Ok(true)
     }
 
@@ -495,4 +520,25 @@ fn encode_step_target_id_for_filename(target_id: &str) -> String {
 
 fn validate_run_id(run_id: &str) -> Result<(), OrbitError> {
     validate_path_stem(run_id, "job run")
+}
+
+fn clear_run_waiting_reasons_at(run_dir: &Path) -> Result<(), OrbitError> {
+    let state_path = run_dir.join("state.json");
+    if !state_path.exists() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&state_path).map_err(|e| OrbitError::Io(e.to_string()))?;
+    let mut state: PipelineState = serde_json::from_str(&raw).map_err(|e| {
+        OrbitError::Store(format!(
+            "invalid state.json '{}': {e}",
+            state_path.display()
+        ))
+    })?;
+    if state.waiting_on_deps.is_none() && state.waiting_on_locks.is_none() {
+        return Ok(());
+    }
+    state.clear_waiting_reasons();
+    let content =
+        serde_json::to_string_pretty(&state).map_err(|e| OrbitError::Store(e.to_string()))?;
+    write_atomic(&state_path, &content).map_err(Into::into)
 }

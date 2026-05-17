@@ -21,32 +21,10 @@ pub struct Workflow {
 pub const WORKFLOWS: &[Workflow] = &[
     Workflow {
         alias: "ship",
-        job_id: "task_pr_pipeline",
-        description: "Ship explicitly selected tasks through the PR pipeline",
-        supports_tasks: true,
-        supports_parallelism: false,
-        supports_base: true,
-        supports_pr_number: false,
-        requires_pr_number: false,
-        max_tasks: None,
-    },
-    Workflow {
-        alias: "ship-local",
-        job_id: "task_local_pipeline",
-        description: "Ship explicitly selected tasks through the local pipeline",
-        supports_tasks: true,
-        supports_parallelism: false,
-        supports_base: true,
-        supports_pr_number: false,
-        requires_pr_number: false,
-        max_tasks: None,
-    },
-    Workflow {
-        alias: "ship-auto",
         job_id: "task_auto_pipeline",
-        description: "Auto-select backlog tasks, gate them, and ship them",
+        description: "Gate and ship backlog or explicitly selected tasks",
         supports_tasks: true,
-        supports_parallelism: true,
+        supports_parallelism: false,
         supports_base: true,
         supports_pr_number: false,
         requires_pr_number: false,
@@ -205,4 +183,21 @@ pub fn build_workflow_input_for(
     }
 
     Ok(Value::Object(map))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ship_workflow_routes_to_auto_pipeline_only() {
+        let workflow = find_workflow("ship").expect("ship workflow");
+
+        assert_eq!(workflow.job_id, "task_auto_pipeline");
+        assert!(workflow.supports_tasks);
+        assert!(workflow.supports_base);
+        assert!(!workflow.supports_parallelism);
+        assert!(find_workflow("ship-auto").is_none());
+        assert!(find_workflow("ship-local").is_none());
+    }
 }

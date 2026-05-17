@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-16
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -254,7 +254,7 @@ For `run_command` or any shell-based step, there is no implicit structured outpu
 
 `when` is evaluated once, before retry. A skipped step is a successful no-op and does not retry.
 
-After [T20260509-11], the shipped condition grammar remains equality-only (`==` / `!=`, combined with `&&` / `||`); skip-on-empty guards express emptiness as `!= 0` or `!= []` rather than numeric comparisons, preserving `ship-auto` empty-backlog no-op behavior.
+After [T20260509-11], the shipped condition grammar remains equality-only (`==` / `!=`, combined with `&&` / `||`); skip-on-empty guards express emptiness as `!= 0` or `!= []` rather than numeric comparisons, preserving the `orbit run ship` auto-mode empty-backlog no-op behavior.
 
 The retry wrapper re-runs the whole step body up to `max_attempts`, with exponential or linear backoff. Some errors bypass retry:
 
@@ -293,7 +293,7 @@ The body runs before `break_when`, so steps can populate fields the break expres
 
 ### 8.6 Persisted state for v2 job runs
 
-Persisted pipeline runs (`orbit run ship`, `ship-auto`, `duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
+Persisted pipeline runs (`orbit run ship`, `duel-plan`, `orbit.pipeline.invoke` + `orbit.pipeline.wait`) go through `pipeline_run.rs`. Direct v2 runs (`orbit job run <job-id-or-yaml>`) also create durable `JobRun` bundles after [T20260423-2004-4] under `state/job-runs/<job_id>/<run_id>/`, so `orbit run history -j <job_id>` and `orbit run show <run_id>` can inspect the returned ID. Workflow-specific `orbit run <workflow> list/show` aliases were removed in [T20260425-2010], and duplicate job-level aliases in [T20260426-0742].
 
 Before [T20260423-0445], early v2 failures could leave `steps: []` and no surfaced `error_message`. The current contract is:
 
@@ -304,7 +304,7 @@ Before [T20260423-0445], early v2 failures could leave `steps: []` and no surfac
 
 This operator-surface repair keeps `orbit run ship --json`, direct `orbit job run`, `orbit run history`, and `orbit run show` actionable without adding a second run-level error channel.
 
-After [T20260430-27], `orbit run ship-auto` also interprets the parent `task_auto_pipeline` snapshot for operator output. Text and JSON modes keep the persisted run state and exit-code semantics, but add `workflow_status` labels: `empty_backlog`, `gated_noop`, `gate_waiting`, `gate_failed`, and `completed`. `empty_backlog` means no candidates and no exclusions. `gated_noop` means zero dispatched bundles with one or more `list_backlog.excluded` entries. `gate_waiting` means a child `task_gate_pipeline` run is still pending/running or the parent wait timed out while the child remains active. `gate_failed` means a child gate run reached a failed or cancelled state. The output also carries dispatched bundle count, excluded task count, exclusion reasons, blocker summaries, and child gate run status so operators do not have to run `orbit run show` merely to tell no backlog from lock-gated work. After [T20260430-30], default text renders that data as labeled multi-line operator output, while `--json` remains the stable machine-readable surface with raw status fields.
+After [T20260430-27], the former `orbit run ship-auto` path interpreted the parent `task_auto_pipeline` snapshot for operator output. Text and JSON modes kept the persisted run state and exit-code semantics, but added `workflow_status` labels: `empty_backlog`, `gated_noop`, `gate_waiting`, `gate_failed`, and `completed`. `empty_backlog` means no candidates and no exclusions. `gated_noop` means zero dispatched bundles with one or more `list_backlog.excluded` entries. `gate_waiting` means a child `task_gate_pipeline` run is still pending/running or the parent wait timed out while the child remains active. `gate_failed` means a child gate run reached a failed or cancelled state. After [ORB-00075], `orbit run ship` is the single public shipment command: omitted task IDs run auto mode, provided task IDs seed explicit singleton bundles, and both forms submit `task_auto_pipeline` asynchronously. The dispatch output is now just workflow/job/run identity plus pointers to `orbit run history -j task_auto_pipeline` and `orbit run show <RUN_ID>`; waiting reasons and terminal details live on those durable inspection surfaces rather than in CLI dispatch output.
 
 After [T20260505-8], active job runs can be cancelled through the same durable run surface. `pending` and `running` runs transition to `cancelled`; terminal runs remain immutable. Pending cancellation only rewrites the run bundle and pipeline snapshot, so a later pipeline worker observes `cancelled` and exits without claiming the run. Running cancellation first validates the stored owner PID start-time token, then signals the owner process group on Unix with a bounded graceful period and `SIGKILL` escalation. `JobRunCancelled` audit payloads include run id, previous/final state, actor/source, whether signaling was attempted, and the signal outcome.
 
@@ -522,8 +522,8 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260430-15]** — Embed task-aware input and run context in backend: cli agent envelopes.
 - **[T20260430-19]** — Shorten the Activity / Job design docs while preserving required structure.
 - **[T20260430-26]** — Release task-gate reservations after terminal child shipment runs and expose active reservations through the lock view.
-- **[T20260430-27]** — Make `ship-auto` output distinguish empty backlog, gated no-op, and waiting gate children.
-- **[T20260430-30]** — Make `ship-auto` default text output human-readable while preserving JSON fields.
+- **[T20260430-27]** — Make the auto shipment output distinguish empty backlog, gated no-op, and waiting gate children.
+- **[T20260430-30]** — Make auto shipment default text output human-readable while preserving JSON fields.
 - **[T20260430-31]** — Require populated execution summaries before opening task PRs.
 - **[T20260505-2]** — Admit accepted backlog friction reports in automatic backlog listing.
 - **[T20260505-8]** — Add dashboard/runtime controls to cancel active job runs.
@@ -533,7 +533,8 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260508-8]** — Resolve backend: cli subprocess cwd from workspace context and record it in audit/tracing.
 - **[T20260509-2]** — Split the v2 job executor into responsibility-focused modules without changing runtime behavior.
 - **[T20260509-7]** — Establish focused test coverage for the activity/job DAG executor (linear, retry, parallel, fan-out, loop, pipeline durability) and the macOS sandbox / policy boundary.
-- **[T20260509-11]** — Keep condition guards on equality-only grammar and repair the `ship-auto` empty-backlog guard.
+- **[T20260509-11]** — Keep condition guards on equality-only grammar and repair the `task_auto_pipeline` empty-backlog guard.
+- **[ORB-00075]** — Unify ship aliases into async `orbit run ship`.
 - **[T20260509-30]** — Resolve the macOS `sandbox-exec` wrapper from a trusted absolute path before CLI spawn.
 - **[T20260509-38]** — Run legacy parallel-batch workers through cancellable pipeline runs so timeout failure paths return promptly.
 - **[T20260509-40]** — Run CLI subprocesses in killable process groups and bound timeout-path output reader joins.

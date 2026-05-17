@@ -116,7 +116,7 @@ git -c user.name='<agent>' -c user.email='<agent-email>' commit \
 <one or two sentence description>"
 ```
 
-Use the agent commit identity that matches the model running the release (`claude <noreply@anthropic.com>`, `codex <codex@orbit.local>`, etc.) — see existing `git log` for the canonical email per agent.
+Use the agent commit identity that matches the model running the release (`claude <noreply@anthropic.com>`, `codex <codex@orbit.local>`, `grok <grok@orbit.local>`, `gemini <gemini@orbit.local>`, etc.) — see existing `git log` for the canonical email per agent.
 
 ### 9. Tag
 

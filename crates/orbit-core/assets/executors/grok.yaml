@@ -1,0 +1,22 @@
+schemaVersion: 2
+kind: Executor
+metadata:
+  name: grok
+spec:
+  executor_type: direct_agent
+  command: grok
+  args:
+    - --permission-mode
+    - bypassPermissions
+    - --output-format
+    - json
+    - --no-plan
+    - --prompt-file
+    - /dev/stdin
+  stdout_format: envelope
+  sandbox: macos-sandbox-exec
+  model_pair_override:
+    strong: grok-build
+    weak: grok-build
+  model_flag: "-m"
+  env: {}

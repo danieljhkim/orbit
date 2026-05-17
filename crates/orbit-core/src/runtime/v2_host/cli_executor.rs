@@ -7,7 +7,7 @@ use crate::OrbitRuntime;
 /// overrides (`ORBIT_V2_CLI_<PROVIDER>`) let smokes substitute a fixture
 /// binary for the real provider CLI; production normally comes from the
 /// registered executor def, falling back to the provider name itself
-/// (`claude`, `codex`, `gemini`, `ollama`) when no executor is registered.
+/// (`claude`, `codex`, `gemini`, `grok`, `ollama`) when no executor is registered.
 pub(super) fn resolve_cli_executor(
     runtime: &OrbitRuntime,
     provider: &str,
@@ -58,7 +58,7 @@ pub(super) fn resolve_cli_executor(
     }
 
     match provider {
-        "claude" | "codex" | "gemini" | "ollama" => Ok(ResolvedCliExecutor {
+        "claude" | "codex" | "gemini" | "grok" | "ollama" => Ok(ResolvedCliExecutor {
             command: provider.to_string(),
             args: Vec::new(),
         }),

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
+use axum::http::{Method, Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -18,10 +18,14 @@ use serde::Deserialize;
 use serde_json::json;
 use url::Url;
 
+mod adrs;
 mod audit;
+mod crews;
 mod denials;
 mod diagnostics;
+mod frictions;
 mod jobs;
+mod learnings;
 mod log;
 mod runs;
 mod scoreboard;
@@ -234,6 +238,17 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
             kind: orbit_core::NotFoundKind::JobRun,
             id,
         } => not_found(format!("run not found: {id}")),
+        orbit_core::OrbitError::NotFound {
+            kind: orbit_core::NotFoundKind::Learning,
+            id,
+        } => not_found(format!("learning not found: {id}")),
+        orbit_core::OrbitError::NotFound {
+            kind: orbit_core::NotFoundKind::Adr,
+            id,
+        } => not_found(format!("ADR not found: {id}")),
+        orbit_core::OrbitError::AdrInvalidTransition(message) => {
+            bad_request(format!("Invalid ADR status transition: {message}"))
+        }
         other => server_error(other),
     }
 }
@@ -255,22 +270,24 @@ pub(super) fn server_error(e: orbit_core::OrbitError) -> Response {
 }
 
 async fn require_localhost_origin(request: Request<Body>, next: Next) -> Response {
-    if let Some(origin) = request.headers().get(header::ORIGIN) {
-        let allowed = origin
-            .to_str()
-            .ok()
-            .and_then(|origin| Url::parse(origin).ok())
-            .is_some_and(|origin| {
-                origin.scheme() == "http"
-                    && matches!(origin.host_str(), Some("localhost" | "127.0.0.1"))
-            });
-        if !allowed {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "cross-origin requests not allowed"})),
-            )
-                .into_response();
-        }
+    let unsafe_method = matches!(
+        *request.method(),
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+    let origin = request.headers().get(header::ORIGIN);
+    let allowed = origin
+        .and_then(|origin| origin.to_str().ok())
+        .and_then(|origin| Url::parse(origin).ok())
+        .is_some_and(|origin| {
+            origin.scheme() == "http"
+                && matches!(origin.host_str(), Some("localhost" | "127.0.0.1"))
+        });
+    if !allowed && (unsafe_method || origin.is_some()) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "cross-origin requests not allowed"})),
+        )
+            .into_response();
     }
     next.run(request).await
 }
@@ -281,13 +298,36 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
             "/tasks",
             get(tasks::list_tasks).post(tasks::create_task_action),
         )
+        .route("/tasks/locks", get(tasks::list_task_locks))
         .route(
             "/tasks/:id",
             get(tasks::get_task).patch(tasks::update_task_action),
         )
+        .route("/crews", get(crews::list_crews))
+        .route("/tasks/:id/artifacts/*path", get(tasks::get_task_artifact))
         .route("/tasks/:id/approve", post(tasks::approve_task_action))
         .route("/tasks/:id/reject", post(tasks::reject_task_action))
         .route("/tasks/:id/archive", post(tasks::archive_task_action))
+        .route("/learnings", get(learnings::list_learnings))
+        .route("/learnings/:id", get(learnings::get_learning))
+        .route(
+            "/learnings/:id/supersede",
+            post(learnings::supersede_learning_action),
+        )
+        .route("/adrs", get(adrs::list_adrs))
+        .route("/adrs/:id", get(adrs::get_adr))
+        .route("/adrs/:id/accept", post(adrs::accept_adr_action))
+        .route("/adrs/:id/supersede", post(adrs::supersede_adr_action))
+        .route("/frictions", get(frictions::list_frictions))
+        .route("/frictions/stats", get(frictions::friction_stats))
+        .route(
+            "/frictions/:id",
+            get(frictions::get_friction).patch(frictions::update_friction_action),
+        )
+        .route(
+            "/frictions/:id/resolve",
+            post(frictions::resolve_friction_action),
+        )
         .route("/jobs", get(jobs::list_jobs))
         .route("/job-runs", get(jobs::list_job_runs))
         .route("/runs/:id", get(runs::get_run))
@@ -357,6 +397,50 @@ mod tests {
             .expect("response")
     }
 
+    async fn request_crews(runtime: OrbitRuntime) -> Response {
+        router()
+            .with_state(Arc::new(runtime))
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/crews")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    fn runtime_with_custom_crews() -> (tempfile::TempDir, OrbitRuntime) {
+        let root = tempfile::tempdir().expect("create tempdir");
+        let global_root = root.path().join("global");
+        let repo_root = root.path().join("repo");
+        let workspace_root = repo_root.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("create global root");
+        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+        std::fs::write(
+            workspace_root.join("config.toml"),
+            r#"
+[crews.silver]
+planner = { model = "claude-silver-plan", provider = "claude", backend = "cli" }
+implementer = { model = "codex-silver-impl", provider = "codex", backend = "cli" }
+reviewer = { model = "codex-silver-review", provider = "codex", backend = "cli" }
+
+[crews.alpha]
+planner = { model = "alpha-plan-model", provider = "claude", backend = "cli" }
+implementer = { model = "alpha-impl-model", provider = "codex", backend = "cli" }
+reviewer = { model = "alpha-review-model", provider = "codex", backend = "cli" }
+
+[workflow]
+default_crew = "silver"
+"#,
+        )
+        .expect("write config");
+        let runtime =
+            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
+        (root, runtime)
+    }
+
     fn seed_task(
         runtime: &OrbitRuntime,
         title: &str,
@@ -373,6 +457,29 @@ mod tests {
                 ..Default::default()
             })
             .expect("create task")
+    }
+
+    #[tokio::test]
+    async fn crews_endpoint_returns_sorted_runtime_registry() {
+        let (_root, runtime) = runtime_with_custom_crews();
+
+        let response = request_crews(runtime).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["default_crew"], json!("silver"));
+        let crews = body["crews"].as_array().expect("crews array");
+        assert_eq!(crews.len(), 2);
+        assert_eq!(crews[0]["name"], json!("alpha"));
+        assert_eq!(crews[0]["is_default"], json!(false));
+        assert_eq!(crews[0]["planner_model"], json!("alpha-plan-model"));
+        assert_eq!(crews[0]["implementer_model"], json!("alpha-impl-model"));
+        assert_eq!(crews[0]["reviewer_model"], json!("alpha-review-model"));
+        assert_eq!(crews[1]["name"], json!("silver"));
+        assert_eq!(crews[1]["is_default"], json!(true));
+        assert_eq!(crews[1]["planner_model"], json!("claude-silver-plan"));
+        assert_eq!(crews[1]["implementer_model"], json!("codex-silver-impl"));
+        assert_eq!(crews[1]["reviewer_model"], json!("codex-silver-review"));
     }
 
     #[tokio::test]
@@ -533,3 +640,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }
+
+#[cfg(test)]
+mod tasks_tests;

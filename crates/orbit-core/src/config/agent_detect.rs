@@ -84,6 +84,7 @@ pub struct DetectedAgents {
     pub claude_cli: bool,
     pub codex_cli: bool,
     pub gemini_cli: bool,
+    pub grok_cli: bool,
     pub ollama_cli: bool,
     pub anthropic_api_key: bool,
     pub openai_api_key: bool,
@@ -97,6 +98,7 @@ pub fn detect(probe: &dyn AgentEnvProbe) -> DetectedAgents {
         claude_cli: probe.binary_on_path("claude"),
         codex_cli: probe.binary_on_path("codex"),
         gemini_cli: probe.binary_on_path("gemini"),
+        grok_cli: probe.binary_on_path("grok"),
         ollama_cli: probe.binary_on_path("ollama"),
         anthropic_api_key: probe.env_var("ANTHROPIC_API_KEY").is_some(),
         openai_api_key: probe.env_var("OPENAI_API_KEY").is_some(),
@@ -112,13 +114,14 @@ pub fn default_model_for(provider: &str) -> Option<&'static str> {
         "claude" => Some("claude-opus-4-7"),
         "codex" => Some("gpt-5.5"),
         "gemini" => Some("gemini-3-pro"),
+        "grok" => Some("grok-build"),
         _ => None,
     }
 }
 
 /// Pick a default provider for the role given a detection snapshot.
 ///
-/// Preference order: first detected CLI in [claude, codex, gemini, ollama],
+/// Preference order: first detected CLI in [claude, codex, gemini, grok, ollama],
 /// else first detected API key in [anthropic→claude, openai→codex,
 /// gemini→gemini], else `claude` as a last resort.
 pub fn default_provider(detected: &DetectedAgents) -> &'static str {
@@ -130,6 +133,9 @@ pub fn default_provider(detected: &DetectedAgents) -> &'static str {
     }
     if detected.gemini_cli {
         return "gemini";
+    }
+    if detected.grok_cli {
+        return "grok";
     }
     if detected.ollama_cli {
         return "ollama";
@@ -153,6 +159,7 @@ pub fn default_backend(provider: &str, detected: &DetectedAgents) -> &'static st
         "claude" => detected.claude_cli,
         "codex" => detected.codex_cli,
         "gemini" => detected.gemini_cli,
+        "grok" => detected.grok_cli,
         "ollama" => detected.ollama_cli,
         _ => false,
     };
@@ -210,6 +217,7 @@ mod tests {
     fn detect_reflects_probe_results() {
         let probe = MockAgentEnvProbe::new()
             .with_binary("claude")
+            .with_binary("grok")
             .with_binary("ollama")
             .with_env("ANTHROPIC_API_KEY", "sk-test");
         let detected = detect(&probe);
@@ -217,6 +225,7 @@ mod tests {
             detected,
             DetectedAgents {
                 claude_cli: true,
+                grok_cli: true,
                 ollama_cli: true,
                 anthropic_api_key: true,
                 ..DetectedAgents::default()
@@ -237,6 +246,7 @@ mod tests {
             claude_cli: true,
             codex_cli: true,
             gemini_cli: true,
+            grok_cli: true,
             ollama_cli: true,
             ..DetectedAgents::default()
         };
@@ -246,6 +256,7 @@ mod tests {
         let detected = DetectedAgents {
             codex_cli: true,
             gemini_cli: true,
+            grok_cli: true,
             ollama_cli: true,
             ..DetectedAgents::default()
         };
@@ -254,10 +265,19 @@ mod tests {
         // gemini wins when claude/codex absent
         let detected = DetectedAgents {
             gemini_cli: true,
+            grok_cli: true,
             ollama_cli: true,
             ..DetectedAgents::default()
         };
         assert_eq!(default_provider(&detected), "gemini");
+
+        // grok wins when claude/codex/gemini absent
+        let detected = DetectedAgents {
+            grok_cli: true,
+            ollama_cli: true,
+            ..DetectedAgents::default()
+        };
+        assert_eq!(default_provider(&detected), "grok");
 
         // ollama wins when nothing else
         let detected = DetectedAgents {
@@ -319,6 +339,7 @@ mod tests {
         assert_eq!(default_model_for("claude"), Some("claude-opus-4-7"));
         assert_eq!(default_model_for("codex"), Some("gpt-5.5"));
         assert_eq!(default_model_for("gemini"), Some("gemini-3-pro"));
+        assert_eq!(default_model_for("grok"), Some("grok-build"));
         assert_eq!(default_model_for("ollama"), None);
         assert_eq!(default_model_for("unknown"), None);
     }

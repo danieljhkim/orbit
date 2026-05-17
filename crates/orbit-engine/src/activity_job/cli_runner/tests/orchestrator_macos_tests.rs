@@ -23,7 +23,7 @@ fn run_cli_backend_audit_argv_starts_with_sandbox_exec_for_each_provider() {
         return;
     }
 
-    for provider_name in ["claude", "codex", "gemini"] {
+    for provider_name in ["claude", "codex", "gemini", "grok"] {
         let temp = tempdir().expect("tempdir");
         let script = temp.path().join(provider_name);
         write_executable(
@@ -219,6 +219,69 @@ fn run_cli_backend_drops_gemini_sandbox_flag_under_outer_wrapper() {
     assert!(
         !suffix.iter().any(|a| a == "--sandbox" || a == "-s"),
         "gemini argv suffix must not contain --sandbox / -s: {suffix:?}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn run_cli_backend_drops_grok_sandbox_flag_under_outer_wrapper() {
+    if !sandbox_exec_can_apply_for_test() {
+        return;
+    }
+
+    let temp = tempdir().expect("tempdir");
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '{\"status\":\"ok\"}'\n",
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-drop",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: vec![
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+            "--output-format".to_string(),
+            "json".to_string(),
+        ],
+        provider_config: HashMap::new(),
+        sandbox: Some(sandbox_for_test()),
+        task_context: None,
+    };
+    let spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-drop",
+        audit.clone(),
+        &serde_json::json!({"prompt": "hi"}),
+        None,
+    )
+    .expect("run cli backend");
+    assert!(outcome.success);
+
+    let events = audit.events_snapshot().expect("events snapshot");
+    let argv = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::CliInvocationStarted { argv_redacted, .. } => {
+                Some(argv_redacted.clone())
+            }
+            _ => None,
+        })
+        .expect("cli.invocation.started event");
+    let suffix = &argv[4..];
+    assert!(
+        !suffix.iter().any(|a| a == "--sandbox") && !suffix.iter().any(|a| a == "workspace-write"),
+        "grok argv suffix must not contain --sandbox profile: {suffix:?}"
     );
 }
 

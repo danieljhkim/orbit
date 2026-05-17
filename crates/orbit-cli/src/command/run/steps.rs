@@ -1,9 +1,12 @@
+use orbit_common::types::PipelineState;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::runtime::run_audit::RunAuditStep;
 use orbit_core::{JobRun, JobRunStep, JobTargetType, NotFoundKind, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
-use super::format::{format_duration, format_timestamp, summarize_error_message};
+use super::format::{
+    format_duration, format_timestamp, format_waiting_line, summarize_error_message,
+};
 
 pub(crate) fn resolve_run(
     runtime: &OrbitRuntime,
@@ -151,6 +154,10 @@ impl RunStepRecord {
 }
 
 pub(crate) fn print_run_header(run: &JobRun) {
+    print_run_header_with_state(run, None);
+}
+
+pub(crate) fn print_run_header_with_state(run: &JobRun, state: Option<&PipelineState>) {
     use crate::output::color::{bold, dimmed, job_state_color};
     println!("{} {}", bold("Run ID:"), run.run_id);
     println!("{} {}", bold("Job ID:"), run.job_id);
@@ -170,6 +177,9 @@ pub(crate) fn print_run_header(run: &JobRun) {
         dimmed(&format_timestamp(run.finished_at))
     );
     println!("{} {}", bold("Duration:"), format_duration(run.duration_ms));
+    if let Some(line) = format_waiting_line(run.state, state) {
+        println!("{line}");
+    }
 }
 
 pub(crate) fn print_step_summary_table(steps: &[&JobRunStep]) -> Result<(), OrbitError> {

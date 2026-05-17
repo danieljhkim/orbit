@@ -133,7 +133,7 @@ Classify the failure before suggesting a fix:
 When a run has task ids, inspect the relevant tasks through Orbit tools:
 
 ```bash
-orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"<model_name>"}'
+orbit tool run orbit.task.show --full --input '{"id":"<task_id>","model":"<agent-family>"}'
 ```
 
 Check:

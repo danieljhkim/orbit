@@ -21,7 +21,7 @@ use git_ops::{
     ensure_named_branch, ensure_no_unmerged_changes, git_commit_with_identity, stage_paths,
     staged_changed_files,
 };
-use message::{finalize_commit_message, task_commit_message};
+use message::{batch_commit_message, finalize_commit_message, task_commit_message};
 use scope::{changed_files_for_task, collect_worktree_changes, filter_changed_files_for_task};
 
 #[cfg(test)]
@@ -176,9 +176,12 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
 ) -> Result<Value, OrbitError> {
     let batch_id = required_job_run_id(input, "commit_batch_changes")?;
     let batch_tasks = host.list_tasks_filtered(None, None, None, Some(batch_id), None, None)?;
-    if batch_tasks.is_empty() {
-        return Ok(json!({}));
-    }
+    let [task] = batch_tasks.as_slice() else {
+        return Err(OrbitError::InvalidInput(format!(
+            "commit_batch_changes expected exactly one task for job_run_id '{batch_id}', got {}",
+            batch_tasks.len()
+        )));
+    };
 
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
@@ -192,20 +195,8 @@ pub(super) fn commit_batch_changes<H: TaskHost + RuntimeHost + ?Sized>(
         return Ok(json!({}));
     }
 
-    let mut task_lines = Vec::new();
-    let mut id_labels = Vec::new();
-    for task in &batch_tasks {
-        task_lines.push(format!("- {}: {}", task.id, task.title.trim()));
-        id_labels.push(task.id.clone());
-    }
-    let ids_joined = id_labels.join(", ");
-    let mut message = format!(
-        "feat: parallel batch [{}]\n\nTasks:\n{}",
-        ids_joined,
-        task_lines.join("\n")
-    );
-    let (author, coauthors) = commit_author_for_tasks(&batch_tasks);
-    append_co_author_trailers(&mut message, &coauthors);
+    let message = batch_commit_message(task);
+    let author = git_author_for_task(task);
 
     git_commit_with_identity(&workspace_path, &message, author.as_ref())?;
     Ok(json!({}))
@@ -247,15 +238,16 @@ mod tests {
 
     use chrono::Utc;
     use orbit_common::types::{
-        Activity, Job, JobTargetType, NotFoundKind, OrbitEvent, Role, TaskArtifact, TaskPriority,
-        TaskStatus, TaskType,
+        Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitEvent, Role, TaskArtifact,
+        TaskPriority, TaskStatus, TaskType,
     };
     use orbit_tools::ToolContext;
     use serde_json::{Value, json};
     use tempfile::tempdir;
 
     use crate::context::{
-        JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
+        JobRunResult, RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, TaskReadHost,
+        TaskWriteHost,
     };
     use crate::executor::registry::ActivityExecutorRegistry;
 
@@ -362,10 +354,7 @@ mod tests {
         fn update_task_from_activity(
             &self,
             _task_id: &str,
-            _status: TaskStatus,
-            _execution_summary: Option<String>,
-            _comment: Option<String>,
-            _note: Option<String>,
+            _update: TaskActivityUpdate,
         ) -> Result<Task, OrbitError> {
             Err(OrbitError::Execution(
                 "update_task_from_activity is not needed by commit tests".to_string(),
@@ -496,7 +485,10 @@ mod tests {
         let cases = [
             ("claude-opus-4-7", "claude <claude@orbit.local>"),
             ("gemini-3.1-pro", "gemini <gemini@orbit.local>"),
-            ("gpt-5.5", "codex <codex@openai.com>"),
+            ("gpt-5.5", "codex <codex@orbit.local>"),
+            ("grok-4", "grok <grok@orbit.local>"),
+            ("grok-build", "grok <grok@orbit.local>"),
+            ("mystery-model", "mystery-model <mystery-model@orbit.local>"),
         ];
 
         for (implemented_by, expected_author) in cases {
@@ -594,8 +586,8 @@ mod tests {
             git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read author");
         let actual_committer =
             git_output(workspace, &["log", "-1", "--format=%cn <%ce>"]).expect("read committer");
-        assert_eq!(actual_author, "codex <codex@openai.com>");
-        assert_eq!(actual_committer, "codex <codex@openai.com>");
+        assert_eq!(actual_author, "codex <codex@orbit.local>");
+        assert_eq!(actual_committer, "codex <codex@orbit.local>");
         assert_eq!(
             local_user_config_snapshot(workspace),
             local_user_config_before
@@ -603,18 +595,22 @@ mod tests {
     }
 
     #[test]
-    fn git_commit_mixed_implementer_batch_uses_aggregate_identity_with_trailers() {
+    fn git_commit_batch_uses_templated_single_task_message() {
         let temp = initialized_git_repo();
         let workspace = temp.path();
         fs::create_dir_all(workspace.join("src")).unwrap();
-        fs::write(workspace.join("src/claude.txt"), "claude work\n").unwrap();
-        fs::write(workspace.join("src/gemini.txt"), "gemini work\n").unwrap();
+        fs::write(workspace.join("src/bug.txt"), "bug fix\n").unwrap();
 
-        let tasks = vec![
-            task_with_file("T1", "Claude task", "src/claude.txt", "claude-opus-4-7"),
-            task_with_file("T2", "Gemini task", "src/gemini.txt", "gemini-3.1-pro"),
-        ];
-        let host = CommitTestHost::new(tasks, workspace.to_path_buf());
+        let title = "a".repeat(145);
+        let mut task = task_with_file("ORB-00107", &title, "src/bug.txt", "claude");
+        task.task_type = TaskType::Bug;
+        task.planned_by = Some("codex".to_string());
+        task.implemented_by = Some("claude".to_string());
+        task.external_refs = vec![external_ref("eng", "1234")];
+        task.execution_summary =
+            "## Summary\n- Fixed deterministic batch commit messages.\n\n## Validation\n- cargo test"
+                .to_string();
+        let host = CommitTestHost::new(vec![task], workspace.to_path_buf());
         let input = json!({
             "scope": "all",
             "job_run_id": "batch-1",
@@ -630,13 +626,42 @@ mod tests {
         let actual_committer = git_output(workspace, &["log", "-1", "--format=%cn <%ce>"])
             .expect("read git committer");
         let body = git_output(workspace, &["log", "-1", "--format=%B"]).expect("read git body");
-        assert_eq!(actual_author, "orbit <orbit@orbit.local>");
-        assert_eq!(actual_committer, "orbit <orbit@orbit.local>");
-        assert!(body.contains("Co-Authored-By: claude <claude@orbit.local>"));
-        assert!(body.contains("Co-Authored-By: gemini <gemini@orbit.local>"));
+        let expected_body = format!(
+            "fix: {}… [ORB-00107] [ENG-1234]\n\n{}\n\nFixed deterministic batch commit messages.\n\nPlanned-By: codex\nImplemented-By: claude",
+            "a".repeat(66),
+            title
+        );
+        assert_eq!(actual_author, "claude <claude@orbit.local>");
+        assert_eq!(actual_committer, "claude <claude@orbit.local>");
+        assert_eq!(body, expected_body);
         assert_eq!(
             local_user_config_snapshot(workspace),
             local_user_config_before
+        );
+    }
+
+    #[test]
+    fn git_commit_batch_rejects_multiple_tasks() {
+        let temp = initialized_git_repo();
+        let workspace = temp.path();
+
+        let tasks = vec![
+            task_with_file("T1", "Claude task", "src/claude.txt", "claude-opus-4-7"),
+            task_with_file("T2", "Gemini task", "src/gemini.txt", "gemini-3.1-pro"),
+        ];
+        let host = CommitTestHost::new(tasks, workspace.to_path_buf());
+        let input = json!({
+            "scope": "all",
+            "job_run_id": "batch-1",
+            "workspace_path": workspace.to_string_lossy().to_string(),
+        });
+
+        let error = git_commit(&host, &input).expect_err("multi-task batch is rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("commit_batch_changes expected exactly one task")
         );
     }
 
@@ -740,8 +765,14 @@ mod tests {
             external_refs: Vec::new(),
             relations: Vec::new(),
             job_run_id: Some("batch-1".to_string()),
+            crew: None,
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn external_ref(system: &str, id: &str) -> ExternalRef {
+        ExternalRef::try_new(system.to_string(), id.to_string(), None)
+            .expect("external ref fixture is valid")
     }
 }

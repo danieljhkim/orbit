@@ -14,26 +14,34 @@ pub(super) struct RawRuntimeConfig {
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
     pub(super) workflow: Option<RawWorkflowConfig>,
-    /// `[agent.<role>]` tables, e.g. `[agent.reviewer]`. Keys are role names
-    /// (`reviewer`, `implementer`, `planner`, or any free-form string the
-    /// resolver chooses to honour). Values supply optional `provider`,
-    /// `model`, and `backend` overrides per role. Written by `orbit init`
-    /// from interactive prompts (T20260428-9) and consumed at v2 dispatch
-    /// time per ADR-029 / T20260428-12.
+    pub(super) duel: Option<RawDuelSection>,
+    /// Removed in ORB-00058. Kept only so config loading can reject stale
+    /// `[agent.<role>]` tables with an explicit migration error.
     pub(super) agent: Option<BTreeMap<String, RawAgentRoleConfig>>,
+    /// `[crews.<name>]` registry. Each table supplies the three role
+    /// assignments Orbit resolves at task run start.
+    pub(super) crews: Option<BTreeMap<String, RawCrewEntry>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawWorkflowConfig {
-    /// `workflow.base_branch` — repo-level default base branch for ship,
-    /// ship-auto, and duel-plan workflows. When absent, defaults to `main`.
+    /// `workflow.base_branch` — repo-level default base branch for ship and
+    /// duel-plan workflows. When absent, defaults to `main`.
     /// Repos that keep an `agent-main` buffer branch set this to
     /// `"agent-main"`.
     pub(super) base_branch: Option<String>,
+    /// Named crew used when a task does not declare `crew` and no CLI
+    /// override is provided.
+    pub(super) default_crew: Option<String>,
 }
 
-/// Schema for a single `[agent.<role>]` table in `config.toml`. All fields
-/// are optional so partial overrides round-trip cleanly.
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawDuelSection {
+    pub(super) candidates: Option<Vec<String>>,
+    pub(super) models: Option<BTreeMap<String, String>>,
+}
+
+/// Schema for a single role assignment in `[crews.<name>]`.
 ///
 /// Serialize is derived so the writer in `bootstrap` can emit fresh entries
 /// without hand-rolling TOML. The struct is `pub` so the CLI can hand a map
@@ -47,6 +55,16 @@ pub struct RawAgentRoleConfig {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RawCrewEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner: Option<RawAgentRoleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementer: Option<RawAgentRoleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer: Option<RawAgentRoleConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

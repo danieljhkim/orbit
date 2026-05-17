@@ -32,6 +32,11 @@ spec:
   steps:
     - id: worktree
       target: activity:worktree_setup
+      retry:
+        max_attempts: 4
+        initial_backoff_ms: 200
+        backoff_cap_ms: 2000
+        backoff_strategy: exponential
       default_input:
         task_ids: "{{ input.task_ids }}"
         base: "{{ input.base_branch }}"

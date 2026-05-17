@@ -10,6 +10,8 @@ use std::thread;
 use std::time::Duration;
 
 use fs2::FileExt;
+use orbit_knowledge::commands::pack::{self, PackInput};
+use orbit_knowledge::commands::{GraphCommandContext, TaskGraphScope};
 use orbit_knowledge::graph::nodes::{
     BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode,
 };
@@ -390,6 +392,87 @@ fn branch_refs_ensure_fresh_rebuilds_clean_worktree_when_branch_ref_is_missing()
     assert_eq!(status, RefreshStatus::Rebuilt);
     let status = ensure_fresh(&knowledge_dir, &feature_worktree)?;
     assert_eq!(status, RefreshStatus::SkippedDirtyDebounce);
+    Ok(())
+}
+
+#[test]
+fn pack_default_refreshes_missing_worktree_ref_before_fallback()
+-> Result<(), Box<dyn std::error::Error>> {
+    let repo = init_repo()?;
+    let knowledge_dir = repo.path().join(".orbit/knowledge");
+    run_build(BuildConfig {
+        repo_path: repo.path().to_path_buf(),
+        output_dir: knowledge_dir.clone(),
+        incremental: false,
+        ref_name: None,
+    })?;
+
+    git(repo.path(), &["branch", "feature/pack-missing-ref"])?;
+    let feature_worktree = repo.path().join("wt-pack-missing-ref");
+    git(
+        repo.path(),
+        &[
+            "worktree",
+            "add",
+            feature_worktree.to_str().unwrap(),
+            "feature/pack-missing-ref",
+        ],
+    )?;
+    write_rust_source(&feature_worktree, "feature_pack_graph")?;
+    commit_all_with_date(
+        &feature_worktree,
+        "feature pack graph",
+        "2030-01-04T00:00:00Z",
+    )?;
+
+    let graph_store = GraphObjectStore::new(knowledge_dir.join("graph"));
+    let read_target = resolve_graph_read_target(Some(&feature_worktree), None)?;
+    assert_eq!(read_target.requested.as_str(), "feature/pack-missing-ref");
+    assert_eq!(
+        read_target.fallback.as_ref().map(RefName::as_str),
+        Some("main")
+    );
+    assert!(!graph_store.ref_path(&read_target.requested).exists());
+
+    let context = GraphCommandContext {
+        knowledge_dir: knowledge_dir.clone(),
+        workspace_root: Some(feature_worktree.clone()),
+        explicit_ref: None,
+        explicit_knowledge_dir: false,
+        task_scope: TaskGraphScope::default(),
+    };
+    let result = pack::run(PackInput {
+        context: context.clone(),
+        selectors: vec!["symbol:src/lib.rs#feature_pack_graph:function".to_string()],
+        hydrate_leaf_source: false,
+        refresh: false,
+        selector_timeout_ms: 15_000,
+    })?;
+
+    assert!(!result.auto_refresh_skipped);
+    assert!(graph_store.ref_path(&read_target.requested).is_file());
+    let resolved =
+        graph_store.resolve_ref(&read_target.requested, read_target.fallback.as_ref())?;
+    assert!(!resolved.used_fallback);
+    let entries = result
+        .pack
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| io_error("pack entries missing".to_string()))?;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["kind"], "leaf");
+    assert_eq!(entries[0]["name"], "feature_pack_graph");
+    assert!(result.pack.get("diagnostics").is_none());
+
+    let second = pack::run(PackInput {
+        context,
+        selectors: vec!["symbol:src/lib.rs#feature_pack_graph:function".to_string()],
+        hydrate_leaf_source: false,
+        refresh: false,
+        selector_timeout_ms: 15_000,
+    })?;
+    assert!(second.auto_refresh_skipped);
+    assert!(second.pack.get("diagnostics").is_none());
     Ok(())
 }
 

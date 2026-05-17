@@ -51,6 +51,8 @@ pub struct StateExecutionContext {
     pub run_id: Option<String>,
     pub step_index: Option<u32>,
     pub state_dir: Option<PathBuf>,
+    pub agent: Option<String>,
+    pub model: Option<String>,
 }
 
 impl ActivityExecutor for AutomationExecutor {
@@ -70,6 +72,8 @@ impl ActivityExecutor for AutomationExecutor {
                 run_id: execution.run_id.clone(),
                 step_index: execution.step_index,
                 state_dir: execution.state_dir.clone(),
+                agent: Some(execution.agent_cli.clone()),
+                model: None,
             }),
         ) {
             Ok(result) => {
@@ -156,7 +160,7 @@ pub fn execute_action<
 ) -> Result<Value, OrbitError> {
     match action {
         // ---- retained internal actions ----
-        UPDATE_TASK_ACTION => task_update::update_task(host, input),
+        UPDATE_TASK_ACTION => task_update::update_task(host, input, state_context),
         RUN_PARALLEL_TASK_PIPELINE_ACTION => batch::run_parallel_task_pipeline(host, input, debug),
         SELECT_DUEL_TASK_ACTION => duel::select_duel_task(host, input),
         SELECT_DUEL_ROLES_ACTION => duel::select_duel_roles(host, input),

@@ -2,8 +2,11 @@
 
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::{Path, State};
+use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
+use orbit_common::types::validate_relative_artifact_path;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
     ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
@@ -13,6 +16,7 @@ use serde_json::{Value, json};
 
 use super::{bad_request, map_runtime_error, server_error, validate_id};
 use crate::command::task::output::task_to_json_with_sidecars;
+use crate::command::task::task_locks_json;
 
 const DASHBOARD_TASK_STATUSES: &[TaskStatus] = &[
     TaskStatus::InProgress,
@@ -72,6 +76,8 @@ pub(super) struct CreateTaskBody {
     parent_id: Option<String>,
     #[serde(default)]
     source_task_id: Option<String>,
+    #[serde(default)]
+    crew: Option<String>,
 }
 
 fn default_priority() -> TaskPriority {
@@ -109,6 +115,8 @@ pub(super) struct UpdateTaskBody {
     task_type: Option<TaskType>,
     #[serde(default)]
     context_files: Option<Vec<String>>,
+    #[serde(default)]
+    crew: Option<Option<String>>,
 }
 
 pub(super) async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
@@ -127,6 +135,13 @@ pub(super) async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Resp
             }
             Err(e) => server_error(e),
         },
+        Err(e) => server_error(e),
+    }
+}
+
+pub(super) async fn list_task_locks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
+    match task_locks_json(&runtime) {
+        Ok(value) => Json(value).into_response(),
         Err(e) => server_error(e),
     }
 }
@@ -165,6 +180,45 @@ pub(super) async fn get_task(
     }
 }
 
+pub(super) async fn get_task_artifact(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Path((id, path)): Path<(String, String)>,
+) -> Response {
+    let id = match validate_id(&id) {
+        Ok(id) => id,
+        Err(message) => return bad_request(message),
+    };
+    let path = match validate_artifact_request_path(&path) {
+        Ok(path) => path,
+        Err(message) => return bad_request(message),
+    };
+    match runtime.get_task_artifact(id, &path) {
+        Ok(Some(artifact)) => {
+            let content_type = match HeaderValue::from_str(&artifact.media_type) {
+                Ok(value) => value,
+                Err(error) => {
+                    return server_error(orbit_core::OrbitError::Store(format!(
+                        "invalid artifact media type '{}': {error}",
+                        artifact.media_type
+                    )));
+                }
+            };
+            let mut response = Response::new(Body::from(artifact.content));
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, content_type);
+            response
+        }
+        Ok(None) => super::not_found(format!("artifact not found: {id}/{path}")),
+        Err(e) => map_runtime_error(e),
+    }
+}
+
+fn validate_artifact_request_path(path: &str) -> Result<String, String> {
+    validate_relative_artifact_path(path).map_err(|error| error.to_string())?;
+    Ok(path.to_string())
+}
+
 pub(super) async fn create_task_action(
     State(runtime): State<Arc<OrbitRuntime>>,
     Json(body): Json<CreateTaskBody>,
@@ -175,6 +229,7 @@ pub(super) async fn create_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
+        relations: Vec::new(),
         tags: body.tags,
         plan: body.plan,
         comment: body.comment,
@@ -187,6 +242,7 @@ pub(super) async fn create_task_action(
         system_created: false,
         external_refs: body.external_refs,
         source_task_id: body.source_task_id,
+        crew: body.crew,
     };
     match runtime.add_task_with_identity(params, None, None) {
         Ok(task) => match dashboard_status_index(&runtime) {
@@ -214,16 +270,19 @@ pub(super) async fn update_task_action(
         description: body.description,
         acceptance_criteria: body.acceptance_criteria,
         dependencies: body.dependencies,
+        relations: None,
         tags: body.tags,
         plan: body.plan,
         execution_summary: body.execution_summary,
         comment: body.comment,
         status: body.status,
         task_type: body.task_type,
+        source_task_id: None,
         planned_by: None,
         implemented_by: None,
         pr_status: None,
         job_run_id: None,
+        crew: body.crew,
         context_files: body.context_files,
         upsert_artifacts: Vec::new(),
         append_review_threads: Vec::new(),

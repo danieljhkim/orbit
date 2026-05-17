@@ -311,7 +311,11 @@ fn resolve_agent_identity(
         (env_agent_name, env_model_name)
     };
     let agent = normalize_agent_family_for_model(agent.as_deref(), model.as_deref())?;
-    Ok((agent, model))
+    // Tool-call identity crosses a trust boundary: agent-supplied `model`
+    // strings are telemetry at best and may be aliases. Persist the canonical
+    // family in the model slot for tool dispatch so comparisons never depend
+    // on self-reported model text.
+    Ok((agent.clone(), agent))
 }
 
 fn read_proc_allowed_programs_from_env() -> Vec<String> {
@@ -343,11 +347,12 @@ fn read_activity_tools_from_env() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolve the audit `role` label for a tool invocation. Mirrors the precedence
-/// of the CLI's `tool_run_actor_role` exactly:
-/// 1. input JSON `agent`/`model` fields, then
-/// 2. flag overrides (CLI `--agent`/`--model`; MCP passes `None`), then
-/// 3. `ORBIT_AGENT_NAME`/`ORBIT_AGENT_MODEL` env vars.
+/// Resolve the audit `role` label for a tool invocation.
+///
+/// Runtime envelope identity (`ORBIT_AGENT_*`) is authoritative for agent
+/// activities and overwrites any self-reported `model` field in tool JSON.
+/// Manual CLI/MCP calls without an envelope keep the legacy input/flag
+/// precedence.
 pub fn audit_role_label(
     input: &Value,
     agent_override: Option<&str>,
@@ -363,7 +368,14 @@ pub fn audit_role_label(
     let has_input_identity = input_agent.is_some() || input_model.is_some();
     let has_flag_identity = agent_override.is_some_and(|value| !value.trim().is_empty())
         || model_override.is_some_and(|value| !value.trim().is_empty());
-    let (agent, model) = if has_input_identity {
+    let has_env_identity = env_agent.is_some() || env_model.is_some();
+    let (agent, model) = if has_env_identity && !has_flag_identity {
+        let agent = normalize_agent_family_for_model(env_agent.as_deref(), env_model.as_deref())
+            .ok()
+            .flatten()
+            .or(env_agent);
+        (agent.clone(), agent)
+    } else if has_input_identity {
         (input_agent, input_model)
     } else if has_flag_identity {
         (
@@ -899,7 +911,52 @@ mod audit_tests {
         set_identity_env("claude", "opus-4.6");
         let role = audit_role_label(&json!({ "query": "x" }), None, None);
         clear_identity_env();
-        assert_eq!(role, "opus-4.6");
+        assert_eq!(role, "claude");
+    }
+
+    #[test]
+    fn audit_role_label_overwrites_self_reported_model_with_env_family() {
+        let _g = env_guard();
+        set_identity_env("claude", "claude-opus-4-7");
+        let role = audit_role_label(&json!({ "model": "opus-4.7" }), None, None);
+        clear_identity_env();
+        assert_eq!(role, "claude");
+    }
+
+    #[test]
+    fn cli_tool_dispatch_env_identity_overwrites_task_update_self_reported_model() {
+        let _g = env_guard();
+        let runtime = fresh_runtime();
+        let task = runtime
+            .add_task(crate::command::task::TaskAddParams {
+                title: "identity regression".to_string(),
+                description: "exercise CLI tool identity overwrite".to_string(),
+                acceptance_criteria: vec!["implemented_by is canonical".to_string()],
+                plan: "Do the work.".to_string(),
+                status: Some(orbit_common::types::TaskStatus::InProgress),
+                ..Default::default()
+            })
+            .expect("seed in-progress task");
+        set_identity_env("grok", "grok-build");
+
+        runtime
+            .execute_tool_command_dispatch(
+                "orbit.task.update",
+                json!({
+                    "id": task.id.clone(),
+                    "status": "review",
+                    "execution_summary": "Done.",
+                    "model": "claude-opus-4-7"
+                }),
+                None,
+                None,
+                ToolEntryPoint::Cli,
+            )
+            .expect("task update succeeds");
+        clear_identity_env();
+
+        let updated = runtime.get_task(&task.id).expect("read updated task");
+        assert_eq!(updated.implemented_by.as_deref(), Some("grok"));
     }
 
     #[test]

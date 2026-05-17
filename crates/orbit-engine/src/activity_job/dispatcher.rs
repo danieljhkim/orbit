@@ -148,7 +148,8 @@ pub trait V2RuntimeHost: Send + Sync {
         Ok(())
     }
 
-    /// Resolve `[agent.<role>]` from the active workspace's `config.toml`.
+    /// Resolve the selected crew role from the active workspace's
+    /// `config.toml`.
     /// Mirrors [`crate::context::EnvironmentHost::agent_role_config`]; the
     /// engine's job dispatcher receives only `&dyn V2RuntimeHost`, so this
     /// method is the seam dispatch consults at run time. Default returns
@@ -157,6 +158,14 @@ pub trait V2RuntimeHost: Send + Sync {
     /// hosts that have no role-config layer).
     fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
         None
+    }
+
+    fn agent_role_config_for_input(
+        &self,
+        role: AgentRole,
+        _input: &Value,
+    ) -> Option<AgentRoleConfig> {
+        self.agent_role_config(role)
     }
 }
 

@@ -2,7 +2,7 @@
 //!
 //! Two families live here:
 //!
-//! - **CLI transports** (`claude`, `codex`, `gemini`, `ollama`, `mock_agent`):
+//! - **CLI transports** (`claude`, `codex`, `gemini`, `grok`, `ollama`, `mock_agent`):
 //!   translate an [`AgentRequest`] into a CLI command invocation and stdin
 //!   envelope that the engine runs via `orbit-exec`.
 //! - **HTTP transports** (`anthropic`, `openai_compat`, `gemini_http`): implement the sibling
@@ -19,6 +19,7 @@ pub(crate) mod codex;
 mod common;
 pub(crate) mod gemini;
 pub mod gemini_http;
+pub(crate) mod grok;
 pub(crate) mod mock_agent;
 pub(crate) mod ollama;
 pub mod openai_compat;

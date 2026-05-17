@@ -113,18 +113,24 @@ pub(super) fn release(
         })?;
     emit_expired_reservation_events(runtime, &result.expired_reservations)?;
     if result.released {
+        let released_task_id = result
+            .reservation
+            .as_ref()
+            .and_then(|reservation| first_task_id(&reservation.task_ids));
+        let owner_run_id = result
+            .reservation
+            .as_ref()
+            .and_then(|reservation| reservation.owner_run_id.clone());
         record_task_lock_audit_event(
             runtime,
             "task.locks.reserve.released",
             "orbit.task.locks.release",
             Some(reservation_id.as_str()),
+            released_task_id,
             AuditEventStatus::Success,
             json!({
                 "reservation_id": reservation_id,
-                "owner_run_id": result
-                    .reservation
-                    .as_ref()
-                    .and_then(|reservation| reservation.owner_run_id.clone()),
+                "owner_run_id": owner_run_id,
                 "release_reason": TaskReservationReleaseReason::Explicit.as_str(),
                 "released_at": result.released_at,
                 "released_by": reservation_actor_label(
@@ -170,12 +176,16 @@ pub(super) fn reserve(
         "task.locks.reserve.requested",
         "orbit.task.locks.reserve",
         None,
+        first_task_id(&task_ids),
         AuditEventStatus::Success,
         json!({
             "actor": actor.clone(),
             "task_ids": task_ids.clone(),
             "files": requested_files.clone(),
             "ttl_seconds": ttl_seconds,
+            "owner_run_id": reservation_owner
+                .as_ref()
+                .map(|owner| owner.owner_run_id.clone()),
         }),
     )?;
 
@@ -229,6 +239,7 @@ pub(super) fn reserve(
             "task.locks.reserve.granted",
             "orbit.task.locks.reserve",
             Some(reservation_id.as_str()),
+            first_task_id(&task_ids),
             AuditEventStatus::Success,
             json!({
                 "reservation_id": reservation_id,
@@ -254,12 +265,16 @@ pub(super) fn reserve(
             "task.locks.reserve.denied",
             "orbit.task.locks.reserve",
             None,
+            first_task_id(&task_ids),
             AuditEventStatus::Denied,
             json!({
                 "actor": actor,
                 "task_ids": task_ids.clone(),
                 "files": requested_files.clone(),
                 "conflicts": conflicts.clone(),
+                "owner_run_id": reservation_owner
+                    .as_ref()
+                    .map(|owner| owner.owner_run_id.clone()),
             }),
         )?;
         Ok(json!({
@@ -467,6 +482,7 @@ pub(crate) fn emit_expired_reservation_events(
             "task.locks.reserve.expired",
             "orbit.task.locks.reserve",
             Some(expired.reservation_id.as_str()),
+            None,
             AuditEventStatus::Success,
             json!({
                 "reservation_id": expired.reservation_id,
@@ -487,6 +503,7 @@ pub(crate) fn emit_task_lock_release_event(
         "task.locks.reserve.released",
         "orbit.task.locks.release",
         Some(reservation.reservation_id.as_str()),
+        first_task_id(&reservation.task_ids),
         AuditEventStatus::Success,
         json!({
             "reservation_id": reservation.reservation_id,
@@ -511,10 +528,13 @@ fn record_task_lock_audit_event(
     command: &str,
     tool_name: &str,
     target_id: Option<&str>,
+    task_id: Option<&str>,
     status: AuditEventStatus,
     payload: Value,
 ) -> Result<(), OrbitError> {
     let execution_id_prefix = format!("audit-{}", command.replace('.', "-"));
+    let job_run_id = owner_run_id_from_payload(&payload)
+        .or_else(|| std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()));
     runtime.record_audit_event(&crate::AuditEventInsertParams {
         execution_id: audit_execution_id(&execution_id_prefix),
         command: command.to_string(),
@@ -542,8 +562,8 @@ fn record_task_lock_audit_event(
         host: std::env::var("HOSTNAME").ok(),
         pid: std::process::id(),
         session_id: None,
-        task_id: target_id.map(ToOwned::to_owned),
-        job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
+        task_id: task_id.map(ToOwned::to_owned),
+        job_run_id,
         activity_id: std::env::var("ORBIT_ACTIVITY_ID")
             .ok()
             .filter(|s| !s.is_empty()),
@@ -551,4 +571,174 @@ fn record_task_lock_audit_event(
             .ok()
             .and_then(|s| s.parse().ok()),
     })
+}
+
+fn first_task_id(task_ids: &[String]) -> Option<&str> {
+    task_ids.first().map(String::as_str)
+}
+
+fn owner_run_id_from_payload(payload: &Value) -> Option<String> {
+    payload
+        .get("owner_run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orbit_common::types::{AuditEvent, Role, TaskStatus};
+    use orbit_tools::{ReservationOwnerContext, ToolContext};
+    use serde_json::{Value, json};
+
+    use super::super::test_support::{create_context_task, test_runtime, unmanaged_tool_env_guard};
+
+    fn task_lock_audit_event(runtime: &OrbitRuntime, tool_name: &str, command: &str) -> AuditEvent {
+        runtime
+            .list_audit_events(None, Some(tool_name.to_string()), None, None, 16)
+            .expect("list audit events")
+            .into_iter()
+            .find(|event| event.command == command)
+            .expect("task lock audit event")
+    }
+
+    fn reserve_files(runtime: &OrbitRuntime, owner_run_id: Option<&str>) -> String {
+        let input = json!({
+            "files": ["file:src/lib.rs"],
+            "ttl_seconds": 3600,
+            "model": "gpt-5.5",
+        });
+        let output = match owner_run_id {
+            Some(owner_run_id) => runtime
+                .run_tool_with_context_and_role(
+                    "orbit.task.locks.reserve",
+                    input,
+                    Role::Admin,
+                    ToolContext {
+                        reservation_owner: Some(ReservationOwnerContext {
+                            owner_run_id: owner_run_id.to_string(),
+                            owner_metadata_json: None,
+                        }),
+                        ..ToolContext::default()
+                    },
+                )
+                .expect("reserve direct file selectors with owner"),
+            None => runtime
+                .execute_tool_command("orbit.task.locks.reserve", input, None, None)
+                .expect("reserve direct file selectors"),
+        };
+
+        output
+            .get("reservation_id")
+            .and_then(Value::as_str)
+            .expect("reservation id")
+            .to_string()
+    }
+
+    #[test]
+    fn release_audit_without_owner_has_no_task_or_job_run_id() {
+        let _env = unmanaged_tool_env_guard();
+        let (_root, runtime, repo_root) = test_runtime();
+        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
+        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
+            .expect("write source file");
+
+        let reservation_id = reserve_files(&runtime, None);
+        let release = runtime
+            .execute_tool_command(
+                "orbit.task.locks.release",
+                json!({
+                    "reservation_id": reservation_id.clone(),
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("release reservation");
+        assert_eq!(release["released"], true);
+
+        let row = task_lock_audit_event(
+            &runtime,
+            "orbit.task.locks.release",
+            "task.locks.reserve.released",
+        );
+        assert_eq!(row.target_id.as_deref(), Some(reservation_id.as_str()));
+        assert!(row.task_id.is_none());
+        assert!(row.job_run_id.is_none());
+    }
+
+    #[test]
+    fn release_audit_uses_reservation_owner_run_id() {
+        let _env = unmanaged_tool_env_guard();
+        let (_root, runtime, repo_root) = test_runtime();
+        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
+        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
+            .expect("write source file");
+
+        let reservation_id = reserve_files(&runtime, Some("jrun-owner"));
+        let release = runtime
+            .execute_tool_command(
+                "orbit.task.locks.release",
+                json!({
+                    "reservation_id": reservation_id.clone(),
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("release reservation");
+        assert_eq!(release["released"], true);
+
+        let row = task_lock_audit_event(
+            &runtime,
+            "orbit.task.locks.release",
+            "task.locks.reserve.released",
+        );
+        assert_eq!(row.target_id.as_deref(), Some(reservation_id.as_str()));
+        assert!(row.task_id.is_none());
+        assert_eq!(row.job_run_id.as_deref(), Some("jrun-owner"));
+    }
+
+    #[test]
+    fn reserve_audit_for_task_scope_records_first_task_id() {
+        let _env = unmanaged_tool_env_guard();
+        let (_root, runtime, repo_root) = test_runtime();
+        std::fs::create_dir_all(repo_root.join("src")).expect("create src dir");
+        std::fs::write(repo_root.join("src/lib.rs"), "pub fn ok() {}\n")
+            .expect("write source file");
+        let task = create_context_task(
+            &runtime,
+            &repo_root,
+            TaskStatus::Backlog,
+            &["file:src/lib.rs"],
+        );
+
+        let reserve = runtime
+            .execute_tool_command(
+                "orbit.task.locks.reserve",
+                json!({
+                    "task_ids": [task.id.clone()],
+                    "ttl_seconds": 3600,
+                    "model": "gpt-5.5",
+                }),
+                None,
+                None,
+            )
+            .expect("reserve task scope");
+        assert_eq!(reserve["reserved"], true);
+        let reservation_id = reserve["reservation_id"]
+            .as_str()
+            .expect("reservation id")
+            .to_string();
+
+        let row = task_lock_audit_event(
+            &runtime,
+            "orbit.task.locks.reserve",
+            "task.locks.reserve.granted",
+        );
+        assert_eq!(row.target_id.as_deref(), Some(reservation_id.as_str()));
+        assert_eq!(row.task_id.as_deref(), Some(task.id.as_str()));
+    }
 }

@@ -18,4 +18,5 @@ spec:
   model_pair_override:
     strong: claude-opus-4-7
     weak: claude-sonnet-4-6
+  model_flag: "--model"
   env: {}

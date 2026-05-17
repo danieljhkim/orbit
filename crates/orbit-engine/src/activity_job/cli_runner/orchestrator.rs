@@ -54,7 +54,9 @@ pub fn run_cli_backend(
     });
 
     let task_ctx = host.task_context_for_agent_input(input)?;
-    let tool_ctx = host.tool_context_for_activity(Some(run_id), fs_profile, None);
+    let mut tool_ctx = host.tool_context_for_activity(Some(run_id), fs_profile, None);
+    tool_ctx.agent_name = Some(provider.clone());
+    tool_ctx.model_name = spec.model.as_deref().map(str::to_string);
     // Resolve the subprocess cwd before sandbox compilation so the host can
     // re-allow the active worktree subpath after the policy deny rules. The
     // sandbox's `denyModify .orbit/**` rule otherwise blocks every non-codex
@@ -148,6 +150,12 @@ pub fn run_cli_backend(
         ("ORBIT_RUN_ID".to_string(), run_id.to_string()),
         ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
     ];
+    if let Some(agent_name) = tool_ctx.agent_name.as_deref() {
+        child_env.push(("ORBIT_AGENT_NAME".to_string(), agent_name.to_string()));
+    }
+    if let Some(model_name) = tool_ctx.model_name.as_deref() {
+        child_env.push(("ORBIT_AGENT_MODEL".to_string(), model_name.to_string()));
+    }
     if let Some(session_id) = learning_context.session_id {
         child_env.push(("ORBIT_SESSION_ID".to_string(), session_id));
     }

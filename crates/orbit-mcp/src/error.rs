@@ -38,6 +38,7 @@ fn error_code(err: &OrbitError) -> &'static str {
             | NotFoundKind::Adr
             | NotFoundKind::DesignFeature
             | NotFoundKind::Learning
+            | NotFoundKind::LearningComment
             | NotFoundKind::AgentSession
             | NotFoundKind::Workspace => "not_found",
         },

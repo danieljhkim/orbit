@@ -106,14 +106,17 @@ fn semantic_search_schema_uses_v2_task_field_names() {
 }
 
 #[test]
-fn friction_surface_is_append_only() {
+fn friction_surface_supports_artifact_triage() {
     let names = registered_tool_names();
 
     for retained in [
         "orbit.friction.add",
         "orbit.friction.list",
+        "orbit.friction.resolve",
         "orbit.friction.show",
         "orbit.friction.stats",
+        "orbit.friction.tags",
+        "orbit.friction.update",
     ] {
         assert!(
             names.contains(retained),
@@ -121,15 +124,10 @@ fn friction_surface_is_append_only() {
         );
     }
 
-    for removed in [
-        "orbit.friction.update",
-        "orbit.friction.delete",
-        "orbit.friction.resolve",
-        "orbit.friction.reject",
-    ] {
+    for removed in ["orbit.friction.delete", "orbit.friction.reject"] {
         assert!(
             !names.contains(removed),
-            "non-append-only friction tool registered: {removed}"
+            "destructive friction tool registered: {removed}"
         );
     }
 }
@@ -151,6 +149,10 @@ fn task_dependency_params_remain_in_agent_tool_schemas() {
 
         assert_eq!(dependency_param.param_type, "string_list");
         assert!(!dependency_param.required);
+        assert!(
+            schema.parameters.iter().any(|param| param.name == "crew"),
+            "{tool_name} should expose crew"
+        );
     }
 }
 

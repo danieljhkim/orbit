@@ -1,4 +1,4 @@
-.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast bench check-design-docs stability release-check
+.PHONY: help build release run check test fmt fmt-check clippy clean install uninstall dev watch audit tree ci ci-fast bench check-design-docs stability release-check cleanup-branches
 
 # ------------------------------------------------------------
 # Config
@@ -56,6 +56,7 @@ help:
 	@echo "  make install      Install CLI locally (INSTALL_PROFILE=debug optional)"
 	@echo "  make uninstall    Remove installed binary"
 	@echo "  make clean        Clean build artifacts"
+	@echo "  make cleanup-branches  Force-remove worktrees and branches except main/agent-main (DESTRUCTIVE)"
 	@echo "  make watch        Continuous check + test"
 
 # ------------------------------------------------------------
@@ -116,6 +117,7 @@ ci-fast:
 	./scripts/check-dependency-direction.sh
 	./scripts/check-cli-imports.sh
 	./scripts/check-stability.sh
+	./scripts/check-learning-layout.sh
 
 # Flag design docs older than the code they reference
 check-design-docs:
@@ -145,6 +147,11 @@ uninstall:
 # ------------------------------------------------------------
 clean:
 	$(CARGO) clean
+
+# Force-remove every linked worktree and local branch except main/agent-main.
+# Destructive: discards in-progress task branches and uncommitted work in worktrees.
+cleanup-branches:
+	./scripts/cleanup-branches.sh
 
 # ------------------------------------------------------------
 # Dev Loop

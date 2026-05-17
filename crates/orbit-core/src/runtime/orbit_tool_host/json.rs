@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use orbit_common::types::{
-    Learning, OrbitError, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus,
-    build_task_status_index, resolve_task_dependencies,
+    Learning, LearningComment, LearningVoteSummary, OrbitError, Task, TaskArtifact, TaskComment,
+    TaskHistoryEntry, TaskStatus, build_task_status_index, resolve_task_dependencies,
 };
 use orbit_store::LearningSearchResult;
 use serde_json::{Map, Value, json};
@@ -33,6 +33,41 @@ pub(super) fn learning_to_json(learning: &Learning) -> Value {
         "updated_at": learning.updated_at.to_rfc3339(),
         "created_by": learning.created_by,
         "priority": learning.priority,
+    })
+}
+
+pub(super) fn learning_show_to_json(
+    learning: &Learning,
+    vote_summary: &LearningVoteSummary,
+) -> Value {
+    let mut value = learning_to_json(learning);
+    if let Some(object) = value.as_object_mut() {
+        object.insert("vote_count".to_string(), json!(vote_summary.vote_count));
+        object.insert(
+            "last_voted_at".to_string(),
+            vote_summary
+                .last_voted_at
+                .map(|ts| json!(ts.to_rfc3339()))
+                .unwrap_or(Value::Null),
+        );
+    }
+    value
+}
+
+pub(super) fn learning_vote_summary_to_json(summary: &LearningVoteSummary) -> Value {
+    json!({
+        "vote_count": summary.vote_count,
+        "last_voted_at": summary.last_voted_at.map(|ts| ts.to_rfc3339()),
+    })
+}
+
+pub(super) fn learning_comment_to_json(comment: &LearningComment) -> Value {
+    json!({
+        "id": comment.id,
+        "learning_id": comment.learning_id,
+        "body": comment.body,
+        "author_model": comment.author_model,
+        "created_at": comment.created_at.to_rfc3339(),
     })
 }
 
@@ -82,6 +117,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
         "relations": task.relations,
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
+        "crew": task.crew,
         "created_at": task.created_at.to_rfc3339(),
         "updated_at": task.updated_at.to_rfc3339(),
     })
@@ -107,6 +143,7 @@ pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Valu
         serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
             .map_err(serialize_error("serialize review threads"))?,
     );
+    insert_resolved_crew(runtime, task, object)?;
     Ok(value)
 }
 
@@ -116,8 +153,33 @@ pub(super) fn task_lock_to_json(task: &Task) -> Value {
         "title": task.title,
         "status": task.status.to_string(),
         "job_run_id": task.job_run_id,
+        "crew": task.crew,
         "context_files": task.context_files,
     })
+}
+
+fn insert_resolved_crew(
+    runtime: &OrbitRuntime,
+    task: &Task,
+    object: &mut Map<String, Value>,
+) -> Result<(), OrbitError> {
+    let Some(projection) = runtime.resolved_crew_projection(task)? else {
+        return Ok(());
+    };
+    object.insert("resolved_crew".to_string(), Value::String(projection.name));
+    object.insert(
+        "planner_model".to_string(),
+        Value::String(projection.planner_model),
+    );
+    object.insert(
+        "implementer_model".to_string(),
+        Value::String(projection.implementer_model),
+    );
+    object.insert(
+        "reviewer_model".to_string(),
+        Value::String(projection.reviewer_model),
+    );
+    Ok(())
 }
 
 pub(super) fn serialize_task_lint_report(report: &TaskLintReport) -> Result<Value, OrbitError> {

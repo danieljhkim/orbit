@@ -70,8 +70,12 @@ pub fn workspace_adr_backends(adr_dir: PathBuf, store: Store) -> Arc<dyn AdrStor
 pub fn workspace_learning_backend(
     learning_dir: PathBuf,
     store: Store,
-) -> Arc<dyn LearningStoreBackend> {
-    Arc::new(LearningFileStore::new_with_index(learning_dir, store))
+) -> Result<Arc<dyn LearningStoreBackend>, orbit_common::types::OrbitError> {
+    LearningFileStore::reject_legacy_flat_layout(&learning_dir)?;
+    Ok(Arc::new(LearningFileStore::new_with_index(
+        learning_dir,
+        store,
+    )))
 }
 
 pub fn global_executor_def_store(root: PathBuf) -> Arc<dyn ExecutorDefStoreBackend> {
@@ -151,6 +155,7 @@ mod tests {
                 description: "A task created through the trait surface.".to_string(),
                 acceptance_criteria: vec!["Round trip through trait backend".to_string()],
                 dependencies: Vec::new(),
+                relations: Vec::new(),
                 tags: vec!["task-artifacts".to_string()],
                 plan: "1. Exercise backend".to_string(),
                 execution_summary: String::new(),
@@ -166,6 +171,7 @@ mod tests {
                 task_type: TaskType::Feature,
                 external_refs: Vec::new(),
                 source_task_id: None,
+                crew: None,
                 comments: Vec::new(),
             })
             .expect("create task");
@@ -181,5 +187,22 @@ mod tests {
             "Trait-created v2 task"
         );
         assert_eq!(backends.task.list_tasks().expect("list tasks").len(), 1);
+    }
+
+    #[test]
+    fn workspace_learning_backend_rejects_legacy_flat_layout() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path().join("learnings");
+        std::fs::create_dir_all(&root).expect("create learnings");
+        std::fs::write(root.join("L20260517-1.yaml"), "").expect("legacy learning");
+        let store = Store::open_in_memory().expect("open store");
+
+        let err = match workspace_learning_backend(root, store) {
+            Ok(_) => panic!("legacy rejected"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, orbit_common::types::OrbitError::Migration(_)));
+        assert!(err.to_string().contains("orbit learning migrate-layout"));
     }
 }

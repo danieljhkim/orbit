@@ -16,6 +16,9 @@ pub struct TaskStartArgs {
     /// Append a task comment
     #[arg(long)]
     pub comment: Option<String>,
+    /// Crew override for this start
+    #[arg(long)]
+    pub crew: Option<String>,
     /// Explicit agent name to persist on the task artifact
     #[arg(long)]
     pub agent: Option<String>,
@@ -29,12 +32,13 @@ pub struct TaskStartArgs {
 
 impl Execute for TaskStartArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let task = runtime.start_task_with_identity(
+        let task = runtime.start_task_with_identity_and_crew(
             &self.id,
             self.note,
             self.comment,
             self.agent,
             self.model,
+            self.crew,
         )?;
         if self.json {
             crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)

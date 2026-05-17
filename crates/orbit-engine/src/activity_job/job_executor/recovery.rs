@@ -98,7 +98,7 @@ pub(super) fn role_overridden_recovery_spec(
         return None;
     };
     let role = inline_spec.role?;
-    let resolved = resolve_agent_settings(role, ctx.host, inline_spec);
+    let resolved = resolve_agent_settings(role, ctx.host, inline_spec, &ctx.input);
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
     Some(ActivityV2Spec::AgentLoop(spec))

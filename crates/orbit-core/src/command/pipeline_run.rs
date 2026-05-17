@@ -226,6 +226,11 @@ impl OrbitRuntime {
         if !changed {
             return Ok(());
         }
+        let input = run
+            .input
+            .clone()
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        self.record_run_crew_from_input(&run.run_id, &input)?;
 
         self.record_event(OrbitEvent::JobRunStarted {
             job_id: run.job_id.clone(),
@@ -233,10 +238,6 @@ impl OrbitRuntime {
             attempt: run.attempt,
         })?;
 
-        let input = run
-            .input
-            .clone()
-            .unwrap_or_else(|| Value::Object(Default::default()));
         let outcome = self.run_job_v2_from_yaml_with_run_id(
             yaml_path,
             input.clone(),

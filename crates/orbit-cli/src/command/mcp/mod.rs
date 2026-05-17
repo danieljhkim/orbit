@@ -1,9 +1,9 @@
 //! `orbit mcp` — MCP client integration and server.
 //!
 //! `orbit mcp init/remove` manages local client integration for Claude Code,
-//! Codex, and Gemini. `orbit mcp serve` serves the Orbit tool surface over MCP so
-//! external clients can discover and invoke Orbit operations with typed JSON
-//! schemas.
+//! Codex, Gemini, and Grok. `orbit mcp serve` serves the Orbit tool surface over
+//! MCP so external clients can discover and invoke Orbit operations with typed
+//! JSON schemas.
 
 mod setup;
 
@@ -51,8 +51,11 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
 pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
     "orbit.friction.add",
     "orbit.friction.list",
+    "orbit.friction.resolve",
     "orbit.friction.show",
     "orbit.friction.stats",
+    "orbit.friction.tags",
+    "orbit.friction.update",
 ];
 
 pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
@@ -72,11 +75,15 @@ pub(crate) const SEMANTIC_READ_TOOL_NAMES: &[&str] =
 
 pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
+    "orbit.learning.comment.add",
+    "orbit.learning.comment.delete",
+    "orbit.learning.comment.list",
     "orbit.learning.list",
     "orbit.learning.search",
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.supersede",
+    "orbit.learning.upvote",
     "orbit.learning.prune",
     "orbit.learning.reindex",
 ];

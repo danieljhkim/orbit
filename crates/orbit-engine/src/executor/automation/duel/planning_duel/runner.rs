@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use orbit_common::types::{OrbitError, PlanningRoleAssignment};
+use orbit_common::types::{OrbitError, PlanningRoleAssignment, RoleSlot};
 use serde_json::{Value, json};
 
 use super::types::PlanningDuelPlanArtifact;
@@ -23,9 +23,10 @@ fn join_activity_result(
 fn require_plan_artifact_for_assignment<'a>(
     plan_artifacts: &'a [PlanningDuelPlanArtifact],
     assignment: &PlanningRoleAssignment,
+    slot: RoleSlot,
     invocation: &ActivityInvocationResult,
 ) -> Result<&'a PlanningDuelPlanArtifact, OrbitError> {
-    artifacts::plan_artifact_for_assignment(plan_artifacts, assignment).map_err(|error| {
+    artifacts::plan_artifact_for_assignment(plan_artifacts, assignment, slot).map_err(|error| {
         OrbitError::Execution(format!(
             "{error}; {}",
             planner_invocation_diagnostics(invocation)
@@ -110,8 +111,16 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     let planning_roles = roles::parse_planning_duel_roles(&roles_output)?;
 
     let planner_activity = roles::planner_activity();
-    let planner_a_input = roles::planner_input(task_id);
-    let planner_b_input = roles::planner_input(task_id);
+    let planner_a_input = roles::planner_input_for_slot(task_id, RoleSlot::PlannerA);
+    let planner_b_input = roles::planner_input_for_slot(task_id, RoleSlot::PlannerB);
+    let planner_a_model = roles_output["planner_a_model"]
+        .as_str()
+        .ok_or_else(|| OrbitError::Execution("missing planner_a_model".to_string()))?
+        .to_string();
+    let planner_b_model = roles_output["planner_b_model"]
+        .as_str()
+        .ok_or_else(|| OrbitError::Execution("missing planner_b_model".to_string()))?
+        .to_string();
     let (planner_a_result, planner_b_result) = std::thread::scope(|scope| {
         let planner_a = planning_roles.planner_a.clone();
         let planner_b = planning_roles.planner_b.clone();
@@ -120,8 +129,8 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         let handle_a = scope.spawn(move || {
             host.invoke_activity(
                 planner_activity_a,
-                &planner_a.agent,
-                Some(planner_a.model.as_str()),
+                planner_a.family.as_str(),
+                Some(planner_a_model.as_str()),
                 planner_a_input,
                 roles::PLANNER_TIMEOUT_SECONDS,
                 debug,
@@ -130,8 +139,8 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         let handle_b = scope.spawn(move || {
             host.invoke_activity(
                 planner_activity_b,
-                &planner_b.agent,
-                Some(planner_b.model.as_str()),
+                planner_b.family.as_str(),
+                Some(planner_b_model.as_str()),
                 planner_b_input,
                 roles::PLANNER_TIMEOUT_SECONDS,
                 debug,
@@ -150,18 +159,24 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     let _ = require_plan_artifact_for_assignment(
         &plan_artifacts,
         &planning_roles.planner_a,
+        RoleSlot::PlannerA,
         &planner_a_result,
     )?;
     let _ = require_plan_artifact_for_assignment(
         &plan_artifacts,
         &planning_roles.planner_b,
+        RoleSlot::PlannerB,
         &planner_b_result,
     )?;
+    let arbiter_model = roles_output["arbiter_model"]
+        .as_str()
+        .ok_or_else(|| OrbitError::Execution("missing arbiter_model".to_string()))?
+        .to_string();
 
     let arbiter_result = host.invoke_activity(
         roles::arbiter_activity(),
-        &planning_roles.arbiter.agent,
-        Some(planning_roles.arbiter.model.as_str()),
+        planning_roles.arbiter.family.as_str(),
+        Some(arbiter_model.as_str()),
         roles::arbiter_input(task_id),
         roles::ARBITER_TIMEOUT_SECONDS,
         debug,
@@ -176,6 +191,7 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
             "planner_a".to_string(),
             metrics::role_metrics_from_invocation(
                 &planning_roles.planner_a,
+                RoleSlot::PlannerA,
                 roles::PLANNER_ACTIVITY_ID,
                 &planner_a_result,
             ),
@@ -184,6 +200,7 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
             "planner_b".to_string(),
             metrics::role_metrics_from_invocation(
                 &planning_roles.planner_b,
+                RoleSlot::PlannerB,
                 roles::PLANNER_ACTIVITY_ID,
                 &planner_b_result,
             ),
@@ -192,6 +209,7 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
             "arbiter".to_string(),
             metrics::role_metrics_from_invocation(
                 &planning_roles.arbiter,
+                RoleSlot::Arbiter,
                 roles::ARBITER_ACTIVITY_ID,
                 &arbiter_result,
             ),
@@ -218,8 +236,8 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         "task_id": task_id,
         "run_id": job_run_id,
         "task_status": writeback["task_status"].clone(),
-        "winner_agent_cli": winner.winner_agent_cli,
-        "winner_model": winner.winner_model,
+        "winner_family": winner.winner_family,
+        "winner_slot": winner.winner_slot.map(|slot| slot.as_str().to_string()),
         "recorded": true,
     }))
 }
@@ -242,8 +260,8 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::context::{
-        ActivityInvocationResult, JobRunResult, RuntimeHost, TaskAutomationUpdate, TaskReadHost,
-        TaskWriteHost,
+        ActivityInvocationResult, JobRunResult, RuntimeHost, TaskActivityUpdate,
+        TaskAutomationUpdate, TaskReadHost, TaskWriteHost,
     };
     use crate::executor::registry::ActivityExecutorRegistry;
 
@@ -375,10 +393,7 @@ mod tests {
         fn update_task_from_activity(
             &self,
             _task_id: &str,
-            _status: TaskStatus,
-            _execution_summary: Option<String>,
-            _comment: Option<String>,
-            _note: Option<String>,
+            _update: TaskActivityUpdate,
         ) -> Result<Task, orbit_common::types::OrbitError> {
             Err(orbit_common::types::OrbitError::Execution(
                 "planning duel must not update task status from activity".to_string(),
@@ -455,6 +470,17 @@ mod tests {
             Ok(None)
         }
 
+        fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
+            let model = match family {
+                "codex" => "gpt-5.5",
+                "claude" => "claude-opus-4-7",
+                "gemini" => "gemini-3.1-pro",
+                "grok" => "grok-4",
+                _ => return None,
+            };
+            Some(model.to_string())
+        }
+
         fn invocation_records(
             &self,
             _query: InvocationQuery,
@@ -479,13 +505,17 @@ mod tests {
             activity: Activity,
             agent_cli: &str,
             model: Option<&str>,
-            _input: Value,
+            input: Value,
             _timeout_seconds: u64,
             _debug: bool,
         ) -> Result<ActivityInvocationResult, orbit_common::types::OrbitError> {
-            let model = model.unwrap_or("unknown-model");
+            let _model = model.unwrap_or("unknown-model");
             match activity.id.as_str() {
                 "propose_duel_plan" => {
+                    let slot = input
+                        .get("planning_duel_slot")
+                        .and_then(Value::as_str)
+                        .unwrap_or("planner_a");
                     let should_omit = self
                         .omit_planner_artifacts
                         .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
@@ -497,15 +527,15 @@ mod tests {
                             .lock()
                             .expect("artifacts lock")
                             .push(TaskArtifact::from_text(
-                                format!("planning-duel/{agent_cli}-{model}.md"),
+                                format!("planning-duel/{slot}.md"),
                                 format!(
-                                    "*authored by: {agent_cli} / {model}*\n## Plan\nPreserve task status.\n"
+                                    "*authored by: {agent_cli} / {slot}*\n## Plan\nPreserve task status.\n"
                                 ),
                             ));
                     }
                 }
                 "arbitrate_duel_plan" => {
-                    let winner =
+                    let _winner =
                         first_planner_assignment(&self.artifacts.lock().expect("artifacts lock"))?;
                     self.artifacts
                         .lock()
@@ -513,8 +543,7 @@ mod tests {
                         .push(TaskArtifact::from_text(
                             "planning-duel/winner.json",
                             json!({
-                                "winner_agent_cli": winner.agent,
-                                "winner_model": winner.model,
+                                "winner_slot": "planner_a",
                                 "arbiter_rationale": "Preserves lifecycle state."
                             })
                             .to_string(),
@@ -584,23 +613,14 @@ mod tests {
             .ok_or_else(|| {
                 orbit_common::types::OrbitError::Execution("missing planner artifact".to_string())
             })?;
-        let name = artifact
-            .path
-            .strip_prefix("planning-duel/")
-            .and_then(|value| value.strip_suffix(".md"))
-            .ok_or_else(|| {
-                orbit_common::types::OrbitError::Execution(
-                    "invalid planner artifact path".to_string(),
-                )
-            })?;
-        let (agent, model) = name.split_once('-').ok_or_else(|| {
+        let content = artifact.text_content().ok_or_else(|| {
             orbit_common::types::OrbitError::Execution(
-                "invalid planner artifact signature".to_string(),
+                "planner artifact content must be utf-8".to_string(),
             )
         })?;
+        let signature = super::artifacts::parse_planning_duel_signature(content)?;
         Ok(PlanningRoleAssignment {
-            agent: agent.to_string(),
-            model: model.to_string(),
+            family: signature.family,
         })
     }
 
@@ -626,6 +646,7 @@ mod tests {
             external_refs: Vec::new(),
             relations: Vec::new(),
             job_run_id: None,
+            crew: None,
             created_at: now,
             updated_at: now,
         }
@@ -720,18 +741,17 @@ mod tests {
         let mut artifacts = host.artifacts.lock().expect("artifacts lock");
         artifacts.clear();
         artifacts.push(TaskArtifact::from_text(
-            "planning-duel/codex-gpt-5.5.md",
-            "*authored by: codex / gpt-5.5*\n## Plan\nLoser plan.\n",
+            "planning-duel/planner_a.md",
+            "*authored by: codex / planner_a*\n## Plan\nLoser plan.\n",
         ));
         artifacts.push(TaskArtifact::from_text(
-            "planning-duel/claude-claude-opus-4-7.md",
-            format!("*authored by: claude / claude-opus-4-7*\n{plan_body}"),
+            "planning-duel/planner_b.md",
+            format!("*authored by: claude / planner_b*\n{plan_body}"),
         ));
         artifacts.push(TaskArtifact::from_text(
             "planning-duel/winner.json",
             json!({
-                "winner_agent_cli": "claude",
-                "winner_model": "claude-opus-4-7",
+                "winner_slot": "planner_b",
                 "arbiter_rationale": "Claude provided more detail."
             })
             .to_string(),
@@ -744,9 +764,9 @@ mod tests {
             &json!({
                 "task_id": "T20260430-STATUS",
                 "planning_duel_roles": {
-                    "planner_a": { "agent": "codex", "model": "gpt-5.5" },
-                    "planner_b": { "agent": "claude", "model": "claude-opus-4-7" },
-                    "arbiter":   { "agent": "gemini", "model": "gemini-3.1-pro" }
+                    "planner_a": { "family": "codex" },
+                    "planner_b": { "family": "claude" },
+                    "arbiter":   { "family": "gemini" }
                 }
             }),
         )

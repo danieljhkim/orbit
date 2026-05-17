@@ -249,4 +249,20 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn parse_cli_invocation_trace_accepts_grok_json_text_envelope() {
+        let stdout = serde_json::json!({
+            "text": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{\"pong\":\"grok\"},\"error\":null}",
+            "stopReason": "EndTurn",
+            "sessionId": "grok-session",
+            "requestId": "grok-request"
+        })
+        .to_string();
+
+        assert!(
+            parse_cli_invocation_trace(stdout.as_bytes(), b"", Some(0), 99, true).is_some(),
+            "grok --output-format json stdout should expose the embedded Orbit envelope"
+        );
+    }
 }

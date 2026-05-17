@@ -2,6 +2,7 @@ use orbit_common::types::{
     OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus, normalize_task_dependencies,
     normalize_task_tags, prune_missing_context_files, validate_task_dependencies,
 };
+use orbit_engine::TaskActivityUpdate;
 
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams;
@@ -36,11 +37,16 @@ impl OrbitRuntime {
     pub fn update_task_from_activity(
         &self,
         id: &str,
-        status: TaskStatus,
-        execution_summary: Option<String>,
-        comment: Option<String>,
-        note: Option<String>,
+        update: TaskActivityUpdate,
     ) -> Result<Task, OrbitError> {
+        let TaskActivityUpdate {
+            status,
+            execution_summary,
+            comment,
+            note,
+            agent,
+            model,
+        } = update;
         self.update_task_with_status_note_and_identity(
             id,
             TaskUpdateParams {
@@ -50,8 +56,8 @@ impl OrbitRuntime {
                 ..Default::default()
             },
             note,
-            Some(SYSTEM_ACTOR_LABEL.to_string()),
-            None,
+            agent.or_else(|| model.is_none().then(|| SYSTEM_ACTOR_LABEL.to_string())),
+            model,
         )
     }
 
@@ -94,6 +100,9 @@ impl OrbitRuntime {
         }
         if let Some(tags) = params.tags.take() {
             params.tags = Some(normalize_task_tags(tags));
+        }
+        if let Some(crew) = &params.crew {
+            self.validate_crew_name(crew.as_deref())?;
         }
         if params.has_any_mutation() && task.status == TaskStatus::Archived {
             return Err(OrbitError::InvalidInput(format!(
@@ -175,6 +184,10 @@ impl OrbitRuntime {
                 }
             })
         });
+        let source_task_id_changed = params
+            .source_task_id
+            .as_ref()
+            .is_some_and(|source_task_id| task.source_task_id() != source_task_id.as_deref());
 
         let mut append_history: Vec<TaskHistoryEntry> = if dropped_context_files.is_empty() {
             Vec::new()
@@ -185,6 +198,16 @@ impl OrbitRuntime {
             )]
         };
         append_history.extend(task_comment_history_entries(&append_comments));
+        if source_task_id_changed {
+            append_history.push(TaskHistoryEntry {
+                at: chrono::Utc::now(),
+                by: effective_label.clone(),
+                event: "updated".to_string(),
+                note: Some("source_task_id changed".to_string()),
+                from_status: None,
+                to_status: None,
+            });
+        }
         let updated = self.with_mutation(|| {
             let task = self.stores().tasks().update(
                 id,

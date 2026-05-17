@@ -1,39 +1,26 @@
 ---
 title: Default Workflows
-description: "Built-in workflows under orbit run: ship, ship-auto, and duel-plan."
+description: "Built-in workflows under orbit run: ship and duel-plan."
 sidebar:
   order: 4
 ---
 
-Orbit ships three default workflows under `orbit run`. Each wraps a seeded job pipeline under `crates/orbit-core/assets/jobs/`; the same pipelines are runnable directly via `orbit run job <name>`.
+Orbit ships two default workflows under `orbit run`. Each wraps a seeded job pipeline under `crates/orbit-core/assets/jobs/`; the same pipelines are runnable directly via `orbit run job <name>`.
 
 All three workflows default `--base` to `agent-main` — the convention for agent-targeted long-lived branches that humans merge into `main` after review. Pass `--base <branch>` to target a different branch.
 
 ## `orbit run ship`
 
-Carry one or more named tasks from `backlog` through `done`. The default mode opens a PR; `--mode local` ships in-place.
+Submit backlog tasks or one or more named tasks through the gated shipment pipeline. The default mode opens PRs; `--mode local` ships in-place. The command returns a run ID immediately, while dependency and lock waits happen inside the job.
 
 ```bash
+orbit run ship
 orbit run ship T20260506-1
 orbit run ship T20260506-1 T20260506-2 --mode local
 orbit run ship T20260506-1 --base main
 ```
 
-Underlying job: `task_pr_pipeline` (PR mode) or `task_local_pipeline` (`--mode local`).
-
-## `orbit run ship-auto`
-
-Pick eligible tasks from the backlog, group them into bundles, and run each bundle through the same gate pipeline as `ship`. No task IDs are required.
-
-```bash
-orbit run ship-auto
-orbit run ship-auto --mode local
-orbit run ship-auto --base main
-```
-
-Output statuses: `empty_backlog`, `gated_noop`, `gate_waiting`, `gate_failed`, `completed`. Gated and no-op statuses keep exit code 0 and are reported explicitly in both text and `--json` output.
-
-Underlying job: `task_auto_pipeline`.
+Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and then routes to `task_pr_pipeline` or `task_local_pipeline` from `--mode`.
 
 ## `orbit run duel-plan`
 

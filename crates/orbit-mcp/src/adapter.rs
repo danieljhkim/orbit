@@ -410,7 +410,11 @@ fn parse_learning_search_candidates(value: &Value) -> Vec<ReminderCandidate> {
                 .unwrap_or_default()
                 .to_string();
             Some(ReminderCandidate {
-                reminder: LearningReminder { id, summary },
+                reminder: LearningReminder {
+                    id,
+                    summary,
+                    comments: Vec::new(),
+                },
                 priority,
                 updated_at,
             })
@@ -653,7 +657,8 @@ fn enum_values_for(tool_name: &str, param_name: &str) -> Option<&'static [&'stat
 /// stay arrays so arrays of objects are not advertised as string lists.
 fn property_for(param_type: &str) -> Map<String, Value> {
     let mut m = Map::new();
-    match param_type.trim().to_ascii_lowercase().as_str() {
+    let key = param_type.trim().to_ascii_lowercase();
+    match key.as_str() {
         "string" | "text" | "enum" => {
             m.insert("type".to_string(), Value::String("string".to_string()));
         }
@@ -687,7 +692,21 @@ fn property_for(param_type: &str) -> Map<String, Value> {
                 ]),
             );
         }
+        "object_list" | "object[]" | "objects" => {
+            m.insert(
+                "anyOf".to_string(),
+                json!([
+                    { "type": "array", "items": { "type": "object" } },
+                    { "type": "string" },
+                ]),
+            );
+        }
         _ => {
+            tracing::warn!(
+                target: "orbit.mcp.adapter",
+                param_type = %param_type,
+                "unknown ToolParam type degrading to string"
+            );
             m.insert("type".to_string(), Value::String("string".to_string()));
         }
     }
@@ -1227,5 +1246,324 @@ mod tests {
             }
             Ok(self.response.clone())
         }
+    }
+
+    // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---
+
+    fn capture_warnings<F, T>(f: F) -> (T, String)
+    where
+        F: FnOnce() -> T,
+    {
+        use std::io::{self, Write};
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::filter::LevelFilter;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone)]
+        struct CaptureMakeWriter(Arc<Mutex<Vec<u8>>>);
+        struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl<'a> MakeWriter<'a> for CaptureMakeWriter {
+            type Writer = CaptureWriter;
+            fn make_writer(&'a self) -> Self::Writer {
+                CaptureWriter(Arc::clone(&self.0))
+            }
+        }
+        impl Write for CaptureWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().expect("capture lock").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(CaptureMakeWriter(Arc::clone(&buffer)))
+            .with_max_level(LevelFilter::WARN)
+            .with_target(true)
+            .with_ansi(false)
+            .without_time()
+            .finish();
+        let result = tracing::subscriber::with_default(subscriber, f);
+        let logs = String::from_utf8(buffer.lock().expect("capture buffer lock").clone())
+            .expect("utf8 logs");
+        (result, logs)
+    }
+
+    #[test]
+    fn property_for_object_list_emits_anyof_array_of_objects_or_string() {
+        for token in [
+            "object_list",
+            "object[]",
+            "objects",
+            "OBJECT_LIST",
+            "object[] ",
+        ] {
+            let prop = property_for(token);
+            let any_of = match prop.get("anyOf").and_then(Value::as_array) {
+                Some(any_of) => any_of,
+                None => panic!("anyOf present for {token}"),
+            };
+            let has_array_objects = any_of.iter().any(|s| {
+                s.get("type").and_then(Value::as_str) == Some("array")
+                    && s.get("items")
+                        .and_then(|i| i.get("type"))
+                        .and_then(Value::as_str)
+                        == Some("object")
+            });
+            let has_string = any_of
+                .iter()
+                .any(|s| s.get("type").and_then(Value::as_str) == Some("string"));
+            assert!(has_array_objects, "{token} must accept array-of-objects");
+            assert!(has_string, "{token} must accept string fallback");
+        }
+    }
+
+    #[test]
+    fn property_for_unknown_emits_tracing_warn_at_target() {
+        let token = "<unknown-token-not-in-match-arms>";
+        let (prop, logs) = capture_warnings(|| property_for(token));
+        assert_eq!(
+            prop.get("type").and_then(Value::as_str),
+            Some("string"),
+            "fallback still produces string"
+        );
+        assert!(
+            logs.contains("unknown ToolParam type degrading to string"),
+            "warning message present: {logs}"
+        );
+        assert!(logs.contains("orbit.mcp.adapter"), "target present: {logs}");
+        assert!(
+            logs.contains(token),
+            "offending token named in event: {logs}"
+        );
+    }
+
+    #[test]
+    fn learning_add_schema_advertises_object_list_shape_for_evidence() {
+        let params = vec![
+            param_with_type("summary", "string"),
+            param_with_type("scope", "object"),
+            param_with_type("evidence", "object_list"),
+            param_with_type("model", "string"),
+        ];
+        let schema = build_input_schema("orbit.learning.add", &params);
+        let properties = schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        let ev = properties
+            .get("evidence")
+            .and_then(Value::as_object)
+            .expect("evidence property");
+        assert!(
+            ev.get("anyOf").is_some(),
+            "evidence must use anyOf (array-of-object | string), got: {ev:?}"
+        );
+        // must not be the old silent string
+        assert_ne!(
+            ev.get("type").and_then(Value::as_str),
+            Some("string"),
+            "evidence must not degrade to plain string"
+        );
+    }
+
+    /// Simple in-memory persistence host for e2e MCP learning add/update/show tests.
+    /// Verifies that array-shaped evidence reaches the handler (proving schema allows it).
+    struct LearningPersistenceHost {
+        store: StdMutex<HashMap<String, Value>>,
+        next: StdMutex<u32>,
+    }
+
+    impl LearningPersistenceHost {
+        fn new() -> Self {
+            Self {
+                store: StdMutex::new(HashMap::new()),
+                next: StdMutex::new(0),
+            }
+        }
+        fn next_id(&self) -> String {
+            let mut n = self.next.lock().expect("next lock");
+            *n += 1;
+            format!("L-test-{:04}", *n)
+        }
+    }
+
+    impl crate::McpHost for LearningPersistenceHost {
+        fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+            vec![
+                tool_schema("orbit.learning.add"),
+                tool_schema("orbit.learning.update"),
+                tool_schema("orbit.learning.show"),
+            ]
+        }
+
+        fn call_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
+            let canonical = if name.contains("learning.add") {
+                "orbit.learning.add"
+            } else if name.contains("learning.update") {
+                "orbit.learning.update"
+            } else if name.contains("learning.show") {
+                "orbit.learning.show"
+            } else {
+                name
+            };
+            match canonical {
+                "orbit.learning.add" => {
+                    let id = self.next_id();
+                    let mut rec = input.clone();
+                    if let Some(obj) = rec.as_object_mut() {
+                        obj.insert("id".to_string(), Value::String(id.clone()));
+                        obj.insert(
+                            "created_at".to_string(),
+                            Value::String("2026-05-17T12:00:00Z".to_string()),
+                        );
+                        if !obj.contains_key("evidence") {
+                            obj.insert("evidence".to_string(), Value::Array(vec![]));
+                        }
+                    }
+                    self.store
+                        .lock()
+                        .expect("store lock")
+                        .insert(id.clone(), rec.clone());
+                    Ok(rec)
+                }
+                "orbit.learning.update" => {
+                    let id = input
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let mut guard = self.store.lock().expect("store lock");
+                    if let Some(existing) = guard.get_mut(&id) {
+                        if let (Some(obj), Some(up)) = (existing.as_object_mut(), input.as_object())
+                        {
+                            for (k, v) in up.iter() {
+                                if k != "id" {
+                                    obj.insert(k.clone(), v.clone());
+                                }
+                            }
+                        }
+                        Ok(existing.clone())
+                    } else {
+                        Ok(json!({ "id": id, "updated": false }))
+                    }
+                }
+                "orbit.learning.show" => {
+                    let id = input
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    let guard = self.store.lock().expect("store lock");
+                    if let Some(rec) = guard.get(&id) {
+                        Ok(rec.clone())
+                    } else {
+                        Ok(json!({ "id": id, "found": false }))
+                    }
+                }
+                _ => Ok(json!({ "ok": true, "echo": name })),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn orbit_learning_add_via_mcp_adapter_accepts_evidence_array() {
+        let host = Arc::new(LearningPersistenceHost::new());
+        let server = OrbitToolServer::new(host);
+
+        let evidence = json!([{ "kind": "task", "ref": "T-test" }]);
+        let req = request_with_args(
+            "orbit.learning.add",
+            json!({
+                "summary": "MCP evidence array test",
+                "scope": { "tags": ["mcp-test"] },
+                "evidence": evidence,
+                "model": "grok"
+            }),
+        );
+        let res = server
+            .call_tool_request(req)
+            .await
+            .expect("MCP call to learning.add succeeds");
+        let body = res.structured_content.expect("structured response");
+        let id = body.get("id").and_then(Value::as_str).expect("created id");
+
+        // re-fetch via show (exercises round-trip)
+        let show_req = request_with_args("orbit.learning.show", json!({ "id": id }));
+        let show_res = server
+            .call_tool_request(show_req)
+            .await
+            .expect("show after add");
+        let shown = show_res.structured_content.expect("shown record");
+        let got_ev = shown
+            .get("evidence")
+            .and_then(Value::as_array)
+            .expect("evidence persisted as array");
+        assert_eq!(got_ev.len(), 1, "one evidence entry");
+        assert_eq!(got_ev[0]["kind"], "task");
+        assert_eq!(got_ev[0]["ref"], "T-test");
+        // response shape has the fields show would return
+        assert!(shown.get("id").is_some());
+        assert!(shown.get("created_at").is_some() || shown.get("updated_at").is_some());
+    }
+
+    #[tokio::test]
+    async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro() {
+        let host = Arc::new(LearningPersistenceHost::new());
+        let server = OrbitToolServer::new(host);
+
+        // seed via add
+        let seed = request_with_args(
+            "orbit.learning.add",
+            json!({
+                "summary": "for update repro",
+                "scope": { "tags": ["repro"] },
+                "model": "claude"
+            }),
+        );
+        let seed_res = server.call_tool_request(seed).await.expect("seed add");
+        let seed_id = seed_res
+            .structured_content
+            .expect("seed body")
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("seed id")
+            .to_string();
+
+        // now the live repro: update evidence via MCP (the F2026-05-025 case)
+        let new_evidence = json!([{ "kind": "task", "ref": "ORB-00022" }]);
+        let upd_req = request_with_args(
+            "orbit.learning.update",
+            json!({
+                "id": seed_id,
+                "model": "claude",
+                "evidence": new_evidence
+            }),
+        );
+        let upd_res = server
+            .call_tool_request(upd_req)
+            .await
+            .expect("update via MCP must succeed (was failing before fix)");
+        let _updated = upd_res.structured_content.expect("update response");
+
+        // verify by show
+        let show_req = request_with_args("orbit.learning.show", json!({ "id": seed_id }));
+        let shown = server
+            .call_tool_request(show_req)
+            .await
+            .expect("show after update")
+            .structured_content
+            .expect("shown");
+        let ev = shown
+            .get("evidence")
+            .and_then(Value::as_array)
+            .expect("evidence after update is array");
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0]["ref"], "ORB-00022");
+        assert_eq!(ev[0]["kind"], "task");
     }
 }

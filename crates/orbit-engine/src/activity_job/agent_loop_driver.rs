@@ -26,7 +26,9 @@ use orbit_agent::loop_engine::{
 };
 use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
 use orbit_common::types::activity_job::AgentLoopSpec;
-use orbit_common::types::{LearningInjectionCaps, LearningReminder, prepend_reminder_block};
+use orbit_common::types::{
+    LearningInjectionCaps, LearningReminder, RoleSlot, prepend_reminder_block,
+};
 use orbit_common::utility::learning_session::{
     learning_session_state_path, write_learning_session_state,
 };
@@ -53,13 +55,16 @@ pub fn drive_agent_loop(
     fs_profile: Option<&str>,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
-    let provider = expected_provider();
+    let provider = spec.provider.as_str();
     let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
-    let tool_ctx = host.tool_context_for_activity(
+    let mut tool_ctx = host.tool_context_for_activity(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
     );
+    tool_ctx.agent_name = Some(provider.to_string());
+    tool_ctx.model_name = Some(model);
+    tool_ctx.role_slot = role_slot_from_input(input);
     drive_inner(
         spec,
         api_key,
@@ -88,11 +93,16 @@ pub fn drive_agent_loop_with_session(
     host: &dyn V2RuntimeHost,
     fs_profile: Option<&str>,
 ) -> Result<LoopOutcome, DispatchError> {
-    let tool_ctx = host.tool_context_for_activity(
+    let model = resolve_model(spec);
+    let provider = spec.provider.as_str();
+    let mut tool_ctx = host.tool_context_for_activity(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
     );
+    tool_ctx.agent_name = Some(provider.to_string());
+    tool_ctx.model_name = Some(model);
+    tool_ctx.role_slot = role_slot_from_input(input);
     drive_inner(
         spec,
         api_key,
@@ -103,6 +113,15 @@ pub fn drive_agent_loop_with_session(
         tool_ctx,
         Some(host),
     )
+}
+
+fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
+    input
+        .get("planning_duel_slot")
+        .or_else(|| input.get("role_slot"))
+        .or_else(|| input.get("slot"))
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
 }
 
 /// Drive a v2 agent_loop activity with a caller-supplied ToolContext.
@@ -118,8 +137,15 @@ pub fn drive_agent_loop_with_tool_context(
     tool_ctx: ToolContext,
 ) -> Result<LoopOutcome, DispatchError> {
     let model = resolve_model(spec);
-    let provider = expected_provider();
+    let provider = spec.provider.as_str();
     let mut session = Session::new(provider, model.clone(), &spec.instruction, None);
+    let mut tool_ctx = tool_ctx;
+    if tool_ctx.agent_name.is_none() {
+        tool_ctx.agent_name = Some(provider.to_string());
+    }
+    if tool_ctx.model_name.is_none() {
+        tool_ctx.model_name = Some(model);
+    }
     drive_inner(
         spec,
         api_key,
@@ -249,14 +275,6 @@ fn resolve_model(spec: &AgentLoopSpec) -> String {
     spec.model
         .clone()
         .unwrap_or_else(|| DEFAULT_ANTHROPIC_MODEL.to_string())
-}
-
-fn expected_provider() -> &'static str {
-    if replay_active() {
-        "replay"
-    } else {
-        "anthropic"
-    }
 }
 
 fn replay_active() -> bool {
@@ -701,6 +719,7 @@ mod tests {
             reminders: vec![LearningReminder {
                 id: "L20260515-0001".to_string(),
                 summary: "Remember to validate the output.".to_string(),
+                comments: Vec::new(),
             }],
         };
         let mut session = Session::new("replay", "test-model", "test", None);
@@ -763,6 +782,7 @@ baseline prompt"
                 .map(|idx| LearningReminder {
                     id: format!("L20260515-{idx:04}"),
                     summary: format!("Learning {idx}"),
+                    comments: Vec::new(),
                 })
                 .collect(),
         };

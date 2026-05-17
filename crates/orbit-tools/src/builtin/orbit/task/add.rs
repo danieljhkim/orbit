@@ -35,6 +35,14 @@ impl Tool for OrbitTaskAddTool {
                 required: false,
             },
             ToolParam {
+                name: "relations".to_string(),
+                description:
+                    "Optional typed task relations as an array of {type, target} objects"
+                        .to_string(),
+                param_type: "array".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "tags".to_string(),
                 description: "Optional tags as a string or array of strings".to_string(),
                 param_type: "string_list".to_string(),
@@ -118,6 +126,12 @@ impl Tool for OrbitTaskAddTool {
             ToolParam {
                 name: "parent_id".to_string(),
                 description: "Optional parent task ID for a subtask relationship".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "crew".to_string(),
+                description: "Optional named crew to use when running this task".to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },

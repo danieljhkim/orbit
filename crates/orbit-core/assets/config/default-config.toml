@@ -27,34 +27,54 @@ enabled = true
 editing = false
 
 [workflow]
-# Default base branch for `orbit run ship`, `ship-auto`, and `duel-plan`.
+# Default base branch for `orbit run ship` and `duel-plan`.
 # Override per-invocation with `--base <branch>`. The Orbit repo itself uses
 # this two-branch pattern: `main` is the release/production branch, and
 # `agent-main` is the dev integration branch where task PRs land — set
 # `base_branch = "agent-main"` for the same layout in your own repo.
 base_branch = "main"
+default_crew = "opus-codex"
 
-# [agent.<role>] — per-role agent settings written by `orbit init`.
-#
-# Roles: reviewer, implementer, planner. Each table accepts:
-#   provider — claude | codex | gemini | ollama | openai_compat
-#   backend  — cli | http
-#   model    — provider-specific model name (e.g. claude-opus-4-7, gpt-5.5)
-#
-# `orbit init` collects these interactively and rewrites this file. Edit the
-# values below, or re-run `orbit init --force` to start fresh.
-#
-# [agent.reviewer]
-# provider = "claude"
-# backend = "cli"
-# model = "claude-opus-4-7"
-#
-# [agent.implementer]
-# provider = "codex"
-# backend = "cli"
-# model = "gpt-5.5"
-#
-# [agent.planner]
-# provider = "claude"
-# backend = "cli"
-# model = "claude-opus-4-7"
+[crews.opus-codex]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+
+[crews.silver]
+planner = { model = "pro", provider = "gemini", backend = "cli" }
+implementer = { model = "grok-build", provider = "grok", backend = "cli" }
+reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+
+[crews.bronze]
+planner = { model = "sonnet", provider = "claude", backend = "cli" }
+implementer = { model = "sonnet", provider = "claude", backend = "cli" }
+reviewer = { model = "sonnet", provider = "claude", backend = "cli" }
+
+[crews.all-claude]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+
+[crews.all-codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+
+[crews.all-gemini]
+planner = { model = "pro", provider = "gemini", backend = "cli" }
+implementer = { model = "pro", provider = "gemini", backend = "cli" }
+reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+
+[crews.all-grok]
+planner = { model = "grok-build", provider = "grok", backend = "cli" }
+implementer = { model = "grok-build", provider = "grok", backend = "cli" }
+reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
+
+[duel]
+candidates = ["codex", "claude", "gemini", "grok"]
+
+[duel.models]                             
+codex  = "gpt-5.5"
+claude = "claude-opus-4-7"
+gemini = "pro"
+grok = "grok-build"

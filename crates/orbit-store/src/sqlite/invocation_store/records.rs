@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, types::ToSql};
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{OrbitError, RoleSlot};
 
 use crate::{Store, now_string};
 
@@ -26,16 +27,17 @@ impl Store {
 
         tx.execute(
             r#"INSERT INTO invocations(
-                ts, job_run_id, activity_id, agent, model, duration_ms,
+                ts, job_run_id, activity_id, agent, model, slot, duration_ms,
                 input_tokens, cache_read_tokens, cache_create_tokens,
                 output_tokens, tool_call_count
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"#,
             params![
                 now_string(),
                 params.job_run_id,
                 params.activity_id,
                 params.agent,
                 params.model,
+                params.slot.map(|slot| slot.as_str().to_string()),
                 params.trace.duration_ms as i64,
                 params.trace.usage.input as i64,
                 params.trace.usage.cache_read as i64,
@@ -202,6 +204,9 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
     if let Some(model) = &filter.model {
         query.push_filter("i.model = ?", model.clone());
     }
+    if let Some(slot) = filter.slot {
+        query.push_filter("i.slot = ?", slot.as_str().to_string());
+    }
     if let Some(tool_name) = &filter.tool_name {
         query.push_filter(
             "EXISTS (SELECT 1 FROM tool_calls tc WHERE tc.invocation_id = i.id AND tc.tool_name = ?)",
@@ -213,7 +218,7 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
     query.push_value(limit as i64);
 
     let sql = format!(
-        "SELECT i.id, i.ts, i.job_run_id, i.activity_id, i.agent, i.model, i.duration_ms, \
+        "SELECT i.id, i.ts, i.job_run_id, i.activity_id, i.agent, i.model, i.slot, i.duration_ms, \
          i.input_tokens, i.cache_read_tokens, i.cache_create_tokens, i.output_tokens, \
          i.tool_call_count \
          FROM invocations i {} ORDER BY i.ts DESC, i.id DESC LIMIT ?{}",
@@ -226,8 +231,9 @@ fn build_invocation_list_query(filter: &InvocationQuery) -> (String, Vec<Box<dyn
 
 fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<InvocationRecord> {
     let ts_raw: String = row.get(1)?;
-    let input_tokens = row.get::<_, i64>(7)? as u64;
-    let output_tokens = row.get::<_, i64>(10)? as u64;
+    let slot_raw: Option<String> = row.get(6)?;
+    let input_tokens = row.get::<_, i64>(8)? as u64;
+    let output_tokens = row.get::<_, i64>(11)? as u64;
 
     Ok(InvocationRecord {
         id: row.get(0)?,
@@ -236,13 +242,24 @@ fn map_invocation_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<Invocation
         activity_id: row.get(3)?,
         agent: row.get(4)?,
         model: row.get(5)?,
-        duration_ms: row.get::<_, i64>(6)? as u64,
+        slot: slot_raw
+            .as_deref()
+            .map(RoleSlot::from_str)
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+        duration_ms: row.get::<_, i64>(7)? as u64,
         input_tokens,
-        cache_read_tokens: row.get::<_, i64>(8)? as u64,
-        cache_create_tokens: row.get::<_, i64>(9)? as u64,
+        cache_read_tokens: row.get::<_, i64>(9)? as u64,
+        cache_create_tokens: row.get::<_, i64>(10)? as u64,
         output_tokens,
         total_tokens: input_tokens.saturating_add(output_tokens),
-        tool_call_count: row.get::<_, i64>(11)? as u64,
+        tool_call_count: row.get::<_, i64>(12)? as u64,
         task_ids: Vec::new(),
         tool_calls: Vec::new(),
     })
@@ -370,5 +387,67 @@ impl Store {
         self.conn
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use orbit_common::types::{InvocationTrace, RoleSlot};
+
+    use super::*;
+
+    #[test]
+    fn invocation_records_persist_planning_duel_slot() {
+        let store = Store::open_in_memory().expect("open store");
+
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: "jrun-1".to_string(),
+                activity_id: "propose_duel_plan".to_string(),
+                agent: "gemini".to_string(),
+                model: Some("gemini-3.1-pro".to_string()),
+                slot: Some(RoleSlot::PlannerA),
+                task_ids: vec!["ORB-1".to_string()],
+                trace: InvocationTrace::default(),
+            })
+            .expect("insert invocation");
+
+        let records = store
+            .list_invocation_records(&InvocationQuery {
+                job_run_id: Some("jrun-1".to_string()),
+                slot: Some(RoleSlot::PlannerA),
+                limit: 10,
+                ..InvocationQuery::default()
+            })
+            .expect("list records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].slot, Some(RoleSlot::PlannerA));
+    }
+
+    #[test]
+    fn invocation_records_persist_non_duel_slot_as_null() {
+        let store = Store::open_in_memory().expect("open store");
+
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: "jrun-2".to_string(),
+                activity_id: "implement_one".to_string(),
+                agent: "codex".to_string(),
+                model: Some("gpt-5.5".to_string()),
+                slot: None,
+                task_ids: vec!["ORB-2".to_string()],
+                trace: InvocationTrace::default(),
+            })
+            .expect("insert invocation");
+
+        let records = store
+            .list_invocation_records(&InvocationQuery {
+                job_run_id: Some("jrun-2".to_string()),
+                limit: 10,
+                ..InvocationQuery::default()
+            })
+            .expect("list records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].slot, None);
     }
 }

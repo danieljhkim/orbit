@@ -71,6 +71,7 @@ impl ExecutorDefFileStore {
                 args: def.args.clone(),
                 stdout_format: def.stdout_format,
                 model_pair_override: def.model_pair_override.clone(),
+                model_flag: def.model_flag.clone(),
                 legacy_models: None,
                 timeout_seconds: def.timeout_seconds,
                 env: def.env.clone(),
@@ -128,6 +129,7 @@ mod tests {
             args: vec!["--flag".to_string()],
             stdout_format: None,
             model_pair_override: None,
+            model_flag: None,
             timeout_seconds: None,
             env: HashMap::new(),
             sandbox: None,
@@ -154,6 +156,28 @@ mod tests {
         assert_eq!(loaded.name, "claude");
         assert_eq!(loaded.sandbox, Some(ExecutorSandboxKind::MacosSandboxExec));
         assert!(loaded.allow_fallback);
+    }
+
+    #[test]
+    fn roundtrips_model_flag_field() {
+        let dir = tempdir().expect("tempdir");
+        let store = ExecutorDefFileStore::new(dir.path().to_path_buf());
+
+        let mut def = baseline_def("gemini");
+        def.model_flag = Some("-m".to_string());
+        store.upsert_executor_def(&def).expect("upsert");
+
+        let loaded = store
+            .get_executor_def("gemini")
+            .expect("get")
+            .expect("present");
+        assert_eq!(loaded.model_flag.as_deref(), Some("-m"));
+
+        let on_disk = std::fs::read_to_string(dir.path().join("gemini.yaml")).expect("read");
+        assert!(
+            on_disk.contains("model_flag: -m"),
+            "model_flag should be persisted: {on_disk}"
+        );
     }
 
     #[test]

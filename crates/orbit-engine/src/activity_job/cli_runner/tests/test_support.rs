@@ -11,9 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::context::AgentRoleConfig;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::ExecutorSandboxKind;
-use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
+use orbit_common::types::activity_job::{AgentLoopSpec, AgentRole, Backend, OnDenial, Provider};
 use orbit_common::utility::logging::RedactingFields;
 #[cfg(target_os = "macos")]
 use orbit_exec::sandbox_exec_path;
@@ -291,6 +292,30 @@ impl V2RuntimeHost for TestHost {
         Ok(self.task_context.clone())
     }
 
+    fn agent_role_config_for_input(
+        &self,
+        role: AgentRole,
+        input: &Value,
+    ) -> Option<AgentRoleConfig> {
+        let crew = input.get("crew").and_then(|v| v.as_str()).unwrap_or("");
+        if crew != "opus-codex" {
+            return None;
+        }
+        match role {
+            AgentRole::Planner => Some(AgentRoleConfig {
+                provider: Some(Provider::Claude),
+                model: Some("claude-opus-4-7".to_string()),
+                backend: None,
+            }),
+            AgentRole::Implementer => Some(AgentRoleConfig {
+                provider: Some(Provider::Codex),
+                model: Some("gpt-5.5".to_string()),
+                backend: None,
+            }),
+            _ => None,
+        }
+    }
+
     fn tool_context_for_activity(
         &self,
         _run_id: Option<&str>,
@@ -317,7 +342,6 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
     }
 }
 
-#[cfg(target_os = "macos")]
 pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
     provider: &str,
     timeout: Duration,
@@ -326,6 +350,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         "claude" => Provider::Claude,
         "codex" => Provider::Codex,
         "gemini" => Provider::Gemini,
+        "grok" => Provider::Grok,
         other => panic!("unsupported provider for test: {other}"),
     };
     AgentLoopSpec {

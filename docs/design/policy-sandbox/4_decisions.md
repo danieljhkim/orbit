@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-09
+**Last updated:** 2026-05-16
 
 This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by ADR number. New entries follow the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -158,14 +158,14 @@ This is the append-only ADR log for Policy & Sandboxing. Entries are ordered by 
 
 **Status:** Accepted · 2026-04 · [T20260428-14]
 
-**Context.** ADR-012 unblocked Codex state writes, but Claude writes startup state under `$HOME/.claude` or `$CLAUDE_CONFIG_DIR`, and Gemini writes under `$HOME/.gemini`. SBPL compilation receives `ResolvedFsProfile` plus host env, not the active provider, so provider-conditional allow clauses would require new plumbing.
+**Context.** ADR-012 unblocked Codex state writes, but Claude writes startup state under `$HOME/.claude` or `$CLAUDE_CONFIG_DIR`, Gemini writes under `$HOME/.gemini`, and Grok writes under `$HOME/.grok`. SBPL compilation receives `ResolvedFsProfile` plus host env, not the active provider, so provider-conditional allow clauses would require new plumbing.
 
-**Decision.** Emit state-dir allows for all supported CLI providers on every macOS sandbox profile: `$CODEX_HOME` / `$HOME/.codex`, `$CLAUDE_CONFIG_DIR` / `$HOME/.claude`, and `$HOME/.gemini`. Keep `append_provider_side_write_roots` Codex-only because Claude and Gemini have no `--add-dir` equivalent; document that a future provider with such a surface should generalize the branch.
+**Decision.** Emit state-dir allows for all supported CLI providers on every macOS sandbox profile: `$CODEX_HOME` / `$HOME/.codex`, `$CLAUDE_CONFIG_DIR` / `$HOME/.claude`, `$HOME/.gemini`, and `$HOME/.grok`. Keep `append_provider_side_write_roots` Codex-only because Claude, Gemini, and Grok have no `--add-dir` equivalent; document that a future provider with such a surface should generalize the branch.
 
 **Consequences.**
-- Claude and Gemini reach past CLI startup under `macos-sandbox-exec` with the same state-dir defense story as Codex.
-- Emitting all three narrow state-dir allowances avoids provider plumbing; Codex side roots remain a separate branch until another provider ships an equivalent surface.
-- Cost: every macOS sandbox profile carries three state-dir allow clauses regardless of which provider runs. If a future provider's state dir overlaps with another sensitive root, this design needs revisiting.
+- Claude, Gemini, and Grok reach past CLI startup under `macos-sandbox-exec` with the same state-dir defense story as Codex.
+- Emitting all four narrow state-dir allowances avoids provider plumbing; Codex side roots remain a separate branch until another provider ships an equivalent surface.
+- Cost: every macOS sandbox profile carries four state-dir allow clauses regardless of which provider runs. If a future provider's state dir overlaps with another sensitive root, this design needs revisiting.
 
 ## ADR-014 — Claude state surface includes `$HOME/.claude.json` siblings, not just `$HOME/.claude/`
 
@@ -218,5 +218,6 @@ Use `literal` for the canonical and lock files (predictable names) and `regex` f
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
 - **[T20260508-13]** — Add `$HOME/.claude.json{,.lock,.tmp.<pid>.<ms_ts>}` sibling allows to the macOS sandbox profile so Claude can persist its main settings file.
 - **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations rather than inherited `PATH`.
+- **[ORB-00048]** — Extend the unconditional provider state-dir allowance set to include Grok's `$HOME/.grok` state directory while hardening fourth-family scoreboards and analytics.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

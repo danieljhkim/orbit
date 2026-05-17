@@ -308,7 +308,9 @@ mod tests {
     use serde_json::Value;
     use tempfile::tempdir;
 
-    use crate::context::{JobRunResult, RuntimeHost, TaskReadHost, TaskWriteHost};
+    use crate::context::{
+        JobRunResult, RuntimeHost, TaskActivityUpdate, TaskReadHost, TaskWriteHost,
+    };
     use crate::executor::registry::ActivityExecutorRegistry;
 
     use super::*;
@@ -387,10 +389,7 @@ mod tests {
         fn update_task_from_activity(
             &self,
             _task_id: &str,
-            _status: TaskStatus,
-            _execution_summary: Option<String>,
-            _comment: Option<String>,
-            _note: Option<String>,
+            _update: TaskActivityUpdate,
         ) -> Result<Task, OrbitError> {
             unimplemented!("not needed by review sync tests")
         }
@@ -475,6 +474,7 @@ mod tests {
                     "gemini-3.1-pro-preview",
                     "gemini-3-flash-preview",
                 )),
+                "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
                 _ => None,
             }
         }
@@ -588,6 +588,7 @@ mod tests {
             external_refs: vec![ExternalRef::github_pr("42").expect("github pr ref")],
             relations: Vec::new(),
             job_run_id: None,
+            crew: None,
             created_at: now,
             updated_at: now,
         }
@@ -677,5 +678,28 @@ mod tests {
         assert_eq!(scoreable_review_model(&host, "human"), None);
         assert_eq!(scoreable_review_model(&host, "system"), None);
         assert_eq!(scoreable_review_model(&host, "daniel"), None);
+    }
+
+    #[test]
+    fn scoreable_review_model_scores_grok_threads() {
+        let temp = tempdir().expect("create tempdir");
+        let host = TestHost::new(
+            fixture_task(temp.path()),
+            temp.path().to_path_buf(),
+            temp.path().join("scoreboard"),
+        );
+
+        assert_eq!(
+            scoreable_review_model(&host, "grok-4").as_deref(),
+            Some("grok-4")
+        );
+        assert_eq!(
+            scoreable_review_model(&host, "grok / grok-4").as_deref(),
+            Some("grok-4")
+        );
+        assert_eq!(
+            scoreable_review_model(&host, "grok / grok-3").as_deref(),
+            Some("grok-3")
+        );
     }
 }

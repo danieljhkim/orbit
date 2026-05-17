@@ -27,8 +27,7 @@ use crate::command::Execute;
 
 const RUN_AFTER_HELP: &str = "\
 Workflow entrypoints:
-  orbit run ship <task_id> ...
-  orbit run ship-auto
+  orbit run ship [task_id ...]
   orbit run duel-plan <task_id>
   orbit run job <job_id> [--input key=value] [--json] [--debug]
 
@@ -43,7 +42,7 @@ Run history:
 
 #[derive(Args)]
 #[command(
-    about = "Run a job workflow (supports run ship / ship-auto / duel-plan / job)",
+    about = "Run a job workflow (supports run ship / duel-plan / job)",
     arg_required_else_help = true,
     subcommand_required = true,
     override_usage = "orbit run <COMMAND>",
@@ -54,8 +53,7 @@ Run history:
 {usage-heading} {usage}
 
 Workflows:
-  ship       Ship explicitly selected tasks through the task pipeline
-  ship-auto  Auto-select backlog tasks and ship them through the task pipeline
+  ship       Ship backlog or explicitly selected tasks through the gated task pipeline
   duel-plan  Run a planning duel for one task
   job        Run an arbitrary job by ID
 
@@ -83,11 +81,14 @@ impl Execute for RunCommand {
 
 #[derive(Subcommand)]
 pub enum RunSubcommand {
-    /// Ship explicitly selected tasks through the task pipeline
+    /// Ship backlog or explicitly selected tasks through the gated task pipeline
     Ship(ship::ShipCommand),
-    /// Auto-select backlog tasks and ship them through the task pipeline
-    #[command(name = "ship-auto")]
-    ShipAuto(ship::ShipAutoCommand),
+    /// Deprecated alias for `orbit run ship`
+    #[command(name = "ship-auto", hide = true)]
+    ShipAuto(ship::LegacyShipAutoCommand),
+    /// Deprecated alias for `orbit run ship --mode local`
+    #[command(name = "ship-local", hide = true)]
+    ShipLocal(ship::LegacyShipLocalCommand),
     /// Run a planning duel for one task
     #[command(name = "duel-plan")]
     DuelPlan(duel::DuelPlanCommand),
@@ -110,6 +111,7 @@ impl Execute for RunSubcommand {
         match self {
             RunSubcommand::Ship(command) => command.execute(runtime),
             RunSubcommand::ShipAuto(command) => command.execute(runtime),
+            RunSubcommand::ShipLocal(command) => command.execute(runtime),
             RunSubcommand::DuelPlan(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),
@@ -141,6 +143,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_ship_auto_mode_defaults() {
+        let command = parse_run(&["orbit", "run", "ship"]);
+        match command.command {
+            RunSubcommand::Ship(args) => {
+                assert!(args.task_ids.is_empty());
+                assert_eq!(args.mode, ship::ShipMode::Pr);
+                assert_eq!(args.base, None);
+            }
+            _ => panic!("expected ship"),
+        }
+    }
+
+    #[test]
     fn parses_explicit_ship_defaults() {
         let command = parse_run(&["orbit", "run", "ship", "T1", "T2"]);
         match command.command {
@@ -167,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_ship_auto_as_top_level_subcommand() {
+    fn parses_ship_auto_as_deprecated_top_level_subcommand() {
         let command = parse_run(&["orbit", "run", "ship-auto", "-m", "pr", "-b", "main"]);
         match command.command {
             RunSubcommand::ShipAuto(args) => {
@@ -175,6 +190,18 @@ mod tests {
                 assert_eq!(args.base.as_deref(), Some("main"));
             }
             _ => panic!("expected ship-auto"),
+        }
+    }
+
+    #[test]
+    fn parses_ship_local_as_deprecated_top_level_subcommand() {
+        let command = parse_run(&["orbit", "run", "ship-local", "-b", "main", "T1"]);
+        match command.command {
+            RunSubcommand::ShipLocal(args) => {
+                assert_eq!(args.task_ids, vec!["T1"]);
+                assert_eq!(args.base.as_deref(), Some("main"));
+            }
+            _ => panic!("expected ship-local"),
         }
     }
 

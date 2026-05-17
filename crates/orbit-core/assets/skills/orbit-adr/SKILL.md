@@ -1,6 +1,6 @@
 ---
 name: orbit-adr
-description: Use this when creating, updating, listing, showing, accepting, or superseding Orbit Architecture Decision Record artifacts via `orbit.adr.*`. Covers ADR body requirements, global ADR ID allocation, related_features/related_tasks/legacy_ids, lifecycle transitions, and how to avoid editing `.orbit/adrs/` files directly.
+description: Use this whenever an Architecture Decision Record is being created, updated, accepted, or superseded — *including* when editing a `docs/design/<feature>/4_decisions.md` file and about to add or rename a `## ADR-` heading. The global ID must be allocated via `orbit.adr.add` first; the local heading then uses that ID verbatim. Covers ADR body requirements, global ADR ID allocation, related_features/related_tasks/legacy_ids, lifecycle transitions, and how to avoid editing `.orbit/adrs/` files directly.
 ---
 
 # Orbit ADR
@@ -21,15 +21,26 @@ Both surfaces accept the same JSON. Use the CLI examples below when shell access
 | `orbit.adr.update` | `orbit_adr_update({...})` | `orbit tool run orbit.adr.update --input-file update.json` |
 | `orbit.adr.supersede` | `orbit_adr_supersede({...})` | `orbit tool run orbit.adr.supersede --input '{"old_id":"ADR-0041","new_id":"ADR-0042"}'` |
 
-Always include `model` in JSON inputs when the tool accepts it. Prefer `--input-file` for `add` and body-changing `update` calls so markdown does not get mangled by shell quoting.
+Always include `model` in JSON inputs when the tool accepts it. The value is your agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized, but the family is canonical. Prefer `--input-file` for `add` and body-changing `update` calls so markdown does not get mangled by shell quoting.
 
 Run `orbit tool show orbit.adr.add` or `orbit tool list` instead of guessing if the local tool surface has changed. Do not assume future surfaces such as `orbit.adr.search` or `orbit.adr.review_thread.*` exist unless `orbit tool list` shows them.
+
+## When Editing `4_decisions.md` Directly
+
+If you are in the middle of writing prose into `docs/design/<feature>/4_decisions.md` and about to add a `## ADR-` heading, **stop and run `orbit.adr.add` first**. Then use the allocated global ID (`ADR-NNNN`, 4-digit) as the local heading verbatim. Per [ADR-0153] this is the only authoring path that keeps the global store and the local narrative in sync.
+
+Anti-patterns the failure mode looked like before [ORB-00098]:
+
+- Picking the next sequential local number (`## ADR-006 — ...` after `ADR-005`) without an allocation.
+- Picking a four-digit number that "looks global" (e.g. `## ADR-0153 — ...`) without an allocation — this is worse than the 3-digit version because readers assume `orbit.adr.show ADR-0153` will return that decision; it will not.
+
+Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, and the legacy_id resolution path. If you find an existing local-numbered ADR that was authored this way, backfill it via `orbit.adr.add` and set `legacy_ids: ["<feature>/ADR-NNN"]` on the resulting record.
 
 ## Workflow
 
 1. Inspect nearby decisions before adding a new one.
-   - `orbit tool run orbit.adr.list --input '{"feature":"<feature>","model":"<model_name>"}'`
-   - `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN","model":"<model_name>"}'`
+   - `orbit tool run orbit.adr.list --input '{"feature":"<feature>","model":"<agent-family>"}'`
+   - `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN","model":"<agent-family>"}'`
    - Use `legacy_id` lookup for migrated per-feature references, for example `{"legacy_id":"activity-job/ADR-039"}`.
 2. Decide whether this is a new ADR, an update to a proposed ADR, or a supersession.
    - New decision: `orbit.adr.add`.
@@ -83,7 +94,7 @@ Create a proposed ADR:
   "owner": "codex",
   "related_features": ["task-artifacts"],
   "related_tasks": [],
-  "model": "<model_name>"
+  "model": "<agent-family>"
 }
 ```
 
@@ -97,7 +108,7 @@ Attach a legacy per-feature alias after creation:
 orbit tool run orbit.adr.update --input '{
   "id": "ADR-0143",
   "legacy_ids": ["task-artifacts/ADR-001"],
-  "model": "<model_name>"
+  "model": "<agent-family>"
 }'
 ```
 
@@ -108,7 +119,7 @@ orbit tool run orbit.adr.update --input '{
   "id": "ADR-0143",
   "status": "accepted",
   "related_tasks": ["T20260510-28"],
-  "model": "<model_name>"
+  "model": "<agent-family>"
 }'
 ```
 
@@ -118,7 +129,7 @@ Supersede an old ADR:
 orbit tool run orbit.adr.supersede --input '{
   "old_id": "ADR-0041",
   "new_id": "ADR-0042",
-  "model": "<model_name>"
+  "model": "<agent-family>"
 }'
 ```
 

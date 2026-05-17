@@ -58,8 +58,8 @@ impl Prompter for StdinPrompter {
 /// Read provider/backend/model for each of the `ROLE_PROMPT_ORDER` roles and
 /// return a map keyed by role name suitable for serializing as
 /// `[agent.<role>]` blocks. Returned configs always carry `Some` values for
-/// provider/backend, while model is omitted when the selected provider has no
-/// known default and the user leaves it blank.
+/// provider/backend/model values. Crew-based config requires a concrete model
+/// for every role, so custom providers re-prompt until a model is supplied.
 ///
 /// Detection results seed the per-role defaults so most users can just press
 /// Enter once to accept the recommended setup.
@@ -170,15 +170,16 @@ fn collect_model_override(
     prompter: &mut dyn Prompter,
 ) -> io::Result<Option<String>> {
     let prompt = if model_default.is_empty() {
-        "Model (optional): ".to_string()
+        "Model: ".to_string()
     } else {
         format!("Model [{model_default}]: ")
     };
-    let model_value = take_or_default(prompter.prompt(&prompt)?, model_default);
-    if model_value.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(model_value))
+    loop {
+        let model_value = take_or_default(prompter.prompt(&prompt)?, model_default);
+        if !model_value.is_empty() {
+            return Ok(Some(model_value));
+        }
+        prompter.message("Model is required for crew role assignments.")?;
     }
 }
 
@@ -269,6 +270,9 @@ fn agent_options(role: &str, detected: &DetectedAgents) -> Vec<AgentOption> {
     if detected.gemini_cli {
         options.push(agent_option("Gemini CLI", "gemini", "cli"));
     }
+    if detected.grok_cli {
+        options.push(agent_option("Grok CLI", "grok", "cli"));
+    }
     if detected.ollama_cli {
         options.push(agent_option("Ollama CLI", "ollama", "cli"));
     }
@@ -316,6 +320,8 @@ fn agent_label(provider: &str, backend: &str) -> &'static str {
         ("codex", "http") => "Codex API",
         ("gemini", "cli") => "Gemini CLI",
         ("gemini", "http") => "Gemini API",
+        ("grok", "cli") => "Grok CLI",
+        ("grok", "http") => "Grok API",
         ("ollama", "cli") => "Ollama CLI",
         ("ollama", "http") => "Ollama API",
         _ => "Custom agent",
@@ -347,6 +353,7 @@ fn detection_lines(detected: &DetectedAgents) -> String {
         ("Claude CLI", detected.claude_cli),
         ("Codex CLI", detected.codex_cli),
         ("Gemini CLI", detected.gemini_cli),
+        ("Grok CLI", detected.grok_cli),
         ("Ollama CLI", detected.ollama_cli),
         ("ANTHROPIC_API_KEY", detected.anthropic_api_key),
         ("OPENAI_API_KEY", detected.openai_api_key),
@@ -589,14 +596,27 @@ mod tests {
     }
 
     #[test]
-    fn custom_provider_omits_blank_unknown_model() {
+    fn custom_provider_reprompts_for_blank_unknown_model() {
         let detected = DetectedAgents::default();
-        let mut prompter =
-            CannedPrompter::new(["n", "reviewer", "custom", "openai_compat", "http", "", ""]);
+        let mut prompter = CannedPrompter::new([
+            "n",
+            "reviewer",
+            "custom",
+            "openai_compat",
+            "http",
+            "",
+            "my-model",
+            "",
+        ]);
         let result = collect_role_settings(&detected, &mut prompter).unwrap();
         let reviewer = result.get("reviewer").expect("reviewer entry");
         assert_eq!(reviewer.provider.as_deref(), Some("openai_compat"));
         assert_eq!(reviewer.backend.as_deref(), Some("http"));
-        assert_eq!(reviewer.model, None);
+        assert_eq!(reviewer.model.as_deref(), Some("my-model"));
+        assert!(
+            prompter
+                .transcript()
+                .contains("Model is required for crew role assignments.")
+        );
     }
 }

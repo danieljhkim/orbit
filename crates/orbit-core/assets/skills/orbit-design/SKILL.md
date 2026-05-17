@@ -22,7 +22,7 @@ Both surfaces accept the same JSON. Use the CLI form when shell access is availa
 | `orbit.design.show` | `orbit_design_show({...})` | `orbit tool run orbit.design.show --input '{"feature":"my-feature"}'` |
 | `orbit.design.check` | `orbit_design_check({...})` | `orbit design check [--warn-only] [--include-missing]` |
 
-Mapping rule: `orbit.design.<verb>` ↔ `orbit_design_<verb>`. Always include `model` in JSON inputs when the tool accepts it. The `check` tool is the only one with a top-level `orbit design <subcommand>` CLI shortcut today; the other three are reachable through `orbit tool run orbit.design.<verb>`.
+Mapping rule: `orbit.design.<verb>` ↔ `orbit_design_<verb>`. Always include `model` in JSON inputs when the tool accepts it; pass your agent family (`codex`, `claude`, `gemini`, or `grok`). The `check` tool is the only one with a top-level `orbit design <subcommand>` CLI shortcut today; the other three are reachable through `orbit tool run orbit.design.<verb>`.
 
 `make check-design-docs` shells out to `orbit design check` and runs as part of `make ci`. The legacy `scripts/check_design_doc_decay.py` is a thin compatibility wrapper around the same binary.
 
@@ -33,7 +33,7 @@ Mapping rule: `orbit.design.<verb>` ↔ `orbit_design_<verb>`. Always include `m
    - `orbit tool run orbit.design.show --input '{"feature":"<feature>"}'` returns the same shape for one feature, with a typed `design_feature_not_found` error when absent.
    If a folder for a closely-related concern already exists, prefer extending it (specs/ entries, mechanism sections in `2_design.md`) over creating a new sibling — the convention's [CONVENTIONS.md §10](../../../docs/design/CONVENTIONS.md) anti-pattern table rejects "tiny features that should have lived in an existing folder."
 
-2. **Scaffold via `init`.** `orbit tool run orbit.design.init --input '{"feature":"<lowercase-hyphenated>","owner":"<agent-id>"}'` creates the folder atomically: four numbered docs (`1_overview.md`, `2_design.md`, `3_vision.md`, `4_decisions.md`) with required frontmatter pre-populated (today's date, the supplied `owner`), plus empty `specs/` and `references/` subfolders. The tool refuses to clobber an existing folder — delete or move first if you really mean to re-init. Feature names must be lowercase, hyphenated, and path-safe; the validator rejects spaces and uppercase.
+2. **Scaffold via `init`.** `orbit tool run orbit.design.init --input '{"feature":"<lowercase-hyphenated>","owner":"<agent-family>"}'` creates the folder atomically: four numbered docs (`1_overview.md`, `2_design.md`, `3_vision.md`, `4_decisions.md`) with required frontmatter pre-populated (today's date, the supplied `owner`), plus empty `specs/` and `references/` subfolders. The owner is the canonical agent family (`codex`, `claude`, `gemini`, or `grok`). The tool refuses to clobber an existing folder — delete or move first if you really mean to re-init. Feature names must be lowercase, hyphenated, and path-safe; the validator rejects spaces and uppercase.
 
 3. **Author the four docs.** Edit the scaffolded files directly. Required sections per doc role are listed in [CONVENTIONS.md §3](../../../docs/design/CONVENTIONS.md). Common gotcha: `init` writes the `## Task References` section into `4_decisions.md` *above* where ADRs go — move it to the bottom (after the last ADR) before authoring entries, since ADRs are append-only and Task References belongs at end-of-file per existing folder convention.
 
@@ -51,6 +51,7 @@ Mapping rule: `orbit.design.<verb>` ↔ `orbit_design_<verb>`. Always include `m
 - **`init` does not clobber.** If you ran it with the wrong feature name, delete the folder and re-run; do not patch in place.
 - **Required sections are non-negotiable.** Every numbered doc needs the sections listed in [CONVENTIONS.md §3](../../../docs/design/CONVENTIONS.md). Reviewers reject folders missing them; future lint may enforce mechanically.
 - **ADRs use the 3-of-3 earning rule.** A decision belongs in `4_decisions.md` only when it has a real alternative, a forward constraint, and a non-trivial cost. Use the `orbit-adr` skill for the ADR artifact surface; the `orbit.design.*` tools manage *folders*, not individual ADRs.
+- **Allocate ADR IDs globally before adding the local heading.** New `## ADR-` headings in `4_decisions.md` must use the ID returned by `orbit.adr.add` — see the `orbit-adr` skill and [ADR-0153]. Hand-writing a heading with a made-up number (3-digit local or 4-digit fake-global) produces an orphan decision invisible to the store; this is the failure mode [ORB-00098] resolved.
 - **`check` failures block `make ci`.** A stale-doc finding is treated like a clippy warning under `-D warnings`; do not skip it with `--warn-only` in CI configurations.
 - **`_archive/` is the retirement path.** When a feature is retired, move the folder under `docs/design/_archive/<feature>/` and annotate the first line of `1_overview.md`. Tools skip `_`-prefixed folders automatically.
 
@@ -59,7 +60,7 @@ Mapping rule: `orbit.design.<verb>` ↔ `orbit_design_<verb>`. Always include `m
 Scaffold a new feature folder:
 
 ```bash
-orbit tool run orbit.design.init --input '{"feature":"my-feature","owner":"claude-opus-4-7"}' --pretty
+orbit tool run orbit.design.init --input '{"feature":"my-feature","owner":"claude"}' --pretty
 ```
 
 List every existing feature folder with per-doc decay status:
@@ -96,11 +97,12 @@ orbit design check --warn-only
 
 | Mistake | Why it fails | Correct form |
 |---------|--------------|--------------|
-| Copying a sibling folder by hand to start a new feature | Drift between sibling folders compounds; missed required sections; wrong frontmatter dates | `orbit tool run orbit.design.init --input '{"feature":"...","owner":"..."}'` |
+| Copying a sibling folder by hand to start a new feature | Drift between sibling folders compounds; missed required sections; wrong frontmatter dates | `orbit tool run orbit.design.init --input '{"feature":"...","owner":"<agent-family>"}'` |
 | Bumping `Last updated:` to silence the decay check without re-reading the doc | The field is an explicit author assertion; lying breaks the freshness signal | Read the doc end-to-end, then bump |
 | Adding a fifth top-level file (`README.md`, `roadmap.md`) under a feature folder | Anti-pattern table in [CONVENTIONS.md §10](../../../docs/design/CONVENTIONS.md) rejects it; readers expect exactly four numbered docs | Fold the content into the appropriate numbered doc, or into a `specs/` entry |
 | Running `init` then re-running it after editing the wrong feature name | `init` refuses to clobber existing folders | Delete or move the wrong folder first, then re-run |
 | Using `orbit design check` to "lint" content | The tool only checks decay (date vs. referenced-code commit); section completeness is review-enforced today | Cross-review against [CONVENTIONS.md §3](../../../docs/design/CONVENTIONS.md) |
+| Adding a `## ADR-` heading to `4_decisions.md` without calling `orbit.adr.add` first | Produces an orphan decision the global store does not know about; the heading number either invents a local sequence or collides with a real global ID | Allocate via `orbit.adr.add` first, then use the returned `ADR-NNNN` as the heading verbatim — see the `orbit-adr` skill and [ADR-0153] |
 
 ## Exit Criteria
 

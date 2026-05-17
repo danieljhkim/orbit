@@ -427,6 +427,14 @@ pub struct JobRun {
     pub retry_source_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub knowledge_metrics: Option<KnowledgeRunMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_crew: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementer_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer_model: Option<String>,
     /// Step execution results; populated in-memory from step files, not stored in jrun.yaml.
     #[serde(skip)]
     pub steps: Vec<JobRunStep>,

@@ -20,7 +20,7 @@ Both tools are available via two surfaces; both accept identical JSON.
 | `orbit.semantic.search` | `orbit_semantic_search({...})` | `orbit tool run orbit.semantic.search --input '{...}'` |
 | `orbit.semantic.related` | `orbit_semantic_related({...})` | `orbit tool run orbit.semantic.related --input '{...}'` |
 
-Mapping rule: `orbit.semantic.<action>` ↔ `orbit_semantic_<action>`. See the `orbit` skill for the full surface mapping. **Always include `model` in the JSON** for provenance.
+Mapping rule: `orbit.semantic.<action>` ↔ `orbit_semantic_<action>`. See the `orbit` skill for the full surface mapping. **Always include `model` in the JSON** for provenance; pass your agent family (`codex`, `claude`, `gemini`, or `grok`).
 
 ## When To Use
 
@@ -42,13 +42,13 @@ Do not chain `semantic.search` → `semantic.related` → `semantic.search` to w
 
 ```bash
 # Topic search across all indexed task fields (hybrid BM25 + cosine)
-orbit tool run orbit.semantic.search --input '{"query":"slow inference after nomic swap","limit":5,"model":"<model_name>"}'
+orbit tool run orbit.semantic.search --input '{"query":"slow inference after nomic swap","limit":5,"model":"<agent-family>"}'
 
 # Restrict to a specific field (title, description, plan, acceptance, execution_summary)
-orbit tool run orbit.semantic.search --input '{"query":"agent loop deadlock","field":"plan","limit":5,"model":"<model_name>"}'
+orbit tool run orbit.semantic.search --input '{"query":"agent loop deadlock","field":"plan","limit":5,"model":"<agent-family>"}'
 
 # Neighbors of a known task — useful before starting execution
-orbit tool run orbit.semantic.related --input '{"id":"T20260510-3","limit":5,"model":"<model_name>"}'
+orbit tool run orbit.semantic.related --input '{"id":"T20260510-3","limit":5,"model":"<agent-family>"}'
 ```
 
 ## Result Shape

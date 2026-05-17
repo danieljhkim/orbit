@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    ExternalRef, OrbitId, ReviewThread, TaskArtifact, TaskComplexity, TaskPriority, TaskStatus,
-    TaskType,
+    ExternalRef, OrbitId, ReviewThread, TaskArtifact, TaskComplexity, TaskPriority, TaskRelation,
+    TaskStatus, TaskType,
 };
 
 use crate::runtime::TaskRecordUpdateParams;
@@ -12,6 +12,7 @@ pub struct TaskAddParams {
     pub description: String,
     pub acceptance_criteria: Vec<String>,
     pub dependencies: Vec<OrbitId>,
+    pub relations: Vec<TaskRelation>,
     pub tags: Vec<String>,
     pub plan: String,
     pub comment: Option<String>,
@@ -26,6 +27,7 @@ pub struct TaskAddParams {
     pub system_created: bool,
     pub external_refs: Vec<ExternalRef>,
     pub source_task_id: Option<String>,
+    pub crew: Option<String>,
 }
 
 impl Default for TaskAddParams {
@@ -36,6 +38,7 @@ impl Default for TaskAddParams {
             description: String::new(),
             acceptance_criteria: Vec::new(),
             dependencies: Vec::new(),
+            relations: Vec::new(),
             tags: Vec::new(),
             plan: String::new(),
             comment: None,
@@ -48,6 +51,7 @@ impl Default for TaskAddParams {
             system_created: false,
             external_refs: Vec::new(),
             source_task_id: None,
+            crew: None,
         }
     }
 }
@@ -58,16 +62,19 @@ pub struct TaskUpdateParams {
     pub description: Option<String>,
     pub acceptance_criteria: Option<Vec<String>>,
     pub dependencies: Option<Vec<OrbitId>>,
+    pub relations: Option<Vec<TaskRelation>>,
     pub tags: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
     pub status: Option<TaskStatus>,
     pub task_type: Option<TaskType>,
+    pub source_task_id: Option<Option<String>>,
     pub planned_by: Option<Option<String>>,
     pub implemented_by: Option<Option<String>>,
     pub pr_status: Option<Option<String>>,
     pub job_run_id: Option<Option<String>>,
+    pub crew: Option<Option<String>>,
     pub context_files: Option<Vec<String>>,
     pub upsert_artifacts: Vec<TaskArtifact>,
     pub append_review_threads: Vec<ReviewThread>,
@@ -83,15 +90,18 @@ impl TaskUpdateParams {
             || self.description.is_some()
             || self.acceptance_criteria.is_some()
             || self.dependencies.is_some()
+            || self.relations.is_some()
             || self.tags.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.status.is_some()
             || self.task_type.is_some()
+            || self.source_task_id.is_some()
             || self.planned_by.is_some()
             || self.implemented_by.is_some()
             || self.pr_status.is_some()
             || self.job_run_id.is_some()
+            || self.crew.is_some()
             || self.context_files.is_some()
             || !self.upsert_artifacts.is_empty()
             || !self.append_review_threads.is_empty()
@@ -109,15 +119,18 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             description: p.description,
             acceptance_criteria: p.acceptance_criteria,
             dependencies: p.dependencies,
+            relations: p.relations,
             tags: p.tags,
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,
             task_type: p.task_type,
+            source_task_id: p.source_task_id,
             planned_by: p.planned_by,
             implemented_by: p.implemented_by,
             pr_status: p.pr_status,
             job_run_id: p.job_run_id,
+            crew: p.crew,
             context_files: p.context_files,
             upsert_artifacts: p.upsert_artifacts,
             append_review_threads: p.append_review_threads,

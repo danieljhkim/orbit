@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-12
+**Last updated:** 2026-05-17
 
 Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts (phase 1) and, eventually, the knowledge-graph corpus (phase 2). Agents query it to find prior tasks by topic before adding duplicates; humans query it to recover work they remember by meaning rather than by literal substring. **Phase 1 ships in v1 as an opt-in feature**; phase 2 (graph integration) is reserved for a follow-up design once phase 1 is operational.
 

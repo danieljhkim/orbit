@@ -25,6 +25,7 @@ pub(crate) fn seed_executor(
             args: vec!["exec".to_string(), "--json".to_string()],
             stdout_format: None,
             model_pair_override: None,
+            model_flag: None,
             timeout_seconds: None,
             env: HashMap::new(),
             sandbox,
@@ -85,6 +86,7 @@ pub(crate) fn seed_list_backlog_task(
                 description: format!("Fixture task: {title}"),
                 acceptance_criteria: vec!["Fixture task is observable.".to_string()],
                 dependencies: Vec::new(),
+                relations: Vec::new(),
                 tags: Vec::new(),
                 plan: "Fixture plan.".to_string(),
                 execution_summary: String::new(),
@@ -109,6 +111,7 @@ pub(crate) fn seed_list_backlog_task(
                 task_type,
                 external_refs: Vec::new(),
                 source_task_id: None,
+                crew: None,
                 comments: Vec::new(),
             })
             .expect("seed legacy friction task");

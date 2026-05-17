@@ -108,13 +108,14 @@ fn duel_plan_add_persists_gemini_planner_artifact() {
         TaskStatus::InProgress,
         &[],
     );
-    let content = "*authored by: gemini / gemini-3.1-pro*\n## Plan\nPersist through Orbit tools.";
+    let content = "## Plan\nPersist through Orbit tools.";
 
     runtime
         .execute_tool_command(
             "orbit.duel.plan.add",
             json!({
                 "id": task.id.clone(),
+                "planning_duel_slot": "planner_a",
                 "content": content,
             }),
             Some("gemini".to_string()),
@@ -127,9 +128,12 @@ fn duel_plan_add_persists_gemini_planner_artifact() {
         .expect("read task artifacts");
     let artifact = artifacts
         .iter()
-        .find(|artifact| artifact.path == "planning-duel/gemini-gemini-3.1-pro.md")
+        .find(|artifact| artifact.path == "planning-duel/planner_a.md")
         .expect("gemini planner artifact");
-    assert_eq!(artifact.text_content(), Some(content));
+    assert_eq!(
+        artifact.text_content(),
+        Some("*authored by: gemini / planner_a*\n## Plan\nPersist through Orbit tools.")
+    );
 }
 
 #[test]
@@ -153,8 +157,7 @@ fn duel_plan_winner_persists_gemini_arbiter_artifact() {
             "orbit.duel.plan.winner",
             json!({
                 "id": task.id.clone(),
-                "winner_agent_cli": "claude",
-                "winner_model": "claude-opus-4-7",
+                "winner_slot": "planner_a",
                 "arbiter_rationale": "Tighter scope and clearer staged plan.",
             }),
             Some("gemini".to_string()),
@@ -173,14 +176,9 @@ fn duel_plan_winner_persists_gemini_arbiter_artifact() {
         .text_content()
         .expect("winner.json must be text content");
     let payload: Value = serde_json::from_str(raw).expect("winner.json is valid JSON");
-    assert_eq!(payload["winner_agent_cli"], "claude");
-    assert_eq!(payload["winner_model"], "claude-opus-4-7");
-    assert_eq!(payload["arbiter_agent_cli"], "gemini");
-    assert_eq!(payload["arbiter_model"], "gemini-3.1-pro");
-    assert_eq!(
-        payload["artifact_path"],
-        "planning-duel/claude-claude-opus-4-7.md"
-    );
+    assert_eq!(payload["winner_slot"], "planner_a");
+    assert_eq!(payload["arbiter_family"], "gemini");
+    assert_eq!(payload["artifact_path"], "planning-duel/planner_a.md");
     assert_eq!(
         payload["arbiter_rationale"],
         "Tighter scope and clearer staged plan."
@@ -244,7 +242,7 @@ fn friction_add_writes_markdown_record_and_validates_tags() {
     let raw = std::fs::read_to_string(path).expect("read friction markdown");
     assert!(raw.starts_with("---\n"), "{raw}");
     assert!(raw.contains("id: F"), "{raw}");
-    assert!(raw.contains("model: gpt-5.5"), "{raw}");
+    assert!(raw.contains("model: codex"), "{raw}");
     assert!(raw.contains("tooling"), "{raw}");
     assert!(raw.contains("skill-guidance"), "{raw}");
 
@@ -281,7 +279,7 @@ fn friction_stats_does_not_write_state_scoreboard_file() {
         )
         .expect("stats succeeds");
     assert_eq!(
-        stats["by_model"]["gpt-zero"]["frictions_per_10_tasks"],
+        stats["by_family"]["codex"]["frictions_per_10_tasks"],
         json!("n/a")
     );
     assert!(
@@ -698,6 +696,197 @@ fn task_update_tool_replaces_dependencies() {
     assert_eq!(
         output.get("dependencies"),
         Some(&json!([second_dependency.id.as_str()]))
+    );
+}
+
+#[test]
+fn task_update_tool_persists_source_task_id_and_history() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let source = create_task(
+        &runtime,
+        &repo_root,
+        "Regression source",
+        "Existing task that introduced the defect.",
+        TaskStatus::Done,
+        &[],
+    );
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Bug without source",
+                "description": "A bug whose source is discovered later.",
+                "workspace": ".",
+                "type": "bug",
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id").to_string();
+    let created_updated_at = added["updated_at"]
+        .as_str()
+        .expect("created updated_at")
+        .to_string();
+    assert_eq!(added.get("type").and_then(Value::as_str), Some("bug"));
+    assert_eq!(added.get("source_task_id"), Some(&Value::Null));
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "model": "claude",
+                "source_task_id": source.id.clone(),
+            }),
+            None,
+            None,
+        )
+        .expect("task update tool succeeds");
+
+    assert_eq!(
+        output.get("source_task_id").and_then(Value::as_str),
+        Some(source.id.as_str())
+    );
+    assert_ne!(
+        output.get("updated_at").and_then(Value::as_str),
+        Some(created_updated_at.as_str())
+    );
+    assert!(
+        output["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| {
+                event.get("event").and_then(Value::as_str) == Some("updated")
+                    && event
+                        .get("note")
+                        .and_then(Value::as_str)
+                        .is_some_and(|note| note.contains("source_task_id"))
+            })
+    );
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": output["id"].as_str().expect("task id") }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task show tool succeeds");
+    assert_eq!(
+        shown.get("source_task_id").and_then(Value::as_str),
+        Some(source.id.as_str())
+    );
+}
+
+#[test]
+fn task_update_tool_clears_source_task_id_with_empty_string() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let source = create_task(
+        &runtime,
+        &repo_root,
+        "Regression source",
+        "Existing task that introduced the defect.",
+        TaskStatus::Done,
+        &[],
+    );
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Bug with source",
+                "description": "A bug whose source should be cleared.",
+                "workspace": ".",
+                "type": "bug",
+                "source_task_id": source.id,
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": added["id"].as_str().expect("task id"),
+                "source_task_id": "",
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task update tool succeeds");
+
+    assert_eq!(output.get("source_task_id"), Some(&Value::Null));
+    assert!(
+        output["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| {
+                event.get("event").and_then(Value::as_str) == Some("updated")
+                    && event
+                        .get("note")
+                        .and_then(Value::as_str)
+                        .is_some_and(|note| note.contains("source_task_id"))
+            })
+    );
+}
+
+#[test]
+fn task_update_tool_stores_unresolved_source_task_id_matching_add() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let unresolved_from_update = "ORB-99999";
+    let unresolved_from_add = "ORB-99998";
+
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Bug without resolved source",
+                "description": "A bug whose source ID is known before its task exists.",
+                "workspace": ".",
+                "type": "bug",
+                "source_task_id": unresolved_from_add,
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("add stores a loose source reference");
+    assert_eq!(
+        added.get("source_task_id").and_then(Value::as_str),
+        Some(unresolved_from_add)
+    );
+
+    let update_target = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Bug with later loose source",
+                "description": "Exercise update-side loose reference parity.",
+                "workspace": ".",
+                "type": "bug",
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": update_target["id"].as_str().expect("task id"),
+                "source_task_id": unresolved_from_update,
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("update stores a loose source reference just like add");
+
+    assert_eq!(
+        output.get("source_task_id").and_then(Value::as_str),
+        Some(unresolved_from_update)
     );
 }
 

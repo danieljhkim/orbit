@@ -152,7 +152,7 @@ fn append_codex_side_write_roots(
 /// their MCP/tool calls still execute `orbit ...` as a sandbox-inherited child.
 /// Those child processes initialize the global audit/tool database, the global
 /// task registry + canonical task bundles, and the workspace-local semantic
-/// index before a planner can persist `planning-duel/<agent>-<model>.md`.
+/// index before a planner can persist `planning-duel/<slot>.md`.
 /// Keep the grants path-shaped instead of re-allowing the whole home directory.
 #[cfg(target_os = "macos")]
 fn append_orbit_child_runtime_write_roots(

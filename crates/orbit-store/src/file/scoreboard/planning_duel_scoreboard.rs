@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, PlannerSlot, PlanningDuelRun};
+use orbit_common::types::{OrbitError, PlannerSlot, PlanningDuelRun, all_agent_families};
 use serde::{Deserialize, Serialize};
 
 use orbit_common::utility::fs::{
@@ -55,8 +55,7 @@ pub struct AggregateFilter {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AggregateRow {
     pub role: &'static str,
-    pub agent: String,
-    pub model: String,
+    pub family: String,
     pub runs: u32,
     pub points: u32,
     pub avg_wall_seconds: f64,
@@ -67,11 +66,23 @@ pub struct AggregateRow {
     pub avg_byte_proxy_total: Option<f64>,
 }
 
-/// Aggregation result. Rows are sorted by role, agent, and model for
+/// Aggregation result. Rows are sorted by role and family for
 /// deterministic rendering.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Aggregates {
     pub rows: Vec<AggregateRow>,
+}
+
+#[derive(Default)]
+struct Bucket {
+    runs: u32,
+    points: u32,
+    wall_ms_sum: u128,
+    tool_calls_sum: u128,
+    token_sum: u128,
+    token_count: u32,
+    byte_proxy_sum: u128,
+    byte_proxy_count: u32,
 }
 
 // ============================================================================
@@ -115,19 +126,7 @@ fn load_scoreboard_file(path: &Path) -> Result<PlanningDuelScoreboardFile, Orbit
 
 /// Reduce `runs` into an [`Aggregates`] report.
 pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregates {
-    #[derive(Default)]
-    struct Bucket {
-        runs: u32,
-        points: u32,
-        wall_ms_sum: u128,
-        tool_calls_sum: u128,
-        token_sum: u128,
-        token_count: u32,
-        byte_proxy_sum: u128,
-        byte_proxy_count: u32,
-    }
-
-    let mut buckets: BTreeMap<(String, &'static str, String, String), Bucket> = BTreeMap::new();
+    let mut buckets: BTreeMap<(String, &'static str, String), Bucket> = BTreeMap::new();
 
     let roles_to_emit: &[RoleAxis] = match filter.role {
         Some(RoleAxis::PlannerA) => &[RoleAxis::PlannerA],
@@ -135,6 +134,8 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
         Some(RoleAxis::Arbiter) => &[RoleAxis::Arbiter],
         None => &[RoleAxis::PlannerA, RoleAxis::PlannerB, RoleAxis::Arbiter],
     };
+
+    seed_zero_family_rows(&mut buckets, roles_to_emit);
 
     for run in runs {
         for role in roles_to_emit {
@@ -165,8 +166,7 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
             let key = (
                 role_name.to_string(),
                 role_name,
-                assignment.agent.clone(),
-                assignment.model.clone(),
+                assignment.family.to_string(),
             );
             let bucket = buckets.entry(key).or_default();
             bucket.runs += 1;
@@ -186,12 +186,11 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
 
     let rows = buckets
         .into_iter()
-        .map(|((_, role, agent, model), b)| {
+        .map(|((_, role, family), b)| {
             let runs = b.runs.max(1) as f64;
             AggregateRow {
                 role,
-                agent,
-                model,
+                family,
                 runs: b.runs,
                 points: b.points,
                 avg_wall_seconds: (b.wall_ms_sum as f64 / runs) / 1_000.0,
@@ -213,6 +212,28 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
     Aggregates { rows }
 }
 
+fn seed_zero_family_rows(
+    buckets: &mut BTreeMap<(String, &'static str, String), Bucket>,
+    roles_to_emit: &[RoleAxis],
+) {
+    for role in roles_to_emit {
+        let role_name = role_name(*role);
+        for family in all_agent_families() {
+            buckets
+                .entry((role_name.to_string(), role_name, family.to_string()))
+                .or_default();
+        }
+    }
+}
+
+fn role_name(role: RoleAxis) -> &'static str {
+    match role {
+        RoleAxis::PlannerA => "planner_a",
+        RoleAxis::PlannerB => "planner_b",
+        RoleAxis::Arbiter => "arbiter",
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -225,7 +246,7 @@ mod tests {
 
     use chrono::Utc;
     use orbit_common::types::{
-        EfficiencyMetrics, PlannerSlot, PlanningEfficiency, PlanningOutcome,
+        AgentFamily, EfficiencyMetrics, PlannerSlot, PlanningEfficiency, PlanningOutcome,
         PlanningRoleAssignment, PlanningRoles,
     };
 
@@ -264,15 +285,39 @@ mod tests {
         assert_eq!(run_ids, expected);
     }
 
+    #[test]
+    fn aggregate_emits_zero_rows_for_known_families() {
+        let aggregates = aggregate(&[], AggregateFilter::default());
+
+        assert!(
+            aggregates
+                .rows
+                .iter()
+                .any(|row| row.role == "planner_a" && row.family == "grok" && row.runs == 0)
+        );
+        assert!(
+            aggregates
+                .rows
+                .iter()
+                .any(|row| row.role == "planner_b" && row.family == "grok" && row.runs == 0)
+        );
+        assert!(
+            aggregates
+                .rows
+                .iter()
+                .any(|row| row.role == "arbiter" && row.family == "grok" && row.runs == 0)
+        );
+    }
+
     fn test_run(run_id: String) -> PlanningDuelRun {
         PlanningDuelRun {
             run_id,
             task_id: "T-test".to_string(),
             completed_at: Utc::now(),
             roles: PlanningRoles {
-                planner_a: role("codex", "gpt-5.5"),
-                planner_b: role("claude", "opus"),
-                arbiter: role("gemini", "pro"),
+                planner_a: role(AgentFamily::Codex),
+                planner_b: role(AgentFamily::Claude),
+                arbiter: role(AgentFamily::Gemini),
             },
             planner_a_artifact_path: "artifacts/planner-a.md".to_string(),
             planner_b_artifact_path: "artifacts/planner-b.md".to_string(),
@@ -288,11 +333,8 @@ mod tests {
         }
     }
 
-    fn role(agent: &str, model: &str) -> PlanningRoleAssignment {
-        PlanningRoleAssignment {
-            agent: agent.to_string(),
-            model: model.to_string(),
-        }
+    fn role(family: AgentFamily) -> PlanningRoleAssignment {
+        PlanningRoleAssignment { family }
     }
 
     fn metrics() -> EfficiencyMetrics {

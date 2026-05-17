@@ -68,7 +68,7 @@ fn require_review_model(model: Option<&str>, tool_name: &str) -> Result<(), Orbi
     let resolved = model.map(str::trim).filter(|value| !value.is_empty());
     if resolved.is_none() {
         return Err(OrbitError::InvalidInput(format!(
-            "{tool_name} requires `model`. Pass the calling agent's model identifier (e.g. `gpt-5.5`, `claude-opus-4-7`); pass `human` for human-authored review feedback to opt out of scoring."
+            "{tool_name} requires `model`. Pass the calling agent family (`codex`, `claude`, `gemini`, or `grok`); pass `human` for human-authored review feedback to opt out of scoring."
         )));
     }
     Ok(())

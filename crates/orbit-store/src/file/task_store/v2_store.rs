@@ -86,6 +86,7 @@ impl TaskV2Store {
                 priority: params.priority,
                 complexity: params.complexity,
                 job_run_id: None,
+                crew: params.crew,
                 relations,
                 tags: normalize_task_tags(params.tags),
                 context_files: params.context_files,
@@ -321,8 +322,16 @@ impl TaskV2Store {
                 );
                 envelope_changed = true;
             }
+            if let Some(value) = &fields.relations {
+                bundle.envelope.relations = value.clone();
+                envelope_changed = true;
+            }
             if let Some(value) = &fields.job_run_id {
                 bundle.envelope.job_run_id = value.clone();
+                envelope_changed = true;
+            }
+            if let Some(value) = &fields.crew {
+                bundle.envelope.crew = value.clone();
                 envelope_changed = true;
             }
             if let Some(value) = &fields.external_refs {
@@ -526,6 +535,60 @@ impl TaskV2Store {
         }
         artifacts.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(Some(artifacts))
+    }
+
+    pub(crate) fn get_task_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        orbit_common::types::validate_orb_task_id(id)?;
+        let bundle = match self.bundle_store.read_bundle(id) {
+            Ok(bundle) => bundle,
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let Some(manifest) = bundle.artifact_manifest else {
+            return Ok(Some(Vec::new()));
+        };
+        let mut files = manifest.files;
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(Some(files))
+    }
+
+    pub(crate) fn get_task_artifact(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        orbit_common::types::validate_orb_task_id(id)?;
+        let path = normalize_v2_artifact_path(path)?;
+        let bundle = match self.bundle_store.read_bundle(id) {
+            Ok(bundle) => bundle,
+            Err(OrbitError::NotFound {
+                kind: NotFoundKind::Task,
+                ..
+            }) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let Some(manifest) = bundle.artifact_manifest else {
+            return Ok(None);
+        };
+        let Some(file) = manifest.files.into_iter().find(|file| file.path == path) else {
+            return Ok(None);
+        };
+        let bundle_dir = self.bundle_store.bundle_path(id)?;
+        let Some(artifact_file) = resolve_v2_artifact_file_path(&bundle_dir, &file.path)? else {
+            return Ok(None);
+        };
+        let content = fs::read(&artifact_file).map_err(|err| OrbitError::Io(err.to_string()))?;
+        Ok(Some(TaskArtifact {
+            path: file.path,
+            media_type: file.media_type,
+            content,
+        }))
     }
 
     pub(crate) fn upsert_task_artifacts(
@@ -750,6 +813,7 @@ impl TaskV2Store {
             external_refs: bundle.envelope.external_refs,
             relations: bundle.envelope.relations,
             job_run_id: bundle.envelope.job_run_id,
+            crew: bundle.envelope.crew,
             created_at: bundle.envelope.created_at,
             updated_at: bundle.envelope.updated_at,
         })
@@ -920,6 +984,7 @@ fn relations_from_create_params(
             target: source_task_id.clone(),
         });
     }
+    relations.extend(params.relations.clone());
     Ok(relations)
 }
 
@@ -1129,6 +1194,31 @@ fn normalize_v2_artifact_path(raw: &str) -> Result<String, OrbitError> {
     Ok(parts.join("/"))
 }
 
+fn resolve_v2_artifact_file_path(
+    bundle_dir: &Path,
+    path: &str,
+) -> Result<Option<PathBuf>, OrbitError> {
+    let files_dir = bundle_dir
+        .join(TASK_ARTIFACTS_DIR_NAME)
+        .join(TASK_ARTIFACT_FILES_DIR_NAME);
+    let files_root = match fs::canonicalize(&files_dir) {
+        Ok(path) => path,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(OrbitError::Io(err.to_string())),
+    };
+    let artifact_file = match fs::canonicalize(files_dir.join(path)) {
+        Ok(path) => path,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(OrbitError::Io(err.to_string())),
+    };
+    if !artifact_file.starts_with(&files_root) {
+        return Err(OrbitError::InvalidInput(format!(
+            "artifact path '{path}' resolves outside the task artifact directory"
+        )));
+    }
+    Ok(Some(artifact_file))
+}
+
 fn render_acceptance(criteria: &[String]) -> String {
     if criteria.is_empty() {
         return String::new();
@@ -1217,6 +1307,7 @@ mod tests {
                 "Second criterion".to_string(),
             ],
             dependencies: Vec::new(),
+            relations: Vec::new(),
             tags: vec!["task-artifacts".to_string(), "v2".to_string()],
             plan: "1. Do the work".to_string(),
             execution_summary: String::new(),
@@ -1234,6 +1325,7 @@ mod tests {
                 ExternalRef::try_new("linear".to_string(), "ENG-123".to_string(), None).unwrap(),
             ],
             source_task_id: None,
+            crew: None,
             comments: vec![TaskComment {
                 at: now,
                 by: "daniel".to_string(),
@@ -1695,6 +1787,72 @@ mod tests {
                 .expect("priority filter should use updated generated index")
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn document_update_sets_and_clears_source_task_id() {
+        let temp = TempDir::new().expect("tempdir");
+        let store = store(&temp);
+        let source = store
+            .create_task(create_params("Source", TaskStatus::Done))
+            .expect("create source");
+        store
+            .create_task(create_params("Bug", TaskStatus::Backlog))
+            .expect("create bug");
+
+        store
+            .update_task_document(
+                "ORB-00001",
+                &TaskDocumentUpdateParams {
+                    actor: "codex:gpt-5.5".to_string(),
+                    source_task_id: Some(Some(source.id.clone())),
+                    ..Default::default()
+                },
+            )
+            .expect("set source task");
+
+        let task = store
+            .get_task("ORB-00001")
+            .expect("get task")
+            .expect("task exists");
+        assert_eq!(task.source_task_id(), Some(source.id.as_str()));
+        let envelope = store
+            .bundle_store
+            .read_bundle("ORB-00001")
+            .expect("read bundle")
+            .envelope;
+        assert!(envelope.relations.iter().any(|relation| {
+            relation.relation_type == TaskRelationType::RegressionFrom
+                && relation.target == source.id
+        }));
+
+        store
+            .update_task_document(
+                "ORB-00001",
+                &TaskDocumentUpdateParams {
+                    actor: "codex:gpt-5.5".to_string(),
+                    source_task_id: Some(None),
+                    ..Default::default()
+                },
+            )
+            .expect("clear source task");
+
+        let task = store
+            .get_task("ORB-00001")
+            .expect("get task")
+            .expect("task exists");
+        assert_eq!(task.source_task_id(), None);
+        let envelope = store
+            .bundle_store
+            .read_bundle("ORB-00001")
+            .expect("read bundle")
+            .envelope;
+        assert!(
+            envelope
+                .relations
+                .iter()
+                .all(|relation| relation.relation_type != TaskRelationType::RegressionFrom)
         );
     }
 

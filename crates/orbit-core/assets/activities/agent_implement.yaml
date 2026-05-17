@@ -49,12 +49,19 @@ spec:
     6. Respect repository instructions for validation. If tests are forbidden,
        do not add or run them. Use the smallest allowed validation that gives
        real confidence.
-    7. Persist an execution summary when useful, but do not move the task to
+    7. Before handoff, run the learning checkpoint: if this task surfaced a
+       contradicted assumption, recurring failure mode, non-obvious gotcha that
+       took more than 10 minutes to debug, or incident-style root cause, follow
+       the `orbit-learning` skill and call the `add` action on
+       `orbit.learning` (or use that skill's update/supersede flow when it
+       points to existing guidance).
+       Skip if none apply.
+    8. Persist an execution summary when useful, but do not move the task to
        `review`; the pipeline does that only after commit/merge or PR steps
        succeed. This envelope rule overrides the direct-execution review
        transition described in the `orbit-execute-task` skill's Step 5 and Exit
        Criteria.
-    8. Return a short structured summary. Include a `diff` string only when you
+    9. Return a short structured summary. Include a `diff` string only when you
        can produce it cheaply and accurately.
   tools:
     - orbit.task.*
@@ -64,6 +71,12 @@ spec:
     - orbit.learning.search
     - orbit.learning.show
     - orbit.learning.list
+    - orbit.learning.add
+    - orbit.learning.comment.add
+    - orbit.learning.comment.list
+    - orbit.learning.comment.delete
+    - orbit.learning.update
+    - orbit.learning.supersede
     - fs.read
     - fs.delete
     - proc.spawn

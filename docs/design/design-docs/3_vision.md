@@ -1,8 +1,8 @@
 # Design Docs — Vision
 
 **Status:** Draft
-**Owner:** claude-opus-4-7
-**Last updated:** 2026-05-14
+**Owner:** claude
+**Last updated:** 2026-05-17
 
 Forward-looking concerns for the design-docs system. The current implementation ([2_design.md](./2_design.md)) ships strict layout, decay check, and a CLI + MCP tool surface. What is open: lint enforcement gaps, ADR migration to a queryable artifact, semantic search over design content, and tighter integration with the rest of the Orbit lifecycle (tasks → ADRs → docs).
 
@@ -72,7 +72,7 @@ The Status line on an ADR currently embeds task IDs as plain text (`**Status:** 
 - **`Last updated:` decay is enforced in CI via the same binary the operator runs locally.** The decay check, the scaffolding, the per-feature inspection, and the convention rulebook all live in one repo and ship in one binary. There is no two-tool surface ("local linter + remote CI check") to drift apart.
 - **Scaffolding is one MCP tool call.** Most documentation conventions ship as a CONTRIBUTING.md plus a `cookiecutter` template; the Orbit version makes scaffolding a first-class agent-callable operation that returns a typed summary of what was created. A non-trivial fraction of "agents that skipped writing the doc" are agents that did not know how to start.
 - **The 3-of-3 ADR earning rule is unusual.** Most ADR practices are append-permissive — any decision can become an ADR, with after-the-fact pruning. Orbit gates entry on an explicit triple-test, which is more restrictive but keeps the log readable as a list of *load-bearing* decisions rather than *all* decisions.
-- **Agent-attributed ownership.** The `Owner:` field is a single accountable agent identity (`claude`, `codex`, model name). The discipline is that one agent is on the hook for keeping the folder coherent; cross-agent edits are welcome but the owner approves merges. This mirrors the broader Orbit posture that every write carries the identity of the agent that produced it.
+- **Agent-attributed ownership.** The `Owner:` field is a single accountable agent family (`codex`, `claude`, `gemini`, or `grok`). The discipline is that one agent family is on the hook for keeping the folder coherent; cross-agent edits are welcome but the owner approves merges. This mirrors the broader Orbit posture that every write carries the identity of the agent that produced it.
 
 ---
 
@@ -99,5 +99,6 @@ The Status line on an ADR currently embeds task IDs as plain text (`**Status:** 
 ## Task References
 
 - [ORB-00019] — Promoted the python decay checker to first-class `orbit design` tooling; this vision doc enumerates the open questions left after that promotion.
+- [ORB-00090] — Aligned the ownership convention with family-based agent identity.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

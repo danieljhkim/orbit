@@ -11,6 +11,8 @@
 
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
 use std::process::Output;
 
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -29,6 +31,249 @@ fn cli_add_then_show_round_trips_every_field() {
     assert_eq!(shown["scope"]["paths"], json!(["foo/**"]));
     assert_eq!(shown["scope"]["tags"], json!(["perf"]));
     assert_eq!(shown["status"], "active");
+    assert_eq!(shown["vote_count"], 0);
+    assert!(shown["last_voted_at"].is_null());
+}
+
+#[test]
+fn cli_upvote_is_task_idempotent_and_show_reports_vote_stats() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id");
+
+    let first = workspace.run_json(
+        &[
+            "learning",
+            "upvote",
+            "--id",
+            id,
+            "--model",
+            "claude",
+            "--task",
+            "ORB-00095",
+            "--json",
+        ],
+        "upvote first",
+    );
+    assert_eq!(first["vote_count"], 1);
+    assert!(first["last_voted_at"].as_str().is_some());
+
+    let duplicate = workspace.run_json(
+        &[
+            "learning",
+            "upvote",
+            "--id",
+            id,
+            "--model",
+            "claude",
+            "--task",
+            "ORB-00095",
+            "--json",
+        ],
+        "upvote duplicate",
+    );
+    assert_eq!(duplicate["vote_count"], 1);
+
+    let second_task = workspace.run_json(
+        &[
+            "learning",
+            "upvote",
+            "--id",
+            id,
+            "--model",
+            "claude",
+            "--task",
+            "ORB-OTHER",
+            "--json",
+        ],
+        "upvote second task",
+    );
+    assert_eq!(second_task["vote_count"], 2);
+
+    let shown = workspace.run_json(&["learning", "show", id, "--json"], "show learning");
+    assert_eq!(shown["vote_count"], 2);
+    assert!(shown["last_voted_at"].as_str().is_some());
+}
+
+#[test]
+fn cli_upvote_without_task_rejects_free_floating_vote_policy() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id");
+
+    let output = run_orbit(
+        &workspace.work,
+        &workspace.home,
+        &["learning", "upvote", "--id", id, "--model", "claude"],
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("free-floating votes"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn cli_learning_comment_add_list_delete_round_trips_with_tombstone() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id");
+    let comments_path = workspace
+        .work
+        .join(".orbit/learnings")
+        .join(id)
+        .join("comments.jsonl");
+    assert!(!comments_path.exists());
+
+    let comment = workspace.run_json(
+        &[
+            "learning",
+            "comment",
+            "add",
+            "--learning-id",
+            id,
+            "--body",
+            "  keep this nearby  ",
+            "--model",
+            "claude",
+            "--json",
+        ],
+        "add comment",
+    );
+    let comment_id = comment["id"].as_str().expect("comment id");
+    assert_eq!(comment["learning_id"], id);
+    assert!(comment_id.starts_with('C'));
+
+    assert_eq!(
+        fs::read_to_string(&comments_path).unwrap().lines().count(),
+        1
+    );
+
+    let listed = workspace.run_json(
+        &["learning", "comment", "list", "--learning-id", id, "--json"],
+        "list comments",
+    );
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["id"], comment_id);
+    assert_eq!(listed[0]["body"], "keep this nearby");
+
+    workspace.run(
+        &[
+            "learning", "comment", "delete", "--id", comment_id, "--json",
+        ],
+        None,
+        "delete comment",
+    );
+    workspace.run(
+        &[
+            "learning", "comment", "delete", "--id", comment_id, "--json",
+        ],
+        None,
+        "delete comment again",
+    );
+
+    let active = workspace.run_json(
+        &["learning", "comment", "list", "--learning-id", id, "--json"],
+        "list active comments",
+    );
+    assert!(active.as_array().unwrap().is_empty());
+    let deleted = workspace.run_json(
+        &[
+            "learning",
+            "comment",
+            "list",
+            "--learning-id",
+            id,
+            "--include-deleted",
+            "--json",
+        ],
+        "list deleted comments",
+    );
+    assert_eq!(deleted.as_array().unwrap().len(), 1);
+    assert_eq!(
+        fs::read_to_string(&comments_path).unwrap().lines().count(),
+        2
+    );
+}
+
+#[test]
+fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_file() {
+    let workspace = TestWorkspace::new();
+    let output = run_orbit(
+        &workspace.work,
+        &workspace.home,
+        &[
+            "learning",
+            "comment",
+            "add",
+            "--learning-id",
+            "L20260517-404",
+            "--body",
+            "valid",
+            "--model",
+            "claude",
+        ],
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("learning not found"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !workspace
+            .work
+            .join(".orbit/learnings/L20260517-404/comments.jsonl")
+            .exists()
+    );
+
+    let old = workspace.add_learning("old", &["old/**"], &[]);
+    let new = workspace.add_learning("new", &["new/**"], &[]);
+    workspace.run(
+        &[
+            "learning",
+            "supersede",
+            old["id"].as_str().unwrap(),
+            "--with",
+            new["id"].as_str().unwrap(),
+            "--json",
+        ],
+        None,
+        "supersede",
+    );
+    let output = run_orbit(
+        &workspace.work,
+        &workspace.home,
+        &[
+            "learning",
+            "comment",
+            "add",
+            "--learning-id",
+            old["id"].as_str().unwrap(),
+            "--body",
+            "valid",
+            "--model",
+            "claude",
+        ],
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("orbit.learning.supersede"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !workspace
+            .work
+            .join(".orbit/learnings")
+            .join(old["id"].as_str().unwrap())
+            .join("comments.jsonl")
+            .exists()
+    );
 }
 
 #[test]
@@ -55,6 +300,28 @@ fn cli_search_returns_matched_by_annotation_array() {
             "matched_by axis prefix must be path:|tag:|query:"
         );
     }
+}
+
+#[test]
+fn cli_search_accepts_absolute_paths_inside_workspace() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("path scope", &["foo/**"], &[]);
+    let target = workspace.work.join("foo/bar.rs");
+    fs::create_dir_all(target.parent().expect("target parent")).expect("create target dir");
+    fs::write(&target, "pub fn example() {}\n").expect("write target");
+    let absolute = target.to_string_lossy().to_string();
+
+    let path_hits = workspace.run_json(
+        &["learning", "search", "--path", &absolute, "--json"],
+        "search by absolute path",
+    );
+    let ids: Vec<&str> = path_hits
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|row| row["id"].as_str().expect("id"))
+        .collect();
+    assert!(ids.contains(&learning["id"].as_str().expect("learning id")));
 }
 
 #[test]
@@ -151,8 +418,7 @@ fn cli_prune_delete_archives_stale_learnings() {
         .collect();
     assert!(deleted.contains(&learning["id"].as_str().unwrap()));
 
-    // Verify the YAML moved under `superseded/` with status=superseded and
-    // superseded_by=null per §7.3.
+    // Verify the YAML status is superseded and superseded_by=null per §7.3.
     let shown = workspace.run_json(
         &[
             "learning",
@@ -164,6 +430,91 @@ fn cli_prune_delete_archives_stale_learnings() {
     );
     assert_eq!(shown["status"], "superseded");
     assert!(shown["superseded_by"].is_null());
+}
+
+#[test]
+fn cli_migrate_layout_preserves_records_and_is_idempotent() {
+    let workspace = TestWorkspace::new();
+    let _active = workspace.add_learning("active rule", &["active/**"], &["keep"]);
+    let old = workspace.add_learning("old rule", &["old/**"], &["archive"]);
+    let new = workspace.add_learning("new rule", &["new/**"], &["keep"]);
+    workspace.run(
+        &[
+            "learning",
+            "supersede",
+            old["id"].as_str().unwrap(),
+            "--with",
+            new["id"].as_str().unwrap(),
+            "--json",
+        ],
+        None,
+        "supersede before migration",
+    );
+    let active_before = workspace.learning_projection("active");
+    let superseded_before = workspace.learning_projection("superseded");
+
+    workspace.convert_learning_store_to_legacy_flat();
+    let output = workspace.run(
+        &["learning", "migrate-layout"],
+        None,
+        "migrate legacy learning layout",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Migrated learning layout"));
+
+    assert_eq!(workspace.learning_projection("active"), active_before);
+    assert_eq!(
+        workspace.learning_projection("superseded"),
+        superseded_before
+    );
+    let learnings_root = workspace.work.join(".orbit/learnings");
+    assert!(
+        fs::read_dir(&learnings_root)
+            .expect("read learnings")
+            .all(|entry| {
+                let path = entry.expect("entry").path();
+                !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('L') && name.ends_with(".yaml"))
+            })
+    );
+    assert!(!learnings_root.join("superseded").exists());
+
+    let before_rerun = snapshot_files(&learnings_root);
+    let output = workspace.run(
+        &["learning", "migrate-layout"],
+        None,
+        "rerun migrated layout",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("workspace is already on the per-entity layout"));
+    assert_eq!(snapshot_files(&learnings_root), before_rerun);
+}
+
+#[test]
+fn guardrail_rejects_flat_learning_root_files() {
+    let temp = tempdir().expect("tempdir");
+    let learnings = temp.path().join(".orbit/learnings");
+    fs::create_dir_all(&learnings).expect("create learnings");
+    fs::write(learnings.join("L20260517-1.yaml"), "").expect("legacy flat file");
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repo root")
+        .to_path_buf();
+    let output = Command::new(repo_root.join("scripts/check-learning-layout.sh"))
+        .arg(temp.path())
+        .output()
+        .expect("run guardrail");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("flat legacy learning file"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 struct TestWorkspace {
@@ -227,6 +578,86 @@ impl TestWorkspace {
             )
         })
     }
+
+    fn learning_projection(&self, status: &str) -> Vec<String> {
+        let rows = self.run_json(
+            &["learning", "list", "--status", status, "--json"],
+            "list learning projection",
+        );
+        let mut projection = rows
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|item| {
+                format!(
+                    "{}|{}|{}|{}",
+                    item["id"].as_str().unwrap(),
+                    item["status"].as_str().unwrap(),
+                    item["summary"].as_str().unwrap(),
+                    item["evidence"]
+                )
+            })
+            .collect::<Vec<_>>();
+        projection.sort();
+        projection
+    }
+
+    fn convert_learning_store_to_legacy_flat(&self) {
+        let learnings_root = self.work.join(".orbit/learnings");
+        let superseded_root = learnings_root.join("superseded");
+        fs::create_dir_all(&superseded_root).expect("create legacy superseded");
+        let entries = fs::read_dir(&learnings_root)
+            .expect("read learnings")
+            .map(|entry| entry.expect("entry").path())
+            .collect::<Vec<_>>();
+        for path in entries {
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(id) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !id.starts_with('L') {
+                continue;
+            }
+            let yaml_path = path.join("learning.yaml");
+            let yaml = fs::read_to_string(&yaml_path).expect("read learning yaml");
+            let target = if yaml.contains("status: superseded") {
+                superseded_root.join(format!("{id}.yaml"))
+            } else {
+                learnings_root.join(format!("{id}.yaml"))
+            };
+            fs::rename(&yaml_path, target).expect("move to legacy flat");
+            fs::remove_dir_all(&path).expect("remove per-entity dir");
+        }
+    }
+}
+
+fn snapshot_files(root: &Path) -> Vec<(String, Vec<u8>)> {
+    fn visit(root: &Path, path: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+        if path.is_dir() {
+            let mut entries = fs::read_dir(path)
+                .expect("read snapshot dir")
+                .map(|entry| entry.expect("entry").path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for entry in entries {
+                visit(root, &entry, out);
+            }
+        } else if path.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("strip root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push((relative, fs::read(path).expect("read snapshot file")));
+        }
+    }
+
+    let mut out = Vec::new();
+    visit(root, root, &mut out);
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 fn run_orbit(cwd: &Path, home: &Path, args: &[&str], stdin: Option<&str>) -> Output {

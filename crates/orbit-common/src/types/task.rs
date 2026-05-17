@@ -634,6 +634,8 @@ pub struct Task {
     pub relations: Vec<TaskRelation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crew: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -924,6 +926,35 @@ updated_at: 2026-01-01T00:00:00Z
         .expect("task without tags deserializes");
 
         assert_eq!(task.tags, Vec::<String>::new());
+        assert_eq!(task.crew, None);
+    }
+
+    #[test]
+    fn task_round_trips_with_crew_set() {
+        let task = serde_yaml::from_str::<Task>(
+            r#"id: T20260101-1
+title: Crew task
+description: Existing task record.
+acceptance_criteria: []
+dependencies: []
+plan: ""
+execution_summary: ""
+context_files: []
+status: backlog
+priority: medium
+task_type: chore
+crew: opus-codex
+created_at: 2026-01-01T00:00:00Z
+updated_at: 2026-01-01T00:00:00Z
+"#,
+        )
+        .expect("task with crew deserializes");
+
+        let serialized = serde_yaml::to_string(&task).expect("serialize task");
+        let reparsed = serde_yaml::from_str::<Task>(&serialized).expect("reparse task");
+
+        assert_eq!(reparsed, task);
+        assert_eq!(reparsed.crew.as_deref(), Some("opus-codex"));
     }
 
     #[test]

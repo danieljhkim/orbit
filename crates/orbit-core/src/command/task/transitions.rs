@@ -1,7 +1,9 @@
+use chrono::Utc;
 use orbit_common::types::{
-    NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus,
-    build_task_status_index, unmet_task_dependencies,
+    NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskRelationType, TaskStatus,
+    build_task_status_index, is_valid_friction_id, unmet_task_dependencies,
 };
+use orbit_store::friction_store::{resolve_friction_by_task, show_friction};
 
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
@@ -11,6 +13,17 @@ use super::helpers::{
 };
 
 const UNAUTHORED_TASK_PLAN_PLACEHOLDER: &str = "To be authored by executing agent at start time.";
+const RELATION_RESOLVES: &str = "resolves";
+
+#[derive(Debug, Default)]
+struct StartTaskOptions {
+    note: Option<String>,
+    comment: Option<String>,
+    agent: Option<String>,
+    model: Option<String>,
+    actor_label_override: Option<String>,
+    crew_override: Option<String>,
+}
 
 impl OrbitRuntime {
     pub fn approve_task(
@@ -95,7 +108,55 @@ impl OrbitRuntime {
             ))),
         }?;
 
+        if task.status == TaskStatus::Review {
+            for event in self.apply_resolves_side_effects(&result) {
+                self.record_event(event)?;
+            }
+        }
+
         Ok(result)
+    }
+
+    fn apply_resolves_side_effects(&self, task: &Task) -> Vec<OrbitEvent> {
+        let frictions_root = self.data_root().join("frictions");
+        let mut events = Vec::new();
+        for relation in &task.relations {
+            if relation.relation_type != TaskRelationType::Resolves {
+                continue;
+            }
+            let target = relation.target.as_str();
+            if !is_valid_friction_id(target) {
+                continue;
+            }
+            match show_friction(&frictions_root, target) {
+                Ok(Some(_)) => {
+                    match resolve_friction_by_task(&frictions_root, target, &task.id, Utc::now()) {
+                        Ok(_) => events.push(OrbitEvent::FrictionAutoResolved {
+                            task_id: task.id.clone(),
+                            friction_id: target.to_string(),
+                        }),
+                        Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
+                            task_id: task.id.clone(),
+                            target: target.to_string(),
+                            relation: RELATION_RESOLVES.to_string(),
+                            reason: error.to_string(),
+                        }),
+                    }
+                }
+                Ok(None) => events.push(OrbitEvent::TaskRelationDangling {
+                    task_id: task.id.clone(),
+                    target: target.to_string(),
+                    relation: RELATION_RESOLVES.to_string(),
+                }),
+                Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
+                    task_id: task.id.clone(),
+                    target: target.to_string(),
+                    relation: RELATION_RESOLVES.to_string(),
+                    reason: error.to_string(),
+                }),
+            }
+        }
+        events
     }
 
     pub fn start_task(
@@ -104,7 +165,14 @@ impl OrbitRuntime {
         note: Option<String>,
         comment: Option<String>,
     ) -> Result<Task, OrbitError> {
-        self.start_task_with_actor_label_override(id, note, comment, None, None, None)
+        self.start_task_with_actor_label_override(
+            id,
+            StartTaskOptions {
+                note,
+                comment,
+                ..Default::default()
+            },
+        )
     }
 
     pub fn start_task_with_identity(
@@ -115,7 +183,29 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Task, OrbitError> {
-        self.start_task_with_actor_label_override(id, note, comment, agent, model, None)
+        self.start_task_with_identity_and_crew(id, note, comment, agent, model, None)
+    }
+
+    pub fn start_task_with_identity_and_crew(
+        &self,
+        id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
+        crew_override: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        self.start_task_with_actor_label_override(
+            id,
+            StartTaskOptions {
+                note,
+                comment,
+                agent,
+                model,
+                crew_override,
+                ..Default::default()
+            },
+        )
     }
 
     pub(crate) fn start_task_as_system(
@@ -126,26 +216,56 @@ impl OrbitRuntime {
     ) -> Result<Task, OrbitError> {
         self.start_task_with_actor_label_override(
             id,
-            note,
-            comment,
-            None,
-            None,
-            Some(SYSTEM_ACTOR_LABEL.to_string()),
+            StartTaskOptions {
+                note,
+                comment,
+                actor_label_override: Some(SYSTEM_ACTOR_LABEL.to_string()),
+                ..Default::default()
+            },
         )
     }
 
     fn start_task_with_actor_label_override(
         &self,
         id: &str,
-        note: Option<String>,
-        comment: Option<String>,
-        agent: Option<String>,
-        model: Option<String>,
-        actor_label_override: Option<String>,
+        options: StartTaskOptions,
     ) -> Result<Task, OrbitError> {
+        let StartTaskOptions {
+            note,
+            comment,
+            agent,
+            model,
+            actor_label_override,
+            crew_override,
+        } = options;
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let task = self.get_task(id)?;
+        // Validate status before crew resolution so a misleading
+        // "no crew selected" error can't mask the real problem
+        // (e.g. trying to restart a task that's already in-progress).
+        match task.status {
+            TaskStatus::Proposed
+            | TaskStatus::Friction
+            | TaskStatus::Backlog
+            | TaskStatus::Someday
+            | TaskStatus::Blocked => {}
+            TaskStatus::InProgress => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task '{id}' is already in-progress"
+                )));
+            }
+            other => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task '{id}' is in status '{other}'; start requires 'proposed', 'friction', 'backlog', 'someday', or 'blocked'"
+                )));
+            }
+        }
+        self.resolve_and_log_crew_for_task_start(
+            id,
+            crew_override.as_deref(),
+            task.crew.as_deref(),
+        )?;
         let dependency_status_index = build_task_status_index(&self.list_tasks()?);
         let unmet_dependencies = unmet_task_dependencies(&task, &dependency_status_index);
         if in_progress_transition_requires_plan(task.status) {

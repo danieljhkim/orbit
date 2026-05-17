@@ -47,7 +47,7 @@ use std::sync::Arc;
 use orbit_policy::PolicyEngine;
 use serde_json::{Map, Value};
 
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::types::{OrbitError, RoleSlot, ToolSchema};
 
 /// Fast operation timeout (1 s). Used for local command resolution (e.g. `which`).
 pub const TIMEOUT_FAST_MS: u64 = 1_000;
@@ -79,9 +79,15 @@ pub enum OrbitBuiltinAction {
     DesignShow,
     FrictionAdd,
     FrictionList,
+    FrictionResolve,
     FrictionShow,
     FrictionStats,
+    FrictionTags,
+    FrictionUpdate,
     LearningAdd,
+    LearningCommentAdd,
+    LearningCommentDelete,
+    LearningCommentList,
     LearningList,
     LearningPrune,
     LearningReindex,
@@ -89,6 +95,7 @@ pub enum OrbitBuiltinAction {
     LearningShow,
     LearningSupersede,
     LearningUpdate,
+    LearningUpvote,
     PipelineInvoke,
     PipelineWait,
     ReviewThreadAdd,
@@ -197,6 +204,9 @@ pub struct ToolContext {
     /// Resolved model identifier (e.g. `"opus-4.6"`). Used alongside `agent_name`
     /// for the attribution footer.
     pub model_name: Option<String>,
+    /// Planning-duel slot asserted by the runtime envelope, when this tool call
+    /// is made from a planning-duel activity.
+    pub role_slot: Option<RoleSlot>,
     /// Program allowlist for `proc.spawn`. When non-empty, `proc.spawn` rejects
     /// any program not in this list. Empty means unrestricted.
     pub proc_allowed_programs: Vec<String>,
@@ -224,6 +234,7 @@ impl std::fmt::Debug for ToolContext {
             .field("workspace_root", &self.workspace_root)
             .field("agent_name", &self.agent_name)
             .field("model_name", &self.model_name)
+            .field("role_slot", &self.role_slot)
             .field("proc_allowed_programs", &self.proc_allowed_programs)
             .field("has_policy_engine", &self.policy_engine.is_some())
             .field("fs_profile", &self.fs_profile)

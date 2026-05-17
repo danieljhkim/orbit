@@ -31,7 +31,7 @@ pub struct DuelPlanCommand {
 impl Execute for DuelPlanCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let plan = build_duel_plan_run_plan(&self, runtime.workflow_base_branch())?;
-        let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, 1)?;
+        let runs = dispatch_workflow(runtime, plan.workflow_alias, &plan.input, false, true, 1)?;
         print_workflow_dispatch_results(plan.workflow_alias, &runs, self.json)
     }
 }

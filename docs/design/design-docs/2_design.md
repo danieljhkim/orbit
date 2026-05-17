@@ -1,8 +1,8 @@
 # Design Docs — Design
 
 **Status:** Draft
-**Owner:** claude-opus-4-7
-**Last updated:** 2026-05-14
+**Owner:** claude
+**Last updated:** 2026-05-17
 
 This document specifies the design-docs convention as currently shipped: the per-feature folder layout, the required frontmatter and sections per numbered doc, the ADR template and earning rules, the decay-check algorithm, and the CLI + MCP tool surface introduced by [ORB-00019]. The convention itself is in [CONVENTIONS.md](../CONVENTIONS.md); this design doc explains the *implementation* of the convention — what lives where in the Rust crates and how the pieces fit together.
 
@@ -36,13 +36,13 @@ Every numbered doc opens with:
 # <Feature> — <Doc Role>
 
 **Status:** <Draft | Accepted>
-**Owner:** <agent identity — `claude`, `codex`, etc.>
+**Owner:** <agent family — `codex`, `claude`, `gemini`, or `grok`>
 **Last updated:** YYYY-MM-DD
 ```
 
 The four fields are non-optional. Status follows the lifecycle in [CONVENTIONS.md §7](../CONVENTIONS.md): `Draft` for pre-first-review, `Accepted` for reviewed and load-bearing. There is no `Deprecated` status; retired folders move under `_archive/` ([§1](#1-folder-layout-per-feature)).
 
-`Owner` is the *accountable* agent (e.g. `claude`, `codex`, or a model identifier such as `claude-opus-4-7`), not a committer list. `Last updated:` is parsed by the decay check ([§5](#5-decay-check-algorithm)) and is authoritative — see [4_decisions.md ADR-002](./4_decisions.md) for why this overrides `git log` of the doc itself.
+`Owner` is the *accountable* agent family (one of `codex`, `claude`, `gemini`, or `grok`), not a committer list or full model string. `Last updated:` is parsed by the decay check ([§5](#5-decay-check-algorithm)) and is authoritative — see [4_decisions.md ADR-002](./4_decisions.md) for why this overrides `git log` of the doc itself.
 
 The `init_feature` scaffold writes today's date and the caller's identity into all four frontmatter blocks at scaffold time; the `orbit.design.show` and `orbit.design.list` tools surface the parsed values ([§6](#6-tool-surface-cli--mcp)).
 
@@ -152,5 +152,6 @@ Tool registry definitions in [`crates/orbit-tools/src/builtin/orbit/design/`](..
 ## Task References
 
 - [ORB-00019] — Promoted the python decay checker to first-class `orbit design` CLI + `orbit.design.*` MCP tools, scaffolded the per-feature folder layout via `orbit.design.init`, and rewrote `make check-design-docs` and `scripts/check_design_doc_decay.py` as thin wrappers.
+- [ORB-00090] — Aligned the `Owner` field contract with the agent-family identity convention.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

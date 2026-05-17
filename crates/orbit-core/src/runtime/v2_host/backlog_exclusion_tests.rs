@@ -1,9 +1,10 @@
-use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
+use orbit_common::types::{Task, TaskPriority, TaskStatus, TaskType};
 use orbit_engine::V2RuntimeHost;
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+use crate::command::task::{TaskAddParams, TaskUpdateParams};
 use crate::runtime::v2_host::test_support::{
     runtime_with_workspace_layout, seed_accepted_friction_task, seed_list_backlog_task,
     write_workspace_file,
@@ -38,6 +39,50 @@ fn excluded_entry<'a>(output: &'a Value, task_id: &str) -> &'a Value {
         .iter()
         .find(|entry| entry["id"] == task_id)
         .expect("excluded entry")
+}
+
+fn output_task_ids(output: &Value) -> Vec<String> {
+    output["task_ids"]
+        .as_array()
+        .expect("task_ids array")
+        .iter()
+        .map(|task_id| {
+            task_id
+                .as_str()
+                .expect("task_id should be a string")
+                .to_string()
+        })
+        .collect()
+}
+
+fn seed_task_with_dependencies(
+    runtime: &OrbitRuntime,
+    title: &str,
+    status: TaskStatus,
+    dependencies: Vec<String>,
+) -> Task {
+    runtime
+        .add_task(TaskAddParams {
+            title: title.to_string(),
+            description: format!("Fixture task: {title}"),
+            acceptance_criteria: vec!["Fixture task is observable.".to_string()],
+            dependencies,
+            plan: "Fixture plan.".to_string(),
+            workspace_path: Some(".".to_string()),
+            priority: TaskPriority::Medium,
+            task_type: Some(TaskType::Chore),
+            status: Some(status),
+            ..Default::default()
+        })
+        .expect("seed task with dependencies")
+}
+
+fn seed_backlog_task_with_dependencies(
+    runtime: &OrbitRuntime,
+    title: &str,
+    dependencies: Vec<String>,
+) -> Task {
+    seed_task_with_dependencies(runtime, title, TaskStatus::Backlog, dependencies)
 }
 
 #[test]
@@ -188,6 +233,115 @@ fn list_backlog_tasks_preserves_existing_fields_without_conflicts() {
         ])
     );
     assert_eq!(output["excluded"], json!([]));
+}
+
+#[test]
+fn list_backlog_tasks_filters_dependency_readiness() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let proposed_dependency = seed_task_with_dependencies(
+        &runtime,
+        "Proposed dependency",
+        TaskStatus::Proposed,
+        vec![],
+    );
+    let backlog_dependency =
+        seed_task_with_dependencies(&runtime, "Backlog dependency", TaskStatus::Backlog, vec![]);
+    let in_progress_dependency = seed_task_with_dependencies(
+        &runtime,
+        "In-progress dependency",
+        TaskStatus::InProgress,
+        vec![],
+    );
+    let review_dependency =
+        seed_task_with_dependencies(&runtime, "Review dependency", TaskStatus::Review, vec![]);
+    let done_dependency =
+        seed_task_with_dependencies(&runtime, "Done dependency", TaskStatus::Done, vec![]);
+    let ready = seed_backlog_task_with_dependencies(
+        &runtime,
+        "Ready dependent",
+        vec![done_dependency.id.clone()],
+    );
+    let no_dependencies = seed_backlog_task_with_dependencies(&runtime, "No dependencies", vec![]);
+    let blocked_by_proposed = seed_backlog_task_with_dependencies(
+        &runtime,
+        "Blocked by proposed",
+        vec![proposed_dependency.id.clone()],
+    );
+    let blocked_by_backlog = seed_backlog_task_with_dependencies(
+        &runtime,
+        "Blocked by backlog",
+        vec![backlog_dependency.id.clone()],
+    );
+    let blocked_by_in_progress = seed_backlog_task_with_dependencies(
+        &runtime,
+        "Blocked by in-progress",
+        vec![in_progress_dependency.id.clone()],
+    );
+    let blocked_by_review = seed_backlog_task_with_dependencies(
+        &runtime,
+        "Blocked by review",
+        vec![review_dependency.id.clone()],
+    );
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+    let task_ids = output_task_ids(&output);
+
+    assert!(task_ids.contains(&ready.id));
+    assert!(task_ids.contains(&no_dependencies.id));
+    assert!(task_ids.contains(&backlog_dependency.id));
+    assert!(!task_ids.contains(&blocked_by_proposed.id));
+    assert!(!task_ids.contains(&blocked_by_backlog.id));
+    assert!(!task_ids.contains(&blocked_by_in_progress.id));
+    assert!(!task_ids.contains(&blocked_by_review.id));
+    assert_eq!(output["excluded"], json!([]));
+}
+
+#[test]
+fn list_backlog_tasks_serializes_orb_00042_grok_epic_chain() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let orb43 = seed_backlog_task_with_dependencies(&runtime, "ORB-00043 grok foundation", vec![]);
+    let orb44 = seed_backlog_task_with_dependencies(
+        &runtime,
+        "ORB-00044 grok follow-up",
+        vec![orb43.id.clone()],
+    );
+    let orb45 = seed_backlog_task_with_dependencies(
+        &runtime,
+        "ORB-00045 grok follow-up",
+        vec![orb43.id.clone()],
+    );
+    let orb46 = seed_backlog_task_with_dependencies(
+        &runtime,
+        "ORB-00046 grok follow-up",
+        vec![orb43.id.clone()],
+    );
+    let orb48 = seed_backlog_task_with_dependencies(
+        &runtime,
+        "ORB-00048 grok follow-up",
+        vec![orb43.id.clone()],
+    );
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+
+    assert_eq!(output_task_ids(&output), vec![orb43.id.clone()]);
+
+    runtime
+        .update_task(
+            &orb43.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .expect("mark ORB-00043 done");
+    let output = list_backlog_tasks(&runtime, json!({}));
+    let task_ids = output_task_ids(&output);
+
+    assert_eq!(task_ids.len(), 4);
+    assert!(task_ids.contains(&orb44.id));
+    assert!(task_ids.contains(&orb45.id));
+    assert!(task_ids.contains(&orb46.id));
+    assert!(task_ids.contains(&orb48.id));
 }
 
 #[test]

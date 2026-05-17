@@ -1,8 +1,8 @@
 # Design Docs — Overview
 
 **Status:** Draft
-**Owner:** claude-opus-4-7
-**Last updated:** 2026-05-14
+**Owner:** claude
+**Last updated:** 2026-05-17
 
 The design-docs system is Orbit's convention for capturing architectural intent: every load-bearing feature gets a folder under `docs/design/<feature>/` with four numbered docs (overview, design, vision, decisions) plus `specs/` and `references/` subfolders. [CONVENTIONS.md](../CONVENTIONS.md) is the rulebook. The `orbit design check` CLI and the `orbit.design.{init,list,show,check}` MCP tools make scaffolding and decay-detection cheap so agents apply the discipline by default rather than skip it.
 
@@ -59,7 +59,7 @@ Every numbered doc ends with a `Task References` section listing the task IDs ci
 # <Feature> — <Doc Role>
 
 **Status:** <Draft | Accepted>
-**Owner:** <agent identity — `claude`, `codex`, etc.>
+**Owner:** <agent family — `codex`, `claude`, `gemini`, or `grok`>
 **Last updated:** YYYY-MM-DD
 ```
 
@@ -131,5 +131,6 @@ The legacy [`scripts/check_design_doc_decay.py`](../../../scripts/check_design_d
 
 - [ORB-00006] — Refreshed ARCHITECTURE.md and the existing design folders to a consistent layout that became the basis for CONVENTIONS.md.
 - [ORB-00019] — Promoted the python decay checker to first-class `orbit design` CLI + `orbit.design.*` MCP tools and rewrote `make check-design-docs` and `scripts/check_design_doc_decay.py` to delegate.
+- [ORB-00090] — Aligned design-doc owner examples with the agent-family identity convention.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

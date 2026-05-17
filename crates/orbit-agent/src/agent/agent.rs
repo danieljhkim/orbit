@@ -14,6 +14,7 @@ pub enum ProviderOptions {
         writable_dirs: Vec<String>,
     },
     Gemini,
+    Grok,
     Ollama,
     Mock,
 }

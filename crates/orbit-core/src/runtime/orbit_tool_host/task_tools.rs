@@ -12,7 +12,8 @@ use crate::command::task::{TaskAddParams, TaskUpdateParams};
 
 use super::input::{
     empty_string_to_none, optional_bool_alias, parse_artifacts, parse_external_refs,
-    parse_task_complexity, parse_task_priority, parse_task_status, parse_task_type,
+    parse_relations, parse_task_complexity, parse_task_priority, parse_task_status,
+    parse_task_type,
 };
 use super::json::{serialize_task, serialize_task_lint_report, task_fields_to_json, task_to_json};
 
@@ -50,6 +51,7 @@ pub(super) fn add(
             .unwrap_or_default(),
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?
                 .unwrap_or_default(),
+            relations: parse_relations(&input)?.unwrap_or_default(),
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
             plan,
             comment: optional_string(&input, "comment")?,
@@ -78,6 +80,7 @@ pub(super) fn add(
                 &input,
                 &["source_task_id", "source_task", "sourceTaskId"],
             )?,
+            crew: optional_string(&input, "crew")?,
         },
         agent,
         model,
@@ -197,12 +200,13 @@ pub(super) fn start(
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let task = runtime.start_task_with_identity(
+    let task = runtime.start_task_with_identity_and_crew(
         &id,
         optional_string(&input, "note")?,
         optional_string(&input, "comment")?,
         agent,
         model,
+        optional_string(&input, "crew")?,
     )?;
     serialize_task(runtime, &task)
 }
@@ -235,6 +239,7 @@ pub(super) fn update(
                 ],
             )?,
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?,
+            relations: parse_relations(&input)?,
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?,
             plan: input
                 .get("plan")
@@ -252,11 +257,17 @@ pub(super) fn update(
             task_type: optional_string_alias(&input, &["type", "task_type", "taskType"])?
                 .map(|value| parse_task_type("type", &value))
                 .transpose()?,
+            source_task_id: optional_raw_string_alias(
+                &input,
+                &["source_task_id", "source_task", "sourceTaskId"],
+            )?
+            .map(empty_string_to_none),
             planned_by: optional_raw_string(&input, "planned_by")?.map(empty_string_to_none),
             implemented_by: optional_raw_string(&input, "implemented_by")?
                 .map(empty_string_to_none),
             pr_status: optional_raw_string(&input, "pr_status")?.map(empty_string_to_none),
             job_run_id: optional_raw_string(&input, "job_run_id")?.map(empty_string_to_none),
+            crew: optional_raw_string(&input, "crew")?.map(empty_string_to_none),
             context_files: optional_csv_or_string_list_alias(
                 &input,
                 &["context_files", "context"],
@@ -284,4 +295,19 @@ fn parse_task_id_list(task_ids: Vec<String>) -> Result<Vec<String>, OrbitError> 
         ));
     }
     Ok(deduped.into_iter().collect())
+}
+
+fn optional_raw_string_alias(input: &Value, keys: &[&str]) -> Result<Option<String>, OrbitError> {
+    for key in keys {
+        if let Some(value) = input.get(*key) {
+            return match value {
+                Value::Null => Ok(None),
+                Value::String(raw) => Ok(Some(raw.to_string())),
+                _ => Err(OrbitError::InvalidInput(format!(
+                    "`{key}` must be a string"
+                ))),
+            };
+        }
+    }
+    Ok(None)
 }

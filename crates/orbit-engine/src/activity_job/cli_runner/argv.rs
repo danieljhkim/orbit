@@ -35,10 +35,10 @@ pub(super) fn audit_argv_for_dispatch(
     }
 }
 
-/// Pin codex's `--sandbox` to `danger-full-access` and drop gemini's `-s` /
-/// `--sandbox` flag so the inner CLI sandbox does not double-encode the
-/// outer orbit-exec sandbox. Claude has no native sandbox flag — nothing to
-/// neutralize.
+/// Pin codex's `--sandbox` to `danger-full-access`, drop gemini's `-s` /
+/// `--sandbox` toggle, and drop grok's `--sandbox <profile>` value so the
+/// inner CLI sandbox does not double-encode the outer orbit-exec sandbox.
+/// Claude has no native sandbox flag — nothing to neutralize.
 pub(super) fn neutralize_inner_sandbox(
     provider: &str,
     provider_config: &mut HashMap<String, String>,
@@ -50,6 +50,9 @@ pub(super) fn neutralize_inner_sandbox(
         }
         "gemini" => {
             *static_args = filter_gemini_inner_sandbox_args(static_args);
+        }
+        "grok" => {
+            *static_args = filter_grok_inner_sandbox_args(static_args);
         }
         _ => {}
     }
@@ -103,6 +106,27 @@ fn filter_gemini_inner_sandbox_args(args: &[String]) -> Vec<String> {
         .filter(|a| a.as_str() != "-s" && a.as_str() != "--sandbox")
         .cloned()
         .collect()
+}
+
+/// Strip grok's sandbox flag from a static-args vector. `--sandbox` takes a
+/// value and may also be spelled `--sandbox=<profile>`.
+fn filter_grok_inner_sandbox_args(args: &[String]) -> Vec<String> {
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut idx = 0;
+    while idx < args.len() {
+        let arg = &args[idx];
+        if arg == "--sandbox" {
+            idx += 2;
+            continue;
+        }
+        if arg.starts_with("--sandbox=") {
+            idx += 1;
+            continue;
+        }
+        filtered.push(arg.clone());
+        idx += 1;
+    }
+    filtered
 }
 
 #[cfg(test)]
@@ -176,6 +200,35 @@ mod tests {
         );
         assert!(args.iter().any(|a| a == "--approval-mode"));
         assert!(args.iter().any(|a| a == "json"));
+    }
+
+    #[test]
+    fn neutralize_inner_sandbox_drops_grok_sandbox_flag_and_value() {
+        let mut config = HashMap::new();
+        let mut args = vec![
+            "--permission-mode".to_string(),
+            "bypassPermissions".to_string(),
+            "--sandbox".to_string(),
+            "workspace-write".to_string(),
+            "--output-format".to_string(),
+            "json".to_string(),
+            "--sandbox=another-profile".to_string(),
+        ];
+        neutralize_inner_sandbox("grok", &mut config, &mut args);
+        assert_eq!(
+            args,
+            vec![
+                "--permission-mode".to_string(),
+                "bypassPermissions".to_string(),
+                "--output-format".to_string(),
+                "json".to_string(),
+            ],
+            "grok sandbox flags should be removed with their values"
+        );
+        assert!(
+            config.is_empty(),
+            "grok provider_config must remain untouched"
+        );
     }
 
     #[test]

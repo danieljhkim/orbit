@@ -233,6 +233,7 @@ impl Execute for MetricsInvocationsArgs {
             task_id: self.task_id,
             agent: self.agent,
             model: self.model,
+            slot: None,
             tool_name: self.tool_name,
             limit: self.limit,
         };

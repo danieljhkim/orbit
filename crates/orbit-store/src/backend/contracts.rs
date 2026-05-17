@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, AuditEvent, ExecutorDef, ExternalRef, JobRun, JobRunState, KnowledgeRunMetrics,
-    Learning, LearningEvidence, LearningScope, LegacyValidation, OrbitError, OrbitId,
-    PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment,
-    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, normalize_task_tags,
-    task_matches_tags,
+    Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
+    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope,
+    LearningVoteSummary, LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef,
+    ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -50,6 +50,7 @@ pub struct TaskCreateParams {
     pub description: String,
     pub acceptance_criteria: Vec<String>,
     pub dependencies: Vec<OrbitId>,
+    pub relations: Vec<TaskRelation>,
     pub tags: Vec<String>,
     pub plan: String,
     pub execution_summary: String,
@@ -72,6 +73,7 @@ pub struct TaskCreateParams {
     pub task_type: TaskType,
     pub external_refs: Vec<ExternalRef>,
     pub source_task_id: Option<String>,
+    pub crew: Option<String>,
     pub comments: Vec<TaskComment>,
 }
 
@@ -89,6 +91,7 @@ pub struct TaskDocumentUpdateParams {
     pub description: Option<String>,
     pub acceptance_criteria: Option<Vec<String>>,
     pub dependencies: Option<Vec<OrbitId>>,
+    pub relations: Option<Vec<TaskRelation>>,
     pub tags: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
@@ -103,6 +106,7 @@ pub struct TaskDocumentUpdateParams {
     pub pr_status: Option<Option<String>>,
     pub source_task_id: Option<Option<String>>,
     pub job_run_id: Option<Option<String>>,
+    pub crew: Option<Option<String>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -393,7 +397,24 @@ pub trait TaskReviewStoreBackend: Send + Sync {
 }
 
 pub trait TaskArtifactStoreBackend: Send + Sync {
+    fn get_task_artifact_manifest(
+        &self,
+        _id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        Err(OrbitError::Store(
+            "task artifact manifest read is not supported by this backend".to_string(),
+        ))
+    }
     fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError>;
+    fn get_task_artifact(
+        &self,
+        _id: &str,
+        _path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        Err(OrbitError::Store(
+            "task artifact read is not supported by this backend".to_string(),
+        ))
+    }
     fn upsert_task_artifacts(
         &self,
         id: &str,
@@ -473,6 +494,7 @@ pub trait JobRunStoreBackend: Send + Sync {
         run_id: &str,
         metrics: KnowledgeRunMetrics,
     ) -> Result<bool, OrbitError>;
+    fn record_job_run_crew(&self, run_id: &str, crew: &Crew) -> Result<bool, OrbitError>;
     fn finalize_job_run(
         &self,
         run_id: &str,
@@ -612,6 +634,29 @@ pub struct LearningSearchResult {
     pub matched_by: Vec<String>,
 }
 
+/// Parameters for recording a re-validation vote on a learning.
+#[derive(Debug, Clone)]
+pub struct LearningUpvoteParams {
+    pub learning_id: OrbitId,
+    pub voter_model: String,
+    pub task_id: Option<OrbitId>,
+}
+
+/// Parameters for adding a footnote-style comment to a learning.
+#[derive(Debug, Clone)]
+pub struct LearningCommentAddParams {
+    pub learning_id: OrbitId,
+    pub body: String,
+    pub author_model: String,
+}
+
+/// Parameters for soft-deleting a learning comment.
+#[derive(Debug, Clone)]
+pub struct LearningCommentDeleteParams {
+    pub comment_id: OrbitId,
+    pub deleted_by: String,
+}
+
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
@@ -623,6 +668,24 @@ pub trait LearningStoreBackend: Send + Sync {
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError>;
+    fn upvote_learning(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<LearningVoteSummary, OrbitError>;
+    fn learning_vote_summary(&self, id: &str) -> Result<LearningVoteSummary, OrbitError>;
+    fn add_learning_comment(
+        &self,
+        params: LearningCommentAddParams,
+    ) -> Result<orbit_common::types::LearningComment, OrbitError>;
+    fn list_learning_comments(
+        &self,
+        learning_id: &str,
+        include_deleted: bool,
+    ) -> Result<Vec<orbit_common::types::LearningComment>, OrbitError>;
+    fn delete_learning_comment(
+        &self,
+        params: LearningCommentDeleteParams,
+    ) -> Result<(), OrbitError>;
     fn update_learning(
         &self,
         id: &str,
@@ -630,8 +693,7 @@ pub trait LearningStoreBackend: Send + Sync {
     ) -> Result<Learning, OrbitError>;
     fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
     /// Archive a learning without a replacement record. Flips
-    /// `status = superseded`, sets `superseded_by = None`, and moves the
-    /// YAML under `superseded/`. Returns `false` when the record does not
+    /// `status = superseded` and sets `superseded_by = None`. Returns `false` when the record does not
     /// exist. Used by `prune --delete` (§7.3).
     fn archive_learning(&self, id: &str) -> Result<bool, OrbitError>;
     fn delete_learning(&self, id: &str) -> Result<bool, OrbitError>;

@@ -35,6 +35,7 @@ fn fixture_task(id: &str) -> Task {
         external_refs: Vec::new(),
         relations: Vec::new(),
         job_run_id: None,
+        crew: None,
         tags: Vec::new(),
         created_at: Utc::now(),
         updated_at: Utc::now(),

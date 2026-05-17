@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-14
+**Last updated:** 2026-05-16
 
 > **Sandbox backend status.** The only OS-level sandbox backend implemented today is `macos-sandbox-exec`. `ExecutorSandboxKind` (`crates/orbit-common/src/types/executor_def.rs`) defines no Linux or Windows variant, and `EnvironmentHost::resolve_executor_sandbox` (`crates/orbit-core/src/runtime/v2_host/sandbox.rs`) rejects `macos-sandbox-exec` on non-macOS platforms. On Linux and Windows the spawned agent subprocess runs without OS-level isolation; HTTP-tool `fs.*` enforcement and process supervision still apply. A Linux backend is named in [3_vision.md](./3_vision.md) as future work but is not in `2_design.md`'s shipped contract. [T20260505-23]
 

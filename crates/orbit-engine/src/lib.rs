@@ -57,9 +57,9 @@ pub use context::{
     AGENT_PROTOCOL_VIOLATION, AGENT_TIMEOUT, ActivityInvocationResult, AgentProtocolHost,
     AgentRoleConfig, AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost,
     ExecutionContext, ExecutorHost, ExecutorLookupHost, JobRunHost, JobRunResult, PrConfig,
-    RuntimeHost, STALE_RUN_GRACE_SECONDS, TaskAutomationUpdate, TaskHost, TaskReadHost,
-    TaskWriteHost, execution_working_directory, execution_working_directory_with_task,
-    input_workspace_path, redact_attempt_outcome,
+    RuntimeHost, STALE_RUN_GRACE_SECONDS, TaskActivityUpdate, TaskAutomationUpdate, TaskHost,
+    TaskReadHost, TaskWriteHost, execution_working_directory,
+    execution_working_directory_with_task, input_workspace_path, redact_attempt_outcome,
 };
 pub use executor::automation::{
     StateExecutionContext, execute_action as execute_deterministic_action,

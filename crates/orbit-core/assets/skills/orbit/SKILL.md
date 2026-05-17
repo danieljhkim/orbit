@@ -17,8 +17,8 @@ Orbit tools are reachable via two surfaces. Both accept identical JSON arguments
 
 | Surface | When to use | Form |
 |---------|-------------|------|
-| **MCP** | Claude Code with the orbit plugin (or any MCP client connected to `orbit mcp serve`); look for `orbit_*` tools in your toolbox | `orbit_task_add({"title": "...", "model": "<model_name>"})` |
-| **CLI** | Shell access (inside an activity step, or with the `orbit` binary on `PATH`) | `orbit tool run orbit.task.add --input '{"title": "...", "model": "<model_name>"}'` |
+| **MCP** | Claude Code with the orbit plugin (or any MCP client connected to `orbit mcp serve`); look for `orbit_*` tools in your toolbox | `orbit_task_add({"title": "...", "model": "<agent-family>"})` |
+| **CLI** | Shell access (inside an activity step, or with the `orbit` binary on `PATH`) | `orbit tool run orbit.task.add --input '{"title": "...", "model": "<agent-family>"}'` |
 
 **Mapping rule**: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>` (dots become underscores; JSON args identical). For multi-segment names like `orbit.task.review_thread.add`, every dot becomes an underscore: `orbit_task_review_thread_add`.
 
@@ -30,10 +30,10 @@ Orbit tools are reachable via two surfaces. Both accept identical JSON arguments
 - Semantic read tools (`orbit.semantic.search`, `orbit.semantic.related`): both surfaces. Require the `orbit-embed-companion` binary (`orbit semantic install`); calls fail with an install-pointer error otherwise.
 - State handoff (`orbit.state.*`), graph writes, and duel/scoreboard tools: **CLI only** — used inside activity steps where the agent has shell access.
 
-**Always include `model` in the JSON** so Orbit can attribute the call to the right agent family:
+**Always include `model` in the JSON** so Orbit can attribute the call to the right agent family. Here `model` means the canonical agent family: pass `codex`, `claude`, `gemini`, or `grok`. Full model strings are accepted and auto-normalized, but the family is the persisted identity.
 
 ```json
-{ "model": "<model_name>" }
+{ "model": "codex" }
 ```
 
 **CLI-flag → JSON mapping:** the CLI exposes some flags (e.g. `orbit tool run orbit.task.show --full ...`) that don't appear over MCP. The MCP equivalent is the default behavior when the corresponding JSON field is omitted (e.g. `orbit_task_show({"id": "<id>"})` returns the full task; pass `field` or `fields` to project).
@@ -46,26 +46,26 @@ The reference below is intentionally common, not exhaustive. Never guess. Run `o
 
 ```bash
 # Task commands
-orbit tool run orbit.task.show --full --input '{"id": "<id>", "model": "<model_name>"}'                    # Load full task
-orbit tool run orbit.task.show --input '{"id": "<id>", "field": "comments", "model": "<model_name>"}'     # Load only comments
-orbit tool run orbit.task.show --input '{"id": "<id>", "field": "plan", "model": "<model_name>"}'         # Load only plan
+orbit tool run orbit.task.show --full --input '{"id": "<id>", "model": "<agent-family>"}'                    # Load full task
+orbit tool run orbit.task.show --input '{"id": "<id>", "field": "comments", "model": "<agent-family>"}'     # Load only comments
+orbit tool run orbit.task.show --input '{"id": "<id>", "field": "plan", "model": "<agent-family>"}'         # Load only plan
 # Valid field values: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts
-orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<model_name>"}'       # List by status
-orbit tool run orbit.task.search --input '{"query": "search text", "model": "<model_name>"}'  # Lexical title/description substring match
-orbit tool run orbit.semantic.search --input '{"query": "topic phrase", "limit": 5, "model": "<model_name>"}'  # Hybrid BM25 + cosine over indexed task fields (requires `orbit semantic install`)
-orbit tool run orbit.semantic.related --input '{"id": "<task-id>", "limit": 5, "model": "<model_name>"}'        # Cosine neighbors of an indexed task
-orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "acceptance_criteria": ["..."], "workspace": ".", "model": "<model_name>"}'
-orbit tool run orbit.task.update --input '{"id": "<id>", "plan": "...", "model": "<model_name>"}'
-orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": "<model_name>"}' # backlog -> in-progress
-orbit tool run orbit.task.update --input '{"id": "<id>", "status": "review", "model": "<model_name>"}'
-orbit tool run orbit.task.update --input '{"id": "<id>", "comment": "...", "model": "<model_name>"}'
-orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<model_name>"}' # proposed/friction -> backlog, review -> done
-orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "...", "model": "<model_name>"}'   # proposed/friction -> rejected
+orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<agent-family>"}'       # List by status
+orbit tool run orbit.task.search --input '{"query": "search text", "model": "<agent-family>"}'  # Lexical title/description substring match
+orbit tool run orbit.semantic.search --input '{"query": "topic phrase", "limit": 5, "model": "<agent-family>"}'  # Hybrid BM25 + cosine over indexed task fields (requires `orbit semantic install`)
+orbit tool run orbit.semantic.related --input '{"id": "<task-id>", "limit": 5, "model": "<agent-family>"}'        # Cosine neighbors of an indexed task
+orbit tool run orbit.task.add --input '{"title": "...", "description": "...", "acceptance_criteria": ["..."], "workspace": ".", "model": "<agent-family>"}'
+orbit tool run orbit.task.update --input '{"id": "<id>", "plan": "...", "model": "<agent-family>"}'
+orbit tool run orbit.task.start --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}' # backlog -> in-progress
+orbit tool run orbit.task.update --input '{"id": "<id>", "status": "review", "model": "<agent-family>"}'
+orbit tool run orbit.task.update --input '{"id": "<id>", "comment": "...", "model": "<agent-family>"}'
+orbit tool run orbit.task.approve --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}' # proposed/friction -> backlog, review -> done
+orbit tool run orbit.task.reject --input '{"id": "<id>", "note": "...", "model": "<agent-family>"}'   # proposed/friction -> rejected
 # Review-thread commands: add/reply require `model`; list/resolve show it for provenance consistency, though it is optional there.
-orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...", "path": "<repo-relative path>", "line": "<line>", "model": "<model_name>"}'
-orbit tool run orbit.task.review_thread.list --input '{"id": "<id>", "status": "open", "model": "<model_name>"}'
-orbit tool run orbit.task.review_thread.reply --input '{"id": "<id>", "thread_id": "<thread-id>", "body": "...", "model": "<model_name>"}'
-orbit tool run orbit.task.review_thread.resolve --input '{"id": "<id>", "thread_id": "<thread-id>", "model": "<model_name>"}'
+orbit tool run orbit.task.review_thread.add --input '{"id": "<id>", "body": "...", "path": "<repo-relative path>", "line": "<line>", "model": "<agent-family>"}'
+orbit tool run orbit.task.review_thread.list --input '{"id": "<id>", "status": "open", "model": "<agent-family>"}'
+orbit tool run orbit.task.review_thread.reply --input '{"id": "<id>", "thread_id": "<thread-id>", "body": "...", "model": "<agent-family>"}'
+orbit tool run orbit.task.review_thread.resolve --input '{"id": "<id>", "thread_id": "<thread-id>", "model": "<agent-family>"}'
 ```
 
 ## Common Mistakes — DO NOT

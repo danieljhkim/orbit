@@ -5,7 +5,7 @@ use orbit_common::types::{
     Activity, AgentModelPair, ExecutorDef, ExternalRef, InvocationTrace, Job, JobRun, JobRunState,
     JobTargetType, KnowledgeRunMetrics, OrbitError, OrbitEvent, PipelineState, ReviewThread, Role,
     Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
-    resolve_agent_model_pair,
+    all_agent_families,
 };
 use orbit_common::utility::redaction::{redact_sensitive_env_json, redact_sensitive_env_option};
 use orbit_exec::EnvironmentMode;
@@ -202,6 +202,16 @@ pub struct TaskAutomationUpdate {
     pub job_run_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TaskActivityUpdate {
+    pub status: TaskStatus,
+    pub execution_summary: Option<String>,
+    pub comment: Option<String>,
+    pub note: Option<String>,
+    pub agent: Option<String>,
+    pub model: Option<String>,
+}
+
 pub trait JobRunHost {
     fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError>;
     fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
@@ -288,10 +298,7 @@ pub trait TaskWriteHost {
     fn update_task_from_activity(
         &self,
         task_id: &str,
-        status: TaskStatus,
-        execution_summary: Option<String>,
-        comment: Option<String>,
-        note: Option<String>,
+        update: TaskActivityUpdate,
     ) -> Result<Task, OrbitError>;
     fn apply_task_automation_update(
         &self,
@@ -311,7 +318,7 @@ pub trait AgentProtocolHost {
     ) -> Result<Vec<u8>, OrbitError>;
 }
 
-/// Resolved `[agent.<role>]` block from `config.toml` (ADR-029). Each field
+/// Resolved crew role assignment from `config.toml`. Each field
 /// is independently optional — the resolver in
 /// `crate::activity_job::agent_role` falls back to the inline activity value
 /// for any field the config does not specify.
@@ -345,12 +352,12 @@ pub trait EnvironmentHost {
     fn cli_command_environment(&self, env_extra: &[String]) -> Vec<(String, String)>;
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String>;
 
-    /// Resolved `[agent.<role>]` block from the active workspace's
-    /// `config.toml`, if any (ADR-029). The default returns `None`, which
-    /// means dispatch falls back to the inline `provider`/`model`/`backend`
-    /// on the activity. orbit-core's implementation reads
-    /// `RawRuntimeConfig.agent` (written by `orbit init` per ADR-027) and
-    /// parses the string fields into the strongly-typed activity-job enums.
+    /// Resolved crew role assignment from the active workspace's
+    /// `config.toml`, if any. The default returns `None`, which means
+    /// dispatch falls back to the inline `provider`/`model`/`backend` on the
+    /// activity. orbit-core's implementation reads the selected
+    /// `[crews.<name>]` entry and parses the string fields into the
+    /// strongly-typed activity-job enums.
     fn agent_role_config(&self, _role: AgentRole) -> Option<AgentRoleConfig> {
         None
     }
@@ -432,6 +439,12 @@ pub trait RuntimeHost {
             ..InvocationQuery::default()
         })
     }
+    fn activity_implementer_identity(
+        &self,
+        _input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        Ok((None, None))
+    }
     fn run_tool_with_context_and_role(
         &self,
         name: &str,
@@ -466,7 +479,17 @@ pub trait RuntimeHost {
         model: Option<&str>,
     ) -> Result<(), OrbitError>;
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
-        resolve_agent_model_pair(agent_cli)
+        let _ = agent_cli;
+        None
+    }
+    fn duel_candidate_families(&self) -> Vec<String> {
+        all_agent_families()
+            .iter()
+            .map(|family| (*family).to_string())
+            .collect()
+    }
+    fn duel_orchestrator_model(&self, _family: &str) -> Option<String> {
+        None
     }
     fn canonical_model_name(&self, _agent_cli: &str, model: Option<&str>) -> Option<String> {
         model
@@ -799,18 +822,9 @@ impl TaskWriteHost for AutomationExecutorHost<'_> {
     fn update_task_from_activity(
         &self,
         task_id: &str,
-        status: TaskStatus,
-        execution_summary: Option<String>,
-        comment: Option<String>,
-        note: Option<String>,
+        update: TaskActivityUpdate,
     ) -> Result<Task, OrbitError> {
-        self.task_writer.update_task_from_activity(
-            task_id,
-            status,
-            execution_summary,
-            comment,
-            note,
-        )
+        self.task_writer.update_task_from_activity(task_id, update)
     }
 
     fn apply_task_automation_update(
@@ -905,6 +919,13 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
         self.runtime.invocation_records(query)
     }
 
+    fn activity_implementer_identity(
+        &self,
+        input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        self.runtime.activity_implementer_identity(input)
+    }
+
     fn run_tool_with_context_and_role(
         &self,
         name: &str,
@@ -950,6 +971,14 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
 
     fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
         self.runtime.resolved_agent_model_pair(agent_cli)
+    }
+
+    fn duel_candidate_families(&self) -> Vec<String> {
+        self.runtime.duel_candidate_families()
+    }
+
+    fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
+        self.runtime.duel_orchestrator_model(family)
     }
 
     fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {

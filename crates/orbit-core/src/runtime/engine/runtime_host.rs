@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use orbit_common::types::{
     Activity, AgentModelPair, InvocationTrace, JobRunState, JobTargetType, OrbitError, OrbitEvent,
-    Role,
+    Role, RoleSlot,
 };
 use orbit_engine::{ActivityInvocationResult, ExecutionContext, ExecutorHost, RuntimeHost};
 use orbit_store::{InvocationInsertParams, InvocationQuery, InvocationRecord, token_scoreboard};
@@ -64,8 +64,21 @@ impl RuntimeHost for OrbitRuntime {
         self.configured_agent_model_pair(agent_cli)
     }
 
+    fn duel_candidate_families(&self) -> Vec<String> {
+        self.duel_config().candidates.clone()
+    }
+
+    fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
+        let family = family.trim().to_ascii_lowercase();
+        self.duel_config().models.get(&family).cloned()
+    }
+
     fn canonical_model_name(&self, agent_cli: &str, model: Option<&str>) -> Option<String> {
-        self.canonical_model_for_agent(agent_cli, model)
+        let _ = agent_cli;
+        model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
     }
 
     fn invocation_records(
@@ -73,6 +86,13 @@ impl RuntimeHost for OrbitRuntime {
         query: InvocationQuery,
     ) -> Result<Vec<InvocationRecord>, OrbitError> {
         OrbitRuntime::invocation_records(self, query)
+    }
+
+    fn activity_implementer_identity(
+        &self,
+        input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        self.implementer_identity_for_activity_input(input)
     }
 
     fn run_tool_with_context_and_role(
@@ -193,6 +213,7 @@ impl RuntimeHost for OrbitRuntime {
             activity_id: execution.activity.id.clone(),
             agent: agent.unwrap_or_else(|| normalize_agent_name(&execution.agent_cli)),
             model,
+            slot: role_slot_from_input(&execution.input),
             task_ids: associated_task_ids(&execution.input),
             trace: trace.clone(),
         })?;
@@ -209,6 +230,15 @@ impl RuntimeHost for OrbitRuntime {
 
         Ok(())
     }
+}
+
+fn role_slot_from_input(input: &Value) -> Option<RoleSlot> {
+    input
+        .get("planning_duel_slot")
+        .or_else(|| input.get("role_slot"))
+        .or_else(|| input.get("slot"))
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
 }
 
 fn is_planning_duel_agent_activity(activity_id: &str) -> bool {
@@ -259,6 +289,7 @@ mod tests {
                 args: Vec::new(),
                 stdout_format: None,
                 model_pair_override: None,
+                model_flag: None,
                 timeout_seconds: None,
                 env: HashMap::new(),
                 sandbox: None,

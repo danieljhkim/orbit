@@ -31,6 +31,19 @@ There is no task lifecycle, triage state, rejection penalty, or precomputed scor
 
 Do **not ignore friction**. Always create a report.
 
+## Valid Tags
+
+| Tag | Use for |
+| --- | --- |
+| `build` | make/fmt/lint friction |
+| `docs` | Stale or missing CLAUDE.md or design docs |
+| `lifecycle` | Task lifecycle confusion or transition issues |
+| `naming` | Naming drift or duplicated sources of truth |
+| `other` | Fallback when no specific tag fits |
+| `policy` | fsProfile or sandboxing surprises |
+| `skill-guidance` | Misleading or incorrect skill instructions |
+| `tooling` | Orbit tool/CLI/MCP failures |
+
 ## How to Create the Report
 
 Two surfaces, identical JSON args. See the `orbit` skill for the full mapping.
@@ -42,7 +55,7 @@ orbit tool run orbit.friction.add --input '{
   "body": "<what happened, where, and why it caused friction>",
   "tags": ["<tooling|skill-guidance|docs|lifecycle|build|naming|policy|other>"],
   "during_task": "<optional task id>",
-  "model": "<model_name>" # gpt-5.4, claude-opus-4-6, gemini-2.5-pro, etc
+  "model": "<family>" # codex | claude | gemini | grok (full model strings are accepted and auto-normalized)
 }'
 ```
 
@@ -53,7 +66,7 @@ orbit_friction_add({
   "body": "<what happened, where, and why it caused friction>",
   "tags": ["<tooling|skill-guidance|docs|lifecycle|build|naming|policy|other>"],
   "during_task": "<optional task id>",
-  "model": "<model_name>"
+  "model": "<family>"  // codex | claude | gemini | grok
 })
 ```
 

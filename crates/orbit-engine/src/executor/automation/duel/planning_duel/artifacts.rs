@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::{
-    OrbitError, OrbitEvent, PlannerSlot, PlanningRoleAssignment, PlanningRoles, Role, TaskArtifact,
-    TaskComment,
+    AgentFamily, OrbitError, OrbitEvent, PlanningRoleAssignment, PlanningRoles, Role, RoleSlot,
+    TaskArtifact, TaskComment,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
@@ -26,7 +26,52 @@ const TASK_ARTIFACTS_DIR_NAME: &str = "artifacts";
 const AUTHOR_SIGNATURE_PREFIX: &str = "*authored by: ";
 const AUTHOR_SIGNATURE_SEPARATOR: &str = " / ";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PlanningDuelSignature {
+    pub family: AgentFamily,
+    pub slot: RoleSlot,
+}
+
 pub(super) fn parse_planning_duel_signature(
+    content: &str,
+) -> Result<PlanningDuelSignature, OrbitError> {
+    let first_line = content
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(
+                "planning duel artifact must start with an authored-by signature line".to_string(),
+            )
+        })?;
+    let signature = first_line
+        .strip_prefix(AUTHOR_SIGNATURE_PREFIX)
+        .and_then(|value| value.strip_suffix('*'))
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "planning duel artifact signature must match `{AUTHOR_SIGNATURE_PREFIX}<family> / <slot>*`"
+            ))
+        })?;
+    let (family, slot) = signature
+        .split_once(AUTHOR_SIGNATURE_SEPARATOR)
+        .ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "planning duel artifact signature must contain `{AUTHOR_SIGNATURE_SEPARATOR}`"
+            ))
+        })?;
+    if family.trim().is_empty() || slot.trim().is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "planning duel artifact signature must include both family and slot".to_string(),
+        ));
+    }
+    Ok(PlanningDuelSignature {
+        family: family.trim().parse()?,
+        slot: slot.trim().parse()?,
+    })
+}
+
+fn parse_legacy_planning_duel_signature(
     content: &str,
 ) -> Result<PlanningRoleAssignment, OrbitError> {
     let first_line = content
@@ -43,26 +88,27 @@ pub(super) fn parse_planning_duel_signature(
         .strip_prefix(AUTHOR_SIGNATURE_PREFIX)
         .and_then(|value| value.strip_suffix('*'))
         .ok_or_else(|| {
-            OrbitError::InvalidInput(format!(
-                "planning duel artifact signature must match `{AUTHOR_SIGNATURE_PREFIX}<agent> / <model>*`"
-            ))
+            OrbitError::InvalidInput(
+                "legacy planning duel artifact signature is malformed".to_string(),
+            )
         })?;
-    let (agent, model) = signature
+    let (agent, _) = signature
         .split_once(AUTHOR_SIGNATURE_SEPARATOR)
         .ok_or_else(|| {
-            OrbitError::InvalidInput(format!(
-                "planning duel artifact signature must contain `{AUTHOR_SIGNATURE_SEPARATOR}`"
-            ))
+            OrbitError::InvalidInput(
+                "legacy planning duel artifact signature must contain agent and model".to_string(),
+            )
         })?;
-    if agent.trim().is_empty() || model.trim().is_empty() {
-        return Err(OrbitError::InvalidInput(
-            "planning duel artifact signature must include both agent and model".to_string(),
-        ));
-    }
     Ok(PlanningRoleAssignment {
-        agent: agent.trim().to_string(),
-        model: model.trim().to_string(),
+        family: agent.trim().parse()?,
     })
+}
+
+fn role_slot_from_artifact_path(path: &str) -> Option<RoleSlot> {
+    let name = path
+        .strip_prefix(PLANNING_DUEL_ARTIFACT_PREFIX)?
+        .strip_suffix(PLANNING_DUEL_PLAN_EXTENSION)?;
+    name.parse().ok()
 }
 
 pub(super) fn planning_duel_plan_artifacts(
@@ -81,10 +127,24 @@ pub(super) fn planning_duel_plan_artifacts(
                     artifact.path
                 ))
             })?;
+            let parsed = parse_planning_duel_signature(content);
+            let (author, slot) = match parsed {
+                Ok(signature) => (
+                    PlanningRoleAssignment {
+                        family: signature.family,
+                    },
+                    Some(signature.slot),
+                ),
+                Err(_) => (
+                    parse_legacy_planning_duel_signature(content)?,
+                    role_slot_from_artifact_path(&artifact.path),
+                ),
+            };
             Ok(PlanningDuelPlanArtifact {
                 path: artifact.path.clone(),
                 content: content.to_string(),
-                author: parse_planning_duel_signature(content)?,
+                author,
+                slot,
             })
         })
         .collect::<Result<Vec<_>, OrbitError>>()?;
@@ -100,20 +160,24 @@ pub(super) fn planning_duel_plan_artifacts(
 pub(super) fn plan_artifact_for_assignment<'a>(
     plan_artifacts: &'a [PlanningDuelPlanArtifact],
     assignment: &PlanningRoleAssignment,
+    expected_slot: RoleSlot,
 ) -> Result<&'a PlanningDuelPlanArtifact, OrbitError> {
     let matches = plan_artifacts
         .iter()
-        .filter(|artifact| artifact.author == *assignment)
+        .filter(|artifact| artifact.slot == Some(expected_slot))
         .collect::<Vec<_>>();
     match matches.as_slice() {
-        [artifact] => Ok(*artifact),
+        [artifact] if artifact.author.family == assignment.family => Ok(*artifact),
+        [artifact] => Err(OrbitError::InvalidInput(format!(
+            "planning duel artifact for slot {expected_slot} has family {} but expected {}",
+            artifact.author.family, assignment.family
+        ))),
         [] => Err(OrbitError::InvalidInput(format!(
-            "missing planning duel artifact for {}/{}",
-            assignment.agent, assignment.model
+            "missing planning duel artifact for {} / {}",
+            assignment.family, expected_slot
         ))),
         _ => Err(OrbitError::InvalidInput(format!(
-            "found multiple planning duel artifacts for {}/{}",
-            assignment.agent, assignment.model
+            "found multiple planning duel artifacts for slot {expected_slot}"
         ))),
     }
 }
@@ -156,50 +220,25 @@ fn optional_winner_marker_field(
         .transpose()
 }
 
-fn arbiter_identity_from_marker(
-    marker_agent: Option<String>,
-    marker_model: Option<String>,
-    roles: Option<&PlanningRoles>,
-) -> Result<PlanningRoleAssignment, OrbitError> {
-    match roles {
-        Some(roles) => {
-            if let Some(agent) = marker_agent.as_deref()
-                && agent != roles.arbiter.agent.as_str()
-            {
-                return Err(OrbitError::InvalidInput(format!(
-                    "winner artifact arbiter {}/{} does not match recorded arbiter {}/{}",
-                    agent,
-                    marker_model.as_deref().unwrap_or("<unspecified>"),
-                    roles.arbiter.agent,
-                    roles.arbiter.model
-                )));
-            }
-            if let Some(model) = marker_model.as_deref()
-                && model != roles.arbiter.model.as_str()
-            {
-                return Err(OrbitError::InvalidInput(format!(
-                    "winner artifact arbiter {}/{} does not match recorded arbiter {}/{}",
-                    marker_agent.as_deref().unwrap_or("<unspecified>"),
-                    model,
-                    roles.arbiter.agent,
-                    roles.arbiter.model
-                )));
-            }
-            Ok(roles.arbiter.clone())
-        }
-        None => Ok(PlanningRoleAssignment {
-            agent: marker_agent.ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "planning duel winner marker requires `arbiter_agent_cli` when `planning_duel_roles` are unavailable".to_string(),
-                )
-            })?,
-            model: marker_model.ok_or_else(|| {
-                OrbitError::InvalidInput(
-                    "planning duel winner marker requires `arbiter_model` when `planning_duel_roles` are unavailable".to_string(),
-                )
-            })?,
-        }),
+fn assignment_for_slot(roles: &PlanningRoles, slot: RoleSlot) -> &PlanningRoleAssignment {
+    match slot {
+        RoleSlot::PlannerA => &roles.planner_a,
+        RoleSlot::PlannerB => &roles.planner_b,
+        RoleSlot::Arbiter => &roles.arbiter,
     }
+}
+
+fn family_from_legacy_identity(
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<AgentFamily>, OrbitError> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| required_winner_marker_field(&value, field))
+        .transpose()?
+        .map(|value| value.parse())
+        .transpose()
 }
 
 fn normalize_winner_marker(
@@ -208,52 +247,122 @@ fn normalize_winner_marker(
     roles: Option<&PlanningRoles>,
 ) -> Result<PlanningDuelWinnerArtifact, OrbitError> {
     let PlanningDuelWinnerMarker {
+        winner_slot,
         winner_agent_cli,
-        winner_model,
+        winner_model: _,
         artifact_path,
         arbiter_agent_cli,
-        arbiter_model,
+        arbiter_model: _,
+        arbiter_family,
         arbiter_rationale,
     } = marker;
 
-    let winner_agent_cli = required_winner_marker_field(&winner_agent_cli, "winner_agent_cli")?;
-    let winner_model = required_winner_marker_field(&winner_model, "winner_model")?;
     let arbiter_rationale = required_winner_marker_field(&arbiter_rationale, "arbiter_rationale")?;
-    let winner_assignment = PlanningRoleAssignment {
-        agent: winner_agent_cli.clone(),
-        model: winner_model.clone(),
+    let legacy_winner_family =
+        family_from_legacy_identity(Some(winner_agent_cli), "winner_agent_cli")?;
+    let winner_slot = winner_slot.or_else(|| {
+        artifact_path
+            .as_deref()
+            .and_then(role_slot_from_artifact_path)
+    });
+    let (winner_family, winner_slot) = match (roles, winner_slot, legacy_winner_family) {
+        (Some(roles), Some(slot), legacy_family) => {
+            let family = assignment_for_slot(roles, slot).family;
+            if let Some(legacy_family) = legacy_family
+                && legacy_family != family
+            {
+                return Err(OrbitError::InvalidInput(format!(
+                    "winner artifact family {legacy_family} does not match recorded {slot} family {family}"
+                )));
+            }
+            (family, Some(slot))
+        }
+        (Some(roles), None, Some(legacy_family)) => {
+            let assignment = PlanningRoleAssignment {
+                family: legacy_family,
+            };
+            let slot = winner_slot_for_assignment(roles, &assignment)?;
+            (legacy_family, Some(slot))
+        }
+        (Some(_), None, None) => {
+            return Err(OrbitError::InvalidInput(
+                "planning duel winner marker requires `winner_slot`".to_string(),
+            ));
+        }
+        (None, Some(slot), Some(legacy_family)) => (legacy_family, Some(slot)),
+        (None, Some(slot), None) => {
+            let artifact = plan_artifacts
+                .iter()
+                .find(|artifact| artifact.slot == Some(slot))
+                .ok_or_else(|| {
+                    OrbitError::InvalidInput(format!(
+                        "missing planning duel artifact for winner slot {slot}"
+                    ))
+                })?;
+            (artifact.author.family, Some(slot))
+        }
+        (None, None, Some(legacy_family)) => (legacy_family, None),
+        (None, None, None) => {
+            return Err(OrbitError::InvalidInput(
+                "planning duel winner marker requires `winner_slot` or legacy `winner_agent_cli`"
+                    .to_string(),
+            ));
+        }
     };
 
     let artifact_path = match optional_winner_marker_field(artifact_path, "artifact_path")? {
         Some(artifact_path) => {
             let winning_artifact = plan_artifact_by_path(plan_artifacts, &artifact_path)?;
-            if winning_artifact.author != winner_assignment {
+            if winning_artifact.author.family != winner_family {
                 return Err(OrbitError::InvalidInput(format!(
-                    "winner artifact `{}` is authored by {}/{} instead of declared winner {}/{}",
-                    artifact_path,
-                    winning_artifact.author.agent,
-                    winning_artifact.author.model,
-                    winner_assignment.agent,
-                    winner_assignment.model
+                    "winner artifact `{}` is authored by {} instead of declared winner {}",
+                    artifact_path, winning_artifact.author.family, winner_family
                 )));
             }
             artifact_path
         }
-        None => plan_artifact_for_assignment(plan_artifacts, &winner_assignment)?
+        None => {
+            let slot = winner_slot.ok_or_else(|| {
+                OrbitError::InvalidInput(
+                    "planning duel winner marker requires artifact_path when winner_slot is unavailable"
+                        .to_string(),
+                )
+            })?;
+            plan_artifact_for_assignment(
+                plan_artifacts,
+                &PlanningRoleAssignment {
+                    family: winner_family,
+                },
+                slot,
+            )?
             .path
-            .clone(),
+            .clone()
+        }
     };
 
-    let arbiter_agent_cli = optional_winner_marker_field(arbiter_agent_cli, "arbiter_agent_cli")?;
-    let arbiter_model = optional_winner_marker_field(arbiter_model, "arbiter_model")?;
-    let arbiter = arbiter_identity_from_marker(arbiter_agent_cli, arbiter_model, roles)?;
+    let legacy_arbiter_family =
+        family_from_legacy_identity(arbiter_agent_cli, "arbiter_agent_cli")?;
+    let arbiter_family = match (roles, arbiter_family.or(legacy_arbiter_family)) {
+        (Some(roles), Some(marker_family)) if marker_family != roles.arbiter.family => {
+            return Err(OrbitError::InvalidInput(format!(
+                "winner artifact arbiter {marker_family} does not match recorded arbiter {}",
+                roles.arbiter.family
+            )));
+        }
+        (Some(roles), _) => roles.arbiter.family,
+        (None, Some(marker_family)) => marker_family,
+        (None, None) => {
+            return Err(OrbitError::InvalidInput(
+                "planning duel winner marker requires `arbiter_family` when `planning_duel_roles` are unavailable".to_string(),
+            ));
+        }
+    };
 
     Ok(PlanningDuelWinnerArtifact {
-        winner_agent_cli,
-        winner_model,
+        winner_family,
+        winner_slot,
         artifact_path,
-        arbiter_agent_cli: arbiter.agent,
-        arbiter_model: arbiter.model,
+        arbiter_family,
         arbiter_rationale,
     })
 }
@@ -287,24 +396,23 @@ pub(super) fn winner_artifact_from_artifacts(
 
 pub(super) fn winner_assignment(winner: &PlanningDuelWinnerArtifact) -> PlanningRoleAssignment {
     PlanningRoleAssignment {
-        agent: winner.winner_agent_cli.clone(),
-        model: winner.winner_model.clone(),
+        family: winner.winner_family,
     }
 }
 
 pub(super) fn winner_slot_for_assignment(
     roles: &PlanningRoles,
     winner: &PlanningRoleAssignment,
-) -> Result<PlannerSlot, OrbitError> {
+) -> Result<RoleSlot, OrbitError> {
     if roles.planner_a == *winner {
-        return Ok(PlannerSlot::PlannerA);
+        return Ok(RoleSlot::PlannerA);
     }
     if roles.planner_b == *winner {
-        return Ok(PlannerSlot::PlannerB);
+        return Ok(RoleSlot::PlannerB);
     }
     Err(OrbitError::InvalidInput(format!(
-        "winner {}/{} does not match the current planner assignments",
-        winner.agent, winner.model
+        "winner {} does not match the current planner assignments",
+        winner.family
     )))
 }
 
@@ -418,21 +526,17 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
     let winner_assignment = winner_assignment(&winner);
     let plan_artifacts = planning_duel_plan_artifacts(&artifacts)?;
     let winning_artifact = plan_artifact_by_path(&plan_artifacts, &winner.artifact_path)?;
-    if winning_artifact.author != winner_assignment {
+    if winning_artifact.author.family != winner_assignment.family {
         return Err(OrbitError::InvalidInput(format!(
-            "winner artifact `{}` is authored by {}/{} instead of declared winner {}/{}",
-            winner.artifact_path,
-            winning_artifact.author.agent,
-            winning_artifact.author.model,
-            winner_assignment.agent,
-            winner_assignment.model
+            "winner artifact `{}` is authored by {} instead of declared winner {}",
+            winner.artifact_path, winning_artifact.author.family, winner_assignment.family
         )));
     }
-    let winner_slot = if let Some(roles) = roles.as_ref() {
-        Some(winner_slot_for_assignment(roles, &winner_assignment)?)
-    } else {
-        None
-    };
+    let winner_slot = roles
+        .as_ref()
+        .map(|roles| winner_slot_for_assignment(roles, &winner_assignment))
+        .transpose()?
+        .or(winner.winner_slot);
     let winning_plan = normalize_winning_plan_for_task(&winning_artifact.content);
     let extraction = extract_context_files_from_plan(&winning_plan);
     let context_files = extraction.as_ref().map(|e| e.canonical_entries.clone());
@@ -447,20 +551,15 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
         }
     }
 
-    let winner_label = winner_slot
-        .map(|slot| match slot {
-            PlannerSlot::PlannerA => "planner_a",
-            PlannerSlot::PlannerB => "planner_b",
-        })
-        .unwrap_or("planner");
+    let winner_label = winner_slot.map(|slot| slot.as_str()).unwrap_or("planner");
 
     let status_note = format!(
-        "planning duel winner={winner_label} ({}/{})",
-        winner_assignment.agent, winner_assignment.model
+        "planning duel winner={winner_label} ({})",
+        winner_assignment.family
     );
     let comment_message = format!(
-        "Planning duel resolved.\n\nWinner: {winner_label} ({}/{})\n\nRationale: {}\n\nWinning plan persisted to task.plan. Task status remains {current_status}.",
-        winner_assignment.agent, winner_assignment.model, winner.arbiter_rationale
+        "Planning duel resolved.\n\nWinner: {winner_label} ({})\n\nRationale: {}\n\nWinning plan persisted to task.plan. Task status remains {current_status}.",
+        winner_assignment.family, winner.arbiter_rationale
     );
 
     host.apply_task_automation_update(
@@ -475,11 +574,11 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
             )),
             append_comments: vec![TaskComment {
                 at: Utc::now(),
-                by: winner.arbiter_agent_cli.clone(),
+                by: winner.arbiter_family.to_string(),
                 message: comment_message,
             }],
-            agent: Some(winner_assignment.agent.clone()),
-            model: Some(winner_assignment.model.clone()),
+            agent: Some(winner_assignment.family.to_string()),
+            model: Some(winner_assignment.family.to_string()),
             ..TaskAutomationUpdate::default()
         },
     )?;
@@ -487,25 +586,27 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
     Ok(json!({
         "task_id": task_id,
         "task_status": host.get_task(task_id)?.status.to_string(),
-        "winner_agent_cli": winner_assignment.agent,
-        "winner_model": winner_assignment.model,
+        "winner_family": winner_assignment.family,
+        "winner_slot": winner_slot.map(|slot| slot.as_str().to_string()),
     }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbit_common::types::{PlanningRoleAssignment, PlanningRoles, TaskArtifact};
+    use orbit_common::types::{
+        AgentFamily, PlanningRoleAssignment, PlanningRoles, RoleSlot, TaskArtifact,
+    };
     use serde_json::{Value, json};
 
     fn task_artifact(path: &str, content: String) -> TaskArtifact {
         TaskArtifact::from_text(path, content)
     }
 
-    fn plan_artifact(path: &str, agent: &str, model: &str) -> TaskArtifact {
+    fn plan_artifact(path: &str, family: &str, slot: &str) -> TaskArtifact {
         task_artifact(
             path,
-            format!("*authored by: {agent} / {model}*\n## Plan\nDo the thing.\n"),
+            format!("*authored by: {family} / {slot}*\n## Plan\nDo the thing.\n"),
         )
     }
 
@@ -516,28 +617,21 @@ mod tests {
     fn planning_roles() -> PlanningRoles {
         PlanningRoles {
             planner_a: PlanningRoleAssignment {
-                agent: "codex".to_string(),
-                model: "gpt-5.5".to_string(),
+                family: AgentFamily::Codex,
             },
             planner_b: PlanningRoleAssignment {
-                agent: "claude".to_string(),
-                model: "claude-opus-4-7".to_string(),
+                family: AgentFamily::Claude,
             },
             arbiter: PlanningRoleAssignment {
-                agent: "gemini".to_string(),
-                model: "gemini-3.1-pro".to_string(),
+                family: AgentFamily::Gemini,
             },
         }
     }
 
     fn planning_duel_artifacts(winner_payload: Value) -> Vec<TaskArtifact> {
         vec![
-            plan_artifact("planning-duel/codex-gpt-5.5.md", "codex", "gpt-5.5"),
-            plan_artifact(
-                "planning-duel/claude-claude-opus-4-7.md",
-                "claude",
-                "claude-opus-4-7",
-            ),
+            plan_artifact("planning-duel/planner_a.md", "codex", "planner_a"),
+            plan_artifact("planning-duel/planner_b.md", "claude", "planner_b"),
             winner_marker(winner_payload),
         ]
     }
@@ -550,26 +644,71 @@ mod tests {
     }
 
     #[test]
+    fn planning_duel_signature_extracts_family_and_slot() {
+        let signature = parse_planning_duel_signature("*authored by: gemini / planner_a*\n## Plan")
+            .expect("signature parses");
+        assert_eq!(signature.family, AgentFamily::Gemini);
+        assert_eq!(signature.slot, RoleSlot::PlannerA);
+
+        assert!(parse_planning_duel_signature("*authored by: gemini*\n").is_err());
+        assert!(parse_planning_duel_signature("*authored by: / planner_a*\n").is_err());
+        assert!(parse_planning_duel_signature("*authored by: pro / planner_a*\n").is_err());
+    }
+
+    #[test]
+    fn plan_artifact_validation_uses_family_and_slot_not_configured_model() {
+        let artifacts = planning_duel_plan_artifacts(&[
+            plan_artifact("planning-duel/planner_a.md", "gemini", "planner_a"),
+            plan_artifact("planning-duel/planner_b.md", "codex", "planner_b"),
+        ])
+        .expect("plan artifacts parse");
+        let assignment = PlanningRoleAssignment {
+            family: AgentFamily::Gemini,
+        };
+
+        let artifact = plan_artifact_for_assignment(&artifacts, &assignment, RoleSlot::PlannerA)
+            .expect("matching family and slot validate");
+
+        assert_eq!(artifact.path, "planning-duel/planner_a.md");
+    }
+
+    #[test]
+    fn plan_artifact_validation_reports_family_mismatch() {
+        let artifacts = planning_duel_plan_artifacts(&[plan_artifact(
+            "planning-duel/planner_a.md",
+            "claude",
+            "planner_a",
+        )])
+        .expect("plan artifacts parse");
+        let assignment = PlanningRoleAssignment {
+            family: AgentFamily::Gemini,
+        };
+
+        let message = invalid_input_message(
+            plan_artifact_for_assignment(&artifacts, &assignment, RoleSlot::PlannerA)
+                .expect_err("mismatched family fails"),
+        );
+
+        assert!(message.contains("expected gemini"), "{message}");
+        assert!(message.contains("has family claude"), "{message}");
+    }
+
+    #[test]
     fn planning_duel_winner_marker_omits_derived_fields_when_roles_available() {
         let roles = planning_roles();
         let artifacts = planning_duel_artifacts(json!({
             "id": "T20260427-47",
-            "winner_agent_cli": "claude",
-            "winner_model": "claude-opus-4-7",
+            "winner_slot": "planner_b",
             "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
         }));
 
         let winner = winner_artifact_from_artifacts(&artifacts, Some(&roles))
             .expect("minimal winner marker should normalize");
 
-        assert_eq!(winner.winner_agent_cli, "claude");
-        assert_eq!(winner.winner_model, "claude-opus-4-7");
-        assert_eq!(
-            winner.artifact_path,
-            "planning-duel/claude-claude-opus-4-7.md"
-        );
-        assert_eq!(winner.arbiter_agent_cli, "gemini");
-        assert_eq!(winner.arbiter_model, "gemini-3.1-pro");
+        assert_eq!(winner.winner_family, AgentFamily::Claude);
+        assert_eq!(winner.winner_slot, Some(RoleSlot::PlannerB));
+        assert_eq!(winner.artifact_path, "planning-duel/planner_b.md");
+        assert_eq!(winner.arbiter_family, AgentFamily::Gemini);
         assert_eq!(
             winner.arbiter_rationale,
             "Claude provided a more comprehensive diagnosis."
@@ -580,10 +719,8 @@ mod tests {
     fn planning_duel_winner_marker_rejects_explicit_arbiter_mismatch() {
         let roles = planning_roles();
         let artifacts = planning_duel_artifacts(json!({
-            "winner_agent_cli": "claude",
-            "winner_model": "claude-opus-4-7",
+            "winner_slot": "planner_b",
             "arbiter_agent_cli": "codex",
-            "arbiter_model": "gpt-5.5",
             "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
         }));
 
@@ -593,9 +730,8 @@ mod tests {
         );
 
         assert!(
-            message.contains(
-                "winner artifact arbiter codex/gpt-5.5 does not match recorded arbiter gemini/gemini-3.1-pro"
-            ),
+            message
+                .contains("winner artifact arbiter codex does not match recorded arbiter gemini"),
             "{message}"
         );
     }
@@ -603,8 +739,7 @@ mod tests {
     #[test]
     fn planning_duel_winner_marker_requires_arbiter_identity_without_roles() {
         let artifacts = planning_duel_artifacts(json!({
-            "winner_agent_cli": "claude",
-            "winner_model": "claude-opus-4-7",
+            "winner_slot": "planner_b",
             "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
         }));
 
@@ -615,7 +750,7 @@ mod tests {
 
         assert!(
             message.contains(
-                "planning duel winner marker requires `arbiter_agent_cli` when `planning_duel_roles` are unavailable"
+                "planning duel winner marker requires `arbiter_family` when `planning_duel_roles` are unavailable"
             ),
             "{message}"
         );
@@ -626,7 +761,7 @@ mod tests {
         let artifacts = planning_duel_artifacts(json!({
             "winner_agent_cli": "claude",
             "winner_model": "claude-opus-4-7",
-            "artifact_path": "planning-duel/claude-claude-opus-4-7.md",
+            "artifact_path": "planning-duel/planner_b.md",
             "arbiter_agent_cli": "gemini",
             "arbiter_model": "gemini-3.1-pro",
             "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
@@ -635,13 +770,8 @@ mod tests {
         let winner = winner_artifact_from_artifacts(&artifacts, None)
             .expect("legacy full winner payload should still normalize");
 
-        assert_eq!(winner.winner_agent_cli, "claude");
-        assert_eq!(winner.winner_model, "claude-opus-4-7");
-        assert_eq!(
-            winner.artifact_path,
-            "planning-duel/claude-claude-opus-4-7.md"
-        );
-        assert_eq!(winner.arbiter_agent_cli, "gemini");
-        assert_eq!(winner.arbiter_model, "gemini-3.1-pro");
+        assert_eq!(winner.winner_family, AgentFamily::Claude);
+        assert_eq!(winner.artifact_path, "planning-duel/planner_b.md");
+        assert_eq!(winner.arbiter_family, AgentFamily::Gemini);
     }
 }

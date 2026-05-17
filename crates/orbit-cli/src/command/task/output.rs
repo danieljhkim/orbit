@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::TaskArtifact;
+use orbit_common::types::{ArtifactManifestFileV2, TaskArtifact};
 use orbit_core::{
     OrbitError, OrbitRuntime, TaskStatus, build_task_status_index, resolve_task_dependencies,
 };
@@ -47,6 +47,7 @@ pub(crate) fn task_to_json(
         "relations": task.relations,
         "source_task_id": task.source_task_id(),
         "job_run_id": task.job_run_id,
+        "crew": task.crew,
         "created_at": task.created_at.to_rfc3339(),
         "updated_at": task.updated_at.to_rfc3339(),
     })
@@ -84,6 +85,25 @@ pub(crate) fn task_to_json_with_sidecars(
         serde_json::to_value(runtime.get_task_review_threads(&task.id)?)
             .map_err(|e| OrbitError::Io(e.to_string()))?,
     );
+    object.insert(
+        "artifacts".to_string(),
+        task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
+    );
+    if let Some(projection) = runtime.resolved_crew_projection(task)? {
+        object.insert("resolved_crew".to_string(), Value::String(projection.name));
+        object.insert(
+            "planner_model".to_string(),
+            Value::String(projection.planner_model),
+        );
+        object.insert(
+            "implementer_model".to_string(),
+            Value::String(projection.implementer_model),
+        );
+        object.insert(
+            "reviewer_model".to_string(),
+            Value::String(projection.reviewer_model),
+        );
+    }
     Ok(value)
 }
 
@@ -93,6 +113,7 @@ pub(super) fn task_lock_to_json(task: &orbit_core::Task) -> Value {
         "title": task.title,
         "status": task.status.to_string(),
         "job_run_id": task.job_run_id,
+        "crew": task.crew,
         "context_files": task.context_files,
     })
 }
@@ -384,6 +405,24 @@ pub(crate) fn task_artifacts_to_json(artifacts: &[TaskArtifact]) -> Value {
                     object.insert("content".to_string(), Value::String(content.to_string()));
                 }
                 Value::Object(object)
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn task_artifact_manifest_to_json(files: &[ArtifactManifestFileV2]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|file| {
+                json!({
+                    "path": file.path,
+                    "media_type": file.media_type,
+                    "size_bytes": file.size_bytes,
+                    "sha256": file.sha256,
+                    "created_by": file.created_by,
+                    "created_at": file.created_at.to_rfc3339(),
+                })
             })
             .collect(),
     )

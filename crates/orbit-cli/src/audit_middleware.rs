@@ -19,6 +19,7 @@ pub struct CommandMeta {
     pub target_id: Option<String>,
     pub role: String,
     pub arguments_json: Option<String>,
+    pub job_run_id: Option<String>,
 }
 
 /// Feeds the **persistent** SQLite audit event store on every CLI invocation.
@@ -119,7 +120,11 @@ impl Drop for AuditGuard<'_> {
             task_id: std::env::var("ORBIT_TASK_ID")
                 .ok()
                 .filter(|s| !s.is_empty()),
-            job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
+            job_run_id: self
+                .meta
+                .job_run_id
+                .clone()
+                .or_else(|| std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty())),
             activity_id: std::env::var("ORBIT_ACTIVITY_ID")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -159,6 +164,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Init(_) => CommandMeta {
@@ -169,6 +175,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             target_id: None,
             role: "admin".to_string(),
             arguments_json: None,
+            job_run_id: None,
         },
         Commands::Mcp(cmd) => {
             use crate::command::mcp::McpSubcommand;
@@ -185,6 +192,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Tool(tool_cmd) => {
@@ -247,6 +255,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id,
                 role,
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Task(task_cmd) => {
@@ -291,6 +300,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Semantic(cmd) => {
@@ -311,6 +321,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Adr(cmd) => {
@@ -326,6 +337,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Design(cmd) => {
@@ -341,18 +353,22 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Learning(cmd) => {
             use crate::command::learning::LearningSubcommand;
             let sub = match &cmd.command {
                 LearningSubcommand::Add(_) => "add",
+                LearningSubcommand::Comment(_) => "comment",
                 LearningSubcommand::List(_) => "list",
                 LearningSubcommand::Search(_) => "search",
                 LearningSubcommand::Show(_) => "show",
                 LearningSubcommand::Update(_) => "update",
+                LearningSubcommand::Upvote(_) => "upvote",
                 LearningSubcommand::Supersede(_) => "supersede",
                 LearningSubcommand::Reindex(_) => "reindex",
+                LearningSubcommand::MigrateLayout(_) => "migrate-layout",
                 LearningSubcommand::Prune(_) => "prune",
             };
             CommandMeta {
@@ -363,6 +379,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Activity(cmd) => {
@@ -378,18 +395,25 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Job(job_cmd) => {
             use crate::command::job::JobSubcommand;
-            let (sub, target_id) = match &job_cmd.command {
-                JobSubcommand::List(_) => ("list", None),
-                JobSubcommand::Show(args) => ("show", Some(args.job_id.as_str())),
-                JobSubcommand::Run(args) => ("run", Some(args.job_id.as_str())),
-                JobSubcommand::Replay(args) => ("replay", Some(args.run_id.as_str())),
-                JobSubcommand::RunPipelineWorker(args) => {
-                    ("run-pipeline-worker", Some(args.run_id.as_str()))
-                }
+            let (sub, target_id, job_run_id) = match &job_cmd.command {
+                JobSubcommand::List(_) => ("list", None, None),
+                JobSubcommand::Show(args) => ("show", Some(args.job_id.as_str()), None),
+                JobSubcommand::Run(args) => ("run", Some(args.job_id.as_str()), None),
+                JobSubcommand::Replay(args) => (
+                    "replay",
+                    Some(args.run_id.as_str()),
+                    Some(args.run_id.as_str()),
+                ),
+                JobSubcommand::RunPipelineWorker(args) => (
+                    "run-pipeline-worker",
+                    Some(args.run_id.as_str()),
+                    Some(args.run_id.as_str()),
+                ),
             };
             CommandMeta {
                 command: "job".to_string(),
@@ -403,6 +427,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: job_run_id.map(String::from),
             }
         }
         Commands::Skill(cmd) => {
@@ -422,6 +447,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Executor(cmd) => {
@@ -438,6 +464,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Metrics(cmd) => {
@@ -459,6 +486,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Scoreboard(cmd) => {
@@ -474,6 +502,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Graph(cmd) => {
@@ -492,6 +521,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Policy(cmd) => {
@@ -509,6 +539,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Run(cmd) => run_command_meta(cmd),
@@ -520,6 +551,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             target_id: Some(cmd.run_id.clone()),
             role: "admin".to_string(),
             arguments_json: None,
+            job_run_id: None,
         },
         Commands::Artifacts(cmd) => CommandMeta {
             command: "artifacts".to_string(),
@@ -529,6 +561,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             target_id: Some(cmd.id.clone()),
             role: "admin".to_string(),
             arguments_json: None,
+            job_run_id: None,
         },
         Commands::Web(cmd) => {
             use crate::command::web::WebSubcommand;
@@ -543,6 +576,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
         Commands::Audit(_) => unreachable!("audit commands should not be audited"),
@@ -554,6 +588,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             target_id: None,
             role: "admin".to_string(),
             arguments_json: None,
+            job_run_id: None,
         },
         Commands::Workspace(cmd) => {
             use crate::command::workspace::WorkspaceSubcommand;
@@ -572,6 +607,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
     }
@@ -579,17 +615,11 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
 
 fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
     use crate::command::run::RunSubcommand;
-    use crate::command::run::ship::ShipMode;
 
     let (subcommand, target_type, target_id) = match &cmd.command {
-        RunSubcommand::Ship(command) => {
-            let target_id = match command.mode {
-                ShipMode::Pr => "ship",
-                ShipMode::Local => "ship-local",
-            };
-            ("ship", Some("workflow"), Some(target_id))
-        }
+        RunSubcommand::Ship(_) => ("ship", Some("workflow"), Some("ship")),
         RunSubcommand::ShipAuto(_) => ("ship-auto", Some("workflow"), Some("ship-auto")),
+        RunSubcommand::ShipLocal(_) => ("ship-local", Some("workflow"), Some("ship-local")),
         RunSubcommand::DuelPlan(args) => ("duel-plan", Some("task"), Some(args.task_id.as_str())),
         RunSubcommand::History(args) => ("history", Some("job_run"), args.job_id.as_deref()),
         RunSubcommand::Show(args) => ("show", Some("job_run"), args.run_id.as_deref()),
@@ -607,6 +637,7 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
         target_id: target_id.map(String::from),
         role: "admin".to_string(),
         arguments_json: None,
+        job_run_id: None,
     }
 }
 
@@ -671,7 +702,9 @@ fn tool_run_input_identity(
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use orbit_common::types::AuditEvent;
     use serde_json::{Value, json};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use crate::command::Cli;
 
@@ -682,8 +715,54 @@ mod tests {
         extract_command_meta(&cli.command)
     }
 
+    struct OrbitRunEnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: Option<String>,
+    }
+
+    fn unset_orbit_run_id() -> OrbitRunEnvGuard {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let saved = std::env::var("ORBIT_RUN_ID").ok();
+        // SAFETY: the guard serializes this test env mutation and restores the value on drop.
+        unsafe {
+            std::env::remove_var("ORBIT_RUN_ID");
+        }
+        OrbitRunEnvGuard { _lock: lock, saved }
+    }
+
+    impl Drop for OrbitRunEnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: the guard holds the serialization lock for the full mutation window.
+            unsafe {
+                match &self.saved {
+                    Some(value) => std::env::set_var("ORBIT_RUN_ID", value),
+                    None => std::env::remove_var("ORBIT_RUN_ID"),
+                }
+            }
+        }
+    }
+
+    fn audit_event_for_meta_without_orbit_run_id(meta: CommandMeta) -> AuditEvent {
+        let _env = unset_orbit_run_id();
+        let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
+        {
+            let mut guard = AuditGuard::new(&runtime, meta);
+            guard.mark_success();
+        }
+
+        let events = runtime
+            .list_audit_events(None, None, Some(AuditEventStatus::Success), None, 8)
+            .expect("list audit events");
+        assert_eq!(events.len(), 1);
+        events.into_iter().next().expect("single audit event")
+    }
+
     #[test]
-    fn run_ship_audit_meta_uses_selected_mode_alias() {
+    fn run_ship_audit_meta_uses_unified_workflow_alias() {
         let pr = meta_for(&["orbit", "run", "ship", "T1"]);
         assert_eq!(pr.command, "run");
         assert_eq!(pr.subcommand.as_deref(), Some("ship"));
@@ -693,16 +772,25 @@ mod tests {
         let local = meta_for(&["orbit", "run", "ship", "-m", "local", "T1"]);
         assert_eq!(local.subcommand.as_deref(), Some("ship"));
         assert_eq!(local.target_type.as_deref(), Some("workflow"));
-        assert_eq!(local.target_id.as_deref(), Some("ship-local"));
+        assert_eq!(local.target_id.as_deref(), Some("ship"));
     }
 
     #[test]
-    fn run_ship_auto_audit_meta_uses_new_top_level_command() {
+    fn run_ship_auto_audit_meta_uses_deprecated_top_level_command() {
         let meta = meta_for(&["orbit", "run", "ship-auto"]);
         assert_eq!(meta.command, "run");
         assert_eq!(meta.subcommand.as_deref(), Some("ship-auto"));
         assert_eq!(meta.target_type.as_deref(), Some("workflow"));
         assert_eq!(meta.target_id.as_deref(), Some("ship-auto"));
+    }
+
+    #[test]
+    fn run_ship_local_audit_meta_uses_deprecated_top_level_command() {
+        let meta = meta_for(&["orbit", "run", "ship-local", "T1"]);
+        assert_eq!(meta.command, "run");
+        assert_eq!(meta.subcommand.as_deref(), Some("ship-local"));
+        assert_eq!(meta.target_type.as_deref(), Some("workflow"));
+        assert_eq!(meta.target_id.as_deref(), Some("ship-local"));
     }
 
     #[test]
@@ -787,6 +875,38 @@ mod tests {
     }
 
     #[test]
+    fn job_run_pipeline_worker_audit_uses_static_run_id_without_env() {
+        let meta = meta_for(&["orbit", "job", "run-pipeline-worker", "jrun-worker"]);
+        assert_eq!(meta.command, "job");
+        assert_eq!(meta.subcommand.as_deref(), Some("run-pipeline-worker"));
+        assert_eq!(meta.target_type.as_deref(), Some("job_run"));
+        assert_eq!(meta.target_id.as_deref(), Some("jrun-worker"));
+        assert_eq!(meta.job_run_id.as_deref(), Some("jrun-worker"));
+
+        let row = audit_event_for_meta_without_orbit_run_id(meta);
+        assert_eq!(row.command, "job");
+        assert_eq!(row.subcommand.as_deref(), Some("run-pipeline-worker"));
+        assert_eq!(row.target_id.as_deref(), Some("jrun-worker"));
+        assert_eq!(row.job_run_id.as_deref(), Some("jrun-worker"));
+    }
+
+    #[test]
+    fn job_replay_audit_uses_static_run_id_without_env() {
+        let meta = meta_for(&["orbit", "job", "replay", "jrun-source"]);
+        assert_eq!(meta.command, "job");
+        assert_eq!(meta.subcommand.as_deref(), Some("replay"));
+        assert_eq!(meta.target_type.as_deref(), Some("job_run"));
+        assert_eq!(meta.target_id.as_deref(), Some("jrun-source"));
+        assert_eq!(meta.job_run_id.as_deref(), Some("jrun-source"));
+
+        let row = audit_event_for_meta_without_orbit_run_id(meta);
+        assert_eq!(row.command, "job");
+        assert_eq!(row.subcommand.as_deref(), Some("replay"));
+        assert_eq!(row.target_id.as_deref(), Some("jrun-source"));
+        assert_eq!(row.job_run_id.as_deref(), Some("jrun-source"));
+    }
+
+    #[test]
     fn audit_guard_event_json_shapes_are_snapshotted() {
         let events = vec![
             audit_guard_event_json(AuditEventStatus::Success),
@@ -840,6 +960,7 @@ mod tests {
             target_id: Some("orbit.task.update".to_string()),
             role: "gpt-5.5".to_string(),
             arguments_json: Some(r#"{"id":"ORB-00002","model":"gpt-5.5"}"#.to_string()),
+            job_run_id: None,
         }
     }
 
@@ -891,6 +1012,7 @@ mod tests {
                 target_id: Some(tool_name.to_string()),
                 role: "agent".to_string(),
                 arguments_json: None,
+                job_run_id: None,
             }
         }
 

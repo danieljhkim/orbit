@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use orbit_common::types::JobKind;
+use orbit_common::types::PipelineState;
 use orbit_core::command::job::JobCatalogEntry;
 use orbit_core::{JobRun, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
@@ -188,12 +189,25 @@ impl Execute for JobReplayArgs {
 }
 
 pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
+    job_run_to_json_with_state(run, None)
+}
+
+pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineState>) -> Value {
     let last = run.steps.last();
+    let state = (!run.state.is_terminal()).then_some(state).flatten();
+    let waiting_on_deps = state
+        .and_then(|state| state.waiting_on_deps.as_ref())
+        .filter(|values| !values.is_empty());
+    let waiting_on_locks = state
+        .and_then(|state| state.waiting_on_locks.as_ref())
+        .filter(|values| !values.is_empty());
     json!({
         "run_id": run.run_id,
         "job_id": run.job_id,
         "attempt": run.attempt,
         "state": run.state.to_string(),
+        "waiting_on_deps": waiting_on_deps,
+        "waiting_on_locks": waiting_on_locks,
         "scheduled_at": run.scheduled_at.to_rfc3339(),
         "started_at": run.started_at.map(|v| v.to_rfc3339()),
         "finished_at": run.finished_at.map(|v| v.to_rfc3339()),
@@ -204,6 +218,10 @@ pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
         "error_code": last.and_then(|s| s.error_code.as_deref()),
         "error_message": last.and_then(|s| s.error_message.as_deref()),
         "knowledge_metrics": run.knowledge_metrics,
+        "resolved_crew": run.resolved_crew,
+        "planner_model": run.planner_model,
+        "implementer_model": run.implementer_model,
+        "reviewer_model": run.reviewer_model,
         "steps": run.steps.iter().map(|s| json!({
             "step_index": s.step_index,
             "target_type": s.target_type.to_string(),
@@ -263,7 +281,34 @@ fn build_job_run_input(pairs: &[String]) -> Result<Value, OrbitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use orbit_common::types::JobRunState;
     use orbit_core::NotFoundKind;
+
+    fn test_run(state: JobRunState) -> JobRun {
+        let now = Utc::now();
+        JobRun {
+            run_id: "jrun-test".to_string(),
+            job_id: "task_gate_pipeline".to_string(),
+            attempt: 1,
+            state,
+            scheduled_at: now,
+            started_at: Some(now),
+            finished_at: None,
+            duration_ms: None,
+            created_at: now,
+            pid: None,
+            pid_start_time: None,
+            input: None,
+            retry_source_run_id: None,
+            knowledge_metrics: None,
+            resolved_crew: None,
+            planner_model: None,
+            implementer_model: None,
+            reviewer_model: None,
+            steps: Vec::new(),
+        }
+    }
 
     fn write_replay_job(runtime: &OrbitRuntime, name: &str) -> PathBuf {
         let jobs_dir = runtime.data_root().join("resources/jobs");
@@ -290,6 +335,36 @@ spec:
         )
         .expect("write replay job");
         path
+    }
+
+    #[test]
+    fn job_run_json_includes_waiting_reasons_from_state() {
+        let run = test_run(JobRunState::Running);
+        let mut state = PipelineState::new(run.run_id.clone(), run.job_id.clone(), json!({}));
+        state.set_waiting_reasons(
+            Some(vec!["ORB-1".to_string()]),
+            Some(vec!["file:src/lib.rs".to_string()]),
+        );
+
+        let value = job_run_to_json_with_state(&run, Some(&state));
+
+        assert_eq!(value["waiting_on_deps"], json!(["ORB-1"]));
+        assert_eq!(value["waiting_on_locks"], json!(["file:src/lib.rs"]));
+    }
+
+    #[test]
+    fn job_run_json_omits_stale_waiting_reasons_for_terminal_run() {
+        let run = test_run(JobRunState::Success);
+        let mut state = PipelineState::new(run.run_id.clone(), run.job_id.clone(), json!({}));
+        state.set_waiting_reasons(
+            Some(vec!["ORB-1".to_string()]),
+            Some(vec!["file:src/lib.rs".to_string()]),
+        );
+
+        let value = job_run_to_json_with_state(&run, Some(&state));
+
+        assert_eq!(value["waiting_on_deps"], Value::Null);
+        assert_eq!(value["waiting_on_locks"], Value::Null);
     }
 
     #[test]

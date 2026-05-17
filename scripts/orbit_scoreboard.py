@@ -32,11 +32,20 @@ AGENT_COLORS = {
     "claude":  "#4C9BE8",
     "codex":   "#F5A623",
     "gemini":  "#7ED321",
+    "grok":    "#E84C9B",
     "system":  "#888888",
 }
+KNOWN_AGENTS = ("claude", "codex", "gemini", "grok")
 
 def agent_color(name: str) -> str:
     return AGENT_COLORS.get(name.lower(), "#BD10E0")
+
+
+def known_agents(*counters) -> list[str]:
+    agents = set(KNOWN_AGENTS)
+    for counter in counters:
+        agents.update(counter.keys())
+    return sorted(agents)
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
@@ -65,7 +74,7 @@ def chart_win_rate(runs: list, fig, row, col):
         for role in ("planner_a", "planner_b"):
             total[r["roles"][role]["agent"]] += 1
 
-    agents = sorted(total)
+    agents = known_agents(total)
 
     # One trace per agent so each bar is its own color in the stack
     for a in agents:
@@ -91,7 +100,7 @@ def chart_win_rate_pct(runs: list, fig, row, col):
         for role in ("planner_a", "planner_b"):
             total[r["roles"][role]["agent"]] += 1
 
-    agents = sorted(total)
+    agents = known_agents(total)
     pcts   = [100 * wins[a] / total[a] if total[a] else 0 for a in agents]
     colors = [agent_color(a) for a in agents]
 
@@ -117,8 +126,8 @@ def chart_tool_calls(runs: list, fig, row, col):
                 agent = r["roles"][role]["agent"]
                 calls[agent].append(tc)
 
-    agents = sorted(calls)
-    avgs   = [sum(calls[a]) / len(calls[a]) for a in agents]
+    agents = known_agents(calls)
+    avgs   = [sum(calls[a]) / len(calls[a]) if calls[a] else 0 for a in agents]
     colors = [agent_color(a) for a in agents]
 
     fig.add_trace(go.Bar(
@@ -186,7 +195,7 @@ def chart_token_breakdown(runs: list, fig, row, col):
             for f in token_fields:
                 totals[agent][f] += tu.get(f, 0)
 
-    agents = sorted(totals)
+    agents = known_agents(totals)
     if not agents:
         return
 
@@ -208,7 +217,7 @@ def chart_arbiter_breakdown(runs: list, fig, row, col):
     for r in runs:
         counts[r["roles"]["arbiter"]["agent"]] += 1
 
-    agents = sorted(counts)
+    agents = known_agents(counts)
     fig.add_trace(go.Pie(
         labels=agents,
         values=[counts[a] for a in agents],

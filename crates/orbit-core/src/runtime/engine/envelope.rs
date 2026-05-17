@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
     Activity, AgentModelPair, OrbitError, Task, agent_family_from_cli, prune_missing_context_files,
-    resolve_agent_model_pair,
 };
 use orbit_engine::{ExecutionContext, TaskHost};
 use serde::Serialize;
@@ -158,7 +157,6 @@ fn activity_envelope_json_for_execution_with_pair(
     agent_cli: &str,
     pair: Option<AgentModelPair>,
 ) -> Value {
-    let pair = pair.or_else(|| resolve_agent_model_pair(agent_cli));
     let family = agent_family_from_cli(agent_cli);
     let orchestrator = pair.as_ref().map(|p| p.orchestrator.as_str()).unwrap_or("");
     let helper = pair.as_ref().map(|p| p.helper.as_str()).unwrap_or("");

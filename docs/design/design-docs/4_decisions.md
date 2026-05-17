@@ -1,18 +1,20 @@
 # Design Docs — Decisions
 
 **Status:** Draft
-**Owner:** claude-opus-4-7
-**Last updated:** 2026-05-14
+**Owner:** claude
+**Last updated:** 2026-05-17 (ORB-00103)
 
-Append-only ADR log for the design-docs feature. Each entry follows the template in [CONVENTIONS.md §4](../CONVENTIONS.md). Numbers are append-only; superseded entries stay in place with status updated. Every ADR cites at least one cost.
+Append-only ADR log for the design-docs feature. Each entry follows the template in [CONVENTIONS.md §4](../CONVENTIONS.md). Numbers are append-only; superseded entries stay in place with status updated. Every ADR cites at least one cost. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill.
 
-ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in [CONVENTIONS.md](../CONVENTIONS.md) before this feature folder existed; their `Status` lines carry no task ID because the convention crystallized through review of [docs/design/](..) over time rather than a single shipping task. ADR-005 and ADR-006 document the [ORB-00019] promotion of the decay checker and scaffolder into first-class Orbit tooling.
+ADR-0158 through ADR-0161 retroactively document load-bearing decisions encoded in [CONVENTIONS.md](../CONVENTIONS.md) before this feature folder existed; the convention crystallized through review of [docs/design/](..) over time rather than a single shipping task, and the global records cite [ORB-00103] (the backfill that put them in the store) on the Status line. ADR-0162 and ADR-0163 document the [ORB-00019] promotion of the decay checker and scaffolder into first-class Orbit tooling.
+
+Historical note: entries below were originally numbered ADR-001 through ADR-006 within this folder. They were allocated through `orbit.adr.add` and rewritten to global IDs per [ORB-00103]; the original local IDs survive as `legacy_ids` so prior citations still resolve via `orbit.adr.list --legacy-id=design-docs/ADR-NNN`.
 
 ---
 
-## ADR-001 — Four numbered docs with strict role separation
+## ADR-0158 — Four numbered docs with strict role separation
 
-**Status:** Accepted · 2026-05
+**Status:** Accepted · 2026-05 · [ORB-00103] · legacy_id: `design-docs/ADR-001`
 
 **Context.** Per-feature design folders need a contract that makes cross-feature reading cheap. Free-form folders (every author picks their own structure) and single-doc folders (one big README) were both on the table. The first failure mode of free-form folders had already surfaced in early Orbit work: readers had to learn each folder's structure before they could find the decision history.
 
@@ -27,11 +29,11 @@ ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in
 
 ---
 
-## ADR-002 — Decay anchor is the `Last updated:` frontmatter field, not git mtime
+## ADR-0159 — Decay anchor is the `Last updated:` frontmatter field, not git mtime
+
+**Status:** Accepted · 2026-05 · [ORB-00103] · legacy_id: `design-docs/ADR-002`
 
 **Context.** The decay check needs a per-doc freshness timestamp to compare against `git log` of referenced source files. Two anchors were on the table: (a) parse `Last updated:` from frontmatter, requiring authors to bump it manually; (b) use `git log -1 --format=%cs -- <doc>.md` directly. Option (b) eliminates the manual-discipline failure mode; option (a) carries an explicit author assertion.
-
-**Status:** Accepted · 2026-05
 
 **Decision.** Use the `Last updated:` field. The author updates it manually whenever the doc body changes substantively; cosmetic edits (typo fixes, link reflows, whitespace) intentionally do *not* bump it. The check parses the field and trusts it.
 
@@ -44,9 +46,9 @@ ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in
 
 ---
 
-## ADR-003 — ADRs earned by 3-of-3 rule, not append-permissive
+## ADR-0160 — ADRs earned by 3-of-3 rule, not append-permissive
 
-**Status:** Accepted · 2026-05
+**Status:** Accepted · 2026-05 · [ORB-00103] · legacy_id: `design-docs/ADR-003`
 
 **Context.** Most ADR practices are append-permissive: any decision can become an ADR, and pruning is after-the-fact. Append-permissive logs grow fast and bury load-bearing decisions in trivia ("we picked this library version," "we used `?` instead of `match`"). The question was whether to inherit the permissive default or gate entry.
 
@@ -60,9 +62,9 @@ ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in
 
 ---
 
-## ADR-004 — Folder names lowercase, hyphenated, singular
+## ADR-0161 — Folder names lowercase, hyphenated, singular
 
-**Status:** Accepted · 2026-05
+**Status:** Accepted · 2026-05 · [ORB-00103] · legacy_id: `design-docs/ADR-004`
 
 **Context.** Folder naming is a low-stakes choice in isolation but high-stakes once cross-links accumulate. Options on the table: `PascalCase`, `snake_case`, `kebab-case`; singular vs plural; whether to allow nested folders.
 
@@ -76,9 +78,9 @@ ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in
 
 ---
 
-## ADR-005 — Promote python decay checker to first-class `orbit design` CLI + MCP
+## ADR-0162 — Promote python decay checker to first-class `orbit design` CLI + MCP
 
-**Status:** Accepted · 2026-05 · [ORB-00019]
+**Status:** Accepted · 2026-05 · [ORB-00019] · [ORB-00103] · legacy_id: `design-docs/ADR-005`
 
 **Context.** The decay checker shipped as `scripts/check_design_doc_decay.py` (117 lines) wrapped by `make check-design-docs`. Three properties of that placement bothered enough to file ORB-00019: (a) agents driving Orbit through MCP could not invoke the check without shelling out to the make target, (b) the python parser duplicated logic that belonged with the rest of the design-doc tooling (which was about to grow scaffolding and inspection), and (c) the script was not exercised by Orbit's own integration tests, so a parser bug could ship undetected. Three options were on the table: keep python and just expose it through MCP via a shim; rewrite in Rust as a CLI only; rewrite in Rust with both a CLI and an `orbit.design.*` MCP tool surface.
 
@@ -93,9 +95,9 @@ ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in
 
 ---
 
-## ADR-006 — `init_feature` refuses to clobber an existing folder
+## ADR-0163 — `init_feature` refuses to clobber an existing folder
 
-**Status:** Accepted · 2026-05 · [ORB-00019]
+**Status:** Accepted · 2026-05 · [ORB-00019] · [ORB-00103] · legacy_id: `design-docs/ADR-006`
 
 **Context.** `orbit.design.init` accepts a feature name and scaffolds a folder. The question was whether to overwrite an existing folder (with or without a `--force` flag), error on existing, or merge into existing (write only the missing files). Overwrite is convenient but destructive — a re-run after editing would silently undo the author's work. Merge is convenient but produces an inconsistent state when a folder is partially scaffolded by hand and partially by tool.
 
@@ -111,7 +113,9 @@ ADR-001 through ADR-004 retroactively document load-bearing decisions encoded in
 
 ## Task References
 
-- [ORB-00006] — Refresh of ARCHITECTURE.md and existing design folders that produced the layout codified in ADR-001.
-- [ORB-00019] — Promotion of the decay checker and scaffolder into first-class Rust + MCP tooling, documented in ADR-005 and ADR-006.
+- [ORB-00006] — Refresh of ARCHITECTURE.md and existing design folders that produced the layout codified in [ADR-0158].
+- [ORB-00019] — Promotion of the decay checker and scaffolder into first-class Rust + MCP tooling, documented in [ADR-0162] and [ADR-0163].
+- [ORB-00090] — Aligned design-doc ownership metadata with family-based agent identity.
+- [ORB-00103] — Backfilled this folder's ADR-001 through ADR-006 into the global store with `legacy_ids`; rewrote local headings to global IDs.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

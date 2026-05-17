@@ -32,4 +32,4 @@ When a commit is associated with an Orbit task, include the task ID in square br
 feat: add optional agent_review step to bundle pipelines [T20260505-7]
 ```
 
-When authoring tasks or design docs, identify yourself by model name (e.g. `claude-opus-4-7`, `gpt-5.5`, `gemini-3.1-pro`). When writing docs, cite the task IDs that motivated the change in the doc itself.
+When authoring tasks or design docs, identify yourself by agent family (`codex`, `claude`, `gemini`, or `grok`), not by a full model string. When writing docs, cite the task IDs that motivated the change in the doc itself.

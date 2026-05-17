@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use orbit_common::utility::fs::write_text_with_parent;
 
-use super::raw::RawAgentRoleConfig;
+use super::raw::{RawAgentRoleConfig, RawCrewEntry};
 
 const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../assets/config/default-config.toml");
 
@@ -29,21 +29,55 @@ fn render_with_role_settings(
     template: &str,
     roles: &BTreeMap<String, RawAgentRoleConfig>,
 ) -> Result<String, OrbitError> {
-    #[derive(Serialize)]
-    struct AgentSection<'a> {
-        agent: &'a BTreeMap<String, RawAgentRoleConfig>,
-    }
-    let serialized = toml::to_string(&AgentSection { agent: roles })
-        .map_err(|err| OrbitError::Io(format!("serialize [agent.<role>] sections: {err}")))?;
+    validate_complete_role_settings(roles)?;
 
-    let mut out = String::with_capacity(template.len() + serialized.len() + 2);
-    out.push_str(template);
-    if !template.ends_with('\n') {
-        out.push('\n');
+    #[derive(Serialize)]
+    struct CrewConfig<'a> {
+        crews: BTreeMap<&'a str, RawCrewEntry>,
     }
-    out.push('\n');
-    out.push_str(&serialized);
-    Ok(out)
+
+    let mut crews = BTreeMap::new();
+    crews.insert(
+        "custom",
+        RawCrewEntry {
+            planner: roles.get("planner").cloned(),
+            implementer: roles.get("implementer").cloned(),
+            reviewer: roles.get("reviewer").cloned(),
+        },
+    );
+    let custom_crew = toml::to_string(&CrewConfig { crews })
+        .map_err(|err| OrbitError::Io(format!("serialize [crews.<name>] sections: {err}")))?;
+    let mut body = template.replace("default_crew = \"opus-codex\"", "default_crew = \"custom\"");
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push('\n');
+    body.push_str(&custom_crew);
+    Ok(body)
+}
+
+fn validate_complete_role_settings(
+    roles: &BTreeMap<String, RawAgentRoleConfig>,
+) -> Result<(), OrbitError> {
+    for role in ["planner", "implementer", "reviewer"] {
+        let Some(config) = roles.get(role) else {
+            return Err(OrbitError::InvalidInput(format!(
+                "custom crew is missing required `{role}` role settings"
+            )));
+        };
+        for (field, value) in [
+            ("provider", config.provider.as_deref()),
+            ("backend", config.backend.as_deref()),
+            ("model", config.model.as_deref()),
+        ] {
+            if value.map(str::trim).is_none_or(str::is_empty) {
+                return Err(OrbitError::InvalidInput(format!(
+                    "custom crew role `{role}` is missing required `{field}`"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -75,7 +109,7 @@ mod tests {
             RawAgentRoleConfig {
                 provider: Some("claude".into()),
                 backend: Some("http".into()),
-                model: None,
+                model: Some("claude-opus-4-7".into()),
             },
         );
         roles
@@ -89,21 +123,20 @@ mod tests {
         assert!(created);
         let contents = std::fs::read_to_string(&path).expect("read");
         assert_eq!(contents, DEFAULT_CONFIG_TEMPLATE);
-        assert!(no_active_agent_section(&contents));
+        assert!(no_active_role_section(&contents));
+        assert!(contents.contains("[crews.opus-codex]"));
+        assert!(contents.contains("[crews.all-claude]"));
+        assert!(contents.contains("default_crew = \"opus-codex\""));
     }
 
-    /// Returns true when the file has no uncommented `[agent.<role>]`
-    /// section header. The default template ships with a commented-out
-    /// documentation block that includes `# [agent.reviewer]` etc; we want
-    /// to ignore those.
-    fn no_active_agent_section(contents: &str) -> bool {
+    fn no_active_role_section(contents: &str) -> bool {
         contents
             .lines()
             .all(|line| !line.trim_start().starts_with("[agent."))
     }
 
     #[test]
-    fn seed_with_role_settings_appends_agent_blocks() {
+    fn seed_with_role_settings_writes_custom_crew() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
         let roles = sample_roles();
@@ -111,13 +144,8 @@ mod tests {
         assert!(created);
         let contents = std::fs::read_to_string(&path).expect("read");
 
-        // Default template is preserved verbatim at the head of the file.
-        assert!(contents.starts_with(DEFAULT_CONFIG_TEMPLATE));
-
-        // All three role tables are present.
-        assert!(contents.contains("[agent.reviewer]"));
-        assert!(contents.contains("[agent.implementer]"));
-        assert!(contents.contains("[agent.planner]"));
+        assert!(no_active_role_section(&contents));
+        assert!(contents.contains("default_crew = \"custom\""));
         assert!(contents.contains("provider = \"claude\""));
         assert!(contents.contains("provider = \"codex\""));
         assert!(contents.contains("model = \"claude-opus-4-7\""));
@@ -125,14 +153,18 @@ mod tests {
 
         // Round-trips through toml::from_str (consumer side will need this).
         let parsed: toml::Value = toml::from_str(&contents).expect("parse");
-        let agent = parsed
-            .get("agent")
-            .expect("agent table")
+        let crews = parsed
+            .get("crews")
+            .expect("crews table")
             .as_table()
             .unwrap();
-        assert!(agent.contains_key("reviewer"));
-        assert!(agent.contains_key("implementer"));
-        assert!(agent.contains_key("planner"));
+        let custom = crews
+            .get("custom")
+            .and_then(|v| v.as_table())
+            .expect("custom crew");
+        assert!(custom.contains_key("reviewer"));
+        assert!(custom.contains_key("implementer"));
+        assert!(custom.contains_key("planner"));
     }
 
     #[test]
@@ -161,35 +193,17 @@ mod tests {
     }
 
     #[test]
-    fn seed_serialization_omits_none_fields() {
-        // The planner sample omits `model`. Verify it doesn't show up as
-        // `model = ""` or similar in the parsed output.
+    fn seed_with_incomplete_role_settings_fails() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
-        let roles = sample_roles();
-        seed_default_config(&path, Some(&roles)).expect("seed");
-        let contents = std::fs::read_to_string(&path).expect("read");
-
-        // Parsing TOML ignores comments, so the only `[agent.planner]` table
-        // visible in the parsed structure is the one we wrote.
-        let parsed: toml::Value = toml::from_str(&contents).expect("parse");
-        let planner = parsed
-            .get("agent")
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("planner"))
-            .and_then(|v| v.as_table())
-            .expect("planner table present");
+        let mut roles = sample_roles();
+        roles.get_mut("planner").expect("planner").model.take();
+        let error = seed_default_config(&path, Some(&roles)).expect_err("missing model fails");
         assert!(
-            planner.get("model").is_none(),
-            "planner.model must be absent when None: {planner:?}"
+            error
+                .to_string()
+                .contains("custom crew role `planner` is missing required `model`")
         );
-        assert_eq!(
-            planner.get("provider").and_then(|v| v.as_str()),
-            Some("claude")
-        );
-        assert_eq!(
-            planner.get("backend").and_then(|v| v.as_str()),
-            Some("http")
-        );
+        assert!(!path.exists());
     }
 }

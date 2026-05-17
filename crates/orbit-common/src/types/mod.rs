@@ -24,7 +24,9 @@ pub mod activity;
 pub mod activity_job;
 pub mod actor;
 pub mod adr;
+pub mod agent_family;
 pub mod agent_pair;
+pub mod artifact_ids;
 pub mod audit;
 pub mod audit_event;
 pub mod duel;
@@ -64,24 +66,28 @@ pub use actor::{
     normalize_optional_attribution_label, provider_from_model,
 };
 pub use adr::{Adr, AdrStatus, LegacyValidation, legacy_id_for, validate_adr_id};
+pub use agent_family::AgentFamily;
 pub use agent_pair::{
-    AgentModelPair, agent_family_from_cli, all_agent_families, infer_agent_family_from_model,
-    normalize_agent_family_for_model, resolve_agent_model_pair,
+    AgentModelPair, Crew, CrewRoleAssignment, agent_family_from_cli, all_agent_families,
+    infer_agent_family_from_model, normalize_agent_family_for_model, resolve_crew,
+};
+pub use artifact_ids::{
+    is_valid_adr_id, is_valid_friction_id, is_valid_learning_id, validate_friction_id,
 };
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats, audit_execution_id};
 pub use duel::{
     Ambiguity, ArbiterVerdict, Cost, Decision, DuelRun, EfficiencyMetrics, ImplementerStats,
     Outcome, PerCommentVerdict, PlannerSlot, PlanningDuelRun, PlanningEfficiency, PlanningOutcome,
-    PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, Roles, Scores, Severity,
-    TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
+    PlanningRoleAssignment, PlanningRoles, ReviewerStats, RoleAssignment, RoleSlot, Roles, Scores,
+    Severity, TaskClass, TaskScope, ValidIssuesBySeverity, Verdict,
 };
 pub use error::{NotFoundKind, OrbitError};
 pub use event::OrbitEvent;
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
-pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord};
+pub use friction::{FrictionEntry, FrictionFrontmatter, FrictionRecord, FrictionStatus};
 pub use id::OrbitId;
 pub use invocation::{InvocationTrace, TokenUsage, ToolCallTrace};
 pub use job::{
@@ -90,10 +96,12 @@ pub use job::{
     default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
 };
 pub use learning::{
-    DEFAULT_LEARNING_REMINDER_PER_CALL_CAP, DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind,
-    Learning, LearningEvidence, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-    LearningScope, LearningStatus, normalize_learning_paths, normalize_learning_tags,
-    prepend_reminder_block, render_reminder_block,
+    DEFAULT_LEARNING_COMMENT_RENDER_CAP, DEFAULT_LEARNING_REMINDER_PER_CALL_CAP,
+    DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind, Learning, LearningComment,
+    LearningCommentEvent, LearningCommentTombstone, LearningEvidence, LearningInjectionCaps,
+    LearningInjectionState, LearningReminder, LearningScope, LearningStatus, LearningVoteRow,
+    LearningVoteSummary, decayed_vote_score, normalize_learning_paths, normalize_learning_tags,
+    prepend_reminder_block, read_comment_render_cap_env, render_reminder_block,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;

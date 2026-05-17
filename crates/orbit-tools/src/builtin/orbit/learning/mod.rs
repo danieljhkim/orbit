@@ -1,4 +1,7 @@
 pub mod add;
+pub mod comment_add;
+pub mod comment_delete;
+pub mod comment_list;
 pub mod list;
 pub mod prune;
 pub mod reindex;
@@ -6,3 +9,4 @@ pub mod search;
 pub mod show;
 pub mod supersede;
 pub mod update;
+pub mod upvote;

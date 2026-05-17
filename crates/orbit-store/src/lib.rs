@@ -48,8 +48,10 @@ pub mod skill_store {
 
 pub mod friction_store {
     pub use crate::file::friction_store::{
-        FrictionAddParams, FrictionListFilter, StoredFrictionRecord, add_friction,
-        ensure_default_tag_taxonomy, friction_stats, list_frictions, show_friction,
+        FrictionAddParams, FrictionListFilter, FrictionUpdateParams, StoredFrictionRecord,
+        add_friction, ensure_default_tag_taxonomy, friction_stats, friction_tags, list_frictions,
+        resolve_friction, resolve_friction_by_task, show_friction, update_friction,
+        validate_friction_id,
     };
 }
 
@@ -101,17 +103,24 @@ pub mod token_scoreboard {
     pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
 }
 
+pub mod learning_layout {
+    pub use crate::file::learning_store::migration::{
+        LearningLayoutMigrationReport, migrate_learning_layout,
+    };
+}
+
 use chrono::{DateTime, Utc};
 
 pub use backend::{
     ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend,
     AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    ReleasedTaskReservation, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
-    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
-    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
-    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
+    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
+    LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend, ReleasedTaskReservation,
+    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
+    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict,
+    TaskLockHolder, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,

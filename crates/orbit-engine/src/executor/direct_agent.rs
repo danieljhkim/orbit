@@ -75,6 +75,23 @@ fn normalize_agent_label(agent_cli: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn append_runtime_model_args(
+    args: &mut Vec<String>,
+    model_flag: Option<&str>,
+    model: Option<&str>,
+) {
+    let (Some(model_flag), Some(model)) = (model_flag, model) else {
+        return;
+    };
+
+    if model_flag.trim().is_empty() || model.trim().is_empty() {
+        return;
+    }
+
+    args.push(model_flag.to_string());
+    args.push(model.to_string());
+}
+
 pub struct DirectAgentExecutor {
     bound_executor: ExecutorDef,
 }
@@ -112,7 +129,12 @@ impl ActivityExecutor for DirectAgentExecutor {
                 ));
             }
         };
-        let args = self.bound_executor.args.clone();
+        let mut args = self.bound_executor.args.clone();
+        append_runtime_model_args(
+            &mut args,
+            self.bound_executor.model_flag.as_deref(),
+            execution.model.as_deref(),
+        );
 
         // --- Assemble environment ---
         let label = self.bound_executor.name.clone();
@@ -233,6 +255,48 @@ mod tests {
             exit_code: Some(if success { 0 } else { 1 }),
             duration_ms: 12,
             output: None,
+        }
+    }
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn appends_runtime_model_after_operator_args_when_flag_and_model_present() {
+        let mut argv = args(&["--existing", "old"]);
+
+        append_runtime_model_args(&mut argv, Some("--model"), Some("gpt-5.5"));
+
+        assert_eq!(argv, args(&["--existing", "old", "--model", "gpt-5.5"]));
+    }
+
+    #[test]
+    fn leaves_args_unchanged_when_model_flag_missing() {
+        let mut argv = args(&["--existing", "old"]);
+
+        append_runtime_model_args(&mut argv, None, Some("gpt-5.5"));
+
+        assert_eq!(argv, args(&["--existing", "old"]));
+    }
+
+    #[test]
+    fn leaves_args_unchanged_when_runtime_model_missing() {
+        let mut argv = args(&["--existing", "old"]);
+
+        append_runtime_model_args(&mut argv, Some("--model"), None);
+
+        assert_eq!(argv, args(&["--existing", "old"]));
+    }
+
+    #[test]
+    fn leaves_args_unchanged_when_runtime_model_is_blank() {
+        for model in ["", "   "] {
+            let mut argv = args(&["--existing", "old"]);
+
+            append_runtime_model_args(&mut argv, Some("--model"), Some(model));
+
+            assert_eq!(argv, args(&["--existing", "old"]));
         }
     }
 

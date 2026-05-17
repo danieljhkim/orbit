@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use orbit_common::types::{
     LearningInjectionCaps, LearningReminder, OrbitError, Task, normalize_learning_tags,
+    read_comment_render_cap_env,
 };
 use orbit_common::utility::selector::anchor_path;
 use orbit_engine::DispatchError;
@@ -10,13 +11,14 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::command::task::{canonicalize_context_files_for_read, context_workspace_root};
+use crate::runtime::run_input::singular_task_id_from_input;
 
 pub(super) fn learning_reminders_for_task(
     runtime: &OrbitRuntime,
     input: &Value,
     caps: LearningInjectionCaps,
 ) -> Result<Vec<LearningReminder>, DispatchError> {
-    let Some(task_id) = super::task_context::singular_task_id_from_input(input) else {
+    let Some(task_id) = singular_task_id_from_input(input) else {
         return Ok(Vec::new());
     };
     let task = runtime.get_task(task_id).map_err(|err| {
@@ -53,13 +55,23 @@ fn learning_reminders_for_task_snapshot(
         })?);
     }
 
-    Ok(merge_ranked_results(batches, caps.per_call)
+    let comment_cap = read_comment_render_cap_env();
+    merge_ranked_results(batches, caps.per_call)
         .into_iter()
-        .map(|result| LearningReminder {
-            id: result.learning.id,
-            summary: result.learning.summary,
+        .map(|result| {
+            let id = result.learning.id;
+            let comments = runtime
+                .list_learning_comments(&id, false)?
+                .into_iter()
+                .take(comment_cap)
+                .collect();
+            Ok(LearningReminder {
+                id,
+                summary: result.learning.summary,
+                comments,
+            })
         })
-        .collect())
+        .collect::<Result<Vec<_>, OrbitError>>()
 }
 
 fn task_context_paths(runtime: &OrbitRuntime, task: &Task, input: &Value) -> Vec<String> {
@@ -116,6 +128,8 @@ fn priority_rank(priority: Option<u8>) -> i16 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use orbit_common::types::{LearningScope, Task};
     use orbit_engine::V2RuntimeHost;
     use orbit_store::LearningCreateParams;
@@ -125,13 +139,48 @@ mod tests {
     use crate::OrbitRuntime;
     use crate::command::task::TaskAddParams;
 
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        value: Option<String>,
+    }
+
+    fn set_comment_cap_env(value: Option<&str>) -> EnvGuard {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var("ORBIT_LEARNING_COMMENT_RENDER_CAP").ok();
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var("ORBIT_LEARNING_COMMENT_RENDER_CAP", value),
+                None => std::env::remove_var("ORBIT_LEARNING_COMMENT_RENDER_CAP"),
+            }
+        }
+        EnvGuard {
+            _lock: lock,
+            value: previous,
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.value {
+                    Some(value) => std::env::set_var("ORBIT_LEARNING_COMMENT_RENDER_CAP", value),
+                    None => std::env::remove_var("ORBIT_LEARNING_COMMENT_RENDER_CAP"),
+                }
+            }
+        }
+    }
+
     fn create_learning(
         runtime: &OrbitRuntime,
         summary: &str,
         paths: &[&str],
         tags: &[&str],
         priority: Option<u8>,
-    ) {
+    ) -> orbit_common::types::Learning {
         runtime
             .create_learning(LearningCreateParams {
                 summary: summary.to_string(),
@@ -145,7 +194,7 @@ mod tests {
                 created_by: Some("gpt-5.5".to_string()),
                 priority,
             })
-            .expect("create learning");
+            .expect("create learning")
     }
 
     fn task_with_context(
@@ -238,5 +287,84 @@ mod tests {
 
         assert_eq!(reminders.len(), 5);
         assert_eq!(reminders[0].summary, "Learning 6");
+    }
+
+    #[test]
+    fn reminders_attach_active_comments_oldest_first_with_render_cap() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let learning = create_learning(
+            &runtime,
+            "Remember the engine path.",
+            &["crates/orbit-engine/**"],
+            &[],
+            None,
+        );
+        let mut comment_ids = Vec::new();
+        for idx in 0..5 {
+            let comment = runtime
+                .add_learning_comment(
+                    learning.id.clone(),
+                    format!("comment {idx}"),
+                    "codex".to_string(),
+                )
+                .expect("add comment");
+            comment_ids.push(comment.id);
+        }
+        runtime
+            .delete_learning_comment(comment_ids[1].clone(), Some("codex".to_string()))
+            .expect("delete one");
+        runtime
+            .delete_learning_comment(comment_ids[3].clone(), Some("codex".to_string()))
+            .expect("delete two");
+        let task = task_with_context(
+            &runtime,
+            vec!["dir:crates/orbit-engine/src".to_string()],
+            Vec::new(),
+        );
+
+        {
+            let _env = set_comment_cap_env(None);
+            let reminders = runtime
+                .learning_reminders_for_task(
+                    &json!({"task_id": task.id.clone()}),
+                    LearningInjectionCaps::default(),
+                )
+                .expect("learning reminders");
+            let block = orbit_common::types::render_reminder_block(&reminders);
+            assert_eq!(
+                reminders[0]
+                    .comments
+                    .iter()
+                    .map(|comment| comment.body.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["comment 0", "comment 2", "comment 4"]
+            );
+            assert!(block.contains("comment 0"));
+            assert!(block.contains("comment 2"));
+            assert!(block.contains("comment 4"));
+            assert!(!block.contains("comment 1"));
+            assert!(!block.contains("comment 3"));
+        }
+
+        {
+            let _env = set_comment_cap_env(Some("1"));
+            let reminders = runtime
+                .learning_reminders_for_task(
+                    &json!({"task_id": task.id.clone()}),
+                    LearningInjectionCaps::default(),
+                )
+                .expect("learning reminders");
+            let block = orbit_common::types::render_reminder_block(&reminders);
+            assert_eq!(
+                reminders[0]
+                    .comments
+                    .iter()
+                    .map(|comment| comment.body.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["comment 0"]
+            );
+            assert!(block.contains("comment 0"));
+            assert!(!block.contains("comment 2"));
+        }
     }
 }

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_common::types::WorkspacePaths;
+use orbit_common::types::{Crew, WorkspacePaths};
 use orbit_embed::{EmbedWorker, VectorStore};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
@@ -13,7 +13,7 @@ use orbit_store::{
 };
 use orbit_tools::ToolRegistry;
 
-use crate::config::{CodexExecutionPolicy, ExecutionEnvPolicy, PersistenceConfig};
+use crate::config::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, PersistenceConfig};
 use crate::skill_catalog::SkillCatalog;
 
 const ORBIT_AGENT_NAME: &str = "ORBIT_AGENT_NAME";
@@ -177,12 +177,12 @@ pub(crate) struct OrbitRuntimeSettings {
     pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
-    /// Default base branch for ship/ship-auto/duel-plan workflows
+    /// Default base branch for ship/duel-plan workflows
     /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
     workflow_base_branch: String,
-    /// `[agent.<role>]` overrides written by `orbit init` (ADR-027) and
-    /// consumed at v2 dispatch time (ADR-029).
-    agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
+    crews: std::collections::BTreeMap<String, Crew>,
+    default_crew: Option<String>,
+    duel: DuelConfig,
 }
 
 impl OrbitRuntimeSettings {
@@ -197,7 +197,9 @@ impl OrbitRuntimeSettings {
         pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
-        agent_roles: std::collections::BTreeMap<String, crate::config::RawAgentRoleConfig>,
+        crews: std::collections::BTreeMap<String, Crew>,
+        default_crew: Option<String>,
+        duel: DuelConfig,
     ) -> Self {
         Self {
             persistence,
@@ -209,7 +211,9 @@ impl OrbitRuntimeSettings {
             pr_config,
             v2_backend,
             workflow_base_branch,
-            agent_roles,
+            crews,
+            default_crew,
+            duel,
         }
     }
 
@@ -225,8 +229,16 @@ impl OrbitRuntimeSettings {
         &self.workflow_base_branch
     }
 
-    pub(crate) fn agent_role(&self, role: &str) -> Option<&crate::config::RawAgentRoleConfig> {
-        self.agent_roles.get(role)
+    pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
+        &self.crews
+    }
+
+    pub(crate) fn default_crew(&self) -> Option<&str> {
+        self.default_crew.as_deref()
+    }
+
+    pub(crate) fn duel_config(&self) -> &DuelConfig {
+        &self.duel
     }
 }
 
@@ -326,18 +338,23 @@ impl OrbitContext {
         self.runtime.v2_backend()
     }
 
-    /// Default base branch for ship/ship-auto/duel-plan workflows. Sourced
+    /// Default base branch for ship/duel-plan workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; falls back to
     /// `"main"` when the key is absent.
     pub(crate) fn workflow_base_branch(&self) -> &str {
         self.runtime.workflow_base_branch()
     }
 
-    /// `[agent.<role>]` lookup written by `orbit init` and consumed at v2
-    /// dispatch time (ADR-029). `None` means no `[agent.<role>]` block was
-    /// present for this role name.
-    pub(crate) fn agent_role(&self, role: &str) -> Option<&crate::config::RawAgentRoleConfig> {
-        self.runtime.agent_role(role)
+    pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
+        self.runtime.crews()
+    }
+
+    pub(crate) fn default_crew(&self) -> Option<&str> {
+        self.runtime.default_crew()
+    }
+
+    pub(crate) fn duel_config(&self) -> &DuelConfig {
+        self.runtime.duel_config()
     }
 }
 

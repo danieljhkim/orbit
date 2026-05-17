@@ -21,6 +21,12 @@ impl Tool for OrbitTaskStartTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "crew".to_string(),
+                description: "Optional crew override for this start".to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
         ]);
         parameters.extend(super::super::identity_params());
 

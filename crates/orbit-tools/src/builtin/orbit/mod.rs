@@ -46,8 +46,11 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
     registry.register(friction::add::OrbitFrictionAddTool);
     registry.register(friction::list::OrbitFrictionListTool);
+    registry.register(friction::resolve::OrbitFrictionResolveTool);
     registry.register(friction::show::OrbitFrictionShowTool);
     registry.register(friction::stats::OrbitFrictionStatsTool);
+    registry.register(friction::tags::OrbitFrictionTagsTool);
+    registry.register(friction::update::OrbitFrictionUpdateTool);
     registry.register(task::add::OrbitTaskAddTool);
     registry.register(task::artifact_put::OrbitTaskArtifactPutTool);
     registry.register(task::approve::OrbitTaskApproveTool);
@@ -74,6 +77,9 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(knowledge::search::OrbitKnowledgeSearchTool);
     registry.register(knowledge::show::OrbitKnowledgeShowTool);
     registry.register(learning::add::OrbitLearningAddTool);
+    registry.register(learning::comment_add::OrbitLearningCommentAddTool);
+    registry.register(learning::comment_delete::OrbitLearningCommentDeleteTool);
+    registry.register(learning::comment_list::OrbitLearningCommentListTool);
     registry.register(learning::list::OrbitLearningListTool);
     registry.register(learning::prune::OrbitLearningPruneTool);
     registry.register(learning::reindex::OrbitLearningReindexTool);
@@ -81,6 +87,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);
+    registry.register(learning::upvote::OrbitLearningUpvoteTool);
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
     registry.register(review_thread::add::OrbitReviewThreadAddTool);
@@ -109,19 +116,28 @@ pub(super) fn resolve_identity(
 ) -> Result<OrbitIdentity, OrbitError> {
     let input_agent = optional_string_alias(input, &["agent"])?;
     let input_model = optional_string_alias(input, &["model"])?;
+    let context_agent = trimmed_optional(ctx.agent_name.clone());
+    let context_model = trimmed_optional(ctx.model_name.clone());
+    let context_has_identity = context_agent.is_some() || context_model.is_some();
     let input_has_identity = input_agent
         .as_deref()
         .is_some_and(|value| !value.trim().is_empty())
         || input_model
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
-    let (agent, model) = if input_has_identity {
+    let (agent, model) = if context_has_identity {
+        let agent =
+            normalize_agent_family_for_model(context_agent.as_deref(), context_model.as_deref())?;
+        // Runtime-provided identity is authoritative at the tool boundary. If
+        // an agent self-reports a `model` argument, Orbit overwrites it with
+        // the canonical family string so downstream persistence compares
+        // family identity, not unstable model aliases.
+        let model = agent.clone();
+        (agent, model)
+    } else if input_has_identity {
         (trimmed_optional(input_agent), trimmed_optional(input_model))
     } else {
-        (
-            trimmed_optional(ctx.agent_name.clone()),
-            trimmed_optional(ctx.model_name.clone()),
-        )
+        (None, None)
     };
     let agent = normalize_agent_family_for_model(agent.as_deref(), model.as_deref())?;
     let actor_label = build_actor_label(agent.as_deref(), model.as_deref());
@@ -137,7 +153,7 @@ pub(super) fn identity_params() -> Vec<ToolParam> {
         ToolParam {
             name: "agent".to_string(),
             description:
-                "Deprecated compatibility field. Prefer `model`; Orbit infers the agent family from known model names."
+                "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`)."
                     .to_string(),
             param_type: "string".to_string(),
             required: false,
@@ -145,7 +161,7 @@ pub(super) fn identity_params() -> Vec<ToolParam> {
         ToolParam {
             name: "model".to_string(),
             description:
-                "Preferred provenance field. Exact LLM model identifier used to infer agent family when possible (e.g. opus, gpt-5.4, gemini-3.1-pro-preview)."
+                "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized."
                     .to_string(),
             param_type: "string".to_string(),
             required: false,
@@ -157,7 +173,7 @@ pub(super) fn model_identity_params() -> Vec<ToolParam> {
     vec![ToolParam {
         name: "model".to_string(),
         description:
-            "Preferred provenance field. Exact LLM model identifier used to infer agent family when possible (e.g. opus, gpt-5.4, gemini-3.1-pro-preview)."
+            "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized."
                 .to_string(),
         param_type: "string".to_string(),
         required: false,
@@ -170,7 +186,7 @@ pub(super) fn reject_agent_field(input: &Value, tool_name: &str) -> Result<(), O
         .is_some_and(|object| object.contains_key("agent"))
     {
         return Err(OrbitError::InvalidInput(format!(
-            "{tool_name} no longer accepts `agent`; use `model` for attribution"
+            "{tool_name} no longer accepts `agent`; use `model` with the agent family for attribution"
         )));
     }
     Ok(())
@@ -181,7 +197,7 @@ pub(super) fn scored_identity_params() -> Vec<ToolParam> {
         ToolParam {
             name: "agent".to_string(),
             description:
-                "Deprecated compatibility field. Prefer `model`; Orbit infers the agent family from known model names."
+                "Deprecated compatibility field. Prefer `model` with the agent family (`codex`, `claude`, `gemini`, or `grok`)."
                     .to_string(),
             param_type: "string".to_string(),
             required: false,
@@ -189,7 +205,7 @@ pub(super) fn scored_identity_params() -> Vec<ToolParam> {
         ToolParam {
             name: "model".to_string(),
             description:
-                "Required provenance field. Exact LLM model identifier used to infer agent family (e.g. opus, gpt-5.4, gemini-3.1-pro-preview). Pass `human` for human-authored review feedback to opt out of scoreboard scoring."
+                "Required provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`), or `human` for human-authored review feedback to opt out of scoreboard scoring. Full model strings are accepted and auto-normalized."
                     .to_string(),
             param_type: "string".to_string(),
             required: true,
@@ -303,4 +319,41 @@ pub(super) fn orbit_id_params(kind: &str) -> Vec<ToolParam> {
         param_type: "string".to_string(),
         required: true,
     }]
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn runtime_identity_overwrites_self_reported_model_at_tool_boundary() {
+        let ctx = tool_context("claude", "claude-opus-4-7");
+
+        let identity =
+            resolve_identity(&ctx, &json!({ "model": "opus-4.7" })).expect("identity resolves");
+
+        assert_eq!(identity.agent.as_deref(), Some("claude"));
+        assert_eq!(identity.model.as_deref(), Some("claude"));
+        assert_eq!(identity.actor_label.as_deref(), Some("claude"));
+    }
+
+    fn tool_context(agent: &str, model: &str) -> ToolContext {
+        ToolContext {
+            cwd: None,
+            allowed_tools: Vec::new(),
+            workspace_root: None,
+            agent_name: Some(agent.to_string()),
+            model_name: Some(model.to_string()),
+            role_slot: None,
+            proc_allowed_programs: Vec::new(),
+            policy_engine: None,
+            fs_profile: None,
+            fs_audit: None,
+            reservation_owner: None,
+            orbit_host: None,
+            groundhog_host: None,
+        }
+    }
 }

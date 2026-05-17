@@ -168,6 +168,7 @@ mod tests {
                 description: "test".to_string(),
                 acceptance_criteria: Vec::new(),
                 dependencies: Vec::new(),
+                relations: Vec::new(),
                 tags: Vec::new(),
                 plan: String::new(),
                 execution_summary: String::new(),
@@ -183,6 +184,7 @@ mod tests {
                 task_type: TaskType::Chore,
                 external_refs: Vec::new(),
                 source_task_id: None,
+                crew: None,
                 comments: Vec::new(),
             })
             .expect("create task");

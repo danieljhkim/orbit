@@ -23,6 +23,8 @@ pub(super) fn run_action(
             (McpAction::Remove, McpProvider::Codex) => apply_codex_remove(&target)?,
             (McpAction::Init, McpProvider::Gemini) => apply_gemini_init(&target)?,
             (McpAction::Remove, McpProvider::Gemini) => apply_gemini_remove(&target)?,
+            (McpAction::Init, McpProvider::Grok) => apply_grok_init(&target)?,
+            (McpAction::Remove, McpProvider::Grok) => apply_grok_remove(&target)?,
             (McpAction::Init, McpProvider::Cursor) => {
                 apply_simple_json_init(&target, "mcpServers")?
             }
@@ -95,6 +97,17 @@ impl ConfigTarget {
             }
             (ScopeArg::Workspace, McpProvider::Gemini) => Ok(Self {
                 mcp_path: repo_root.join(".gemini").join("settings.json"),
+                settings_path: None,
+            }),
+            (ScopeArg::Home, McpProvider::Grok) => {
+                let home = require_home_dir(home_dir)?;
+                Ok(Self {
+                    mcp_path: home.join(".grok").join("config.toml"),
+                    settings_path: None,
+                })
+            }
+            (ScopeArg::Workspace, McpProvider::Grok) => Ok(Self {
+                mcp_path: repo_root.join(".grok").join("config.toml"),
                 settings_path: None,
             }),
             (ScopeArg::Home, McpProvider::Cursor) => {
@@ -207,6 +220,13 @@ pub(super) fn auto_detected_providers(
     if gemini_repo || gemini_home {
         providers.push(McpProvider::Gemini);
     }
+    let grok_repo = repo_root.join(".grok").is_dir();
+    let grok_home = home_dir
+        .map(|home| home.join(".grok").join("config.toml").is_file())
+        .unwrap_or(false);
+    if grok_repo || grok_home {
+        providers.push(McpProvider::Grok);
+    }
     let cursor_repo = repo_root.join(".cursor").is_dir();
     let cursor_home = home_dir
         .map(|home| home.join(".cursor").join("mcp.json").is_file())
@@ -263,6 +283,7 @@ mod tests {
         let home = tempdir().expect("home tempdir");
         std::fs::create_dir_all(repo.path().join(".claude")).expect("create .claude");
         std::fs::create_dir_all(repo.path().join(".gemini")).expect("create .gemini");
+        std::fs::create_dir_all(repo.path().join(".grok")).expect("create .grok");
         std::fs::create_dir_all(home.path().join(".codex")).expect("create codex dir");
         std::fs::write(
             home.path().join(".codex").join("config.toml"),
@@ -273,7 +294,12 @@ mod tests {
         let providers = auto_detected_providers(repo.path(), Some(home.path()));
         assert_eq!(
             providers,
-            vec![McpProvider::Claude, McpProvider::Codex, McpProvider::Gemini]
+            vec![
+                McpProvider::Claude,
+                McpProvider::Codex,
+                McpProvider::Gemini,
+                McpProvider::Grok,
+            ]
         );
     }
 
@@ -287,6 +313,18 @@ mod tests {
 
         let providers = auto_detected_providers(repo.path(), Some(home.path()));
         assert_eq!(providers, vec![McpProvider::Gemini]);
+    }
+
+    #[test]
+    fn auto_detects_grok_from_home_when_repo_lacks_dotgrok() {
+        let repo = tempdir().expect("repo tempdir");
+        let home = tempdir().expect("home tempdir");
+        std::fs::create_dir_all(home.path().join(".grok")).expect("create grok home dir");
+        std::fs::write(home.path().join(".grok").join("config.toml"), "\n")
+            .expect("write global grok config");
+
+        let providers = auto_detected_providers(repo.path(), Some(home.path()));
+        assert_eq!(providers, vec![McpProvider::Grok]);
     }
 
     #[test]
@@ -304,6 +342,7 @@ mod tests {
                 McpProvider::Claude,
                 McpProvider::Codex,
                 McpProvider::Gemini,
+                McpProvider::Grok,
             ]),
             Some(home.path().to_path_buf()),
             ScopeArg::Home,
@@ -359,10 +398,26 @@ mod tests {
         assert_eq!(gemini_args.len(), 2);
         assert!(gemini_settings["mcpServers"]["orbit"]["cwd"].is_null());
 
+        let grok_config = std::fs::read_to_string(home.path().join(".grok").join("config.toml"))
+            .expect("read grok home config");
+        let grok_parsed: toml::Value = toml::from_str(&grok_config).expect("parse grok");
+        let grok_args = grok_parsed["mcp_servers"]["orbit"]["args"]
+            .as_array()
+            .expect("grok args");
+        assert_eq!(grok_args.len(), 2);
+        assert_eq!(grok_args[0].as_str(), Some("mcp"));
+        assert_eq!(grok_args[1].as_str(), Some("serve"));
+        assert_eq!(
+            grok_parsed["mcp_servers"]["orbit"]["enabled"].as_bool(),
+            Some(true)
+        );
+        assert!(grok_parsed["mcp_servers"]["orbit"].get("cwd").is_none());
+
         // Repo-local files should not have been touched.
         assert!(!repo.path().join(".mcp.json").exists());
         assert!(!repo.path().join(".codex").join("config.toml").exists());
         assert!(!repo.path().join(".gemini").join("settings.json").exists());
+        assert!(!repo.path().join(".grok").join("config.toml").exists());
         assert!(!repo.path().join(".claude").join("settings.json").exists());
     }
 
@@ -382,6 +437,12 @@ mod tests {
             "{\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"other\": {\"command\": \"demo\"}\n  }\n}\n",
         )
         .expect("write gemini settings");
+        std::fs::create_dir_all(home.path().join(".grok")).expect("create grok home");
+        std::fs::write(
+            home.path().join(".grok").join("config.toml"),
+            "model = \"grok-4\"\n[mcp_servers.other]\ncommand = \"demo\"\n",
+        )
+        .expect("write grok config");
 
         let orbit_root = repo.path().join(".orbit");
         std::fs::create_dir_all(&orbit_root).expect("create orbit root");
@@ -390,7 +451,11 @@ mod tests {
             McpAction::Init,
             repo.path(),
             &orbit_root,
-            ProviderSelectionMode::Explicit(vec![McpProvider::Codex, McpProvider::Gemini]),
+            ProviderSelectionMode::Explicit(vec![
+                McpProvider::Codex,
+                McpProvider::Gemini,
+                McpProvider::Grok,
+            ]),
             Some(home.path().to_path_buf()),
             ScopeArg::Home,
         )
@@ -400,7 +465,11 @@ mod tests {
             McpAction::Remove,
             repo.path(),
             &orbit_root,
-            ProviderSelectionMode::Explicit(vec![McpProvider::Codex, McpProvider::Gemini]),
+            ProviderSelectionMode::Explicit(vec![
+                McpProvider::Codex,
+                McpProvider::Gemini,
+                McpProvider::Grok,
+            ]),
             Some(home.path().to_path_buf()),
             ScopeArg::Home,
         )
@@ -429,6 +498,21 @@ mod tests {
         assert_eq!(gemini_settings["theme"], "dark");
         assert!(gemini_settings["mcpServers"]["orbit"].is_null());
         assert!(gemini_settings["mcpServers"]["other"].is_object());
+
+        let grok_config = std::fs::read_to_string(home.path().join(".grok").join("config.toml"))
+            .expect("read grok");
+        let grok_parsed: toml::Value = toml::from_str(&grok_config).expect("parse grok");
+        assert_eq!(grok_parsed["model"].as_str(), Some("grok-4"));
+        assert_eq!(
+            grok_parsed["mcp_servers"]["other"]["command"].as_str(),
+            Some("demo")
+        );
+        assert!(
+            grok_parsed["mcp_servers"]
+                .as_table()
+                .and_then(|t| t.get("orbit"))
+                .is_none()
+        );
     }
 
     #[test]

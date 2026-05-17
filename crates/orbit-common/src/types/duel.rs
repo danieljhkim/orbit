@@ -26,7 +26,7 @@
 //! must bump `schema_version` on the enclosing scoreboard file and add a
 //! migration path in `orbit-store::file::duel_scoreboard`.
 
-use crate::types::invocation::TokenUsage;
+use crate::types::{AgentFamily, OrbitError, invocation::TokenUsage};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -285,6 +285,54 @@ pub enum PlannerSlot {
     PlannerB,
 }
 
+/// Role slot for a planning-duel participant.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum RoleSlot {
+    PlannerA,
+    PlannerB,
+    Arbiter,
+}
+
+impl RoleSlot {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PlannerA => "planner_a",
+            Self::PlannerB => "planner_b",
+            Self::Arbiter => "arbiter",
+        }
+    }
+
+    pub const fn planner_slot(self) -> Option<PlannerSlot> {
+        match self {
+            Self::PlannerA => Some(PlannerSlot::PlannerA),
+            Self::PlannerB => Some(PlannerSlot::PlannerB),
+            Self::Arbiter => None,
+        }
+    }
+}
+
+impl std::fmt::Display for RoleSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for RoleSlot {
+    type Err = crate::types::OrbitError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim() {
+            "planner_a" => Ok(Self::PlannerA),
+            "planner_b" => Ok(Self::PlannerB),
+            "arbiter" => Ok(Self::Arbiter),
+            other => Err(crate::types::OrbitError::InvalidInput(format!(
+                "unknown planning-duel role slot '{other}'; expected planner_a, planner_b, or arbiter"
+            ))),
+        }
+    }
+}
+
 /// Reusable efficiency payload for a single role in a planning duel.
 ///
 /// Token usage is stored exactly when available. When the runtime cannot
@@ -325,21 +373,67 @@ impl EfficiencyMetrics {
     }
 }
 
-/// Agent/model assignment for one side of a planning duel.
+/// Agent-family assignment for one side of a planning duel.
+///
+/// The field that contains this assignment (`planner_a`, `planner_b`, or
+/// `arbiter`) is the role slot. Exact model strings live in invocation
+/// configuration and are intentionally absent from this identity schema.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningRoleAssignment {
-    pub agent: String,
-    pub model: String,
+    pub family: AgentFamily,
 }
 
 /// The three role assignments for a planning duel.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PlanningRoles {
     pub planner_a: PlanningRoleAssignment,
     pub planner_b: PlanningRoleAssignment,
     pub arbiter: PlanningRoleAssignment,
+}
+
+impl<'de> Deserialize<'de> for PlanningRoles {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct RawPlanningRoles {
+            planner_a: serde_json::Value,
+            planner_b: serde_json::Value,
+            arbiter: serde_json::Value,
+        }
+
+        let raw = RawPlanningRoles::deserialize(deserializer)?;
+        Ok(Self {
+            planner_a: deserialize_planning_assignment(raw.planner_a)
+                .map_err(serde::de::Error::custom)?,
+            planner_b: deserialize_planning_assignment(raw.planner_b)
+                .map_err(serde::de::Error::custom)?,
+            arbiter: deserialize_planning_assignment(raw.arbiter)
+                .map_err(serde::de::Error::custom)?,
+        })
+    }
+}
+
+fn deserialize_planning_assignment(
+    value: serde_json::Value,
+) -> Result<PlanningRoleAssignment, OrbitError> {
+    if let Ok(assignment) = serde_json::from_value::<PlanningRoleAssignment>(value.clone()) {
+        return Ok(assignment);
+    }
+
+    let serde_json::Value::Object(map) = value else {
+        return Err(OrbitError::InvalidInput(
+            "planning role assignment must be an object".to_string(),
+        ));
+    };
+    if let Some(family) = map.get("agent").and_then(serde_json::Value::as_str) {
+        return Ok(PlanningRoleAssignment {
+            family: family.parse()?,
+        });
+    }
+    Err(OrbitError::InvalidInput(
+        "planning role assignment must contain `family`".to_string(),
+    ))
 }
 
 /// Arbiter outcome for a planning duel.
@@ -366,13 +460,55 @@ pub struct PlanningDuelRun {
     pub run_id: String,
     pub task_id: String,
     pub completed_at: chrono::DateTime<chrono::Utc>,
+    /// Family selected for each planning-duel slot.
     pub roles: PlanningRoles,
     /// Artifact path for planner A's proposal markdown.
     pub planner_a_artifact_path: String,
     /// Artifact path for planner B's proposal markdown.
     pub planner_b_artifact_path: String,
     pub outcome: PlanningOutcome,
+    /// "Who actually ran?" metrics, attributed by invocation family + slot.
     pub efficiency: PlanningEfficiency,
+}
+
+#[cfg(test)]
+mod planning_schema_tests {
+    use std::str::FromStr;
+
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn planning_assignment_is_family_only_and_rejects_model_field() {
+        let assignment = PlanningRoleAssignment {
+            family: AgentFamily::Gemini,
+        };
+        let value = serde_json::to_value(&assignment).expect("serialize assignment");
+        assert_eq!(value, json!({ "family": "gemini" }));
+
+        let round_trip: PlanningRoleAssignment =
+            serde_json::from_value(value).expect("deserialize assignment");
+        assert_eq!(round_trip, assignment);
+
+        let with_model = serde_json::from_value::<PlanningRoleAssignment>(json!({
+            "family": "gemini",
+            "model": "pro"
+        }));
+        assert!(with_model.is_err());
+    }
+
+    #[test]
+    fn role_slot_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&RoleSlot::PlannerA).expect("serialize slot"),
+            "\"planner_a\""
+        );
+        assert_eq!(
+            RoleSlot::from_str("arbiter").expect("parse slot"),
+            RoleSlot::Arbiter
+        );
+    }
 }
 
 // ============================================================================

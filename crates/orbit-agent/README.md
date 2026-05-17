@@ -2,7 +2,7 @@
 
 Agent provider abstraction for Orbit. Two transport families coexist:
 
-- **CLI transports** drive `claude`, `codex`, `gemini`, `ollama`, and `mock`
+- **CLI transports** drive `claude`, `codex`, `gemini`, `grok`, `ollama`, and `mock`
   as subprocesses via the existing `AgentRuntime` trait. An invocation
   builds an `AgentInvocationSpec` (program, args, stdin envelope) that the
   engine runs through `orbit-exec`.

@@ -237,6 +237,7 @@ mod tests {
 
         std::fs::create_dir_all(workspace.path().join(".claude")).expect("create .claude");
         std::fs::create_dir_all(workspace.path().join(".gemini")).expect("create .gemini");
+        std::fs::create_dir_all(workspace.path().join(".grok")).expect("create .grok");
         std::fs::create_dir_all(home.path().join(".codex")).expect("create global .codex");
         std::fs::write(
             home.path().join(".codex").join("config.toml"),
@@ -288,6 +289,7 @@ mod tests {
                 .join("settings.json")
                 .exists()
         );
+        assert!(workspace.path().join(".grok").join("config.toml").exists());
     }
 
     #[test]
@@ -298,6 +300,7 @@ mod tests {
 
         std::fs::create_dir_all(workspace.path().join(".claude")).expect("create .claude");
         std::fs::create_dir_all(workspace.path().join(".gemini")).expect("create .gemini");
+        std::fs::create_dir_all(workspace.path().join(".grok")).expect("create .grok");
         std::fs::create_dir_all(home.path().join(".codex")).expect("create global .codex");
         std::fs::write(
             home.path().join(".codex").join("config.toml"),
@@ -349,6 +352,7 @@ mod tests {
                 .join("settings.json")
                 .exists()
         );
+        assert!(!workspace.path().join(".grok").join("config.toml").exists());
     }
 
     #[test]

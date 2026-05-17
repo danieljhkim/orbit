@@ -163,38 +163,50 @@ pub struct TaskLocksArgs {
 
 impl Execute for TaskLocksArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let mut tasks: Vec<_> = runtime
-            .list_tasks()?
-            .into_iter()
-            .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
-            .collect();
-
-        tasks.sort_by_key(|task| {
-            (
-                task_lock_status_rank(task.status),
-                task.created_at,
-                task.id.clone(),
-            )
-        });
-
-        let locked_files: BTreeSet<String> = tasks
-            .iter()
-            .flat_map(|task| task.context_files.iter().cloned())
-            .collect();
-
         if self.json {
-            let json_by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
-            crate::output::json::print_pretty(&json!({
-                "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
-                "by_task": json_by_task,
-                "total_locked": locked_files.len(),
-                "total_tasks": tasks.len(),
-            }))
+            crate::output::json::print_pretty(&task_locks_json(runtime)?)
         } else {
+            let (tasks, locked_files) = task_locks(runtime)?;
             print_task_locks(&tasks, &locked_files);
             Ok(())
         }
     }
+}
+
+pub(crate) fn task_locks_json(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+    let (tasks, locked_files) = task_locks(runtime)?;
+    let json_by_task: Vec<Value> = tasks.iter().map(task_lock_to_json).collect();
+    Ok(json!({
+        "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
+        "by_task": json_by_task,
+        "total_locked": locked_files.len(),
+        "total_tasks": tasks.len(),
+    }))
+}
+
+fn task_locks(
+    runtime: &OrbitRuntime,
+) -> Result<(Vec<orbit_core::Task>, BTreeSet<String>), OrbitError> {
+    let mut tasks: Vec<_> = runtime
+        .list_tasks()?
+        .into_iter()
+        .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
+        .collect();
+
+    tasks.sort_by_key(|task| {
+        (
+            task_lock_status_rank(task.status),
+            task.created_at,
+            task.id.clone(),
+        )
+    });
+
+    let locked_files: BTreeSet<String> = tasks
+        .iter()
+        .flat_map(|task| task.context_files.iter().cloned())
+        .collect();
+
+    Ok((tasks, locked_files))
 }
 
 fn task_lock_status_rank(status: TaskStatus) -> u8 {

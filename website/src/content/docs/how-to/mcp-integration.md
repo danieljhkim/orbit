@@ -1,6 +1,6 @@
 ---
 title: Set Up MCP
-description: "Expose Orbit's safe MCP tool surface to Claude, Codex, or Gemini."
+description: "Expose Orbit's safe MCP tool surface to Claude Code, Codex, Gemini, or Grok Build."
 sidebar:
   order: 5
 ---
@@ -14,7 +14,7 @@ For Claude Code, the simplest setup is the official plugin — it registers the 
 /plugin install orbit
 ```
 
-Requires Node 18+ on `PATH`. Skip the rest of this page if you go this route; the plugin handles registration. Use the manual flow below for Codex, Gemini, or a Claude Code install you want to wire by hand.
+Requires Node 18+ on `PATH`. Skip the rest of this page if you go this route; the plugin handles registration. Use the manual flow below for Codex, Gemini, Grok Build, or a Claude Code install you want to wire by hand.
 
 ## Initialize (manual)
 
@@ -30,7 +30,10 @@ Or target a client explicitly:
 orbit mcp init --claude
 orbit mcp init --codex
 orbit mcp init --gemini
+orbit mcp init --grok
 ```
+
+**Grok Build** uses the native `.grok/config.toml` format (similar to how Claude Code can use a config file). `orbit mcp init --grok` will create or update `.grok/config.toml` in your workspace root (or `~/.grok/config.toml` for global).
 
 ## Serve
 

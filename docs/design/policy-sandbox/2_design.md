@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-14
+**Last updated:** 2026-05-16
 
 This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
@@ -121,7 +121,7 @@ The compiled macOS profile denies by default, allows broad reads required by age
 
 - scratch/cache roots (`/tmp`, `/private/tmp`, `/private/var/folders`, `/dev`, `$HOME/Library/Caches`)
 - `$HOME/.orbit` for inherited Orbit subprocess audit/state
-- provider state dirs: Codex (`$CODEX_HOME` or `$HOME/.codex`), Claude (`$CLAUDE_CONFIG_DIR` or `$HOME/.claude`), and Gemini (`$HOME/.gemini`)
+- provider state dirs: Codex (`$CODEX_HOME` or `$HOME/.codex`), Claude (`$CLAUDE_CONFIG_DIR` or `$HOME/.claude`), Gemini (`$HOME/.gemini`), and Grok (`$HOME/.grok`)
 - Claude `$HOME/.claude.json` sibling files (`.claude.json`, `.claude.json.lock`, atomic-write `.claude.json.tmp.<pid>.<ms_ts>`) when `CLAUDE_CONFIG_DIR` is unset, since these live at the home root rather than under `$HOME/.claude/` ([T20260508-13])
 - positive `modify` roots from the resolved profile
 - Codex side-write roots from runtime provider config, appended after policy denies so workflow state remains writable under the outer sandbox

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-14
+**Last updated:** 2026-05-17 (ORB-00106)
 
 This document describes Orbit's shipped auditability implementation across command audit rows, activity/job envelopes, loop-level provider/tool traces, blob storage, redaction, identity attribution, metrics-adjacent invocation records, and known limitations. See [1_overview.md](./1_overview.md) for the feature purpose and [3_vision.md](./3_vision.md) for future questions.
 
@@ -30,7 +30,7 @@ After [T20260505-6], command-audit producers use the shared `audit_execution_id`
 
 The CLI RAII guard in `crates/orbit-cli/src/audit_middleware.rs` defaults to failure, marks success or denial explicitly, and writes one row in `Drop`, so early returns still audit when stack unwinding reaches the guard. Direct `orbit audit ...` commands are outside the guard today to avoid recursive audit noise.
 
-For `orbit tool run`, [T20260427-52] made provenance model-first. Orbit resolves identity from input JSON or input file, then explicit `--agent` / `--model`, then `ORBIT_AGENT_NAME` / `ORBIT_AGENT_MODEL`. An exact model becomes the row role and can infer an agent family for task provenance; legacy `agent` inputs remain accepted only when consistent. Missing identity falls back to `agent` for tool dispatch, while direct non-tool CLI commands use `admin`.
+For `orbit tool run`, [T20260427-52] first collapsed duplicate `agent` + `model` inputs. [ORB-00080] later made the family the durable identity: agent-facing `model` inputs should be `codex`, `claude`, `gemini`, or `grok`, while full model strings remain accepted for compatibility and normalize to the family before persistence. Missing identity falls back to `agent` for tool dispatch, while direct non-tool CLI commands use `admin`.
 
 After [T20260428-4], tool-invocation audit is written in `OrbitRuntime::execute_tool_command_dispatch` for CLI, MCP, and future entry points. A `ToolEntryPoint` discriminator surfaces as `subcommand: "run"` or `"run-mcp"`, setup failures inside dispatch are audited, and `duration_ms` is clamped to at least `1`. The legacy CLI guard skips its own emission when the runtime sets a per-thread `mark_tool_audit_recorded` signal; pre-runtime CLI failures such as invalid JSON still produce the existing guard-side row.
 
@@ -47,7 +47,7 @@ Some runtime paths write targeted command-audit rows directly:
 
 These producers share the SQLite schema and must preserve the same status, target, actor, and redaction expectations as CLI rows. Prescriptive coverage expectations live in [specs/coverage-matrix.md](./specs/coverage-matrix.md).
 
-After [T20260427-0023], selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are now append-only records under `.orbit/frictions/` via [T20260510-13], not task lifecycle events or precomputed scoreboard updates.
+After [T20260427-0023], selected canonical stores also project live tracing events: filesystem policy denials still write FS audit events, proc-spawn allowlist denials still return `OrbitError::PolicyDenied`, and each path also emits a redacted `orbit.policy.deny` event. Friction reports are records under `.orbit/frictions/` via [T20260510-13], not task lifecycle events or precomputed scoreboard updates; [ORB-00062] adds explicit record triage metadata (`open`, `triaged`, `resolved`) and dashboard/API mutation surfaces for status and tags.
 
 ---
 
@@ -83,16 +83,18 @@ Dashboard log previews added by [T20260508-14] are derived views over `.orbit/st
 
 Orbit currently carries identity through related fields rather than one universal key:
 
-- Direct CLI commands default to a human/admin-facing role; agent-facing tool rows prefer exact `model` labels and infer compatible agent families.
+- Direct CLI commands default to a human/admin-facing role; agent-facing tool rows prefer canonical family labels from `model` (`codex`, `claude`, `gemini`, or `grok`) and normalize compatible full model strings.
 - `V2AuditEnvelope.agent_identity` records the workflow-envelope actor. CLI-launched v2 runs use `system`; concrete provider activity appears in event bodies and metrics.
 - Task records carry `created_by`, `planned_by`, `implemented_by`, `agent`, and `model`.
-- Invocation metrics record agent and model beside job run and activity ids.
+- Invocation metrics record agent family and configured runtime model beside job run and activity ids.
 
 Task attribution remains automatic by default: non-empty plan writes stamp `planned_by`, and transitions into `review` or `done` stamp `implemented_by`. After [T20260427-47], `orbit.task.update` and direct `orbit task update` can explicitly set or clear those fields; explicit values win within the same update.
 
+For `orbit run ship`, the PR-open handoff preserves implementation provenance when tasks move from In Progress to Review, and the PR-merge handoff preserves it again when tasks move from Review to Done. The Review handoff resolves attribution from existing `task.implemented_by`, then the pipeline's resolved implementer identity, then task-authored fallback fields (`planned_by`, `created_by`) before leaving genuinely actor-less automation as `system`. The Done handoff preserves existing `implemented_by` and otherwise falls back to `created_by` before `system`. This keeps mixed-family batches from collapsing to one ship actor while retaining the legitimate system fallback. [ORB-00106]
+
 After [T20260508-22] and [T20260509-12], `git_commit` automation carries that task attribution into git metadata. Per-task commits use process-scoped author and committer identity derived from `task.implemented_by` (`claude`, `gemini`, or `codex` family identities), leaving repository `git config user.name` and `user.email` untouched. Multi-implementer batch commits use `orbit <orbit@orbit.local>` as the aggregate author and committer and add `Co-Authored-By` trailers for each distinct implementer identity.
 
-The requirement is not to collapse every field into one value. It is that a reviewer can follow task state, command rows, run envelopes, provider/tool traces, and metrics back to a concrete human or model. A unified identity glossary and query join story remain open.
+The requirement is not to collapse every field into one value. It is that a reviewer can follow task state, command rows, run envelopes, provider/tool traces, and metrics back to a concrete human or agent family. A unified identity glossary and query join story remain open.
 
 ---
 
@@ -108,7 +110,7 @@ After [T20260428-11], compact `summary.json` counts all audited tool-run attempt
 
 After [T20260428-17] and [T20260430-4], local task review and GitHub PR review are separate scoreboard inputs. Local review-thread creations record `task-review-threads` in `task_review.json`; successful GitHub sync records `pr-review-comments` in `pr.json`. `summary.json` schema version 2 exposes these as `task_review.threads` and `pr.review_comments`, and scoring accepts only exact configured model identities or built-in defaults, skipping `human`, `system`, and arbitrary bare labels.
 
-After [T20260510-13], friction reporting is outside the task lifecycle: `orbit.friction.add` writes append-only markdown records under `.orbit/frictions/`, and `orbit.friction.stats` computes model/tag rates on demand from that corpus plus task completion attribution.
+After [T20260510-13] and [ORB-00062], friction reporting is outside the task lifecycle: `orbit.friction.add` writes markdown records under `.orbit/frictions/`; `orbit.friction.list/show/tags/update/resolve` expose scan and triage helpers; and `orbit.friction.stats` computes `open`, `triaged`, `resolved_this_month`, total resolved count, and model/tag rates on demand from that corpus plus task completion attribution. The dashboard `Knowledge > Frictions` subtab delegates to the same tool helpers through `/api/frictions*`, so human triage and CLI/MCP reads share one vocabulary and stats shape.
 
 ---
 
@@ -160,5 +162,8 @@ Each record contains timestamp, level, target, and structured fields. After [T20
 - **[T20260508-22]** — Use `task.implemented_by` to set git commit authors for automated task commits.
 - **[T20260509-12]** — Scope workflow git author and committer identity to the spawned commit process without writing repo-local Git config.
 - **[T20260510-13]** — Move friction reports from task lifecycle state to append-only `.orbit/frictions/` records.
+- **[ORB-00062]** — Surface first-class friction artifacts in the dashboard Knowledge tab and add triage endpoints.
+- **[ORB-00090]** — Aligned agent-facing provenance wording with the family-as-identity convention.
+- **[ORB-00106]** — Preserve per-task implementer attribution when `orbit run ship` moves batch PR tasks from Review to Done.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

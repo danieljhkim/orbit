@@ -11,7 +11,7 @@ Handle a human-requested engineering task or existing Orbit task from intent to 
 
 ## Command Reference
 
-Orbit task tools are available via two surfaces; both accept identical JSON. **Always include `model` in the JSON args.**
+Orbit task tools are available via two surfaces; both accept identical JSON. **Always include `model` in the JSON args.** The value is your agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized, but the family is canonical.
 
 - **MCP** (plugin path): call `orbit_task_show`, `orbit_task_start`, `orbit_task_update`, `orbit_task_list` directly.
 - **CLI**: `orbit tool run orbit.task.<action> --input '<json>'` — never use `orbit task ...` directly, it skips agent provenance.
@@ -19,31 +19,31 @@ Orbit task tools are available via two surfaces; both accept identical JSON. **A
 Mapping rule: `orbit.<group>.<action>` ↔ `orbit_<group>_<action>`. See the `orbit` skill for full coverage. Never guess tool names — run `orbit tool list` (CLI) or `tools/list` (MCP) to see all registered tools.
 
 ```json
-{ "model": "<model_name>" }
+{ "model": "<agent-family>" }
 ```
 
 CLI examples (substitute the MCP form using the mapping above):
 
 ```bash
 # Load a full task (MCP: omit `field`/`fields` → returns full task)
-orbit tool run orbit.task.show --full --input '{"id": "<task-id>", "model": "<model_name>"}'
+orbit tool run orbit.task.show --full --input '{"id": "<task-id>", "model": "<agent-family>"}'
 
 # Load a specific field only
-orbit tool run orbit.task.show --input '{"id": "<task-id>", "field": "plan", "model": "<model_name>"}'
+orbit tool run orbit.task.show --input '{"id": "<task-id>", "field": "plan", "model": "<agent-family>"}'
 # Valid fields: comments, plan, execution_summary, description, acceptance_criteria, history, context_files, artifacts
 
 # Start a task (proposed/backlog/someday/blocked -> in-progress)
-orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why>", "model": "<model_name>"}'
+orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why>", "model": "<agent-family>"}'
 
 # Update plan or add a comment
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>", "model": "<model_name>"}'
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "comment": "<what happened>", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>", "model": "<agent-family>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "comment": "<what happened>", "model": "<agent-family>"}'
 
 # Persist execution summary
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>", "model": "<agent-family>"}'
 
 # List tasks
-orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<model_name>"}'
+orbit tool run orbit.task.list --input '{"status": "backlog", "model": "<agent-family>"}'
 ```
 
 ## Workflow
@@ -65,7 +65,7 @@ Then, if `orbit.semantic.*` is available, call `orbit.semantic.related` on the t
 If the task lacks a concrete plan, write one:
 
 ```bash
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "plan": "<markdown plan>", "model": "<agent-family>"}'
 ```
 
 Replace placeholders like `To be authored by executing agent at start time.` Keep the plan concrete: target files, validation commands, risks.
@@ -73,7 +73,7 @@ Replace placeholders like `To be authored by executing agent at start time.` Kee
 ### Step 3: Start
 
 ```bash
-orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this is ready>", "model": "<model_name>"}'
+orbit tool run orbit.task.start --input '{"id": "<task-id>", "note": "<why this is ready>", "model": "<agent-family>"}'
 ```
 
 - Moves `backlog -> in-progress` or `proposed -> in-progress` (records approval automatically).
@@ -89,8 +89,15 @@ Follow the task's `plan` step by step. Use selector-first context from `context_
 First persist the execution summary (see template below):
 
 ```bash
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "execution_summary": "<summary>", "model": "<agent-family>"}'
 ```
+
+Learning checkpoint: after persisting the summary, consider whether the task
+surfaced a contradicted assumption, recurring failure mode, non-obvious gotcha
+that took more than 10 minutes to debug, or incident-style root cause. If so,
+follow the `orbit-learning` skill and call `orbit.learning.add` (or use that
+skill's update/supersede flow when it points to existing guidance). Skip if
+none apply.
 
 Then choose the lifecycle handoff path:
 
@@ -104,7 +111,7 @@ Then choose the lifecycle handoff path:
   `orbit.task.update`.
 
 ```bash
-orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review", "model": "<model_name>"}'
+orbit tool run orbit.task.update --input '{"id": "<task-id>", "status": "review", "model": "<agent-family>"}'
 ```
 
 ## Execution Summary Template
@@ -157,6 +164,8 @@ Recommended follow-ups:
 - Requested change implemented and validated.
 - Task started via `orbit.task.start` before execution.
 - Execution summary persisted via `orbit.task.update`.
+- Learning checkpoint considered; if a load-bearing insight was identified,
+  `orbit.learning.add` was called per the `orbit-learning` skill.
 - For direct execution, task advanced to `review`.
 - For envelope-driven execution, task left for the pipeline-owned review
   transition after commit/merge or PR steps succeed.

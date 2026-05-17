@@ -1,14 +1,15 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ExecutorDef, ExternalRef, JobRun, KnowledgeRunMetrics, Learning,
-    LearningStatus, OrbitError, PipelineState, PolicyDef, ReviewThread, Task, TaskArtifact,
-    TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    Adr, AdrStatus, ArtifactManifestFileV2, Crew, ExecutorDef, ExternalRef, JobRun,
+    KnowledgeRunMetrics, Learning, LearningStatus, OrbitError, PipelineState, PolicyDef,
+    ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
+    LearningCommentDeleteParams, LearningCreateParams, LearningSearchParams, LearningSearchResult,
+    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
     TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
     TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
     TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
@@ -129,8 +130,19 @@ impl TaskReviewStoreBackend for TaskV2Store {
 }
 
 impl TaskArtifactStoreBackend for TaskV2Store {
+    fn get_task_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<ArtifactManifestFileV2>>, OrbitError> {
+        self.get_task_artifact_manifest(id)
+    }
+
     fn get_task_artifacts(&self, id: &str) -> Result<Option<Vec<TaskArtifact>>, OrbitError> {
         self.get_task_artifacts(id)
+    }
+
+    fn get_task_artifact(&self, id: &str, path: &str) -> Result<Option<TaskArtifact>, OrbitError> {
+        self.get_task_artifact(id, path)
     }
 
     fn upsert_task_artifacts(
@@ -218,6 +230,10 @@ impl JobRunStoreBackend for JobFileStore {
         metrics: KnowledgeRunMetrics,
     ) -> Result<bool, OrbitError> {
         self.record_job_run_knowledge_metrics(run_id, metrics)
+    }
+
+    fn record_job_run_crew(&self, run_id: &str, crew: &Crew) -> Result<bool, OrbitError> {
+        self.record_job_run_crew(run_id, crew)
     }
 
     fn finalize_job_run(
@@ -366,6 +382,42 @@ impl LearningStoreBackend for LearningFileStore {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         self.search_learnings(params)
+    }
+
+    fn upvote_learning(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.upvote_learning(params)
+    }
+
+    fn learning_vote_summary(
+        &self,
+        id: &str,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.learning_vote_summary(id)
+    }
+
+    fn add_learning_comment(
+        &self,
+        params: LearningCommentAddParams,
+    ) -> Result<orbit_common::types::LearningComment, OrbitError> {
+        self.add_learning_comment(params)
+    }
+
+    fn list_learning_comments(
+        &self,
+        learning_id: &str,
+        include_deleted: bool,
+    ) -> Result<Vec<orbit_common::types::LearningComment>, OrbitError> {
+        self.list_learning_comments(learning_id, include_deleted)
+    }
+
+    fn delete_learning_comment(
+        &self,
+        params: LearningCommentDeleteParams,
+    ) -> Result<(), OrbitError> {
+        self.delete_learning_comment(params)
     }
 
     fn update_learning(

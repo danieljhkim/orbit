@@ -8,7 +8,6 @@ const STATUS_ORDER = [
   "proposed",
   "backlog",
   "someday",
-  "rejected",
 ];
 
 const DEFAULT_INACTIVE_STATUSES = new Set(["someday"]);
@@ -25,9 +24,13 @@ const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
 const DIAG_LIMIT = positiveIntParam("diag", 50);
 const AUDIT_LIMIT = positiveIntParam("audit", 50);
 const RUN_EVENTS_LIMIT = positiveIntParam("events", 100);
+const LEARNING_LIMIT = positiveIntParam("learnings", 100);
+const ADR_LIMIT = positiveIntParam("adrs", 100);
+const FRICTION_LIMIT = positiveIntParam("frictions", 100);
 
 const AUDIT_STATUSES = ["success", "failure", "denied"];
 const CANCELLABLE_RUN_STATES = new Set(["pending", "running"]);
+const FRICTION_STATUSES = ["open", "triaged", "resolved"];
 
 const $ = (id) => document.getElementById(id);
 
@@ -36,13 +39,26 @@ let activeStatuses = new Set(
   STATUS_ORDER.filter((s) => !DEFAULT_INACTIVE_STATUSES.has(s)),
 );
 let lastTasks = [];
+let lastCrewPayload = { default_crew: null, crews: [] };
 let lastRuns = [];
-let lastDiagnostics = { metrics: [], friction: [], errors: [] };
+let lastDiagnostics = { metrics: [], errors: [] };
+let lastLearningPayload = { stats: {}, items: [] };
+let lastAdrPayload = { stats: {}, items: [] };
+let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
+let activeKnowledgeSubtab = "learnings";
+let runSort = { key: "when", dir: "desc" };
 let expandedTaskIds = new Set();
 let isRefreshing = false;
 let taskActionNotice = null;
+let crewUpdateErrors = new Map();
+let activeLearningId = null;
+let learningSearchQuery = "";
+let activeAdrId = null;
+let adrSearchQuery = "";
+let activeFrictionId = null;
+let frictionSearchQuery = "";
 
 // Audit tab state
 let lastAudit = [];
@@ -65,7 +81,13 @@ let auditFilter = {
 let expandedAuditIds = new Set();
 let activeAuditSubtab = "events";
 let lastAuditPolicy = null;
-let policySort = { by_profile: "count", by_target: "count", by_run: "count", by_agent: "count" };
+let policySort = {
+  by_profile: "count",
+  by_target: "count",
+  by_run: "count",
+  by_execution: "count",
+  by_agent: "count",
+};
 
 // Health strip state
 let lastSummary = null;
@@ -119,11 +141,17 @@ function fetchJson(path) {
     });
 }
 
-function postJson(path) {
-  return fetch(path, {
-    method: "POST",
-    headers: { accept: "application/json" },
-  }).then(async (res) => {
+function requestJson(path, method, body) {
+  const headers = { accept: "application/json" };
+  const opts = {
+    method,
+    headers,
+  };
+  if (body !== undefined) {
+    headers["content-type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(path, opts).then(async (res) => {
     const text = await res.text();
     const body = text ? JSON.parse(text) : {};
     if (!res.ok) {
@@ -131,6 +159,65 @@ function postJson(path) {
     }
     return body;
   });
+}
+
+function postJson(path, body) {
+  return requestJson(path, "POST", body);
+}
+
+function patchJson(path, body) {
+  return requestJson(path, "PATCH", body);
+}
+
+function normalizeCrewPayload(payload) {
+  const crews = Array.isArray(payload && payload.crews)
+    ? payload.crews
+      .filter((crew) => crew && crew.name)
+      .map((crew) => ({
+        name: String(crew.name),
+        planner_model: crew.planner_model == null ? "" : String(crew.planner_model),
+        implementer_model: crew.implementer_model == null ? "" : String(crew.implementer_model),
+        reviewer_model: crew.reviewer_model == null ? "" : String(crew.reviewer_model),
+        is_default: Boolean(crew.is_default),
+      }))
+    : [];
+  crews.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    default_crew: payload && payload.default_crew ? String(payload.default_crew) : null,
+    crews,
+  };
+}
+
+function crewOptionsSignature() {
+  return JSON.stringify(lastCrewPayload);
+}
+
+function explicitCrewValue(task) {
+  return task && task.crew ? String(task.crew) : "";
+}
+
+function resolvedCrewName(task) {
+  if (lastCrewPayload.default_crew) return lastCrewPayload.default_crew;
+  if (!explicitCrewValue(task) && task && task.resolved_crew) {
+    return String(task.resolved_crew);
+  }
+  return "workspace";
+}
+
+function crewOptionTitle(crew) {
+  const parts = [
+    `planner=${crew.planner_model || "-"}`,
+    `implementer=${crew.implementer_model || "-"}`,
+    `reviewer=${crew.reviewer_model || "-"}`,
+  ];
+  return parts.join(" · ");
+}
+
+function applyUpdatedTask(updatedTask) {
+  const index = lastTasks.findIndex((task) => task.id === updatedTask.id);
+  if (index >= 0) {
+    lastTasks[index] = updatedTask;
+  }
 }
 
 function runIsCancellable(run) {
@@ -253,6 +340,23 @@ function syncNodes(container, newNodesArr) {
   }
 }
 
+function renderBodyBlock(body, fallbackClass) {
+  if (!body || !body.trim()) return null;
+  const isMarked = typeof marked !== "undefined";
+  const view = el(isMarked ? "div" : "pre", {
+    class: isMarked ? "markdown-body" : fallbackClass,
+  });
+  if (isMarked) {
+    view.innerHTML = marked.parse(body);
+  } else {
+    view.textContent = body;
+  }
+  return el("div", { class: "field-block" }, [
+    el("h4", { text: "body" }),
+    view,
+  ]);
+}
+
 function filterTasks(tasks) {
   const q = searchQuery;
   return tasks.filter((t) => {
@@ -271,9 +375,232 @@ const TASK_META_FIELDS = [
   ["created_by", "created_by"],
   ["pr_number", "pr"],
   ["pr_status", "pr_status"],
+  ["job_run_id", "job_run"],
   ["created_at", "created"],
   ["updated_at", "updated"],
 ];
+
+const RELATION_GROUPS = [
+  ["blocked_by", "BlockedBy"],
+  ["child_of", "ChildOf"],
+  ["spawned_from", "SpawnedFrom"],
+  ["regression_from", "RegressionFrom"],
+  ["supersedes", "Supersedes"],
+  ["related_to", "RelatedTo"],
+];
+const RELATION_GROUP_LABELS = new Map(RELATION_GROUPS);
+
+function relationTypeKey(value) {
+  if (!value) return "";
+  return String(value)
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/-/g, "_")
+    .toLowerCase();
+}
+
+function copyTaskIdWithNotice(taskId) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(taskId).catch(() => {});
+  }
+  taskActionNotice = `${taskId} is not in the filtered task list; copied ID`;
+  renderTasks(lastTasks);
+}
+
+function findTaskRow(taskId) {
+  return Array.from(document.querySelectorAll("#tasks-body .row"))
+    .find((row) => row.dataset.key === `task-${taskId}`) || null;
+}
+
+function openVisibleTask(taskId) {
+  const visible = filterTasks(lastTasks).some((task) => task.id === taskId);
+  if (!visible) {
+    copyTaskIdWithNotice(taskId);
+    return;
+  }
+  expandedTaskIds.add(taskId);
+  renderTasks(lastTasks);
+  requestAnimationFrame(() => {
+    const row = findTaskRow(taskId);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.add("data-changed");
+    setTimeout(() => row.classList.remove("data-changed"), 1200);
+  });
+}
+
+function buildTagRow(tags) {
+  const wrap = el("div", { class: "detail-tag-row" });
+  for (const tag of tags) {
+    wrap.appendChild(el("span", { class: "chip", text: tag }));
+  }
+  return wrap;
+}
+
+function buildExternalRefs(refs) {
+  const wrap = el("div");
+  for (const ref of refs) {
+    const label = `${ref.system || "external"}:${ref.id || ""}`;
+    const line = el("div", { class: "external-ref-line" });
+    if (ref.url) {
+      const link = el("a", { text: label });
+      link.href = ref.url;
+      line.appendChild(link);
+    } else {
+      line.textContent = label;
+    }
+    wrap.appendChild(line);
+  }
+  return wrap;
+}
+
+function buildRelations(relations) {
+  const byType = new Map(RELATION_GROUPS.map(([key]) => [key, []]));
+  for (const relation of relations) {
+    const key = relationTypeKey(relation.relation_type || relation.type);
+    const target = relation.target == null ? "" : String(relation.target);
+    if (!RELATION_GROUP_LABELS.has(key) || !target) continue;
+    byType.get(key).push(target);
+  }
+
+  const wrap = el("div");
+  for (const [key, label] of RELATION_GROUPS) {
+    const targets = byType.get(key);
+    if (!targets || targets.length === 0) continue;
+    const group = el("div", { class: "relation-group" }, [
+      el("span", { class: "label", text: label }),
+    ]);
+    for (const target of targets) {
+      const btn = el("button", { class: "relation-target mono", text: target });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openVisibleTask(target);
+      });
+      group.appendChild(btn);
+    }
+    wrap.appendChild(group);
+  }
+  return wrap;
+}
+
+function reviewThreadStatus(thread) {
+  const status = String(thread.status || "open").toLowerCase();
+  return status === "resolved" ? "resolved" : "open";
+}
+
+function buildReviewThreads(threads) {
+  const wrap = el("div", { class: "review-threads" });
+  for (const thread of threads) {
+    const messages = Array.isArray(thread.messages) ? thread.messages : [];
+    const location = thread.path
+      ? `${thread.path}${thread.line == null ? "" : `:${thread.line}`}`
+      : "general";
+    const block = el("div", { class: "review-thread" });
+    block.appendChild(el("div", {
+      class: "review-thread-header",
+      text: `[${reviewThreadStatus(thread)}] ${location} · ${messages.length} messages`,
+    }));
+    for (const msg of messages) {
+      const line = el("div", { class: "comment-line" }, [
+        document.createTextNode(`[${fmtAbsTime(msg.at)}] `),
+        el("span", { class: "author", text: msg.by || "?" }),
+        document.createTextNode(`: ${msg.body || ""}`),
+      ]);
+      block.appendChild(line);
+    }
+    wrap.appendChild(block);
+  }
+  return wrap;
+}
+
+function fmtSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return "0 bytes";
+  if (value < 1024) return `${value} bytes`;
+  const kb = value / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+function artifactUrl(taskId, path) {
+  const encodedPath = String(path)
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodedPath}`;
+}
+
+function artifactMediaType(artifact, response) {
+  return String(
+    response.headers.get("content-type") || artifact.media_type || "application/octet-stream",
+  ).split(";")[0].trim().toLowerCase();
+}
+
+function renderArtifactText(mediaType, text) {
+  if (mediaType === "text/markdown" && typeof marked !== "undefined") {
+    const view = el("div", { class: "markdown-body" });
+    view.innerHTML = marked.parse(text);
+    return view;
+  }
+  return el("pre", { text });
+}
+
+function buildArtifactPreview(artifact, response) {
+  const mediaType = artifactMediaType(artifact, response);
+  if (
+    mediaType === "text/markdown" ||
+    mediaType === "application/json" ||
+    mediaType.endsWith("/yaml") ||
+    mediaType.endsWith("+yaml") ||
+    mediaType.startsWith("text/")
+  ) {
+    return response.text().then((text) => renderArtifactText(mediaType, text));
+  }
+  return response.blob().then((blob) => {
+    const link = el("a", { text: `Download ${artifact.path}` });
+    link.href = URL.createObjectURL(blob);
+    link.download = String(artifact.path).split("/").pop() || artifact.path;
+    return link;
+  });
+}
+
+function buildArtifacts(task) {
+  const wrap = el("div", { class: "artifacts" });
+  for (const artifact of task.artifacts) {
+    const path = String(artifact.path || "");
+    const mediaType = String(artifact.media_type || "application/octet-stream");
+    const row = el("div", {
+      class: "artifact-row",
+      text: `${path} · ${mediaType} · ${fmtSize(artifact.size_bytes)}`,
+    });
+    const preview = el("div", { class: "artifact-preview" });
+    preview.hidden = true;
+    row.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (preview.dataset.loaded === "true" && !preview.hidden) {
+        preview.hidden = true;
+        return;
+      }
+      if (preview.dataset.loaded === "true") {
+        preview.hidden = false;
+        return;
+      }
+      preview.hidden = false;
+      preview.textContent = "loading...";
+      try {
+        const response = await fetch(artifactUrl(task.id, path));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        preview.replaceChildren(await buildArtifactPreview(artifact, response));
+        preview.dataset.loaded = "true";
+      } catch (error) {
+        preview.textContent = `Unable to load ${path}: ${error.message}`;
+      }
+    });
+    wrap.appendChild(row);
+    wrap.appendChild(preview);
+  }
+  return wrap;
+}
 
 function buildTaskDetail(task) {
   const detail = el("div", { class: "row-detail split-layout" });
@@ -343,20 +670,49 @@ function buildTaskDetail(task) {
     addField(leftCol, "execution summary", view, true, true);
   }
 
+  if (Array.isArray(task.review_threads) && task.review_threads.length > 0) {
+    addField(leftCol, "review threads", buildReviewThreads(task.review_threads), true, true);
+  }
+
+  if (Array.isArray(task.artifacts) && task.artifacts.length > 0) {
+    addField(leftCol, "artifacts", buildArtifacts(task), true, true);
+  }
+
+  if (Array.isArray(task.tags) && task.tags.length > 0) {
+    rightCol.appendChild(buildTagRow(task.tags));
+  }
+
   const meta = el("div", { class: "meta-list" });
   let metaCount = 0;
   for (const [key, label] of TASK_META_FIELDS) {
     const v = task[key];
     if (v == null || v === "") continue;
     const display = key.endsWith("_at") ? fmtAbsTime(v) : String(v);
+    const value = el("span", { class: "value" });
+    if (key === "job_run_id") {
+      const link = el("a", { text: display });
+      link.href = `#runs?run_id=${encodeURIComponent(display)}`;
+      value.appendChild(link);
+    } else {
+      value.textContent = display;
+    }
     const span = el("div", { class: "meta-item" }, [
       el("span", { class: "label", text: `${label}` }),
-      el("span", { class: "value", text: display }),
+      value,
     ]);
     meta.appendChild(span);
     metaCount++;
   }
   if (metaCount > 0) addField(rightCol, "details", meta);
+
+  if (Array.isArray(task.external_refs) && task.external_refs.length > 0) {
+    addField(rightCol, "external refs", buildExternalRefs(task.external_refs));
+  }
+
+  if (Array.isArray(task.relations) && task.relations.length > 0) {
+    const relations = buildRelations(task.relations);
+    if (relations.children.length > 0) addField(rightCol, "relations", relations);
+  }
 
   if (Array.isArray(task.context_files) && task.context_files.length > 0) {
     const ul = el("ul", { class: "file-list" });
@@ -482,6 +838,89 @@ function buildStatusUpdateControl(task, detail) {
     );
   });
   return select;
+}
+
+function buildCrewUpdateControl(task) {
+  const cell = el("span", { class: "crew-cell" });
+  const select = el("select", {
+    class: "task-crew-select mono",
+    title: `Update crew for ${task.id}`,
+  });
+  const currentValue = explicitCrewValue(task);
+  select.dataset.currentValue = currentValue;
+
+  const defaultOption = el("option", {
+    text: `default: ${resolvedCrewName(task)}`,
+  });
+  defaultOption.value = "";
+  select.appendChild(defaultOption);
+
+  const crews = Array.isArray(lastCrewPayload.crews) ? lastCrewPayload.crews : [];
+  for (const crew of crews) {
+    const option = el("option", {
+      text: crew.name,
+      title: crewOptionTitle(crew),
+    });
+    option.value = crew.name;
+    select.appendChild(option);
+  }
+
+  if (currentValue && !crews.some((crew) => crew.name === currentValue)) {
+    const option = el("option", {
+      text: currentValue,
+      title: "Configured crew no longer found",
+    });
+    option.value = currentValue;
+    select.appendChild(option);
+  }
+
+  if (crews.length === 0) {
+    select.disabled = true;
+    defaultOption.textContent = "crew unavailable";
+  }
+
+  select.value = currentValue;
+  for (const eventName of ["pointerdown", "mousedown", "click", "keydown"]) {
+    select.addEventListener(eventName, (event) => event.stopPropagation());
+  }
+  select.addEventListener("change", (event) => {
+    event.stopPropagation();
+    updateTaskCrew(task, select);
+  });
+
+  cell.appendChild(select);
+  const error = crewUpdateErrors.get(task.id);
+  if (error) {
+    cell.appendChild(el("span", { class: "crew-error", text: error }));
+  }
+  return cell;
+}
+
+async function updateTaskCrew(task, select) {
+  const previousValue = select.dataset.currentValue || "";
+  const nextValue = select.value || "";
+  if (nextValue === previousValue) return;
+
+  crewUpdateErrors.delete(task.id);
+  select.disabled = true;
+  try {
+    const updatedTask = await patchJson(`/api/tasks/${encodeURIComponent(task.id)}`, {
+      crew: nextValue || null,
+    });
+    applyUpdatedTask(updatedTask);
+    crewUpdateErrors.delete(task.id);
+    renderTasks(lastTasks);
+  } catch (error) {
+    select.value = previousValue;
+    select.dataset.currentValue = previousValue;
+    select.disabled = false;
+    crewUpdateErrors.set(
+      task.id,
+      `crew update failed: ${error.message || String(error)}`,
+    );
+    renderTasks(lastTasks);
+    console.error(error);
+  }
 }
 
 function showRejectForm(task, detail, actions) {
@@ -616,10 +1055,11 @@ function renderTasks(tasks) {
         el("span", { class: "title", text: t.title }),
         priorityCell(t.priority),
         el("span", { class: "type mono", text: t.type }),
+        buildCrewUpdateControl(t),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);
@@ -647,6 +1087,71 @@ function renderTasks(tasks) {
     }
   }
   syncNodes(body, Array.from(frag.children));
+}
+
+function renderLocksPanel(payload) {
+  const body = $("locks-body");
+  const count = $("locks-count");
+  if (!body || !count) return;
+  const byTask = Array.isArray(payload && payload.by_task) ? payload.by_task : [];
+  const totalLocked = Number.isFinite(Number(payload && payload.total_locked))
+    ? Number(payload.total_locked)
+    : 0;
+  const totalTasks = Number.isFinite(Number(payload && payload.total_tasks))
+    ? Number(payload.total_tasks)
+    : byTask.length;
+  count.textContent = `${totalLocked} files / ${totalTasks} tasks`;
+
+  if (byTask.length === 0) {
+    const empty = el("div", { class: "locks-empty", text: "No files currently locked." });
+    empty.dataset.key = "locks-empty";
+    empty.dataset.hash = "locks-empty";
+    syncNodes(body, [empty]);
+    return;
+  }
+
+  const nodes = byTask.map((task) => {
+    const taskId = String(task.id || "");
+    const group = el("div", { class: "lock-task-group" });
+    group.dataset.key = `lock-task-${taskId}`;
+    group.dataset.hash = JSON.stringify(task);
+
+    const idButton = el("button", {
+      class: "lock-task-id mono",
+      text: `[${taskId}]`,
+      title: `Open ${taskId} in the task list`,
+    });
+    idButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openVisibleTask(taskId);
+    });
+
+    const header = el("div", { class: "lock-task-header" }, [
+      idButton,
+      el("span", { class: "lock-separator", text: "·" }),
+      statusPill(task.status || "unknown"),
+    ]);
+    if (task.job_run_id) {
+      header.appendChild(el("span", { class: "lock-separator", text: "·" }));
+      header.appendChild(el("span", {
+        class: "lock-job mono",
+        text: `job_run=${task.job_run_id}`,
+        title: task.job_run_id,
+      }));
+    }
+    group.appendChild(header);
+
+    const files = Array.isArray(task.context_files) ? task.context_files : [];
+    for (const path of files) {
+      group.appendChild(el("div", {
+        class: "lock-file-row mono",
+        text: String(path),
+        title: String(path),
+      }));
+    }
+    return group;
+  });
+  syncNodes(body, nodes);
 }
 
 function fmtTimestamp(iso) {
@@ -704,13 +1209,255 @@ function formatScoreboardPair(agent, col) {
   };
 }
 
+const RUN_SORT_DEFAULT_DIR = {
+  when: "desc",
+  job: "asc",
+  run_id: "asc",
+  denials: "desc",
+  tool_fails: "desc",
+  duration: "desc",
+  state: "asc",
+};
+
+function coerceNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function firstNumericField(row, keys) {
+  for (const key of keys) {
+    const value = coerceNumber(row && row[key]);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function firstBooleanField(row, keys) {
+  for (const key of keys) {
+    const value = row && row[key];
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") return true;
+      if (normalized === "false") return false;
+    }
+  }
+  return false;
+}
+
+function frictionRunId(row) {
+  return (
+    (row && (row.run_id || row.job_run || row.runId || row.jobRun)) ||
+    ""
+  );
+}
+
+function frictionRowText(row) {
+  return [
+    row && (row.kind || row.body_kind || row.event_kind || row.type || row.category),
+    row && (row.command || row.tool || row.tool_name || row.status || row.outcome),
+    row && (row.stderr || row.message || row.reason || row.error),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function frictionRowLooksDenied(row) {
+  const text = frictionRowText(row).replace(/[_-]/g, " ");
+  return /\bden(?:y|ied|ial|ials)\b/.test(text) || text.includes("policy deny");
+}
+
+function frictionRowLooksToolFail(row) {
+  const exitCode = coerceNumber(row && row.exit_code);
+  if (exitCode != null && exitCode !== 0) return true;
+  if (firstBooleanField(row, ["timed_out", "timeout"])) return true;
+  const text = frictionRowText(row).replace(/[_-]/g, " ");
+  return text.includes("tool") && /\b(fail|failed|failure|timeout|timed out)\b/.test(text);
+}
+
+function frictionRowLooksLongRun(row) {
+  if (firstBooleanField(row, ["long_run", "is_long_run", "long_running"])) return true;
+  const text = frictionRowText(row).replace(/[_-]/g, " ");
+  return text.includes("long run") || text.includes("long running");
+}
+
+function emptyRunFrictionSummary(run) {
+  return {
+    denials: 0,
+    toolFails: 0,
+    durationMs: coerceNumber(run && run.duration_ms),
+    longRun: false,
+  };
+}
+
+function addFrictionRowToSummary(summary, row) {
+  const denials = firstNumericField(row, [
+    "denials",
+    "denial_count",
+    "policy_denials",
+  ]);
+  if (denials != null) {
+    summary.denials += denials;
+  } else if (frictionRowLooksDenied(row)) {
+    summary.denials += 1;
+  }
+
+  const toolFails = firstNumericField(row, [
+    "tool_fails",
+    "tool_failures",
+    "tool_fail_count",
+    "failed_tool_calls",
+  ]);
+  if (toolFails != null) {
+    summary.toolFails += toolFails;
+  } else if (frictionRowLooksToolFail(row)) {
+    summary.toolFails += 1;
+  }
+
+  const durationMs = firstNumericField(row, [
+    "duration_ms",
+    "run_duration_ms",
+    "wall_clock_ms",
+    "elapsed_ms",
+  ]);
+  if (durationMs != null) {
+    summary.durationMs = Math.max(summary.durationMs || 0, durationMs);
+  }
+  summary.longRun = summary.longRun || frictionRowLooksLongRun(row);
+}
+
+function mergeRunsWithFriction(runs, frictionRows) {
+  const byRun = new Map();
+  for (const row of frictionRows || []) {
+    const runId = frictionRunId(row);
+    if (!runId) continue;
+    if (!byRun.has(runId)) byRun.set(runId, emptyRunFrictionSummary());
+    addFrictionRowToSummary(byRun.get(runId), row);
+  }
+  return (runs || []).map((run) => ({
+    ...run,
+    diagnostics_friction: mergeRunFrictionSummary(run, byRun.get(run.run_id)),
+  }));
+}
+
+function mergeRunFrictionSummary(run, friction) {
+  const base = emptyRunFrictionSummary(run);
+  if (!friction) return base;
+  return {
+    ...base,
+    ...friction,
+    durationMs: friction.durationMs == null ? base.durationMs : friction.durationMs,
+  };
+}
+
+function runTimestampValue(run) {
+  const ts = run.finished_at || run.started_at || run.scheduled_at || run.created_at;
+  const time = ts ? new Date(ts).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function runFriction(run) {
+  return run.diagnostics_friction || emptyRunFrictionSummary(run);
+}
+
+function runSortValue(run, key) {
+  const friction = runFriction(run);
+  switch (key) {
+    case "when":
+      return runTimestampValue(run);
+    case "job":
+      return run.job_id || "";
+    case "run_id":
+      return run.run_id || "";
+    case "denials":
+      return friction.denials || 0;
+    case "tool_fails":
+      return friction.toolFails || 0;
+    case "duration":
+      return friction.durationMs || 0;
+    case "state":
+      return run.state || "";
+    default:
+      return "";
+  }
+}
+
+function compareRunValues(left, right) {
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right));
+}
+
+function sortedRunsForDisplay(runs) {
+  const rows = (runs || []).slice();
+  rows.sort((a, b) => {
+    const primary = compareRunValues(runSortValue(a, runSort.key), runSortValue(b, runSort.key));
+    const directed = runSort.dir === "asc" ? primary : -primary;
+    if (directed !== 0) return directed;
+    return runTimestampValue(b) - runTimestampValue(a);
+  });
+  return rows;
+}
+
+function setRunSort(key) {
+  if (runSort.key === key) {
+    runSort = { key, dir: runSort.dir === "asc" ? "desc" : "asc" };
+  } else {
+    runSort = { key, dir: RUN_SORT_DEFAULT_DIR[key] || "asc" };
+  }
+  renderRuns(lastRuns);
+}
+
+function runHeaderCell(label, key, opts = {}) {
+  const classes = [opts.class, opts.num ? "num" : ""].filter(Boolean).join(" ");
+  const cell = el("span", { class: classes, style: opts.style });
+  const button = el("button", {
+    class: `runs-sort${runSort.key === key ? " active" : ""}`,
+    text: label,
+    title: `Sort Recent Runs by ${label}`,
+  });
+  button.type = "button";
+  if (runSort.key === key) {
+    button.appendChild(el("span", {
+      class: "sort-arrow",
+      text: runSort.dir === "asc" ? " ▲" : " ▼",
+    }));
+  }
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setRunSort(key);
+  });
+  cell.appendChild(button);
+  return cell;
+}
+
+function runCountCell(value) {
+  return el("span", {
+    class: `num${value > 0 ? " hot" : ""}`,
+    text: String(value || 0),
+  });
+}
+
+function runDurationCell(run) {
+  const friction = runFriction(run);
+  return el("span", { class: "duration" }, [
+    fmtDuration(friction.durationMs),
+    friction.longRun
+      ? el("span", { class: "long-run-flag", text: "!", title: "Long run" })
+      : null,
+  ]);
+}
+
 function renderRuns(runs) {
   const body = $("runs-body");
   const frag = document.createDocumentFragment();
   
-  const top = runs.slice(0, 20);
+  const sorted = sortedRunsForDisplay(runs);
+  const top = sorted.slice(0, 20);
   if ($("diag-count") && activeDiagSubtab === "runs") {
-    $("diag-count").textContent = `${top.length}/${runs.length}`;
+    $("diag-count").textContent = `${top.length}/${sorted.length}`;
   }
   if (top.length === 0) {
     syncNodes(body, [el("div", { class: "empty-state" }, [
@@ -720,18 +1467,21 @@ function renderRuns(runs) {
     return;
   }
   const header = el("div", { class: "runs-row runs-header" }, [
-    el("span", { text: "when" }),
-    el("span", { text: "job" }),
-    el("span", { text: "run id" }),
-    el("span", { text: "duration", style: { textAlign: "right" } }),
-    el("span", { text: "state", style: { textAlign: "right" } }),
+    runHeaderCell("when", "when"),
+    runHeaderCell("job", "job"),
+    runHeaderCell("run id", "run_id"),
+    runHeaderCell("denials", "denials", { num: true }),
+    runHeaderCell("tool fails", "tool_fails", { num: true }),
+    runHeaderCell("duration", "duration", { style: { textAlign: "right" } }),
+    runHeaderCell("state", "state", { style: { textAlign: "right" } }),
     el("span", { text: "" }),
   ]);
   header.dataset.key = "runs-header";
-  header.dataset.hash = "header";
+  header.dataset.hash = `header-${runSort.key}-${runSort.dir}`;
   frag.appendChild(header);
   for (const r of top) {
     const ts = r.finished_at || r.started_at || r.scheduled_at || r.created_at;
+    const friction = runFriction(r);
     const runIdSpan = el("span", { class: "run-id", text: r.run_id, title: "Click to copy run ID" });
     runIdSpan.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -748,12 +1498,14 @@ function renderRuns(runs) {
       el("span", { class: "when", text: fmtTimestamp(ts) }),
       el("span", { class: "id", text: r.job_id }),
       runIdSpan,
-      el("span", { class: "duration", text: fmtDuration(r.duration_ms) }),
+      runCountCell(friction.denials),
+      runCountCell(friction.toolFails),
+      runDurationCell(r),
       el("span", { class: "state" }, [stateCell(r.state)]),
       el("span", { class: "run-actions" }, runIsCancellable(r) ? [buildCancelRunButton(r, body)] : []),
     ]);
     row.dataset.key = `run-${r.run_id}`;
-    row.dataset.hash = `${r.run_id}-${ts}-${r.duration_ms}-${r.state}`;
+    row.dataset.hash = `${r.run_id}-${ts}-${r.duration_ms}-${r.state}-${friction.denials}-${friction.toolFails}-${friction.durationMs}-${friction.longRun}`;
     row.style.cursor = "pointer";
     row.addEventListener("click", () => navigateToRun(r.run_id));
     frag.appendChild(row);
@@ -906,6 +1658,612 @@ function renderScoreboard(summary) {
   syncNodes(tbody, Array.from(frag.children));
 }
 
+function evidenceCount(learning) {
+  return Array.isArray(learning && learning.evidence) ? learning.evidence.length : 0;
+}
+
+function learningScopeNodes(learning) {
+  const scope = (learning && learning.scope) || {};
+  const paths = Array.isArray(scope.paths) ? scope.paths : [];
+  const tags = Array.isArray(scope.tags) ? scope.tags : [];
+  const chips = [];
+  for (const tag of tags.slice(0, 3)) {
+    chips.push(el("span", { class: "pill", text: `#${tag}`, title: tag }));
+  }
+  for (const path of paths.slice(0, Math.max(0, 4 - chips.length))) {
+    chips.push(el("span", { class: "pill", text: truncate(path, 28), title: path }));
+  }
+  if (paths.length + tags.length > chips.length) {
+    chips.push(el("span", { class: "pill", text: `+${paths.length + tags.length - chips.length}` }));
+  }
+  if (chips.length === 0) chips.push(el("span", { class: "pill", text: "global" }));
+  return chips;
+}
+
+function renderLearningStats(stats = {}) {
+  $("learning-total-value").textContent = formatBigInt(stats.total || 0);
+  $("learning-superseded-value").textContent = formatBigInt(stats.superseded || 0);
+  $("learning-last-indexed-value").textContent = stats.last_indexed
+    ? fmtTimestamp(stats.last_indexed)
+    : "-";
+}
+
+function renderLearnings(payload) {
+  const body = $("learnings-body");
+  if (!body) return;
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const stats = (payload && payload.stats) || {};
+  renderLearningStats(stats);
+  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
+
+  if (items.length > 0 && !items.some((item) => item.id === activeLearningId)) {
+    activeLearningId = items[0].id;
+  }
+  if (items.length === 0) activeLearningId = null;
+
+  if (items.length === 0) {
+    syncNodes(body, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No learnings match the current filter." }),
+    ])]);
+    renderLearningDetail(null);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  const header = el("div", { class: "learning-row header" }, [
+    el("span", { text: "id" }),
+    el("span", { text: "scope" }),
+    el("span", { class: "evidence", text: "evidence" }),
+    el("span", { text: "status" }),
+    el("span", { class: "updated", text: "updated" }),
+  ]);
+  header.dataset.key = "learning-header";
+  header.dataset.hash = "learning-header";
+  frag.appendChild(header);
+
+  for (const learning of items) {
+    const row = el("div", { class: "learning-row", title: learning.summary || learning.id }, [
+      el("span", { class: "id", text: learning.id, title: learning.id }),
+      el("span", { class: "scope" }, learningScopeNodes(learning)),
+      el("span", { class: "evidence", text: String(evidenceCount(learning)) }),
+      statusPill(learning.status || "active"),
+      el("span", { class: "updated", text: fmtTimestamp(learning.updated_at), title: fmtAbsTime(learning.updated_at) }),
+    ]);
+    row.dataset.key = `learning-${learning.id}`;
+    row.dataset.hash = `${learning.id}-${learning.status}-${learning.updated_at}-${activeLearningId === learning.id}`;
+    if (activeLearningId === learning.id) row.classList.add("active");
+    row.addEventListener("click", () => {
+      activeLearningId = learning.id;
+      renderLearnings(lastLearningPayload);
+    });
+    frag.appendChild(row);
+  }
+
+  syncNodes(body, Array.from(frag.children));
+  renderLearningDetail(items.find((item) => item.id === activeLearningId) || items[0]);
+}
+
+function renderLearningDetail(learning) {
+  const detail = $("learning-detail");
+  if (!detail) return;
+  const count = $("learning-detail-count");
+  if (!learning) {
+    if (count) count.textContent = "-";
+    syncNodes(detail, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No learning selected." }),
+    ])]);
+    return;
+  }
+  if (count) count.textContent = learning.status || "active";
+
+  const title = el("div", { class: "field-block" }, [
+    el("h4", { text: learning.id }),
+    el("div", { class: "markdown-body", text: learning.summary || "" }),
+  ]);
+
+  const meta = el("div", { class: "learning-detail-meta" });
+  const addMeta = (label, value) => {
+    if (value == null || value === "") return;
+    meta.appendChild(el("span", {}, [
+      document.createTextNode(`${label}: `),
+      el("span", { class: "value", text: String(value) }),
+    ]));
+  };
+  addMeta("status", learning.status || "active");
+  addMeta("evidence", evidenceCount(learning));
+  addMeta("updated", fmtAbsTime(learning.updated_at));
+  addMeta("superseded_by", learning.superseded_by);
+  addMeta("supersedes", learning.supersedes);
+
+  const scopeBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "scope" }),
+    el("div", { class: "learning-detail-scope" }, learningScopeNodes(learning)),
+  ]);
+
+  const bodyBlock = renderBodyBlock(learning.body, "learning-detail-body");
+
+  const actions = el("div", { class: "actions" });
+  const supersede = el("button", {
+    class: "action archive",
+    text: "Supersede",
+    title: `Supersede ${learning.id}`,
+  });
+  supersede.disabled = learning.status === "superseded";
+  supersede.addEventListener("click", () => {
+    const by = window.prompt(`Replacement learning ID for ${learning.id}`);
+    if (!by || !by.trim()) return;
+    supersedeLearning(learning, by.trim(), supersede, detail);
+  });
+  actions.appendChild(supersede);
+
+  const nodes = [title, meta, scopeBlock];
+  if (bodyBlock) nodes.push(bodyBlock);
+  nodes.push(actions);
+  syncNodes(detail, nodes);
+}
+
+async function supersedeLearning(learning, by, btn, detail) {
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>wait`;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    await postJson(`/api/learnings/${encodeURIComponent(learning.id)}/supersede`, { by });
+    activeLearningId = learning.id;
+    await fetchAndRenderLearnings();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || "supersede failed" }));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
+function frictionTagNodes(tags = []) {
+  const values = Array.isArray(tags) ? tags : [];
+  if (values.length === 0) return [el("span", { class: "pill", text: "-" })];
+  return values.map((tag) => el("span", { class: "pill mono", text: tag, title: tag }));
+}
+
+function renderFrictionStats(stats = {}) {
+  $("friction-open-value").textContent = formatBigInt(stats.open || 0);
+  $("friction-triaged-value").textContent = formatBigInt(stats.triaged || 0);
+  $("friction-resolved-month-value").textContent = formatBigInt(stats.resolved_this_month || 0);
+}
+
+function renderFrictions(payload) {
+  const body = $("frictions-body");
+  if (!body) return;
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const stats = (payload && payload.stats) || {};
+  renderFrictionStats(stats);
+  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
+
+  if (items.length > 0 && !items.some((item) => item.id === activeFrictionId)) {
+    activeFrictionId = items[0].id;
+  }
+  if (items.length === 0) activeFrictionId = null;
+
+  if (items.length === 0) {
+    syncNodes(body, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No frictions match the current filter." }),
+    ])]);
+    renderFrictionDetail(null);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  const header = el("div", { class: "friction-row header" }, [
+    el("span", { text: "id" }),
+    el("span", { text: "title" }),
+    el("span", { class: "tags", text: "tags" }),
+    el("span", { text: "status" }),
+    el("span", { class: "reported", text: "reported" }),
+  ]);
+  header.dataset.key = "friction-header";
+  header.dataset.hash = "friction-header";
+  frag.appendChild(header);
+
+  for (const friction of items) {
+    const title = friction.title || friction.id;
+    const row = el("div", { class: "friction-row", title }, [
+      el("span", { class: "id", text: friction.id, title: friction.id }),
+      el("span", { class: "title", text: title }),
+      el("span", { class: "tags" }, frictionTagNodes(friction.tags)),
+      statusPill(friction.status || "open"),
+      el("span", { class: "reported", text: fmtTimestamp(friction.created_at), title: fmtAbsTime(friction.created_at) }),
+    ]);
+    row.dataset.key = `friction-${friction.id}`;
+    row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${activeFrictionId === friction.id}`;
+    if (activeFrictionId === friction.id) row.classList.add("active");
+    row.addEventListener("click", () => {
+      activeFrictionId = friction.id;
+      renderFrictions(lastFrictionPayload);
+    });
+    frag.appendChild(row);
+  }
+
+  syncNodes(body, Array.from(frag.children));
+  renderFrictionDetail(items.find((item) => item.id === activeFrictionId) || items[0]);
+}
+
+function renderFrictionDetail(friction) {
+  const detail = $("friction-detail");
+  if (!detail) return;
+  const count = $("friction-detail-count");
+  if (!friction) {
+    if (count) count.textContent = "-";
+    syncNodes(detail, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No friction selected." }),
+    ])]);
+    return;
+  }
+  if (count) count.textContent = friction.status || "open";
+
+  const title = el("div", { class: "field-block" }, [
+    el("h4", { text: friction.id }),
+    el("div", { class: "markdown-body", text: friction.title || "" }),
+  ]);
+
+  const meta = el("div", { class: "friction-detail-meta" });
+  const addMeta = (label, value) => {
+    if (value == null || value === "") return;
+    meta.appendChild(el("span", {}, [
+      document.createTextNode(`${label}: `),
+      el("span", { class: "value", text: String(value) }),
+    ]));
+  };
+  addMeta("status", friction.status || "open");
+  addMeta("model", friction.model);
+  addMeta("reported", fmtAbsTime(friction.created_at));
+  addMeta("resolved", friction.resolved_at ? fmtAbsTime(friction.resolved_at) : null);
+  addMeta("task", friction.during_task);
+
+  const controls = el("div", { class: "field-block friction-controls" }, [
+    el("h4", { text: "triage" }),
+  ]);
+  const controlGrid = el("div", { class: "friction-control-grid" });
+  controlGrid.appendChild(buildFrictionStatusControl(friction, detail));
+  controlGrid.appendChild(buildFrictionTagPicker(friction, detail));
+  controls.appendChild(controlGrid);
+
+  const bodyBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "body" }),
+    el("pre", { class: "friction-detail-body", text: friction.body || "" }),
+  ]);
+
+  const actions = el("div", { class: "actions" });
+  const resolve = el("button", {
+    class: "action approve",
+    text: "Resolve",
+    title: `Resolve ${friction.id}`,
+  });
+  resolve.disabled = friction.status === "resolved";
+  resolve.addEventListener("click", () => resolveFriction(friction, resolve, detail));
+  actions.appendChild(resolve);
+
+  syncNodes(detail, [title, meta, controls, bodyBlock, actions]);
+}
+
+function buildFrictionStatusControl(friction, detail) {
+  const wrap = el("label", { class: "friction-control" });
+  wrap.appendChild(el("span", { class: "friction-control-label", text: "status" }));
+  const select = el("select", { class: "action status-update", title: `Status for ${friction.id}` });
+  for (const status of FRICTION_STATUSES) {
+    const option = el("option", { text: status });
+    option.value = status;
+    option.selected = (friction.status || "open") === status;
+    select.appendChild(option);
+  }
+  select.addEventListener("change", () => {
+    patchFriction(friction, { status: select.value }, select, detail);
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function buildFrictionTagPicker(friction, detail) {
+  const wrap = el("div", { class: "friction-control friction-tag-picker" }, [
+    el("span", { class: "friction-control-label", text: "tags" }),
+  ]);
+  const options = Array.isArray(lastFrictionPayload.tags) ? lastFrictionPayload.tags : [];
+  const selected = new Set(Array.isArray(friction.tags) ? friction.tags : []);
+  const grid = el("div", { class: "friction-tag-options" });
+  const checkboxes = new Map();
+  if (options.length === 0) {
+    grid.appendChild(el("span", { class: "pill", text: "-" }));
+  }
+  for (const tag of options) {
+    const id = `friction-tag-${friction.id}-${tag}`;
+    const checkbox = el("input");
+    checkbox.type = "checkbox";
+    checkbox.id = id;
+    checkbox.checked = selected.has(tag);
+    checkboxes.set(tag, checkbox);
+    checkbox.addEventListener("change", () => {
+      const tags = options.filter((option) => checkboxes.get(option)?.checked);
+      if (tags.length === 0) {
+        checkbox.checked = true;
+        return;
+      }
+      patchFriction(friction, { tags }, checkbox, detail);
+    });
+    const label = el("label", { class: "friction-tag-option", title: tag }, [
+      checkbox,
+      el("span", { text: tag }),
+    ]);
+    grid.appendChild(label);
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+async function patchFriction(friction, patch, control, detail) {
+  if (!friction || !friction.id) return;
+  if (control) control.disabled = true;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    const updated = await patchJson(`/api/frictions/${encodeURIComponent(friction.id)}`, patch);
+    activeFrictionId = updated.id || friction.id;
+    await fetchAndRenderFrictions();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || "friction update failed" }));
+    if (patch.status && control) control.value = friction.status || "open";
+  } finally {
+    if (control) control.disabled = false;
+  }
+}
+
+async function resolveFriction(friction, btn, detail) {
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>wait`;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    const updated = await postJson(`/api/frictions/${encodeURIComponent(friction.id)}/resolve`);
+    activeFrictionId = updated.id || friction.id;
+    await fetchAndRenderFrictions();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || "resolve failed" }));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
+function adrList(adr, field) {
+  return Array.isArray(adr && adr[field]) ? adr[field] : [];
+}
+
+function adrPrimaryFeature(adr) {
+  const features = adrList(adr, "related_features");
+  if (features.length === 0) return "-";
+  if (features.length === 1) return features[0];
+  return `${features[0]} +${features.length - 1}`;
+}
+
+function renderAdrStats(stats = {}) {
+  $("adr-proposed-value").textContent = formatBigInt(stats.proposed || 0);
+  $("adr-accepted-value").textContent = formatBigInt(stats.accepted || 0);
+  $("adr-superseded-value").textContent = formatBigInt(stats.superseded || 0);
+}
+
+function renderAdrs(payload) {
+  const body = $("adrs-body");
+  if (!body) return;
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const stats = (payload && payload.stats) || {};
+  renderAdrStats(stats);
+  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
+
+  if (items.length > 0 && !items.some((item) => item.id === activeAdrId)) {
+    activeAdrId = items[0].id;
+  }
+  if (items.length === 0) activeAdrId = null;
+
+  if (items.length === 0) {
+    syncNodes(body, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No ADRs match the current filter." }),
+    ])]);
+    renderAdrDetail(null);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  const header = el("div", { class: "adr-row header" }, [
+    el("span", { text: "id" }),
+    el("span", { text: "title" }),
+    el("span", { text: "status" }),
+    el("span", { class: "feature", text: "feature" }),
+    el("span", { class: "accepted", text: "accepted-at" }),
+  ]);
+  header.dataset.key = "adr-header";
+  header.dataset.hash = "adr-header";
+  frag.appendChild(header);
+
+  for (const adr of items) {
+    const feature = adrPrimaryFeature(adr);
+    const accepted = adr.accepted_at ? fmtTimestamp(adr.accepted_at) : "-";
+    const row = el("div", { class: "adr-row", title: adr.title || adr.id }, [
+      el("span", { class: "id", text: adr.id, title: adr.id }),
+      el("span", { class: "title", text: adr.title || "" }),
+      statusPill(adr.status || "proposed"),
+      el("span", { class: "feature", text: feature, title: adrList(adr, "related_features").join(", ") }),
+      el("span", { class: "accepted", text: accepted, title: fmtAbsTime(adr.accepted_at) }),
+    ]);
+    row.dataset.key = `adr-${adr.id}`;
+    row.dataset.hash = `${adr.id}-${adr.status}-${adr.accepted_at || ""}-${adr.superseded_by || ""}-${activeAdrId === adr.id}`;
+    if (activeAdrId === adr.id) row.classList.add("active");
+    row.addEventListener("click", () => {
+      activeAdrId = adr.id;
+      renderAdrs(lastAdrPayload);
+    });
+    frag.appendChild(row);
+  }
+
+  syncNodes(body, Array.from(frag.children));
+  renderAdrDetail(items.find((item) => item.id === activeAdrId) || items[0]);
+}
+
+function buildAdrValueList(values, opts = {}) {
+  const wrap = el("div", { class: "adr-detail-list" });
+  if (!values || values.length === 0) {
+    wrap.appendChild(el("span", { class: "pill", text: "-" }));
+    return wrap;
+  }
+  for (const value of values) {
+    if (opts.taskLinks) {
+      const btn = el("button", { class: "relation-target mono", text: value, title: `Open task ${value}` });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openTaskFromKnowledge(value);
+      });
+      wrap.appendChild(btn);
+    } else {
+      wrap.appendChild(el("span", { class: "pill mono", text: value, title: value }));
+    }
+  }
+  return wrap;
+}
+
+function openTaskFromKnowledge(taskId) {
+  activeStatuses = new Set(STATUS_ORDER);
+  searchQuery = "";
+  const taskSearch = $("task-search");
+  if (taskSearch) taskSearch.value = "";
+  setActiveTab("tasks", { refresh: false });
+  const open = () => openVisibleTask(taskId);
+  if (lastTasks.length > 0 && lastCrewPayload.crews.length > 0) {
+    open();
+    return;
+  }
+  fetchAndRenderTasks().then(() => {
+    open();
+  }).catch(() => copyTaskIdWithNotice(taskId));
+}
+
+function renderAdrDetail(adr) {
+  const detail = $("adr-detail");
+  if (!detail) return;
+  const count = $("adr-detail-count");
+  if (!adr) {
+    if (count) count.textContent = "-";
+    syncNodes(detail, [el("div", { class: "empty-state" }, [
+      el("div", { class: "icon", text: "✧" }),
+      el("div", { class: "text", text: "No ADR selected." }),
+    ])]);
+    return;
+  }
+  if (count) count.textContent = adr.status || "proposed";
+
+  const title = el("div", { class: "field-block" }, [
+    el("h4", { text: adr.id }),
+    el("div", { class: "markdown-body", text: adr.title || "" }),
+  ]);
+
+  const meta = el("div", { class: "adr-detail-meta" });
+  const addMeta = (label, value) => {
+    if (value == null || value === "") return;
+    meta.appendChild(el("span", {}, [
+      document.createTextNode(`${label}: `),
+      el("span", { class: "value", text: String(value) }),
+    ]));
+  };
+  addMeta("status", adr.status || "proposed");
+  addMeta("owner", adr.owner);
+  addMeta("created", fmtAbsTime(adr.created_at));
+  addMeta("accepted", fmtAbsTime(adr.accepted_at));
+  addMeta("updated", fmtAbsTime(adr.last_updated));
+
+  const featuresBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "related_features" }),
+    buildAdrValueList(adrList(adr, "related_features")),
+  ]);
+  const tasksBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "related_tasks" }),
+    buildAdrValueList(adrList(adr, "related_tasks"), { taskLinks: true }),
+  ]);
+  const edgesBlock = el("div", { class: "field-block" }, [
+    el("h4", { text: "supersession" }),
+    buildAdrValueList([
+      ...adrList(adr, "supersedes").map((id) => `supersedes ${id}`),
+      ...(adr.superseded_by ? [`superseded_by ${adr.superseded_by}`] : []),
+    ]),
+  ]);
+  const bodyBlock = renderBodyBlock(adr.body, "adr-detail-body");
+
+  const actions = el("div", { class: "actions" });
+  if (adr.status === "proposed") {
+    const accept = el("button", {
+      class: "action approve",
+      text: "Accept",
+      title: `Accept ${adr.id}`,
+    });
+    accept.addEventListener("click", () => acceptAdr(adr, accept, detail));
+    actions.appendChild(accept);
+  }
+  if (adr.status === "accepted") {
+    const supersede = el("button", {
+      class: "action archive",
+      text: "Supersede",
+      title: `Supersede ${adr.id}`,
+    });
+    supersede.addEventListener("click", () => {
+      const by = window.prompt(`Replacement ADR ID for ${adr.id}`);
+      if (!by || !by.trim()) return;
+      supersedeAdr(adr, by.trim(), supersede, detail);
+    });
+    actions.appendChild(supersede);
+  }
+
+  const nodes = [title, meta, featuresBlock, tasksBlock, edgesBlock];
+  if (bodyBlock) nodes.push(bodyBlock);
+  if (actions.children.length > 0) nodes.push(actions);
+  syncNodes(detail, nodes);
+}
+
+async function acceptAdr(adr, btn, detail) {
+  await runAdrAction(
+    adr,
+    btn,
+    detail,
+    () => postJson(`/api/adrs/${encodeURIComponent(adr.id)}/accept`),
+    "accept failed",
+  );
+}
+
+async function supersedeAdr(adr, by, btn, detail) {
+  await runAdrAction(
+    adr,
+    btn,
+    detail,
+    () => postJson(`/api/adrs/${encodeURIComponent(adr.id)}/supersede`, { by }),
+    "supersede failed",
+  );
+}
+
+async function runAdrAction(adr, btn, detail, action, fallbackMessage) {
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>wait`;
+  for (const node of detail.querySelectorAll(".action-error")) node.remove();
+  try {
+    await action();
+    activeAdrId = adr.id;
+    await fetchAndRenderAdrs();
+  } catch (e) {
+    detail.prepend(el("div", { class: "action-error", text: e.message || fallbackMessage }));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 function refreshChips() {
   for (const chip of document.querySelectorAll("#task-filter .chip")) {
     const status = chip.dataset.status;
@@ -952,10 +2310,50 @@ function wireSearch() {
   });
 }
 
-const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "friction", "errors"];
+function wireLearningSearch() {
+  const input = $("learning-search");
+  if (!input) return;
+  let debounce = null;
+  input.addEventListener("input", (e) => {
+    learningSearchQuery = e.target.value.trim();
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (activeTab === "knowledge") fetchAndRenderLearnings().catch(console.error);
+    }, 200);
+  });
+}
+
+function wireAdrSearch() {
+  const input = $("adr-search");
+  if (!input) return;
+  let debounce = null;
+  input.addEventListener("input", (e) => {
+    adrSearchQuery = e.target.value.trim();
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (activeTab === "knowledge") fetchAndRenderAdrs().catch(console.error);
+    }, 200);
+  });
+}
+
+function wireFrictionSearch() {
+  const input = $("friction-search");
+  if (!input) return;
+  let debounce = null;
+  input.addEventListener("input", (e) => {
+    frictionSearchQuery = e.target.value.trim();
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (activeTab === "knowledge") fetchAndRenderFrictions().catch(console.error);
+    }, 200);
+  });
+}
+
+const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "knowledge", "run-detail"];
+const DIAG_SUBTABS = ["runs", "metrics", "errors"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const AUDIT_SUBTABS = ["events", "policy"];
+const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
 
 function parseHashRoute(raw) {
   const trimmed = String(raw || "").replace(/^#/, "");
@@ -970,6 +2368,9 @@ function parseHashRoute(raw) {
 function setActiveTab(raw, opts = {}) {
   const { segments, query } = parseHashRoute(raw);
   const head = segments[0] || "tasks";
+  if (head === "runs" && !segments[1] && query.get("run_id")) {
+    segments[1] = encodeURIComponent(query.get("run_id"));
+  }
   let top;
   if (head === "runs" && segments[1]) {
     top = "run-detail";
@@ -1038,6 +2439,10 @@ function setActiveTab(raw, opts = {}) {
     hash = `#runs/${encodeURIComponent(activeRunId || "")}` +
       (activeRunSubtab !== "steps" ? `/${activeRunSubtab}` : "");
     if (query.get("step") != null) hash += `?step=${encodeURIComponent(query.get("step"))}`;
+  } else if (top === "knowledge") {
+    const sub = KNOWLEDGE_SUBTABS.includes(segments[1]) ? segments[1] : activeKnowledgeSubtab;
+    setKnowledgeSubtab(sub);
+    hash = sub === "learnings" ? "#knowledge/learnings" : `#knowledge/${sub}`;
   } else {
     hash = `#${top}`;
   }
@@ -1138,6 +2543,33 @@ function setDiagSubtab(name) {
   }
 }
 
+function setKnowledgeSubtab(name) {
+  if (!KNOWLEDGE_SUBTABS.includes(name)) name = "learnings";
+  activeKnowledgeSubtab = name;
+  for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
+    btn.classList.toggle("active", btn.dataset.subtab === name);
+  }
+  const isAdrs = name === "adrs";
+  const isFrictions = name === "frictions";
+  const isLearnings = name === "learnings";
+  const toggle = (id, show) => {
+    const node = $(id);
+    if (node) node.style.display = show ? "" : "none";
+  };
+  toggle("learning-stats", isLearnings);
+  toggle("learning-search", isLearnings);
+  toggle("learnings-body", isLearnings);
+  toggle("learning-detail-panel", isLearnings);
+  toggle("adr-stats", isAdrs);
+  toggle("adr-search", isAdrs);
+  toggle("adrs-body", isAdrs);
+  toggle("adr-detail-panel", isAdrs);
+  toggle("friction-stats", isFrictions);
+  toggle("friction-search", isFrictions);
+  toggle("frictions-body", isFrictions);
+  toggle("friction-detail-panel", isFrictions);
+}
+
 function initTabs() {
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => setActiveTab(tab.dataset.tab, { refresh: false }));
@@ -1167,6 +2599,11 @@ function initTabs() {
         refreshDashboard();
       }
     });
+  }
+  for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
+    btn.addEventListener("click", () =>
+      setActiveTab(`knowledge/${btn.dataset.subtab}`, { refresh: false }),
+    );
   }
   window.addEventListener("hashchange", () => {
     setActiveTab(window.location.hash);
@@ -1207,33 +2644,6 @@ const DIAG_METRICS_COLUMNS = [
     render: (v) => (v == null ? "-" : fmtDuration(v)),
   },
   { key: "retry_count", label: "retries", num: true },
-];
-
-const DIAG_FRICTION_COLUMNS = [
-  { key: "ts", label: "time", num: false, render: (v) => fmtRelative(v) },
-  { key: "step", label: "step", num: false },
-  { key: "command", label: "command", num: false },
-  {
-    key: "exit_code",
-    label: "exit",
-    num: true,
-    render: (v, _row, td) => {
-      if (v == null) return "-";
-      if (v !== 0) td.classList.add("exit-fail");
-      return String(v);
-    },
-  },
-  {
-    key: "stderr",
-    label: "stderr",
-    num: false,
-    cellClass: "stderr",
-    render: (v, _row, td) => {
-      const full = v || "";
-      td.title = full;
-      return truncate(full, 160);
-    },
-  },
 ];
 
 const DIAG_ERRORS_COLUMNS = [
@@ -1321,13 +2731,28 @@ function renderDiagnostics() {
   const columns =
     sub === "metrics"
       ? DIAG_METRICS_COLUMNS
-      : sub === "errors"
-        ? DIAG_ERRORS_COLUMNS
-        : DIAG_FRICTION_COLUMNS;
+      : DIAG_ERRORS_COLUMNS;
   renderDiagnosticsTable(
     rows,
     columns,
   );
+}
+
+function fetchAndCacheCrews() {
+  return fetchJson("/api/crews").then((payload) => {
+    lastCrewPayload = normalizeCrewPayload(payload);
+    return lastCrewPayload;
+  });
+}
+
+function fetchAndRenderTasks() {
+  return Promise.all([
+    fetchJson("/api/tasks"),
+    fetchAndCacheCrews(),
+  ]).then(([tasks]) => {
+    lastTasks = tasks;
+    renderTasks(tasks);
+  });
 }
 
 function activeRefreshJobs() {
@@ -1335,12 +2760,8 @@ function activeRefreshJobs() {
   const jobs = [fetchAndRenderSummary()];
 
   if (activeTab === "tasks") {
-    jobs.push(
-      fetchJson("/api/tasks").then((tasks) => {
-        lastTasks = tasks;
-        renderTasks(tasks);
-      }),
-    );
+    jobs.push(fetchAndRenderTasks());
+    if (!document.hidden) jobs.push(fetchAndRenderTaskLocks());
     return jobs;
   }
 
@@ -1354,6 +2775,17 @@ function activeRefreshJobs() {
       jobs.push(fetchAndRenderPolicy());
     } else {
       jobs.push(fetchAndRenderAudit());
+    }
+    return jobs;
+  }
+
+  if (activeTab === "knowledge") {
+    if (activeKnowledgeSubtab === "adrs") {
+      jobs.push(fetchAndRenderAdrs());
+    } else if (activeKnowledgeSubtab === "frictions") {
+      jobs.push(fetchAndRenderFrictions());
+    } else {
+      jobs.push(fetchAndRenderLearnings());
     }
     return jobs;
   }
@@ -1396,21 +2828,21 @@ function activeRefreshJobs() {
     );
     return jobs;
   }
-
-  jobs.push(
-    fetchJson(`/api/diagnostics/friction?limit=${DIAG_LIMIT}`).then((rows) => {
-      lastDiagnostics.friction = rows;
-      renderDiagnostics();
-    }),
-  );
   return jobs;
 }
 
 function fetchAndRenderRuns() {
-  return fetchJson(`/api/job-runs?limit=${JOB_RUN_LIMIT}`).then((runs) => {
-    lastRuns = runs;
-    renderRuns(runs);
+  return Promise.all([
+    fetchJson(`/api/job-runs?limit=${JOB_RUN_LIMIT}`),
+    fetchJson(`/api/diagnostics/friction?limit=${DIAG_LIMIT}`),
+  ]).then(([runs, frictionRows]) => {
+    lastRuns = mergeRunsWithFriction(runs, frictionRows);
+    renderRuns(lastRuns);
   });
+}
+
+function fetchAndRenderTaskLocks() {
+  return fetchJson("/api/tasks/locks").then(renderLocksPanel);
 }
 
 function fetchAndRenderRunDetail() {
@@ -1486,6 +2918,40 @@ function fetchAndRenderPolicy() {
   });
 }
 
+function fetchAndRenderLearnings() {
+  const sp = new URLSearchParams();
+  sp.set("limit", String(LEARNING_LIMIT));
+  if (learningSearchQuery) sp.set("q", learningSearchQuery);
+  return fetchJson(`/api/learnings?${sp.toString()}`).then((payload) => {
+    lastLearningPayload = payload || { stats: {}, items: [] };
+    renderLearnings(lastLearningPayload);
+  });
+}
+
+function fetchAndRenderAdrs() {
+  const sp = new URLSearchParams();
+  sp.set("limit", String(ADR_LIMIT));
+  if (adrSearchQuery) sp.set("q", adrSearchQuery);
+  return fetchJson(`/api/adrs?${sp.toString()}`).then((payload) => {
+    lastAdrPayload = payload || { stats: {}, items: [] };
+    renderAdrs(lastAdrPayload);
+  });
+}
+
+function fetchAndRenderFrictions() {
+  const sp = new URLSearchParams();
+  sp.set("limit", String(FRICTION_LIMIT));
+  if (frictionSearchQuery) sp.set("q", frictionSearchQuery);
+  return Promise.all([
+    fetchJson(`/api/frictions?${sp.toString()}`),
+    fetchJson("/api/frictions/stats"),
+  ]).then(([payload, stats]) => {
+    lastFrictionPayload = payload || { stats: {}, tags: [], items: [] };
+    lastFrictionPayload.stats = stats || lastFrictionPayload.stats || {};
+    renderFrictions(lastFrictionPayload);
+  });
+}
+
 function renderHealthStrip(data) {
   if (!data) return;
   $("tile-events-value").textContent = formatBigInt(data.events);
@@ -1536,12 +3002,41 @@ function renderSparkline(buckets) {
 }
 
 const POLICY_TABLES = [
-  { id: "by_profile", label: "By Profile",  nameField: "name",   filterKey: "profile" },
-  { id: "by_target",  label: "By Target",   nameField: "name",   filterKey: null },
-  // Real JobRun ids from the v2 audit envelope. Click routes to Run Detail
-  // rather than filtering Events (audit Events only knows execution_id).
-  { id: "by_run",     label: "By Run",      nameField: "run_id", navigateTo: "run" },
-  { id: "by_agent",   label: "By Agent",    nameField: "agent",  filterKey: "role" },
+  {
+    id: "by_profile",
+    label: "By Profile",
+    nameField: "name",
+    header: "profile",
+    filterKey: "profile",
+  },
+  {
+    id: "by_target",
+    label: "By Target",
+    nameField: "name",
+    header: "target",
+    filterKey: null,
+  },
+  {
+    id: "by_run",
+    label: "By JobRun",
+    nameField: "run_id",
+    header: "job_run_id",
+    navigateTo: "job_run",
+  },
+  {
+    id: "by_execution",
+    label: "By Audit Invocation",
+    nameField: "execution_id",
+    header: "execution_id",
+    navigateTo: "audit_execution",
+  },
+  {
+    id: "by_agent",
+    label: "By Agent",
+    nameField: "agent",
+    header: "agent",
+    filterKey: "role",
+  },
 ];
 
 function renderPolicy(data) {
@@ -1556,6 +3051,12 @@ function renderPolicy(data) {
     ])]);
     return;
   }
+
+  const sections = [];
+  const recent = buildRecentDenials(data.recent_denials || []);
+  const causes = buildTopCauses(data.top_causes || []);
+  if (recent) sections.push(recent);
+  if (causes) sections.push(causes);
 
   const grid = el("div", { class: "policy-grid" });
   for (const tbl of POLICY_TABLES) {
@@ -1572,14 +3073,15 @@ function renderPolicy(data) {
     cell.appendChild(buildPolicyTable(tbl, rawRows, sortMode));
     grid.appendChild(cell);
   }
-  syncNodes(body, [grid]);
+  sections.push(grid);
+  syncNodes(body, sections);
 }
 
 function buildPolicyTable(spec, rows, sortMode) {
   const table = el("table", { class: "policy-table" });
   const thead = el("thead");
   const headRow = el("tr");
-  const nameTh = el("th", { text: spec.nameField });
+  const nameTh = el("th", { text: spec.header || spec.nameField });
   if (sortMode === "name") {
     const arrow = el("span", { class: "sort-arrow", text: "▼" });
     nameTh.appendChild(arrow);
@@ -1615,11 +3117,14 @@ function buildPolicyTable(spec, rows, sortMode) {
       const tr = el("tr", { title: name });
       tr.appendChild(el("td", { class: "value-name", text: name }));
       tr.appendChild(el("td", { class: "num", text: String(row.count || 0) }));
-      if (spec.navigateTo === "run") {
-        tr.style.cursor = "pointer";
+      if (spec.navigateTo === "job_run") {
+        tr.classList.add("clickable");
         tr.addEventListener("click", () => navigateToRun(name));
+      } else if (spec.navigateTo === "audit_execution") {
+        tr.classList.add("clickable");
+        tr.addEventListener("click", () => navigateToAuditExecution(name));
       } else if (spec.filterKey) {
-        tr.style.cursor = "pointer";
+        tr.classList.add("clickable");
         tr.addEventListener("click", () => {
           auditFilter[spec.filterKey] = name;
           activeAuditSubtab = "events";
@@ -1631,6 +3136,121 @@ function buildPolicyTable(spec, rows, sortMode) {
   }
   table.appendChild(tbody);
   return table;
+}
+
+function buildTopCauses(rows) {
+  if (!rows.length) return null;
+  const section = el("div", { class: "policy-section" });
+  section.appendChild(el("h5", { text: "Top Causes" }));
+  const table = el("table", { class: "policy-table policy-cause-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const label of ["cause", "target", "count", "latest"]) {
+    headRow.appendChild(el("th", { class: label === "count" ? "num" : "", text: label }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    tr.appendChild(el("td", {
+      class: "value-name",
+      text: row.cause || "-",
+      title: row.cause || "",
+    }));
+    tr.appendChild(el("td", {
+      class: "value-name muted",
+      text: row.target || "-",
+      title: row.target || "",
+    }));
+    tr.appendChild(el("td", { class: "num", text: String(row.count || 0) }));
+    tr.appendChild(el("td", {
+      class: "muted mono",
+      text: row.latest_ts ? fmtRelative(row.latest_ts) : "-",
+    }));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+function buildRecentDenials(rows) {
+  if (!rows.length) return null;
+  const section = el("div", { class: "policy-section" });
+  section.appendChild(el("h5", { text: "Recent Denials" }));
+  const table = el("table", { class: "policy-table policy-recent-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const label of ["time", "target", "cause", "identity", "details"]) {
+    headRow.appendChild(el("th", { text: label }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    tr.appendChild(el("td", {
+      class: "muted mono",
+      text: row.timestamp ? fmtRelative(row.timestamp) : "-",
+    }));
+    tr.appendChild(el("td", {
+      class: "value-name",
+      text: row.target || "-",
+      title: row.target || "",
+    }));
+    tr.appendChild(el("td", {
+      class: "value-name",
+      text: row.cause || row.denial_kind || "-",
+      title: row.cause || "",
+    }));
+    const identity = el("td");
+    identity.appendChild(buildPolicyIdentityAction(row));
+    tr.appendChild(identity);
+    const details = policyDetailText(row);
+    tr.appendChild(el("td", { class: "policy-detail", text: details, title: details }));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+function buildPolicyIdentityAction(row) {
+  const identityId = row.identity_id || row.job_run_id || row.execution_id || "";
+  if (!identityId) return el("span", { class: "muted", text: "-" });
+  const isJobRun = row.identity_type === "job_run" && row.job_run_id;
+  const label = isJobRun ? "JobRun" : "Audit";
+  const btn = el("button", {
+    class: "policy-link",
+    text: `${label} ${truncate(identityId, 18)}`,
+    title: identityId,
+  });
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (isJobRun) navigateToRun(identityId);
+    else navigateToAuditExecution(identityId);
+  });
+  return btn;
+}
+
+function policyDetailText(row) {
+  const parts = [];
+  if (row.actor) parts.push(`actor ${row.actor}`);
+  const taskIds = row.requested_task_ids || [];
+  if (taskIds.length) parts.push(`tasks ${taskIds.join(", ")}`);
+  const files = row.requested_files || [];
+  if (files.length) {
+    const suffix = files.length > 2 ? " +" + (files.length - 2) : "";
+    parts.push(`files ${files.slice(0, 2).join(", ")}${suffix}`);
+  }
+  const conflicts = row.conflicts || [];
+  if (conflicts.length) {
+    const first = conflicts[0] || {};
+    const holder = [first.held_by, first.held_by_id].filter(Boolean).join(" ");
+    parts.push(holder ? `held by ${holder}` : `${conflicts.length} conflicts`);
+  }
+  return parts.join(" · ") || row.denial_kind || "-";
 }
 
 function refreshLabel() {
@@ -1645,6 +3265,22 @@ function navigateToRun(runId) {
   activeRunDetail = null;
   activeRunEvents = [];
   setActiveTab(`runs/${encodeURIComponent(runId)}`);
+}
+
+function navigateToAuditExecution(executionId) {
+  auditFilter = {
+    status: null,
+    q: "",
+    tool: null,
+    role: null,
+    execution_id: executionId,
+    profile: null,
+    since: null,
+    policyKind: null,
+  };
+  activeAuditSubtab = "events";
+  syncAuditControls();
+  window.location.hash = buildAuditHash();
 }
 
 /// Navigates to the Audit tab pre-filtered by `role` (audit `role` ≈ scoreboard
@@ -2364,12 +4000,13 @@ async function refreshDashboard() {
   if (btn) btn.disabled = false;
   isRefreshing = false;
   if (activeTab === "tasks") fitLogPanelToViewport();
-  
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();
 wireSearch();
+wireLearningSearch();
+wireAdrSearch();
+wireFrictionSearch();
 buildAuditChips();
 wireAuditSearch();
 $("refresh-btn").addEventListener("click", refreshDashboard);

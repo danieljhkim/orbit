@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-04-30 (T20260430-20)
+**Last updated:** 2026-05-17 (ORB-00090)
 
 This document captures the questions that remain before Orbit's auditability story matches its product promise end to end. [2_design.md](./2_design.md) is the current implementation; this file names the pressure points that should drive future tasks and ADRs.
 
@@ -13,7 +13,7 @@ This document captures the questions that remain before Orbit's auditability sto
 1. **Canonical query surface.** Should `orbit audit` stay command-row-only, or grow a run-centric view that joins command rows, job-run state, v2 envelopes, loop JSONL, blobs, and invocation metrics?
 2. **Local tamper evidence.** Should Orbit use per-file hash chains, SQLite append proofs, signed manifests, git-backed checkpoints, or export-time attestations while staying self-hosted by default?
 3. **Auditing audit reads.** Should `orbit audit` reads, exports, and prunes remain outside the guard to avoid recursion, or be recorded through a separate path?
-4. **Stable identity key.** What joins human CLI usage, model-first tool inputs, task attribution fields, v2 `agent_identity`, invocation metrics, commits, and PR metadata?
+4. **Stable identity key.** What joins human CLI usage, family-based tool inputs, task attribution fields, v2 `agent_identity`, invocation metrics, commits, and PR metadata?
 5. **Stdout/stderr retention.** The command schema has truncated stdout/stderr fields, but most paths leave them empty. What retention policy should exist before broad capture?
 6. **JSONL migration.** [T20260426-0519] moved run traces to `.orbit/state/audit/`; should old `.orbit/audit/` files be migrated, ignored, or read through a legacy fallback?
 7. **Replay payload depth.** When are redacted verbatim prompts/responses required, and when are summaries enough?
@@ -86,5 +86,6 @@ External reference categories:
 - **[T20260426-0526]** — Persist v2 invocation traces for metrics beside audit.
 - **[T20260426-0605]** — Add this auditability design folder and name future auditability questions.
 - **[T20260430-20]** — Shorten the auditability docs while preserving required guarantees.
+- **[ORB-00090]** — Aligned auditability identity wording with the family-as-identity convention.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

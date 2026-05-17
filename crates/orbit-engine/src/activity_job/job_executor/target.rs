@@ -45,11 +45,7 @@ pub(super) fn run_target(
                     .model
                     .clone()
                     .unwrap_or_else(|| DEFAULT_MODEL_FOR_SESSION.to_string());
-                let provider = if replay_active() {
-                    "replay"
-                } else {
-                    "anthropic"
-                };
+                let provider = agent_spec.provider.as_str();
                 Session::new(provider, model, &agent_spec.instruction, None)
             });
             let api_key = ctx.host.api_key_for("anthropic").ok();
@@ -190,6 +186,7 @@ pub(super) fn run_agent_loop_outcome(
     })
 }
 
+#[cfg(test)]
 pub(super) fn replay_active() -> bool {
     std::env::var("ORBIT_V2_REPLAY").is_ok() || std::env::var("ORBIT_V2_REPLAY_FIXTURE").is_ok()
 }
@@ -204,7 +201,7 @@ pub(super) fn role_overridden_spec(t: &TargetStep, ctx: &ExecCtx<'_>) -> Option<
         return None;
     };
     let effective_role = t.role.or(inline_spec.role)?;
-    let resolved = resolve_agent_settings(effective_role, ctx.host, inline_spec);
+    let resolved = resolve_agent_settings(effective_role, ctx.host, inline_spec, &ctx.input);
     let mut spec = inline_spec.clone();
     apply_resolved_settings(&mut spec, &resolved);
     Some(spec)

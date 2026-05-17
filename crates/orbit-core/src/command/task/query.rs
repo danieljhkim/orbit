@@ -1,6 +1,6 @@
 use orbit_common::types::{
-    ExternalRef, NotFoundKind, OrbitError, ReviewThread, Task, TaskArtifact, TaskComment,
-    TaskHistoryEntry, prune_missing_context_files,
+    ArtifactManifestFileV2, ExternalRef, NotFoundKind, OrbitError, ReviewThread, Task,
+    TaskArtifact, TaskComment, TaskHistoryEntry, prune_missing_context_files,
 };
 
 use crate::OrbitRuntime;
@@ -20,6 +20,24 @@ impl OrbitRuntime {
             .tasks()
             .get_artifacts(id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
+    }
+
+    pub fn get_task_artifact_manifest(
+        &self,
+        id: &str,
+    ) -> Result<Vec<ArtifactManifestFileV2>, OrbitError> {
+        self.stores()
+            .tasks()
+            .get_artifact_manifest(id)?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, id.to_string()))
+    }
+
+    pub fn get_task_artifact(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<Option<TaskArtifact>, OrbitError> {
+        self.stores().tasks().get_artifact(id, path)
     }
 
     pub fn get_task_comments(&self, id: &str) -> Result<Vec<TaskComment>, OrbitError> {

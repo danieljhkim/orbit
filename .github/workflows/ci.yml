@@ -59,7 +59,7 @@ jobs:
               context: ".github/workflows/ci.yml",
               workspace: ".",
               priority: "high",
-              type: "issue"
+              type: "bug"
             }'
           )"
           cargo run -p orbit-cli --bin orbit -- tool run orbit.task.add --input "$payload"
