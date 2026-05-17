@@ -3986,8 +3986,6 @@ async function refreshDashboard() {
   if (btn) btn.disabled = false;
   isRefreshing = false;
   if (activeTab === "tasks") fitLogPanelToViewport();
-  
-  $("footer").textContent = `orbit dashboard · auto-refresh 30s · GET /api/{tasks,tasks/locks,crews,learnings,adrs,frictions,frictions/stats,jobs,job-runs,audit?since|tool|status|role|execution_id|profile|q|limit|offset,audit/summary?since|denial_threshold,runs/:id,runs/:id/events?kind|limit|offset,runs/:id/logs?limit,scoreboard,diagnostics/{metrics,errors,friction,denials?since|kind|profile|agent}}`;
 }
 
 buildChips();
