@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-10 (post-[T20260509-64], [T20260510-7])
+**Last updated:** 2026-05-17 ([ORB-00099])
 
 ADR-style log of non-obvious knowledge-graph decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -594,6 +594,23 @@ These entries were formerly ADR headings, but they are plain instances of ADR-00
 
 ---
 
+## ADR-039 — Attribute refreshes to the active git checkout, not the shared Orbit root
+
+**Status:** Accepted · 2026-05 · [ORB-00099]
+**Author:** codex
+
+**Context.** Linked worktrees intentionally resolve Orbit data through the main checkout's `.orbit/` directory so tasks, audit state, and knowledge objects stay shared. The read-side graph refresh path reused that same resolved root as `workspace_root`, so a graph tool invoked from `.orbit/state/worktrees/...` ran `git current-branch` against the main checkout and wrote `refs/heads/agent-main.json` even when the agent was on an `orbit/ORB-*` worktree branch.
+
+**Decision.** Keep `orbit_root`/`knowledge_dir` shared through main-worktree resolution, but derive graph read/write attribution from the active git checkout root associated with the tool call CWD. Runtime dispatch resolves `workspace_root` with `git rev-parse --show-toplevel` and accepts it only when its `--git-common-dir` matches the configured workspace repository. Knowledge refresh then treats that checkout root as the repo path for branch ref resolution, dirty fingerprinting, scanning, and manifest git identity.
+
+**Consequences.**
+- Worktree agents materialize branch refs such as `refs/heads/orbit/ORB-*.json` under the shared `.orbit/knowledge/graph/` object store.
+- The main checkout still owns the Orbit data root, so task state and graph objects remain shared across worktrees.
+- A CWD in an unrelated git repository cannot redirect Orbit's workspace boundary because the git common directory must match the configured repo.
+- Cost: runtime dispatch now shells out to `git` when filling a missing `ToolContext.workspace_root`; non-git or mismatched CWDs fall back to the configured repo root.
+
+---
+
 ## Task References
 
 Tasks cited by ADRs above:
@@ -653,5 +670,6 @@ Tasks cited by ADRs above:
 - **[T20260510-2]** — Restore SQL/fallback equivalence for `orbit.graph.show` `children` (forward leaf pointers).
 - **[T20260510-5]** — Extract `orbit_knowledge::commands::*` as the canonical graph command surface and thin graph tools to dispatch/envelope shaping.
 - **[T20260510-7]** — Make leaf IDs unique across extractors so SQL fast paths preserve every symbol.
+- **[ORB-00099]** — Decouple graph refresh branch attribution from shared `.orbit` root resolution for linked worktrees.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

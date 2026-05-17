@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use orbit_common::types::{OrbitEvent, Role, activity_job::tool_allowed};
@@ -187,14 +188,19 @@ fn resolve_task_id_from_context(
 fn resolve_workspace_root_from_context(
     runtime: &OrbitRuntime,
     task_id: Option<&str>,
-    _tool_context: &ToolContext,
+    tool_context: &ToolContext,
 ) -> Result<Option<PathBuf>, OrbitError> {
+    let canonical_repo_root = canonical_repo_root(runtime);
+    if let Some(workspace_root) = active_git_checkout_root(&canonical_repo_root, tool_context) {
+        return Ok(Some(workspace_root));
+    }
+
     if let Some(task_id) = task_id
         && let Some(workspace_root) = resolve_task_workspace_root(runtime, task_id)
     {
         return Ok(Some(workspace_root));
     }
-    Ok(Some(canonical_repo_root(runtime)))
+    Ok(Some(canonical_repo_root))
 }
 
 fn canonical_repo_root(runtime: &OrbitRuntime) -> PathBuf {
@@ -210,6 +216,61 @@ fn resolve_task_workspace_root(runtime: &OrbitRuntime, task_id: &str) -> Option<
     let repo_root = canonical_repo_root(runtime);
     runtime.get_task(task_id).ok()?;
     Some(repo_root)
+}
+
+fn active_git_checkout_root(
+    canonical_repo_root: &Path,
+    tool_context: &ToolContext,
+) -> Option<PathBuf> {
+    let cwd = tool_context.cwd.as_deref()?;
+    let cwd = Path::new(cwd);
+    let checkout_root = git_checkout_root(cwd)?;
+    same_git_common_dir(&checkout_root, canonical_repo_root).then_some(checkout_root)
+}
+
+fn git_checkout_root(path: &Path) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let raw_path = stdout.lines().next()?.trim();
+    if raw_path.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(raw_path);
+    Some(path.canonicalize().unwrap_or(path))
+}
+
+fn same_git_common_dir(left: &Path, right: &Path) -> bool {
+    match (git_common_dir(left), git_common_dir(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn git_common_dir(path: &Path) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let raw_path = stdout.lines().next()?.trim();
+    if raw_path.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(raw_path);
+    Some(path.canonicalize().unwrap_or(path))
 }
 
 fn task_workspace_matches(canonical_workspace: &Path, canonical_cwd: &Path) -> bool {
@@ -235,6 +296,7 @@ mod tests {
     use orbit_store::TaskCreateParams;
     use orbit_tools::ToolContext;
     use serde_json::json;
+    use tempfile::tempdir;
 
     use super::*;
 
@@ -289,5 +351,139 @@ mod tests {
             .expect("wildcard activity context should permit orbit.task.show");
 
         assert_eq!(output["id"], task.id);
+    }
+
+    #[test]
+    fn graph_tool_refresh_from_linked_worktree_attributes_to_worktree_branch() {
+        let fixture = GitWorktreeFixture::new();
+        let runtime = OrbitRuntime::from_roots(&fixture.global_root, &fixture.main_orbit)
+            .expect("build runtime");
+
+        runtime
+            .run_tool_with_context_and_role(
+                "orbit.graph.pack",
+                json!({
+                    "selectors": ["file:Cargo.toml"],
+                    "refresh": true,
+                }),
+                Role::Admin,
+                ToolContext {
+                    cwd: Some(fixture.worktree.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            )
+            .expect("pack from worktree");
+
+        assert!(
+            fixture
+                .main_orbit
+                .join("knowledge/graph/refs/heads/orbit/ORB-00099-test.json")
+                .is_file(),
+            "worktree branch ref should be written under shared knowledge dir"
+        );
+        assert_eq!(
+            manifest_head_oid(&fixture.main_orbit.join("knowledge/manifest.json")),
+            git_output(&fixture.worktree, &["rev-parse", "HEAD"])
+        );
+    }
+
+    struct GitWorktreeFixture {
+        _root: tempfile::TempDir,
+        global_root: PathBuf,
+        main_orbit: PathBuf,
+        worktree: PathBuf,
+    }
+
+    impl GitWorktreeFixture {
+        fn new() -> Self {
+            let root = tempdir().expect("create tempdir");
+            let global_root = root.path().join("global");
+            let main_repo = root.path().join("repo");
+            let worktree = main_repo.join(".orbit/state/worktrees/orb-00099-test");
+            std::fs::create_dir_all(main_repo.join("src")).expect("create src dir");
+            std::fs::create_dir_all(&global_root).expect("create global root");
+
+            run_git(
+                root.path(),
+                &["init", main_repo.to_str().expect("main repo path")],
+            );
+            run_git(&main_repo, &["config", "user.email", "test@example.com"]);
+            run_git(&main_repo, &["config", "user.name", "Test User"]);
+            std::fs::write(
+                main_repo.join("Cargo.toml"),
+                "[package]\nname = \"orb_00099_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+            )
+            .expect("write manifest");
+            std::fs::write(main_repo.join("src/lib.rs"), "pub fn main_branch() {}\n")
+                .expect("write lib");
+            run_git(&main_repo, &["add", "Cargo.toml", "src/lib.rs"]);
+            run_git(&main_repo, &["commit", "-m", "initial"]);
+            run_git(&main_repo, &["branch", "-M", "agent-main"]);
+
+            let main_orbit = main_repo.join(".orbit");
+            std::fs::create_dir_all(&main_orbit).expect("create main orbit dir");
+            run_git(
+                &main_repo,
+                &[
+                    "worktree",
+                    "add",
+                    "-b",
+                    "orbit/ORB-00099-test",
+                    worktree.to_str().expect("worktree path"),
+                ],
+            );
+            std::fs::write(worktree.join("src/lib.rs"), "pub fn worktree_branch() {}\n")
+                .expect("write worktree lib");
+            run_git(&worktree, &["add", "src/lib.rs"]);
+            run_git(&worktree, &["commit", "-m", "worktree change"]);
+
+            Self {
+                _root: root,
+                global_root,
+                main_orbit,
+                worktree,
+            }
+        }
+    }
+
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_output(cwd: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git stdout is utf8")
+            .trim()
+            .to_string()
+    }
+
+    fn manifest_head_oid(path: &Path) -> String {
+        let raw = std::fs::read_to_string(path).expect("read manifest");
+        let manifest: serde_json::Value = serde_json::from_str(&raw).expect("parse manifest");
+        manifest["git_head_oid"]
+            .as_str()
+            .expect("manifest git_head_oid")
+            .to_string()
     }
 }
