@@ -1,0 +1,18 @@
+schema_version: 1
+id: L20260517-7
+status: active
+scope:
+  paths:
+  - crates/orbit-engine/src/executor/automation/vcs/pr.rs
+  tags:
+  - rust
+  - attribution
+  - ship
+summary: When changing ship PR merge, pass per-task attribution (`implemented_by -> created_by -> system`) into `TaskAutomationUpdate.model`
+body: The `merge_batch_pr` Done-transition loop runs as system automation, so runtime actor context is not a reliable implementer source. Resolve attribution from each task before the update (`implemented_by`, then `created_by`, then no model so actor-less flows remain `system`) and keep regression coverage for mixed-family batches.
+evidence:
+- kind: task
+  reference: ORB-00106
+created_at: 2026-05-17T07:09:40.771239Z
+updated_at: 2026-05-17T07:09:40.771239Z
+priority: 90
