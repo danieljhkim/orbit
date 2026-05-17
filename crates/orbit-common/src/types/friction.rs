@@ -6,18 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::ActorIdentity;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FrictionStatus {
+    #[default]
     Open,
     Triaged,
     Resolved,
-}
-
-impl Default for FrictionStatus {
-    fn default() -> Self {
-        Self::Open
-    }
 }
 
 impl Display for FrictionStatus {
