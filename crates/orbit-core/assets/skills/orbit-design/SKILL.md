@@ -51,6 +51,7 @@ Mapping rule: `orbit.design.<verb>` ↔ `orbit_design_<verb>`. Always include `m
 - **`init` does not clobber.** If you ran it with the wrong feature name, delete the folder and re-run; do not patch in place.
 - **Required sections are non-negotiable.** Every numbered doc needs the sections listed in [CONVENTIONS.md §3](../../../docs/design/CONVENTIONS.md). Reviewers reject folders missing them; future lint may enforce mechanically.
 - **ADRs use the 3-of-3 earning rule.** A decision belongs in `4_decisions.md` only when it has a real alternative, a forward constraint, and a non-trivial cost. Use the `orbit-adr` skill for the ADR artifact surface; the `orbit.design.*` tools manage *folders*, not individual ADRs.
+- **Allocate ADR IDs globally before adding the local heading.** New `## ADR-` headings in `4_decisions.md` must use the ID returned by `orbit.adr.add` — see the `orbit-adr` skill and [ADR-0153]. Hand-writing a heading with a made-up number (3-digit local or 4-digit fake-global) produces an orphan decision invisible to the store; this is the failure mode [ORB-00098] resolved.
 - **`check` failures block `make ci`.** A stale-doc finding is treated like a clippy warning under `-D warnings`; do not skip it with `--warn-only` in CI configurations.
 - **`_archive/` is the retirement path.** When a feature is retired, move the folder under `docs/design/_archive/<feature>/` and annotate the first line of `1_overview.md`. Tools skip `_`-prefixed folders automatically.
 
@@ -101,6 +102,7 @@ orbit design check --warn-only
 | Adding a fifth top-level file (`README.md`, `roadmap.md`) under a feature folder | Anti-pattern table in [CONVENTIONS.md §10](../../../docs/design/CONVENTIONS.md) rejects it; readers expect exactly four numbered docs | Fold the content into the appropriate numbered doc, or into a `specs/` entry |
 | Running `init` then re-running it after editing the wrong feature name | `init` refuses to clobber existing folders | Delete or move the wrong folder first, then re-run |
 | Using `orbit design check` to "lint" content | The tool only checks decay (date vs. referenced-code commit); section completeness is review-enforced today | Cross-review against [CONVENTIONS.md §3](../../../docs/design/CONVENTIONS.md) |
+| Adding a `## ADR-` heading to `4_decisions.md` without calling `orbit.adr.add` first | Produces an orphan decision the global store does not know about; the heading number either invents a local sequence or collides with a real global ID | Allocate via `orbit.adr.add` first, then use the returned `ADR-NNNN` as the heading verbatim — see the `orbit-adr` skill and [ADR-0153] |
 
 ## Exit Criteria
 

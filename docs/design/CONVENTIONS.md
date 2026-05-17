@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Owner:** daniel
-**Last updated:** 2026-05-17
+**Last updated:** 2026-05-17 (ORB-00098)
 
 Rules feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them.
 
@@ -61,10 +61,12 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 ## 4. ADR Template (strict)
 
-```
-## ADR-NNN — <short title, noun phrase>
+**Allocation order is non-negotiable.** Before writing the heading or body, allocate the global ID via `orbit.adr.add` (see the `orbit-adr` skill and [ADR-0153]). The local heading then uses the allocated global ID verbatim — never invent a four-digit number that "looks global." The store is the source of truth for ID, status, owner, `related_features`, and `related_tasks`; the local `4_decisions.md` entry is the long-form narrative log keyed on that same global ID.
 
-**Status:** <Accepted | Proposed | Superseded by ADR-MMM> · YYYY-MM · [T...]
+```
+## ADR-NNNN — <short title, noun phrase>
+
+**Status:** <Accepted | Proposed | Superseded by ADR-MMMM> · YYYY-MM · [T...]
 
 **Context.** <1–3 sentences. Why this forced a decision.>
 
@@ -78,9 +80,12 @@ Every numbered doc ends with a **Task References** section listing only the task
 
 Rules:
 
+- **Allocate first.** `orbit.adr.add` returns the global `ADR-NNNN` (4-digit, zero-padded). That ID is your local heading. Never hand-author headings under `## ADR-` without an allocation behind them. Bypassing this is the failure mode [ORB-00098] resolved; see [ADR-0153].
+- **Inline cross-references** use the global ID (`[ADR-0042]`), resolvable via `orbit tool run orbit.adr.show --input '{"id":"ADR-0042"}'`.
 - Numbers are append-only; superseded entries stay in place with status updated.
-- `Proposed` allowed only before the relevant task ships. Flip to `Accepted` + task ID when it lands.
+- `Proposed` allowed only before the relevant task ships. Flip to `Accepted` + task ID via `orbit.adr.update` (which also flips the markdown status line on the next edit) when it lands.
 - Every ADR must cite at least one cost. No cost = the decision wasn't real.
+- **Legacy 3-digit headings.** Existing local 3-digit headings (`## ADR-NNN`) authored before the global-ID convention are grandfathered. They may be backfilled opportunistically when a folder is being substantially edited; when backfilled, the local heading is rewritten to the allocated global ID and the original local ID is preserved as a `legacy_id` in the store record. See `docs/design/project-learnings/4_decisions.md` and `docs/design/agent-families/4_decisions.md` for worked examples.
 
 An entry earns its own ADR only if **all three** hold:
 

@@ -1,6 +1,6 @@
 ---
 name: orbit-adr
-description: Use this when creating, updating, listing, showing, accepting, or superseding Orbit Architecture Decision Record artifacts via `orbit.adr.*`. Covers ADR body requirements, global ADR ID allocation, related_features/related_tasks/legacy_ids, lifecycle transitions, and how to avoid editing `.orbit/adrs/` files directly.
+description: Use this whenever an Architecture Decision Record is being created, updated, accepted, or superseded — *including* when editing a `docs/design/<feature>/4_decisions.md` file and about to add or rename a `## ADR-` heading. The global ID must be allocated via `orbit.adr.add` first; the local heading then uses that ID verbatim. Covers ADR body requirements, global ADR ID allocation, related_features/related_tasks/legacy_ids, lifecycle transitions, and how to avoid editing `.orbit/adrs/` files directly.
 ---
 
 # Orbit ADR
@@ -24,6 +24,17 @@ Both surfaces accept the same JSON. Use the CLI examples below when shell access
 Always include `model` in JSON inputs when the tool accepts it. The value is your agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized, but the family is canonical. Prefer `--input-file` for `add` and body-changing `update` calls so markdown does not get mangled by shell quoting.
 
 Run `orbit tool show orbit.adr.add` or `orbit tool list` instead of guessing if the local tool surface has changed. Do not assume future surfaces such as `orbit.adr.search` or `orbit.adr.review_thread.*` exist unless `orbit tool list` shows them.
+
+## When Editing `4_decisions.md` Directly
+
+If you are in the middle of writing prose into `docs/design/<feature>/4_decisions.md` and about to add a `## ADR-` heading, **stop and run `orbit.adr.add` first**. Then use the allocated global ID (`ADR-NNNN`, 4-digit) as the local heading verbatim. Per [ADR-0153] this is the only authoring path that keeps the global store and the local narrative in sync.
+
+Anti-patterns the failure mode looked like before [ORB-00098]:
+
+- Picking the next sequential local number (`## ADR-006 — ...` after `ADR-005`) without an allocation.
+- Picking a four-digit number that "looks global" (e.g. `## ADR-0153 — ...`) without an allocation — this is worse than the 3-digit version because readers assume `orbit.adr.show ADR-0153` will return that decision; it will not.
+
+Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, and the legacy_id resolution path. If you find an existing local-numbered ADR that was authored this way, backfill it via `orbit.adr.add` and set `legacy_ids: ["<feature>/ADR-NNN"]` on the resulting record.
 
 ## Workflow
 
