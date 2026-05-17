@@ -496,7 +496,10 @@ mod tests {
         let cases = [
             ("claude-opus-4-7", "claude <claude@orbit.local>"),
             ("gemini-3.1-pro", "gemini <gemini@orbit.local>"),
-            ("gpt-5.5", "codex <codex@openai.com>"),
+            ("gpt-5.5", "codex <codex@orbit.local>"),
+            ("grok-4", "grok <grok@orbit.local>"),
+            ("grok-build", "grok <grok@orbit.local>"),
+            ("mystery-model", "mystery-model <mystery-model@orbit.local>"),
         ];
 
         for (implemented_by, expected_author) in cases {
@@ -594,8 +597,8 @@ mod tests {
             git_output(workspace, &["log", "-1", "--format=%an <%ae>"]).expect("read author");
         let actual_committer =
             git_output(workspace, &["log", "-1", "--format=%cn <%ce>"]).expect("read committer");
-        assert_eq!(actual_author, "codex <codex@openai.com>");
-        assert_eq!(actual_committer, "codex <codex@openai.com>");
+        assert_eq!(actual_author, "codex <codex@orbit.local>");
+        assert_eq!(actual_committer, "codex <codex@orbit.local>");
         assert_eq!(
             local_user_config_snapshot(workspace),
             local_user_config_before

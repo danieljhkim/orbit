@@ -80,7 +80,8 @@ fn git_author_for_implemented_by(implemented_by: Option<&str>) -> Option<GitAuth
     match implementer_family(implemented_by).as_deref() {
         Some("claude") => Some(GitAuthor::new("claude", "claude@orbit.local")),
         Some("gemini") => Some(GitAuthor::new("gemini", "gemini@orbit.local")),
-        Some("codex") => Some(GitAuthor::new("codex", "codex@openai.com")),
+        Some("codex") => Some(GitAuthor::new("codex", "codex@orbit.local")),
+        Some("grok") => Some(GitAuthor::new("grok", "grok@orbit.local")),
         _ => {
             let slug = author_slug(implemented_by);
             Some(GitAuthor::new(slug.clone(), format!("{slug}@orbit.local")))
