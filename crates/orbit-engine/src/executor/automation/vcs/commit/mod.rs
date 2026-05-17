@@ -366,6 +366,8 @@ mod tests {
             _execution_summary: Option<String>,
             _comment: Option<String>,
             _note: Option<String>,
+            _agent: Option<String>,
+            _model: Option<String>,
         ) -> Result<Task, OrbitError> {
             Err(OrbitError::Execution(
                 "update_task_from_activity is not needed by commit tests".to_string(),

@@ -1,13 +1,15 @@
 use orbit_common::types::{OrbitError, TaskStatus};
 use serde_json::{Value, json};
 
-use crate::context::TaskHost;
+use crate::context::{RuntimeHost, TaskHost};
 
+use super::StateExecutionContext;
 use super::input::{input_string_field, required_input_string};
 
-pub(super) fn update_task<H: TaskHost + ?Sized>(
+pub(super) fn update_task<H: RuntimeHost + TaskHost + ?Sized>(
     host: &H,
     input: &Value,
+    state_context: Option<&StateExecutionContext>,
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
 
@@ -30,6 +32,30 @@ pub(super) fn update_task<H: TaskHost + ?Sized>(
 
     let note = input_string_field(input, "note")
         .or_else(|| Some(format!("automation: update_task → {status}")));
-    host.update_task_from_activity(task_id, status, None, None, note)?;
+    let (agent, model) = activity_identity(host, input, state_context)?;
+    host.update_task_from_activity(task_id, status, None, None, note, agent, model)?;
     Ok(json!({}))
+}
+
+fn activity_identity<H: RuntimeHost + ?Sized>(
+    host: &H,
+    input: &Value,
+    state_context: Option<&StateExecutionContext>,
+) -> Result<(Option<String>, Option<String>), OrbitError> {
+    if let Some(context) = state_context {
+        let agent = non_empty(context.agent.as_deref());
+        let model = non_empty(context.model.as_deref());
+        if agent.is_some() || model.is_some() {
+            return Ok((agent, model));
+        }
+    }
+
+    host.activity_implementer_identity(input)
+}
+
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }

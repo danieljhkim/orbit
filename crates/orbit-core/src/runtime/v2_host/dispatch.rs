@@ -51,18 +51,29 @@ pub(super) fn run_deterministic(
                 })
         }
         "git_commit" | "git_merge" | "git_push" | "pr_open" | "run_planning_duel"
-        | "update_task" | "worktree_setup" => execute_deterministic_action(
-            runtime,
-            action,
-            input,
-            false,
-            &HashMap::new(),
-            Option::<&StateExecutionContext>::None,
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("{err}"),
-        }),
+        | "update_task" | "worktree_setup" => {
+            let state_context = StateExecutionContext {
+                run_id: input
+                    .get("run_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+                ..StateExecutionContext::default()
+            };
+            execute_deterministic_action(
+                runtime,
+                action,
+                input,
+                false,
+                &HashMap::new(),
+                Some(&state_context),
+            )
+            .map_err(|err| DispatchError::DeterministicActionFailed {
+                action: action.to_string(),
+                message: format!("{err}"),
+            })
+        }
         // Retired Phase 4 stubs. These used to return structured skipped
         // success, which made unavailable git/API behavior look like a
         // completed deterministic action. Keep the action names registered

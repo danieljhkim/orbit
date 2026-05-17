@@ -397,6 +397,8 @@ mod tests {
             _execution_summary: Option<String>,
             _comment: Option<String>,
             _note: Option<String>,
+            _agent: Option<String>,
+            _model: Option<String>,
         ) -> Result<Task, orbit_common::types::OrbitError> {
             Err(orbit_common::types::OrbitError::Execution(
                 "planning duel must not update task status from activity".to_string(),

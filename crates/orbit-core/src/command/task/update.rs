@@ -40,6 +40,8 @@ impl OrbitRuntime {
         execution_summary: Option<String>,
         comment: Option<String>,
         note: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
     ) -> Result<Task, OrbitError> {
         self.update_task_with_status_note_and_identity(
             id,
@@ -50,8 +52,8 @@ impl OrbitRuntime {
                 ..Default::default()
             },
             note,
-            Some(SYSTEM_ACTOR_LABEL.to_string()),
-            None,
+            agent.or_else(|| model.is_none().then(|| SYSTEM_ACTOR_LABEL.to_string())),
+            model,
         )
     }
 

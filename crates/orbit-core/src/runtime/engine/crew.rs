@@ -1,4 +1,7 @@
-use orbit_common::types::{Crew, OrbitError, Task, resolve_crew};
+use orbit_common::types::{
+    Crew, CrewRoleAssignment, OrbitError, Task, all_agent_families, infer_agent_family_from_model,
+    resolve_crew,
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -183,6 +186,46 @@ impl OrbitRuntime {
         Ok(crew)
     }
 
+    pub(crate) fn implementer_identity_for_activity_input(
+        &self,
+        input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        let task = self.task_id_from_run_input(input)?;
+        let input_run_id = input
+            .get("run_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let task_run_id = task.as_ref().and_then(|task| task.job_run_id.as_deref());
+        let Some(run_id) = input_run_id.or(task_run_id) else {
+            return Ok((None, None));
+        };
+        let Some(run) = self.get_job_run_backend(run_id)? else {
+            return Ok((None, None));
+        };
+
+        if let Some(crew_name) = run
+            .resolved_crew
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            && let Ok(crew) = resolve_crew(crew_name, self.context.crews())
+            && let Some(family) = family_from_assignment(&crew.implementer)
+        {
+            return Ok((Some(family.clone()), Some(family)));
+        }
+
+        if let Some(family) = run
+            .implementer_model
+            .as_deref()
+            .and_then(infer_agent_family_from_model)
+        {
+            return Ok((Some(family.clone()), Some(family)));
+        }
+
+        Ok((None, None))
+    }
+
     pub(crate) fn resolve_and_log_crew_for_task_start(
         &self,
         task_id: &str,
@@ -222,6 +265,18 @@ impl OrbitRuntime {
         }
         Ok(None)
     }
+}
+
+fn family_from_assignment(assignment: &CrewRoleAssignment) -> Option<String> {
+    let provider = assignment.provider.trim().to_ascii_lowercase();
+    if all_agent_families()
+        .iter()
+        .any(|family| *family == provider)
+    {
+        return Some(provider);
+    }
+
+    infer_agent_family_from_model(&assignment.model)
 }
 
 #[cfg(test)]

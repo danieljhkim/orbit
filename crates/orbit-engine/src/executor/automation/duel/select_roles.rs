@@ -331,6 +331,8 @@ mod tests {
             _execution_summary: Option<String>,
             _comment: Option<String>,
             _note: Option<String>,
+            _agent: Option<String>,
+            _model: Option<String>,
         ) -> Result<Task, OrbitError> {
             unimplemented!("not needed by duel role tests")
         }

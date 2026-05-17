@@ -292,6 +292,8 @@ pub trait TaskWriteHost {
         execution_summary: Option<String>,
         comment: Option<String>,
         note: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
     ) -> Result<Task, OrbitError>;
     fn apply_task_automation_update(
         &self,
@@ -431,6 +433,12 @@ pub trait RuntimeHost {
             limit: 1_000_000,
             ..InvocationQuery::default()
         })
+    }
+    fn activity_implementer_identity(
+        &self,
+        _input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        Ok((None, None))
     }
     fn run_tool_with_context_and_role(
         &self,
@@ -813,6 +821,8 @@ impl TaskWriteHost for AutomationExecutorHost<'_> {
         execution_summary: Option<String>,
         comment: Option<String>,
         note: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
     ) -> Result<Task, OrbitError> {
         self.task_writer.update_task_from_activity(
             task_id,
@@ -820,6 +830,8 @@ impl TaskWriteHost for AutomationExecutorHost<'_> {
             execution_summary,
             comment,
             note,
+            agent,
+            model,
         )
     }
 
@@ -913,6 +925,13 @@ impl RuntimeHost for AutomationExecutorHost<'_> {
         query: InvocationQuery,
     ) -> Result<Vec<InvocationRecord>, OrbitError> {
         self.runtime.invocation_records(query)
+    }
+
+    fn activity_implementer_identity(
+        &self,
+        input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        self.runtime.activity_implementer_identity(input)
     }
 
     fn run_tool_with_context_and_role(

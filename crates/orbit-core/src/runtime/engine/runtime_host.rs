@@ -88,6 +88,13 @@ impl RuntimeHost for OrbitRuntime {
         OrbitRuntime::invocation_records(self, query)
     }
 
+    fn activity_implementer_identity(
+        &self,
+        input: &Value,
+    ) -> Result<(Option<String>, Option<String>), OrbitError> {
+        self.implementer_identity_for_activity_input(input)
+    }
+
     fn run_tool_with_context_and_role(
         &self,
         name: &str,
