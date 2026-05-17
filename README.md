@@ -68,7 +68,6 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 > Don't run anything destructive (overwriting files, modifying shell config) without confirming. If `make install` would write outside `~/.cargo/bin`, ask me first.
 
 </details>
-<br>
 
 ### Manual Setup (old school way)
 
@@ -103,11 +102,11 @@ TASK_ID=$(orbit task add \
 
 orbit task approve "$TASK_ID"
 
-# launch interactive dashboard
-orbit web serve
-
 # conflict-aware, parallel flush of the backlog tasks to PRs
 orbit run ship
+
+# launch interactive dashboard
+orbit web serve
 ```
 
 </details>
@@ -238,7 +237,8 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 
 ## Workspace Layout of `.orbit`
 
-`orbit workspace init` creates a `.orbit/` directory at the repo root. All workspace state lives here — the directory is the source of truth, and removing it returns the workspace to a pre-init state.
+- `orbit workspace init` creates a `.orbit/` directory at the repo root. Workspace-local state lives there; removing the directory returns the workspace to a pre-init state.
+- `orbit init` creates a `.orbit/` directory in the user's home (`~/.orbit/`). User-scoped state lives there; removing the directory returns the user environment to a pre-init state.
 
 ```
 .orbit/                          # workspace-local (safe to delete → clean slate)
