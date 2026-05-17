@@ -117,6 +117,7 @@ ci-fast:
 	./scripts/check-cli-imports.sh
 	./scripts/check-stability.sh
 	./scripts/check-learning-layout.sh
+	./scripts/check-artifact-redaction-boundary.sh
 
 # Verify every workspace crate declares its stability tier
 stability:

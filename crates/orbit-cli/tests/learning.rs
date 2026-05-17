@@ -386,6 +386,76 @@ fn cli_update_then_show_reflects_changes() {
 }
 
 #[test]
+fn tool_run_redaction_audit_is_queryable_via_audit_list_json() {
+    let workspace = TestWorkspace::new();
+    let secret = "ghp_012345678901234567890123456789012345";
+    let input_path = workspace.work.join("learning-input.json");
+    fs::write(
+        &input_path,
+        serde_json::to_string(&json!({
+            "summary": format!("redact {secret}"),
+            "scope": {"tags": ["audit"]},
+            "model": "codex",
+        }))
+        .expect("serialize input"),
+    )
+    .expect("write input");
+
+    let mut command = cargo_bin_cmd!("orbit");
+    let output = command
+        .current_dir(&workspace.work)
+        .env("HOME", &workspace.home)
+        .env("USERPROFILE", &workspace.home)
+        .env("GITHUB_TOKEN", secret)
+        .env_remove("ORBIT_ROOT")
+        .args([
+            "tool",
+            "run",
+            "orbit.learning.add",
+            "--input-file",
+            input_path.to_str().expect("input path"),
+            "--full",
+        ])
+        .output()
+        .expect("run orbit tool");
+    assert!(
+        output.status.success(),
+        "tool run failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let added: Value = serde_json::from_slice(&output.stdout).expect("tool output JSON");
+    assert_eq!(added["redactions_applied"], true);
+    let id = added["id"].as_str().expect("learning id");
+
+    // L20260517-9: audit assertions use `orbit audit list --json`, not direct SQLite reads.
+    let audit = workspace.run_json(
+        &[
+            "audit",
+            "list",
+            "--json",
+            "--tool",
+            "orbit.learning.add",
+            "--limit",
+            "50",
+        ],
+        "audit list",
+    );
+    let redaction_event = audit
+        .as_array()
+        .expect("audit array")
+        .iter()
+        .find(|event| event["target_type"] == "artifact_redaction" && event["target_id"] == id)
+        .expect("redaction audit event");
+    let args = redaction_event["arguments_json"]
+        .as_str()
+        .expect("arguments_json");
+    assert!(args.contains("\"redaction_kinds\":[\"env\"]"));
+    assert!(!args.contains(secret));
+    assert!(!args.contains("[REDACTED_ENV]"));
+}
+
+#[test]
 fn cli_reindex_returns_rebuilt_count() {
     let workspace = TestWorkspace::new();
     workspace.add_learning("a", &[], &[]);

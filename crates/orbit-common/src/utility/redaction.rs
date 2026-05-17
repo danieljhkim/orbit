@@ -18,6 +18,9 @@
 //! - [`PatternRedactor`] — regex pattern scrubbing (HTTP / argv / JSON)
 //! - [`redact_all`] — env + default patterns in one pass (use when you don't
 //!   know what shape the input has and want maximum coverage)
+//! - [`is_high_confidence_credential_token`] — exact-token refusal heuristic
+//!   for write boundaries that should reject clear credential values instead
+//!   of masking them silently
 
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
@@ -31,6 +34,9 @@ use crate::types::OrbitError;
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
+static OPENAI_KEY_PATTERN: OnceLock<Regex> = OnceLock::new();
+static GITHUB_TOKEN_PATTERN: OnceLock<Regex> = OnceLock::new();
+static SLACK_TOKEN_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // Env-var value scrubbing
@@ -107,6 +113,7 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
                 .map(|suggestion| redact_sensitive_env_text(&suggestion))
                 .collect(),
         },
+        OrbitError::SensitiveInput(m) => OrbitError::SensitiveInput(redact_sensitive_env_text(&m)),
         OrbitError::SkillValidation(m) => {
             OrbitError::SkillValidation(redact_sensitive_env_text(&m))
         }
@@ -173,20 +180,21 @@ pub fn is_sensitive_env_name(name: &str) -> bool {
 // Pattern-based redaction (HTTP + argv)
 // ---------------------------------------------------------------------------
 
-/// Regex-driven scrubber for HTTP-shape and argv-shape secrets.
+/// Regex-driven scrubber for HTTP-shape and credential-shaped secrets.
 ///
 /// Builds to `default()` give you the same coverage as the former
 /// `RedactionMiddleware` (Authorization / x-api-key / Bearer / raw header
-/// lines). Use [`PatternRedactor::with_argv_secrets`] to also catch bare
-/// `sk-…` tokens — needed when scrubbing subprocess argv where a provider
-/// key sometimes ends up mis-configured.
+/// lines) plus high-confidence provider tokens that may appear inside prose.
+/// Use [`PatternRedactor::with_argv_secrets`] when scrubbing subprocess argv;
+/// it retains compatibility with the old argv-specific constructor.
 pub struct PatternRedactor {
     patterns: Vec<(Regex, &'static str)>,
 }
 
 impl PatternRedactor {
-    /// HTTP-only default: Authorization / x-api-key / api_key / Bearer in
-    /// both JSON and raw-header form.
+    /// Authorization / x-api-key / api_key / Bearer in both JSON and
+    /// raw-header form, plus common provider token shapes that may appear
+    /// inside free text.
     pub fn http_default() -> Self {
         let patterns = vec![
             (
@@ -216,6 +224,18 @@ impl PatternRedactor {
             (
                 Regex::new(r"(?im)^(\s*api[_-]?key\s*:\s*).+$").expect("valid regex"),
                 "${1}[REDACTED_AUTH]",
+            ),
+            (
+                Regex::new(r"sk-[A-Za-z0-9_\-]{20,}").expect("valid regex"),
+                "[REDACTED_API_KEY]",
+            ),
+            (
+                Regex::new(r"ghp_[A-Za-z0-9]{36}").expect("valid regex"),
+                "[REDACTED_API_KEY]",
+            ),
+            (
+                Regex::new(r"xox[baprs]-[A-Za-z0-9\-]{10,}").expect("valid regex"),
+                "[REDACTED_API_KEY]",
             ),
         ];
         Self { patterns }
@@ -277,4 +297,78 @@ pub fn redact_all(input: &str) -> String {
 
 pub(crate) fn default_pattern_redactor() -> &'static PatternRedactor {
     DEFAULT_PATTERN_REDACTOR.get_or_init(PatternRedactor::http_default)
+}
+
+/// Returns `true` when the whole trimmed value is a known credential token.
+///
+/// Callers use this to refuse writes where the entire field is plainly a
+/// credential. The same token embedded in larger prose is left to
+/// [`redact_all`] so the surrounding context can be preserved.
+pub fn is_high_confidence_credential_token(input: &str) -> bool {
+    let trimmed = input.trim();
+    openai_key_pattern().is_match(trimmed)
+        || github_token_pattern().is_match(trimmed)
+        || slack_token_pattern().is_match(trimmed)
+}
+
+fn openai_key_pattern() -> &'static Regex {
+    OPENAI_KEY_PATTERN.get_or_init(|| Regex::new(r"^sk-[A-Za-z0-9_\-]{20,}$").expect("valid regex"))
+}
+
+fn github_token_pattern() -> &'static Regex {
+    GITHUB_TOKEN_PATTERN.get_or_init(|| Regex::new(r"^ghp_[A-Za-z0-9]{36}$").expect("valid regex"))
+}
+
+fn slack_token_pattern() -> &'static Regex {
+    SLACK_TOKEN_PATTERN
+        .get_or_init(|| Regex::new(r"^xox[baprs]-[A-Za-z0-9\-]{10,}$").expect("valid regex"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_all_masks_embedded_provider_tokens() {
+        let input = concat!(
+            "OpenAI sk-0123456789abcdefghijklmn ",
+            "GitHub ghp_012345678901234567890123456789012345 ",
+            "Slack xoxb-0123456789-abcd"
+        );
+
+        let redacted = redact_all(input);
+
+        assert!(!redacted.contains("sk-0123456789abcdefghijklmn"));
+        assert!(!redacted.contains("ghp_012345678901234567890123456789012345"));
+        assert!(!redacted.contains("xoxb-0123456789-abcd"));
+        assert!(redacted.contains("[REDACTED_API_KEY]"));
+    }
+
+    #[test]
+    fn high_confidence_credential_detection_is_whole_token_only() {
+        assert!(is_high_confidence_credential_token(
+            "sk-0123456789abcdefghijklmn"
+        ));
+        assert!(is_high_confidence_credential_token(
+            "ghp_012345678901234567890123456789012345"
+        ));
+        assert!(is_high_confidence_credential_token("xoxb-0123456789-abcd"));
+        assert!(!is_high_confidence_credential_token(
+            "token sk-0123456789abcdefghijklmn in prose"
+        ));
+    }
+
+    #[test]
+    fn redact_all_is_idempotent_for_fixture_inputs() {
+        let fixtures = [
+            "Authorization: Bearer abcdef012345",
+            r#"{"api_key":"abcdef012345"}"#,
+            "sk-0123456789abcdefghijklmn",
+            "already [REDACTED_ENV] and [REDACTED_API_KEY]",
+        ];
+
+        for fixture in fixtures {
+            assert_eq!(redact_all(&redact_all(fixture)), redact_all(fixture));
+        }
+    }
 }

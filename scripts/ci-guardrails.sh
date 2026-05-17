@@ -20,3 +20,4 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
 "$repo_root/scripts/check-cli-imports.sh"
 "$repo_root/scripts/check-stability.sh"
 "$repo_root/scripts/check-learning-layout.sh"
+"$repo_root/scripts/check-artifact-redaction-boundary.sh"

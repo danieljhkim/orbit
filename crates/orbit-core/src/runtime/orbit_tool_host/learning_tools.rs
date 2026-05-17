@@ -19,6 +19,10 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
+use super::artifact_redaction::{
+    ArtifactRedactionReport, emit_redaction_audits, flag_without_redactions, redactions_flagged,
+    sanitize_free_text_field, sanitize_path_field,
+};
 use super::input::optional_bool_alias;
 use super::json::{
     learning_comment_to_json, learning_search_result_to_json, learning_show_to_json,
@@ -31,14 +35,24 @@ pub(super) fn add(
     _agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let summary = required_string(&input, &["summary"], "summary")?;
+    let mut redactions = ArtifactRedactionReport::default();
+    let summary = redactions.absorb(sanitize_free_text_field(
+        "summary",
+        required_string(&input, &["summary"], "summary")?,
+    )?);
     let scope_value = input
         .get("scope")
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
-    let scope = parse_scope_value(scope_value)?;
-    let body = optional_string(&input, "body")?.unwrap_or_default();
-    let evidence = parse_evidence_value(input.get("evidence"))?;
+    let scope = sanitize_scope(parse_scope_value(scope_value)?, &mut redactions)?;
+    let body = redactions.absorb(sanitize_free_text_field(
+        "body",
+        optional_string(&input, "body")?.unwrap_or_default(),
+    )?);
+    let evidence = sanitize_evidence(
+        parse_evidence_value(input.get("evidence"))?,
+        &mut redactions,
+    )?;
     let priority = parse_optional_priority(&input)?;
     let created_by = optional_string_alias(&input, &["created_by", "createdBy"])?.or(model);
 
@@ -50,7 +64,16 @@ pub(super) fn add(
         created_by,
         priority,
     })?;
-    Ok(learning_to_json(&learning))
+    emit_redaction_audits(
+        runtime,
+        "orbit.learning.add",
+        "learning",
+        &learning.id,
+        &redactions,
+        None,
+        learning.created_by.as_deref(),
+    )?;
+    Ok(redactions_flagged(learning_to_json(&learning), &redactions))
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -137,16 +160,32 @@ pub(super) fn comment_add(
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
     let learning_id = required_string(&input, &["learning_id", "learningId", "id"], "learning_id")?;
-    let body = required_string(&input, &["body"], "body")?;
+    let mut redactions = ArtifactRedactionReport::default();
+    let body = redactions.absorb(sanitize_free_text_field(
+        "body",
+        required_string(&input, &["body"], "body")?,
+    )?);
     let author_model = optional_string(&input, "model")?.or(model).ok_or_else(|| {
         OrbitError::InvalidInput("learning comment add requires `model`".to_string())
     })?;
-    let comment = runtime.add_learning_comment(learning_id, body, author_model)?;
-    Ok(json!({
-        "id": comment.id,
-        "learning_id": comment.learning_id,
-        "created_at": comment.created_at.to_rfc3339(),
-    }))
+    let comment = runtime.add_learning_comment(learning_id, body, author_model.clone())?;
+    emit_redaction_audits(
+        runtime,
+        "orbit.learning.comment.add",
+        "learning_comment",
+        &comment.id,
+        &redactions,
+        None,
+        Some(&author_model),
+    )?;
+    Ok(redactions_flagged(
+        json!({
+            "id": comment.id,
+            "learning_id": comment.learning_id,
+            "created_at": comment.created_at.to_rfc3339(),
+        }),
+        &redactions,
+    ))
 }
 
 pub(super) fn comment_list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -179,15 +218,28 @@ pub(super) fn update(
     _model: Option<String>,
 ) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let summary = optional_string(&input, "summary")?;
+    let mut redactions = ArtifactRedactionReport::default();
+    let summary = optional_string(&input, "summary")?
+        .map(|value| {
+            sanitize_free_text_field("summary", value).map(|field| redactions.absorb(field))
+        })
+        .transpose()?;
     let scope = match input.get("scope") {
         Some(Value::Null) | None => None,
-        Some(value) => Some(parse_scope_value(value.clone())?),
+        Some(value) => Some(sanitize_scope(
+            parse_scope_value(value.clone())?,
+            &mut redactions,
+        )?),
     };
-    let body = optional_string(&input, "body")?;
+    let body = optional_string(&input, "body")?
+        .map(|value| sanitize_free_text_field("body", value).map(|field| redactions.absorb(field)))
+        .transpose()?;
     let evidence = match input.get("evidence") {
         Some(Value::Null) | None => None,
-        Some(value) => Some(parse_evidence_value(Some(value))?),
+        Some(value) => Some(sanitize_evidence(
+            parse_evidence_value(Some(value))?,
+            &mut redactions,
+        )?),
     };
     let priority = parse_optional_priority_field(&input)?;
 
@@ -201,7 +253,16 @@ pub(super) fn update(
             priority,
         },
     )?;
-    Ok(learning_to_json(&updated))
+    emit_redaction_audits(
+        runtime,
+        "orbit.learning.update",
+        "learning",
+        &id,
+        &redactions,
+        None,
+        None,
+    )?;
+    Ok(redactions_flagged(learning_to_json(&updated), &redactions))
 }
 
 pub(super) fn supersede(
@@ -228,10 +289,10 @@ pub(super) fn supersede(
         .learnings()
         .get(&with)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, with.clone()))?;
-    Ok(json!({
+    Ok(flag_without_redactions(json!({
         "old": learning_to_json(&old),
         "new": learning_to_json(&new),
-    }))
+    })))
 }
 
 pub(super) fn reindex(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
@@ -284,6 +345,39 @@ fn parse_scope_value(value: Value) -> Result<LearningScope, OrbitError> {
         scope.semantic_seed = Some(seed.clone());
     }
     Ok(scope)
+}
+
+fn sanitize_scope(
+    mut scope: LearningScope,
+    redactions: &mut ArtifactRedactionReport,
+) -> Result<LearningScope, OrbitError> {
+    scope.paths = scope
+        .paths
+        .into_iter()
+        .map(|path| redactions.absorb(sanitize_path_field("scope.paths", path)))
+        .collect();
+    scope.tags = scope
+        .tags
+        .into_iter()
+        .map(|tag| {
+            sanitize_free_text_field("scope.tags", tag).map(|field| redactions.absorb(field))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(scope)
+}
+
+fn sanitize_evidence(
+    evidence: Vec<LearningEvidence>,
+    redactions: &mut ArtifactRedactionReport,
+) -> Result<Vec<LearningEvidence>, OrbitError> {
+    evidence
+        .into_iter()
+        .map(|mut item| {
+            item.reference =
+                redactions.absorb(sanitize_free_text_field("evidence.ref", item.reference)?);
+            Ok(item)
+        })
+        .collect()
 }
 
 fn parse_string_list(field: &str, value: &Value) -> Result<Vec<String>, OrbitError> {

@@ -46,6 +46,7 @@ fn error_code(err: &OrbitError) -> &'static str {
         OrbitError::PolicyDenied(_) => "policy_denied",
         OrbitError::TaskApprovalRequired(_) => "approval_required",
         OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
+        OrbitError::SensitiveInput(_) => "sensitive_input",
         OrbitError::SkillValidation(_) | OrbitError::JobValidation(_) => "validation_failed",
         OrbitError::TaskStatusTransition(_)
         | OrbitError::JobRunStateTransition(_)

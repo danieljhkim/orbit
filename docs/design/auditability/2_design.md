@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-17 (ORB-00106)
+**Last updated:** 2026-05-17 (ORB-00106, ORB-00137)
 
 This document describes Orbit's shipped auditability implementation across command audit rows, activity/job envelopes, loop-level provider/tool traces, blob storage, redaction, identity attribution, metrics-adjacent invocation records, and known limitations. See [1_overview.md](./1_overview.md) for the feature purpose and [3_vision.md](./3_vision.md) for future questions.
 
@@ -73,7 +73,7 @@ Loop events reference hashes for request bodies, response bodies, tool inputs, a
 
 `crates/orbit-common/src/utility/blob_store.rs` writes content-addressed blobs under `{root}/{hash_prefix}/{hash}`. The hash is computed after redaction, and existing blob paths are reused.
 
-`crates/orbit-common/src/utility/redaction.rs` centralizes sensitive live environment value scrubbing plus regex-based HTTP/argv patterns for authorization headers, API keys, bearer tokens, JSON API-key fields, and bare `sk-...` tokens when argv scrubbing is requested. CLI audit errors, blob bytes, selected pipeline outputs/errors, and the default tracing subscriber all redact before persistence or terminal/JSONL output. The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies stored blob bytes omit the raw secret and contain a marker.
+`crates/orbit-common/src/utility/redaction.rs` centralizes sensitive live environment value scrubbing plus regex-based HTTP, argv, and credential-token patterns for authorization headers, API keys, bearer tokens, JSON API-key fields, `sk-...`, `ghp_...`, and `xox...` tokens. CLI audit errors, blob bytes, selected pipeline outputs/errors, artifact write text, and the default tracing subscriber all redact before persistence or terminal/JSONL output. The smoke example `crates/orbit-agent/examples/redaction_smoke.rs` verifies stored blob bytes omit the raw secret and contain a marker. Artifact write specifics live in [specs/artifact-redaction.md](./specs/artifact-redaction.md). [ORB-00137]
 
 Dashboard log previews added by [T20260508-14] are derived views over `.orbit/state/audit/v2_loop` and `.orbit/state/audit/blobs`; they do not duplicate full transcripts into SQLite. Preview responses are byte- and line-capped, apply defensive read-time redaction with the shared redactor, and preserve existing write-time redaction markers. The focused diagnostics error feed is also derived, combining global ERROR tracing rows with structured `ERROR <target>:` lines found in agent stderr blobs. No `.orbit/state/diagnostics/errors/` store exists in this design; retention remains bounded by the existing v2 audit, blob, and global log retention roots.
 

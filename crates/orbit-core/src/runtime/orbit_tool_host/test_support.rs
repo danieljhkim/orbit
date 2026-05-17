@@ -130,3 +130,44 @@ impl Drop for UnmanagedToolEnvGuard {
         }
     }
 }
+
+pub(super) struct EnvVarGuard {
+    _lock: MutexGuard<'static, ()>,
+    vars: Vec<(&'static str, Option<String>)>,
+}
+
+pub(super) fn env_var_guard(updates: &[(&'static str, Option<&str>)]) -> EnvVarGuard {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let lock = LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let vars = updates
+        .iter()
+        .map(|(name, _)| (*name, std::env::var(name).ok()))
+        .collect::<Vec<_>>();
+    // SAFETY: the guard serializes these test env mutations and restores values on drop.
+    unsafe {
+        for (name, value) in updates {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+    EnvVarGuard { _lock: lock, vars }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: the guard holds the serialization lock for the full mutation window.
+        unsafe {
+            for (name, value) in &self.vars {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+}

@@ -55,6 +55,7 @@ fn error_code(error: &OrbitError) -> &'static str {
         OrbitError::TaskApprovalRequired(_) => "task_approval_required",
         OrbitError::CompanionNotInstalled(_) => "companion_not_installed",
         OrbitError::InvalidInput(_) | OrbitError::InvalidInputDiagnostic { .. } => "invalid_input",
+        OrbitError::SensitiveInput(_) => "sensitive_input",
         OrbitError::SkillValidation(_) => "skill_validation_failed",
         OrbitError::JobValidation(_) => "job_validation_failed",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",

@@ -15,18 +15,30 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
+use super::artifact_redaction::{
+    ArtifactRedactionReport, emit_redaction_audits, flag_without_redactions, redactions_flagged,
+    sanitize_free_text_field,
+};
+
 pub(super) fn add(
     runtime: &OrbitRuntime,
     input: Value,
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let title = required_string(&input, &["title"], "title")?;
+    let mut redactions = ArtifactRedactionReport::default();
+    let title = redactions.absorb(sanitize_free_text_field(
+        "title",
+        required_string(&input, &["title"], "title")?,
+    )?);
     let owner = match optional_string(&input, "owner")? {
         Some(value) => value,
         None => actor_label(runtime, agent.as_deref(), model.as_deref()),
     };
-    let body = required_string(&input, &["body"], "body")?;
+    let body = redactions.absorb(sanitize_free_text_field(
+        "body",
+        required_string(&input, &["body"], "body")?,
+    )?);
     let related_features =
         optional_string_list_alias(&input, &["related_features", "features"])?.unwrap_or_default();
     let related_tasks =
@@ -39,7 +51,16 @@ pub(super) fn add(
         related_tasks,
         body,
     })?;
-    Ok(adr_to_json(&adr))
+    emit_redaction_audits(
+        runtime,
+        "orbit.adr.add",
+        "adr",
+        &adr.id,
+        &redactions,
+        agent.as_deref(),
+        model.as_deref(),
+    )?;
+    Ok(redactions_flagged(adr_to_json(&adr), &redactions))
 }
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -119,10 +140,19 @@ pub(super) fn update(
         .map(|raw| AdrStatus::from_str(&raw).map_err(OrbitError::InvalidInput))
         .transpose()?;
 
+    let mut redactions = ArtifactRedactionReport::default();
     let fields = AdrDocumentUpdateParams {
-        title: optional_string(&input, "title")?,
+        title: optional_string(&input, "title")?
+            .map(|value| {
+                sanitize_free_text_field("title", value).map(|field| redactions.absorb(field))
+            })
+            .transpose()?,
         owner: optional_string(&input, "owner")?,
-        body: optional_string(&input, "body")?,
+        body: optional_string(&input, "body")?
+            .map(|value| {
+                sanitize_free_text_field("body", value).map(|field| redactions.absorb(field))
+            })
+            .transpose()?,
         related_features: optional_string_list_alias(&input, &["related_features", "features"])?,
         related_tasks: optional_string_list_alias(&input, &["related_tasks", "tasks"])?,
         supersedes: optional_string_list_alias(&input, &["supersedes"])?,
@@ -139,6 +169,15 @@ pub(super) fn update(
 
     if has_document_changes(&fields) {
         adrs.update_document(&id, &fields)?;
+        emit_redaction_audits(
+            runtime,
+            "orbit.adr.update",
+            "adr",
+            &id,
+            &redactions,
+            agent.as_deref(),
+            model.as_deref(),
+        )?;
     }
 
     if let Some(target) = new_status {
@@ -193,7 +232,7 @@ pub(super) fn update(
     let updated = adrs
         .get(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id.clone()))?;
-    Ok(adr_to_json(&updated))
+    Ok(redactions_flagged(adr_to_json(&updated), &redactions))
 }
 
 pub(super) fn supersede(
@@ -223,7 +262,7 @@ pub(super) fn supersede(
     let updated = adrs
         .get(&old_id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, old_id.clone()))?;
-    Ok(adr_to_json(&updated))
+    Ok(flag_without_redactions(adr_to_json(&updated)))
 }
 
 fn parse_status_filter(raw: &str) -> Result<AdrStatus, OrbitError> {
@@ -328,7 +367,7 @@ fn record_transition_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::orbit_tool_host::test_support::test_runtime;
+    use crate::runtime::orbit_tool_host::test_support::{env_var_guard, test_runtime};
     use orbit_common::types::NotFoundKind;
 
     fn assert_adr_field(value: &Value, field: &str, expected: &str) {
@@ -642,5 +681,109 @@ mod tests {
         )
         .expect_err("rejects non-accepted target");
         assert!(matches!(err, OrbitError::AdrInvalidTransition(_)));
+    }
+
+    #[test]
+    fn add_and_update_redact_title_and_body_before_persistence() {
+        let secret = "ghp_012345678901234567890123456789012345";
+        let _env = env_var_guard(&[("GITHUB_TOKEN", Some(secret))]);
+        let (_guard, runtime, _repo_root) = test_runtime();
+
+        let created = add(
+            &runtime,
+            json!({
+                "title": format!("Decision {secret}"),
+                "owner": "claude",
+                "body": format!("## Context\nBearer abcdef and {secret}."),
+            }),
+            Some("claude".to_string()),
+            None,
+        )
+        .expect("add with secret");
+
+        assert_eq!(created["redactions_applied"], true);
+        let id = created["id"].as_str().expect("id");
+        let adr_dir = runtime.paths().adrs_dir.join("proposed").join(id);
+        let yaml = std::fs::read_to_string(adr_dir.join("adr.yaml")).expect("read adr yaml");
+        let body = std::fs::read_to_string(adr_dir.join("body.md")).expect("read adr body");
+        assert!(yaml.contains("[REDACTED_ENV]"));
+        assert!(!yaml.contains(secret));
+        assert!(body.contains("[REDACTED_ENV]"));
+        assert!(body.contains("Bearer [REDACTED_AUTH]"));
+        assert!(!body.contains(secret));
+
+        let updated = update(
+            &runtime,
+            json!({
+                "id": id,
+                "body": "The embedded key sk-0123456789abcdefghijklmn is masked.",
+            }),
+            None,
+            None,
+        )
+        .expect("update body");
+        assert_eq!(updated["redactions_applied"], true);
+        let body = std::fs::read_to_string(adr_dir.join("body.md")).expect("read updated body");
+        assert!(body.contains("[REDACTED_API_KEY]"));
+        assert!(!body.contains("sk-0123456789abcdefghijklmn"));
+    }
+
+    #[test]
+    fn exact_credential_title_is_rejected_before_adr_write() {
+        let (_guard, runtime, _repo_root) = test_runtime();
+        let err = add(
+            &runtime,
+            json!({
+                "title": "sk-0123456789abcdefghijklmn",
+                "owner": "claude",
+                "body": "body",
+            }),
+            None,
+            None,
+        )
+        .expect_err("reject exact credential");
+
+        assert!(matches!(err, OrbitError::SensitiveInput(_)));
+        assert!(!runtime.paths().adrs_dir.join("proposed/ADR-0001").exists());
+    }
+
+    #[test]
+    fn supersede_response_reports_no_redactions() {
+        let (_guard, runtime, _repo_root) = test_runtime();
+        let old = add(
+            &runtime,
+            json!({"title": "Old", "owner": "claude", "body": "b"}),
+            None,
+            None,
+        )
+        .expect("old");
+        let new = add(
+            &runtime,
+            json!({"title": "New", "owner": "claude", "body": "b"}),
+            None,
+            None,
+        )
+        .expect("new");
+        update(
+            &runtime,
+            json!({
+                "id": new["id"],
+                "status": "accepted",
+                "related_tasks": ["T20260511-1"],
+            }),
+            None,
+            None,
+        )
+        .expect("accept new");
+
+        let response = supersede(
+            &runtime,
+            json!({"old_id": old["id"], "new_id": new["id"]}),
+            None,
+            None,
+        )
+        .expect("supersede");
+
+        assert_eq!(response["redactions_applied"], false);
     }
 }

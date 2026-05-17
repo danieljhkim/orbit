@@ -54,7 +54,6 @@ fn workspace_root(input: &Value) -> Result<std::path::PathBuf, OrbitError> {
 mod tests {
     use orbit_common::types::NotFoundKind;
     use serde_json::json;
-    use serde_json::json;
 
     use super::*;
     use crate::runtime::orbit_tool_host::test_support::test_runtime;

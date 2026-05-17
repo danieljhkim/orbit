@@ -393,12 +393,21 @@ pub fn normalize_learning_tags(raw_tags: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::with_capacity(raw_tags.len());
     let mut seen = BTreeSet::new();
     for raw in raw_tags {
-        let tag = raw.trim().to_lowercase();
+        let trimmed = raw.trim();
+        let tag = if is_redaction_marker(trimmed) {
+            trimmed.to_string()
+        } else {
+            trimmed.to_lowercase()
+        };
         if !tag.is_empty() && seen.insert(tag.clone()) {
             normalized.push(tag);
         }
     }
     normalized
+}
+
+fn is_redaction_marker(value: &str) -> bool {
+    value.starts_with("[REDACTED_") && value.ends_with(']')
 }
 
 /// Trim + dedupe a list of path-glob strings, preserving the first occurrence
@@ -453,10 +462,11 @@ mod tests {
             "  Perf ".to_string(),
             "BENCH".to_string(),
             "perf".to_string(),
+            "[REDACTED_ENV]".to_string(),
             "   ".to_string(),
         ]);
 
-        assert_eq!(tags, vec!["perf", "bench"]);
+        assert_eq!(tags, vec!["perf", "bench", "[REDACTED_ENV]"]);
     }
 
     #[test]

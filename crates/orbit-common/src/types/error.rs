@@ -57,6 +57,8 @@ pub enum OrbitError {
         message: String,
         did_you_mean: Vec<String>,
     },
+    #[error("sensitive input refused: {0}")]
+    SensitiveInput(String),
     #[error("skill validation failed: {0}")]
     SkillValidation(String),
     #[error("job validation failed: {0}")]

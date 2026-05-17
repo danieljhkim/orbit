@@ -24,7 +24,7 @@ use orbit_store::{LearningCreateParams, LearningSearchParams};
 use orbit_tools::ToolRegistry;
 use serde_json::{Value, json};
 
-use super::test_support::test_runtime;
+use super::test_support::{env_var_guard, test_runtime};
 use crate::OrbitRuntime;
 
 fn registry_with_builtins() -> ToolRegistry {
@@ -266,6 +266,182 @@ fn comment_tools_add_list_and_delete() {
     )
     .expect("deleted comments");
     assert_eq!(deleted.as_array().expect("array").len(), 1);
+}
+
+#[test]
+fn add_redacts_learning_fields_and_home_only_paths_before_yaml_persistence() {
+    let secret = "ghp_012345678901234567890123456789012345";
+    let home = std::env::var("HOME").expect("HOME set for redaction test");
+    let _env = env_var_guard(&[("GITHUB_TOKEN", Some(secret))]);
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let home_glob = format!("{home}/workspace/[A-Za-z0-9_-]{{20,}}/**/*.rs");
+
+    let created = super::learning_tools::add(
+        &runtime,
+        json!({
+            "summary": format!("summary {secret}"),
+            "scope": {
+                "paths": [home_glob],
+                "tags": [format!("tag-{secret}")],
+            },
+            "body": format!("body {secret} and Bearer abcdef012345"),
+            "evidence": [{"kind": "external", "ref": format!("ref {secret}")}],
+            "model": "codex",
+        }),
+        None,
+        Some("codex".to_string()),
+    )
+    .expect("add redacted learning");
+
+    assert_eq!(created["redactions_applied"], true);
+    let id = created["id"].as_str().expect("id");
+    let yaml_path = runtime.paths().learnings_dir.join(id).join("learning.yaml");
+    let yaml = std::fs::read_to_string(yaml_path).expect("read learning yaml");
+    assert!(yaml.contains("[REDACTED_ENV]"));
+    assert!(yaml.contains("Bearer [REDACTED_AUTH]"));
+    assert!(yaml.contains("~/workspace/[A-Za-z0-9_-]{20,}/**/*.rs"));
+    assert!(!yaml.contains(secret));
+    assert!(
+        yaml.contains("[A-Za-z0-9_-]{20,}"),
+        "path glob character class should be preserved"
+    );
+}
+
+#[test]
+fn update_comment_and_response_flags_cover_redacted_and_plain_invocations() {
+    let secret = "ghp_012345678901234567890123456789012345";
+    let _env = env_var_guard(&[("GITHUB_TOKEN", Some(secret))]);
+    let (_guard, runtime, _repo_root) = test_runtime();
+
+    let plain = super::learning_tools::add(
+        &runtime,
+        json!({
+            "summary": "plain",
+            "scope": {"tags": ["security"]},
+            "model": "codex",
+        }),
+        None,
+        Some("codex".to_string()),
+    )
+    .expect("plain add");
+    assert_eq!(plain["redactions_applied"], false);
+    let id = plain["id"].as_str().expect("id");
+
+    let updated = super::learning_tools::update(
+        &runtime,
+        json!({
+            "id": id,
+            "summary": format!("updated {secret}"),
+            "evidence": [{"kind": "external", "ref": format!("evidence {secret}")}],
+        }),
+        None,
+        None,
+    )
+    .expect("update");
+    assert_eq!(updated["redactions_applied"], true);
+
+    let comment = super::learning_tools::comment_add(
+        &runtime,
+        json!({
+            "learning_id": id,
+            "body": format!("comment {secret}"),
+            "model": "codex",
+        }),
+        None,
+        None,
+    )
+    .expect("comment add");
+    assert_eq!(comment["redactions_applied"], true);
+
+    let yaml =
+        std::fs::read_to_string(runtime.paths().learnings_dir.join(id).join("learning.yaml"))
+            .expect("read yaml");
+    assert!(yaml.contains("[REDACTED_ENV]"));
+    assert!(!yaml.contains(secret));
+
+    let comments = std::fs::read_to_string(
+        runtime
+            .paths()
+            .learnings_dir
+            .join(id)
+            .join("comments.jsonl"),
+    )
+    .expect("read comments");
+    assert!(comments.contains("[REDACTED_ENV]"));
+    assert!(!comments.contains(secret));
+}
+
+#[test]
+fn exact_credential_is_rejected_but_embedded_credential_is_masked() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+
+    let err = super::learning_tools::add(
+        &runtime,
+        json!({
+            "summary": "sk-0123456789abcdefghijklmn",
+            "scope": {"tags": ["security"]},
+            "model": "codex",
+        }),
+        None,
+        Some("codex".to_string()),
+    )
+    .expect_err("reject exact credential");
+    assert!(matches!(err, OrbitError::SensitiveInput(_)));
+
+    let created = super::learning_tools::add(
+        &runtime,
+        json!({
+            "summary": "embedded sk-0123456789abcdefghijklmn token",
+            "scope": {"tags": ["security"]},
+            "model": "codex",
+        }),
+        None,
+        Some("codex".to_string()),
+    )
+    .expect("mask embedded credential");
+    assert_eq!(created["redactions_applied"], true);
+    assert_eq!(created["summary"], "embedded [REDACTED_API_KEY] token");
+}
+
+#[test]
+fn redaction_audit_events_do_not_include_secret_values() {
+    let secret = "ghp_012345678901234567890123456789012345";
+    let _env = env_var_guard(&[("GITHUB_TOKEN", Some(secret))]);
+    let (_guard, runtime, _repo_root) = test_runtime();
+
+    let created = super::learning_tools::add(
+        &runtime,
+        json!({
+            "summary": format!("summary {secret}"),
+            "scope": {"tags": ["audit"]},
+            "model": "codex",
+        }),
+        None,
+        Some("codex".to_string()),
+    )
+    .expect("add");
+    let id = created["id"].as_str().expect("id");
+    let events = runtime
+        .list_audit_events(
+            None,
+            Some("orbit.learning.add".to_string()),
+            Some(orbit_common::types::AuditEventStatus::Success),
+            None,
+            16,
+        )
+        .expect("list audit events");
+    let event = events
+        .iter()
+        .find(|event| {
+            event.target_type.as_deref() == Some("artifact_redaction")
+                && event.target_id.as_deref() == Some(id)
+        })
+        .expect("redaction audit event");
+    let args = event.arguments_json.as_ref().expect("arguments json");
+    assert!(args.contains("\"artifact_id\""));
+    assert!(args.contains("\"redaction_kinds\":[\"env\"]"));
+    assert!(!args.contains(secret));
+    assert!(!args.contains("[REDACTED_ENV]"));
 }
 
 // --- AC #4: scope-OR with dedup --------------------------------------
