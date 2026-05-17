@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     ExternalRef, OrbitError, OrbitId, ReviewThreadStatus, TaskComplexity, TaskPriority, TaskStatus,
-    TaskType,
+    TaskType, is_valid_adr_id, is_valid_friction_id, is_valid_learning_id,
 };
 
 pub const TASK_ARTIFACT_SCHEMA_VERSION: u32 = 1;
@@ -107,6 +107,8 @@ pub enum TaskRelationType {
     RegressionFrom,
     Supersedes,
     RelatedTo,
+    Produces,
+    Resolves,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,7 +147,7 @@ pub fn validate_task_relations_for_source(
         }
     }
     for relation in relations {
-        validate_orb_task_id(&relation.target)?;
+        validate_target_for(relation.relation_type, &relation.target)?;
         if relation.target == source_id {
             return Err(OrbitError::InvalidInput(format!(
                 "task relation from '{source_id}' must not target itself"
@@ -181,6 +183,29 @@ pub fn validate_task_relations_for_source(
     }
 
     Ok(())
+}
+
+fn validate_target_for(relation_type: TaskRelationType, target: &str) -> Result<(), OrbitError> {
+    match relation_type {
+        TaskRelationType::Produces | TaskRelationType::Resolves => {
+            if is_valid_orb_task_id(target)
+                || is_valid_friction_id(target)
+                || is_valid_learning_id(target)
+                || is_valid_adr_id(target)
+            {
+                return Ok(());
+            }
+            Err(OrbitError::InvalidInput(format!(
+                "relation target '{target}' must be an ORB-/F-/L-/ADR- id"
+            )))
+        }
+        TaskRelationType::BlockedBy
+        | TaskRelationType::ChildOf
+        | TaskRelationType::SpawnedFrom
+        | TaskRelationType::RegressionFrom
+        | TaskRelationType::Supersedes
+        | TaskRelationType::RelatedTo => validate_orb_task_id(target),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -441,7 +466,9 @@ fn cyclic_relation_family(relation_type: TaskRelationType) -> Option<RelationCyc
         TaskRelationType::SpawnedFrom => None,
         TaskRelationType::RegressionFrom
         | TaskRelationType::Supersedes
-        | TaskRelationType::RelatedTo => None,
+        | TaskRelationType::RelatedTo
+        | TaskRelationType::Produces
+        | TaskRelationType::Resolves => None,
     }
 }
 
@@ -547,6 +574,90 @@ updated_at: 2026-05-10T12:00:00Z
             target: "ORB-00001".to_string(),
         }];
         assert!(validate_task_relations_for_source("ORB-00001", &self_edge, &[]).is_err());
+
+        let self_cross_artifact_edge = vec![TaskRelation {
+            relation_type: TaskRelationType::Produces,
+            target: "ORB-00001".to_string(),
+        }];
+        assert!(
+            validate_task_relations_for_source("ORB-00001", &self_cross_artifact_edge, &[])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn task_relation_produces_and_resolves_yaml_round_trip() {
+        let relations = vec![
+            TaskRelation {
+                relation_type: TaskRelationType::Produces,
+                target: "F2026-05-007".to_string(),
+            },
+            TaskRelation {
+                relation_type: TaskRelationType::Resolves,
+                target: "L20260517-1".to_string(),
+            },
+        ];
+
+        let yaml = serde_yaml::to_string(&relations).unwrap();
+        assert!(yaml.contains("type: produces"));
+        assert!(yaml.contains("type: resolves"));
+
+        let decoded: Vec<TaskRelation> = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(decoded, relations);
+    }
+
+    #[test]
+    fn produces_and_resolves_accept_cross_artifact_targets() {
+        for relation_type in [TaskRelationType::Produces, TaskRelationType::Resolves] {
+            for target in ["ORB-00002", "F2026-05-007", "L20260517-1", "ADR-0001"] {
+                let relations = vec![TaskRelation {
+                    relation_type,
+                    target: target.to_string(),
+                }];
+                assert!(
+                    validate_task_relations_for_source("ORB-00001", &relations, &[]).is_ok(),
+                    "{relation_type:?} should accept {target}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_relation_types_reject_non_task_targets() {
+        for relation_type in [
+            TaskRelationType::BlockedBy,
+            TaskRelationType::ChildOf,
+            TaskRelationType::SpawnedFrom,
+            TaskRelationType::RegressionFrom,
+            TaskRelationType::Supersedes,
+            TaskRelationType::RelatedTo,
+        ] {
+            for target in ["F2026-05-007", "L20260517-1", "ADR-0001", "not-an-id"] {
+                let relations = vec![TaskRelation {
+                    relation_type,
+                    target: target.to_string(),
+                }];
+                assert!(
+                    validate_task_relations_for_source("ORB-00001", &relations, &[]).is_err(),
+                    "{relation_type:?} should reject {target}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_cross_artifact_relations_are_rejected() {
+        let relations = vec![
+            TaskRelation {
+                relation_type: TaskRelationType::Resolves,
+                target: "F2026-05-007".to_string(),
+            },
+            TaskRelation {
+                relation_type: TaskRelationType::Resolves,
+                target: "F2026-05-007".to_string(),
+            },
+        ];
+        assert!(validate_task_relations_for_source("ORB-00001", &relations, &[]).is_err());
     }
 
     #[test]

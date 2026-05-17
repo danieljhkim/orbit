@@ -151,6 +151,7 @@ mod tests {
                 description: "A task created through the trait surface.".to_string(),
                 acceptance_criteria: vec!["Round trip through trait backend".to_string()],
                 dependencies: Vec::new(),
+                relations: Vec::new(),
                 tags: vec!["task-artifacts".to_string()],
                 plan: "1. Exercise backend".to_string(),
                 execution_summary: String::new(),

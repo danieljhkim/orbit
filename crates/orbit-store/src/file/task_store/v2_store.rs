@@ -322,6 +322,10 @@ impl TaskV2Store {
                 );
                 envelope_changed = true;
             }
+            if let Some(value) = &fields.relations {
+                bundle.envelope.relations = value.clone();
+                envelope_changed = true;
+            }
             if let Some(value) = &fields.job_run_id {
                 bundle.envelope.job_run_id = value.clone();
                 envelope_changed = true;
@@ -980,6 +984,7 @@ fn relations_from_create_params(
             target: source_task_id.clone(),
         });
     }
+    relations.extend(params.relations.clone());
     Ok(relations)
 }
 
@@ -1302,6 +1307,7 @@ mod tests {
                 "Second criterion".to_string(),
             ],
             dependencies: Vec::new(),
+            relations: Vec::new(),
             tags: vec!["task-artifacts".to_string(), "v2".to_string()],
             plan: "1. Do the work".to_string(),
             execution_summary: String::new(),

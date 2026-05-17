@@ -2,7 +2,7 @@ use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, ExecutorDef, ExternalRef, JobRun,
     JobRunState, KnowledgeRunMetrics, Learning, LearningStatus, NotFoundKind, OrbitError,
     PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
+    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
 use orbit_embed::{EmbedWorker, VectorStore};
 use orbit_store::{
@@ -29,6 +29,7 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) description: Option<String>,
     pub(crate) acceptance_criteria: Option<Vec<String>>,
     pub(crate) dependencies: Option<Vec<String>>,
+    pub(crate) relations: Option<Vec<TaskRelation>>,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) plan: Option<String>,
     pub(crate) execution_summary: Option<String>,
@@ -60,6 +61,7 @@ impl TaskRecordUpdateParams {
             || self.description.is_some()
             || self.acceptance_criteria.is_some()
             || self.dependencies.is_some()
+            || self.relations.is_some()
             || self.tags.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
@@ -259,6 +261,7 @@ impl TaskRecords<'_> {
                     description: params.description.clone(),
                     acceptance_criteria: params.acceptance_criteria.clone(),
                     dependencies: params.dependencies.clone(),
+                    relations: params.relations.clone(),
                     tags: params.tags.clone(),
                     plan: params.plan.clone(),
                     execution_summary: params.execution_summary.clone(),

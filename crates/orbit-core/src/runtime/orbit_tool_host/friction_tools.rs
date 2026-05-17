@@ -116,6 +116,7 @@ pub(super) fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
         FrictionUpdateParams {
             status,
             tags,
+            resolved_by_task: None,
             updated_at: Utc::now(),
         },
     )?;
@@ -212,4 +213,31 @@ fn record_title(record: &FrictionRecord) -> String {
         .map(|line| line.trim_start_matches('#').trim().to_string())
         .filter(|line| !line.is_empty())
         .unwrap_or_else(|| record.id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_to_json_includes_resolved_by_task() {
+        let stored = StoredFrictionRecord {
+            record: FrictionRecord {
+                id: "F2026-05-007".to_string(),
+                model: "codex".to_string(),
+                created_at: Utc.with_ymd_and_hms(2026, 5, 17, 4, 5, 0).unwrap(),
+                status: FrictionStatus::Resolved,
+                tags: vec!["tooling".to_string()],
+                resolved_at: Some(Utc.with_ymd_and_hms(2026, 5, 17, 4, 10, 0).unwrap()),
+                during_task: None,
+                resolved_by_task: Some("ORB-00093".to_string()),
+                body: "Resolved by task".to_string(),
+            },
+            path: "frictions/2026-05/F007.md".into(),
+        };
+
+        let value = record_to_json(stored).unwrap();
+
+        assert_eq!(value["resolved_by_task"], json!("ORB-00093"));
+    }
 }

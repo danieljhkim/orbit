@@ -106,6 +106,21 @@ pub enum OrbitEvent {
         id: String,
         approved_by: String,
     },
+    FrictionAutoResolved {
+        task_id: String,
+        friction_id: String,
+    },
+    TaskRelationDangling {
+        task_id: String,
+        target: String,
+        relation: String,
+    },
+    TaskRelationSideEffectFailed {
+        task_id: String,
+        target: String,
+        relation: String,
+        reason: String,
+    },
     TaskStarted {
         id: String,
         started_by: String,

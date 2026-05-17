@@ -86,6 +86,7 @@ pub(crate) fn seed_list_backlog_task(
                 description: format!("Fixture task: {title}"),
                 acceptance_criteria: vec!["Fixture task is observable.".to_string()],
                 dependencies: Vec::new(),
+                relations: Vec::new(),
                 tags: Vec::new(),
                 plan: "Fixture plan.".to_string(),
                 execution_summary: String::new(),
