@@ -1,23 +1,30 @@
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Learning, LearningStatus, NotFoundKind, OrbitError, normalize_learning_paths,
-    normalize_learning_tags,
+    Learning, LearningStatus, LearningVoteRow, LearningVoteSummary, NotFoundKind, OrbitError,
+    decayed_vote_score, normalize_learning_paths, normalize_learning_tags,
 };
 use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 
-use super::layout::{learning_doc_path, locate_learning, next_learning_id, validate_learning_id};
+use super::layout::{
+    learning_doc_path, locate_learning, next_learning_id, validate_learning_id, votes_jsonl_path,
+};
 use super::lock::{acquire_learning_allocation_lock, acquire_learning_lock};
 use super::record::{read_learning_file, write_learning_file};
+use super::votes::{
+    append_vote_row, deduped_vote_times, read_vote_rows, summarize_votes, validate_vote_files,
+};
 use crate::Store;
 use crate::backend::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
+    LearningUpvoteParams,
 };
 
 /// Workspace-scoped, filesystem-backed learning store.
@@ -321,11 +328,113 @@ impl LearningFileStore {
         Ok(true)
     }
 
+    pub(crate) fn upvote_learning(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<LearningVoteSummary, OrbitError> {
+        self.upvote_learning_at(params, Utc::now())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn upvote_learning_at(
+        &self,
+        params: LearningUpvoteParams,
+        now: DateTime<Utc>,
+    ) -> Result<LearningVoteSummary, OrbitError> {
+        self.upvote_learning_at_impl(params, now)
+    }
+
+    #[cfg(not(test))]
+    fn upvote_learning_at(
+        &self,
+        params: LearningUpvoteParams,
+        now: DateTime<Utc>,
+    ) -> Result<LearningVoteSummary, OrbitError> {
+        self.upvote_learning_at_impl(params, now)
+    }
+
+    fn upvote_learning_at_impl(
+        &self,
+        params: LearningUpvoteParams,
+        now: DateTime<Utc>,
+    ) -> Result<LearningVoteSummary, OrbitError> {
+        validate_learning_id(&params.learning_id)?;
+        let Some(path) = locate_learning(&self.root, &params.learning_id)? else {
+            return Err(OrbitError::not_found(
+                NotFoundKind::Learning,
+                params.learning_id,
+            ));
+        };
+        let learning = read_learning_file(&path)?;
+        if learning.status == LearningStatus::Superseded {
+            return Err(OrbitError::InvalidInput(format!(
+                "learning '{}' is superseded; use the superseding learning before voting",
+                learning.id
+            )));
+        }
+
+        let task_id = params
+            .task_id
+            .map(|task_id| task_id.trim().to_string())
+            .filter(|task_id| !task_id.is_empty())
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(
+                    "learning upvote requires `task_id` in v1; free-floating votes are rejected by policy"
+                        .to_string(),
+                )
+            })?;
+        let voter_model = params.voter_model.trim().to_string();
+        if voter_model.is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "learning upvote requires a non-empty voter model".to_string(),
+            ));
+        }
+
+        let _lock = acquire_learning_lock(&self.root, &learning.id)?;
+        let votes_path = votes_jsonl_path(&self.root, &learning.id);
+        let rows = read_vote_rows(&votes_path)?;
+        let already_voted = rows.iter().any(|row| {
+            row.learning_id == learning.id
+                && row.voter_model == voter_model
+                && row.task_id.as_deref() == Some(task_id.as_str())
+        });
+        if already_voted {
+            return Ok(summarize_votes(&rows));
+        }
+
+        let mut next_rows = rows;
+        let row = LearningVoteRow {
+            learning_id: learning.id,
+            voter_model,
+            voted_at: now,
+            task_id: Some(task_id),
+        };
+        append_vote_row(&votes_path, &row)?;
+        next_rows.push(row);
+        Ok(summarize_votes(&next_rows))
+    }
+
+    pub(crate) fn learning_vote_summary(
+        &self,
+        id: &str,
+    ) -> Result<LearningVoteSummary, OrbitError> {
+        validate_learning_id(id)?;
+        if locate_learning(&self.root, id)?.is_none() {
+            return Err(OrbitError::not_found(
+                NotFoundKind::Learning,
+                id.to_string(),
+            ));
+        }
+        let rows = read_vote_rows(&votes_jsonl_path(&self.root, id))?;
+        Ok(summarize_votes(&rows))
+    }
+
     /// Rebuild the SQLite index from the YAML source of truth.
     ///
     /// No-op when no index is attached; otherwise wipes
     /// `learnings_index` and reinserts every record found on disk.
     pub(crate) fn reindex_learnings(&self) -> Result<(), OrbitError> {
+        validate_vote_files(&self.root)?;
         let Some(index) = &self.index else {
             self.invalidate_envelope_cache();
             return Ok(());
@@ -359,6 +468,14 @@ impl LearningFileStore {
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
+        self.search_learnings_at(params, Utc::now())
+    }
+
+    pub(crate) fn search_learnings_at(
+        &self,
+        params: LearningSearchParams,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let limit = params.limit.unwrap_or(usize::MAX);
         let normalized_path = params
             .path
@@ -372,7 +489,8 @@ impl LearningFileStore {
 
         let unfiltered = normalized_path.is_none() && tag_lower.is_none() && query_lower.is_none();
 
-        let mut matched: Vec<(&EnvelopeSnapshot, Vec<String>)> = Vec::new();
+        let half_life_days = vote_half_life_days();
+        let mut matched: Vec<(&EnvelopeSnapshot, Vec<String>, f64)> = Vec::new();
         for envelope in candidates.iter() {
             let mut axes = Vec::new();
             if let Some(path) = &normalized_path {
@@ -397,22 +515,26 @@ impl LearningFileStore {
             if axes.is_empty() && !unfiltered {
                 continue;
             }
-            matched.push((envelope, axes));
+            let vote_times = deduped_vote_times(&read_vote_rows(&votes_jsonl_path(
+                &self.root,
+                &envelope.id,
+            ))?);
+            let vote_score = decayed_vote_score(&vote_times, now, half_life_days);
+            matched.push((envelope, axes, vote_score));
         }
 
-        // Sort by `priority` desc (Some(N) ranks above None; higher N wins),
-        // then `updated_at` desc, then `id` asc. RFC3339 string compare is
-        // correct because `Learning::updated_at` is `DateTime<Utc>` (always
-        // `Z` suffix) so the string ordering matches the chronological one.
+        // Sort by decayed vote score first, then the prior priority and
+        // recency keys. RFC3339 string compare is correct because
+        // `Learning::updated_at` is `DateTime<Utc>`.
         matched.sort_by(|a, b| {
-            priority_rank(b.0.priority)
-                .cmp(&priority_rank(a.0.priority))
+            b.2.total_cmp(&a.2)
+                .then_with(|| priority_rank(b.0.priority).cmp(&priority_rank(a.0.priority)))
                 .then_with(|| b.0.updated_at_key.cmp(&a.0.updated_at_key))
                 .then_with(|| a.0.id.cmp(&b.0.id))
         });
 
         let mut results = Vec::with_capacity(limit.min(matched.len()));
-        for (envelope, axes) in matched.into_iter().take(limit) {
+        for (envelope, axes, _score) in matched.into_iter().take(limit) {
             let updated_at = parse_rfc3339_or_epoch(&envelope.updated_at_key);
             let learning = Learning {
                 id: envelope.id.clone(),
@@ -570,18 +692,34 @@ fn priority_rank(priority: Option<u8>) -> i16 {
     }
 }
 
+fn vote_half_life_days() -> f64 {
+    const DEFAULT_HALF_LIFE_DAYS: f64 = 180.0;
+    env::var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(DEFAULT_HALF_LIFE_DAYS)
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+    use std::thread;
     use std::time::Instant;
 
-    use chrono::TimeZone;
-    use orbit_common::types::{EvidenceKind, LearningEvidence, LearningScope, LearningStatus};
+    use chrono::{DateTime, TimeZone, Utc};
+    use orbit_common::types::{
+        EvidenceKind, LearningEvidence, LearningScope, LearningStatus, LearningVoteRow,
+        NotFoundKind, OrbitError,
+    };
     use tempfile::{TempDir, tempdir};
 
+    use super::super::layout::votes_jsonl_path;
+    use super::super::votes::append_vote_row;
     use super::*;
 
     fn create_params(summary: &str, paths: Vec<&str>, tags: Vec<&str>) -> LearningCreateParams {
@@ -604,6 +742,66 @@ mod tests {
         let index = Store::open_in_memory().expect("open in-memory store");
         let store = LearningFileStore::new_with_index(dir.path().to_path_buf(), index);
         (dir, store)
+    }
+
+    fn upvote_params(id: &str, model: &str, task_id: Option<&str>) -> LearningUpvoteParams {
+        LearningUpvoteParams {
+            learning_id: id.to_string(),
+            voter_model: model.to_string(),
+            task_id: task_id.map(str::to_string),
+        }
+    }
+
+    fn vote_row(id: &str, model: &str, task_id: &str, voted_at: DateTime<Utc>) -> LearningVoteRow {
+        LearningVoteRow {
+            learning_id: id.to_string(),
+            voter_model: model.to_string(),
+            voted_at,
+            task_id: Some(task_id.to_string()),
+        }
+    }
+
+    fn line_count(path: &std::path::Path) -> usize {
+        std::fs::read_to_string(path)
+            .expect("read votes")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+    }
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        value: Option<String>,
+    }
+
+    fn set_half_life_env(value: Option<&str>) -> EnvGuard {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS").ok();
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS", value),
+                None => std::env::remove_var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS"),
+            }
+        }
+        EnvGuard {
+            _lock: lock,
+            value: previous,
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.value {
+                    Some(value) => std::env::set_var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS", value),
+                    None => std::env::remove_var("ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS"),
+                }
+            }
+        }
     }
 
     // ------ Acceptance criterion: round-trip persistence ------------------
@@ -1145,6 +1343,295 @@ mod tests {
             ignores_state,
             ".gitignore must ignore .orbit/state/ (or the wider .orbit/) so the rebuildable index is not checked in",
         );
+    }
+
+    #[test]
+    fn upvote_creates_lazy_votes_file_and_show_summary_reads_it() {
+        let (dir, store) = store_with_index();
+        let learning = store
+            .create_learning(create_params("vote target", vec![], vec![]))
+            .expect("create");
+        let votes_path = votes_jsonl_path(dir.path(), &learning.id);
+        assert!(!votes_path.exists(), "votes file should be lazy");
+
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap();
+        let summary = store
+            .upvote_learning_at(upvote_params(&learning.id, "claude", Some("ORB-1")), now)
+            .expect("upvote");
+
+        assert_eq!(summary.vote_count, 1);
+        assert_eq!(summary.last_voted_at, Some(now));
+        assert!(votes_path.is_file());
+        assert_eq!(line_count(&votes_path), 1);
+
+        let reread = store.learning_vote_summary(&learning.id).expect("summary");
+        assert_eq!(reread, summary);
+    }
+
+    #[test]
+    fn duplicate_upvote_same_key_is_noop_but_cross_task_counts() {
+        let (dir, store) = store_with_index();
+        let learning = store
+            .create_learning(create_params("vote target", vec![], vec![]))
+            .expect("create");
+        let first = Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap();
+        let second = Utc.with_ymd_and_hms(2026, 5, 17, 13, 0, 0).unwrap();
+        let third = Utc.with_ymd_and_hms(2026, 5, 17, 14, 0, 0).unwrap();
+
+        store
+            .upvote_learning_at(upvote_params(&learning.id, "claude", Some("ORB-1")), first)
+            .expect("first");
+        let duplicate = store
+            .upvote_learning_at(upvote_params(&learning.id, "claude", Some("ORB-1")), second)
+            .expect("duplicate");
+        assert_eq!(duplicate.vote_count, 1);
+        assert_eq!(duplicate.last_voted_at, Some(first));
+        assert_eq!(line_count(&votes_jsonl_path(dir.path(), &learning.id)), 1);
+
+        let cross_task = store
+            .upvote_learning_at(upvote_params(&learning.id, "claude", Some("ORB-2")), third)
+            .expect("cross task");
+        assert_eq!(cross_task.vote_count, 2);
+        assert_eq!(cross_task.last_voted_at, Some(third));
+        assert_eq!(line_count(&votes_jsonl_path(dir.path(), &learning.id)), 2);
+    }
+
+    #[test]
+    fn upvote_rejects_missing_task_missing_learning_and_superseded_learning() {
+        let (dir, store) = store_with_index();
+        let learning = store
+            .create_learning(create_params("vote target", vec![], vec![]))
+            .expect("create");
+
+        let error = store
+            .upvote_learning(upvote_params(&learning.id, "claude", None))
+            .expect_err("missing task rejected");
+        assert!(
+            matches!(error, OrbitError::InvalidInput(message) if message.contains("free-floating votes"))
+        );
+        assert!(!votes_jsonl_path(dir.path(), &learning.id).exists());
+
+        let error = store
+            .upvote_learning(upvote_params("L20260517-404", "claude", Some("ORB-1")))
+            .expect_err("missing learning rejected");
+        assert!(matches!(
+            error,
+            OrbitError::NotFound {
+                kind: NotFoundKind::Learning,
+                ..
+            }
+        ));
+        assert!(
+            !dir.path()
+                .join("L20260517-404")
+                .join("votes.jsonl")
+                .exists()
+        );
+
+        let replacement = store
+            .create_learning(create_params("replacement", vec![], vec![]))
+            .expect("replacement");
+        store
+            .supersede_learning(&learning.id, &replacement.id)
+            .expect("supersede");
+        let error = store
+            .upvote_learning(upvote_params(&learning.id, "claude", Some("ORB-2")))
+            .expect_err("superseded rejected");
+        assert!(
+            matches!(error, OrbitError::InvalidInput(message) if message.contains("superseded"))
+        );
+    }
+
+    #[test]
+    fn per_learning_vote_files_are_isolated() {
+        let (_dir, store) = store_with_index();
+        let a = store
+            .create_learning(create_params("a", vec![], vec![]))
+            .expect("a");
+        let b = store
+            .create_learning(create_params("b", vec![], vec![]))
+            .expect("b");
+        store
+            .upvote_learning(upvote_params(&a.id, "claude", Some("ORB-1")))
+            .expect("vote a");
+
+        assert_eq!(
+            store
+                .learning_vote_summary(&a.id)
+                .expect("summary a")
+                .vote_count,
+            1
+        );
+        assert_eq!(
+            store
+                .learning_vote_summary(&b.id)
+                .expect("summary b")
+                .vote_count,
+            0
+        );
+    }
+
+    #[test]
+    fn concurrent_upvotes_append_complete_json_lines() {
+        let dir = tempdir().expect("tempdir");
+        let store = Arc::new(LearningFileStore::new(dir.path().to_path_buf()));
+        let learning = store
+            .create_learning(create_params("concurrent", vec![], vec![]))
+            .expect("create");
+        let n = 12;
+        let mut handles = Vec::new();
+        for idx in 0..n {
+            let store = Arc::clone(&store);
+            let learning_id = learning.id.clone();
+            handles.push(thread::spawn(move || {
+                store
+                    .upvote_learning(upvote_params(
+                        &learning_id,
+                        "claude",
+                        Some(&format!("ORB-{idx}")),
+                    ))
+                    .expect("upvote");
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("thread join");
+        }
+
+        let votes_path = votes_jsonl_path(dir.path(), &learning.id);
+        let rows = super::super::votes::read_vote_rows(&votes_path).expect("read rows");
+        assert_eq!(rows.len(), n);
+        assert_eq!(
+            store
+                .learning_vote_summary(&learning.id)
+                .expect("summary")
+                .vote_count,
+            n
+        );
+    }
+
+    #[test]
+    fn search_ranks_recent_decayed_votes_ahead_of_many_old_votes() {
+        let _env = set_half_life_env(None);
+        let (dir, store) = store_with_index();
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap();
+        let recent = store
+            .create_learning(create_params("recent", vec!["foo/**"], vec![]))
+            .expect("recent");
+        let old = store
+            .create_learning(create_params("old", vec!["foo/**"], vec![]))
+            .expect("old");
+
+        append_vote_row(
+            &votes_jsonl_path(dir.path(), &recent.id),
+            &vote_row(
+                &recent.id,
+                "claude",
+                "ORB-recent",
+                now - chrono::Duration::days(30),
+            ),
+        )
+        .expect("recent vote");
+        for idx in 0..3 {
+            append_vote_row(
+                &votes_jsonl_path(dir.path(), &old.id),
+                &vote_row(
+                    &old.id,
+                    "claude",
+                    &format!("ORB-old-{idx}"),
+                    now - chrono::Duration::days(730 + idx),
+                ),
+            )
+            .expect("old vote");
+        }
+
+        let hits = store
+            .search_learnings_at(
+                LearningSearchParams {
+                    path: Some("foo/bar.rs".to_string()),
+                    ..Default::default()
+                },
+                now,
+            )
+            .expect("search");
+
+        assert_eq!(hits[0].learning.id, recent.id);
+    }
+
+    #[test]
+    fn zero_half_life_disables_decay_for_search_ranking() {
+        let _env = set_half_life_env(Some("0"));
+        let (dir, store) = store_with_index();
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap();
+        let recent = store
+            .create_learning(create_params("recent", vec!["foo/**"], vec![]))
+            .expect("recent");
+        let old = store
+            .create_learning(create_params("old", vec!["foo/**"], vec![]))
+            .expect("old");
+
+        append_vote_row(
+            &votes_jsonl_path(dir.path(), &recent.id),
+            &vote_row(
+                &recent.id,
+                "claude",
+                "ORB-recent",
+                now - chrono::Duration::days(30),
+            ),
+        )
+        .expect("recent vote");
+        for idx in 0..3 {
+            append_vote_row(
+                &votes_jsonl_path(dir.path(), &old.id),
+                &vote_row(
+                    &old.id,
+                    "claude",
+                    &format!("ORB-old-{idx}"),
+                    now - chrono::Duration::days(730 + idx),
+                ),
+            )
+            .expect("old vote");
+        }
+
+        let hits = store
+            .search_learnings_at(
+                LearningSearchParams {
+                    path: Some("foo/bar.rs".to_string()),
+                    ..Default::default()
+                },
+                now,
+            )
+            .expect("search");
+
+        assert_eq!(hits[0].learning.id, old.id);
+    }
+
+    #[test]
+    fn reindex_validates_votes_and_external_valid_lines_are_visible() {
+        let (dir, store) = store_with_index();
+        let learning = store
+            .create_learning(create_params("target", vec![], vec![]))
+            .expect("create");
+        let votes_path = votes_jsonl_path(dir.path(), &learning.id);
+        let row = vote_row(
+            &learning.id,
+            "claude",
+            "ORB-external",
+            Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap(),
+        );
+        append_vote_row(&votes_path, &row).expect("append external");
+
+        store.reindex_learnings().expect("reindex");
+        assert_eq!(
+            store
+                .learning_vote_summary(&learning.id)
+                .expect("summary")
+                .vote_count,
+            1
+        );
+
+        std::fs::write(&votes_path, b"{not-json}\n").expect("write invalid");
+        let error = store.reindex_learnings().expect_err("invalid vote line");
+        assert!(matches!(error, OrbitError::Store(message) if message.contains("line 1")));
     }
 
     fn legacy_learning_yaml(id: &str, status: &str, summary: &str, priority: u8) -> String {

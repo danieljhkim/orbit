@@ -31,6 +31,88 @@ fn cli_add_then_show_round_trips_every_field() {
     assert_eq!(shown["scope"]["paths"], json!(["foo/**"]));
     assert_eq!(shown["scope"]["tags"], json!(["perf"]));
     assert_eq!(shown["status"], "active");
+    assert_eq!(shown["vote_count"], 0);
+    assert!(shown["last_voted_at"].is_null());
+}
+
+#[test]
+fn cli_upvote_is_task_idempotent_and_show_reports_vote_stats() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id");
+
+    let first = workspace.run_json(
+        &[
+            "learning",
+            "upvote",
+            "--id",
+            id,
+            "--model",
+            "claude",
+            "--task",
+            "ORB-00095",
+            "--json",
+        ],
+        "upvote first",
+    );
+    assert_eq!(first["vote_count"], 1);
+    assert!(first["last_voted_at"].as_str().is_some());
+
+    let duplicate = workspace.run_json(
+        &[
+            "learning",
+            "upvote",
+            "--id",
+            id,
+            "--model",
+            "claude",
+            "--task",
+            "ORB-00095",
+            "--json",
+        ],
+        "upvote duplicate",
+    );
+    assert_eq!(duplicate["vote_count"], 1);
+
+    let second_task = workspace.run_json(
+        &[
+            "learning",
+            "upvote",
+            "--id",
+            id,
+            "--model",
+            "claude",
+            "--task",
+            "ORB-OTHER",
+            "--json",
+        ],
+        "upvote second task",
+    );
+    assert_eq!(second_task["vote_count"], 2);
+
+    let shown = workspace.run_json(&["learning", "show", id, "--json"], "show learning");
+    assert_eq!(shown["vote_count"], 2);
+    assert!(shown["last_voted_at"].as_str().is_some());
+}
+
+#[test]
+fn cli_upvote_without_task_rejects_free_floating_vote_policy() {
+    let workspace = TestWorkspace::new();
+    let added = workspace.add_learning("rule one", &["foo/**"], &["perf"]);
+    let id = added["id"].as_str().expect("id");
+
+    let output = run_orbit(
+        &workspace.work,
+        &workspace.home,
+        &["learning", "upvote", "--id", id, "--model", "claude"],
+        None,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("free-floating votes"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

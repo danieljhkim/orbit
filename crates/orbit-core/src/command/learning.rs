@@ -8,9 +8,12 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
+use orbit_common::types::{
+    LearningVoteSummary, all_agent_families, normalize_agent_family_for_model,
+};
 use orbit_store::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
-    learning_layout::LearningLayoutMigrationReport,
+    LearningUpvoteParams, learning_layout::LearningLayoutMigrationReport,
 };
 
 use crate::OrbitRuntime;
@@ -40,6 +43,21 @@ impl OrbitRuntime {
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let params = normalize_learning_search_params(&self.paths().repo_root, params)?;
         self.stores().learnings().search(params)
+    }
+
+    pub fn upvote_learning(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<LearningVoteSummary, OrbitError> {
+        let voter_model = normalize_learning_voter_model(&params.voter_model)?;
+        self.stores().learnings().upvote(LearningUpvoteParams {
+            voter_model,
+            ..params
+        })
+    }
+
+    pub fn learning_vote_summary(&self, id: &str) -> Result<LearningVoteSummary, OrbitError> {
+        self.stores().learnings().vote_summary(id)
     }
 
     pub fn update_learning(
@@ -207,6 +225,27 @@ fn normalize_learning_search_path(repo_root: &Path, path: &str) -> Result<String
 
     Err(OrbitError::InvalidInput(format!(
         "filesystem path `{path}` must stay inside the workspace root"
+    )))
+}
+
+fn normalize_learning_voter_model(raw: &str) -> Result<String, OrbitError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "learning upvote requires a non-empty model".to_string(),
+        ));
+    }
+    if let Some(family) = normalize_agent_family_for_model(None, Some(trimmed))? {
+        return Ok(family);
+    }
+    let family = normalize_agent_family_for_model(Some(trimmed), None)?;
+    if let Some(family) = family
+        && all_agent_families().contains(&family.as_str())
+    {
+        return Ok(family);
+    }
+    Err(OrbitError::InvalidInput(format!(
+        "unknown agent model `{trimmed}`; use a canonical family (codex, claude, gemini, grok) or a recognized model name"
     )))
 }
 

@@ -98,8 +98,9 @@ pub use job::{
 pub use learning::{
     DEFAULT_LEARNING_REMINDER_PER_CALL_CAP, DEFAULT_LEARNING_REMINDER_SESSION_CAP, EvidenceKind,
     Learning, LearningEvidence, LearningInjectionCaps, LearningInjectionState, LearningReminder,
-    LearningScope, LearningStatus, normalize_learning_paths, normalize_learning_tags,
-    prepend_reminder_block, render_reminder_block,
+    LearningScope, LearningStatus, LearningVoteRow, LearningVoteSummary, decayed_vote_score,
+    normalize_learning_paths, normalize_learning_tags, prepend_reminder_block,
+    render_reminder_block,
 };
 pub use metrics::MetricsEntry;
 pub use policy_decision::PolicyDecision;

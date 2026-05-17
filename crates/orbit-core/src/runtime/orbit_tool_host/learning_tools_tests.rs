@@ -1,7 +1,7 @@
 //! Tests for `crates/orbit-core/src/runtime/orbit_tool_host/learning_tools.rs`.
 //!
 //! Covers the 13 ACs from T20260511-6:
-//! 1. All 8 tools surface in the registry with documented field names.
+//! 1. All learning tools surface in the registry with documented field names.
 //! 2. Reindex + prune tools live in the registry alongside the six design-doc tools.
 //! 3. Round-trip persistence (add → show preserves every field).
 //! 4. Scope-OR matching with dedup on combined queries.
@@ -58,7 +58,7 @@ fn create_minimal(
 // --- AC #1/#2: registry surface --------------------------------------
 
 #[test]
-fn registry_exposes_all_eight_learning_tools_with_documented_schema_fields() {
+fn registry_exposes_learning_tools_with_documented_schema_fields() {
     let registry = registry_with_builtins();
     let schemas = registry.schemas();
     let names: Vec<&str> = schemas
@@ -75,6 +75,7 @@ fn registry_exposes_all_eight_learning_tools_with_documented_schema_fields() {
         "orbit.learning.show",
         "orbit.learning.supersede",
         "orbit.learning.update",
+        "orbit.learning.upvote",
     ] {
         assert!(
             names.contains(&expected),
@@ -114,6 +115,22 @@ fn registry_exposes_all_eight_learning_tools_with_documented_schema_fields() {
             "orbit.learning.search missing field: {required}"
         );
     }
+
+    let upvote_schema = schemas
+        .iter()
+        .find(|s| s.name == "orbit.learning.upvote")
+        .expect("upvote schema");
+    let upvote_field_names: Vec<&str> = upvote_schema
+        .parameters
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    for required in ["id", "model", "task"] {
+        assert!(
+            upvote_field_names.contains(&required),
+            "orbit.learning.upvote missing field: {required}"
+        );
+    }
 }
 
 // --- AC #3: round-trip via runtime API + show ------------------------
@@ -150,6 +167,42 @@ fn round_trip_add_show_preserves_every_field() {
     assert_eq!(response["created_by"], "claude");
     assert_eq!(response["priority"], 7);
     assert_eq!(response["status"], "active");
+    assert_eq!(response["vote_count"], 0);
+    assert!(response["last_voted_at"].is_null());
+}
+
+#[test]
+fn upvote_records_vote_stats_on_show_but_not_list() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let learning = create_minimal(&runtime, "vote target", &["foo/**"], &[]);
+
+    let response = super::learning_tools::upvote(
+        &runtime,
+        json!({"id": learning.id, "model": "claude", "task": "ORB-00095"}),
+        None,
+        None,
+    )
+    .expect("upvote");
+    assert_eq!(response["vote_count"], 1);
+    assert!(response["last_voted_at"].as_str().is_some());
+
+    let duplicate = super::learning_tools::upvote(
+        &runtime,
+        json!({"id": learning.id, "model": "claude", "task_id": "ORB-00095"}),
+        None,
+        None,
+    )
+    .expect("duplicate");
+    assert_eq!(duplicate["vote_count"], 1);
+
+    let shown = super::learning_tools::show(&runtime, json!({"id": learning.id})).expect("show");
+    assert_eq!(shown["vote_count"], 1);
+    assert!(shown["last_voted_at"].as_str().is_some());
+
+    let listed = super::learning_tools::list(&runtime, json!({"status": "active"})).expect("list");
+    let row = find_id(&listed, &learning.id).expect("listed row");
+    assert!(row.get("vote_count").is_none());
+    assert!(row.get("last_voted_at").is_none());
 }
 
 // --- AC #4: scope-OR with dedup --------------------------------------

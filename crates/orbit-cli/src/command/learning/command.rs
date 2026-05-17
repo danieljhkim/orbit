@@ -12,6 +12,7 @@ use super::search::LearningSearchArgs;
 use super::show::LearningShowArgs;
 use super::supersede::LearningSupersedeArgs;
 use super::update::LearningUpdateArgs;
+use super::upvote::LearningUpvoteArgs;
 
 #[derive(Args)]
 #[command(about = "Create, search, and curate project learnings")]
@@ -38,6 +39,8 @@ pub enum LearningSubcommand {
     Show(LearningShowArgs),
     /// Update an existing active learning
     Update(LearningUpdateArgs),
+    /// Record a task-anchored upvote for a learning
+    Upvote(LearningUpvoteArgs),
     /// Mark a learning as superseded by another
     Supersede(LearningSupersedeArgs),
     /// Rebuild the SQLite envelope index from YAML
@@ -56,6 +59,7 @@ impl Execute for LearningSubcommand {
             LearningSubcommand::Search(args) => args.execute(runtime),
             LearningSubcommand::Show(args) => args.execute(runtime),
             LearningSubcommand::Update(args) => args.execute(runtime),
+            LearningSubcommand::Upvote(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
             LearningSubcommand::Reindex(args) => args.execute(runtime),
             LearningSubcommand::MigrateLayout(args) => args.execute(runtime),

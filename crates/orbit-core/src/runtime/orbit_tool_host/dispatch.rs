@@ -44,6 +44,9 @@ pub(super) fn execute(
         OrbitBuiltinAction::LearningUpdate => {
             super::learning_tools::update(runtime, input, agent, model)
         }
+        OrbitBuiltinAction::LearningUpvote => {
+            super::learning_tools::upvote(runtime, input, agent, model)
+        }
         OrbitBuiltinAction::PipelineInvoke => {
             super::pipeline_tools::invoke(runtime, input, agent, model)
         }

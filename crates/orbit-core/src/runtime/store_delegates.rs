@@ -9,15 +9,16 @@ use orbit_store::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, AuditEventFilter,
     AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunQuery,
     JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
+    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    ToolStoreBackend,
 };
 
 use crate::context::OrbitStores;
@@ -769,6 +770,20 @@ impl LearningRecords<'_> {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         self.store.search_learnings(params)
+    }
+
+    pub(crate) fn upvote(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.store.upvote_learning(params)
+    }
+
+    pub(crate) fn vote_summary(
+        &self,
+        id: &str,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.store.learning_vote_summary(id)
     }
 
     pub(crate) fn update(

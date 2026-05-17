@@ -2,9 +2,9 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-17 (ORB-00096)
+**Last updated:** 2026-05-17 (ORB-00095)
 
-This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record, the phase-1 scope-matching algorithm (path globs + tags), the three-layer push-injection pipeline (engine pre-prompt + MCP sidecar + optional Claude Code hook), the pull surface (skill + tools), the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record plus sidecars, the phase-1 scope-matching algorithm (path globs + tags), the three-layer push-injection pipeline (engine pre-prompt + MCP sidecar + optional Claude Code hook), the pull surface (skill + tools), the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
 Phase 2 (semantic ranking, symbol-aware scope) is out of scope for this document and is captured in [3_vision.md §1.2](./3_vision.md). The schema in [§2](#2-learning-record-schema) is forward-compatible with phase 2.
 
@@ -23,7 +23,7 @@ orbit-store/
     └── learnings.rs       # new — index for fast scope-glob lookups
 ```
 
-`orbit-tools` gains a `learning::` submodule that exposes `orbit.learning.add | list | search | show | update | supersede` as MCP tools. `orbit-cli` exposes the corresponding `orbit learning <subcommand>` shell surface.
+`orbit-tools` gains a `learning::` submodule that exposes `orbit.learning.add | list | search | show | update | supersede | upvote` as MCP tools. `orbit-cli` exposes the corresponding `orbit learning <subcommand>` shell surface.
 
 `orbit-engine` gains the **pre-prompt injection** logic: before invoking an agent runtime for a task, it queries the learning store for entries whose `scope` matches the task's `context_files` and prepends formatted summaries to the agent prompt. This is the layer that makes push-based discovery cross-agent, because injection happens above the agent boundary ([§4](#4-push-injection-pipeline), [4_decisions.md ADR-005](./4_decisions.md)).
 
@@ -39,7 +39,7 @@ No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md]
 
 ### 2.1 On-disk format
 
-Each learning owns a directory under `.orbit/learnings/<id>/`, mirroring the task bundle layout. The source-of-truth YAML lives at `.orbit/learnings/<id>/learning.yaml`; future per-learning sidecars such as comments or votes can live beside it without polluting the root:
+Each learning owns a directory under `.orbit/learnings/<id>/`, mirroring the task bundle layout. The source-of-truth YAML lives at `.orbit/learnings/<id>/learning.yaml`; per-learning sidecars such as `votes.jsonl` live beside it without polluting the root:
 
 ```yaml
 id: L20260509-0001
@@ -110,6 +110,8 @@ CREATE INDEX learnings_active ON learnings_index(status) WHERE status = 'active'
 Query path: filter to `status = 'active'`, load the small set of `(paths, tags)` rows, run the in-memory glob match. At expected scale (low hundreds of active learnings), this is sub-millisecond; the index exists to avoid YAML I/O on every tool call.
 
 The YAML files are the source of truth. The index is rebuildable from them via `orbit learning reindex`.
+
+Vote rows are source-of-truth sidecars, not SQLite projections in v1. `orbit learning reindex` still walks every per-learning `votes.jsonl` and fails on invalid JSONL, so cache rebuilds do not silently ignore corrupted vote files.
 
 ### 2.3 ID format
 
@@ -241,11 +243,12 @@ orbit learning search [--path PATH] [--tag TAG] [--query TEXT] [--limit N]
 orbit learning show <id>
 orbit learning update <id> [--summary ...] [--body-file ...] [--scope ...]
 orbit learning supersede <id> --with <new-id>
+orbit learning upvote --id <id> --model <agent-family> --task <task-id>
 orbit learning reindex                    # rebuild SQLite index from YAML
 orbit learning prune [--stale-only]       # report or delete stale learnings
 ```
 
-`add`, `update`, and `supersede` write the YAML and update the index atomically. `search` is the fast read path used by all three injection layers.
+`add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `search` is the fast read path used by all three injection layers.
 
 ### 5.2 MCP tools
 
@@ -254,9 +257,10 @@ orbit learning prune [--stale-only]       # report or delete stale learnings
 | `orbit.learning.add` | `summary`, `scope`, `body?`, `evidence?` | `{ id, created_at }` |
 | `orbit.learning.list` | `status?`, `tag?`, `path?` | `{ learnings: [...] }` |
 | `orbit.learning.search` | `path?`, `tag?`, `query?`, `limit?` | ranked list |
-| `orbit.learning.show` | `id` | full record |
+| `orbit.learning.show` | `id` | full record plus vote summary |
 | `orbit.learning.update` | `id`, fields | updated record |
 | `orbit.learning.supersede` | `id`, `with` | both records updated |
+| `orbit.learning.upvote` | `id`, `model`, `task?` | vote summary |
 
 `orbit.learning.search` is the only tool on the hot path (called from injection layers); it must stay sub-10ms at expected scale.
 
@@ -277,6 +281,32 @@ orbit learning prune [--stale-only]       # report or delete stale learnings
 ```
 
 `matched_by` is exposed deliberately: agents can see which scope axis triggered the match, which feeds back into both human curation (is the path glob right?) and future ranking work.
+
+### 5.4 Re-validation votes
+
+When an agent finds an existing learning that covers a duplicate concern, it records a re-validation signal instead of authoring a competing record:
+
+```jsonc
+{
+  "learning_id": "L20260509-0001",
+  "voter_model": "claude",
+  "voted_at": "2026-05-17T12:00:00Z",
+  "task_id": "ORB-00095"
+}
+```
+
+Rows append to `.orbit/learnings/<id>/votes.jsonl` using `O_APPEND`; each learning has its own file and lock, so cross-learning contention is zero. V1 rejects free-floating votes without `task_id` to keep the signal anchored to a concrete work context. Duplicate rows with the same `(learning_id, voter_model, task_id)` are treated as one vote, preserving the earliest timestamp for that key.
+
+`orbit.learning.show` reports derived vote fields: `vote_count` and `last_voted_at`. `orbit.learning.list` and `orbit.learning.search` keep their envelope output shape unchanged.
+
+Search ranking remains scope-filtered first. Within the matched set, rows sort by:
+
+1. decay-weighted vote score, default half-life 180 days;
+2. manual `priority`;
+3. `updated_at` desc;
+4. `id` asc.
+
+`ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay and uses raw vote count. Vote files are scanned at query time in v1; a SQLite vote-summary mirror is a follow-up only if measured matched-set sizes make the per-file scan visible.
 
 ---
 
@@ -339,6 +369,10 @@ A learning is **stale** if any of these are true:
 
 Two agents (or two humans) may author overlapping learnings concurrently. Phase 1 does not auto-merge; the curation answer is "humans review and supersede one with the other when the duplication surfaces." `orbit learning list --tag <tag>` is the manual surface for spotting duplicates. Phase 2's semantic-similarity ranking will naturally surface near-duplicates at injection time, which is the better forcing function.
 
+### 7.5 Re-validation without re-authoring
+
+When a duplicate concern is already covered by an active learning, the agent should upvote the existing record instead of creating a near-duplicate. The vote says "this learning is still load-bearing in a new task context" and improves search ranking without changing the learning body or `updated_at`.
+
 ---
 
 ## 8. Concerns & Honest Limitations
@@ -355,11 +389,11 @@ A learning scoped to `crates/orbit-knowledge/src/graph_bench.rs` becomes invisib
 
 Phase 2's symbol-aware scope handles renames cleanly because the knowledge graph tracks symbol identity across moves. Phase 1's mitigation is operational: when a refactor moves files, run `orbit learning prune --stale-only` and update or supersede affected records as part of the refactor task.
 
-### 8.3 Recency-only ranking has known failure modes
+### 8.3 Vote ranking still depends on agent discipline
 
-Phase 1 ranks matched learnings by `updated_at` desc. This is the simplest defensible rule, but it's wrong in obvious ways: an old, important learning loses to a recent, marginal one. Manual `priority` tagging is provided as an escape hatch but is itself a tuning knob.
+Phase 1 ranks matched learnings by decayed upvotes before falling back to manual priority and recency. This is better than recency-only ranking, but it depends on agents recording votes only when they have genuinely evaluated a duplicate concern. Over-eager upvoting would make the signal noisy. The v1 mitigations are task-anchored idempotency and time decay, not a full abuse-prevention system.
 
-Phase 2's semantic-similarity ranking from semantic-search will replace recency as the primary signal; phase 1's ranking is a deliberate placeholder, not a long-term answer.
+Phase 2's semantic-similarity ranking from semantic-search may complement or replace parts of this formula; vote score is a load-bearing signal, not the whole relevance model.
 
 ### 8.4 Layer 3 hook is Claude-Code-only
 

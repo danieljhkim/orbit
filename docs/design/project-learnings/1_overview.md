@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-17 (ORB-00095)
 
 Project learnings is a system for preserving and surfacing non-obvious project knowledge — gotchas, root causes from incidents, validated approaches, hard-won workflow insights — at the moment of action so agents stop repeating the same mistakes. The system is **push-first**: relevant learnings inject into agent context automatically when an agent is about to touch code, files, or workflows the learning applies to. A pull surface exists for active exploration, but pull is the secondary mode.
 
@@ -38,10 +38,11 @@ A first-class Orbit resource, parallel to `task`. Each record carries:
 - `body` — multi-line markdown: the rule, the reason, how to apply it.
 - `evidence` — commit SHAs, task IDs, or external refs that produced the learning.
 - `status` — `active` or `superseded`.
+- vote sidecar — append-only task-anchored re-validation events, stored outside the YAML.
 - `supersedes` — back-reference when a newer learning replaces an older one.
 - `created_by`, `created_at`, `updated_at` — provenance.
 
-Records persist as YAML on disk under `.orbit/learnings/L*.yaml`, mirroring the task store pattern. Workspace-scoped per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), and checked into git so learnings travel with the repo ([4_decisions.md ADR-003](./4_decisions.md)).
+Records persist as YAML on disk under `.orbit/learnings/<id>/learning.yaml`, with sidecars such as `votes.jsonl` living beside the YAML. Workspace-scoped per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), and checked into git so learnings travel with the repo ([4_decisions.md ADR-003](./4_decisions.md)).
 
 ### 2.2 Push-based discovery
 
@@ -65,7 +66,7 @@ Active learnings can be superseded (replaced by a newer entry) or marked stale (
 
 | Phase | Scope axis | Ranking | Discovery |
 |-------|-----------|---------|-----------|
-| **Phase 1** | path globs + tags | recency + manual priority | engine pre-prompt + MCP injection + (optional) Claude Code hook |
+| **Phase 1** | path globs + tags | decay-weighted upvotes + manual priority + recency | engine pre-prompt + MCP injection + (optional) Claude Code hook |
 | **Phase 2** | + symbol-aware (knowledge graph) | + semantic similarity (semantic-search) | + relevance-ranked, not just match-based |
 
 Phase 2 is gated on [docs/design/semantic-search/](../semantic-search/) reaching Accepted because the relevance-ranking layer wants real semantic similarity, and the symbol-aware scope wants the same graph integration semantic-search phase 2 will require.
@@ -83,6 +84,7 @@ Phase 2 is gated on [docs/design/semantic-search/](../semantic-search/) reaching
 | Push-injection pipeline | [2_design.md §4](./2_design.md), [4_decisions.md ADR-001](./4_decisions.md), [4_decisions.md ADR-005](./4_decisions.md) | [T20260510-11] |
 | Prerequisite: `Task.tags` field | [2_design.md §4.1](./2_design.md) | [T20260510-12] |
 | MCP / CLI surface (`orbit.learning.*`) | [2_design.md §5](./2_design.md) | [T20260510-11] |
+| Re-validation votes and ranking | [2_design.md §5.4](./2_design.md), [4_decisions.md ADR-006](./4_decisions.md) | [ORB-00095] |
 | Pull skill (`orbit-learnings`) | [2_design.md §6](./2_design.md) | [T20260510-11] |
 | Curation lifecycle, supersession, staleness | [2_design.md §7](./2_design.md) | [T20260510-11] |
 | Native primitive vs flat markdown | [4_decisions.md ADR-002](./4_decisions.md) | [T20260510-11] |
@@ -98,5 +100,6 @@ Phase 2 is gated on [docs/design/semantic-search/](../semantic-search/) reaching
 
 - [T20260510-11] — Design + build project-learnings system as native Orbit primitive. The task that produced this folder.
 - [T20260510-12] — Add `tags` field to `Task` schema. Hard prerequisite for Layer 1's tag-axis matching.
+- [ORB-00095] — Add task-anchored learning upvotes and decay-weighted search ranking.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

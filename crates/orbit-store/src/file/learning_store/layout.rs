@@ -14,6 +14,10 @@ pub(super) fn learning_doc_path(root: &Path, id: &str) -> PathBuf {
     learning_dir_path(root, id).join(LEARNING_DOC_FILE_NAME)
 }
 
+pub(super) fn votes_jsonl_path(root: &Path, id: &str) -> PathBuf {
+    learning_dir_path(root, id).join("votes.jsonl")
+}
+
 /// Locate the YAML path of a learning by id, or `None` if missing.
 pub(super) fn locate_learning(root: &Path, id: &str) -> Result<Option<PathBuf>, OrbitError> {
     validate_learning_id(id)?;

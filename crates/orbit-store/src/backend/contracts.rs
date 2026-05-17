@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
-    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, LegacyValidation,
-    OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact,
-    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus,
-    TaskType, normalize_task_tags, task_matches_tags,
+    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope,
+    LearningVoteSummary, LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef,
+    ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
+    TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -634,6 +634,14 @@ pub struct LearningSearchResult {
     pub matched_by: Vec<String>,
 }
 
+/// Parameters for recording a re-validation vote on a learning.
+#[derive(Debug, Clone)]
+pub struct LearningUpvoteParams {
+    pub learning_id: OrbitId,
+    pub voter_model: String,
+    pub task_id: Option<OrbitId>,
+}
+
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
@@ -645,6 +653,11 @@ pub trait LearningStoreBackend: Send + Sync {
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError>;
+    fn upvote_learning(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<LearningVoteSummary, OrbitError>;
+    fn learning_vote_summary(&self, id: &str) -> Result<LearningVoteSummary, OrbitError>;
     fn update_learning(
         &self,
         id: &str,

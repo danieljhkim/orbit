@@ -84,6 +84,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);
+    registry.register(learning::upvote::OrbitLearningUpvoteTool);
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
     registry.register(review_thread::add::OrbitReviewThreadAddTool);

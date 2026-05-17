@@ -9,5 +9,6 @@ mod search;
 mod show;
 mod supersede;
 mod update;
+mod upvote;
 
 pub use command::{LearningCommand, LearningSubcommand};

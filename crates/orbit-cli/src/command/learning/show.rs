@@ -3,7 +3,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
 
-use super::output::learning_to_json;
+use super::output::learning_show_to_json;
 
 #[derive(Args)]
 pub struct LearningShowArgs {
@@ -17,11 +17,16 @@ pub struct LearningShowArgs {
 impl Execute for LearningShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let learning = runtime.get_learning(&self.id)?;
+        let vote_summary = runtime.learning_vote_summary(&self.id)?;
         if self.json {
-            crate::output::json::print_pretty(&learning_to_json(&learning))
+            crate::output::json::print_pretty(&learning_show_to_json(&learning, &vote_summary))
         } else {
             println!("ID: {}", learning.id);
             println!("Status: {}", learning.status.as_str());
+            println!("Votes: {}", vote_summary.vote_count);
+            if let Some(last_voted_at) = vote_summary.last_voted_at {
+                println!("Last Voted: {}", last_voted_at.to_rfc3339());
+            }
             println!("Summary: {}", learning.summary);
             if !learning.scope.paths.is_empty() {
                 println!("Paths: {}", learning.scope.paths.join(", "));

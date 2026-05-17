@@ -59,7 +59,7 @@ pub use context::{ActorIdentity, ActorKind, OrbitContext};
 pub use orbit_common::types::{
     Activity, AuditEvent, AuditEventStatus, AuditStats, EvidenceKind, ExecutorDef, ExternalRef,
     GITHUB_PR_EXTERNAL_REF_SYSTEM, Job, JobRun, JobRunState, JobRunStep, JobScheduleState, JobStep,
-    JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus,
+    JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus, LearningVoteSummary,
     ResolvedTaskDependency, ReviewMessage, ReviewThread, ReviewThreadStatus, Role, Skill, Task,
     TaskComment, TaskComplexity, TaskPriority, TaskStatus, TaskType, build_task_status_index,
     normalize_task_dependencies, normalize_task_tags, push_external_ref_if_missing,
@@ -75,6 +75,7 @@ pub use orbit_store::AuditEventInsertParams;
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
+    LearningUpvoteParams,
 };
 pub use runtime::OrbitRuntime;
 pub use runtime::engine::{

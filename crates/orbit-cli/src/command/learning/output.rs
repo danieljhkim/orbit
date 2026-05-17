@@ -5,7 +5,7 @@
 //! `orbit.learning.*` MCP tool output byte-for-byte (per the CLI-parity
 //! acceptance criterion).
 
-use orbit_core::{EvidenceKind, Learning, LearningSearchResult};
+use orbit_core::{EvidenceKind, Learning, LearningSearchResult, LearningVoteSummary};
 use serde_json::{Value, json};
 
 pub(crate) fn learning_to_json(learning: &Learning) -> Value {
@@ -32,6 +32,24 @@ pub(crate) fn learning_to_json(learning: &Learning) -> Value {
         "created_by": learning.created_by,
         "priority": learning.priority,
     })
+}
+
+pub(crate) fn learning_show_to_json(
+    learning: &Learning,
+    vote_summary: &LearningVoteSummary,
+) -> Value {
+    let mut value = learning_to_json(learning);
+    if let Some(object) = value.as_object_mut() {
+        object.insert("vote_count".to_string(), json!(vote_summary.vote_count));
+        object.insert(
+            "last_voted_at".to_string(),
+            vote_summary
+                .last_voted_at
+                .map(|ts| json!(ts.to_rfc3339()))
+                .unwrap_or(Value::Null),
+        );
+    }
+    value
 }
 
 pub(crate) fn learning_search_result_to_json(result: &LearningSearchResult) -> Value {

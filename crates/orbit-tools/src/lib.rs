@@ -92,6 +92,7 @@ pub enum OrbitBuiltinAction {
     LearningShow,
     LearningSupersede,
     LearningUpdate,
+    LearningUpvote,
     PipelineInvoke,
     PipelineWait,
     ReviewThreadAdd,

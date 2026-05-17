@@ -6,3 +6,4 @@ pub mod search;
 pub mod show;
 pub mod supersede;
 pub mod update;
+pub mod upvote;

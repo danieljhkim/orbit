@@ -364,6 +364,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 LearningSubcommand::Search(_) => "search",
                 LearningSubcommand::Show(_) => "show",
                 LearningSubcommand::Update(_) => "update",
+                LearningSubcommand::Upvote(_) => "upvote",
                 LearningSubcommand::Supersede(_) => "supersede",
                 LearningSubcommand::Reindex(_) => "reindex",
                 LearningSubcommand::MigrateLayout(_) => "migrate-layout",

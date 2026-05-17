@@ -8,10 +8,10 @@ use orbit_common::types::{
 use super::contracts::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, ExecutorDefStoreBackend,
     JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCreateParams, LearningSearchParams,
-    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    PolicyDefStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -381,6 +381,20 @@ impl LearningStoreBackend for LearningFileStore {
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         self.search_learnings(params)
+    }
+
+    fn upvote_learning(
+        &self,
+        params: LearningUpvoteParams,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.upvote_learning(params)
+    }
+
+    fn learning_vote_summary(
+        &self,
+        id: &str,
+    ) -> Result<orbit_common::types::LearningVoteSummary, OrbitError> {
+        self.learning_vote_summary(id)
     }
 
     fn update_learning(

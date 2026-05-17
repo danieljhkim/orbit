@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-17 (ORB-00096)
+**Last updated:** 2026-05-17 (ORB-00095)
 
 ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -84,7 +84,7 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 
 ---
 
-## ADR-004 — Phase-1 scope = path globs + tags, ranked by recency; semantic and symbol-aware deferred
+## ADR-004 — Phase-1 scope = path globs + tags; semantic and symbol-aware deferred
 
 **Status:** Accepted · 2026-05 · [T20260511-6]
 
@@ -99,13 +99,13 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 
 | Ranking | Profile |
 |---------|---------|
-| **Recency (`updated_at` desc)** | Trivial. Wrong when an old, important learning loses to a recent, marginal one. |
+| **Recency (`updated_at` desc)** | Trivial. Wrong when an old, important learning loses to a recent, marginal one. Superseded as the primary ranking key by ADR-006. |
 | **Manual `priority`** | Author-supplied. Honest signal when used; degenerates to "everything is high priority" without curation discipline. |
 | **Semantic similarity** | Best signal. Requires embeddings. Cost = embed every learning + run cosine on every query. |
 
 Phase 1's binding constraint is: ship before semantic-search reaches Accepted ([T20260510-3]). That rules out semantic similarity for both scope and ranking. Symbol-aware scope is *technically* available — the knowledge graph already exists — but coupling the learning store to graph rebuilds adds dependency surface and mainly pays off when fused with semantic ranking. Doing one without the other yields a clunky middle state.
 
-**Decision.** Phase 1 supports two scope axes, evaluated as logical OR: path globs (matched via the `orbit-policy` glob engine) and tags (matched as exact strings). Ranking is `updated_at` desc with optional `priority` tagging as a tie-breaker. The schema reserves `scope.symbols` and `scope.semantic_seed` fields for phase 2 forward compatibility, but neither is read in phase 1.
+**Decision.** Phase 1 supports two scope axes, evaluated as logical OR: path globs (matched via the `orbit-policy` glob engine) and tags (matched as exact strings). The schema reserves `scope.symbols` and `scope.semantic_seed` fields for phase 2 forward compatibility, but neither is read in phase 1. Initial ranking used `updated_at` desc with optional `priority`; ADR-006 adds decay-weighted upvotes ahead of those tie-breakers.
 
 Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symbol-aware scope and semantic ranking once semantic-search ships.
 
@@ -113,7 +113,7 @@ Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symb
 - Phase 1 is implementable in parallel with semantic-search work, not gated on it.
 - Path globs cover the common case (most learnings are file-area-scoped) and tags cover the cross-cutting case.
 - The schema is forward-compatible; phase 2 is additive, not a migration.
-- Cost: recency-only ranking has known failure modes ([3_vision.md §1.2](./3_vision.md)) — old-but-important learnings get out-ranked by recent-but-marginal ones. Path globs are brittle to renames; the documented mitigation is "run `orbit learning prune --stale-only` after refactors that move files," which is operational discipline, not automation. Both costs are accepted as the price of shipping phase 1 ahead of semantic-search.
+- Cost: path globs are brittle to renames; the documented mitigation is "run `orbit learning prune --stale-only` after refactors that move files," which is operational discipline, not automation. Ranking still lacks semantic similarity until phase 2, even after ADR-006's vote signal.
 
 ---
 
@@ -137,6 +137,34 @@ The vendor-locked single-layer options are non-starters because the project supp
 - Agents see relevant learnings at multiple natural moments — task start, MCP tool call, individual edit — without being drowned in repeats (dedup set).
 - The architecture admits a future "layer 4" (Orbit-side proxy for agents without hooks) without restructuring, but doesn't require it ([3_vision.md §1.5](./3_vision.md)).
 - Cost: three injection sites means three places to maintain. A schema change to learning records (new field surfaced at injection time) requires touching `orbit-engine`, `orbit-mcp`, and the Claude Code hook script. The dedup set is agent-local; if context is compressed mid-session, the set may reset and the same learning may inject twice. Both costs are accepted as the price of robust coverage; collapsing to a single layer would mean choosing one failure mode (vendor lock-in, coarse scope, or missing built-in tools) and living with it.
+
+---
+
+## ADR-006 — Rank matched learnings by task-anchored decay-weighted upvotes
+
+**Status:** Accepted · 2026-05 · [ORB-00095]
+
+**Context.** Recency and manual priority do not capture whether a learning is still load-bearing. An older learning that agents keep relying on should outrank a newer marginal note, but `updated_at` only moves when the learning body changes. The natural re-validation moment is duplicate-check: an agent reads a candidate learning, decides it already covers the concern, and does not author a competing record.
+
+Alternatives considered:
+
+| Approach | Profile |
+|----------|---------|
+| **Keep recency + priority only** | No new state. Continues conflating "was once written" with "is still useful." |
+| **Global vote count** | Simple. Lets ancient high-volume learnings outrank recently useful ones forever. |
+| **Task-anchored decayed votes** | Captures repeated usefulness across work contexts while letting old signal fade. Requires a sidecar file and idempotency policy. |
+| **SQLite vote mirror first** | Fast summaries. Adds schema/cache complexity before measured need. |
+
+**Decision.** Each learning may have `.orbit/learnings/<id>/votes.jsonl`, created lazily on first vote. Each row records `learning_id`, `voter_model`, `voted_at`, and `task_id`. V1 rejects votes without `task_id`; idempotency key is `(learning_id, voter_model, task_id)`. Search ranking filters by scope first, then sorts by decay-weighted vote score, `priority`, `updated_at`, and `id`. Default half-life is 180 days; `ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay for raw-count behavior.
+
+Votes are derived from per-learning JSONL on read. `orbit learning reindex` validates vote files but does not rewrite them or mirror them into SQLite.
+
+**Consequences.**
+- Load-bearing learnings accrue a ranking signal without mutating the YAML body or bumping `updated_at`.
+- Duplicate-check becomes constructive: "this already exists" reinforces the existing record instead of producing a duplicate.
+- Per-learning files keep write contention local; same-learning upvotes serialize with a per-learning lock and append atomically.
+- Cost: vote spam is possible if agents upvote reflexively. Task anchoring, idempotency, and decay reduce but do not eliminate that risk.
+- Cost: search now opens one small votes file per matched learning. This is acceptable for the expected 1-20 row matched sets; a SQLite summary mirror is deferred until measurement shows a need.
 
 ---
 

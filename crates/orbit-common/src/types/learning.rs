@@ -160,6 +160,48 @@ pub struct Learning {
     pub priority: Option<u8>,
 }
 
+/// Append-only vote event for an existing learning.
+///
+/// Vote rows are projection metadata stored beside the learning YAML record
+/// in `votes.jsonl`; they are not part of the persisted `Learning` document.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LearningVoteRow {
+    pub learning_id: OrbitId,
+    pub voter_model: String,
+    pub voted_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<OrbitId>,
+}
+
+/// Derived vote statistics for a learning.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct LearningVoteSummary {
+    pub vote_count: usize,
+    pub last_voted_at: Option<DateTime<Utc>>,
+}
+
+/// Compute the decay-weighted score for vote timestamps at `now`.
+///
+/// A half-life of `0.0` disables decay and returns the raw vote count.
+pub fn decayed_vote_score(
+    voted_at_values: &[DateTime<Utc>],
+    now: DateTime<Utc>,
+    half_life_days: f64,
+) -> f64 {
+    if half_life_days == 0.0 {
+        return voted_at_values.len() as f64;
+    }
+
+    voted_at_values
+        .iter()
+        .map(|voted_at| {
+            let age_days =
+                now.signed_duration_since(*voted_at).num_milliseconds() as f64 / 86_400_000.0;
+            2_f64.powf(-age_days / half_life_days)
+        })
+        .sum()
+}
+
 pub const DEFAULT_LEARNING_REMINDER_PER_CALL_CAP: usize = 5;
 pub const DEFAULT_LEARNING_REMINDER_SESSION_CAP: usize = 20;
 
@@ -499,6 +541,34 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
             EvidenceKind::External
         );
         assert!(EvidenceKind::from_str("other").is_err());
+    }
+
+    #[test]
+    fn decayed_vote_score_halves_each_half_life() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap();
+        let recent = now;
+        let old = now - chrono::Duration::days(180);
+
+        let recent_weight = decayed_vote_score(&[recent], now, 180.0);
+        let old_weight = decayed_vote_score(&[old], now, 180.0);
+
+        let ratio = recent_weight / old_weight;
+        assert!(
+            (ratio - 2.0).abs() < 1e-6,
+            "expected 2:1 ratio, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn decayed_vote_score_zero_half_life_returns_raw_count() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap();
+        let votes = [
+            now - chrono::Duration::days(30),
+            now - chrono::Duration::days(730),
+            now - chrono::Duration::days(1460),
+        ];
+
+        assert_eq!(decayed_vote_score(&votes, now, 0.0), 3.0);
     }
 
     #[test]

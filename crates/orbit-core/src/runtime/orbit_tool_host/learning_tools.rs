@@ -12,13 +12,18 @@ use orbit_common::types::{
     EvidenceKind, LearningEvidence, LearningScope, LearningStatus, NotFoundKind, OrbitError,
     optional_string, optional_string_alias, required_string,
 };
-use orbit_store::{LearningCreateParams, LearningSearchParams, LearningUpdateParams};
+use orbit_store::{
+    LearningCreateParams, LearningSearchParams, LearningUpdateParams, LearningUpvoteParams,
+};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
 use super::input::optional_bool_alias;
-use super::json::{learning_search_result_to_json, learning_to_json};
+use super::json::{
+    learning_search_result_to_json, learning_show_to_json, learning_to_json,
+    learning_vote_summary_to_json,
+};
 
 pub(super) fn add(
     runtime: &OrbitRuntime,
@@ -55,7 +60,8 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .learnings()
         .get(&id)?
         .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
-    Ok(learning_to_json(&learning))
+    let vote_summary = runtime.stores().learnings().vote_summary(&id)?;
+    Ok(learning_show_to_json(&learning, &vote_summary))
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -102,6 +108,26 @@ pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
     Ok(Value::Array(
         results.iter().map(learning_search_result_to_json).collect(),
     ))
+}
+
+pub(super) fn upvote(
+    runtime: &OrbitRuntime,
+    input: Value,
+    _agent: Option<String>,
+    model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let learning_id = required_string(&input, &["id", "learning_id", "learningId"], "id")?;
+    let voter_model = optional_string(&input, "model")?
+        .or(model)
+        .ok_or_else(|| OrbitError::InvalidInput("learning upvote requires `model`".to_string()))?;
+    let task_id = optional_string_alias(&input, &["task", "task_id", "taskId"])?;
+
+    let summary = runtime.upvote_learning(LearningUpvoteParams {
+        learning_id,
+        voter_model,
+        task_id,
+    })?;
+    Ok(learning_vote_summary_to_json(&summary))
 }
 
 pub(super) fn update(
