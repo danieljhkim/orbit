@@ -1,6 +1,6 @@
 //! Lifecycle (supersede/archive/delete) tests split per ORB-00116.
 
-use orbit_common::types::{LearningStatus, OrbitError};
+use orbit_common::types::LearningStatus;
 use tempfile::tempdir;
 
 use super::super::record::read_learning_file;

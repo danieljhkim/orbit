@@ -3,11 +3,11 @@
 use std::sync::Arc;
 use std::thread;
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone as _, Utc};
 use orbit_common::types::{NotFoundKind, OrbitError};
 
 use super::super::layout::votes_jsonl_path;
-use super::super::votes::{append_vote_row, read_vote_rows};
+use super::super::votes::append_vote_row;
 use super::store::LearningFileStore;
 use super::test_support::{
     create_params, line_count, set_half_life_env, store_with_index, upvote_params, vote_row,

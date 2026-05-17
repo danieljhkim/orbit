@@ -1,10 +1,10 @@
 // Shared test fixtures and helpers for the split learning_store/api test suite.
 // Keep this file small; individual *_tests.rs pull only what they need.
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::backend::{LearningCommentAddParams, LearningCreateParams, LearningUpvoteParams};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use orbit_common::types::{LearningScope, LearningVoteRow};
 use tempfile::{TempDir, tempdir};
 

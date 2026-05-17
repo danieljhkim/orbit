@@ -1,6 +1,5 @@
 //! Stale read/list behavior and terminal timing repair tests.
 
-use super::super::*;
 use super::*;
 
 use super::super::JobRunListParams;

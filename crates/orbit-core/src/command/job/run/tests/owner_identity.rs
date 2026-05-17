@@ -1,12 +1,11 @@
 //! Timezone and probe-outcome regression coverage for owner identity classification.
 
-use super::super::*;
 use super::*;
 
+use super::super::JobRunListParams;
+
 #[cfg(unix)]
-use super::super::owner::{
-    OwnerIdentity, classify_run_owner_with_probes, process_is_alive, stale_job_run_message,
-};
+use super::super::owner::{OwnerIdentity, classify_run_owner_with_probes, stale_job_run_message};
 use chrono::{Duration, Utc};
 use orbit_common::types::JobRunState;
 #[cfg(unix)]
@@ -15,10 +14,6 @@ use orbit_common::utility::process_identity::ProbeOutcome;
 use orbit_common::utility::process_identity::{STABLE_TOKEN_PREFIX, process_start_identity_token};
 #[cfg(unix)]
 use std::process::{Command, Stdio};
-#[cfg(unix)]
-use std::time::Duration as StdDuration;
-#[cfg(unix)]
-use tempfile::tempdir;
 
 static TZ_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

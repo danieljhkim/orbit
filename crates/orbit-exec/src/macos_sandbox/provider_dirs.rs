@@ -177,7 +177,5 @@ fn emit_grok_json_file_allow(state_dir: &Path, file_name: &str, out: &mut String
 /// the kernel may lose the profile mid-run.
 /// When `cwd` is set, it is applied to the outer `sandbox-exec` wrapper and
 /// inherited by the wrapped child.
-///
-
 #[cfg(test)]
 mod tests;

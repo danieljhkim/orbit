@@ -1,6 +1,5 @@
 //! Cancellation behavior and process-group cancellation tests.
 
-use super::super::*;
 use super::*;
 
 #[cfg(unix)]

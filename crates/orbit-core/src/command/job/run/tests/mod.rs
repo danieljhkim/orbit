@@ -10,8 +10,6 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{JobRun, JobRunState};
 use tempfile::tempdir;
 
-use super::super::*; // OrbitRuntime, JobRunState, etc. (pub items + reexports)
-
 pub(crate) fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
     let root = tempdir().expect("create tempdir");
     let global_root = root.path().join("global");

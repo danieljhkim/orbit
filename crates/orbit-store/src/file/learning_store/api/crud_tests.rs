@@ -1,15 +1,11 @@
 //! CRUD-focused tests for LearningFileStore (split from monolithic api.rs per ORB-00116).
 
-use chrono::{DateTime, TimeZone, Utc};
-use orbit_common::types::{
-    EvidenceKind, LearningEvidence, LearningScope, LearningStatus, NotFoundKind, OrbitError,
-};
+use chrono::{TimeZone as _, Utc};
+use orbit_common::types::{EvidenceKind, LearningEvidence, LearningScope, LearningStatus};
 use tempfile::tempdir;
 
 use super::store::LearningFileStore;
-use super::test_support::{
-    create_params, legacy_learning_yaml, line_count, set_half_life_env, store_with_index,
-};
+use super::test_support::{create_params, store_with_index};
 use crate::Store;
 use crate::backend::{LearningCreateParams, LearningSearchParams, LearningUpdateParams};
 

@@ -1,6 +1,5 @@
 //! Query, list, show, and history methods for job runs, with reconciliation.
 
-use chrono::Utc;
 use orbit_common::types::{JobRun, NotFoundKind, OrbitError};
 use orbit_store::JobRunQuery;
 

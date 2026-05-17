@@ -4,8 +4,7 @@ use std::time::Instant;
 
 use orbit_common::types::LearningScope;
 
-use super::store::LearningFileStore;
-use super::test_support::{create_params, store_with_index};
+use super::test_support::store_with_index;
 use crate::backend::{LearningCreateParams, LearningSearchParams};
 
 #[test]
