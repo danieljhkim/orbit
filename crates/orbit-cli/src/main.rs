@@ -39,6 +39,7 @@ mod parse;
 use clap::Parser;
 use orbit_core::{ActorIdentity, OrbitRuntime};
 
+use crate::command::learning::{LearningCommand, LearningSubcommand};
 use crate::command::mcp::{McpCommand, McpSubcommand};
 use crate::command::tool::{OutputFormat, ToolSubcommand};
 use crate::command::workspace::{WorkspaceCommand, WorkspaceSubcommand};
@@ -89,6 +90,15 @@ fn main() {
         }
         Commands::Mcp(McpCommand {
             command: McpSubcommand::Serve(args),
+        }) => {
+            if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
+                print_error(&err, tool_run_json_output);
+                std::process::exit(1);
+            }
+            return;
+        }
+        Commands::Learning(LearningCommand {
+            command: LearningSubcommand::MigrateLayout(args),
         }) => {
             if let Err(err) = args.execute_without_runtime(root_override.as_deref()) {
                 print_error(&err, tool_run_json_output);

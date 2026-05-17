@@ -53,7 +53,7 @@ Run `orbit tool list | grep orbit.learning` if you suspect the local tool surfac
 
 ## Operating Rules
 
-- **Never edit `.orbit/learnings/<id>.yaml` directly.** All writes go through the tools so envelope cache, supersede pointers, and audit events stay consistent.
+- **Never edit `.orbit/learnings/<id>/learning.yaml` directly.** All writes go through the tools so envelope cache, supersede pointers, and audit events stay consistent.
 - **Never invent learning IDs.** `add` allocates them; cite returned IDs verbatim.
 - **One learning, one piece of guidance.** If a record needs three sub-points, it is probably three learnings with overlapping scopes — easier to maintain and prune.
 - **Keep `summary` ≤ 280 characters and write it as a directive** (e.g. *"Always X before Y in <crate>"*, not *"Notes about X"*). Push-injection surfaces the summary first; agents skim it for relevance in milliseconds.
@@ -104,7 +104,7 @@ orbit learning prune --stale-only
 
 | Mistake | Why it fails | Correct form |
 |---------|--------------|--------------|
-| Hand-writing `.orbit/learnings/*.yaml` | Skips envelope index update and audit attribution | Use `orbit.learning.add` / `update` / `supersede` |
+| Hand-writing `.orbit/learnings/<id>/learning.yaml` | Skips envelope index update and audit attribution | Use `orbit.learning.add` / `update` / `supersede` |
 | Creating a duplicate without `search` first | Two records with overlapping scope inject twice and contradict each other | `orbit learning search --path/--tag` before `add` |
 | `update` to "fix" a fundamental change in advice | Loses the supersede chain; readers cannot see the old guidance was reversed | `orbit learning supersede --id <old> --with <new>` |
 | Calling `update` on a superseded record | Tool rejects with a typed error | `supersede` from the head of the chain instead |

@@ -44,6 +44,5 @@ fn acquire_lock(path: PathBuf, label: &str) -> Result<File, OrbitError> {
 }
 
 fn learning_lock_path(root: &Path, id: &str) -> PathBuf {
-    root.join(LOCKS_DIR_NAME)
-        .join(format!("learning-{id}.lock"))
+    root.join(format!(".{id}.lock"))
 }

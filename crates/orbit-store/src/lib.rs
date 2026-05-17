@@ -102,6 +102,12 @@ pub mod token_scoreboard {
     pub use crate::file::scoreboard::token_scoreboard::write_token_scoreboard;
 }
 
+pub mod learning_layout {
+    pub use crate::file::learning_store::migration::{
+        LearningLayoutMigrationReport, migrate_learning_layout,
+    };
+}
+
 use chrono::{DateTime, Utc};
 
 pub use backend::{

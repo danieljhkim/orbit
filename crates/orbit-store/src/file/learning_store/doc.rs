@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::{Learning, LearningEvidence, LearningScope, LearningStatus, OrbitId};
 use serde::{Deserialize, Serialize};
 
-/// On-disk shape of a learning record (the contents of `<id>.yaml`).
+/// On-disk shape of a learning record (the contents of `<id>/learning.yaml`).
 ///
 /// Wraps an in-memory [`Learning`] with the persisted `schema_version`
 /// field, mirroring the `AdrFileDocument` pattern. The `Learning` payload

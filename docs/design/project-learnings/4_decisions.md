@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-17 (ORB-00096)
 
 ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 
@@ -48,7 +48,7 @@ The injection layers ([2_design.md §4](./2_design.md)) are the forcing function
 
 A flat-markdown approach can be retrofitted with an index, but at that point it's a native primitive with extra steps and a less convenient on-disk format.
 
-**Decision.** Phase 1 implements `learning` as a first-class Orbit resource: YAML records under `.orbit/learnings/<id>.yaml`, SQLite index under `learnings_index`, MCP/CLI surface mirroring `orbit.task.*`. Tasks were the model because they're the closest existing primitive in shape and lifecycle.
+**Decision.** Phase 1 implements `learning` as a first-class Orbit resource: YAML records under `.orbit/learnings/<id>/learning.yaml`, SQLite index under `learnings_index`, MCP/CLI surface mirroring `orbit.task.*`. Tasks were the model because they're the closest existing primitive in shape and lifecycle.
 
 **Consequences.**
 - Hot-path queries are indexed, sub-10ms, and don't pay filesystem-walk cost.
@@ -65,14 +65,16 @@ A flat-markdown approach can be retrofitted with an index, but at that point it'
 **Context.** Where do learning records live on disk?
 
 - **Workspace state** (`.orbit/state/learnings/`, gitignored). Same locality as job runs, command audit, etc. Workspace-private; doesn't survive collaborator handoff.
-- **Workspace-scoped, checked in** (`.orbit/learnings/<id>.yaml`, in git). Same locality as tasks. Travels with the repo across machines and collaborators.
+- **Workspace-scoped, checked in** (`.orbit/learnings/<id>/learning.yaml`, in git). Same locality as tasks. Travels with the repo across machines and collaborators.
 - **Global** (`~/.orbit/learnings/`). Like the global skills location. Cross-workspace; requires conflict semantics if multiple workspaces author overlapping records.
 
 Per the Scoping Rules table in [CLAUDE.md](../../../CLAUDE.md), tasks are `WorkspaceOnly` and live in `.orbit/tasks/` checked in. Job runs are also `WorkspaceOnly` but under `.orbit/state/`, gitignored, because they're execution artifacts. Learnings sit closer to tasks in shape — durable project artifacts authored over time — so the task locality is the right precedent.
 
 The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but secondary: most learnings are repo-specific, and the cross-cutting ones are best handled by tag-driven promotion later, not by making the default storage location global.
 
-**Decision.** Phase 1 stores learnings at `.orbit/learnings/<id>.yaml`, scoped `WorkspaceOnly` per the Scoping Rules table, checked into git. The SQLite index lives under `.orbit/state/` and is rebuildable from the YAML; it does not need to be checked in.
+**Decision.** Phase 1 stores learnings at `.orbit/learnings/<id>/learning.yaml`, scoped `WorkspaceOnly` per the Scoping Rules table, checked into git. The SQLite index lives under `.orbit/state/` and is rebuildable from the YAML; it does not need to be checked in.
+
+**Amendment — ORB-00096.** Learnings moved from the original flat `.orbit/learnings/<id>.yaml` / `.orbit/learnings/superseded/<id>.yaml` layout to per-entity directories at `.orbit/learnings/<id>/learning.yaml`. Status now lives only in the YAML body, and the explicit `orbit learning migrate-layout` command performs the one-way migration.
 
 **Consequences.**
 - Learnings travel with the repo. New collaborator clones, gets all the project knowledge from day zero.

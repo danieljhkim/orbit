@@ -650,8 +650,7 @@ pub trait LearningStoreBackend: Send + Sync {
     ) -> Result<Learning, OrbitError>;
     fn supersede_learning(&self, old_id: &str, new_id: &str) -> Result<(), OrbitError>;
     /// Archive a learning without a replacement record. Flips
-    /// `status = superseded`, sets `superseded_by = None`, and moves the
-    /// YAML under `superseded/`. Returns `false` when the record does not
+    /// `status = superseded` and sets `superseded_by = None`. Returns `false` when the record does not
     /// exist. Used by `prune --delete` (§7.3).
     fn archive_learning(&self, id: &str) -> Result<bool, OrbitError>;
     fn delete_learning(&self, id: &str) -> Result<bool, OrbitError>;

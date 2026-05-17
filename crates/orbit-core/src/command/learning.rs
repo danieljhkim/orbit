@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use orbit_common::types::{EvidenceKind, Learning, LearningStatus, NotFoundKind, OrbitError};
 use orbit_store::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
+    learning_layout::LearningLayoutMigrationReport,
 };
 
 use crate::OrbitRuntime;
@@ -66,6 +67,10 @@ impl OrbitRuntime {
         self.stores().learnings().reindex()
     }
 
+    pub fn migrate_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {
+        migrate_learning_layout_at(&self.paths().orbit_dir)
+    }
+
     /// Returns the IDs of every active learning that the §7.3 staleness
     /// rules flag as stale. A learning is stale when ALL of:
     /// * every `scope.paths` glob resolves to no extant directory under
@@ -97,6 +102,15 @@ impl OrbitRuntime {
         }
         Ok((stale, deleted))
     }
+}
+
+pub fn migrate_learning_layout_at(
+    workspace_orbit_dir: &Path,
+) -> Result<LearningLayoutMigrationReport, OrbitError> {
+    orbit_store::learning_layout::migrate_learning_layout(
+        &workspace_orbit_dir.join("learnings"),
+        workspace_orbit_dir,
+    )
 }
 
 fn is_learning_stale(runtime: &OrbitRuntime, learning: &Learning, repo_root: &Path) -> bool {

@@ -5,6 +5,7 @@ use crate::command::Execute;
 
 use super::add::LearningAddArgs;
 use super::list::LearningListArgs;
+use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
 use super::reindex::LearningReindexArgs;
 use super::search::LearningSearchArgs;
@@ -41,6 +42,8 @@ pub enum LearningSubcommand {
     Supersede(LearningSupersedeArgs),
     /// Rebuild the SQLite envelope index from YAML
     Reindex(LearningReindexArgs),
+    /// Migrate legacy flat learning YAML files to per-entity directories
+    MigrateLayout(LearningMigrateLayoutArgs),
     /// Report or archive stale learnings
     Prune(LearningPruneArgs),
 }
@@ -55,6 +58,7 @@ impl Execute for LearningSubcommand {
             LearningSubcommand::Update(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
             LearningSubcommand::Reindex(args) => args.execute(runtime),
+            LearningSubcommand::MigrateLayout(args) => args.execute(runtime),
             LearningSubcommand::Prune(args) => args.execute(runtime),
         }
     }

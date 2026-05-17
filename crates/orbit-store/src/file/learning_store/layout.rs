@@ -2,86 +2,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use orbit_common::types::{LearningStatus, OrbitError};
+use orbit_common::types::OrbitError;
 
-use super::constants::{LEARNING_DOC_FILE_EXT, SUPERSEDED_DIR_NAME};
+use super::constants::{LEARNING_DOC_FILE_EXT, LEARNING_DOC_FILE_NAME};
 
-/// Filesystem state directories for learnings.
-///
-/// Mirrors the `task_store::TaskStateDir` shape but with the smaller phase-1
-/// lifecycle (active records live at the root, superseded ones move under
-/// `superseded/`). Both directories are checked into git per ADR-003.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LearningStateDir {
-    Active,
-    Superseded,
+pub(super) fn learning_dir_path(root: &Path, id: &str) -> PathBuf {
+    root.join(id)
 }
 
-impl LearningStateDir {
-    pub(super) fn all() -> &'static [LearningStateDir] {
-        &[LearningStateDir::Active, LearningStateDir::Superseded]
-    }
-
-    pub(super) fn to_status(self) -> LearningStatus {
-        match self {
-            LearningStateDir::Active => LearningStatus::Active,
-            LearningStateDir::Superseded => LearningStatus::Superseded,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn from_status(status: LearningStatus) -> Self {
-        match status {
-            LearningStatus::Active => LearningStateDir::Active,
-            LearningStatus::Superseded => LearningStateDir::Superseded,
-        }
-    }
+pub(super) fn learning_doc_path(root: &Path, id: &str) -> PathBuf {
+    learning_dir_path(root, id).join(LEARNING_DOC_FILE_NAME)
 }
 
-/// Directory containing learning records for the given state.
-///
-/// - `Active` lives directly under the store root (e.g. `.orbit/learnings/`)
-///   so PR diffs surface the most-frequently-touched records first.
-/// - `Superseded` lives under `<root>/superseded/` per ADR-003.
-pub(super) fn state_dir_path(root: &Path, state: LearningStateDir) -> PathBuf {
-    match state {
-        LearningStateDir::Active => root.to_path_buf(),
-        LearningStateDir::Superseded => root.join(SUPERSEDED_DIR_NAME),
-    }
-}
-
-pub(super) fn learning_doc_path(root: &Path, state: LearningStateDir, id: &str) -> PathBuf {
-    state_dir_path(root, state).join(format!("{id}.{LEARNING_DOC_FILE_EXT}"))
-}
-
-/// Locate the `(state, file_path)` of a learning by id, or `None` if missing.
-pub(super) fn locate_learning(
-    root: &Path,
-    id: &str,
-) -> Result<Option<(LearningStateDir, PathBuf)>, OrbitError> {
+/// Locate the YAML path of a learning by id, or `None` if missing.
+pub(super) fn locate_learning(root: &Path, id: &str) -> Result<Option<PathBuf>, OrbitError> {
     validate_learning_id(id)?;
-    for state in LearningStateDir::all() {
-        let path = learning_doc_path(root, *state, id);
-        if path.is_file() {
-            return Ok(Some((*state, path)));
-        }
+    let path = learning_doc_path(root, id);
+    if path.is_file() {
+        return Ok(Some(path));
     }
     Ok(None)
 }
 
-/// Move the YAML file from one state directory to another (e.g. `active` →
-/// `superseded`). Creates the destination parent directory if missing.
-pub(super) fn move_learning_dir(from: &Path, to: &Path) -> Result<(), OrbitError> {
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
-    }
-    fs::rename(from, to).map_err(|e| OrbitError::Io(e.to_string()))
-}
-
 /// Allocate the next sequential learning id of the form `L<YYYYMMDD>-<NNNN>`.
 ///
-/// `<NNNN>` is monotonically increasing across active and superseded records
-/// for the given day; allocation rolls over each calendar day.
+/// `<NNNN>` is monotonically increasing across every per-entity learning
+/// directory for the given day; allocation rolls over each calendar day.
 ///
 /// **Caller contract**: must hold an allocation lock (see
 /// [`super::lock::acquire_learning_allocation_lock`]) for the duration of
@@ -92,26 +38,22 @@ pub(super) fn next_learning_id(root: &Path, now: DateTime<Utc>) -> Result<String
     let prefix = format!("L{date}-");
     let mut max_suffix: u32 = 0;
 
-    for state in LearningStateDir::all() {
-        let dir = state_dir_path(root, *state);
-        if !dir.exists() {
-            continue;
-        }
-        for entry in fs::read_dir(&dir).map_err(|e| OrbitError::Io(e.to_string()))? {
+    if root.exists() {
+        for entry in fs::read_dir(root).map_err(|e| OrbitError::Io(e.to_string()))? {
             let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
             let file_type = entry
                 .file_type()
                 .map_err(|e| OrbitError::Io(e.to_string()))?;
-            if !file_type.is_file() {
-                continue;
-            }
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
                 continue;
             };
-            let Some(stem) = name.strip_suffix(&format!(".{LEARNING_DOC_FILE_EXT}")) else {
+            let Some(id) = learning_id_from_layout_entry(&name, file_type.is_dir()) else {
                 continue;
             };
-            let Some(tail) = stem.strip_prefix(&prefix) else {
+            if file_type.is_dir() && !learning_doc_path(root, &id).is_file() {
+                continue;
+            }
+            let Some(tail) = id.strip_prefix(&prefix) else {
                 continue;
             };
             if let Ok(n) = tail.parse::<u32>() {
@@ -124,6 +66,14 @@ pub(super) fn next_learning_id(root: &Path, now: DateTime<Utc>) -> Result<String
         .checked_add(1)
         .ok_or_else(|| OrbitError::Execution("learning id counter overflow".to_string()))?;
     Ok(format!("L{date}-{next}"))
+}
+
+fn learning_id_from_layout_entry(name: &str, is_dir: bool) -> Option<String> {
+    if is_dir {
+        return is_valid_learning_id(name).then(|| name.to_string());
+    }
+    let stem = name.strip_suffix(&format!(".{LEARNING_DOC_FILE_EXT}"))?;
+    is_valid_learning_id(stem).then(|| stem.to_string())
 }
 
 /// Validate that `id` is shaped as `L<YYYYMMDD>-<digits>` and free of path
@@ -191,10 +141,18 @@ mod tests {
     #[test]
     fn next_learning_id_scans_active_and_superseded_dirs() {
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join("L20260511-1.yaml"), "").expect("seed active");
-        fs::create_dir_all(dir.path().join("superseded")).expect("mk superseded");
-        fs::write(dir.path().join("superseded").join("L20260511-3.yaml"), "")
-            .expect("seed superseded");
+        fs::create_dir_all(dir.path().join("L20260511-1")).expect("seed active dir");
+        fs::write(
+            dir.path().join("L20260511-1").join(LEARNING_DOC_FILE_NAME),
+            "",
+        )
+        .expect("seed active");
+        fs::create_dir_all(dir.path().join("L20260511-3")).expect("seed superseded dir");
+        fs::write(
+            dir.path().join("L20260511-3").join(LEARNING_DOC_FILE_NAME),
+            "",
+        )
+        .expect("seed superseded");
 
         let now = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
         let id = next_learning_id(dir.path(), now).expect("next id");
@@ -204,7 +162,12 @@ mod tests {
     #[test]
     fn next_learning_id_ignores_other_days() {
         let dir = tempdir().expect("tempdir");
-        fs::write(dir.path().join("L20260510-99.yaml"), "").expect("seed yesterday");
+        fs::create_dir_all(dir.path().join("L20260510-99")).expect("seed yesterday dir");
+        fs::write(
+            dir.path().join("L20260510-99").join(LEARNING_DOC_FILE_NAME),
+            "",
+        )
+        .expect("seed yesterday");
         let now = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
         let id = next_learning_id(dir.path(), now).expect("next id");
         assert_eq!(id, "L20260511-1");
@@ -213,21 +176,34 @@ mod tests {
     #[test]
     fn locate_learning_finds_record_in_either_state() {
         let dir = tempdir().expect("tempdir");
-        fs::create_dir_all(dir.path().join("superseded")).expect("mk superseded");
-        fs::write(dir.path().join("L20260511-1.yaml"), "").expect("active");
-        fs::write(dir.path().join("superseded").join("L20260511-2.yaml"), "").expect("superseded");
+        fs::create_dir_all(dir.path().join("L20260511-1")).expect("mk active");
+        fs::create_dir_all(dir.path().join("L20260511-2")).expect("mk superseded");
+        fs::write(
+            dir.path().join("L20260511-1").join(LEARNING_DOC_FILE_NAME),
+            "",
+        )
+        .expect("active");
+        fs::write(
+            dir.path().join("L20260511-2").join(LEARNING_DOC_FILE_NAME),
+            "",
+        )
+        .expect("superseded");
 
-        let (state, path) = locate_learning(dir.path(), "L20260511-1")
+        let path = locate_learning(dir.path(), "L20260511-1")
             .expect("locate")
             .expect("found");
-        assert_eq!(state, LearningStateDir::Active);
-        assert_eq!(path, dir.path().join("L20260511-1.yaml"));
+        assert_eq!(
+            path,
+            dir.path().join("L20260511-1").join(LEARNING_DOC_FILE_NAME)
+        );
 
-        let (state, path) = locate_learning(dir.path(), "L20260511-2")
+        let path = locate_learning(dir.path(), "L20260511-2")
             .expect("locate")
             .expect("found");
-        assert_eq!(state, LearningStateDir::Superseded);
-        assert_eq!(path, dir.path().join("superseded").join("L20260511-2.yaml"));
+        assert_eq!(
+            path,
+            dir.path().join("L20260511-2").join(LEARNING_DOC_FILE_NAME)
+        );
     }
 
     #[test]

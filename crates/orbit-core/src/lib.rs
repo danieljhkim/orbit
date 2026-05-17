@@ -49,6 +49,7 @@ pub use orbit_store::{
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
 
+pub use command::learning::migrate_learning_layout_at;
 pub use command::task_template::TaskTemplate;
 pub use command::workflow::{
     WORKFLOWS, Workflow, WorkflowInput, build_workflow_input, build_workflow_input_for,
@@ -71,6 +72,7 @@ pub use orbit_common::utility::redaction::{
     redact_sensitive_env_text,
 };
 pub use orbit_store::AuditEventInsertParams;
+pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{
     LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningUpdateParams,
 };

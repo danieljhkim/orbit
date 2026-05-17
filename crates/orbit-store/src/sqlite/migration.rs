@@ -151,7 +151,7 @@ fn ensure_learning_index_schema(conn: &Connection) -> Result<(), OrbitError> {
     conn.execute_batch(
         r#"
             -- Project-learnings envelope index. YAML records live on disk under
-            -- `<root>/<id>.yaml` (active) and `<root>/superseded/<id>.yaml`;
+            -- `<root>/<id>/learning.yaml`; status lives in the YAML body.
             -- this table indexes the envelope fields for fast scope-glob
             -- lookups. Arrays are stored as JSON strings for the same reason
             -- the ADR index does it: phase-1 corpora are small and a junction

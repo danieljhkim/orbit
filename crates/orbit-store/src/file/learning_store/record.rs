@@ -13,8 +13,10 @@ use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
 pub(super) fn read_learning_file(path: &Path) -> Result<Learning, OrbitError> {
     if !path.exists() {
         let id = path
-            .file_stem()
+            .parent()
+            .and_then(|parent| parent.file_name())
             .and_then(|n| n.to_str())
+            .or_else(|| path.file_stem().and_then(|n| n.to_str()))
             .unwrap_or("<unknown>")
             .to_string();
         return Err(OrbitError::not_found(NotFoundKind::Learning, id));
@@ -29,7 +31,7 @@ pub(super) fn read_learning_file(path: &Path) -> Result<Learning, OrbitError> {
 /// created if missing; writes are atomic via the shared yaml-doc helper.
 ///
 /// `expected_state` is asserted against `learning.status` to catch placement
-/// bugs (e.g. writing an `Active` record under `superseded/`).
+/// bugs (e.g. writing a superseded record through an active-only call path).
 pub(super) fn write_learning_file(
     path: &Path,
     learning: &Learning,

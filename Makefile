@@ -116,6 +116,7 @@ ci-fast:
 	./scripts/check-dependency-direction.sh
 	./scripts/check-cli-imports.sh
 	./scripts/check-stability.sh
+	./scripts/check-learning-layout.sh
 
 # Flag design docs older than the code they reference
 check-design-docs:

@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** claude
-**Last updated:** 2026-05-17 (ORB-00090)
+**Last updated:** 2026-05-17 (ORB-00096)
 
 This document specifies phase-1 project-learnings: the placement of learning storage in `orbit-store`, the schema of a learning record, the phase-1 scope-matching algorithm (path globs + tags), the three-layer push-injection pipeline (engine pre-prompt + MCP sidecar + optional Claude Code hook), the pull surface (skill + tools), the curation lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
@@ -39,7 +39,7 @@ No cross-crate dependencies that violate the architecture diagram in [CLAUDE.md]
 
 ### 2.1 On-disk format
 
-Each learning is a YAML file under `.orbit/learnings/<id>.yaml`, mirroring the task store layout:
+Each learning owns a directory under `.orbit/learnings/<id>/`, mirroring the task bundle layout. The source-of-truth YAML lives at `.orbit/learnings/<id>/learning.yaml`; future per-learning sidecars such as comments or votes can live beside it without polluting the root:
 
 ```yaml
 id: L20260509-0001
@@ -87,6 +87,8 @@ evidence:
 
 supersedes: null                  # set to L-id if this replaces an older entry
 ```
+
+The legacy flat layout (`.orbit/learnings/<id>.yaml` plus `.orbit/learnings/superseded/<id>.yaml`) is rejected on load with an actionable migration error. `orbit learning migrate-layout` performs the explicit one-way move and leaves `tags.yaml` at `.orbit/learnings/tags.yaml`.
 
 ### 2.2 SQLite index
 

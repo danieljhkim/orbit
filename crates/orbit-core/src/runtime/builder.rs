@@ -63,7 +63,7 @@ pub(crate) fn build_context_from_roots(
     let task_backends = build_v2_task_backends(global_root, &paths)?;
     let adr_store = workspace_adr_backends(persistence.adr_dir.clone(), store.clone());
     let learning_store =
-        workspace_learning_backend(persistence.learning_dir.clone(), store.clone());
+        workspace_learning_backend(persistence.learning_dir.clone(), store.clone())?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
     let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());

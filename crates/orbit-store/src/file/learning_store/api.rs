@@ -12,10 +12,7 @@ use orbit_common::types::{
 };
 use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 
-use super::layout::{
-    LearningStateDir, learning_doc_path, locate_learning, move_learning_dir, next_learning_id,
-    state_dir_path, validate_learning_id,
-};
+use super::layout::{learning_doc_path, locate_learning, next_learning_id, validate_learning_id};
 use super::lock::{acquire_learning_allocation_lock, acquire_learning_lock};
 use super::record::{read_learning_file, write_learning_file};
 use crate::Store;
@@ -25,8 +22,8 @@ use crate::backend::{
 
 /// Workspace-scoped, filesystem-backed learning store.
 ///
-/// YAML files at `<root>/<id>.yaml` (active) and `<root>/superseded/<id>.yaml`
-/// (superseded) are the source of truth. When `index` is attached, envelope
+/// YAML files at `<root>/<id>/learning.yaml` are the source of truth. Status
+/// lives in the YAML body. When `index` is attached, envelope
 /// metadata mirrors into the shared SQLite `learnings_index` table for fast
 /// scope-glob lookups; the filesystem walk is the fallback path when the
 /// index is absent (e.g. tests using `LearningFileStore::new`).
@@ -58,6 +55,10 @@ impl LearningFileStore {
             index: Some(index),
             envelope_cache: RwLock::new(None),
         }
+    }
+
+    pub(crate) fn reject_legacy_flat_layout(root: &std::path::Path) -> Result<(), OrbitError> {
+        super::migration::reject_legacy_flat_layout(root)
     }
 
     pub(crate) fn create_learning(
@@ -108,7 +109,7 @@ impl LearningFileStore {
             priority: params.priority,
         };
 
-        let path = learning_doc_path(&self.root, LearningStateDir::Active, &id);
+        let path = learning_doc_path(&self.root, &id);
         write_learning_file(&path, &learning, LearningStatus::Active)?;
         self.upsert_index_row(&learning);
         self.invalidate_envelope_cache();
@@ -117,7 +118,7 @@ impl LearningFileStore {
 
     pub(crate) fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
         validate_learning_id(id)?;
-        let Some((_, path)) = locate_learning(&self.root, id)? else {
+        let Some(path) = locate_learning(&self.root, id)? else {
             return Ok(None);
         };
         Ok(Some(read_learning_file(&path)?))
@@ -128,34 +129,34 @@ impl LearningFileStore {
         status: Option<LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError> {
         let mut out = Vec::new();
-        for state in LearningStateDir::all() {
+        if !self.root.exists() {
+            return Ok(out);
+        }
+        for entry in fs::read_dir(&self.root).map_err(|e| OrbitError::Io(e.to_string()))? {
+            let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| OrbitError::Io(e.to_string()))?;
+            if !file_type.is_dir() {
+                continue;
+            }
+            let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if validate_learning_id(&id).is_err() {
+                continue;
+            }
+            let path = learning_doc_path(&self.root, &id);
+            if !path.is_file() {
+                continue;
+            }
+            let learning = read_learning_file(&path)?;
             if let Some(s) = status
-                && state.to_status() != s
+                && learning.status != s
             {
                 continue;
             }
-            let dir = state_dir_path(&self.root, *state);
-            if !dir.exists() {
-                continue;
-            }
-            for entry in fs::read_dir(&dir).map_err(|e| OrbitError::Io(e.to_string()))? {
-                let entry = entry.map_err(|e| OrbitError::Io(e.to_string()))?;
-                let file_type = entry
-                    .file_type()
-                    .map_err(|e| OrbitError::Io(e.to_string()))?;
-                if !file_type.is_file() {
-                    continue;
-                }
-                let path = entry.path();
-                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                    continue;
-                };
-                if !name.ends_with(".yaml") {
-                    continue;
-                }
-                let learning = read_learning_file(&path)?;
-                out.push(learning);
-            }
+            out.push(learning);
         }
         out.sort_by(|a, b| {
             b.updated_at
@@ -173,7 +174,7 @@ impl LearningFileStore {
         validate_learning_id(id)?;
         let _lock = acquire_learning_lock(&self.root, id)?;
 
-        let Some((state, path)) = locate_learning(&self.root, id)? else {
+        let Some(path) = locate_learning(&self.root, id)? else {
             return Err(OrbitError::not_found(
                 NotFoundKind::Learning,
                 id.to_string(),
@@ -211,7 +212,7 @@ impl LearningFileStore {
             learning.priority = priority;
         }
         learning.updated_at = Utc::now();
-        write_learning_file(&path, &learning, state.to_status())?;
+        write_learning_file(&path, &learning, learning.status)?;
         self.upsert_index_row(&learning);
         self.invalidate_envelope_cache();
         Ok(learning)
@@ -219,8 +220,7 @@ impl LearningFileStore {
 
     /// Atomically supersede `old_id` with `new_id`. Phase-1 contract:
     /// 1. Both records exist.
-    /// 2. `old.status` flips to `Superseded`, `old.superseded_by = new_id`,
-    ///    and the YAML moves under `superseded/`.
+    /// 2. `old.status` flips to `Superseded` and `old.superseded_by = new_id`.
     /// 3. `new.supersedes = old_id`.
     /// 4. Both index rows reflect the new state.
     ///
@@ -243,9 +243,9 @@ impl LearningFileStore {
         let _old_lock = acquire_learning_lock(&self.root, old_id)?;
         let _new_lock = acquire_learning_lock(&self.root, new_id)?;
 
-        let (old_state, old_path) = locate_learning(&self.root, old_id)?
+        let old_path = locate_learning(&self.root, old_id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, old_id.to_string()))?;
-        let (_, new_path) = locate_learning(&self.root, new_id)?
+        let new_path = locate_learning(&self.root, new_id)?
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, new_id.to_string()))?;
 
         let mut old = read_learning_file(&old_path)?;
@@ -259,19 +259,11 @@ impl LearningFileStore {
         new.supersedes = Some(old_id.to_string());
         new.updated_at = now;
 
-        let new_target_path = learning_doc_path(&self.root, LearningStateDir::Superseded, old_id);
-
         // 1. Write the updated `new` record first; if anything below fails
         //    we can still recover the old state by re-reading from disk.
         write_learning_file(&new_path, &new, new.status)?;
-        // 2. Write the updated `old` content at its current path so the move
-        //    only has to rename a fully-current file.
+        // 2. Write the updated `old` content at its stable per-entity path.
         write_learning_file(&old_path, &old, LearningStatus::Superseded)?;
-        // 3. Move the active YAML into `superseded/` unless it's already
-        //    there.
-        if old_state != LearningStateDir::Superseded {
-            move_learning_dir(&old_path, &new_target_path)?;
-        }
 
         self.upsert_index_row(&old);
         self.upsert_index_row(&new);
@@ -280,8 +272,7 @@ impl LearningFileStore {
     }
 
     /// Archive a learning without a replacement: flip `status` to
-    /// `Superseded` with `superseded_by = None`, move the YAML under
-    /// `superseded/`, and mirror the state into the index. Used by the
+    /// `Superseded` with `superseded_by = None` and mirror the state into the index. Used by the
     /// §7.3 `prune --delete` semantics: stale records are archived, not
     /// hard-deleted.
     pub(crate) fn archive_learning(&self, id: &str) -> Result<bool, OrbitError> {
@@ -289,21 +280,19 @@ impl LearningFileStore {
         let _allocation_lock = acquire_learning_allocation_lock(&self.root)?;
         let _lock = acquire_learning_lock(&self.root, id)?;
 
-        let Some((state, path)) = locate_learning(&self.root, id)? else {
+        let Some(path) = locate_learning(&self.root, id)? else {
             return Ok(false);
         };
-        if state == LearningStateDir::Superseded {
+        let mut learning = read_learning_file(&path)?;
+        if learning.status == LearningStatus::Superseded {
             // Already archived; idempotent no-op.
             return Ok(true);
         }
-        let mut learning = read_learning_file(&path)?;
         learning.status = LearningStatus::Superseded;
         learning.superseded_by = None;
         learning.updated_at = Utc::now();
 
-        let target_path = learning_doc_path(&self.root, LearningStateDir::Superseded, id);
         write_learning_file(&path, &learning, LearningStatus::Superseded)?;
-        move_learning_dir(&path, &target_path)?;
         self.upsert_index_row(&learning);
         self.invalidate_envelope_cache();
         Ok(true)
@@ -313,10 +302,18 @@ impl LearningFileStore {
         validate_learning_id(id)?;
         let _lock = acquire_learning_lock(&self.root, id)?;
 
-        let Some((_, path)) = locate_learning(&self.root, id)? else {
+        let Some(path) = locate_learning(&self.root, id)? else {
             return Ok(false);
         };
         fs::remove_file(&path).map_err(|e| OrbitError::Io(e.to_string()))?;
+        if let Some(parent) = path.parent()
+            && parent
+                .read_dir()
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false)
+        {
+            fs::remove_dir(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+        }
         if let Some(index) = &self.index {
             index.delete_learning_index_row(id)?;
         }
@@ -674,7 +671,8 @@ mod tests {
              created_at: 2026-05-11T00:00:00Z\n\
              updated_at: 2026-05-11T00:00:00Z\n"
         );
-        let path = dir.path().join(format!("{id}.yaml"));
+        let path = dir.path().join(id).join("learning.yaml");
+        std::fs::create_dir_all(path.parent().expect("fixture parent")).expect("fixture dir");
         std::fs::write(&path, yaml).expect("write fixture");
 
         let store = LearningFileStore::new(dir.path().to_path_buf());
@@ -1020,6 +1018,70 @@ mod tests {
         assert_eq!(active.len(), 2);
     }
 
+    #[test]
+    fn migrate_layout_preserves_list_parity_and_reindex_projection() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().join("learnings");
+        std::fs::create_dir_all(root.join("superseded")).expect("legacy dirs");
+        std::fs::write(
+            root.join("L20260517-1.yaml"),
+            legacy_learning_yaml("L20260517-1", "active", "Active rule", 10),
+        )
+        .expect("active yaml");
+        std::fs::write(
+            root.join("superseded").join("L20260517-2.yaml"),
+            legacy_learning_yaml("L20260517-2", "superseded", "Old rule", 20),
+        )
+        .expect("superseded yaml");
+
+        let legacy_active = read_learning_file(&root.join("L20260517-1.yaml")).expect("active");
+        let legacy_superseded =
+            read_learning_file(&root.join("superseded").join("L20260517-2.yaml"))
+                .expect("superseded");
+        let index = Store::open_in_memory().expect("index");
+        index
+            .upsert_learning_index_row(&legacy_active)
+            .expect("index active");
+        index
+            .upsert_learning_index_row(&legacy_superseded)
+            .expect("index superseded");
+        let before_active_row = index
+            .get_learning_index_row("L20260517-1")
+            .expect("row active")
+            .expect("present");
+        let before_superseded_row = index
+            .get_learning_index_row("L20260517-2")
+            .expect("row superseded")
+            .expect("present");
+
+        super::super::migration::migrate_learning_layout(&root, dir.path()).expect("migrate");
+        let store = LearningFileStore::new_with_index(root.clone(), index.clone());
+        store.reindex_learnings().expect("reindex");
+
+        let active = store
+            .list_learnings(Some(LearningStatus::Active))
+            .expect("list active");
+        let superseded = store
+            .list_learnings(Some(LearningStatus::Superseded))
+            .expect("list superseded");
+        assert_eq!(active, vec![legacy_active]);
+        assert_eq!(superseded, vec![legacy_superseded]);
+        assert_eq!(
+            index
+                .get_learning_index_row("L20260517-1")
+                .expect("row active after")
+                .expect("present"),
+            before_active_row
+        );
+        assert_eq!(
+            index
+                .get_learning_index_row("L20260517-2")
+                .expect("row superseded after")
+                .expect("present"),
+            before_superseded_row
+        );
+    }
+
     // ------ Acceptance criterion: layout assertions -----------------------
 
     #[test]
@@ -1028,7 +1090,7 @@ mod tests {
         let learning = store
             .create_learning(create_params("layout", vec![], vec![]))
             .expect("create");
-        let active_path = dir.path().join(format!("{}.yaml", learning.id));
+        let active_path = dir.path().join(&learning.id).join("learning.yaml");
         assert!(
             active_path.is_file(),
             "active file at {}",
@@ -1041,16 +1103,16 @@ mod tests {
         store
             .supersede_learning(&learning.id, &new.id)
             .expect("supersede");
-        let superseded_path = dir
-            .path()
-            .join("superseded")
-            .join(format!("{}.yaml", learning.id));
+        let superseded_path = dir.path().join(&learning.id).join("learning.yaml");
         assert!(
             superseded_path.is_file(),
             "superseded file at {}",
             superseded_path.display()
         );
-        assert!(!active_path.exists(), "active file must be moved out");
+        assert!(
+            active_path.is_file(),
+            "superseded status stays in the per-entity YAML"
+        );
 
         // Repo `.gitignore` content check: `.orbit/learnings/` must not be
         // effectively ignored (ADR-003 says learnings travel with the repo);
@@ -1083,6 +1145,29 @@ mod tests {
             ignores_state,
             ".gitignore must ignore .orbit/state/ (or the wider .orbit/) so the rebuildable index is not checked in",
         );
+    }
+
+    fn legacy_learning_yaml(id: &str, status: &str, summary: &str, priority: u8) -> String {
+        let second = priority % 10;
+        format!(
+            "schema_version: 1\n\
+             id: {id}\n\
+             status: {status}\n\
+             scope:\n\
+             \x20\x20paths:\n\
+             \x20\x20\x20\x20- crates/orbit-store/**\n\
+             \x20\x20tags:\n\
+             \x20\x20\x20\x20- migration\n\
+             summary: {summary}\n\
+             body: body for {id}\n\
+             evidence:\n\
+             \x20\x20- kind: task\n\
+             \x20\x20\x20\x20reference: ORB-00096\n\
+             created_at: 2026-05-17T00:00:00Z\n\
+             updated_at: 2026-05-17T00:00:0{second}Z\n\
+             created_by: codex\n\
+             priority: {priority}\n"
+        )
     }
 
     // ------ Acceptance criterion: latency benchmark (gated) ----------------
