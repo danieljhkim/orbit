@@ -390,4 +390,24 @@ mod tests {
         assert_eq!(trace.duration_ms, 1234);
         assert_eq!(trace.usage.input, 0);
     }
+
+    #[test]
+    fn grok_like_cli_response_extracts_nonzero_usage_and_tool_calls() {
+        // Grok CLI --output-format json returns a wrapper with "text" containing
+        // the Orbit envelope (plus any usage/tool metadata the CLI attaches).
+        // The extraction must descend into "text" content to surface non-zero
+        // token usage and tool invocations for diagnostics/metrics.
+        let inner = r#"{"schemaVersion":1,"status":"success","result":{"pong":"grok"},"error":null,"usage":{"input_tokens":120,"output_tokens":35},"tool_calls":[{"id":"tc1","name":"fs.read"}]}"#;
+        let stdout = serde_json::json!({
+            "text": inner,
+            "stopReason": "EndTurn"
+        })
+        .to_string();
+        let exec = exec(&stdout, "", Some(0), true);
+        let (_, _, trace) = parse_and_validate_response(&exec).expect("grok-like parses");
+        assert_eq!(trace.usage.input, 120);
+        assert_eq!(trace.usage.output, 35);
+        assert!(!trace.tool_calls.is_empty());
+        assert_eq!(trace.tool_calls[0].tool_name, "fs.read");
+    }
 }

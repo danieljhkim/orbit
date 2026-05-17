@@ -62,7 +62,20 @@ fn collect_usage(
                     && usage_key_mode(key).is_none()
                     && !(has_model_token_usage && key == "roles")
                 {
-                    collect_usage(child, usage, false, UsageKeyMode::Standard);
+                    let allow_child = allow_direct_usage
+                        || matches!(
+                            key.as_str(),
+                            "text"
+                                | "result"
+                                | "response"
+                                | "message"
+                                | "messages"
+                                | "content"
+                                | "final"
+                                | "final_message"
+                                | "output"
+                        );
+                    collect_usage(child, usage, allow_child, UsageKeyMode::Standard);
                 }
             }
         }
