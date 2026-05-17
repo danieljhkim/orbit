@@ -1,7 +1,9 @@
+use chrono::Utc;
 use orbit_common::types::{
-    NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskStatus,
-    build_task_status_index, unmet_task_dependencies,
+    NotFoundKind, OrbitError, OrbitEvent, Task, TaskHistoryEntry, TaskRelationType, TaskStatus,
+    build_task_status_index, is_valid_friction_id, unmet_task_dependencies,
 };
+use orbit_store::friction_store::{resolve_friction_by_task, show_friction};
 
 use crate::OrbitRuntime;
 use crate::runtime::TaskRecordUpdateParams as StoreTaskUpdateParams;
@@ -11,6 +13,7 @@ use super::helpers::{
 };
 
 const UNAUTHORED_TASK_PLAN_PLACEHOLDER: &str = "To be authored by executing agent at start time.";
+const RELATION_RESOLVES: &str = "resolves";
 
 impl OrbitRuntime {
     pub fn approve_task(
@@ -95,7 +98,55 @@ impl OrbitRuntime {
             ))),
         }?;
 
+        if task.status == TaskStatus::Review {
+            for event in self.apply_resolves_side_effects(&result) {
+                self.record_event(event)?;
+            }
+        }
+
         Ok(result)
+    }
+
+    fn apply_resolves_side_effects(&self, task: &Task) -> Vec<OrbitEvent> {
+        let frictions_root = self.data_root().join("frictions");
+        let mut events = Vec::new();
+        for relation in &task.relations {
+            if relation.relation_type != TaskRelationType::Resolves {
+                continue;
+            }
+            let target = relation.target.as_str();
+            if !is_valid_friction_id(target) {
+                continue;
+            }
+            match show_friction(&frictions_root, target) {
+                Ok(Some(_)) => {
+                    match resolve_friction_by_task(&frictions_root, target, &task.id, Utc::now()) {
+                        Ok(_) => events.push(OrbitEvent::FrictionAutoResolved {
+                            task_id: task.id.clone(),
+                            friction_id: target.to_string(),
+                        }),
+                        Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
+                            task_id: task.id.clone(),
+                            target: target.to_string(),
+                            relation: RELATION_RESOLVES.to_string(),
+                            reason: error.to_string(),
+                        }),
+                    }
+                }
+                Ok(None) => events.push(OrbitEvent::TaskRelationDangling {
+                    task_id: task.id.clone(),
+                    target: target.to_string(),
+                    relation: RELATION_RESOLVES.to_string(),
+                }),
+                Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
+                    task_id: task.id.clone(),
+                    target: target.to_string(),
+                    relation: RELATION_RESOLVES.to_string(),
+                    reason: error.to_string(),
+                }),
+            }
+        }
+        events
     }
 
     pub fn start_task(

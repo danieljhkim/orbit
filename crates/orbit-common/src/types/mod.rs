@@ -26,6 +26,7 @@ pub mod actor;
 pub mod adr;
 pub mod agent_family;
 pub mod agent_pair;
+pub mod artifact_ids;
 pub mod audit;
 pub mod audit_event;
 pub mod duel;
@@ -69,6 +70,9 @@ pub use agent_family::AgentFamily;
 pub use agent_pair::{
     AgentModelPair, Crew, CrewRoleAssignment, agent_family_from_cli, all_agent_families,
     infer_agent_family_from_model, normalize_agent_family_for_model, resolve_crew,
+};
+pub use artifact_ids::{
+    is_valid_adr_id, is_valid_friction_id, is_valid_learning_id, validate_friction_id,
 };
 pub use audit::Audit;
 pub use audit_event::{AuditEvent, AuditEventStatus, AuditStats, audit_execution_id};

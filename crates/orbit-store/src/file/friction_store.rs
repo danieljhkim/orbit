@@ -11,6 +11,8 @@ use orbit_common::types::{
 use orbit_common::utility::fs::{atomic_write_text, with_exclusive_file_lock};
 use serde_json::{Value, json};
 
+pub use orbit_common::types::validate_friction_id;
+
 const TAGS_FILENAME: &str = "tags.yaml";
 
 #[derive(Debug, Clone)]
@@ -36,6 +38,7 @@ pub struct FrictionListFilter {
 pub struct FrictionUpdateParams {
     pub status: Option<FrictionStatus>,
     pub tags: Option<Vec<String>>,
+    pub resolved_by_task: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -77,6 +80,7 @@ pub fn add_friction(
                 tags,
                 resolved_at: None,
                 during_task: params.during_task,
+                resolved_by_task: None,
                 body: params.body,
             },
         )
@@ -182,8 +186,20 @@ pub fn update_friction(
                 FrictionStatus::Resolved => {
                     Some(stored.record.resolved_at.unwrap_or(params.updated_at))
                 }
-                FrictionStatus::Open | FrictionStatus::Triaged => None,
+                FrictionStatus::Open | FrictionStatus::Triaged => {
+                    stored.record.resolved_by_task = None;
+                    None
+                }
             };
+        }
+        if let Some(resolved_by_task) = params.resolved_by_task {
+            stored.record.resolved_by_task = Some(
+                stored
+                    .record
+                    .resolved_by_task
+                    .clone()
+                    .unwrap_or(resolved_by_task),
+            );
         }
         write_record_at(&path, &stored.record)
     })
@@ -200,6 +216,25 @@ pub fn resolve_friction(
         FrictionUpdateParams {
             status: Some(FrictionStatus::Resolved),
             tags: None,
+            resolved_by_task: None,
+            updated_at: resolved_at,
+        },
+    )
+}
+
+pub fn resolve_friction_by_task(
+    frictions_root: &Path,
+    id: &str,
+    task_id: &str,
+    resolved_at: DateTime<Utc>,
+) -> Result<StoredFrictionRecord, OrbitError> {
+    update_friction(
+        frictions_root,
+        id,
+        FrictionUpdateParams {
+            status: Some(FrictionStatus::Resolved),
+            tags: None,
+            resolved_by_task: Some(task_id.to_string()),
             updated_at: resolved_at,
         },
     )
@@ -445,6 +480,7 @@ fn write_record_at(
         tags: record.tags.clone(),
         resolved_at: record.resolved_at,
         during_task: record.during_task.clone(),
+        resolved_by_task: record.resolved_by_task.clone(),
     };
     let yaml = serde_yaml::to_string(&frontmatter)
         .map_err(|error| OrbitError::Store(format!("serialize friction frontmatter: {error}")))?;
@@ -480,6 +516,7 @@ fn read_record_at(path: &Path) -> Result<StoredFrictionRecord, OrbitError> {
             tags: frontmatter.tags,
             resolved_at: frontmatter.resolved_at,
             during_task: frontmatter.during_task,
+            resolved_by_task: frontmatter.resolved_by_task,
             body: body.trim_start_matches('\n').trim_end().to_string(),
         },
         path: path.to_path_buf(),
@@ -516,24 +553,6 @@ fn friction_record_paths(frictions_root: &Path) -> Result<Vec<PathBuf>, OrbitErr
     }
     paths.sort();
     Ok(paths)
-}
-
-fn validate_friction_id(id: &str) -> Result<(), OrbitError> {
-    let bytes = id.as_bytes();
-    let valid = bytes.len() == 12
-        && bytes[0] == b'F'
-        && bytes[5] == b'-'
-        && bytes[8] == b'-'
-        && bytes[1..5].iter().all(u8::is_ascii_digit)
-        && bytes[6..8].iter().all(u8::is_ascii_digit)
-        && bytes[9..12].iter().all(u8::is_ascii_digit);
-    if valid {
-        Ok(())
-    } else {
-        Err(OrbitError::InvalidInput(format!(
-            "friction id must match FYYYY-MM-NNN, got '{id}'"
-        )))
-    }
 }
 
 fn completed_tasks_by_family(tasks: &[Task]) -> BTreeMap<String, u64> {

@@ -36,6 +36,13 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "relations".to_string(),
+                description: "Replacement typed task relations as an array of {type, target} objects"
+                    .to_string(),
+                param_type: "array".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "tags".to_string(),
                 description: "Replacement task tags as a string or array of strings".to_string(),
                 param_type: "string_list".to_string(),

@@ -50,7 +50,8 @@ pub mod friction_store {
     pub use crate::file::friction_store::{
         FrictionAddParams, FrictionListFilter, FrictionUpdateParams, StoredFrictionRecord,
         add_friction, ensure_default_tag_taxonomy, friction_stats, friction_tags, list_frictions,
-        resolve_friction, show_friction, update_friction,
+        resolve_friction, resolve_friction_by_task, show_friction, update_friction,
+        validate_friction_id,
     };
 }
 

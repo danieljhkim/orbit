@@ -251,6 +251,7 @@ mod tests {
                 description: "Exercise wildcard runtime allowlist".to_string(),
                 acceptance_criteria: Vec::new(),
                 dependencies: Vec::new(),
+                relations: Vec::new(),
                 tags: Vec::new(),
                 plan: String::new(),
                 execution_summary: String::new(),

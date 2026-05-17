@@ -3,8 +3,8 @@ use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
     JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope, LegacyValidation,
     OrbitError, OrbitId, PipelineState, PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact,
-    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType,
-    normalize_task_tags, task_matches_tags,
+    TaskComment, TaskComplexity, TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus,
+    TaskType, normalize_task_tags, task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -50,6 +50,7 @@ pub struct TaskCreateParams {
     pub description: String,
     pub acceptance_criteria: Vec<String>,
     pub dependencies: Vec<OrbitId>,
+    pub relations: Vec<TaskRelation>,
     pub tags: Vec<String>,
     pub plan: String,
     pub execution_summary: String,
@@ -90,6 +91,7 @@ pub struct TaskDocumentUpdateParams {
     pub description: Option<String>,
     pub acceptance_criteria: Option<Vec<String>>,
     pub dependencies: Option<Vec<OrbitId>>,
+    pub relations: Option<Vec<TaskRelation>>,
     pub tags: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,

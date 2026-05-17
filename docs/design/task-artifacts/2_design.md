@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-15
+**Last updated:** 2026-05-17
 
 This document describes the v2 task artifact implementation. The v2 store is the only task backend; the legacy status-directory store and its `[task] artifact_store` config gate were removed once Phase 6 began (`e9582eba`), and stale `artifact_store` keys are now rejected for every value. Sections below are prescriptive about invariants the live store maintains rather than aspirational about a target.
 
@@ -62,6 +62,8 @@ job_run_id: null
 relations:
   - type: supersedes
     target: ORB-00000
+  - type: resolves
+    target: F2026-05-007
 context_files:
   - file:crates/orbit-store/src/file/task_store/v2_bundle.rs
 external_refs: []
@@ -72,7 +74,7 @@ created_at: 2026-05-11T00:00:00Z
 updated_at: 2026-05-11T00:00:00Z
 ```
 
-The envelope should not include prose bodies, comments, review message bodies, execution summaries, `workspace_path`, `repo_root`, `agent`, `model`, or the old `batch_id` name. Local execution bindings live in the local task registry, keyed by task ID and workspace binding. Execution fan-out membership is `job_run_id`, a foreign reference to the job-run store rather than a task relation. `schema_version` restarts at `1` because the reset defines a new artifact family; the cutover command knows how to read the old schema but v2 does not continue its compatibility stream.
+The envelope should not include prose bodies, comments, review message bodies, execution summaries, `workspace_path`, `repo_root`, `agent`, `model`, or the old `batch_id` name. Local execution bindings live in the local task registry, keyed by task ID and workspace binding. Execution fan-out membership is `job_run_id`, a foreign reference to the job-run store rather than a task relation. `relations` can also carry cross-artifact provenance via `produces` and `resolves` targets (`ORB-`, `F`, `L`, or `ADR-` IDs); legacy task relation types remain task-only. `schema_version` restarts at `1` because the reset defines a new artifact family; the cutover command knows how to read the old schema but v2 does not continue its compatibility stream.
 
 ## 3. Prose Documents
 
@@ -174,7 +176,7 @@ The bundle remains canonical. The registry maintains generated projections from 
 
 - `task_bundle_index`: one row per registered task with workspace, status, priority, `job_run_id`, timestamps, and terminal month.
 - `task_bundle_tags`: normalized tag rows with AND-style filtering semantics.
-- `task_bundle_relations`: directed `(source_task_id, relation_type, target_task_id)` rows plus an inverse lookup index.
+- `task_bundle_relations`: directed `(source_task_id, relation_type, target_id)` rows plus an inverse lookup index for task targets.
 
 Task mutations rewrite the generated rows after the envelope write. The index row `updated_at` is a version stamp for the canonical envelope. V2 list and filter paths may use the index only when every registered task has an index row and every indexed `updated_at` matches the bundle envelope. Count or version mismatches trigger a lazy rebuild from registered bundles; if rebuild fails, queries fall back to reading bundles directly. Full-text search still scans task content until the Phase 5 lexical/semantic indexes land.
 

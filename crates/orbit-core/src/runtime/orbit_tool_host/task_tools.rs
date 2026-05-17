@@ -12,7 +12,8 @@ use crate::command::task::{TaskAddParams, TaskUpdateParams};
 
 use super::input::{
     empty_string_to_none, optional_bool_alias, parse_artifacts, parse_external_refs,
-    parse_task_complexity, parse_task_priority, parse_task_status, parse_task_type,
+    parse_relations, parse_task_complexity, parse_task_priority, parse_task_status,
+    parse_task_type,
 };
 use super::json::{serialize_task, serialize_task_lint_report, task_fields_to_json, task_to_json};
 
@@ -50,6 +51,7 @@ pub(super) fn add(
             .unwrap_or_default(),
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?
                 .unwrap_or_default(),
+            relations: parse_relations(&input)?.unwrap_or_default(),
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
             plan,
             comment: optional_string(&input, "comment")?,
@@ -237,6 +239,7 @@ pub(super) fn update(
                 ],
             )?,
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?,
+            relations: parse_relations(&input)?,
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?,
             plan: input
                 .get("plan")

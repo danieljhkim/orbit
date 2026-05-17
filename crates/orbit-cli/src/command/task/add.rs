@@ -118,6 +118,7 @@ impl Execute for TaskAddArgs {
                 description,
                 acceptance_criteria: self.acceptance_criteria,
                 dependencies: crate::parse::csv_to_vec(&self.dependencies),
+                relations: Vec::new(),
                 tags: self.tags,
                 plan,
                 comment: self.comment,

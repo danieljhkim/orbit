@@ -68,6 +68,7 @@ impl OrbitRuntime {
                 description: params.description.clone(),
                 acceptance_criteria: params.acceptance_criteria.clone(),
                 dependencies: dependencies.clone(),
+                relations: params.relations.clone(),
                 tags: normalize_task_tags(params.tags.clone()),
                 plan: params.plan.clone(),
                 execution_summary: String::new(),

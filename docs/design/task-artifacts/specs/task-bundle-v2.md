@@ -87,7 +87,9 @@ type: chore
 priority: medium
 complexity: null
 job_run_id: null
-relations: []
+relations:
+  - type: resolves
+    target: F2026-05-007
 tags: []
 context_files: []
 external_refs: []
@@ -101,6 +103,7 @@ updated_at: 2026-05-11T00:00:00Z
 The envelope must not contain `description`, `acceptance_criteria`, `plan`, `execution_summary`, `history`, `comments`, or `review_threads`.
 The envelope must not contain local-only `workspace_path` or `repo_root`; those live in the local registry workspace binding.
 The envelope must not contain the old `batch_id` name or internal execution-routing fields such as `agent` and `model`; job-run membership is stored as `job_run_id`, while durable task attribution uses `created_by`, `planned_by`, and `implemented_by`.
+Task-only relation types must target `ORB-` IDs. `produces` and `resolves` may additionally target friction, learning, and ADR IDs.
 
 ## Documents
 
@@ -182,7 +185,7 @@ The initial registry projections are:
 
 - `task_bundle_index(task_id, workspace_id, status, priority, job_run_id, created_at, updated_at, terminal_month)`.
 - `task_bundle_tags(task_id, workspace_id, tag)`.
-- `task_bundle_relations(source_task_id, workspace_id, relation_type, target_task_id)`.
+- `task_bundle_relations(source_task_id, workspace_id, relation_type, target_task_id)`. The physical column name is historical; `produces` and `resolves` rows may store non-task artifact IDs in `target_task_id`.
 
 Indexes are generated data. The bundle envelope is canonical, and repair/rebuild paths may delete and regenerate index rows from bundles. The `task_bundle_index.updated_at` value is the envelope version stamp. Query paths should treat a missing row, incomplete index, or `updated_at` mismatch as a cache miss: rebuild from registered bundles when possible, otherwise fall back to bundle reads rather than treating the index as proof that tasks do not exist.
 

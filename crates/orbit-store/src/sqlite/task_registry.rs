@@ -1202,6 +1202,8 @@ fn relation_type_name(relation_type: TaskRelationType) -> &'static str {
         TaskRelationType::RegressionFrom => "regression_from",
         TaskRelationType::Supersedes => "supersedes",
         TaskRelationType::RelatedTo => "related_to",
+        TaskRelationType::Produces => "produces",
+        TaskRelationType::Resolves => "resolves",
     }
 }
 

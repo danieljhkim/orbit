@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Owner:** codex
-**Last updated:** 2026-05-14
+**Last updated:** 2026-05-17
 
 Tasks are Orbit's durable intent records: they explain what an agent or human is trying to change, how the work should be validated, what context is relevant, who acted on the work, and how the work connects to other Orbit artifacts. The v2 task artifact store keeps prose in Markdown sidecars, narrows `task.yaml` to a metadata envelope, allocates authority-scoped `ORB-00000` IDs from `~/.orbit/tasks/index.sqlite`, makes `~/.orbit/tasks/workspaces/<workspace-id>/` the canonical local bundle home, and projects each task into the workspace as a `.orbit/tasks/<task-id>` symlink.
 
@@ -87,7 +87,7 @@ Lifecycle changes, comments, review messages, and automation updates are natural
 
 ### 2.6 Typed relations
 
-Task-to-task links live in a single directed `relations` array on the envelope, with explicit source-implied types such as `child_of`, `blocked_by`, `spawned_from`, `regression_from`, `supersedes`, and `related_to`. The bundle stores one directed edge per relationship. Consumers reason about relation meaning rather than inferring it from legacy field names.
+Typed links live in a single directed `relations` array on the envelope. Task-to-task relation types remain source-implied (`child_of`, `blocked_by`, `spawned_from`, `regression_from`, `supersedes`, and `related_to`) and task-only. Cross-artifact provenance uses `produces` and `resolves`, whose targets may be task, friction, learning, or ADR IDs. The bundle stores one directed edge per relationship. Consumers reason about relation meaning rather than inferring it from legacy field names.
 
 ### 2.7 Local task store and projection
 
