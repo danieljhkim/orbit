@@ -57,7 +57,7 @@ Related lint work:
 
 - Use the agent commit identity (e.g. `codex`, `claude`) as author/committer.
 - Include the Orbit task ID in commit messages when applicable (e.g. `[ORB-00042]`). Task IDs are allocation-authority search keys (`git log --grep '[ORB-00042]'`); when a task has a linked `external_ref`, include that tag too (`[ORB-00042] [ENG-1234] ...`) — cross-engineer reviewers resolve the external tag, not the Orbit one.
-- Use your model name (e.g. `claude-opus-4-7`, `gpt-5.5`, `gemini-3.1-pro`) when authoring tasks or docs. Cite relevant task IDs in any doc you write.
+- Use your agent family (`codex`, `claude`, `gemini`, `grok`) for the `model` field when authoring tasks or docs. Full model strings are accepted and auto-normalized. Cite relevant task IDs in any doc you write.
 
 ## Orbit Workflow
 
