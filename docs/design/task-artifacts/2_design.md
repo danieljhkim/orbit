@@ -246,7 +246,28 @@ The public `Task` DTO should not embed legacy relation fields (`parent_id`, `dep
 
 ---
 
-## 11. Search and Indexing
+## 11. ADR and Learning Auto-publish
+
+Repo-backed artifacts that are meant to travel through Git can opt into automatic publication with workspace config:
+
+```toml
+[artifacts]
+auto_publish = false
+```
+
+The default is off. When enabled, only ADR and project-learning mutators publish in v1: `orbit.adr.add`, `orbit.adr.update`, `orbit.adr.supersede`, `orbit.learning.add`, `orbit.learning.update`, `orbit.learning.supersede`, `orbit.learning.comment.add`, and `orbit.learning.comment.delete`. Task tools are excluded because task lifecycle updates are frequent local operational traffic; per-update commits would be noisy and need a separate design.
+
+Publication targets `[workflow].base_branch` and requires that branch to be checked out in some local Git worktree. Orbit does not silently fall back to the caller's current branch. When the artifact write happens in another worktree, the changed artifact files are copied into the base-branch worktree before staging. The staged path set is restricted to the files the invocation wrote, moved, or deleted under `.orbit/adrs/` or `.orbit/learnings/`; unrelated dirty files remain unstaged even when they sit beside the artifact tree.
+
+Each successful mutation performs one local commit with the calling agent identity as both author and committer (`<family> <family>@orbit.local`). Commit subjects use `docs: <verb> <artifact-id> — <summary>`, where the summary is the ADR title, learning summary, or comment body excerpt. Hooks are not bypassed. A pre-commit failure leaves the artifact written and staged but uncommitted; a pre-push failure leaves the commit local and unpushed.
+
+After the commit, Orbit pushes `origin <base_branch>`. A non-fast-forward rejection runs `git fetch origin <base_branch>` followed by `git rebase origin/<base_branch>` and retries the push once. A second push rejection, network/auth failure, or rebase conflict returns a typed `OrbitError` naming the branch and preserves the local commit. Rebase conflicts are aborted so the branch remains at the pre-rebase local commit for human repair.
+
+Local concurrency is serialized by an Orbit auto-publish lock in Git's common directory, with bounded retry before failing loudly; the underlying Git index lock still guards each staged commit. Remote concurrency relies on the non-fast-forward fetch/rebase/retry path. Every auto-publish attempt records an audit event whose payload includes the originating tool name, artifact ID, changed paths, commit SHA when one exists, and `push_outcome` (`pushed`, `committed_only`, or `failed`).
+
+---
+
+## 12. Search and Indexing
 
 Lexical and semantic search should index each logical field independently:
 
@@ -272,7 +293,7 @@ Status and retention views are also generated indexes. Terminal tasks remain in 
 
 ---
 
-## 12. Cutover Path
+## 13. Cutover Path
 
 The reset should be a one-time cutover rather than a long-lived compatibility layer:
 
@@ -295,7 +316,7 @@ The cutover command may emit a human-readable mapping from old IDs to new IDs, b
 
 ---
 
-## 13. Concerns & Honest Limitations
+## 14. Concerns & Honest Limitations
 
 `ORB-00000` IDs look universal but are only unique inside an allocation authority. Local-only Orbit uses one machine-local authority across all repos, but sync and hosted modes need shared allocation. That is a deliberate tradeoff: a context-free global ID cannot be produced across machines without a registry.
 

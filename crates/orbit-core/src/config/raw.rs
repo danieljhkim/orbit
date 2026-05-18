@@ -10,6 +10,7 @@ pub(super) struct RawRuntimeConfig {
     pub(super) pr: Option<RawPrSection>,
     pub(super) scoring: Option<RawScoringConfig>,
     pub(super) graph: Option<RawGraphConfig>,
+    pub(super) artifacts: Option<RawArtifactsConfig>,
     pub(super) knowledge: Option<RawKnowledgeConfig>,
     pub(super) watch: Option<toml::Value>,
     pub(super) runtime: Option<RawRuntimeSection>,
@@ -26,9 +27,8 @@ pub(super) struct RawRuntimeConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawWorkflowConfig {
     /// `workflow.base_branch` — repo-level default base branch for ship and
-    /// duel-plan workflows. When absent, defaults to `main`.
-    /// Repos that keep an `agent-main` buffer branch set this to
-    /// `"agent-main"`.
+    /// duel-plan workflows. When absent, defaults to `agent-main`.
+    /// Repos that ship directly from `main` can set this to `"main"`.
     pub(super) base_branch: Option<String>,
     /// Named crew used when a task does not declare `crew` and no CLI
     /// override is provided.
@@ -89,6 +89,11 @@ pub(super) struct RawGraphConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct RawScoringConfig {
     pub(super) enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RawArtifactsConfig {
+    pub(super) auto_publish: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

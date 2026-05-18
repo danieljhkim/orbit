@@ -14,6 +14,8 @@ pub(super) fn execute(
     reservation_owner: Option<ReservationOwnerContext>,
 ) -> Result<Value, OrbitError> {
     let (input, redaction_report) = super::artifact_redaction::sanitize_tool_input(action, input)?;
+    let publish_context =
+        super::artifact_auto_publish::capture_before_action(runtime, action, &input)?;
     let agent_for_audit = agent.clone();
     let model_for_audit = model.clone();
     let mut response = match action {
@@ -101,6 +103,13 @@ pub(super) fn execute(
         action,
         &mut response,
         &redaction_report,
+        agent_for_audit.as_deref(),
+        model_for_audit.as_deref(),
+    )?;
+    super::artifact_auto_publish::publish_after_success(
+        runtime,
+        &response,
+        publish_context,
         agent_for_audit.as_deref(),
         model_for_audit.as_deref(),
     )?;

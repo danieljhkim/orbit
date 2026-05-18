@@ -22,6 +22,11 @@ enabled = true
 [graph]
 editing = false
 
+[artifacts]
+# Opt-in. When true, ADR and learning writes commit their changed artifact files
+# to [workflow].base_branch and push that branch to origin.
+auto_publish = false
+
 [workflow]
 base_branch = "agent-main"
 default_crew = "opus-codex"

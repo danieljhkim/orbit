@@ -174,11 +174,12 @@ pub(crate) struct OrbitRuntimeSettings {
     task_delegate_approval: bool,
     scoring_enabled: bool,
     graph_editing: bool,
+    artifact_auto_publish: bool,
     pr_config: PrConfig,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     v2_backend: Option<String>,
     /// Default base branch for ship/duel-plan workflows
-    /// (`[workflow] base_branch` in `config.toml`, default `"main"`).
+    /// (`[workflow] base_branch` in `config.toml`, default `"agent-main"`).
     workflow_base_branch: String,
     crews: std::collections::BTreeMap<String, Crew>,
     default_crew: Option<String>,
@@ -194,6 +195,7 @@ impl OrbitRuntimeSettings {
         task_delegate_approval: bool,
         scoring_enabled: bool,
         graph_editing: bool,
+        artifact_auto_publish: bool,
         pr_config: PrConfig,
         v2_backend: Option<String>,
         workflow_base_branch: String,
@@ -208,6 +210,7 @@ impl OrbitRuntimeSettings {
             task_delegate_approval,
             scoring_enabled,
             graph_editing,
+            artifact_auto_publish,
             pr_config,
             v2_backend,
             workflow_base_branch,
@@ -227,6 +230,10 @@ impl OrbitRuntimeSettings {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn artifact_auto_publish(&self) -> bool {
+        self.artifact_auto_publish
     }
 
     pub(crate) fn crews(&self) -> &std::collections::BTreeMap<String, Crew> {
@@ -328,6 +335,10 @@ impl OrbitContext {
         self.runtime.graph_editing
     }
 
+    pub(crate) fn artifact_auto_publish(&self) -> bool {
+        self.runtime.artifact_auto_publish()
+    }
+
     pub(crate) fn pr_config(&self) -> &PrConfig {
         self.runtime.pr_config()
     }
@@ -340,7 +351,7 @@ impl OrbitContext {
 
     /// Default base branch for ship/duel-plan workflows. Sourced
     /// from `[workflow] base_branch` in `config.toml`; falls back to
-    /// `"main"` when the key is absent.
+    /// `"agent-main"` when the key is absent.
     pub(crate) fn workflow_base_branch(&self) -> &str {
         self.runtime.workflow_base_branch()
     }

@@ -1,4 +1,5 @@
 mod adr_tools;
+mod artifact_auto_publish;
 mod artifact_redaction;
 mod design_tools;
 mod dispatch;

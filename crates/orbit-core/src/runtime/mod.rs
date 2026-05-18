@@ -357,6 +357,10 @@ impl OrbitRuntime {
         self.context.codex_execution_policy()
     }
 
+    pub(crate) fn artifact_auto_publish(&self) -> bool {
+        self.context.artifact_auto_publish()
+    }
+
     pub(crate) fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
         self.activity_executors.as_ref()
     }

@@ -26,13 +26,18 @@ enabled = true
 [graph]
 editing = false
 
+[artifacts]
+# Opt-in. When true, ADR and learning writes commit their changed artifact files
+# to [workflow].base_branch and push that branch to origin.
+auto_publish = false
+
 [workflow]
 # Default base branch for `orbit run ship` and `duel-plan`.
 # Override per-invocation with `--base <branch>`. The Orbit repo itself uses
 # this two-branch pattern: `main` is the release/production branch, and
-# `agent-main` is the dev integration branch where task PRs land — set
-# `base_branch = "agent-main"` for the same layout in your own repo.
-base_branch = "main"
+# `agent-main` is the dev integration branch where task PRs land. Repos that
+# ship directly from `main` can set `base_branch = "main"`.
+base_branch = "agent-main"
 default_crew = "opus-codex"
 
 [crews.opus-codex]

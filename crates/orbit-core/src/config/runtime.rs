@@ -14,8 +14,8 @@ use super::persistence::PersistenceConfig;
 use super::raw::{
     RawAgentRoleConfig, RawCodexExecutionConfig, RawCrewEntry, RawDuelSection,
     RawExecutionEnvConfig, RawPrSection, RawRuntimeConfig, RawRuntimeSection, RawTaskSection,
-    RawWorkflowConfig,
 };
+use super::raw::{RawArtifactsConfig, RawWorkflowConfig};
 
 const DEFAULT_ENV_INHERIT: bool = false;
 const DEFAULT_TASK_APPROVAL_REQUIRED_FOR_AGENT: bool = false;
@@ -24,7 +24,8 @@ const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
 // without an explicit Orbit config still record scoreboard metrics.
 const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
-const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
+const DEFAULT_ARTIFACT_AUTO_PUBLISH: bool = false;
+const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "agent-main";
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -35,12 +36,14 @@ pub(crate) struct RuntimeConfig {
     pub(crate) pr: PrConfig,
     pub(crate) scoring_enabled: bool,
     pub(crate) graph_editing: bool,
+    pub(crate) artifact_auto_publish: bool,
     /// Persisted default for the v2 `agent_loop` execution backend (§3.1).
     /// `None` means "not configured"; the resolver falls through to the hard-
     /// coded `cli` default.
     pub(crate) v2_backend: Option<String>,
     /// Default base branch for ship/duel-plan workflows. Sourced
-    /// from `[workflow] base_branch` in `config.toml`; defaults to `"main"`
+    /// from `[workflow] base_branch` in `config.toml`; defaults to
+    /// `"agent-main"`
     /// when no key is set.
     pub(crate) workflow_base_branch: String,
     /// Named planner/implementer/reviewer lineups from `[crews.<name>]`.
@@ -83,6 +86,7 @@ impl RuntimeConfig {
             pr: PrConfig::default(),
             scoring_enabled: DEFAULT_SCORING_ENABLED,
             graph_editing: DEFAULT_GRAPH_EDITING,
+            artifact_auto_publish: DEFAULT_ARTIFACT_AUTO_PUBLISH,
             v2_backend: None,
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             crews: default_crews(),
@@ -156,6 +160,8 @@ impl RuntimeConfig {
             .and_then(|g| g.editing)
             .unwrap_or(DEFAULT_GRAPH_EDITING);
 
+        let artifact_auto_publish = artifact_auto_publish_from_raw(parsed.artifacts.as_ref());
+
         validate_task_artifact_store_from_raw(parsed.task.as_ref())?;
         let v2_backend = runtime_backend_from_raw(parsed.runtime.as_ref())?;
 
@@ -188,6 +194,7 @@ impl RuntimeConfig {
             pr,
             scoring_enabled,
             graph_editing,
+            artifact_auto_publish,
             v2_backend,
             workflow_base_branch,
             crews,
@@ -203,6 +210,10 @@ impl RuntimeConfig {
 
     pub(crate) fn workflow_base_branch(&self) -> &str {
         &self.workflow_base_branch
+    }
+
+    pub(crate) fn artifact_auto_publish(&self) -> bool {
+        self.artifact_auto_publish
     }
 
     pub(crate) fn pr_config(&self) -> &PrConfig {
@@ -465,6 +476,11 @@ fn validate_task_artifact_store_from_raw(raw: Option<&RawTaskSection>) -> Result
     Err(OrbitError::InvalidInput(format!(
         "[task] artifact_store is no longer supported; remove the key because v2 task artifacts are always enabled (found '{trimmed}')"
     )))
+}
+
+fn artifact_auto_publish_from_raw(raw: Option<&RawArtifactsConfig>) -> bool {
+    raw.and_then(|section| section.auto_publish)
+        .unwrap_or(DEFAULT_ARTIFACT_AUTO_PUBLISH)
 }
 
 fn workflow_base_branch_from_raw(raw: Option<&RawWorkflowConfig>) -> Result<String, OrbitError> {
@@ -1007,6 +1023,27 @@ codex = "   "
         assert!(message.contains("[runtime] backend"));
         assert!(message.contains("clii"));
         assert!(message.contains("http, cli, auto"));
+    }
+
+    #[test]
+    fn artifact_auto_publish_defaults_to_false() {
+        let config = load_config("[scoring]\nenabled = true\n").expect("config loads");
+
+        assert!(!config.artifact_auto_publish());
+    }
+
+    #[test]
+    fn artifact_auto_publish_loads_from_workspace_config() {
+        let config = load_config("[artifacts]\nauto_publish = true\n").expect("config loads");
+
+        assert!(config.artifact_auto_publish());
+    }
+
+    #[test]
+    fn workflow_base_branch_defaults_to_agent_main() {
+        let config = load_config("[scoring]\nenabled = true\n").expect("config loads");
+
+        assert_eq!(config.workflow_base_branch(), "agent-main");
     }
 
     #[test]
