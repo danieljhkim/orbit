@@ -20,6 +20,7 @@ use crate::command::Execute;
 
 const INDEX_HTML: &str = include_str!("../../../assets/dashboard/index.html");
 const APP_JS: &str = include_str!("../../../assets/dashboard/app.js");
+const COMMON_JS: &str = include_str!("../../../assets/dashboard/common.js");
 
 #[derive(Args)]
 #[command(
@@ -77,6 +78,7 @@ impl Execute for ServeArgs {
         let app = Router::new()
             .route("/", get(serve_index))
             .route("/static/app.js", get(serve_app_js))
+            .route("/static/common.js", get(serve_common_js))
             .route("/healthz", get(healthz))
             .nest("/api", api::router())
             .with_state(runtime);
@@ -125,6 +127,17 @@ async fn serve_app_js() -> Response {
             HeaderValue::from_static("application/javascript; charset=utf-8"),
         )],
         APP_JS,
+    )
+        .into_response()
+}
+
+async fn serve_common_js() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/javascript; charset=utf-8"),
+        )],
+        COMMON_JS,
     )
         .into_response()
 }
