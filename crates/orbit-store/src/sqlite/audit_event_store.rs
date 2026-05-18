@@ -1234,8 +1234,7 @@ mod tests {
         store.insert_audit_event_record(&mcp_fail).expect("insert");
 
         // Event with NULL tool_name folds into "unknown".
-        let mut no_tool =
-            sample_params_with("exec-no-tool", "codex", AuditEventStatus::Success);
+        let mut no_tool = sample_params_with("exec-no-tool", "codex", AuditEventStatus::Success);
         no_tool.subcommand = None;
         no_tool.tool_name = None;
         no_tool.duration_ms = 10;
@@ -1272,21 +1271,24 @@ mod tests {
         let store = Store::open_in_memory().expect("open store");
         let since = chrono::Utc::now() - chrono::Duration::hours(1);
 
-        let mut codex_cli = sample_params_with("exec-codex-cli", "codex", AuditEventStatus::Success);
+        let mut codex_cli =
+            sample_params_with("exec-codex-cli", "codex", AuditEventStatus::Success);
         codex_cli.subcommand = Some("run".to_string());
         store.insert_audit_event_record(&codex_cli).expect("insert");
 
-        let mut codex_mcp = sample_params_with("exec-codex-mcp", "codex", AuditEventStatus::Success);
+        let mut codex_mcp =
+            sample_params_with("exec-codex-mcp", "codex", AuditEventStatus::Success);
         codex_mcp.subcommand = Some("run-mcp".to_string());
         store.insert_audit_event_record(&codex_mcp).expect("insert");
 
         let mut codex_other =
             sample_params_with("exec-codex-other", "codex", AuditEventStatus::Success);
         codex_other.subcommand = Some("show".to_string());
-        store.insert_audit_event_record(&codex_other).expect("insert");
+        store
+            .insert_audit_event_record(&codex_other)
+            .expect("insert");
 
-        let mut human =
-            sample_params_with("exec-human", "human", AuditEventStatus::Success);
+        let mut human = sample_params_with("exec-human", "human", AuditEventStatus::Success);
         human.subcommand = Some("run".to_string());
         store.insert_audit_event_record(&human).expect("insert");
 

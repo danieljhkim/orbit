@@ -73,6 +73,25 @@ pub struct Aggregates {
     pub rows: Vec<AggregateRow>,
 }
 
+/// One directed family-vs-family cell in the planning-duel matrix.
+///
+/// `wins` and `losses` are from the row family's perspective against the
+/// column family. `runs` is the number of decided planner matchups observed
+/// for that directed pair.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadToHeadCell {
+    pub wins: u64,
+    pub losses: u64,
+    pub runs: u64,
+}
+
+/// Deterministic family-vs-family planning-duel matrix.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeadToHeadMatrix {
+    pub families: Vec<String>,
+    pub cells: BTreeMap<String, BTreeMap<String, HeadToHeadCell>>,
+}
+
 #[derive(Default)]
 struct Bucket {
     runs: u32,
@@ -212,6 +231,46 @@ pub fn aggregate(runs: &[PlanningDuelRun], filter: AggregateFilter) -> Aggregate
     Aggregates { rows }
 }
 
+/// Aggregate planner outcomes into a directed family-vs-family matrix.
+pub fn aggregate_head_to_head(runs: &[PlanningDuelRun]) -> HeadToHeadMatrix {
+    let canonical_families: Vec<String> = all_agent_families()
+        .iter()
+        .map(|family| family.to_string())
+        .collect();
+    let mut cells = seed_head_to_head_cells(&canonical_families);
+
+    for run in runs {
+        let planner_a = run.roles.planner_a.family.to_string();
+        let planner_b = run.roles.planner_b.family.to_string();
+        ensure_head_to_head_family(&mut cells, &planner_a);
+        ensure_head_to_head_family(&mut cells, &planner_b);
+
+        match run.outcome.winner {
+            PlannerSlot::PlannerA => {
+                record_head_to_head(&mut cells, &planner_a, &planner_b, true);
+                record_head_to_head(&mut cells, &planner_b, &planner_a, false);
+            }
+            PlannerSlot::PlannerB => {
+                record_head_to_head(&mut cells, &planner_b, &planner_a, true);
+                record_head_to_head(&mut cells, &planner_a, &planner_b, false);
+            }
+        }
+    }
+
+    let mut observed_families: Vec<String> = cells.keys().cloned().collect();
+    observed_families.sort();
+    let families: Vec<String> = canonical_families
+        .into_iter()
+        .chain(
+            observed_families
+                .into_iter()
+                .filter(|family| !all_agent_families().contains(&family.as_str())),
+        )
+        .collect();
+
+    HeadToHeadMatrix { families, cells }
+}
+
 fn seed_zero_family_rows(
     buckets: &mut BTreeMap<(String, &'static str, String), Bucket>,
     roles_to_emit: &[RoleAxis],
@@ -231,6 +290,65 @@ fn role_name(role: RoleAxis) -> &'static str {
         RoleAxis::PlannerA => "planner_a",
         RoleAxis::PlannerB => "planner_b",
         RoleAxis::Arbiter => "arbiter",
+    }
+}
+
+fn seed_head_to_head_cells(
+    families: &[String],
+) -> BTreeMap<String, BTreeMap<String, HeadToHeadCell>> {
+    let mut cells = BTreeMap::new();
+    for row_family in families {
+        let row = cells
+            .entry(row_family.clone())
+            .or_insert_with(BTreeMap::new);
+        for col_family in families {
+            row.entry(col_family.clone()).or_default();
+        }
+    }
+    cells
+}
+
+fn ensure_head_to_head_family(
+    cells: &mut BTreeMap<String, BTreeMap<String, HeadToHeadCell>>,
+    family: &str,
+) {
+    if cells.contains_key(family) {
+        return;
+    }
+
+    let existing: Vec<String> = cells.keys().cloned().collect();
+    let mut row = BTreeMap::new();
+    for other in &existing {
+        row.entry(other.clone()).or_default();
+    }
+    row.entry(family.to_string()).or_default();
+    cells.insert(family.to_string(), row);
+
+    for other in existing {
+        cells
+            .entry(other)
+            .or_default()
+            .entry(family.to_string())
+            .or_default();
+    }
+}
+
+fn record_head_to_head(
+    cells: &mut BTreeMap<String, BTreeMap<String, HeadToHeadCell>>,
+    row_family: &str,
+    col_family: &str,
+    won: bool,
+) {
+    let cell = cells
+        .entry(row_family.to_string())
+        .or_default()
+        .entry(col_family.to_string())
+        .or_default();
+    cell.runs = cell.runs.saturating_add(1);
+    if won {
+        cell.wins = cell.wins.saturating_add(1);
+    } else {
+        cell.losses = cell.losses.saturating_add(1);
     }
 }
 
@@ -309,20 +427,89 @@ mod tests {
         );
     }
 
+    #[test]
+    fn aggregate_head_to_head_records_asymmetric_family_outcomes() {
+        let runs = vec![
+            test_run_with(
+                "run-1",
+                AgentFamily::Codex,
+                AgentFamily::Claude,
+                PlannerSlot::PlannerA,
+            ),
+            test_run_with(
+                "run-2",
+                AgentFamily::Codex,
+                AgentFamily::Claude,
+                PlannerSlot::PlannerB,
+            ),
+            test_run_with(
+                "run-3",
+                AgentFamily::Grok,
+                AgentFamily::Codex,
+                PlannerSlot::PlannerA,
+            ),
+        ];
+
+        let matrix = aggregate_head_to_head(&runs);
+
+        assert_eq!(
+            matrix.families,
+            vec![
+                "codex".to_string(),
+                "claude".to_string(),
+                "gemini".to_string(),
+                "grok".to_string(),
+            ]
+        );
+        let codex_vs_claude = &matrix.cells["codex"]["claude"];
+        assert_eq!(codex_vs_claude.wins, 1);
+        assert_eq!(codex_vs_claude.losses, 1);
+        assert_eq!(codex_vs_claude.runs, 2);
+
+        let claude_vs_codex = &matrix.cells["claude"]["codex"];
+        assert_eq!(claude_vs_codex.wins, 1);
+        assert_eq!(claude_vs_codex.losses, 1);
+        assert_eq!(claude_vs_codex.runs, 2);
+
+        let grok_vs_codex = &matrix.cells["grok"]["codex"];
+        assert_eq!(grok_vs_codex.wins, 1);
+        assert_eq!(grok_vs_codex.losses, 0);
+        assert_eq!(grok_vs_codex.runs, 1);
+
+        let codex_vs_grok = &matrix.cells["codex"]["grok"];
+        assert_eq!(codex_vs_grok.wins, 0);
+        assert_eq!(codex_vs_grok.losses, 1);
+        assert_eq!(codex_vs_grok.runs, 1);
+    }
+
     fn test_run(run_id: String) -> PlanningDuelRun {
+        test_run_with(
+            &run_id,
+            AgentFamily::Codex,
+            AgentFamily::Claude,
+            PlannerSlot::PlannerA,
+        )
+    }
+
+    fn test_run_with(
+        run_id: &str,
+        planner_a: AgentFamily,
+        planner_b: AgentFamily,
+        winner: PlannerSlot,
+    ) -> PlanningDuelRun {
         PlanningDuelRun {
-            run_id,
+            run_id: run_id.to_string(),
             task_id: "T-test".to_string(),
             completed_at: Utc::now(),
             roles: PlanningRoles {
-                planner_a: role(AgentFamily::Codex),
-                planner_b: role(AgentFamily::Claude),
+                planner_a: role(planner_a),
+                planner_b: role(planner_b),
                 arbiter: role(AgentFamily::Gemini),
             },
             planner_a_artifact_path: "artifacts/planner-a.md".to_string(),
             planner_b_artifact_path: "artifacts/planner-b.md".to_string(),
             outcome: PlanningOutcome {
-                winner: PlannerSlot::PlannerA,
+                winner,
                 arbiter_rationale: "test winner".to_string(),
             },
             efficiency: PlanningEfficiency {

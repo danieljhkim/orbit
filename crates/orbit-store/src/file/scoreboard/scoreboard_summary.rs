@@ -4,8 +4,8 @@ use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_common::types::{
-    JobRun, JobRunState, OrbitError, PlannerSlot, Task, TaskStatus, all_agent_families,
-    infer_agent_family_from_model, normalize_attribution_label,
+    Adr, AdrStatus, JobRun, JobRunState, Learning, OrbitError, PlannerSlot, Task, TaskStatus,
+    all_agent_families, infer_agent_family_from_model, normalize_attribution_label,
     normalize_optional_attribution_label,
 };
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,9 @@ use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 const SUMMARY_FILENAME: &str = "summary.json";
 // v2 adds `task_review.threads`; v3 adds tasks_created/tasks_planned,
 // per-(role, surface) tool call counts, top-level workflows_run, and a
-// recent_7d window block. Older readers ignore unknown fields.
-const CURRENT_SCHEMA_VERSION: u32 = 3;
+// recent_7d window block. v4 adds per-agent knowledge counters and a
+// planning-duel head-to-head matrix. Older readers ignore unknown fields.
+const CURRENT_SCHEMA_VERSION: u32 = 4;
 const TASK_REVIEW_THREADS_METRIC: &str = "task-review-threads";
 const LEGACY_TASK_REVIEW_MESSAGES_METRIC: &str = "task-review-messages";
 const RECENT_WINDOW_DAYS: i64 = 7;
@@ -53,6 +54,15 @@ pub struct TaskReviewSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KnowledgeSummary {
+    pub learnings_created: u64,
+    pub learning_votes_received: u64,
+    pub adrs_created: u64,
+    pub adrs_accepted: u64,
+    pub adrs_proposed_open: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSummary {
     pub tasks_completed: u64,
     #[serde(default)]
@@ -64,6 +74,8 @@ pub struct AgentSummary {
     pub pr: PrSummary,
     #[serde(default)]
     pub task_review: TaskReviewSummary,
+    #[serde(default)]
+    pub knowledge: KnowledgeSummary,
     pub tool_calls: u64,
     #[serde(default)]
     pub failed_tool_calls: u64,
@@ -106,6 +118,11 @@ pub struct RecentSummary {
     pub workflows_run: u64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanningDuelSummary {
+    pub head_to_head: planning_duel_scoreboard::HeadToHeadMatrix,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScoreboardSummary {
     pub schema_version: u32,
@@ -124,6 +141,9 @@ pub struct ScoreboardSummary {
     /// its absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_7d: Option<RecentSummary>,
+    /// Planning-duel reports that are not naturally per-agent columns.
+    #[serde(default)]
+    pub planning_duels: PlanningDuelSummary,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -168,6 +188,12 @@ pub struct ScoreboardInputs<'a> {
     /// Top (role, tool_name) pairs across the audit log, sorted desc by
     /// count. Drives the "most-called tools" leaderboard.
     pub top_tool_calls: &'a [AuditTopToolCall],
+    /// Workspace learning records, used for knowledge-stewardship counters.
+    pub learnings: &'a [Learning],
+    /// Per-learning vote counts keyed by learning ID.
+    pub learning_vote_counts: &'a [(String, u64)],
+    /// Workspace ADR records, used for knowledge-stewardship counters.
+    pub adrs: &'a [Adr],
     /// Reference "now" for recency windowing. `None` means no recency
     /// section is emitted (used by legacy callers).
     pub now: Option<DateTime<Utc>>,
@@ -261,7 +287,8 @@ pub fn generate_summary_with_inputs(
     // Planning-duel rows are the "who actually ran?" scoreboard projection:
     // metrics are recorded from invocation family + slot, while the stored
     // roles identify the selected family for each slot.
-    for run in planning_duel_scoreboard::load_runs(scoreboard_dir)? {
+    let planning_duel_runs = planning_duel_scoreboard::load_runs(scoreboard_dir)?;
+    for run in &planning_duel_runs {
         let planner_a = agents
             .entry(run.roles.planner_a.family.to_string())
             .or_default();
@@ -298,6 +325,8 @@ pub fn generate_summary_with_inputs(
             }
         }
     }
+
+    overlay_knowledge_counters(&mut agents, inputs);
 
     for task in tasks {
         if matches!(task.status, TaskStatus::Done | TaskStatus::Archived)
@@ -345,6 +374,9 @@ pub fn generate_summary_with_inputs(
     let recent_7d = inputs
         .now
         .map(|now| build_recent_summary(now, tasks, inputs));
+    let planning_duels = PlanningDuelSummary {
+        head_to_head: planning_duel_scoreboard::aggregate_head_to_head(&planning_duel_runs),
+    };
 
     Ok(ScoreboardSummary {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -353,6 +385,7 @@ pub fn generate_summary_with_inputs(
         workflows_run,
         top_tools,
         recent_7d,
+        planning_duels,
     })
 }
 
@@ -532,6 +565,54 @@ fn overlay_audit_tool_calls(
         summary.tool_calls = summary.tool_calls.max(total);
         summary.failed_tool_calls = summary.failed_tool_calls.saturating_add(failed);
     }
+}
+
+fn overlay_knowledge_counters(
+    agents: &mut BTreeMap<String, AgentSummary>,
+    inputs: &ScoreboardInputs<'_>,
+) {
+    for learning in inputs.learnings {
+        let Some(created_by) = learning
+            .created_by
+            .as_deref()
+            .map(|raw| normalize_attribution_label(raw, None))
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let summary = agents.entry(family_key(&created_by)).or_default();
+        summary.knowledge.learnings_created = summary.knowledge.learnings_created.saturating_add(1);
+        summary.knowledge.learning_votes_received = summary
+            .knowledge
+            .learning_votes_received
+            .saturating_add(learning_vote_count(
+                inputs.learning_vote_counts,
+                &learning.id,
+            ));
+    }
+
+    for adr in inputs.adrs {
+        let owner = normalize_attribution_label(&adr.owner, None);
+        if owner.is_empty() {
+            continue;
+        }
+        let summary = agents.entry(family_key(&owner)).or_default();
+        summary.knowledge.adrs_created = summary.knowledge.adrs_created.saturating_add(1);
+        if adr.status == AdrStatus::Accepted || adr.accepted_at.is_some() {
+            summary.knowledge.adrs_accepted = summary.knowledge.adrs_accepted.saturating_add(1);
+        }
+        if adr.status == AdrStatus::Proposed {
+            summary.knowledge.adrs_proposed_open =
+                summary.knowledge.adrs_proposed_open.saturating_add(1);
+        }
+    }
+}
+
+fn learning_vote_count(counts: &[(String, u64)], id: &str) -> u64 {
+    counts
+        .iter()
+        .find_map(|(learning_id, count)| (learning_id == id).then_some(*count))
+        .unwrap_or(0)
 }
 
 fn family_key(label: &str) -> String {
@@ -806,6 +887,57 @@ mod tests {
     }
 
     #[test]
+    fn summary_counts_knowledge_artifacts_by_author_family() {
+        let temp = tempfile::tempdir().expect("create tempdir");
+        let learnings = vec![
+            test_learning("L20260518-1", Some("gpt-5.5")),
+            test_learning("L20260518-2", Some("claude-opus-4-7")),
+            test_learning("L20260518-3", None),
+        ];
+        let learning_votes = vec![
+            ("L20260518-1".to_string(), 2),
+            ("L20260518-2".to_string(), 1),
+        ];
+        let now = Utc::now();
+        let adrs = vec![
+            test_adr("ADR-0001", "codex", AdrStatus::Accepted, Some(now)),
+            test_adr("ADR-0002", "gpt-5.5", AdrStatus::Proposed, None),
+            test_adr(
+                "ADR-0003",
+                "claude-opus-4-7",
+                AdrStatus::Superseded,
+                Some(now),
+            ),
+        ];
+
+        let summary = generate_summary_with_inputs(
+            temp.path(),
+            &[],
+            &ScoreboardInputs {
+                learnings: &learnings,
+                learning_vote_counts: &learning_votes,
+                adrs: &adrs,
+                ..ScoreboardInputs::default()
+            },
+        )
+        .expect("generate summary");
+
+        let codex = summary.agents.get("codex").expect("codex summary");
+        assert_eq!(codex.knowledge.learnings_created, 1);
+        assert_eq!(codex.knowledge.learning_votes_received, 2);
+        assert_eq!(codex.knowledge.adrs_created, 2);
+        assert_eq!(codex.knowledge.adrs_accepted, 1);
+        assert_eq!(codex.knowledge.adrs_proposed_open, 1);
+
+        let claude = summary.agents.get("claude").expect("claude summary");
+        assert_eq!(claude.knowledge.learnings_created, 1);
+        assert_eq!(claude.knowledge.learning_votes_received, 1);
+        assert_eq!(claude.knowledge.adrs_created, 1);
+        assert_eq!(claude.knowledge.adrs_accepted, 1);
+        assert_eq!(claude.knowledge.adrs_proposed_open, 0);
+    }
+
+    #[test]
     fn summary_overlays_per_surface_tool_call_counts() {
         let temp = tempfile::tempdir().expect("create tempdir");
 
@@ -1057,6 +1189,48 @@ mod tests {
             crew: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+        }
+    }
+
+    fn test_learning(id: &str, created_by: Option<&str>) -> Learning {
+        use orbit_common::types::{LearningScope, LearningStatus};
+        Learning {
+            id: id.to_string(),
+            status: LearningStatus::Active,
+            scope: LearningScope::default(),
+            summary: id.to_string(),
+            body: String::new(),
+            evidence: Vec::new(),
+            supersedes: None,
+            superseded_by: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            created_by: created_by.map(str::to_string),
+            priority: None,
+        }
+    }
+
+    fn test_adr(
+        id: &str,
+        owner: &str,
+        status: AdrStatus,
+        accepted_at: Option<DateTime<Utc>>,
+    ) -> Adr {
+        Adr {
+            id: id.to_string(),
+            title: id.to_string(),
+            status,
+            owner: owner.to_string(),
+            created_at: Utc::now(),
+            accepted_at,
+            last_updated: Utc::now(),
+            related_features: Vec::new(),
+            related_tasks: Vec::new(),
+            supersedes: Vec::new(),
+            superseded_by: None,
+            legacy_ids: Vec::new(),
+            validation_warnings: Vec::new(),
+            legacy_validation: Default::default(),
         }
     }
 

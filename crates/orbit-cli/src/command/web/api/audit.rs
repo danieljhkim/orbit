@@ -8,9 +8,7 @@ use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Utc};
 use orbit_core::command::job::JobRunListParams;
-use orbit_core::{
-    AuditEventStatus, AuditToolAggregate, JobRunState, OrbitError, OrbitRuntime,
-};
+use orbit_core::{AuditEventStatus, AuditToolAggregate, JobRunState, OrbitError, OrbitRuntime};
 use serde_json::{Value, json};
 
 use super::denials::{

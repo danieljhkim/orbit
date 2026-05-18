@@ -67,10 +67,10 @@ pub mod task_review_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, DuelSummary, PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary,
-        TaskReviewSummary, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
-        generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
-        write_summary,
+        AgentSummary, DuelSummary, KnowledgeSummary, PlanningDuelSummary, PrSummary, RecentSummary,
+        ScoreboardInputs, ScoreboardSummary, TaskReviewSummary, TokenSummary, TopToolCall,
+        WorkflowRunCount, generate_summary, generate_summary_with_audit_tool_calls,
+        generate_summary_with_inputs, summary_path, write_summary,
     };
 }
 
@@ -83,7 +83,8 @@ pub mod duel_scoreboard {
 
 pub mod planning_duel_scoreboard {
     pub use crate::file::scoreboard::planning_duel_scoreboard::{
-        AggregateFilter, AggregateRow, Aggregates, RoleAxis, aggregate, append_run, load_runs,
+        AggregateFilter, AggregateRow, Aggregates, HeadToHeadCell, HeadToHeadMatrix, RoleAxis,
+        aggregate, aggregate_head_to_head, append_run, load_runs,
     };
 }
 

@@ -1513,13 +1513,33 @@ function renderRuns(runs) {
   syncNodes(body, Array.from(frag.children));
 }
 
-const SCOREBOARD_COLUMNS = [
+const CANONICAL_SCOREBOARD_FAMILIES = ["codex", "claude", "gemini", "grok"];
+const CANONICAL_SCOREBOARD_SET = new Set(CANONICAL_SCOREBOARD_FAMILIES);
+
+const DELIVERY_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   { key: "tasks_created", label: "created", num: true },
   { key: "tasks_planned", label: "planned", num: true },
   { key: "tasks_completed", label: "completed", num: true },
+];
+
+const REVIEW_SCOREBOARD_COLUMNS = [
+  { key: "agent", label: "agent", num: false },
   { key: "task_review.threads", label: "review threads", num: true },
   { key: "pr.review_comments", label: "pr rev", num: true },
+];
+
+const KNOWLEDGE_SCOREBOARD_COLUMNS = [
+  { key: "agent", label: "agent", num: false },
+  { key: "knowledge.learnings_created", label: "learnings", num: true },
+  { key: "knowledge.learning_votes_received", label: "votes", num: true },
+  { key: "knowledge.adrs_created", label: "adrs", num: true },
+  { key: "knowledge.adrs_accepted", label: "accepted", num: true },
+  { key: "knowledge.adrs_proposed_open", label: "proposed", num: true },
+];
+
+const OPERATIONS_SCOREBOARD_COLUMNS = [
+  { key: "agent", label: "agent", num: false },
   {
     key: "graph_calls",
     label: "graph calls",
@@ -1543,6 +1563,30 @@ const SCOREBOARD_COLUMNS = [
     right: "tool_calls",
     title: "failed / total tool calls",
   },
+  { key: "friction.reported", label: "frict r", num: true },
+];
+
+const PLANNING_SCOREBOARD_COLUMNS = [
+  { key: "agent", label: "agent", num: false },
+  { key: "duels.wins", label: "wins", num: true },
+  { key: "duels.losses", label: "losses", num: true },
+  {
+    key: "planner_runs",
+    label: "as planner",
+    num: true,
+    compute: (agent) => (agent?.duels?.wins ?? 0) + (agent?.duels?.losses ?? 0),
+  },
+  {
+    key: "arbiter_runs",
+    label: "as arbiter",
+    num: true,
+    compute: (agent) =>
+      Math.max(
+        0,
+        (agent?.duels?.participated ?? 0) -
+          ((agent?.duels?.wins ?? 0) + (agent?.duels?.losses ?? 0)),
+      ),
+  },
   {
     key: "duels",
     label: "duel w/all",
@@ -1553,7 +1597,15 @@ const SCOREBOARD_COLUMNS = [
       (agent?.duels?.wins ?? 0) + (agent?.duels?.losses ?? 0),
     title: "wins / decided duels (wins + losses)",
   },
-  { key: "friction.reported", label: "frict r", num: true },
+];
+
+const OTHER_SCOREBOARD_COLUMNS = [
+  { key: "agent", label: "agent", num: false },
+  ...DELIVERY_SCOREBOARD_COLUMNS.slice(1),
+  ...REVIEW_SCOREBOARD_COLUMNS.slice(1),
+  ...KNOWLEDGE_SCOREBOARD_COLUMNS.slice(1),
+  ...OPERATIONS_SCOREBOARD_COLUMNS.slice(1),
+  ...PLANNING_SCOREBOARD_COLUMNS.slice(1),
 ];
 
 function readPath(obj, path) {
@@ -1579,81 +1631,167 @@ function renderScoreboard(summary) {
     ])]);
     return;
   }
-  
-  entries.sort(([, a], [, b]) => (b.tasks_completed || 0) - (a.tasks_completed || 0));
 
-  let table = body.querySelector("table.scoreboard-table");
-  let tbody;
-  if (!table) {
-    table = el("table", { class: "scoreboard-table" });
-    const thead = el("thead");
-    const headRow = el("tr");
-    for (const col of SCOREBOARD_COLUMNS) {
-      headRow.appendChild(
-        el(col === SCOREBOARD_COLUMNS[0] ? "th" : "th", {
-          class: col.num ? "num" : "",
-          text: col.label,
-        }),
-      );
+  const canonicalRows = canonicalScoreboardRows(agentsMap);
+  const otherRows = entries
+    .filter(([name]) => !CANONICAL_SCOREBOARD_SET.has(name))
+    .filter(([, agent]) => scoreboardSignalForColumns(agent, OTHER_SCOREBOARD_COLUMNS) > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const sections = [
+    renderScoreboardSection("Delivery", DELIVERY_SCOREBOARD_COLUMNS, canonicalRows),
+    renderScoreboardSection("Review", REVIEW_SCOREBOARD_COLUMNS, canonicalRows),
+    renderScoreboardSection("Knowledge", KNOWLEDGE_SCOREBOARD_COLUMNS, canonicalRows),
+    renderScoreboardSection("Operations", OPERATIONS_SCOREBOARD_COLUMNS, canonicalRows),
+    renderScoreboardSection("Planning Duels", PLANNING_SCOREBOARD_COLUMNS, canonicalRows),
+    renderDuelMatrixSection(summary),
+    renderScoreboardSection("Attribution Cleanup", OTHER_SCOREBOARD_COLUMNS, otherRows),
+  ];
+
+  syncNodes(body, [el("div", { class: "scoreboard-sections" }, sections)]);
+}
+
+function canonicalScoreboardRows(agentsMap) {
+  return CANONICAL_SCOREBOARD_FAMILIES.map((family) => [family, agentsMap[family] || {}]);
+}
+
+function scoreboardSignalForColumns(agent, columns) {
+  return columns.reduce((total, col) => {
+    if (col.key === "agent") return total;
+    if (col.format === "pair") {
+      const pair = formatScoreboardPair(agent, col);
+      return total + (pair.zero ? 0 : 1);
     }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    tbody = el("tbody");
-    table.appendChild(tbody);
-    syncNodes(body, [table]);
+    const value = col.compute ? col.compute(agent) : readPath(agent, col.key);
+    return total + Math.abs(asScoreboardNumber(value));
+  }, 0);
+}
+
+function renderScoreboardSection(title, columns, rows) {
+  const section = el("section", { class: "scoreboard-section" });
+  section.appendChild(
+    el("div", { class: "scoreboard-section-header" }, [
+      el("span", { class: "scoreboard-section-title", text: title }),
+      el("span", { class: "scoreboard-section-count", text: String(rows.length) }),
+    ]),
+  );
+  section.appendChild(renderScoreboardTable(columns, rows, title));
+  return section;
+}
+
+function renderScoreboardTable(columns, rows, sectionTitle) {
+  if (!rows.length) {
+    return el("div", { class: "empty-state compact", text: "No rows." });
+  }
+
+  const table = el("table", { class: "scoreboard-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  for (const col of columns) {
+    headRow.appendChild(el("th", { class: col.num ? "num" : "", text: col.label }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  for (const [name, agent] of rows) {
+    const tr = el("tr");
+    for (const col of columns) {
+      const td = renderScoreboardCell(name, agent, col);
+      tr.appendChild(td);
+    }
+    tr.dataset.key = `scoreboard-${sectionTitle}-${name}`;
+    tr.dataset.hash = JSON.stringify(agent);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderScoreboardCell(name, agent, col) {
+  let cellText;
+  let extra = "";
+  let titleText = col.title;
+
+  if (col.key === "agent") {
+    cellText = name;
+    titleText = `${name} — click to filter audit by role`;
+    extra = " clickable";
+  } else if (col.format === "pair") {
+    const pair = formatScoreboardPair(agent, col);
+    cellText = pair.text;
+    titleText = pair.title;
+    if (pair.zero) extra = " zero";
   } else {
-    tbody = table.querySelector("tbody");
+    const value = col.compute ? col.compute(agent) : readPath(agent, col.key);
+    const num = asScoreboardNumber(value);
+    cellText = fmtScoreboardCount(num);
+    if (num === 0) extra = " zero";
   }
 
-  const frag = document.createDocumentFragment();
-  for (const [name, agent] of entries) {
-    const row = el("tr");
-    for (const col of SCOREBOARD_COLUMNS) {
-      let cellText;
-      let extra = "";
-      let titleText;
-      if (col.key === "agent") {
-        cellText = name;
-        titleText = `${name} — click to filter audit by role`;
-        extra = " clickable";
-      } else {
-        if (col.format === "pair") {
-          const pair = formatScoreboardPair(agent, col);
-          cellText = pair.text;
-          titleText = pair.title;
-          if (pair.zero) extra = " zero";
-        } else if (col.format === "duration") {
-          const num = asScoreboardNumber(readPath(agent, col.key));
-          cellText = num === 0 ? "0" : fmtDuration(num);
-          if (num === 0) extra = " zero";
-        } else {
-          const value = col.compute
-            ? col.compute(agent)
-            : readPath(agent, col.key);
-          const num = asScoreboardNumber(value);
-          cellText = fmtScoreboardCount(num);
-          titleText = col.title || titleText;
-          if (num === 0) extra = " zero";
-        }
-      }
-      const cellClass =
-        (col.num ? "num" : col.key === "agent" ? "agent" : "") + extra;
-      const td = el("td", {
-        class: cellClass,
-        text: cellText,
-        title: titleText,
-      });
-      if (col.key === "agent") {
-        td.addEventListener("click", () => navigateToRole(name));
-      }
-      row.appendChild(td);
-    }
-    row.dataset.key = `agent-${name}`;
-    row.dataset.hash = JSON.stringify(agent);
-    frag.appendChild(row);
+  const td = el("td", {
+    class: (col.num ? "num" : col.key === "agent" ? "agent" : "") + extra,
+    text: cellText,
+    title: titleText,
+  });
+  if (col.key === "agent") {
+    td.addEventListener("click", () => navigateToRole(name));
   }
-  
-  syncNodes(tbody, Array.from(frag.children));
+  return td;
+}
+
+function renderDuelMatrixSection(summary) {
+  const matrix = summary?.planning_duels?.head_to_head || {};
+  const families = Array.isArray(matrix.families) && matrix.families.length
+    ? matrix.families
+    : CANONICAL_SCOREBOARD_FAMILIES;
+  const cells = matrix.cells || {};
+  const rows = families.map((family) => [family, cells[family] || {}]);
+
+  const section = el("section", { class: "scoreboard-section scoreboard-matrix-section" });
+  section.appendChild(
+    el("div", { class: "scoreboard-section-header" }, [
+      el("span", { class: "scoreboard-section-title", text: "Duel Matrix" }),
+      el("span", { class: "scoreboard-section-count", text: `${families.length}x${families.length}` }),
+    ]),
+  );
+
+  const table = el("table", { class: "scoreboard-table duel-matrix-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  headRow.appendChild(el("th", { text: "family" }));
+  for (const family of families) {
+    headRow.appendChild(el("th", { class: "num", text: family }));
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  for (const [family, row] of rows) {
+    const tr = el("tr");
+    const label = el("td", {
+      class: "agent clickable",
+      text: family,
+      title: `${family} — click to filter audit by role`,
+    });
+    label.addEventListener("click", () => navigateToRole(family));
+    tr.appendChild(label);
+    for (const opponent of families) {
+      const cell = row[opponent] || {};
+      const wins = asScoreboardNumber(cell.wins);
+      const losses = asScoreboardNumber(cell.losses);
+      const runs = asScoreboardNumber(cell.runs);
+      tr.appendChild(el("td", {
+        class: `num${runs === 0 ? " zero" : ""}`,
+        text: `${fmtScoreboardCount(wins)}/${fmtScoreboardCount(losses)}`,
+        title: `${family} vs ${opponent}: ${wins} wins / ${losses} losses (${runs} runs)`,
+      }));
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
 }
 
 function evidenceCount(learning) {

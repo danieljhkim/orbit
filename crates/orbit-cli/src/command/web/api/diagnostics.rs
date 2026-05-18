@@ -547,19 +547,18 @@ pub(super) async fn diagnostics_implement_one(
     State(runtime): State<Arc<OrbitRuntime>>,
 ) -> Response {
     let runtime_clone = runtime.clone();
-    let actor_vec = match tokio::task::spawn_blocking(move || {
-        compute_implement_one_by_actor(&runtime_clone)
-    })
-    .await
-    {
-        Ok(Ok(v)) => v,
-        Ok(Err(e)) => return map_runtime_error(e),
-        Err(join_err) => {
-            return map_runtime_error(orbit_core::OrbitError::Execution(format!(
-                "implement_one aggregation panicked: {join_err}"
-            )));
-        }
-    };
+    let actor_vec =
+        match tokio::task::spawn_blocking(move || compute_implement_one_by_actor(&runtime_clone))
+            .await
+        {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => return map_runtime_error(e),
+            Err(join_err) => {
+                return map_runtime_error(orbit_core::OrbitError::Execution(format!(
+                    "implement_one aggregation panicked: {join_err}"
+                )));
+            }
+        };
 
     Json(json!({
         "implement_one_by_actor": actor_vec,

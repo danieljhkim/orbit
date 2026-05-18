@@ -1,0 +1,20 @@
+schema_version: 1
+id: L20260518-1
+status: active
+scope:
+  paths:
+  - .orbit/adrs/**
+  - .orbit/learnings/**
+  - docs/design/**
+  tags:
+  - orbit-worktree
+  - orbit-root
+summary: Pass --root <worktree>/.orbit when running Orbit CLI inside a nested Orbit worktree
+body: Nested task worktrees may live under the parent checkout at .orbit/state/worktrees/<name>. From that location, Orbit workspace discovery can select the parent .orbit directory unless the command is given an explicit root. For ADR, learning, and task-store operations that must land in the task worktree, run Orbit commands with --root <absolute-worktree-path>/.orbit and verify the resulting artifact path before continuing. This is workflow guidance and has no single source-code anchor.
+evidence:
+- kind: task
+  reference: ORB-00144
+created_at: 2026-05-18T03:03:53.104506Z
+updated_at: 2026-05-18T03:03:53.104506Z
+created_by: codex
+priority: 120
