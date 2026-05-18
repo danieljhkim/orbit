@@ -1,3 +1,6 @@
+//! Test-only allowlist: the original tests under orbit-cli passed the same lints via
+//! the crate-level test harness configuration; duplicated here for the extracted crate.
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
@@ -131,7 +134,7 @@ async fn task_locks_endpoint_matches_cli_json_contract() {
         vec!["file:src/done.rs"],
         None,
     );
-    let expected = crate::command::task::task_locks_json(&runtime).expect("cli task locks json");
+    let expected = crate::projections::task_locks_json(&runtime).expect("cli task locks json");
 
     let response = request(runtime, "/tasks/locks").await;
 

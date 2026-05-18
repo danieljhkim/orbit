@@ -1,19 +1,23 @@
+//! Web-focused subset of log tailing / rendering logic (no colored output, no
+//! clap ValueEnum usage for CLI flags). Preserves exact `resolve_log_path`
+//! (ORBIT_LOG_PATH + HOME fallback via orbit-common) and the HTML rendering
+//! used by /api/log and /api/diagnostics.
+
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
-use colored::{ColoredString, Colorize};
 use orbit_core::OrbitError;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::parse::parse_since;
+use crate::p::parse_since;
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, PartialOrd, Ord)]
 #[clap(rename_all = "lower")]
-pub enum LevelFilter {
+pub(crate) enum LevelFilter {
     Trace,
     Debug,
     Info,
@@ -64,7 +68,6 @@ pub(crate) struct Filters {
     since: Option<DateTime<Utc>>,
 }
 
-#[allow(dead_code)]
 impl Filters {
     pub(crate) fn new(
         target_prefix: Option<String>,
@@ -116,10 +119,6 @@ impl Filters {
     }
 }
 
-// Web-only types retained in the CLI copy after ORB-00146 extraction (the renderers
-// live in orbit-dashboard now). Marked dead_code to keep the file diff minimal and
-// avoid splitting the log module during this refactor.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct RenderedLogEvent {
     pub ts: String,
@@ -129,17 +128,6 @@ pub(crate) struct RenderedLogEvent {
     pub message_html: String,
 }
 
-#[allow(dead_code)]
-pub(crate) fn build_filters(
-    target: Option<String>,
-    level: Option<LevelFilter>,
-    since: Option<&str>,
-) -> Result<Filters, OrbitError> {
-    let since = since.map(parse_since).transpose()?;
-    Ok(Filters::new(target, level, since))
-}
-
-#[allow(dead_code)]
 pub(crate) fn resolve_log_path(override_path: Option<&Path>) -> Result<PathBuf, OrbitError> {
     if let Some(path) = override_path {
         return Ok(path.to_path_buf());
@@ -154,7 +142,6 @@ pub(crate) fn resolve_log_path(override_path: Option<&Path>) -> Result<PathBuf, 
     })
 }
 
-#[allow(dead_code)]
 pub(crate) fn read_recent_rendered_events(
     path: &Path,
     filters: &Filters,
@@ -179,13 +166,11 @@ pub(crate) fn read_recent_rendered_events(
     Ok(kept)
 }
 
-#[allow(dead_code)]
 pub(crate) fn parse_matching_event(raw: &str, filters: &Filters) -> Option<Value> {
     let value = serde_json::from_str::<Value>(raw).ok()?;
     filters.matches(&value).then_some(value)
 }
 
-#[allow(dead_code)]
 pub(crate) fn render_log_event_for_web(event: &Value) -> RenderedLogEvent {
     let ts = event
         .get("timestamp")
@@ -208,37 +193,6 @@ pub(crate) fn render_log_event_for_web(event: &Value) -> RenderedLogEvent {
     }
 }
 
-pub(crate) fn format_event_line(event: &Value, use_color: bool) -> String {
-    let timestamp = event
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .unwrap_or("--:--:--");
-    let level = event.get("level").and_then(Value::as_str).unwrap_or("INFO");
-    let target = event.get("target").and_then(Value::as_str).unwrap_or("-");
-    let fields = event
-        .get("fields")
-        .cloned()
-        .unwrap_or_else(|| Value::Object(Default::default()));
-
-    let time_col = format_timestamp(timestamp);
-    let source_col = format_source(target, &fields);
-    let code_col = format_code(target, level, &fields);
-    let message_col = format_message(target, &fields);
-
-    if use_color {
-        format!(
-            "{time}  {source:14}  {code}  {message}",
-            time = time_col.dimmed(),
-            source = colorize_source(target, &source_col),
-            code = colorize_code(target, level, &code_col),
-            message = message_col,
-        )
-    } else {
-        format!("{time_col}  {source_col:14}  {code_col:5}  {message_col}")
-    }
-}
-
-#[allow(dead_code)]
 fn normalize_level(level: &str) -> &'static str {
     match level.to_ascii_uppercase().as_str() {
         "TRACE" => "trace",
@@ -249,9 +203,8 @@ fn normalize_level(level: &str) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn format_timestamp(raw: &str) -> String {
-    // Accept ISO-8601 (RFC3339); display as HH:MM:SS in local-ish UTC. If the
-    // string doesn't parse, render its first 8 chars after stripping the date.
     if let Ok(parsed) = DateTime::parse_from_rfc3339(raw) {
         return parsed.with_timezone(&Utc).format("%H:%M:%S").to_string();
     }
@@ -263,7 +216,6 @@ fn format_timestamp(raw: &str) -> String {
 }
 
 pub(crate) fn format_source(target: &str, fields: &Value) -> String {
-    // High-value targets get short, fixed labels for the source column.
     if let Some(label) = match target {
         "orbit.policy.deny" => Some("policy"),
         "orbit.friction.reported" => Some("friction"),
@@ -273,15 +225,12 @@ pub(crate) fn format_source(target: &str, fields: &Value) -> String {
         return label.to_string();
     }
 
-    // cli_runner subprocess events: prefer the `provider` field as the source
-    // so the reader sees `claude-4.5` / `codex` / etc. directly.
     if target == "orbit_engine::activity_job::cli_runner"
         && let Some(provider) = fields.get("provider").and_then(Value::as_str)
     {
         return provider.to_string();
     }
 
-    // Generic fallback: tail of the dotted target.
     target
         .rsplit_once('.')
         .map(|(_, tail)| tail.to_string())
@@ -309,7 +258,8 @@ pub(crate) fn format_code(target: &str, level: &str, fields: &Value) -> String {
     }
 }
 
-pub(crate) fn format_message(target: &str, fields: &Value) -> String {
+#[allow(dead_code)]
+fn format_message(target: &str, fields: &Value) -> String {
     let getf = |k: &str| fields.get(k).and_then(Value::as_str).unwrap_or("");
     let getn = |k: &str| -> String {
         fields
@@ -429,9 +379,6 @@ pub(crate) fn format_message(target: &str, fields: &Value) -> String {
             }
         }
         _ => {
-            // Generic fallback: render fields as `key=value` space-separated,
-            // omitting `message` (already handled above for known targets) and
-            // `target` (already in the source column).
             let mut parts: Vec<String> = Vec::new();
             if let Value::Object(map) = fields {
                 if let Some(message) = map.get("message").and_then(Value::as_str) {
@@ -453,9 +400,6 @@ pub(crate) fn format_message(target: &str, fields: &Value) -> String {
     }
 }
 
-// Retained for parity after ORB-00146 (web dashboard + its HTML renderers moved to
-// orbit-dashboard). The non-HTML formatters are still used by `orbit log` etc.
-#[allow(dead_code)]
 pub(crate) fn format_message_html(target: &str, fields: &Value) -> String {
     let getf = |k: &str| fields.get(k).and_then(Value::as_str).unwrap_or("");
     let getn = |k: &str| -> String {
@@ -585,7 +529,6 @@ pub(crate) fn format_message_html(target: &str, fields: &Value) -> String {
     }
 }
 
-#[allow(dead_code)]
 fn html_pairs(pairs: &[(&str, String)]) -> String {
     pairs
         .iter()
@@ -595,12 +538,10 @@ fn html_pairs(pairs: &[(&str, String)]) -> String {
         .join(" ")
 }
 
-#[allow(dead_code)]
 fn code_value(value: String) -> String {
     format!("<code>{}</code>", escape_html(&value))
 }
 
-#[allow(dead_code)]
 fn escape_html(raw: &str) -> String {
     let mut escaped = String::with_capacity(raw.len());
     for ch in raw.chars() {
@@ -614,29 +555,6 @@ fn escape_html(raw: &str) -> String {
         }
     }
     escaped
-}
-
-fn colorize_source(target: &str, label: &str) -> ColoredString {
-    match target {
-        "orbit.policy.deny" => label.red().bold(),
-        "orbit.friction.reported" => label.yellow(),
-        t if t.starts_with("orbit.job.") => label.cyan(),
-        "orbit_engine::activity_job::cli_runner" => label.magenta(),
-        _ => label.normal(),
-    }
-}
-
-fn colorize_code(target: &str, level: &str, code: &str) -> ColoredString {
-    if target == "orbit.policy.deny" {
-        return code.red().bold();
-    }
-    match level {
-        "ERROR" => code.red().bold(),
-        "WARN" => code.yellow(),
-        "INFO" => code.green(),
-        "DEBUG" => code.blue(),
-        _ => code.normal(),
-    }
 }
 
 #[cfg(test)]

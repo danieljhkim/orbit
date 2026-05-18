@@ -15,7 +15,7 @@ use super::{
     HISTORY_DEFAULT_LIMIT, LimitQuery, RunEventsQuery, bad_request, bounded_limit,
     map_runtime_error, server_error, v2_loop_dir, validate_id,
 };
-use crate::command::run::job_run_to_json;
+use crate::projections::job_run_to_json;
 
 const RUN_EVENTS_DEFAULT_LIMIT: usize = 100;
 /// Maximum bytes included in stdout/stderr previews returned by run-log APIs.

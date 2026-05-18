@@ -1,5 +1,5 @@
 [package]
-name = "orbit-cli"
+name = "orbit-dashboard"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,33 +10,19 @@ stability = "internal"
 [lints]
 workspace = true
 
-[[bin]]
-name = "orbit"
-path = "src/main.rs"
-
 [dependencies]
+axum.workspace = true
 chrono.workspace = true
 clap.workspace = true
-colored = "2"
-comfy-table = "7"
-csv = "1"
+futures-core = "0.3"
 orbit-common = { path = "../orbit-common" }
-orbit-core = { path = "../orbit-core", features = ["clap"] }
-orbit-mcp = { path = "../orbit-mcp" }
-orbit-dashboard = { path = "../orbit-dashboard" }
-regex.workspace = true
+orbit-core = { path = "../orbit-core" }
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 tokio.workspace = true
-toml.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-serde_json.workspace = true
 serde_yaml.workspace = true
 tempfile = "3"
-toml.workspace = true
 tower = { version = "0.5", features = ["util"] }

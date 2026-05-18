@@ -9,8 +9,7 @@ use orbit_core::command::job::JobRunListParams;
 use serde_json::Value;
 
 use super::{LimitQuery, bounded_limit, server_error};
-use crate::command::job::job_catalog_to_json_with_last_run;
-use crate::command::run::job_run_to_json;
+use crate::projections::{job_catalog_to_json_with_last_run, job_run_to_json};
 
 const JOB_RUN_DEFAULT_LIMIT: usize = 25;
 

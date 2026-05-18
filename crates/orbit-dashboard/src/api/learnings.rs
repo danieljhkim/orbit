@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{bad_request, bounded_limit, map_runtime_error, non_empty_string, server_error};
-use crate::command::learning::output::learning_to_json;
+use crate::projections::learning_to_json;
 
 const LEARNINGS_DEFAULT_LIMIT: usize = 100;
 

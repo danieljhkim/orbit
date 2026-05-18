@@ -29,6 +29,7 @@ flowchart LR
   EmbedCompanion["orbit-embed-companion"] --> Embed
   EmbedCompanion --> Common
   MCP --> Common
+  Dashboard["orbit-dashboard"] --> Core
   Core --> Common
   Registry["orbit-registry"] --> Common
 ```
@@ -47,6 +48,7 @@ flowchart LR
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-embed::vector` (not `orbit-store`).
 - **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
 - **orbit-mcp**: Model Context Protocol adapter using `rmcp`. Depends only on `orbit-common`; consumed by `orbit-cli` via `orbit mcp serve`.
+- **orbit-dashboard**: read-only web dashboard (axum server + embedded HTML/JS assets + JSON API handlers for tasks, runs, scoreboard, logs, etc.). Depends on `orbit-core` (for OrbitRuntime/OrbitError) plus axum/clap/chrono/serde; consumed by `orbit-cli` via `web serve`. Extracted from orbit-cli in ORB-00146 to isolate compile graph and co-locate assets. The only public surface is `serve(runtime, ServeArgs)`.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the `backend: cli` subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
 - **orbit-core**: runtime bootstrap, config layering, command dispatch, default asset seeding, and thin command facades for graph, policy, tool, store, engine, and embedding features. Surfaces the `OrbitRuntime` API used by `orbit-cli`; does NOT depend on `orbit-agent`.
@@ -76,6 +78,7 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | orbit-exec            | internal     |
 | orbit-knowledge       | internal     |
 | orbit-mcp             | internal     |
+| orbit-dashboard       | internal     |
 | orbit-policy          | internal     |
 | orbit-tools           | internal     |
 

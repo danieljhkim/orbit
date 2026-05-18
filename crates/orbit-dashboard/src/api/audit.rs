@@ -19,8 +19,8 @@ use super::{
     HISTORY_MAX_LIMIT, bad_request, bounded_limit, map_runtime_error, server_error,
     truncate_to_hour,
 };
-use crate::command::audit::audit_event_to_json;
-use crate::parse::parse_since;
+use crate::p::parse_since;
+use crate::projections::audit_event_to_json;
 
 /// Default header-tile alert threshold for the denials counter. Surfaced via
 /// `?denial_threshold=` and echoed back in the response so the dashboard can

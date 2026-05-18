@@ -34,8 +34,11 @@ allowed_internal_deps() {
     orbit-mcp)
       echo "orbit-common orbit-tools"
       ;;
+    orbit-dashboard)
+      echo "orbit-common orbit-core"
+      ;;
     orbit-cli)
-      echo "orbit-common orbit-core orbit-mcp"
+      echo "orbit-common orbit-core orbit-mcp orbit-dashboard"
       ;;
     *)
       return 1

@@ -17,7 +17,7 @@ use futures_core::Stream;
 use tokio::sync::mpsc;
 
 use super::{LogQuery, map_runtime_error, non_empty_string, server_error};
-use crate::command::log::format::{
+use crate::log_format::{
     Filters as LogFilters, RenderedLogEvent, parse_matching_event, read_recent_rendered_events,
     render_log_event_for_web, resolve_log_path,
 };

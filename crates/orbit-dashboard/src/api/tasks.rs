@@ -15,8 +15,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{bad_request, map_runtime_error, server_error, validate_id};
-use crate::command::task::output::task_to_json_with_sidecars;
-use crate::command::task::task_locks_json;
+use crate::projections::{task_locks_json, task_to_json_with_sidecars};
 
 const DASHBOARD_TASK_STATUSES: &[TaskStatus] = &[
     TaskStatus::InProgress,

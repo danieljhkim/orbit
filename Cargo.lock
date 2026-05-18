@@ -2060,15 +2060,14 @@ name = "orbit-cli"
 version = "0.6.0"
 dependencies = [
  "assert_cmd",
- "axum",
  "chrono",
  "clap",
  "colored",
  "comfy-table",
  "csv",
- "futures-core",
  "orbit-common",
  "orbit-core",
+ "orbit-dashboard",
  "orbit-mcp",
  "predicates",
  "regex",
@@ -2127,6 +2126,25 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "orbit-dashboard"
+version = "0.6.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "clap",
+ "futures-core",
+ "orbit-common",
+ "orbit-core",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "tower",
+ "url",
 ]
 
 [[package]]

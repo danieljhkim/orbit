@@ -188,6 +188,9 @@ impl Execute for JobReplayArgs {
     }
 }
 
+// Retained after ORB-00146 (dashboard callers moved to orbit-dashboard); the thin
+// wrapper is kept for any external re-exports or future CLI json paths.
+#[allow(dead_code)]
 pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
     job_run_to_json_with_state(run, None)
 }

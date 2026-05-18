@@ -1,3 +1,6 @@
+//! Test-only allowlist: the original tests under orbit-cli passed the same lints via
+//! the crate-level test harness configuration; duplicated here for the extracted crate.
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 use std::sync::Arc;
 
 use axum::body::Body;

@@ -16,9 +16,7 @@ use super::{
     current_year_month_utc, map_runtime_error, month_bounds_utc, server_error, v2_loop_dir,
     validate_year_month,
 };
-use crate::command::log::format::{
-    Filters as LogFilters, read_recent_rendered_events, resolve_log_path,
-};
+use crate::log_format::{Filters as LogFilters, read_recent_rendered_events, resolve_log_path};
 
 pub(super) async fn list_diagnostics_metrics(
     State(runtime): State<Arc<OrbitRuntime>>,

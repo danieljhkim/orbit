@@ -73,6 +73,25 @@ This append-only ADR log records UI decisions in ascending order. Each entry kee
 - No single Rust code anchor; this is enforced by dashboard rendering and design review, and workspace-local ADR comments should not be embedded in shipped dashboard assets.
 - Cost: Cross-section comparison now requires scanning multiple tables instead of one row, and future metrics must choose an explicit section before being added.
 
+## ADR-0167 — Extract Dashboard + JSON API to orbit-dashboard Crate
+
+**Status:** Accepted · 2026-05 · [ORB-00146]
+
+**Context.** The Orbit web dashboard (HTML/JS + read-only axum JSON API, ~6300 LOC across web/mod.rs and 14 api/* files plus embedded assets) lived inside `orbit-cli`. The only orbit-cli coupling was the `Execute` trait; everything else was external (axum, clap, ...) or `orbit_core::{OrbitRuntime, OrbitError}`. This was the exact shape already used by the sibling `orbit-mcp` internal crate. Keeping it inside CLI forced every CLI edit to rebuild the heavy axum tree and mixed test targets.
+
+**Decision.** Extract to a new `crates/orbit-dashboard/` internal crate (stability = "internal", `[lints] workspace = true`, direct axum/clap/chrono/... + `orbit-core` dep). The crate owns `ServeArgs`, the `pub fn serve(runtime, args)` entrypoint, all api handlers, the three dashboard assets, router construction, shutdown, and browser-opener. `orbit-cli` retains a ≤60-line delegator (`command/web.rs`) that only re-exports the clap `WebSubcommand::Serve(orbit_dashboard::ServeArgs)` and calls `orbit_dashboard::serve`. `audit_middleware` continues to match on the CLI-local `WebSubcommand` (no behavior change to audit names).
+
+Rejected alternative: moving the `Execute` trait (or a shared command-execution abstraction) into `orbit-common` so the dashboard crate could implement it directly. Rejected because `Execute` is a CLI-dispatch detail (clap subcommand wiring, runtime injection), not a domain primitive; polluting `orbit-common` would have been the wrong layering.
+
+**Consequences.**
+- `orbit-cli` no longer has a direct `axum` dependency; incremental `cargo check -p orbit-cli` skips the entire dashboard subtree when only command code changes.
+- Dashboard assets live next to the Rust that serves them (`assets/dashboard/` inside the crate); `include_str!` paths are now relative and simple.
+- The 14 `*_tests.rs` files now compile as part of a dedicated `orbit-dashboard` test target.
+- One more workspace member; the existing CI glob in `.github/workflows/ci.yml` picks it up with no per-crate edits.
+- Minor duplication of time-parsing, a handful of JSON projection helpers, and a web-only log tail renderer (to avoid a reverse dependency on orbit-cli or colored output). Future centralization of projections can be a follow-up.
+- Wire behavior is identical: same routes, same response bodies, same content-types, default port 7878, `--no-open`, `/healthz` body, startup banner, graceful shutdown.
+- Cost: one additional crate in the workspace graph and one more place developers look for dashboard code; the projection helpers are now duplicated until a later task extracts a shared `orbit-core` or `orbit-common` projection layer.
+
 ## Task References
 
 - [T20260427-29] introduced the Canon Refined UI direction.
@@ -81,5 +100,6 @@ This append-only ADR log records UI decisions in ascending order. Each entry kee
 - [T20260430-24] tightened this ADR log without changing decisions.
 - [T20260430-29] bounded the live `orbit.log` tail panel.
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
+- [ORB-00146] extracted the dashboard and JSON API into the new `orbit-dashboard` internal crate (this document).
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
