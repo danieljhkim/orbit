@@ -92,6 +92,26 @@ Rejected alternative: moving the `Execute` trait (or a shared command-execution 
 - Wire behavior is identical: same routes, same response bodies, same content-types, default port 7878, `--no-open`, `/healthz` body, startup banner, graceful shutdown.
 - Cost: one additional crate in the workspace graph and one more place developers look for dashboard code; the projection helpers are now duplicated until a later task extracts a shared `orbit-core` or `orbit-common` projection layer.
 
+## ADR-0168 — Unified Leaderboard Matrix Scoreboard
+
+**Status:** Accepted · 2026-05 · [ORB-00154]
+
+**Context.** The Scoreboard view had grown into six stacked tables that repeated the canonical agents, repeated headers, rendered sparse zeros, and left relative performance as bare integers. Operators needed one glanceable view of which agent leads each metric without scanning 24 repeated rows.
+
+**Decision.** Render canonical metrics as one metric-major Unified Leaderboard Matrix: metric rows grouped by Delivery, Review, Knowledge, Operations, and Planning Duels, with `codex`, `claude`, `gemini`, and `grok` as fixed columns. Non-zero metric cells include inline bars scaled within the row, tied leaders get an explicit `▲` badge, zero values render as an em dash, the Duel Matrix remains compact below, and Attribution Cleanup renders only when non-canonical agents have non-zero signal.
+
+Rejected alternative: agent-major flat wide table. Rejected because roughly twenty metric columns would force horizontal scrolling at the canonical dashboard viewport.
+
+Rejected alternative: per-agent card grid. Rejected because cards preserve the need to scan separate blocks to answer which agent leads a specific metric.
+
+Rejected alternative: pure heatmap matrix. Rejected because color alone hides precise values needed for operator judgment.
+
+**Consequences.**
+- The public scoreboard emphasizes per-metric leaders through visual encoding instead of repeated table chrome.
+- The canonical four-agent set remains the primary comparison surface, while attribution cleanup stays conditional and secondary.
+- No single Rust code anchor; this is enforced by dashboard rendering and design review, and workspace-local ADR comments should not be embedded in shipped dashboard assets.
+- Cost: The denser matrix needs careful row-height discipline when new metrics are added.
+
 ## Task References
 
 - [T20260427-29] introduced the Canon Refined UI direction.
@@ -101,5 +121,6 @@ Rejected alternative: moving the `Execute` trait (or a shared command-execution 
 - [T20260430-29] bounded the live `orbit.log` tail panel.
 - [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
 - [ORB-00146] extracted the dashboard and JSON API into the new `orbit-dashboard` internal crate (this document).
+- [ORB-00154] unified the Scoreboard tab into a metric-major leaderboard matrix.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
