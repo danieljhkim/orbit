@@ -67,10 +67,11 @@ pub mod task_review_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, DuelSummary, KnowledgeSummary, PlanningDuelSummary, PrSummary, RecentSummary,
-        ScoreboardInputs, ScoreboardSummary, TaskReviewSummary, TokenSummary, TopToolCall,
-        WorkflowRunCount, generate_summary, generate_summary_with_audit_tool_calls,
-        generate_summary_with_inputs, summary_path, write_summary,
+        AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, PlanningDuelSummary,
+        PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary, TaskReviewSummary,
+        TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
+        generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
+        write_summary,
     };
 }
 

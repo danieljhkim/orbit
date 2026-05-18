@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::planning_duel_scoreboard;
+use crate::friction_store::StoredFrictionRecord;
 use crate::{AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall};
 use orbit_common::utility::fs::atomic_write_text_volatile as write_atomic;
 
@@ -19,8 +20,10 @@ const SUMMARY_FILENAME: &str = "summary.json";
 // v2 adds `task_review.threads`; v3 adds tasks_created/tasks_planned,
 // per-(role, surface) tool call counts, top-level workflows_run, and a
 // recent_7d window block. v4 adds per-agent knowledge counters and a
-// planning-duel head-to-head matrix. Older readers ignore unknown fields.
-const CURRENT_SCHEMA_VERSION: u32 = 4;
+// planning-duel head-to-head matrix. v5 adds per-agent `friction.reported`
+// (from append-only `.orbit/frictions/` records, matching `orbit.friction.stats`).
+// Older readers ignore unknown fields.
+const CURRENT_SCHEMA_VERSION: u32 = 5;
 const TASK_REVIEW_THREADS_METRIC: &str = "task-review-threads";
 const LEGACY_TASK_REVIEW_MESSAGES_METRIC: &str = "task-review-messages";
 const RECENT_WINDOW_DAYS: i64 = 7;
@@ -63,6 +66,15 @@ pub struct KnowledgeSummary {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FrictionSummary {
+    /// Number of append-only friction records reported by this agent family.
+    /// Sourced from `.orbit/frictions/` (via the same aggregation as
+    /// `orbit.friction.stats` / `friction_stats`), not from legacy task status
+    /// or `tool_calls_by_surface.friction`.
+    pub reported: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSummary {
     pub tasks_completed: u64,
     #[serde(default)]
@@ -76,6 +88,8 @@ pub struct AgentSummary {
     pub task_review: TaskReviewSummary,
     #[serde(default)]
     pub knowledge: KnowledgeSummary,
+    #[serde(default)]
+    pub friction: FrictionSummary,
     pub tool_calls: u64,
     #[serde(default)]
     pub failed_tool_calls: u64,
@@ -171,7 +185,7 @@ struct TokenAgentEntry {
 /// New callers should populate this struct;
 /// the older `generate_summary*` thin wrappers stay for tests and any
 /// caller that hasn't been updated yet.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct ScoreboardInputs<'a> {
     /// Per-(role) tool-call totals — drives the legacy `tool_calls`/
     /// `failed_tool_calls` columns.
@@ -194,9 +208,37 @@ pub struct ScoreboardInputs<'a> {
     pub learning_vote_counts: &'a [(String, u64)],
     /// Workspace ADR records, used for knowledge-stewardship counters.
     pub adrs: &'a [Adr],
+    /// Append-only friction records from `.orbit/frictions/`. Used to populate
+    /// per-family `friction.reported` counts (so the dashboard `frict r` column
+    /// and `orbit.friction.stats` agree, without using tool call surface counts).
+    pub frictions: &'a [StoredFrictionRecord],
     /// Reference "now" for recency windowing. `None` means no recency
     /// section is emitted (used by legacy callers).
     pub now: Option<DateTime<Utc>>,
+}
+
+impl<'a> Default for ScoreboardInputs<'a> {
+    fn default() -> Self {
+        static EMPTY_AUDIT: [AuditToolCallCountsByRole; 0] = [];
+        static EMPTY_SURFACE: [AuditToolCallCountsBySurfaceAndRole; 0] = [];
+        static EMPTY_JOB: [JobRun; 0] = [];
+        static EMPTY_TOP: [AuditTopToolCall; 0] = [];
+        static EMPTY_LEARNING: [Learning; 0] = [];
+        static EMPTY_VOTES: [(String, u64); 0] = [];
+        static EMPTY_ADR: [Adr; 0] = [];
+        Self {
+            audit_tool_calls: &EMPTY_AUDIT,
+            audit_tool_calls_by_surface: &EMPTY_SURFACE,
+            audit_tool_calls_by_surface_recent: &EMPTY_SURFACE,
+            job_runs: &EMPTY_JOB,
+            top_tool_calls: &EMPTY_TOP,
+            learnings: &EMPTY_LEARNING,
+            learning_vote_counts: &EMPTY_VOTES,
+            adrs: &EMPTY_ADR,
+            frictions: &[],
+            now: None,
+        }
+    }
 }
 
 pub fn generate_summary(
@@ -327,6 +369,7 @@ pub fn generate_summary_with_inputs(
     }
 
     overlay_knowledge_counters(&mut agents, inputs);
+    overlay_friction_reported(&mut agents, inputs.frictions);
 
     for task in tasks {
         if matches!(task.status, TaskStatus::Done | TaskStatus::Archived)
@@ -605,6 +648,25 @@ fn overlay_knowledge_counters(
             summary.knowledge.adrs_proposed_open =
                 summary.knowledge.adrs_proposed_open.saturating_add(1);
         }
+    }
+}
+
+fn overlay_friction_reported(
+    agents: &mut BTreeMap<String, AgentSummary>,
+    frictions: &[StoredFrictionRecord],
+) {
+    let mut counts: BTreeMap<String, u64> = BTreeMap::new();
+    for stored in frictions {
+        let family = {
+            let normalized = normalize_optional_attribution_label(Some(&stored.record.model), None)
+                .unwrap_or_default();
+            infer_agent_family_from_model(&normalized).unwrap_or(normalized)
+        };
+        *counts.entry(family).or_insert(0) += 1;
+    }
+    for (family, count) in counts {
+        let summary = agents.entry(family).or_default();
+        summary.friction.reported = count;
     }
 }
 
@@ -1277,5 +1339,76 @@ mod tests {
 
         let reviewer = summary.agents.get("codex").expect("reviewer summary");
         assert_eq!(reviewer.task_review.threads, 2);
+    }
+
+    #[test]
+    fn summary_exposes_friction_reported_counts_from_records() {
+        // Deterministic test per ORB-00143: seeds friction records for >=2 families
+        // and asserts the generated scoreboard exposes nonzero `friction.reported`
+        // (and zero for families with none). Uses the inputs path so it does not
+        // depend on disk state or legacy task.status=friction.
+        let temp = tempfile::tempdir().expect("create tempdir");
+
+        let frictions: Vec<crate::friction_store::StoredFrictionRecord> = vec![
+            crate::friction_store::StoredFrictionRecord {
+                record: orbit_common::types::FrictionRecord {
+                    id: "F001".to_string(),
+                    model: "codex".to_string(),
+                    created_at: Utc::now(),
+                    status: orbit_common::types::FrictionStatus::Open,
+                    tags: vec![],
+                    resolved_at: None,
+                    during_task: None,
+                    resolved_by_task: None,
+                    body: "seed for codex family".to_string(),
+                },
+                path: std::path::PathBuf::from("frictions/2026-05/F001.md"),
+            },
+            crate::friction_store::StoredFrictionRecord {
+                record: orbit_common::types::FrictionRecord {
+                    id: "F002".to_string(),
+                    model: "claude-3-opus".to_string(),
+                    created_at: Utc::now(),
+                    status: orbit_common::types::FrictionStatus::Resolved,
+                    tags: vec!["test".to_string()],
+                    resolved_at: Some(Utc::now()),
+                    during_task: None,
+                    resolved_by_task: None,
+                    body: "seed for claude family (normalized)".to_string(),
+                },
+                path: std::path::PathBuf::from("frictions/2026-05/F002.md"),
+            },
+        ];
+
+        let summary = generate_summary_with_inputs(
+            temp.path(),
+            &[],
+            &ScoreboardInputs {
+                frictions: &frictions,
+                ..ScoreboardInputs::default()
+            },
+        )
+        .expect("generate summary with seeded frictions");
+
+        let codex = summary.agents.get("codex").expect("codex summary");
+        assert_eq!(
+            codex.friction.reported, 1,
+            "codex should report 1 friction record"
+        );
+
+        let claude = summary.agents.get("claude").expect("claude summary");
+        assert_eq!(
+            claude.friction.reported, 1,
+            "claude (from claude-3-opus) should report 1"
+        );
+
+        let gemini = summary.agents.get("gemini").expect("gemini summary");
+        assert_eq!(
+            gemini.friction.reported, 0,
+            "gemini with no records must expose 0, not fall back"
+        );
+
+        let grok = summary.agents.get("grok").expect("grok summary");
+        assert_eq!(grok.friction.reported, 0);
     }
 }

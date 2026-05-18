@@ -39,6 +39,10 @@ impl OrbitRuntime {
             self.stores()
                 .adrs()
                 .list_filtered(None::<AdrStatus>, None, None, None, None, None)?;
+        let frictions = orbit_store::friction_store::list_frictions(
+            &self.data_root().join("frictions"),
+            &orbit_store::friction_store::FrictionListFilter::default(),
+        )?;
 
         let summary = orbit_store::scoreboard_summary::generate_summary_with_inputs(
             &self.paths().scoreboard_dir,
@@ -52,6 +56,7 @@ impl OrbitRuntime {
                 learnings: &learnings,
                 learning_vote_counts: &learning_vote_counts,
                 adrs: &adrs,
+                frictions: &frictions,
                 now: Some(now),
             },
         )?;

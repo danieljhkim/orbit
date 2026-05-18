@@ -66,6 +66,7 @@ pub(super) async fn scoreboard(State(runtime): State<Arc<OrbitRuntime>>) -> Resp
                     "duels": { "wins": 0, "losses": 0, "participated": 0 },
                     "pr": { "review_comments": 0, "merged_clean": 0, "merged_with_revision": 0 },
                     "task_review": { "threads": 0 },
+                    "friction": { "reported": 0 },
                     "tool_calls": 0,
                     "failed_tool_calls": 0,
                     "avg_step_duration_ms": extras.avg_duration_ms,
