@@ -82,6 +82,34 @@ Tag severity in the headline so the implementer can triage: `Spec compliance`, `
 
 End by reporting in chat: how many threads filed, which are blockers, overall verdict (approve / request changes). Do not add a `comment` to the task — review threads are the persistent surface; the chat summary is for the human running the review.
 
+### 5. Meta-review (systemic prompt insufficiency)
+
+After filing review threads, the reviewer checks whether the threads reveal a gap in an Orbit-authored agent instruction file (activity YAMLs under `crates/orbit-core/assets/activities/` such as `agent_implement.yaml` or `agent_review.yaml`, or skill `SKILL.md` files).
+
+**Trigger heuristic:** two or more review threads in this session map to the same gap in an instruction asset, OR a single thread the reviewer recognizes as recurring / a class of issue that will recur on the next implementer task without a prompt change.
+
+When the heuristic fires, file one friction via `orbit.friction.add` (MCP form: `orbit_friction_add`):
+
+```bash
+orbit tool run orbit.friction.add --input '{
+  "body": "crates/orbit-core/assets/activities/agent_implement.yaml step 5 says \"implement only the task's scoped work\" but does not define scope-drift or require surfacing it as a comment when the implementer deletes unrelated code. Threads 1, 3, 7 were instances of this gap. Suggested language: \"If you delete or modify code outside the task's listed context files, surface the drift as a comment before continuing.\"",
+  "tags": ["skill-guidance"],
+  "during_task": "<task-under-review>",
+  "model": "<reviewer-family>"
+}'
+```
+
+Filing a friction is **additive** to filing individual review threads — it is not a replacement and the reviewer must still file threads on the actual code issues. The threads document what the implementer must fix; the friction is the meta-signal so a later task can strengthen the instruction asset.
+
+**Negative cases — do not file a friction for:**
+- A single nit
+- A stylistic preference
+- A one-off coding mistake with no link to instruction text
+
+The bar (aligned with `orbit-track-issues` "report genuine friction only") is that the reviewer believes the class of issue would recur without an instruction change.
+
+This step runs after Summarize and is the final action before exiting the review session.
+
 ## Rules
 
 - **Never** transition the reviewed task's status (no `orbit.task.update --status …`). The implementer or human owns lifecycle.
@@ -94,7 +122,7 @@ End by reporting in chat: how many threads filed, which are blockers, overall ve
 ## When NOT to use this skill
 
 - Implementing a task (use `orbit-execute-task`).
-- Filing a friction report on Orbit tooling itself (use `orbit-track-issues`).
+- Filing a friction report on Orbit tooling itself (use `orbit-track-issues`). Filing a friction when review threads in aggregate reveal a systemic prompt insufficiency in an Orbit-authored agent instruction asset **is** in scope for the reviewer's session — the prior boundary is refined, not removed.
 - Approving a task in `review` status (that's a lifecycle transition the reviewee or human performs via `orbit.task.approve`).
 
 ## Exit Criteria
