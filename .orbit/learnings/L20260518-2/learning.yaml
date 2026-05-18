@@ -1,0 +1,18 @@
+schema_version: 1
+id: L20260518-2
+status: active
+scope:
+  paths:
+  - crates/orbit-cli/assets/dashboard/index.html
+  - crates/orbit-cli/assets/dashboard/app.js
+  tags:
+  - dashboard
+summary: Validate dashboard tab names against the DOM before smoke-testing Runs
+body: |
+  ORB-00145's validation plan named a top-level Runs tab, but the current dashboard DOM exposes top-level tabs Tasks, Scoreboard, Audit, Diagnostics, and Knowledge. Runs coverage lives under Diagnostics as the Recent Runs subtab. Before treating a dashboard smoke-test tab list as authoritative, inspect `#tabs .tab` in `index.html` or the loaded DOM and map any Runs coverage to Diagnostics > Recent Runs unless a real top-level Runs tab has been added.
+evidence:
+- kind: task
+  reference: ORB-00145
+created_at: 2026-05-18T03:46:40.379536Z
+updated_at: 2026-05-18T03:46:40.379536Z
+priority: 80

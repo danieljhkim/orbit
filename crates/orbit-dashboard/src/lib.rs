@@ -12,8 +12,6 @@
 mod api;
 mod log_format;
 mod parse;
-use parse as p;
-
 mod projections;
 
 use std::net::{IpAddr, SocketAddr};

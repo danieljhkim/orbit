@@ -14,7 +14,7 @@ workspace = true
 axum.workspace = true
 chrono.workspace = true
 clap.workspace = true
-futures-core = "0.3"
+futures-core.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core" }
 serde.workspace = true

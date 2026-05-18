@@ -15,7 +15,7 @@ use super::{
     DEFAULT_SUMMARY_WINDOW, DenialsQuery, V2_LOOP_FILE_SCAN_CAP, bad_request, map_runtime_error,
     server_error, v2_loop_dir,
 };
-use crate::p::parse_since;
+use crate::parse::parse_since;
 
 const SQLITE_DENIAL_SCAN_LIMIT: usize = 1000;
 pub(super) const SQLITE_FS_BOUNDARY_PROFILE: &str = "workspace-boundary";
