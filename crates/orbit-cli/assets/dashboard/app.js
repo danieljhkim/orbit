@@ -1554,8 +1554,6 @@ const SCOREBOARD_COLUMNS = [
     title: "wins / decided duels (wins + losses)",
   },
   { key: "friction.reported", label: "frict r", num: true },
-  { key: "avg_step_duration_ms", label: "avg step", num: true, format: "duration" },
-  { key: "p95_wall_clock_ms", label: "p95 wall", num: true, format: "duration" },
 ];
 
 function readPath(obj, path) {
