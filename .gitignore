@@ -15,7 +15,12 @@ agentspace
 !.codex/hooks/
 .codex/hooks/*
 !.codex/hooks/orbit-learning-reminder
+!.gemini/
+.gemini/*
 !.gemini/settings.json
+!.gemini/hooks/
+.gemini/hooks/*
+!.gemini/hooks/orbit-learning-reminder
 !.grok/
 !.grok/config.toml
 !.grok/hooks/
