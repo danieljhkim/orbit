@@ -1,10 +1,13 @@
 ---
+summary: "Task Sync — Overview"
+type: design
 title: "Task Sync — Overview"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: task-sync
 doc_role: overview
+tags: ["task-sync"]
 ---
 
 # Task Sync — Overview

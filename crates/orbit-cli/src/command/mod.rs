@@ -1,6 +1,7 @@
 pub mod adr;
 pub mod definitions;
 pub mod design;
+pub mod docs;
 pub mod environment;
 pub mod hook;
 pub mod learning;
@@ -51,6 +52,7 @@ Operate:
   task        Create, update, and manage tasks
   adr         Architecture Decision Record operations
   design      Design doc operations
+  docs        Search and manage the indexed docs corpus
   learning    Create, search, and curate project learnings
   semantic    Manage local semantic-search indexing
 
@@ -97,6 +99,7 @@ pub enum Commands {
     Task(Box<task::TaskCommand>),
     Adr(adr::AdrCommand),
     Design(design::DesignCommand),
+    Docs(docs::DocsCommand),
     Learning(learning::LearningCommand),
     Semantic(semantic::SemanticCommand),
 
@@ -138,6 +141,7 @@ impl Execute for Commands {
             Commands::Task(cmd) => (*cmd).execute(runtime),
             Commands::Adr(cmd) => cmd.execute(runtime),
             Commands::Design(cmd) => cmd.execute(runtime),
+            Commands::Docs(cmd) => cmd.execute(runtime),
             Commands::Learning(cmd) => cmd.execute(runtime),
             Commands::Semantic(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),

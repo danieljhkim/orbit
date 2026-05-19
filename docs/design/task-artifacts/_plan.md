@@ -1,3 +1,8 @@
+---
+type: design
+summary: "Task Artifacts Execution Plan"
+tags: ["task-artifacts"]
+---
 # Task Artifacts Execution Plan
 
 **Status:** Draft

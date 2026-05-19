@@ -1,10 +1,13 @@
 ---
+summary: "Semantic Search — Vision"
+type: design
 title: "Semantic Search — Vision"
 owner: claude
 last_updated: 2026-05-10
 status: Draft
 feature: semantic-search
 doc_role: vision
+tags: ["semantic-search"]
 ---
 
 # Semantic Search — Vision

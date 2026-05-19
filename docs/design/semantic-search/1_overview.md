@@ -1,10 +1,13 @@
 ---
+summary: "Semantic Search — Overview"
+type: design
 title: "Semantic Search — Overview"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: semantic-search
 doc_role: overview
+tags: ["semantic-search"]
 ---
 
 # Semantic Search — Overview

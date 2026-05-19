@@ -1,10 +1,13 @@
 ---
+summary: "Auditability — Overview"
+type: design
 title: "Auditability — Overview"
 owner: codex
 last_updated: 2026-05-16
 status: Draft
 feature: auditability
 doc_role: overview
+tags: ["auditability"]
 ---
 
 # Auditability — Overview

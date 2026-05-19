@@ -1,10 +1,13 @@
 ---
+summary: "Task Artifacts — Overview"
+type: design
 title: "Task Artifacts — Overview"
 owner: codex
 last_updated: 2026-05-17
 status: Draft
 feature: task-artifacts
 doc_role: overview
+tags: ["task-artifacts"]
 ---
 
 # Task Artifacts — Overview

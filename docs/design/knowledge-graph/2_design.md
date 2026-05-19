@@ -1,10 +1,13 @@
 ---
+summary: "Knowledge Graph — Design"
+type: design
 title: "Knowledge Graph — Design"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: knowledge-graph
 doc_role: design
+tags: ["knowledge-graph"]
 ---
 
 # Knowledge Graph — Design

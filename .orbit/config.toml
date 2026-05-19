@@ -67,3 +67,6 @@ reviewer = { model = "pro", provider = "gemini", backend = "cli" }
 planner = { model = "grok-build", provider = "grok", backend = "cli" }
 implementer = { model = "grok-build", provider = "grok", backend = "cli" }
 reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
+
+[docs]
+roots = ["docs/"]

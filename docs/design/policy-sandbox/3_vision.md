@@ -1,10 +1,13 @@
 ---
+summary: "Policy & Sandboxing — Vision"
+type: design
 title: "Policy & Sandboxing — Vision"
 owner: claude
 last_updated: 2026-05-16
 status: Draft
 feature: policy-sandbox
 doc_role: vision
+tags: ["policy-sandbox"]
 ---
 
 # Policy & Sandboxing — Vision

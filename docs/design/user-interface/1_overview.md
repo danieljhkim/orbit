@@ -1,10 +1,13 @@
 ---
+summary: "User Interface — Overview"
+type: design
 title: "User Interface — Overview"
 owner: gemini
 last_updated: 2026-04-30
 status: Draft
 feature: user-interface
 doc_role: overview
+tags: ["user-interface"]
 ---
 
 # User Interface — Overview

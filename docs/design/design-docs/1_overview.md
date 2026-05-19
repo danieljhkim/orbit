@@ -1,10 +1,13 @@
 ---
+summary: "Design Docs — Overview"
+type: design
 title: "Design Docs — Overview"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: design-docs
 doc_role: overview
+tags: ["design-docs"]
 ---
 
 # Design Docs — Overview

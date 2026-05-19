@@ -1,10 +1,13 @@
 ---
+summary: "Task Sync — Vision"
+type: design
 title: "Task Sync — Vision"
 owner: claude
 last_updated: 2026-05-12
 status: Draft
 feature: task-sync
 doc_role: vision
+tags: ["task-sync"]
 ---
 
 # Task Sync — Vision

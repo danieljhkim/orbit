@@ -1,10 +1,13 @@
 ---
+summary: "Task Artifacts — Decisions"
+type: design
 title: "Task Artifacts — Decisions"
 owner: codex
 last_updated: 2026-05-17
 status: Draft
 feature: task-artifacts
 doc_role: decisions
+tags: ["task-artifacts"]
 ---
 
 # Task Artifacts — Decisions

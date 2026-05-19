@@ -57,6 +57,21 @@ doc_role: <overview | design | vision | decisions>
 - `feature` is the folder slug (e.g. `groundhog`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
 - `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
 
+Orbit-docs also indexes any configured Markdown doc with this retrieval frontmatter. For numbered design docs, keep the fields above and add at least `type` and `summary`:
+
+```yaml
+---
+type: design | pattern | context | glossary | runbook
+summary: One-line hook for agent retrieval
+tags: [feature-slug]
+paths: ["crates/orbit-cli/**"]
+related_features: [feature-slug]
+related_artifacts: [ORB-00160, ADR-0168, L20260514-3]
+---
+```
+
+`type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `LYYYYMMDD-N`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. Orbit-docs does not index `.orbit/`; ADR bodies remain owned by `orbit-adr`.
+
 ---
 
 ## 3. Required Sections per Numbered Doc

@@ -1,10 +1,13 @@
 ---
+summary: "Design Docs — Vision"
+type: design
 title: "Design Docs — Vision"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: design-docs
 doc_role: vision
+tags: ["design-docs"]
 ---
 
 # Design Docs — Vision

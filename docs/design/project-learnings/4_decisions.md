@@ -1,10 +1,13 @@
 ---
+summary: "Project Learnings — Decisions"
+type: design
 title: "Project Learnings — Decisions"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: project-learnings
 doc_role: decisions
+tags: ["project-learnings"]
 ---
 
 # Project Learnings — Decisions

@@ -1,3 +1,7 @@
+---
+type: pattern
+summary: "Command Pattern"
+---
 # Command Pattern
 
 In this codebase, Command = the `Tool` trait at `crates/orbit-tools/src/lib.rs:225`:

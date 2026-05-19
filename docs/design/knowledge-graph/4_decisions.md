@@ -1,10 +1,13 @@
 ---
+summary: "Knowledge Graph — Decisions"
+type: design
 title: "Knowledge Graph — Decisions"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: knowledge-graph
 doc_role: decisions
+tags: ["knowledge-graph"]
 ---
 
 # Knowledge Graph — Decisions

@@ -49,6 +49,10 @@ pub use orbit_store::{
     TaskInvocationMetrics, ToolInvocationMetrics,
 };
 
+pub use command::docs::{
+    ArtifactRef, DocAddOutcome, DocFrontmatter, DocMigrationChange, DocMigrationReport, DocRecord,
+    DocSearchResult, DocShow, DocType,
+};
 pub use command::learning::migrate_learning_layout_at;
 pub use command::task_template::TaskTemplate;
 pub use command::workflow::{

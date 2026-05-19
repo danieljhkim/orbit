@@ -30,7 +30,7 @@ Reusable codebase-specific patterns (Command, RAII guard, newtype, crate-boundar
 
 ## Design Docs
 
-- **Layout.** Feature design docs live under `docs/design/<feature>/` and follow [`CONVENTIONS.md`](docs/design/CONVENTIONS.md) (folder layout, required sections, ADR format, glossary shape).
+- **Layout.** Feature design docs live under `docs/design/<feature>/` and follow [`CONVENTIONS.md`](docs/design/CONVENTIONS.md) (folder layout, required sections, ADR format, glossary shape). Use the `orbit-docs` skill / `orbit docs` surface to retrieve indexed human-authored docs.
 - **Same-PR updates.** Change the doc in the same PR as the code: flip affected ADR statuses (`Proposed → Accepted` with task ID), bump `**Last updated:**`, add a new ADR for any non-obvious decision the change embodies. Stale docs are a review blocker.
 
 ## Rust Practices

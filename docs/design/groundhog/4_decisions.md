@@ -1,10 +1,13 @@
 ---
+summary: "Groundhog — Decisions"
+type: design
 title: "Groundhog — Decisions"
 owner: codex
 last_updated: 2026-05-10
 status: Draft
 feature: groundhog
 doc_role: decisions
+tags: ["groundhog"]
 ---
 
 # Groundhog — Decisions

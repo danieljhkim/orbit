@@ -1,10 +1,13 @@
 ---
+summary: "Agent Families — Vision"
+type: design
 title: "Agent Families — Vision"
 owner: human
 last_updated: 2026-05-16
 status: Draft
 feature: agent-families
 doc_role: vision
+tags: ["agent-families"]
 ---
 
 # Agent Families — Vision

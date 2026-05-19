@@ -1,10 +1,13 @@
 ---
+summary: "ADR Artifact — Decisions"
+type: design
 title: "ADR Artifact — Decisions"
 owner: claude
 last_updated: 2026-05-10
 status: Draft
 feature: adr-artifact
 doc_role: decisions
+tags: ["adr-artifact"]
 ---
 
 # ADR Artifact — Decisions

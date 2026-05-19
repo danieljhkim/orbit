@@ -1,10 +1,13 @@
 ---
+summary: "Policy & Sandboxing — Decisions"
+type: design
 title: "Policy & Sandboxing — Decisions"
 owner: claude
 last_updated: 2026-05-16
 status: Draft
 feature: policy-sandbox
 doc_role: decisions
+tags: ["policy-sandbox"]
 ---
 
 # Policy & Sandboxing — Decisions

@@ -1,10 +1,13 @@
 ---
+summary: "Task Sync — Decisions"
+type: design
 title: "Task Sync — Decisions"
 owner: claude
 last_updated: 2026-05-12
 status: Draft
 feature: task-sync
 doc_role: decisions
+tags: ["task-sync"]
 ---
 
 # Task Sync — Decisions

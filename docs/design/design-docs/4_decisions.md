@@ -1,10 +1,13 @@
 ---
+summary: "Design Docs — Decisions"
+type: design
 title: "Design Docs — Decisions"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: design-docs
 doc_role: decisions
+tags: ["design-docs"]
 ---
 
 # Design Docs — Decisions

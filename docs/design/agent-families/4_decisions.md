@@ -1,10 +1,13 @@
 ---
+summary: "Agent Families — Decisions"
+type: design
 title: "Agent Families — Decisions"
 owner: grok
 last_updated: 2026-05-18
 status: Draft
 feature: agent-families
 doc_role: decisions
+tags: ["agent-families"]
 ---
 
 # Agent Families — Decisions

@@ -1,10 +1,13 @@
 ---
+summary: "Task Artifacts — Vision"
+type: design
 title: "Task Artifacts — Vision"
 owner: codex
 last_updated: 2026-05-11
 status: Draft
 feature: task-artifacts
 doc_role: vision
+tags: ["task-artifacts"]
 ---
 
 # Task Artifacts — Vision

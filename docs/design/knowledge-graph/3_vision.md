@@ -1,10 +1,13 @@
 ---
+summary: "Knowledge Graph — Vision"
+type: design
 title: "Knowledge Graph — Vision"
 owner: claude
 last_updated: 2026-05-06
 status: Draft
 feature: knowledge-graph
 doc_role: vision
+tags: ["knowledge-graph"]
 ---
 
 # Knowledge Graph — Vision

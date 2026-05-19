@@ -1,10 +1,13 @@
 ---
+summary: "Agent Families — Overview"
+type: design
 title: "Agent Families — Overview"
 owner: grok
 last_updated: 2026-05-16
 status: Draft
 feature: agent-families
 doc_role: overview
+tags: ["agent-families"]
 ---
 
 # Agent Families — Overview

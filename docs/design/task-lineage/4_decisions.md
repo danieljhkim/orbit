@@ -1,10 +1,13 @@
 ---
+summary: "Task Lineage — Decisions"
+type: design
 title: "Task Lineage — Decisions"
 owner: claude
 last_updated: 2026-05-09
 status: Draft
 feature: task-lineage
 doc_role: decisions
+tags: ["task-lineage"]
 ---
 
 # Task Lineage — Decisions

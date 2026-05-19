@@ -1,10 +1,13 @@
 ---
+summary: "Groundhog — Design"
+type: design
 title: "Groundhog — Design"
 owner: codex
 last_updated: 2026-05-12
 status: Draft
 feature: groundhog
 doc_role: design
+tags: ["groundhog"]
 ---
 
 # Groundhog — Design

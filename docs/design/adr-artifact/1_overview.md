@@ -1,10 +1,13 @@
 ---
+summary: "ADR Artifact — Overview"
+type: design
 title: "ADR Artifact — Overview"
 owner: claude
 last_updated: 2026-05-10
 status: Draft
 feature: adr-artifact
 doc_role: overview
+tags: ["adr-artifact"]
 ---
 
 # ADR Artifact — Overview

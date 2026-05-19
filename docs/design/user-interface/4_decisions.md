@@ -1,10 +1,13 @@
 ---
+summary: "User Interface — Decisions"
+type: design
 title: "User Interface — Decisions"
 owner: gemini
 last_updated: 2026-05-18
 status: Draft
 feature: user-interface
 doc_role: decisions
+tags: ["user-interface"]
 ---
 
 # User Interface — Decisions

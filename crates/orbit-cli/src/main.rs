@@ -39,6 +39,7 @@ mod parse;
 use clap::Parser;
 use orbit_core::{ActorIdentity, OrbitRuntime};
 
+use crate::command::docs::{DocsCommand, DocsSubcommand};
 use crate::command::hook::{HookCommand, HookSubcommand};
 use crate::command::learning::{LearningCommand, LearningSubcommand};
 use crate::command::mcp::{McpCommand, McpSubcommand};
@@ -51,7 +52,7 @@ fn main() {
 
     let cli = command::Cli::parse();
     let root_override = cli.root.clone();
-    let tool_run_json_output = tool_run_json_output_preference(&cli.command);
+    let tool_run_json_output = json_error_output_preference(&cli.command);
     let hook_pretooluse = is_hook_pretooluse_command(&cli.command);
 
     // Commands that run without a pre-existing runtime
@@ -156,13 +157,21 @@ fn execute_init_command(
     cmd.execute_without_runtime(root_override)
 }
 
-fn tool_run_json_output_preference(command: &Commands) -> Option<bool> {
+fn json_error_output_preference(command: &Commands) -> Option<bool> {
     match command {
         Commands::Tool(command) => match &command.command {
             ToolSubcommand::Run(args) if matches!(args.output, OutputFormat::Json) => {
                 Some(args.pretty)
             }
             _ => None,
+        },
+        Commands::Docs(DocsCommand { command }) => match command {
+            DocsSubcommand::List(args) => args.json.then_some(true),
+            DocsSubcommand::Show(args) => args.json.then_some(true),
+            DocsSubcommand::Search(args) => args.json.then_some(true),
+            DocsSubcommand::Add(args) => args.json.then_some(true),
+            DocsSubcommand::Reindex(args) => args.json.then_some(true),
+            DocsSubcommand::Migrate(args) => args.json.then_some(true),
         },
         _ => None,
     }

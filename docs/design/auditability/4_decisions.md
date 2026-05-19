@@ -1,10 +1,13 @@
 ---
+summary: "Auditability — Decisions"
+type: design
 title: "Auditability — Decisions"
 owner: codex
 last_updated: 2026-05-17
 status: Draft
 feature: auditability
 doc_role: decisions
+tags: ["auditability"]
 ---
 
 # Auditability — Decisions

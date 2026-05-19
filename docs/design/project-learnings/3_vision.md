@@ -1,10 +1,13 @@
 ---
+summary: "Project Learnings — Vision"
+type: design
 title: "Project Learnings — Vision"
 owner: claude
 last_updated: 2026-05-12
 status: Draft
 feature: project-learnings
 doc_role: vision
+tags: ["project-learnings"]
 ---
 
 # Project Learnings — Vision

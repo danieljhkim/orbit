@@ -1,10 +1,13 @@
 ---
+summary: "ADR Artifact — Vision"
+type: design
 title: "ADR Artifact — Vision"
 owner: claude
 last_updated: 2026-05-10
 status: Draft
 feature: adr-artifact
 doc_role: vision
+tags: ["adr-artifact"]
 ---
 
 # ADR Artifact — Vision

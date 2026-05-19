@@ -1,10 +1,13 @@
 ---
+summary: "Groundhog — Vision"
+type: design
 title: "Groundhog — Vision"
 owner: codex
 last_updated: 2026-04-30
 status: Draft
 feature: groundhog
 doc_role: vision
+tags: ["groundhog"]
 ---
 
 # Groundhog — Vision

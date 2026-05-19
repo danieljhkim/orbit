@@ -20,6 +20,7 @@ pub mod audit_event;
 pub mod backend_resolver;
 pub mod design;
 pub mod diagnostics;
+pub mod docs;
 pub mod executor;
 pub mod graph;
 pub mod init;

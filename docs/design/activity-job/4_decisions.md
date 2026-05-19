@@ -1,10 +1,13 @@
 ---
+summary: "Activity / Job — Decisions"
+type: design
 title: "Activity / Job — Decisions"
 owner: codex
 last_updated: 2026-05-16
 status: Draft
 feature: activity-job
 doc_role: decisions
+tags: ["activity-job"]
 ---
 
 # Activity / Job — Decisions

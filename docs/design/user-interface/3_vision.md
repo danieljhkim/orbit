@@ -1,10 +1,13 @@
 ---
+summary: "User Interface — Vision"
+type: design
 title: "User Interface — Vision"
 owner: gemini
 last_updated: 2026-04-30
 status: Draft
 feature: user-interface
 doc_role: vision
+tags: ["user-interface"]
 ---
 
 # User Interface — Vision

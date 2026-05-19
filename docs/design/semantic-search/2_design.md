@@ -1,10 +1,13 @@
 ---
+summary: "Semantic Search — Design"
+type: design
 title: "Semantic Search — Design"
 owner: claude
 last_updated: 2026-05-17
 status: Accepted
 feature: semantic-search
 doc_role: design
+tags: ["semantic-search"]
 ---
 
 # Semantic Search — Design

@@ -1,10 +1,13 @@
 ---
+summary: "Task Sync — Design"
+type: design
 title: "Task Sync — Design"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: task-sync
 doc_role: design
+tags: ["task-sync"]
 ---
 
 # Task Sync — Design

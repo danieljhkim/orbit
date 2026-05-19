@@ -1,10 +1,13 @@
 ---
+summary: "Policy & Sandboxing — Overview"
+type: design
 title: "Policy & Sandboxing — Overview"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: policy-sandbox
 doc_role: overview
+tags: ["policy-sandbox"]
 ---
 
 # Policy & Sandboxing — Overview

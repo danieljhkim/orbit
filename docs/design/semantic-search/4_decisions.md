@@ -1,10 +1,13 @@
 ---
+summary: "Semantic Search — Decisions"
+type: design
 title: "Semantic Search — Decisions"
 owner: claude
 last_updated: 2026-05-17
 status: Accepted
 feature: semantic-search
 doc_role: decisions
+tags: ["semantic-search"]
 ---
 
 # Semantic Search — Decisions

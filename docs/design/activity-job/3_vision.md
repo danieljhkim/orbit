@@ -1,10 +1,13 @@
 ---
+summary: "Activity / Job — Vision"
+type: design
 title: "Activity / Job — Vision"
 owner: codex
 last_updated: 2026-04-30
 status: Draft
 feature: activity-job
 doc_role: vision
+tags: ["activity-job"]
 ---
 
 # Activity / Job — Vision

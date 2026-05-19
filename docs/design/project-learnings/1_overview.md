@@ -1,10 +1,13 @@
 ---
+summary: "Project Learnings — Overview"
+type: design
 title: "Project Learnings — Overview"
 owner: claude
 last_updated: 2026-05-17
 status: Draft
 feature: project-learnings
 doc_role: overview
+tags: ["project-learnings"]
 ---
 
 # Project Learnings — Overview

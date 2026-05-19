@@ -1,10 +1,13 @@
 ---
+summary: "Task Lineage — Design"
+type: design
 title: "Task Lineage — Design"
 owner: claude
 last_updated: 2026-05-12
 status: Draft
 feature: task-lineage
 doc_role: design
+tags: ["task-lineage"]
 ---
 
 # Task Lineage — Design

@@ -1,10 +1,13 @@
 ---
+summary: "Auditability — Vision"
+type: design
 title: "Auditability — Vision"
 owner: codex
 last_updated: 2026-05-17
 status: Draft
 feature: auditability
 doc_role: vision
+tags: ["auditability"]
 ---
 
 # Auditability — Vision

@@ -2,6 +2,7 @@ mod adr_tools;
 mod artifact_redaction;
 mod design_tools;
 mod dispatch;
+mod docs_tools;
 mod friction_tools;
 mod host;
 mod input;

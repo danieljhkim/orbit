@@ -1,10 +1,13 @@
 ---
+summary: "Activity / Job — Overview"
+type: design
 title: "Activity / Job — Overview"
 owner: codex
 last_updated: 2026-05-17
 status: Draft
 feature: activity-job
 doc_role: overview
+tags: ["activity-job"]
 ---
 
 # Activity / Job — Overview

@@ -1,10 +1,13 @@
 ---
+summary: "Agent Families — Design"
+type: design
 title: "Agent Families — Design"
 owner: human
 last_updated: 2026-05-16
 status: Draft
 feature: agent-families
 doc_role: design
+tags: ["agent-families"]
 ---
 
 # Agent Families — Design

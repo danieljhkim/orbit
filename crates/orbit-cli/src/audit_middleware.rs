@@ -374,6 +374,27 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        Commands::Docs(cmd) => {
+            use crate::command::docs::DocsSubcommand;
+            let (sub, target_id) = match &cmd.command {
+                DocsSubcommand::List(_) => ("list", None),
+                DocsSubcommand::Show(args) => ("show", Some(args.path.as_str())),
+                DocsSubcommand::Search(_) => ("search", None),
+                DocsSubcommand::Add(args) => ("add", Some(args.path.as_str())),
+                DocsSubcommand::Reindex(_) => ("reindex", None),
+                DocsSubcommand::Migrate(_) => ("migrate", None),
+            };
+            CommandMeta {
+                command: "docs".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("docs".to_string()),
+                target_id: target_id.map(String::from),
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Learning(cmd) => {
             use crate::command::learning::LearningSubcommand;
             let sub = match &cmd.command {

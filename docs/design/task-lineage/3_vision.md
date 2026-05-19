@@ -1,10 +1,13 @@
 ---
+summary: "Task Lineage — Vision"
+type: design
 title: "Task Lineage — Vision"
 owner: claude
 last_updated: 2026-05-09
 status: Draft
 feature: task-lineage
 doc_role: vision
+tags: ["task-lineage"]
 ---
 
 # Task Lineage — Vision
