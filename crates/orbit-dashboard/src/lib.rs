@@ -25,6 +25,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
+const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");
 const APP_JS: &str = include_str!("../assets/dashboard/app.js");
 const COMMON_JS: &str = include_str!("../assets/dashboard/common.js");
 const TASKS_JS: &str = include_str!("../assets/dashboard/tasks.js");
@@ -61,6 +62,7 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
 
     let app = Router::new()
         .route("/", get(serve_index))
+        .route("/static/dashboard.css", get(serve_dashboard_css))
         .route("/static/app.js", get(serve_app_js))
         .route("/static/common.js", get(serve_common_js))
         .route("/static/tasks.js", get(serve_tasks_js))
@@ -105,6 +107,17 @@ async fn serve_index() -> Response {
             HeaderValue::from_static("text/html; charset=utf-8"),
         )],
         INDEX_HTML,
+    )
+        .into_response()
+}
+
+async fn serve_dashboard_css() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/css; charset=utf-8"),
+        )],
+        DASHBOARD_CSS,
     )
         .into_response()
 }
