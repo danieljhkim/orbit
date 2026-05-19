@@ -268,3 +268,8 @@ export function initTabs() {
   const ctx = getCtx();
   return initTabsImpl(ctx);
 }
+
+export function setRunDetailSubtab(name) {
+  const ctx = getCtx();
+  setRunDetailSubtabImpl(ctx, name);
+}

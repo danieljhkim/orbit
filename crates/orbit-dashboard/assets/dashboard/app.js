@@ -7,8 +7,32 @@ import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAud
 import { renderScoreboard } from './scoreboard.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
-import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, } from './router.js';
+import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
 import { initRuns, mergeRunsWithFriction, renderRuns, runIsCancellable, buildCancelRunButton, buildReplayRunButton } from './runs.js';
+import {
+  renderRunDetailEmpty,
+  renderRunDetailMeta,
+  renderRunSteps,
+  renderRunKnowledge,
+  renderRunGantt,
+  renderRunEvents,
+  RUN_EVENTS_LIMIT,
+  getActiveRunId,
+  setActiveRunId,
+  getActiveRunDetail,
+  setActiveRunDetail,
+  getActiveRunEvents,
+  setActiveRunEvents,
+  getActiveRunLogs,
+  setActiveRunLogs,
+  getActiveRunSubtab,
+  setActiveRunSubtab,
+  getExpandedStepIndices,
+  setExpandedStepIndices,
+  clearExpandedStepIndices,
+  toggleExpandedStepIndex,
+  initRunDetail,
+} from './run-detail.js';
 
 const STATUS_ORDER = [
   "in-progress",
@@ -26,7 +50,6 @@ const STATUS_UPDATE_TARGETS = STATUS_ORDER
 
 const JOB_RUN_LIMIT = positiveIntParam("runs", 25);
 const DIAG_LIMIT = positiveIntParam("diag", 50);
-const RUN_EVENTS_LIMIT = positiveIntParam("events", 100);
 const LEARNING_LIMIT = positiveIntParam("learnings", 100);
 const ADR_LIMIT = positiveIntParam("adrs", 100);
 const FRICTION_LIMIT = positiveIntParam("frictions", 100);
@@ -58,14 +81,6 @@ let frictionSearchQuery = "";
 
 // Health strip state
 let lastSummary = null;
-
-// Run detail state
-let activeRunId = null;
-let activeRunDetail = null;
-let activeRunEvents = [];
-let activeRunLogs = [];
-let activeRunSubtab = "steps";
-let expandedStepIndices = new Set();
 
 function taskContext() {
   return {
@@ -121,18 +136,18 @@ function routerContext() {
     setDiagSubtab: (v) => { activeDiagSubtab = v; },
     getKnowledgeSubtab: () => activeKnowledgeSubtab,
     setKnowledgeSubtab: (v) => { activeKnowledgeSubtab = v; },
-    getRunId: () => activeRunId,
-    setRunId: (v) => { activeRunId = v; },
-    getRunSubtab: () => activeRunSubtab,
-    setRunSubtab: (v) => { activeRunSubtab = v; },
-    getRunDetail: () => activeRunDetail,
-    setRunDetail: (v) => { activeRunDetail = v; },
-    getRunEvents: () => activeRunEvents,
-    setRunEvents: (v) => { activeRunEvents = v || []; },
-    getRunLogs: () => activeRunLogs,
-    setRunLogs: (v) => { activeRunLogs = v || []; },
-    getExpandedSteps: () => expandedStepIndices,
-    setExpandedSteps: (v) => { expandedStepIndices = v || new Set(); },
+    getRunId: getActiveRunId,
+    setRunId: setActiveRunId,
+    getRunSubtab: getActiveRunSubtab,
+    setRunSubtab: setActiveRunSubtab,
+    getRunDetail: getActiveRunDetail,
+    setRunDetail: setActiveRunDetail,
+    getRunEvents: getActiveRunEvents,
+    setRunEvents: setActiveRunEvents,
+    getRunLogs: getActiveRunLogs,
+    setRunLogs: setActiveRunLogs,
+    getExpandedSteps: getExpandedStepIndices,
+    setExpandedSteps: setExpandedStepIndices,
 
     // last* for render helpers used by router
     getLastRuns: () => lastRuns,
@@ -153,7 +168,48 @@ function routerContext() {
 }
 
 function runsContext() {
-  return { navigateToRun: nTR, fetchAndRenderRuns, fetchAndRenderRunDetail, fetchAndRenderRunEvents, getActiveRunId: () => activeRunId, getLastRuns: () => lastRuns, fmtTimestamp, fmtDuration };
+  return { navigateToRun: nTR, fetchAndRenderRuns, fetchAndRenderRunDetail, fetchAndRenderRunEvents, getActiveRunId, getLastRuns: () => lastRuns, fmtTimestamp, fmtDuration };
+}
+
+function runDetailContext() {
+  return {
+    // state getters/setters (module-scoped in run-detail.js)
+    getActiveRunId,
+    setActiveRunId,
+    getActiveRunDetail,
+    setActiveRunDetail,
+    getActiveRunEvents,
+    setActiveRunEvents,
+    getActiveRunLogs,
+    setActiveRunLogs,
+    getActiveRunSubtab,
+    setActiveRunSubtab,
+    getExpandedStepIndices,
+    setExpandedStepIndices,
+    clearExpandedStepIndices,
+    toggleExpandedStepIndex,
+    // callbacks the run-detail renderers invoke (Gantt click handler etc.)
+    setRunDetailSubtab,
+    // formatters (stay in app.js until common.js extraction)
+    fmtTimestamp,
+    fmtDuration,
+    fmtRelative,
+    fmtAbsTime,
+    truncate,
+    // run action builders (from runs.js) and nav for renderRunDetailMeta
+    navigateToRun: nTR,
+    setActiveTab: sAT,
+    runIsCancellable,
+    buildCancelRunButton,
+    buildReplayRunButton,
+    // render fns for orchestrator symmetry
+    renderRunDetailEmpty,
+    renderRunDetailMeta,
+    renderRunSteps,
+    renderRunKnowledge,
+    renderRunGantt,
+    renderRunEvents,
+  };
 }
 
 function renderBodyBlock(body, fallbackClass) {
@@ -972,7 +1028,7 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "run-detail") {
-    if (!activeRunId) {
+    if (!getActiveRunId()) {
       renderRunDetailEmpty("No run selected.");
       return jobs;
     }
@@ -1034,39 +1090,39 @@ function fetchAndRenderTaskLocks() {
 }
 
 function fetchAndRenderRunDetail() {
-  if (!activeRunId) return Promise.resolve();
-  return fetchJson(`/api/runs/${encodeURIComponent(activeRunId)}`).then((data) => {
-    activeRunDetail = data;
+  if (!getActiveRunId()) return Promise.resolve();
+  return fetchJson(`/api/runs/${encodeURIComponent(getActiveRunId())}`).then((data) => {
+    setActiveRunDetail(data);
     renderRunDetailMeta();
     renderRunKnowledge();
     renderRunGantt();
     renderRunSteps();
   }).catch((e) => {
-    renderRunDetailEmpty(`Run not found: ${activeRunId}`);
+    renderRunDetailEmpty(`Run not found: ${getActiveRunId()}`);
     throw e;
   });
 }
 
 function fetchAndRenderRunEvents() {
-  if (!activeRunId) return Promise.resolve();
-  return fetchJson(`/api/runs/${encodeURIComponent(activeRunId)}/events?limit=${RUN_EVENTS_LIMIT}`).then((events) => {
-    activeRunEvents = events;
+  if (!getActiveRunId()) return Promise.resolve();
+  return fetchJson(`/api/runs/${encodeURIComponent(getActiveRunId())}/events?limit=${RUN_EVENTS_LIMIT}`).then((events) => {
+    setActiveRunEvents(events);
     renderRunEvents();
     renderRunGantt();
   }).catch(() => {
     // Missing v2 events file is non-fatal — run detail still renders.
-    activeRunEvents = [];
+    setActiveRunEvents([]);
     renderRunGantt();
   });
 }
 
 function fetchAndRenderRunLogs() {
-  if (!activeRunId) return Promise.resolve();
-  return fetchJson(`/api/runs/${encodeURIComponent(activeRunId)}/logs?limit=${RUN_EVENTS_LIMIT}`).then((logs) => {
-    activeRunLogs = logs;
+  if (!getActiveRunId()) return Promise.resolve();
+  return fetchJson(`/api/runs/${encodeURIComponent(getActiveRunId())}/logs?limit=${RUN_EVENTS_LIMIT}`).then((logs) => {
+    setActiveRunLogs(logs);
     renderRunSteps();
   }).catch(() => {
-    activeRunLogs = [];
+    setActiveRunLogs([]);
     renderRunSteps();
   });
 }
@@ -1164,480 +1220,12 @@ function renderSparkline(buckets) {
 
 function refreshLabel() {
   if (activeTab === "diagnostics") return `diagnostics/${activeDiagSubtab}`;
-  if (activeTab === "run-detail") return `run/${activeRunId || "?"}`;
+  if (activeTab === "run-detail") return `run/${getActiveRunId() || "?"}`;
   return activeTab;
 }
 
-function renderRunDetailEmpty(message) {
-  const meta = $("run-detail-meta");
-  if (meta) syncNodes(meta, [el("div", { class: "empty-state" }, [
-    el("div", { class: "icon", text: "✧" }),
-    el("div", { class: "text", text: message }),
-  ])]);
-  $("run-detail-title").textContent = "Run Detail";
-  $("run-detail-count").textContent = "-";
-  $("run-steps-body").innerHTML = "";
-  $("run-events-body").innerHTML = "";
-  const knowledge = $("run-knowledge-panel");
-  const gantt = $("run-gantt-panel");
-  if (knowledge) knowledge.style.display = "none";
-  if (gantt) gantt.style.display = "none";
-}
 
-function renderRunDetailMeta() {
-  const meta = $("run-detail-meta");
-  if (!meta) return;
-  const detail = activeRunDetail || {};
-  const run = detail.run || {};
-  $("run-detail-title").textContent = `Run ${run.run_id || activeRunId || "?"}`;
-  const stepCount = Array.isArray(detail.steps) ? detail.steps.length : 0;
-  $("run-detail-count").textContent = `${stepCount} steps`;
 
-  const grid = el("div", { class: "run-meta-grid" });
-  const addCell = (label, value) => {
-    const cell = el("div");
-    cell.appendChild(el("div", { class: "label", text: label }));
-    cell.appendChild(el("div", { class: "value", text: value == null ? "-" : String(value) }));
-    grid.appendChild(cell);
-  };
-  addCell("job", run.job_id);
-  addCell("state", run.state);
-  addCell("attempt", run.attempt);
-  addCell("started", run.started_at ? fmtAbsTime(run.started_at) : "-");
-  addCell("finished", run.finished_at ? fmtAbsTime(run.finished_at) : "-");
-  addCell("duration", run.duration_ms != null ? fmtDuration(run.duration_ms) : "-");
-
-  const wrap = el("div");
-  const back = el("button", { class: "back-action", text: "← back to runs" });
-  back.addEventListener("click", () => sAT("diagnostics/runs"));
-  const actions = el("div", { class: "run-detail-actions" }, [back]);
-  if (run.retry_source_run_id) {
-    const sourceId = run.retry_source_run_id;
-    const lineage = el("button", {
-      class: "back-action replay-source",
-      text: `Replayed from ${sourceId}`,
-      title: `Open ${sourceId}`,
-    });
-    lineage.addEventListener("click", () => nTR(sourceId));
-    actions.appendChild(lineage);
-  }
-  if (run.run_id) actions.appendChild(buildReplayRunButton(run, wrap));
-  if (runIsCancellable(run)) actions.appendChild(buildCancelRunButton(run, wrap));
-  wrap.appendChild(actions);
-  wrap.appendChild(grid);
-  syncNodes(meta, [wrap]);
-}
-
-function renderRunSteps() {
-  const body = $("run-steps-body");
-  if (!body) return;
-  const steps = (activeRunDetail && activeRunDetail.steps) || [];
-  if (steps.length === 0) {
-    syncNodes(body, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No steps recorded for this run." }),
-    ])]);
-    return;
-  }
-  const frag = document.createDocumentFragment();
-  for (const step of steps) {
-    const exit = step.exit_code;
-    const exitClass = exit != null && exit !== 0 ? "exit fail" : "exit";
-    const row = el("div", { class: "step-row" }, [
-      el("span", { class: "idx", text: `#${step.step_index}` }),
-      el("span", { class: "target", text: `${step.target_type}:${step.target_id}` }),
-      el("span", {}, [stateCell(step.state)]),
-      el("span", { class: "duration", text: fmtDuration(step.duration_ms) }),
-      el("span", { class: exitClass, text: exit == null ? "-" : String(exit) }),
-    ]);
-    row.dataset.key = `step-${step.step_index}`;
-    row.dataset.hash = `${step.step_index}-${step.state}-${exit}`;
-    if (expandedStepIndices.has(step.step_index)) row.classList.add("expanded");
-    row.addEventListener("click", () => {
-      if (expandedStepIndices.has(step.step_index)) expandedStepIndices.delete(step.step_index);
-      else expandedStepIndices.add(step.step_index);
-      renderRunSteps();
-    });
-    frag.appendChild(row);
-    if (expandedStepIndices.has(step.step_index)) {
-      frag.appendChild(buildStepDetail(step));
-    }
-  }
-  syncNodes(body, Array.from(frag.children));
-}
-
-function renderRunKnowledge() {
-  const panel = $("run-knowledge-panel");
-  if (!panel) return;
-  panel.style.display = "block";
-  const km = activeRunDetail && activeRunDetail.run && activeRunDetail.run.knowledge_metrics;
-  panel.innerHTML = "";
-  const header = el("div", { class: "knowledge-header", text: "Knowledge Pack" });
-  panel.appendChild(header);
-  if (km == null) {
-    panel.appendChild(el("div", { class: "knowledge-empty", text: "no knowledge metrics for this run" }));
-    return;
-  }
-  const grid = el("div", { class: "knowledge-grid" });
-  const baseline = Number(km.raw_read_token_baseline || 0);
-  const packTokens = km.knowledge_pack_tokens == null ? null : Number(km.knowledge_pack_tokens);
-  const totalLlm = km.total_llm_input_tokens == null ? null : Number(km.total_llm_input_tokens);
-  const ratioText = baseline === 0 || packTokens == null
-    ? "n/a"
-    : `${((packTokens / baseline) * 100).toFixed(1)}%`;
-  const addCell = (label, value, extra = "") => {
-    const cell = el("div");
-    cell.appendChild(el("div", { class: "label", text: label }));
-    cell.appendChild(el("div", { class: `value${extra ? " " + extra : ""}`, text: value }));
-    grid.appendChild(cell);
-  };
-  addCell("raw_read_token_baseline", String(baseline));
-  addCell("knowledge_pack_tokens", packTokens == null ? "-" : String(packTokens));
-  addCell("total_llm_input_tokens", totalLlm == null ? "-" : String(totalLlm));
-  addCell("compression_ratio", ratioText, "ratio");
-  panel.appendChild(grid);
-}
-
-function renderRunGantt() {
-  const panel = $("run-gantt-panel");
-  if (!panel) return;
-  const detail = activeRunDetail || {};
-  const run = detail.run || {};
-  const steps = Array.isArray(detail.steps) ? detail.steps : [];
-  if (steps.length === 0) {
-    panel.style.display = "none";
-    panel.innerHTML = "";
-    return;
-  }
-  panel.style.display = "block";
-  panel.innerHTML = "";
-  panel.appendChild(el("div", { class: "gantt-header", text: "Step Timeline" }));
-
-  const startMs = run.started_at ? new Date(run.started_at).getTime() : null;
-  let endMs = run.finished_at ? new Date(run.finished_at).getTime() : null;
-  // Walk steps for tighter bounds when run-level timestamps are missing.
-  let derivedStart = startMs;
-  let derivedEnd = endMs;
-  for (const s of steps) {
-    if (s.started_at) {
-      const t = new Date(s.started_at).getTime();
-      if (derivedStart == null || t < derivedStart) derivedStart = t;
-    }
-    if (s.finished_at) {
-      const t = new Date(s.finished_at).getTime();
-      if (derivedEnd == null || t > derivedEnd) derivedEnd = t;
-    }
-  }
-  // Run still in flight or missing finish: extend to now.
-  if (derivedEnd == null) derivedEnd = Date.now();
-  if (derivedStart == null) derivedStart = derivedEnd - 1000;
-  if (derivedEnd <= derivedStart) derivedEnd = derivedStart + 1000;
-
-  const PAD_LEFT = 56;   // step-index gutter
-  const PAD_RIGHT = 12;
-  const PAD_TOP = 18;
-  const ROW_H = 22;
-  const BAR_H = 14;
-  const W_TOTAL = 1000;  // virtual viewBox width; SVG rescales to container
-  const innerW = W_TOTAL - PAD_LEFT - PAD_RIGHT;
-  const totalH = PAD_TOP + steps.length * ROW_H + 18;
-  const span = derivedEnd - derivedStart;
-  const xOf = (ms) => PAD_LEFT + ((ms - derivedStart) / span) * innerW;
-
-  const svgNS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("class", "gantt-svg");
-  svg.setAttribute("viewBox", `0 0 ${W_TOTAL} ${totalH}`);
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.style.height = `${totalH}px`;
-
-  // Lane backgrounds + step-index labels.
-  steps.forEach((step, i) => {
-    const y = PAD_TOP + i * ROW_H;
-    const bg = document.createElementNS(svgNS, "rect");
-    bg.setAttribute("class", `gantt-lane-bg${i % 2 === 0 ? "" : " alt"}`);
-    bg.setAttribute("x", String(0));
-    bg.setAttribute("y", String(y));
-    bg.setAttribute("width", String(W_TOTAL));
-    bg.setAttribute("height", String(ROW_H));
-    svg.appendChild(bg);
-    const label = document.createElementNS(svgNS, "text");
-    label.setAttribute("class", "gantt-lane-label");
-    label.setAttribute("x", String(8));
-    label.setAttribute("y", String(y + ROW_H / 2 + 3));
-    label.textContent = `#${step.step_index}`;
-    svg.appendChild(label);
-  });
-
-  // Axis: start and end labels.
-  const axisY = PAD_TOP + steps.length * ROW_H + 6;
-  const axisLine = document.createElementNS(svgNS, "line");
-  axisLine.setAttribute("class", "gantt-axis-line");
-  axisLine.setAttribute("x1", String(PAD_LEFT));
-  axisLine.setAttribute("y1", String(axisY));
-  axisLine.setAttribute("x2", String(W_TOTAL - PAD_RIGHT));
-  axisLine.setAttribute("y2", String(axisY));
-  svg.appendChild(axisLine);
-  const fmtAxis = (ms) => {
-    const d = new Date(ms);
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  };
-  const axisStart = document.createElementNS(svgNS, "text");
-  axisStart.setAttribute("class", "gantt-axis-label");
-  axisStart.setAttribute("x", String(PAD_LEFT));
-  axisStart.setAttribute("y", String(axisY + 12));
-  axisStart.textContent = fmtAxis(derivedStart);
-  svg.appendChild(axisStart);
-  const axisEnd = document.createElementNS(svgNS, "text");
-  axisEnd.setAttribute("class", "gantt-axis-label");
-  axisEnd.setAttribute("x", String(W_TOTAL - PAD_RIGHT));
-  axisEnd.setAttribute("y", String(axisY + 12));
-  axisEnd.setAttribute("text-anchor", "end");
-  axisEnd.textContent = fmtAxis(derivedEnd);
-  svg.appendChild(axisEnd);
-
-  // Bars per step.
-  steps.forEach((step, i) => {
-    const sStart = step.started_at ? new Date(step.started_at).getTime() : derivedStart;
-    const sEnd = step.finished_at ? new Date(step.finished_at).getTime() : derivedEnd;
-    const x1 = xOf(sStart);
-    const x2 = xOf(sEnd);
-    const w = Math.max(2, x2 - x1);
-    const y = PAD_TOP + i * ROW_H + (ROW_H - BAR_H) / 2;
-    const bar = document.createElementNS(svgNS, "rect");
-    bar.setAttribute("class", "gantt-bar");
-    bar.setAttribute("x", String(x1));
-    bar.setAttribute("y", String(y));
-    bar.setAttribute("width", String(w));
-    bar.setAttribute("height", String(BAR_H));
-    bar.setAttribute("fill", `var(--state-${step.state}, var(--fg-dim))`);
-    bar.addEventListener("mousemove", (e) => showGanttTooltip(e, step));
-    bar.addEventListener("mouseleave", hideGanttTooltip);
-    bar.addEventListener("click", () => {
-      // Reuse the per-step expand/collapse panel from the Steps sub-tab.
-      if (expandedStepIndices.has(step.step_index)) {
-        expandedStepIndices.delete(step.step_index);
-      } else {
-        expandedStepIndices.add(step.step_index);
-      }
-      activeRunSubtab = "steps";
-      // Inline subtab activation for "steps" (router owns canonical setRunDetailSubtab impl + consts)
-      for (const btn of document.querySelectorAll("#run-detail-subtabs .subtab")) {
-        btn.classList.toggle("active", btn.dataset.subtab === "steps");
-      }
-      const rsb = $("run-steps-body");
-      const reb = $("run-events-body");
-      if (rsb) rsb.style.display = "block";
-      if (reb) reb.style.display = "none";
-      renderRunSteps();
-      const target = document.querySelector(`[data-key="step-${step.step_index}"]`);
-      if (target && target.scrollIntoView) {
-        target.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      }
-    });
-    svg.appendChild(bar);
-  });
-
-  // Retry markers from StepRetry events.
-  const stepIdToIndex = new Map();
-  steps.forEach((s) => {
-    // step_id is the activity name (or step.id); the step file stores it as
-    // target_id. Map both forms to the lane index.
-    if (s.target_id != null) stepIdToIndex.set(String(s.target_id), s.step_index);
-  });
-  for (const ev of activeRunEvents || []) {
-    if (ev.body_kind !== "step_retry") continue;
-    const stepId = ev.step_id;
-    const index = stepIdToIndex.get(stepId);
-    if (index == null) continue;
-    const tsMs = ev.ts ? new Date(ev.ts).getTime() : null;
-    if (!tsMs || isNaN(tsMs)) continue;
-    const cx = xOf(Math.max(derivedStart, Math.min(derivedEnd, tsMs)));
-    const cy = PAD_TOP + index * ROW_H + ROW_H / 2;
-    const marker = document.createElementNS(svgNS, "circle");
-    marker.setAttribute("class", "gantt-retry-marker");
-    marker.setAttribute("cx", String(cx));
-    marker.setAttribute("cy", String(cy));
-    marker.setAttribute("r", "3.5");
-    const title = document.createElementNS(svgNS, "title");
-    title.textContent = `retry attempt=${ev.attempt} backoff=${ev.next_backoff_ms}ms`;
-    marker.appendChild(title);
-    svg.appendChild(marker);
-  }
-
-  panel.appendChild(svg);
-}
-
-function showGanttTooltip(e, step) {
-  const tip = $("gantt-tooltip");
-  if (!tip) return;
-  const lines = [
-    `step_index: ${step.step_index}`,
-    `state: ${step.state}`,
-    `exit_code: ${step.exit_code == null ? "-" : step.exit_code}`,
-    `duration_ms: ${step.duration_ms == null ? "-" : step.duration_ms}`,
-  ];
-  tip.textContent = lines.join("\n");
-  tip.style.display = "block";
-  tip.setAttribute("aria-hidden", "false");
-  // Position relative to viewport; clamp to keep the tooltip on-screen.
-  const x = Math.min(window.innerWidth - 220, e.clientX + 12);
-  const y = Math.min(window.innerHeight - 80, e.clientY + 12);
-  tip.style.left = `${x}px`;
-  tip.style.top = `${y}px`;
-}
-
-function hideGanttTooltip() {
-  const tip = $("gantt-tooltip");
-  if (!tip) return;
-  tip.style.display = "none";
-  tip.setAttribute("aria-hidden", "true");
-}
-
-function logsForStep(step) {
-  const stepId = step.target_id == null ? null : String(step.target_id);
-  return (activeRunLogs || []).filter((record) => {
-    if (record.step_index != null && Number(record.step_index) === Number(step.step_index)) return true;
-    return stepId != null && record.step_id === stepId;
-  });
-}
-
-function buildLogBlock(record, stream) {
-  const isErr = stream === "stderr";
-  const preview = record[`${stream}_preview`] || "";
-  if (!preview) return null;
-  const block = el("div", { class: `step-log-block ${isErr ? "stderr" : "stdout"}` });
-  const meta = [
-    record.provider || "cli",
-    record.exit_code == null ? "exit -" : `exit ${record.exit_code}`,
-    record.timed_out ? "timeout" : null,
-    record[`${stream}_truncated`] ? "truncated" : null,
-  ].filter(Boolean).join(" · ");
-  block.appendChild(el("div", { class: "step-log-head" }, [
-    el("span", { class: "label", text: stream }),
-    el("span", { class: "meta", text: meta }),
-  ]));
-  const pre = el("pre");
-  for (const line of preview.split("\n")) {
-    const row = el("span", {
-      class: isErr && /\bERROR\s+[^:]+:/.test(line) ? "log-line error-line" : "log-line",
-      text: line || " ",
-    });
-    pre.appendChild(row);
-  }
-  block.appendChild(pre);
-  return block;
-}
-
-function buildStepDetail(step) {
-  const wrap = el("div", { class: "step-detail" });
-  wrap.dataset.key = `step-detail-${step.step_index}`;
-  wrap.dataset.hash = JSON.stringify(step);
-  wrap.addEventListener("click", (e) => e.stopPropagation());
-
-  const addBlock = (label, raw) => {
-    const v = raw == null ? "" : (typeof raw === "string" ? raw : JSON.stringify(raw, null, 2));
-    if (!v) return;
-    const block = el("div", { class: "audit-detail-block" });
-    block.appendChild(el("div", { class: "label", text: label }));
-    block.appendChild(el("pre", { text: v }));
-    wrap.appendChild(block);
-  };
-
-  if (step.error_message) addBlock("error", `${step.error_code || ""} ${step.error_message}`);
-  addBlock("agent_response", step.agent_response_json);
-  const logs = logsForStep(step);
-  if (logs.length > 0) {
-    const section = el("div", { class: "step-log-section" });
-    section.appendChild(el("div", { class: "label", text: "agent logs" }));
-    for (const record of logs) {
-      const stdout = buildLogBlock(record, "stdout");
-      const stderr = buildLogBlock(record, "stderr");
-      if (stdout) section.appendChild(stdout);
-      if (stderr) section.appendChild(stderr);
-    }
-    wrap.appendChild(section);
-  }
-  const km = activeRunDetail && activeRunDetail.run && activeRunDetail.run.knowledge_metrics;
-  if (km && step.step_index === 0) addBlock("knowledge_metrics (run)", km);
-  return wrap;
-}
-
-const RUN_EVENT_COLUMNS = [
-  { key: "ts", label: "time" },
-  { key: "body_kind", label: "kind" },
-  { key: "event_type", label: "scope" },
-  { key: "agent_identity", label: "agent" },
-  { key: "summary", label: "detail" },
-];
-
-function renderRunEvents() {
-  const body = $("run-events-body");
-  if (!body) return;
-  const events = activeRunEvents || [];
-  if (events.length === 0) {
-    syncNodes(body, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No v2 envelope events for this run." }),
-    ])]);
-    return;
-  }
-  let table = body.querySelector("table.scoreboard-table");
-  let tbody;
-  if (!table) {
-    table = el("table", { class: "scoreboard-table" });
-    const thead = el("thead");
-    const headRow = el("tr");
-    for (const col of RUN_EVENT_COLUMNS) {
-      headRow.appendChild(el("th", { text: col.label }));
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    tbody = el("tbody");
-    table.appendChild(tbody);
-    syncNodes(body, [table]);
-  } else {
-    tbody = table.querySelector("tbody");
-  }
-  const frag = document.createDocumentFragment();
-  for (let i = 0; i < events.length; i++) {
-    const ev = events[i];
-    const summary = summarizeEvent(ev);
-    const tr = el("tr");
-    tr.appendChild(el("td", { text: fmtTimestamp(ev.ts) }));
-    tr.appendChild(el("td", { text: ev.body_kind || "-" }));
-    tr.appendChild(el("td", { text: ev.event_type || "-" }));
-    tr.appendChild(el("td", { text: ev.agent_identity || "-" }));
-    const td = el("td", { class: "stderr" });
-    td.title = summary.title;
-    td.textContent = summary.text;
-    tr.appendChild(td);
-    tr.dataset.key = `runev-${ev.event_id || i}`;
-    tr.dataset.hash = `${ev.event_id || i}-${ev.body_kind}`;
-    frag.appendChild(tr);
-  }
-  syncNodes(tbody, Array.from(frag.children));
-}
-
-function summarizeEvent(ev) {
-  const ignoreKeys = new Set([
-    "schemaVersion", "event_type", "event_id", "ts", "run_id",
-    "agent_identity", "parent_event_id", "workspace_path", "body_kind",
-  ]);
-  const parts = [];
-  for (const [k, v] of Object.entries(ev)) {
-    if (ignoreKeys.has(k)) continue;
-    if (v == null) continue;
-    if (typeof v === "object") {
-      parts.push(`${k}=${JSON.stringify(v)}`);
-    } else {
-      parts.push(`${k}=${v}`);
-    }
-  }
-  const text = parts.join(" ");
-  return { text: truncate(text, 200), title: text };
-}
 
 async function refreshDashboard() {
   if (isRefreshing) return;
@@ -1682,6 +1270,7 @@ wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
 
 initRuns(runsContext());
+initRunDetail(runDetailContext());
 const rctx = routerContext();
 initRouter(rctx);
 iT();
