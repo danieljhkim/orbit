@@ -23,6 +23,12 @@ import {
   renderDiagnostics,
   renderImplementOneCard as renderImplOne,
 } from './diagnostics.js';
+import {
+  initRouter,
+  initTabs as iT,
+  navigateToRun as nTR,
+  setActiveTab as sAT,
+} from './router.js';
 
 const STATUS_ORDER = [
   "in-progress",
@@ -105,8 +111,8 @@ function taskContext() {
 
 function auditContext() {
   return {
-    navigateToRun,
-    setActiveTab,
+    navigateToRun: nTR,
+    setActiveTab: sAT,
     refreshDashboard,
     fmtDuration,
     fmtTimestamp,
@@ -123,8 +129,49 @@ function diagnosticsContext() {
     fmtRelative,
     fmtDuration,
     truncate,
-    setActiveTab,
-    navigateToRun,
+    setActiveTab: sAT,
+    navigateToRun: nTR,
+  };
+}
+
+function routerContext() {
+  return {
+    // getters/setters for router-owned state (kept in app.js per extraction contract)
+    getTab: () => activeTab,
+    setTab: (v) => { activeTab = v; },
+    getDiagSubtab: () => activeDiagSubtab,
+    setDiagSubtab: (v) => { activeDiagSubtab = v; },
+    getKnowledgeSubtab: () => activeKnowledgeSubtab,
+    setKnowledgeSubtab: (v) => { activeKnowledgeSubtab = v; },
+    getRunId: () => activeRunId,
+    setRunId: (v) => { activeRunId = v; },
+    getRunSubtab: () => activeRunSubtab,
+    setRunSubtab: (v) => { activeRunSubtab = v; },
+    getRunDetail: () => activeRunDetail,
+    setRunDetail: (v) => { activeRunDetail = v; },
+    getRunEvents: () => activeRunEvents,
+    setRunEvents: (v) => { activeRunEvents = v || []; },
+    getRunLogs: () => activeRunLogs,
+    setRunLogs: (v) => { activeRunLogs = v || []; },
+    getExpandedSteps: () => expandedStepIndices,
+    setExpandedSteps: (v) => { expandedStepIndices = v || new Set(); },
+
+    // last* for render helpers used by router
+    getLastRuns: () => lastRuns,
+
+    // callbacks (close over app.js scope)
+    refreshDashboard,
+    renderRuns,
+    renderDiagnostics: () => renderDiagnostics(diagnosticsContext()),
+    fitLogPanelToViewport,
+
+    // audit pass-throughs (re-exported here for router; imported at top of this file)
+    applyAuditHashQuery,
+    setAuditSubtab,
+    getActiveAuditSubtab,
+    setActiveAuditSubtabFromButton,
+    buildAuditHash,
+    syncAuditControls,
   };
 }
 
@@ -198,7 +245,7 @@ async function replayRun(run, btn, host) {
   try {
     const payload = await postJson(`/api/runs/${encodeURIComponent(runId)}/replay`);
     if (!payload.run_id) throw new Error("replay response did not include run_id");
-    navigateToRun(payload.run_id);
+    nTR(payload.run_id);
     fetchAndRenderRuns().catch(console.error);
   } catch (e) {
     if (host) {
@@ -648,7 +695,7 @@ function renderRuns(runs) {
     row.dataset.key = `run-${r.run_id}`;
     row.dataset.hash = `${r.run_id}-${ts}-${r.duration_ms}-${r.state}-${friction.denials}-${friction.toolFails}-${friction.durationMs}-${friction.longRun}`;
     row.style.cursor = "pointer";
-    row.addEventListener("click", () => navigateToRun(r.run_id));
+    row.addEventListener("click", () => nTR(r.run_id));
     frag.appendChild(row);
   }
   syncNodes(body, Array.from(frag.children));
@@ -1489,7 +1536,7 @@ function openTaskFromKnowledge(taskId) {
   searchQuery = "";
   const taskSearch = $("task-search");
   if (taskSearch) taskSearch.value = "";
-  setActiveTab("tasks", { refresh: false });
+  sAT("tasks", { refresh: false });
   const open = () => openVisibleTask(taskId, taskContext());
   if (lastTasks.length > 0 && hasCrewOptions()) {
     open();
@@ -1654,207 +1701,6 @@ function wireFrictionSearch() {
       if (activeTab === "knowledge") fetchAndRenderFrictions().catch(console.error);
     }, 200);
   });
-}
-
-const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "knowledge", "run-detail"];
-const DIAG_SUBTABS = ["runs", "metrics", "errors"];
-const RUN_DETAIL_SUBTABS = ["steps", "events"];
-const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
-
-function parseHashRoute(raw) {
-  const trimmed = String(raw || "").replace(/^#/, "");
-  const queryIdx = trimmed.indexOf("?");
-  const path = queryIdx >= 0 ? trimmed.slice(0, queryIdx) : trimmed;
-  const queryStr = queryIdx >= 0 ? trimmed.slice(queryIdx + 1) : "";
-  const segments = path.split("/").filter(Boolean);
-  const query = new URLSearchParams(queryStr);
-  return { segments, query };
-}
-
-function setActiveTab(raw, opts = {}) {
-  const { segments, query } = parseHashRoute(raw);
-  const head = segments[0] || "tasks";
-  if (head === "runs" && !segments[1] && query.get("run_id")) {
-    segments[1] = encodeURIComponent(query.get("run_id"));
-  }
-  let top;
-  if (head === "runs" && segments[1]) {
-    top = "run-detail";
-    const nextRunId = decodeURIComponent(segments[1]);
-    if (activeRunId !== nextRunId) {
-      activeRunLogs = [];
-      expandedStepIndices.clear();
-    }
-    activeRunId = nextRunId;
-    const expandStep = query.get("step");
-    if (expandStep != null && /^\d+$/.test(expandStep)) {
-      expandedStepIndices.add(Number(expandStep));
-    }
-    const sub = RUN_DETAIL_SUBTABS.includes(segments[2]) ? segments[2] : activeRunSubtab;
-    activeRunSubtab = sub;
-  } else if (TABS.includes(head)) {
-    top = head;
-  } else {
-    top = "tasks";
-  }
-  activeTab = top;
-  for (const tab of document.querySelectorAll(".tab")) {
-    tab.classList.toggle("active", tab.dataset.tab === top);
-  }
-  for (const pane of document.querySelectorAll(".tab-pane")) {
-    pane.classList.toggle("active", pane.dataset.tab === top);
-  }
-  if (top === "tasks") requestAnimationFrame(fitLogPanelToViewport);
-
-  const indicator = $("tab-indicator") || el("div", {id: "tab-indicator", class: "tab-indicator"});
-  if (!indicator.parentNode) document.querySelector(".tabs").appendChild(indicator);
-  // For run-detail (no top tab button), hide the indicator
-  const activeTabEl = document.querySelector(`.tab[data-tab="${top}"]`);
-  if (activeTabEl) {
-    indicator.style.display = "";
-    indicator.style.width = `${activeTabEl.offsetWidth}px`;
-    indicator.style.left = `${activeTabEl.offsetLeft}px`;
-  } else {
-    indicator.style.display = "none";
-  }
-
-  let hash;
-  if (top === "diagnostics") {
-    const sub = DIAG_SUBTABS.includes(segments[1]) ? segments[1] : activeDiagSubtab;
-    setDiagSubtab(sub);
-    hash = `#diagnostics/${sub}`;
-  } else if (top === "audit") {
-    applyAuditHashQuery(query);
-    const sub = ["events", "policy"].includes(segments[1]) ? segments[1] : getActiveAuditSubtab();
-    setAuditSubtab(sub);
-    hash = buildAuditHash();
-    syncAuditControls();
-  } else if (top === "run-detail") {
-    setRunDetailSubtab(activeRunSubtab);
-    hash = `#runs/${encodeURIComponent(activeRunId || "")}` +
-      (activeRunSubtab !== "steps" ? `/${activeRunSubtab}` : "");
-    if (query.get("step") != null) hash += `?step=${encodeURIComponent(query.get("step"))}`;
-  } else if (top === "knowledge") {
-    const sub = KNOWLEDGE_SUBTABS.includes(segments[1]) ? segments[1] : activeKnowledgeSubtab;
-    setKnowledgeSubtab(sub);
-    hash = sub === "learnings" ? "#knowledge/learnings" : `#knowledge/${sub}`;
-  } else {
-    hash = `#${top}`;
-  }
-  const hashChanged = window.location.hash !== hash;
-  const shouldUpdateHash = opts.updateHash !== false;
-  if (hashChanged && shouldUpdateHash) {
-    window.location.hash = hash;
-  }
-  if (opts.refresh !== false && (!hashChanged || !shouldUpdateHash)) refreshDashboard();
-}
-
-function setRunDetailSubtab(name) {
-  if (!RUN_DETAIL_SUBTABS.includes(name)) name = "steps";
-  activeRunSubtab = name;
-  for (const btn of document.querySelectorAll("#run-detail-subtabs .subtab")) {
-    btn.classList.toggle("active", btn.dataset.subtab === name);
-  }
-  $("run-steps-body").style.display = name === "steps" ? "block" : "none";
-  $("run-events-body").style.display = name === "events" ? "block" : "none";
-}
-
-function setDiagSubtab(name) {
-  if (!DIAG_SUBTABS.includes(name)) name = "runs";
-  activeDiagSubtab = name;
-  for (const btn of document.querySelectorAll("#diag-subtabs .subtab")) {
-    btn.classList.toggle("active", btn.dataset.subtab === name);
-  }
-
-  const subIndicator = $("subtab-indicator") || el("div", {id: "subtab-indicator", class: "tab-indicator"});
-  if (!subIndicator.parentNode) document.querySelector("#diag-subtabs").appendChild(subIndicator);
-  const activeBtn = document.querySelector(`.subtab[data-subtab="${name}"]`);
-  if (activeBtn) {
-    subIndicator.style.width = `${activeBtn.offsetWidth}px`;
-    subIndicator.style.left = `${activeBtn.offsetLeft}px`;
-  }
-
-  if (name === "runs") {
-    $("diag-body").style.display = "none";
-    $("runs-body").style.display = "block";
-    renderRuns(lastRuns);
-  } else {
-    $("diag-body").style.display = "block";
-    $("runs-body").style.display = "none";
-    renderDiagnostics(diagnosticsContext());
-  }
-}
-
-function setKnowledgeSubtab(name) {
-  if (!KNOWLEDGE_SUBTABS.includes(name)) name = "learnings";
-  activeKnowledgeSubtab = name;
-  for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
-    btn.classList.toggle("active", btn.dataset.subtab === name);
-  }
-  const isAdrs = name === "adrs";
-  const isFrictions = name === "frictions";
-  const isLearnings = name === "learnings";
-  const toggle = (id, show) => {
-    const node = $(id);
-    if (node) node.style.display = show ? "" : "none";
-  };
-  toggle("learning-stats", isLearnings);
-  toggle("learning-search", isLearnings);
-  toggle("learnings-body", isLearnings);
-  toggle("learning-detail-panel", isLearnings);
-  toggle("adr-stats", isAdrs);
-  toggle("adr-search", isAdrs);
-  toggle("adrs-body", isAdrs);
-  toggle("adr-detail-panel", isAdrs);
-  toggle("friction-stats", isFrictions);
-  toggle("friction-search", isFrictions);
-  toggle("frictions-body", isFrictions);
-  toggle("friction-detail-panel", isFrictions);
-}
-
-function initTabs() {
-  for (const tab of document.querySelectorAll(".tab")) {
-    tab.addEventListener("click", () => setActiveTab(tab.dataset.tab, { refresh: false }));
-  }
-  for (const btn of document.querySelectorAll("#diag-subtabs .subtab")) {
-    btn.addEventListener("click", () =>
-      setActiveTab(`diagnostics/${btn.dataset.subtab}`, { refresh: false }),
-    );
-  }
-  for (const btn of document.querySelectorAll("#run-detail-subtabs .subtab")) {
-    btn.addEventListener("click", () => {
-      activeRunSubtab = btn.dataset.subtab;
-      const path = `runs/${encodeURIComponent(activeRunId || "")}` +
-        (activeRunSubtab !== "steps" ? `/${activeRunSubtab}` : "");
-      setActiveTab(path, { refresh: false });
-      refreshDashboard();
-    });
-  }
-  for (const btn of document.querySelectorAll("#audit-subtabs .subtab")) {
-    btn.addEventListener("click", () => {
-      setActiveAuditSubtabFromButton(btn.dataset.subtab);
-      const newHash = buildAuditHash();
-      if (window.location.hash !== newHash) {
-        window.location.hash = newHash;
-      } else {
-        refreshDashboard();
-      }
-    });
-  }
-  for (const btn of document.querySelectorAll("#knowledge-subtabs .subtab")) {
-    btn.addEventListener("click", () =>
-      setActiveTab(`knowledge/${btn.dataset.subtab}`, { refresh: false }),
-    );
-  }
-  window.addEventListener("hashchange", () => {
-    setActiveTab(window.location.hash);
-  });
-  setActiveTab(window.location.hash || "tasks", {
-    refresh: false,
-    updateHash: false,
-  });
-  refreshDashboard();
-  setInterval(refreshDashboard, 30000);
 }
 
 function fmtRelative(iso) {
@@ -2115,16 +1961,6 @@ function refreshLabel() {
   return activeTab;
 }
 
-function navigateToRun(runId) {
-  activeRunId = runId;
-  expandedStepIndices = new Set();
-  activeRunDetail = null;
-  activeRunEvents = [];
-  setActiveTab(`runs/${encodeURIComponent(runId)}`);
-}
-
-
-
 function renderRunDetailEmpty(message) {
   const meta = $("run-detail-meta");
   if (meta) syncNodes(meta, [el("div", { class: "empty-state" }, [
@@ -2166,7 +2002,7 @@ function renderRunDetailMeta() {
 
   const wrap = el("div");
   const back = el("button", { class: "back-action", text: "← back to runs" });
-  back.addEventListener("click", () => setActiveTab("diagnostics/runs"));
+  back.addEventListener("click", () => sAT("diagnostics/runs"));
   const actions = el("div", { class: "run-detail-actions" }, [back]);
   if (run.retry_source_run_id) {
     const sourceId = run.retry_source_run_id;
@@ -2175,7 +2011,7 @@ function renderRunDetailMeta() {
       text: `Replayed from ${sourceId}`,
       title: `Open ${sourceId}`,
     });
-    lineage.addEventListener("click", () => navigateToRun(sourceId));
+    lineage.addEventListener("click", () => nTR(sourceId));
     actions.appendChild(lineage);
   }
   if (run.run_id) actions.appendChild(buildReplayRunButton(run, wrap));
@@ -2379,7 +2215,14 @@ function renderRunGantt() {
         expandedStepIndices.add(step.step_index);
       }
       activeRunSubtab = "steps";
-      setRunDetailSubtab("steps");
+      // Inline subtab activation for "steps" (router owns canonical setRunDetailSubtab impl + consts)
+      for (const btn of document.querySelectorAll("#run-detail-subtabs .subtab")) {
+        btn.classList.toggle("active", btn.dataset.subtab === "steps");
+      }
+      const rsb = $("run-steps-body");
+      const reb = $("run-events-body");
+      if (rsb) rsb.style.display = "block";
+      if (reb) reb.style.display = "none";
       renderRunSteps();
       const target = document.querySelector(`[data-key="step-${step.step_index}"]`);
       if (target && target.scrollIntoView) {
@@ -2630,6 +2473,9 @@ wireFrictionSearch();
 buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
-initTabs();
+
+const rctx = routerContext();
+initRouter(rctx);
+iT();
 
 initLogTail();
