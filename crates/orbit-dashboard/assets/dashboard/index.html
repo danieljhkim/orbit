@@ -505,6 +505,12 @@
       .external-ref-line a:hover {
         text-decoration: underline;
       }
+      .detail-side .meta-item .value a:focus-visible,
+      .external-ref-line a:focus-visible {
+        text-decoration: underline;
+        outline: 2px solid var(--accent-hover);
+        outline-offset: 2px;
+      }
       .detail-tag-row {
         display: flex;
         flex-wrap: wrap;
@@ -652,6 +658,13 @@
       .markdown-body p:last-child { margin-bottom: 0; }
       .markdown-body a { color: var(--accent); text-decoration: none; }
       .markdown-body a:hover { text-decoration: underline; }
+      .markdown-body a:focus-visible,
+      .ac-list a:focus-visible,
+      .artifact-preview a:focus-visible {
+        text-decoration: underline;
+        outline: 2px solid var(--accent-hover);
+        outline-offset: 2px;
+      }
       .markdown-body code {
         font-family: var(--font-mono);
         font-size: 11px;
@@ -699,6 +712,16 @@
         padding-left: 12px;
         border-left: 3px solid var(--border);
         color: var(--fg-dim);
+      }
+
+      .ac-list a,
+      .artifact-preview a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .ac-list a:hover,
+      .artifact-preview a:hover {
+        text-decoration: underline;
       }
 
       .row-detail .ac-list,
