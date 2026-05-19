@@ -24,7 +24,9 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let query = required_string(&input, &["query"], "query")?;
     let limit = optional_usize(&input, "limit")?;
-    to_json(runtime.search_docs(&query, limit)?)
+    let include_superseded =
+        optional_bool_alias(&input, &["include_superseded", "includeSuperseded"])?.unwrap_or(false);
+    to_json(runtime.search_docs(&query, limit, include_superseded)?)
 }
 
 pub(super) fn add(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {

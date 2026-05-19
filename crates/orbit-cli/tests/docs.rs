@@ -38,15 +38,136 @@ fn cli_docs_list_show_and_search_json() {
         results,
         json!([
             {
-                "path": "docs/pattern.md",
-                "type": "pattern",
-                "summary": "RAII guard pattern",
-                "tags": ["rust", "guard"],
-                "related_artifacts": ["ORB-00160"],
-                "score": 84,
-                "matched_by": ["summary"]
+                "Doc": {
+                    "path": "docs/pattern.md",
+                    "type": "pattern",
+                    "summary": "RAII guard pattern",
+                    "tags": ["rust", "guard"],
+                    "related_artifacts": ["ORB-00160"],
+                    "score": 84,
+                    "matched_by": ["summary"]
+                }
             }
         ])
+    );
+}
+
+#[test]
+fn cli_docs_search_federates_docs_and_adrs() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/orbit-docs.md",
+        "---\ntype: design\nsummary: Docs search context\ntags: [orbit-docs]\n---\n# Docs Search\n",
+    );
+    let adr_id = workspace.add_adr(
+        "Federated ADR search",
+        &["orbit-docs"],
+        "## Context\nDocs search needs ADR metadata.\n\n## Decision\nKeep stores sibling and search both.\n\n## Consequences\n- Results carry origin tags.\n- Cost: docs search owns a small federation overlay.\n",
+    );
+
+    let results = workspace.run_json(
+        &["docs", "search", "orbit-docs", "--limit", "5", "--json"],
+        "docs search federated",
+    );
+    let adr_path = format!(".orbit/adrs/proposed/{adr_id}/body.md");
+
+    assert_eq!(
+        results,
+        json!([
+            {
+                "Doc": {
+                    "path": "docs/orbit-docs.md",
+                    "type": "design",
+                    "summary": "Docs search context",
+                    "tags": ["orbit-docs"],
+                    "score": 120,
+                    "matched_by": ["tag:orbit-docs"]
+                }
+            },
+            {
+                "Adr": {
+                    "id": adr_id,
+                    "title": "Federated ADR search",
+                    "status": "proposed",
+                    "path": adr_path,
+                    "related_features": ["orbit-docs"],
+                    "score": 120,
+                    "matched_by": ["related_feature:orbit-docs"]
+                }
+            }
+        ])
+    );
+
+    let plain = workspace.run(&["docs", "search", "orbit-docs"], "docs search table");
+    let stdout = String::from_utf8_lossy(&plain.stdout);
+    assert!(stdout.contains("ORIGIN"));
+    assert!(stdout.contains("doc"));
+    assert!(stdout.contains("adr"));
+}
+
+#[test]
+fn cli_docs_search_superseded_adrs_are_opt_in() {
+    let workspace = TestWorkspace::new();
+    let old_id = workspace.add_adr(
+        "Archive policy old",
+        &["archive-policy"],
+        "## Context\nAn old archive decision existed.\n\n## Decision\nUse the old archive policy.\n\n## Consequences\n- Superseded records stay searchable only by opt-in.\n- Cost: archaeology requires an explicit flag.\n",
+    );
+    workspace.accept_adr(&old_id);
+    let new_id = workspace.add_adr(
+        "Archive policy replacement",
+        &["archive-policy-current"],
+        "## Context\nThe archive decision changed.\n\n## Decision\nUse the replacement archive policy.\n\n## Consequences\n- Current search should prefer active records.\n- Cost: the old record moves to superseded state.\n",
+    );
+    workspace.accept_adr(&new_id);
+    workspace.supersede_adr(&old_id, &new_id);
+
+    let default_results = workspace.run_json(
+        &["docs", "search", "archive-policy", "--json"],
+        "docs search default superseded",
+    );
+    assert!(
+        !default_results
+            .as_array()
+            .expect("array")
+            .iter()
+            .any(|result| result["Adr"]["id"] == old_id)
+    );
+
+    let included_results = workspace.run_json(
+        &[
+            "docs",
+            "search",
+            "archive-policy",
+            "--include-superseded",
+            "--json",
+        ],
+        "docs search include superseded",
+    );
+    assert!(
+        included_results
+            .as_array()
+            .expect("array")
+            .iter()
+            .any(|result| result["Adr"]["id"] == old_id && result["Adr"]["status"] == "superseded")
+    );
+
+    let tool_results = workspace.run_json(
+        &[
+            "tool",
+            "run",
+            "orbit.docs.search",
+            "--input",
+            "{\"query\":\"archive-policy\",\"include_superseded\":true}",
+        ],
+        "tool run docs search include superseded",
+    );
+    assert!(
+        tool_results
+            .as_array()
+            .expect("array")
+            .iter()
+            .any(|result| result["Adr"]["id"] == old_id)
     );
 }
 
@@ -182,6 +303,26 @@ fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
     ] {
         assert!(names.contains(&name), "missing docs tool {name}");
     }
+    let docs_search = tools
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "orbit.docs.search")
+        .expect("docs search tool");
+    assert!(
+        docs_search["description"]
+            .as_str()
+            .expect("description")
+            .contains("ADRs")
+    );
+    let parameter_names = docs_search["parameters"]
+        .as_array()
+        .expect("parameters")
+        .iter()
+        .map(|param| param["name"].as_str().expect("parameter name"))
+        .collect::<Vec<_>>();
+    assert!(parameter_names.contains(&"include_superseded"));
+    assert!(!parameter_names.contains(&"include_adrs"));
 
     let output = workspace.run_json(
         &["tool", "run", "orbit.docs.list", "--input", "{}"],
@@ -241,6 +382,48 @@ impl TestWorkspace {
                 String::from_utf8_lossy(&output.stderr)
             )
         })
+    }
+
+    fn tool_run(&self, tool: &str, input: Value, label: &str) -> Value {
+        let input = serde_json::to_string(&input).expect("serialize tool input");
+        self.run_json(&["tool", "run", tool, "--input", &input], label)
+    }
+
+    fn add_adr(&self, title: &str, related_features: &[&str], body: &str) -> String {
+        let adr = self.tool_run(
+            "orbit.adr.add",
+            json!({
+                "title": title,
+                "body": body,
+                "owner": "codex",
+                "related_features": related_features,
+            }),
+            "add adr",
+        );
+        adr["id"].as_str().expect("adr id").to_string()
+    }
+
+    fn accept_adr(&self, id: &str) {
+        self.tool_run(
+            "orbit.adr.update",
+            json!({
+                "id": id,
+                "status": "accepted",
+                "related_tasks": ["ORB-00001"],
+            }),
+            "accept adr",
+        );
+    }
+
+    fn supersede_adr(&self, old_id: &str, new_id: &str) {
+        self.tool_run(
+            "orbit.adr.supersede",
+            json!({
+                "old_id": old_id,
+                "new_id": new_id,
+            }),
+            "supersede adr",
+        );
     }
 }
 

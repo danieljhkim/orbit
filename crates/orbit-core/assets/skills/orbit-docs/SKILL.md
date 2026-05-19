@@ -20,11 +20,11 @@ summary: One-line hook for agent retrieval
 tags: [hook, learning, audit]
 paths: ["crates/orbit-cli/**"]
 related_features: [hook-rewrite]
-related_artifacts: [ORB-00160, ADR-0168, L20260514-3]
+related_artifacts: ["<task-id>", "<adr-id>", "<learning-id>"]
 ---
 ```
 
-`type` and `summary` are required. `summary` must be a non-empty single line. `related_artifacts` uses ID-prefix dispatch: `ORB-NNNNN` for tasks, `LYYYYMMDD-N` for learnings, `FYYYY-MM-NNN` for friction reports, and `ADR-NNNN` for ADRs.
+`type` and `summary` are required. `summary` must be a non-empty single line. `related_artifacts` uses ID-prefix dispatch for task, learning, friction, and ADR IDs.
 
 ## Recommended Layout
 
@@ -46,7 +46,8 @@ Doc = explanatory context. It is PR-reviewed Markdown, retrieved through `orbit.
 
 ## Routing Notes
 
-- ADRs are owned by `orbit-adr` and live at `.orbit/adrs/{accepted,proposed,superseded}/ADR-NNNN/`. Orbit-docs does not index `.orbit/` in v1.
+- ADRs are owned by `orbit-adr` and live at `.orbit/adrs/{accepted,proposed,superseded}/<adr-id>/`. Orbit-docs does not walk `.orbit/`, but `orbit docs search` federates ADR metadata into the search result set unconditionally. Use `--include-superseded` only when superseded ADRs should be included for archaeology.
+- For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-docs"}'` and inspect the accepted ADR that covers the sibling-index search overlay.
 - Learnings are owned by `orbit-learning`; cross-reference them from docs with `related_artifacts`.
 - `orbit-design` is retired. Use `orbit-docs` for docs retrieval and `orbit-adr` when creating, accepting, or superseding ADRs.
 
@@ -63,11 +64,13 @@ CLI and MCP forms are equivalent:
 | Reindex | `orbit docs reindex` | `orbit.docs.reindex` |
 | Migrate | `orbit docs migrate --dry-run` | `orbit.docs.migrate` |
 
+Search returns tagged `Doc` and `Adr` results. ADR federation is always on; the only ADR-specific search option is `--include-superseded` / `include_superseded: true`, which re-includes superseded ADRs.
+
 `reindex` is a v1 no-op because the indexer walks on demand. `migrate` backfills locked frontmatter for `docs/design/<feature>/*.md` and `docs/design-patterns/*.md`; it never touches `.orbit/`.
 
 ## Workflow
 
-1. Use `orbit docs search <query> --json` first when looking for context.
+1. Use `orbit docs search <query> --json` first when looking for context across docs and ADRs.
 2. Use `orbit docs show <path> --json` for the full Markdown body.
 3. Use `orbit docs list --json --type <type>` or `--tag <tag>` when browsing.
 4. Use `orbit docs add <path>` only for existing non-`.orbit/` roots that should be searched going forward.

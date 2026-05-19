@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use orbit_core::{DocType, OrbitError, OrbitRuntime};
+use orbit_core::{DocType, OrbitError, OrbitRuntime, SearchResult};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -20,7 +20,7 @@ pub enum DocsSubcommand {
     List(DocsListArgs),
     /// Show one doc with parsed frontmatter and body
     Show(DocsShowArgs),
-    /// Search docs by summary, tags, and type
+    /// Search docs and ADRs by summary, tags, type, title, related features, and status
     Search(DocsSearchArgs),
     /// Register an additional docs root in .orbit/config.toml
     Add(DocsAddArgs),
@@ -54,7 +54,7 @@ pub struct DocsShowArgs {
 
 #[derive(Args)]
 pub struct DocsSearchArgs {
-    /// Query matched against summary, tags, and type
+    /// Query matched against docs and ADR metadata
     pub query: String,
     /// Output as JSON
     #[arg(long)]
@@ -62,6 +62,9 @@ pub struct DocsSearchArgs {
     /// Maximum number of matches to return (default 20)
     #[arg(long)]
     pub limit: Option<usize>,
+    /// Include superseded ADRs in search results
+    #[arg(long)]
+    pub include_superseded: bool,
 }
 
 #[derive(Args)]
@@ -179,19 +182,40 @@ impl Execute for DocsShowArgs {
 
 impl Execute for DocsSearchArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let results = runtime.search_docs(&self.query, self.limit)?;
+        let results = runtime.search_docs(&self.query, self.limit, self.include_superseded)?;
         if self.json {
             print_json(&results)
         } else {
+            let mut table = crate::output::table::build_table(&[
+                "ORIGIN",
+                "PATH",
+                "TYPE/STATUS",
+                "SUMMARY/TITLE",
+                "MATCHED",
+            ]);
             for result in results {
-                println!(
-                    "{}\t{}\t{}\t[{}]",
-                    result.record.path,
-                    result.record.frontmatter.doc_type,
-                    result.record.frontmatter.summary,
-                    result.matched_by.join(", ")
-                );
+                match result {
+                    SearchResult::Doc(result) => {
+                        table.add_row(vec![
+                            "doc".to_string(),
+                            result.record.path,
+                            result.record.frontmatter.doc_type.to_string(),
+                            result.record.frontmatter.summary,
+                            result.matched_by.join(", "),
+                        ]);
+                    }
+                    SearchResult::Adr(result) => {
+                        table.add_row(vec![
+                            "adr".to_string(),
+                            result.path.to_string_lossy().into_owned(),
+                            result.status.to_string(),
+                            result.title,
+                            result.matched_by.join(", "),
+                        ]);
+                    }
+                }
             }
+            println!("{table}");
             Ok(())
         }
     }

@@ -50,8 +50,8 @@ pub use orbit_store::{
 };
 
 pub use command::docs::{
-    ArtifactRef, DocAddOutcome, DocFrontmatter, DocMigrationChange, DocMigrationReport, DocRecord,
-    DocSearchResult, DocShow, DocType, TaskRelatedDoc,
+    AdrSearchResult, ArtifactRef, DocAddOutcome, DocFrontmatter, DocMigrationChange,
+    DocMigrationReport, DocRecord, DocSearchResult, DocShow, DocType, SearchResult, TaskRelatedDoc,
 };
 pub use command::learning::migrate_learning_layout_at;
 pub use command::task_template::TaskTemplate;

@@ -9,6 +9,8 @@ description: Use this whenever an Architecture Decision Record is being created,
 
 Create and maintain Orbit ADR artifacts through the registered tool surface. ADRs record decisions, not implementation plans: use them when a choice has a real alternative, constrains future work, and carries a non-trivial cost.
 
+ADRs and orbit-docs are sibling indexes by design. ADRs keep their stricter lifecycle and dedicated allocation through `orbit.adr.*`; `orbit docs search` surfaces ADR metadata read-only alongside doc results. For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'` and inspect the accepted ADR covering the sibling-index search overlay.
+
 ## Tool Invocation
 
 Both surfaces accept the same JSON. Use the CLI examples below when shell access is available; use the MCP names when the Orbit plugin exposes them.
@@ -16,10 +18,10 @@ Both surfaces accept the same JSON. Use the CLI examples below when shell access
 | Tool | MCP | CLI |
 |------|-----|-----|
 | `orbit.adr.add` | `orbit_adr_add({...})` | `orbit tool run orbit.adr.add --input-file adr.json` |
-| `orbit.adr.show` | `orbit_adr_show({...})` | `orbit tool run orbit.adr.show --input '{"id":"ADR-0042"}'` |
+| `orbit.adr.show` | `orbit_adr_show({...})` | `orbit tool run orbit.adr.show --input '{"id":"<adr-id>"}'` |
 | `orbit.adr.list` | `orbit_adr_list({...})` | `orbit tool run orbit.adr.list --input '{"feature":"task-artifacts"}'` |
 | `orbit.adr.update` | `orbit_adr_update({...})` | `orbit tool run orbit.adr.update --input-file update.json` |
-| `orbit.adr.supersede` | `orbit_adr_supersede({...})` | `orbit tool run orbit.adr.supersede --input '{"old_id":"ADR-0041","new_id":"ADR-0042"}'` |
+| `orbit.adr.supersede` | `orbit_adr_supersede({...})` | `orbit tool run orbit.adr.supersede --input '{"old_id":"<old-adr-id>","new_id":"<new-adr-id>"}'` |
 
 Always include `model` in JSON inputs when the tool accepts it. The value is your agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized, but the family is canonical. Prefer `--input-file` for `add` and body-changing `update` calls so markdown does not get mangled by shell quoting.
 
@@ -27,20 +29,20 @@ Run `orbit tool show orbit.adr.add` or `orbit tool list` instead of guessing if 
 
 ## When Editing `4_decisions.md` Directly
 
-If you are in the middle of writing prose into `docs/design/<feature>/4_decisions.md` and about to add a `## ADR-` heading, **stop and run `orbit.adr.add` first**. Then use the allocated global ID (`ADR-NNNN`, 4-digit) as the local heading verbatim. Per [ADR-0153] this is the only authoring path that keeps the global store and the local narrative in sync.
+If you are in the middle of writing prose into `docs/design/<feature>/4_decisions.md` and about to add an ADR heading, **stop and run `orbit.adr.add` first**. Then use the allocated global ID as the local heading verbatim. To find the accepted boundary decision behind this rule, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'`.
 
-Anti-patterns the failure mode looked like before [ORB-00098]:
+Anti-patterns this rule prevents:
 
 - Picking the next sequential local number (`## ADR-006 — ...` after `ADR-005`) without an allocation.
-- Picking a four-digit number that "looks global" (e.g. `## ADR-0153 — ...`) without an allocation — this is worse than the 3-digit version because readers assume `orbit.adr.show ADR-0153` will return that decision; it will not.
+- Picking a four-digit number that "looks global" without an allocation is worse than the 3-digit version because readers assume `orbit.adr.show` will return that decision; it will not.
 
-Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, and the legacy_id resolution path. If you find an existing local-numbered ADR that was authored this way, backfill it via `orbit.adr.add` and set `legacy_ids: ["<feature>/ADR-NNN"]` on the resulting record.
+Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, and the legacy_id resolution path. If you find an existing local-numbered ADR that was authored this way, backfill it via `orbit.adr.add` and set `legacy_ids` on the resulting record.
 
 ## Workflow
 
 1. Inspect nearby decisions before adding a new one.
    - `orbit tool run orbit.adr.list --input '{"feature":"<feature>","model":"<agent-family>"}'`
-   - `orbit tool run orbit.adr.show --input '{"id":"ADR-NNNN","model":"<agent-family>"}'`
+  - `orbit tool run orbit.adr.show --input '{"id":"<adr-id>","model":"<agent-family>"}'`
    - Use `legacy_id` lookup for migrated per-feature references, for example `{"legacy_id":"activity-job/ADR-039"}`.
 2. Decide whether this is a new ADR, an update to a proposed ADR, or a supersession.
    - New decision: `orbit.adr.add`.
@@ -53,7 +55,7 @@ Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, a
 7. **Close the loop with a source citation when the ADR has a code anchor.** If the ADR encodes a constraint enforced at a small set of code sites — a `ToolParam` requiring a field, a validation check, a guarded code path — drop a one-line citation comment at each enforcement site in the Rust source so the next reader of that line sees the rationale before they reason their way to weakening it:
 
    ```rust
-   // ADR-NNNN: <one-line rationale>
+   // <adr-id>: <one-line rationale>
    ```
 
    Use the literal ADR ID returned from `orbit.adr.add` (greppability is the point). If the constraint has no single anchor — pure architectural decision, cross-cutting style — record this in the `## Consequences` body as a single sentence (e.g. "No single code anchor; convention enforced via review.") and skip the citation step.
@@ -115,8 +117,8 @@ Attach a legacy per-feature alias after creation:
 
 ```bash
 orbit tool run orbit.adr.update --input '{
-  "id": "ADR-0143",
-  "legacy_ids": ["task-artifacts/ADR-001"],
+  "id": "<adr-id>",
+  "legacy_ids": ["<legacy-id>"],
   "model": "<agent-family>"
 }'
 ```
@@ -125,7 +127,7 @@ Accept a proposed ADR only once a real task exists:
 
 ```bash
 orbit tool run orbit.adr.update --input '{
-  "id": "ADR-0143",
+  "id": "<adr-id>",
   "status": "accepted",
   "related_tasks": ["T20260510-28"],
   "model": "<agent-family>"
@@ -136,8 +138,8 @@ Supersede an old ADR:
 
 ```bash
 orbit tool run orbit.adr.supersede --input '{
-  "old_id": "ADR-0041",
-  "new_id": "ADR-0042",
+  "old_id": "<old-adr-id>",
+  "new_id": "<new-adr-id>",
   "model": "<agent-family>"
 }'
 ```
@@ -150,7 +152,7 @@ orbit tool run orbit.adr.supersede --input '{
 | Creating a task just to propose an ADR | Proposed ADRs explicitly allow empty `related_tasks` | Leave `related_tasks: []` until acceptance |
 | Accepting an ADR without a real task | Lifecycle requires implementation linkage at acceptance | Add the task ID in the same `orbit.adr.update` call |
 | Omitting `Cost:` | The validator rejects new ADRs without an explicit cost | Include a consequences bullet beginning `Cost:` |
-| Treating local `ADR-001` as global | Local per-feature numbers are legacy aliases | Use global `ADR-NNNN` and optional `legacy_ids` |
+| Treating a local ADR heading as global | Local per-feature numbers are legacy aliases | Use the allocated global ID and optional `legacy_ids` |
 
 ## Exit Criteria
 

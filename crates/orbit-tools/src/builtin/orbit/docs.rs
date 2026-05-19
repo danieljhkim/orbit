@@ -56,13 +56,19 @@ impl Tool for OrbitDocsSearchTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.docs.search".to_string(),
-            description: "Search docs by frontmatter summary, tags, and type.".to_string(),
+            description: "Search docs and ADRs together by docs frontmatter and ADR metadata."
+                .to_string(),
             parameters: vec![
                 required_param("query", "Query text.", "string"),
                 optional_param(
                     "limit",
                     "Maximum number of results. Default: 20.",
                     "integer",
+                ),
+                optional_param(
+                    "include_superseded",
+                    "Include superseded ADRs. Default: false.",
+                    "boolean",
                 ),
             ],
             builtin: true,
