@@ -19,6 +19,10 @@ import {
   wireAuditSearch,
 } from './audit.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
+import {
+  renderDiagnostics,
+  renderImplementOneCard as renderImplOne,
+} from './diagnostics.js';
 
 const STATUS_ORDER = [
   "in-progress",
@@ -109,6 +113,18 @@ function auditContext() {
     fmtRelative,
     fmtAbsTime,
     truncate,
+  };
+}
+
+function diagnosticsContext() {
+  return {
+    getLastDiagnostics: () => lastDiagnostics,
+    getActiveDiagSubtab: () => activeDiagSubtab,
+    fmtRelative,
+    fmtDuration,
+    truncate,
+    setActiveTab,
+    navigateToRun,
   };
 }
 
@@ -1765,7 +1781,7 @@ function setDiagSubtab(name) {
   } else {
     $("diag-body").style.display = "block";
     $("runs-body").style.display = "none";
-    renderDiagnostics();
+    renderDiagnostics(diagnosticsContext());
   }
 }
 
@@ -1851,167 +1867,6 @@ function truncate(text, max) {
   return text.slice(0, max) + "\u2026";
 }
 
-const DIAG_METRICS_COLUMNS = [
-  { key: "ts", label: "time", num: false, render: (v) => fmtRelative(v) },
-  { key: "step", label: "step", num: false },
-  { key: "actor_identity", label: "actor", num: false, render: (v) => v || "-" },
-  {
-    key: "token_usage",
-    label: "tokens",
-    num: true,
-    render: (v) => (v == null ? "-" : String(v)),
-  },
-  { key: "tool_invocations", label: "tools", num: true },
-  {
-    key: "step_duration_ms",
-    label: "duration",
-    num: true,
-    render: (v) => (v == null ? "-" : fmtDuration(v)),
-  },
-  { key: "retry_count", label: "retries", num: true },
-];
-
-const DIAG_ERRORS_COLUMNS = [
-  { key: "ts", label: "time", num: false, render: (v) => fmtRelative(v) },
-  { key: "source", label: "source", num: false },
-  { key: "provider", label: "provider", num: false, render: (v) => v || "-" },
-  { key: "step", label: "step", num: false, render: (v) => v || "-" },
-  {
-    key: "message",
-    label: "message",
-    num: false,
-    cellClass: "stderr",
-    render: (v, row, td) => {
-      const full = v || "";
-      td.title = row.target ? `${row.target}: ${full}` : full;
-      return truncate(full, 220);
-    },
-  },
-];
-
-function renderDiagnosticsTable(rows, columns) {
-  const body = $("diag-body");
-  
-  if (!rows || rows.length === 0) {
-    syncNodes(body, [el("div", { class: "empty-state" }, [
-      el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No entries this month." })
-    ])]);
-    return;
-  }
-  
-  let table = body.querySelector("table.scoreboard-table");
-  let tbody;
-  const tableSig = columns.map(c => c.key).join("-");
-  if (!table || table.dataset.sig !== tableSig) {
-    table = el("table", { class: "scoreboard-table" });
-    table.dataset.sig = tableSig;
-    const thead = el("thead");
-    const headRow = el("tr");
-    for (const col of columns) {
-      headRow.appendChild(el("th", { class: col.num ? "num" : "", text: col.label }));
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    tbody = el("tbody");
-    table.appendChild(tbody);
-    syncNodes(body, [table]);
-  } else {
-    tbody = table.querySelector("tbody");
-  }
-
-  const frag = document.createDocumentFragment();
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const tr = el("tr");
-    for (const col of columns) {
-      const baseClass =
-        (col.num ? "num" : "") + (col.cellClass ? ` ${col.cellClass}` : "");
-      const td = el("td", { class: baseClass });
-      const v = row[col.key];
-      const text = col.render ? col.render(v, row, td) : v == null ? "" : String(v);
-      td.textContent = text;
-      tr.appendChild(td);
-    }
-    tr.dataset.key = `diag-${row.ts || ''}-${row.step || i}-${row.command || row.actor_identity || ''}`;
-    tr.dataset.hash = JSON.stringify(row);
-    if (row.job_run) {
-      tr.classList.add("clickable");
-      tr.title = "Open owning run";
-      tr.addEventListener("click", () => {
-        const stepQuery = row.step_index == null ? "" : `?step=${encodeURIComponent(row.step_index)}`;
-        setActiveTab(`runs/${encodeURIComponent(row.job_run)}${stepQuery}`);
-      });
-    }
-    frag.appendChild(tr);
-  }
-  
-  syncNodes(tbody, Array.from(frag.children));
-}
-
-function renderDiagnostics() {
-  const sub = activeDiagSubtab;
-  const rows = lastDiagnostics[sub] || [];
-  $("diag-count").textContent = `${rows.length}`;
-  const columns =
-    sub === "metrics"
-      ? DIAG_METRICS_COLUMNS
-      : DIAG_ERRORS_COLUMNS;
-  renderDiagnosticsTable(
-    rows,
-    columns,
-  );
-
-  const sidePanel = $("diagnostics-side-panel");
-  if (sidePanel) {
-    renderImplementOneCard($("diag-implement-one-body"), lastDiagnostics.implement_one || []);
-  }
-}
-
-function renderMetricsCard(container, title, rows, cols) {
-  const card = el("div", { class: "audit-summary-card" });
-  card.appendChild(el("div", { class: "card-title", text: title }));
-  const body = el("div", { class: "card-body" });
-  
-  const table = el("table", { class: "summary-table" });
-  const thead = el("thead");
-  const tr = el("tr");
-  for (const c of cols) tr.appendChild(el("th", { class: c.num ? "num" : "", text: c.label }));
-  thead.appendChild(tr);
-  table.appendChild(thead);
-
-  const tbody = el("tbody");
-  for (const item of rows) {
-    const row = el("tr");
-    for (const c of cols) {
-      const val = c.format ? c.format(item[c.key]) : item[c.key];
-      row.appendChild(el("td", { class: c.num ? "num" : "", text: val }));
-    }
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  body.appendChild(table);
-  card.appendChild(body);
-  container.appendChild(card);
-}
-
-function renderImplementOneCard(container, rows) {
-  container.innerHTML = "";
-  if (rows.length === 0) {
-    container.appendChild(el("div", { class: "empty", text: "No implement_one runs in last 30d." }));
-    return;
-  }
-
-  const durCols = [
-    { key: "actor", label: "actor" },
-    { key: "n", label: "n", num: true },
-    { key: "avg", label: "avg", num: true, format: fmtDuration },
-    { key: "p50", label: "p50", num: true, format: fmtDuration },
-    { key: "p95", label: "p95", num: true, format: fmtDuration }
-  ];
-  renderMetricsCard(container, "Average implement_one duration by actor (30d)", rows, durCols);
-}
-
 function fetchAndCacheCrews() {
   return fetchJson("/api/crews").then((payload) => {
     return cacheCrewPayload(payload);
@@ -2084,14 +1939,14 @@ function activeRefreshJobs() {
       jobs.push(
         fetchJson(`/api/diagnostics/metrics?limit=${DIAG_LIMIT}`).then((rows) => {
           lastDiagnostics.metrics = rows;
-          renderDiagnostics();
+          renderDiagnostics(diagnosticsContext());
         })
       );
     } else if (activeDiagSubtab === "errors") {
       jobs.push(
         fetchJson(`/api/diagnostics/errors?limit=${DIAG_LIMIT}`).then((rows) => {
           lastDiagnostics.errors = rows;
-          renderDiagnostics();
+          renderDiagnostics(diagnosticsContext());
         })
       );
     }
@@ -2102,7 +1957,7 @@ function activeRefreshJobs() {
           lastDiagnostics.implement_one = implOne.implement_one_by_actor || [];
           const sidePanel = $("diagnostics-side-panel");
           if (sidePanel) {
-            renderImplementOneCard($("diag-implement-one-body"), lastDiagnostics.implement_one);
+            renderImplOne($("diag-implement-one-body"), lastDiagnostics.implement_one, diagnosticsContext());
           }
         })
         .catch(e => console.error("Failed to fetch implement_one metrics", e))
