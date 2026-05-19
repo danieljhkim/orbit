@@ -356,6 +356,11 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        // Deprecated (sunset per ORB-00165): `orbit design` retired in favor of `orbit docs`.
+        // The audit event still emits `command: "design"` (and `target_type: "design_docs"`) for
+        // backward compatibility with downstream audit consumers — they will not break.
+        // Equivalent retrievals now use the `docs` command surface. The design subcommand
+        // itself remains only for the one-release sunset window.
         Commands::Design(cmd) => {
             use crate::command::design::DesignSubcommand;
             let sub = match &cmd.command {

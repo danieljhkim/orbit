@@ -7,29 +7,29 @@ status: Accepted
 
 # Design Doc Conventions
 
-Rules feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them.
+Recommended conventions that feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them. These are recommendations (not hard rules enforced by tooling; `orbit-design` has been retired in favor of the more tolerant `orbit-docs` surface).
 
 This doc is itself the source of truth for the conventions. When a convention changes, update this doc and then update existing feature folders to match — do not silently diverge.
 
 ---
 
-## 1. Folder Layout (per feature)
+## 1. Folder Layout (per feature, recommended)
 
 ```
 docs/design/<feature>/
-├── 1_overview.md       required — what and why
-├── 2_design.md         required — current implementation
-├── 3_vision.md         required — forward-looking
-├── 4_decisions.md      required — ADR log (append-only)
-├── specs/              required folder; may be empty initially
+├── 1_overview.md       recommended — what and why
+├── 2_design.md         recommended — current implementation
+├── 3_vision.md         recommended — forward-looking
+├── 4_decisions.md      recommended — ADR log (append-only)
+├── specs/              recommended folder; may be empty initially
 │   └── <mechanism>.md  one mechanism per file
-└── references/         required folder; may be empty initially
+└── references/         recommended folder; may be empty initially
     └── glossary.md     recommended; other lookup-style docs allowed
 ```
 
 - Folder name: lowercase, hyphenated, singular (`knowledge-graph`, `groundhog`).
 - No `README.md`, `roadmap.md`, `changelog.md`, `tutorial.md` at this level.
-- No top-level narrative files outside the numbered four (`1_`–`4_`).
+- No top-level narrative files outside the numbered four (`1_`–`4_`). Existing folders may vary; new work should prefer the layout for coherence.
 
 ---
 
@@ -214,12 +214,14 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 
 ## 11. Enforcement
 
-Two mechanical checks worth adding later:
+These are recommendations, not mechanically enforced by `orbit-design` (retired) or `orbit-docs`. The tolerant indexer in `orbit-docs` accepts both strict numbered design folders and free-form docs.
+
+Two mechanical checks worth adding later (as optional lints, never blocking):
 
 1. Lint: every numbered doc has required frontmatter + Task References section.
 2. Lint: every ADR has a Cost line.
 
-Until those exist: cross-review is the enforcement mechanism. When one agent reviews the other's docs (KG ↔ Groundhog), the reviewer treats this doc as a checklist and rejects on any violation.
+Until those exist: cross-review and author judgment are the quality mechanism. When one agent reviews the other's docs, the reviewer treats this doc as a checklist and gives feedback on deviations; the author decides whether the deviation is justified for that folder.
 
 ---
 

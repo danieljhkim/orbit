@@ -10,8 +10,18 @@ use orbit_common::utility::fs::atomic_write_text;
 use regex::{Captures, Regex};
 use serde::Serialize;
 
-pub const DESIGN_CONVENTIONS_TEMPLATE: &str =
-    include_str!("../../../../docs/design/CONVENTIONS.md");
+// Deprecated design-doc scaffolding and inspection surface (sunset per ORB-00165).
+// The `orbit design` CLI subcommand and `orbit.design.*` MCP surface are retired
+// in favor of `orbit docs` (see the `orbit-docs` skill). The strict 4-numbered-doc
+// layout + `Last updated:` freshness rule under `docs/design/<feature>/` is now a
+// recommendation documented in docs/design/CONVENTIONS.md, not a tool-enforced rule.
+// Existing design folders remain discoverable via `orbit docs list --tag <feature>`.
+// This module is kept for a one-release sunset window and will be removed in a
+// future release. Migrate to `orbit docs` for retrieval; design folder writes are
+// now plain edits followed by `orbit docs reindex` as needed. ADR earning rule
+// ownership remains with `orbit-adr`.
+
+const DESIGN_CONVENTIONS_TEMPLATE: &str = include_str!("../../../../docs/design/CONVENTIONS.md");
 
 const DESIGN_DIR: &str = "docs/design";
 const NUMBERED_DOCS: [(&str, &str); 4] = [
@@ -22,6 +32,10 @@ const NUMBERED_DOCS: [(&str, &str); 4] = [
 ];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[deprecated(
+    since = "2026-05",
+    note = "Design surface retired; use orbit-docs instead. See design.rs module docs."
+)]
 pub struct DesignFeatureSummary {
     pub feature: String,
     pub docs: BTreeMap<String, DesignDocInfo>,
@@ -30,6 +44,10 @@ pub struct DesignFeatureSummary {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[deprecated(
+    since = "2026-05",
+    note = "Design surface retired; use orbit-docs instead. See design.rs module docs."
+)]
 pub struct DesignDocInfo {
     pub path: PathBuf,
     pub owner: Option<String>,
@@ -39,11 +57,19 @@ pub struct DesignDocInfo {
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[deprecated(
+    since = "2026-05",
+    note = "Design surface retired; use orbit-docs instead. See design.rs module docs."
+)]
 pub enum DesignDecayStatus {
     Fresh,
     Stale,
 }
 
+#[deprecated(
+    since = "2026-05",
+    note = "Use `orbit docs` instead of `orbit design init`. See design.rs module-level docs for migration."
+)]
 pub fn init_feature(
     repo_root: &Path,
     feature: &str,
@@ -75,6 +101,10 @@ pub fn init_feature(
     show_feature(repo_root, &feature)
 }
 
+#[deprecated(
+    since = "2026-05",
+    note = "Use `orbit docs list --tag <feature>` instead of `orbit design list`. See design.rs module-level docs for migration."
+)]
 pub fn list_features(repo_root: &Path) -> Result<Vec<DesignFeatureSummary>, OrbitError> {
     let design_root = repo_root.join(DESIGN_DIR);
     if !design_root.exists() {
@@ -100,6 +130,10 @@ pub fn list_features(repo_root: &Path) -> Result<Vec<DesignFeatureSummary>, Orbi
     Ok(features)
 }
 
+#[deprecated(
+    since = "2026-05",
+    note = "Use `orbit docs show` / `orbit docs list --tag <feature>` instead of `orbit design show`. See design.rs module-level docs for migration."
+)]
 pub fn show_feature(repo_root: &Path, feature: &str) -> Result<DesignFeatureSummary, OrbitError> {
     let feature = validate_feature_name(feature)?;
     let feature_dir = repo_root.join(DESIGN_DIR).join(&feature);
@@ -136,6 +170,10 @@ pub fn show_feature(repo_root: &Path, feature: &str) -> Result<DesignFeatureSumm
     })
 }
 
+#[deprecated(
+    since = "2026-05",
+    note = "Design conventions seeding retired along with orbit-design. See design.rs module-level docs."
+)]
 pub fn seed_design_conventions(repo_root: &Path, owner: &str) -> Result<bool, OrbitError> {
     let conventions_path = repo_root.join(DESIGN_DIR).join("CONVENTIONS.md");
     if conventions_path.exists() {
