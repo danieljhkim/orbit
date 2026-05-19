@@ -18,6 +18,7 @@
 // Also exports parseHashRoute for symmetry (used only internally today).
 
 import { el } from './common.js';
+import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -73,7 +74,7 @@ function setDiagSubtabImpl(ctx, name) {
   if (name === "runs") {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "block";
-    ctx.renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
+    renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
   } else {
     $("diag-body").style.display = "block";
     $("runs-body").style.display = "none";
