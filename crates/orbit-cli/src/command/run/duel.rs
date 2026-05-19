@@ -100,10 +100,18 @@ fn explicit_duel_role_families(
         )));
     }
 
-    // All three present: parse and validate
-    let fa = AgentFamily::parse(pa.unwrap())?;
-    let fb = AgentFamily::parse(pb.unwrap())?;
-    let fc = AgentFamily::parse(arb.unwrap())?;
+    let (pa, pb, arb) = match (pa, pb, arb) {
+        (Some(pa), Some(pb), Some(arb)) => (pa, pb, arb),
+        _ => {
+            return Err(OrbitError::InvalidInput(
+                "duel-plan explicit roles require all three role flags".to_string(),
+            ));
+        }
+    };
+
+    let fa = AgentFamily::parse(pa)?;
+    let fb = AgentFamily::parse(pb)?;
+    let fc = AgentFamily::parse(arb)?;
 
     let sa = fa.as_str();
     let sb = fb.as_str();

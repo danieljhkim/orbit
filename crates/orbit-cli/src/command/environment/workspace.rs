@@ -688,8 +688,8 @@ mod tests {
                 .join("CONVENTIONS.md"),
         )
         .expect("read conventions");
-        assert!(conventions.contains("**Owner:** human"));
-        assert!(!conventions.contains("**Owner:** daniel"));
+        assert!(conventions.contains("owner: human"));
+        assert!(!conventions.contains("owner: daniel"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use chrono::{NaiveDate, Utc};
 use orbit_common::types::{NotFoundKind, OrbitError};
 use orbit_common::utility::fs::atomic_write_text;
-use regex::{NoExpand, Regex};
+use regex::{Captures, Regex};
 use serde::Serialize;
 
 pub const DESIGN_CONVENTIONS_TEMPLATE: &str =
@@ -67,7 +67,7 @@ pub fn init_feature(
     let today = Utc::now().date_naive();
     let title = titleize_feature(&feature);
     for (file_name, role) in NUMBERED_DOCS {
-        let content = scaffold_doc(&title, role, &owner, today);
+        let content = scaffold_doc(&feature, &title, role, &owner, today);
         atomic_write_text(&feature_dir.join(file_name), &content)
             .map_err(|error| OrbitError::Io(error.to_string()))?;
     }
@@ -174,7 +174,7 @@ fn doc_owner(doc: &Path) -> Result<Option<String>, OrbitError> {
     Ok(owner_regex()?
         .captures(&body)
         .and_then(|captures| captures.get(1))
-        .map(|value| value.as_str().trim().to_string())
+        .map(|value| value.as_str().trim().trim_matches('"').to_string())
         .filter(|value| !value.is_empty()))
 }
 
@@ -227,29 +227,50 @@ fn git_last_commit_date(repo_root: &Path, path: &Path) -> Result<Option<NaiveDat
     Ok(NaiveDate::parse_from_str(raw, "%Y-%m-%d").ok())
 }
 
-fn scaffold_doc(title: &str, role: &str, owner: &str, last_updated: NaiveDate) -> String {
-    let role_body = match role {
-        "Overview" => {
-            "\n<Feature overview.>\n\n## 1. Motivation\n\n## 2. Core Concepts\n\n## 3. At a Glance\n\n| Concern | File | Task |\n|---------|------|------|\n"
-        }
-        "Design" => {
-            "\n<Scope of the current implementation.>\n\n## 1. Current Implementation\n\n## 2. Concerns & Honest Limitations\n"
-        }
-        "Vision" => {
-            "\n<Scope of the forward-looking design.>\n\n## 1. Open Questions\n\n## 2. Prior Work\n\n## 3. What May Be Distinctive\n\n## 4. References\n"
-        }
-        "Decisions" => "\nADR entries are append-only and ordered ascending.\n",
-        _ => "\n",
+fn scaffold_doc(
+    feature: &str,
+    title: &str,
+    role: &str,
+    owner: &str,
+    last_updated: NaiveDate,
+) -> String {
+    let (doc_role, role_body) = match role {
+        "Overview" => (
+            "overview",
+            "\n<Feature overview.>\n\n## 1. Motivation\n\n## 2. Core Concepts\n\n## 3. At a Glance\n\n| Concern | File | Task |\n|---------|------|------|\n",
+        ),
+        "Design" => (
+            "design",
+            "\n<Scope of the current implementation.>\n\n## 1. Current Implementation\n\n## 2. Concerns & Honest Limitations\n",
+        ),
+        "Vision" => (
+            "vision",
+            "\n<Scope of the forward-looking design.>\n\n## 1. Open Questions\n\n## 2. Prior Work\n\n## 3. What May Be Distinctive\n\n## 4. References\n",
+        ),
+        "Decisions" => (
+            "decisions",
+            "\nADR entries are append-only and ordered ascending.\n",
+        ),
+        _ => ("unknown", "\n"),
     };
     format!(
-        "# {title} — {role}\n\n**Status:** Draft\n**Owner:** {owner}\n**Last updated:** {last_updated}\n{role_body}\n## Task References\n\nResolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.\n"
+        "---\ntitle: \"{title} — {role}\"\nowner: {owner}\nlast_updated: {last_updated}\nstatus: Draft\nfeature: {feature}\ndoc_role: {doc_role}\n---\n\n# {title} — {role}\n{role_body}\n## Task References\n\nResolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.\n"
     )
 }
 
 fn conventions_with_owner(owner: &str) -> Result<String, OrbitError> {
-    let replacement = format!("**Owner:** {owner}");
     Ok(owner_regex()?
-        .replacen(DESIGN_CONVENTIONS_TEMPLATE, 1, NoExpand(&replacement))
+        .replacen(DESIGN_CONVENTIONS_TEMPLATE, 1, |captures: &Captures<'_>| {
+            let matched = captures
+                .get(0)
+                .map(|value| value.as_str().trim_start())
+                .unwrap_or_default();
+            if matched.starts_with("owner:") {
+                format!("owner: {owner}")
+            } else {
+                format!("**Owner:** {owner}")
+            }
+        })
         .to_string())
 }
 
@@ -303,8 +324,10 @@ fn last_updated_regex() -> Result<&'static Regex, OrbitError> {
     static REGEX: OnceLock<Result<Regex, String>> = OnceLock::new();
     REGEX
         .get_or_init(|| {
-            Regex::new(r"(?m)^\s*\*\*Last updated:\*\*\s*(\d{4}-\d{2}-\d{2})\s*$")
-                .map_err(|error| error.to_string())
+            Regex::new(
+                r#"(?m)^\s*(?:\*\*Last updated:\*\*|last_updated:)\s*"?(\d{4}-\d{2}-\d{2})"?\s*$"#,
+            )
+            .map_err(|error| error.to_string())
         })
         .as_ref()
         .map_err(|error| OrbitError::Execution(format!("compile last-updated regex: {error}")))
@@ -314,7 +337,8 @@ fn owner_regex() -> Result<&'static Regex, OrbitError> {
     static REGEX: OnceLock<Result<Regex, String>> = OnceLock::new();
     REGEX
         .get_or_init(|| {
-            Regex::new(r"(?m)^\s*\*\*Owner:\*\*\s*(.*?)\s*$").map_err(|error| error.to_string())
+            Regex::new(r"(?m)^\s*(?:\*\*Owner:\*\*|owner:)\s*(.*?)\s*$")
+                .map_err(|error| error.to_string())
         })
         .as_ref()
         .map_err(|error| OrbitError::Execution(format!("compile owner regex: {error}")))
@@ -388,8 +412,10 @@ mod tests {
         );
         for (file_name, _) in NUMBERED_DOCS {
             let content = fs::read_to_string(feature_dir.join(file_name)).expect("read doc");
-            assert!(content.contains("**Status:** Draft"));
-            assert!(content.contains("**Owner:** codex"));
+            assert!(content.starts_with("---\n"));
+            assert!(content.contains("status: Draft"));
+            assert!(content.contains("owner: codex"));
+            assert!(content.contains("feature: design-docs"));
             assert!(last_updated_regex().unwrap().is_match(&content));
         }
     }
@@ -409,13 +435,13 @@ mod tests {
         assert!(seeded);
         let conventions = fs::read_to_string(root.path().join(DESIGN_DIR).join("CONVENTIONS.md"))
             .expect("read conventions");
-        assert!(conventions.contains("**Owner:** codex"));
-        assert!(!conventions.contains("**Owner:** daniel"));
+        assert!(conventions.contains("owner: codex"));
+        assert!(!conventions.contains("owner: daniel"));
 
         let second = seed_design_conventions(root.path(), "claude").expect("idempotent");
         assert!(!second);
         let conventions = fs::read_to_string(root.path().join(DESIGN_DIR).join("CONVENTIONS.md"))
             .expect("read conventions again");
-        assert!(conventions.contains("**Owner:** codex"));
+        assert!(conventions.contains("owner: codex"));
     }
 }
