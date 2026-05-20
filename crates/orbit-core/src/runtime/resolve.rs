@@ -12,17 +12,42 @@ pub(crate) fn resolve_global_root() -> Result<PathBuf, OrbitError> {
     workspace_registry::global_orbit_dir()
 }
 
-/// Resolves the `.orbit` data root using the full resolution chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedOrbitRoots {
+    pub(crate) shared_root: PathBuf,
+    pub(crate) local_root: PathBuf,
+}
+
+impl ResolvedOrbitRoots {
+    fn pinned(root: PathBuf) -> Self {
+        Self {
+            shared_root: root.clone(),
+            local_root: root,
+        }
+    }
+
+    fn new(shared_root: PathBuf, local_root: PathBuf) -> Self {
+        Self {
+            shared_root,
+            local_root,
+        }
+    }
+}
+
+/// Resolves the `.orbit` shared and local roots using the full resolution chain.
 ///
-/// Linked git worktrees intentionally resolve to the main checkout's `.orbit`
-/// before local walk-up discovery, so task state cannot diverge per worktree.
+/// Linked git worktrees intentionally keep `shared_root` pointed at the main
+/// checkout's `.orbit` before local walk-up discovery, so existing task state
+/// cannot diverge per worktree. They also expose a separate `local_root` at the
+/// current linked checkout's `.orbit` for later per-worktree artifacts.
 /// Explicit `--root` and `ORBIT_ROOT` still take precedence over this automatic
-/// worktree resolution. A worktree-local `.orbit/` is ignored by design.
+/// worktree resolution and pin both roots. A worktree-local `.orbit/` is not
+/// consumed by any existing store in this phase.
 ///
 /// Resolution order:
 /// 1. `--root` flag (escape hatch)
 /// 2. `ORBIT_ROOT` env (escape hatch)
-/// 3. Linked git worktree's main checkout `.orbit/`
+/// 3. Linked git worktree's main checkout `.orbit/` as `shared_root`
 /// 4. `path_overrides` in global registry (longest prefix match from cwd)
 /// 5. Walk up from cwd to find first workspace `.orbit/` directory, skipping
 ///    the global home `.orbit/`
@@ -30,36 +55,41 @@ pub(crate) fn resolve_global_root() -> Result<PathBuf, OrbitError> {
 ///    skipping the global home `.orbit/`
 /// 7. Fallback: `<cwd>/.orbit`, refusing if it would resolve to the global
 ///    home `.orbit/`
-pub(crate) fn resolve_initialize_data_root(
+pub(crate) fn resolve_initialize_roots(
     cwd: &Path,
     root_override: Option<&Path>,
-) -> Result<PathBuf, OrbitError> {
-    resolve_data_root(cwd, root_override, ExplicitRootMode::RequireInitialized)
+) -> Result<ResolvedOrbitRoots, OrbitError> {
+    resolve_roots(cwd, root_override, ExplicitRootMode::RequireInitialized)
 }
 
-/// Resolves the `.orbit` data root for commands that are allowed to create it.
-pub(crate) fn resolve_bootstrap_data_root(
+/// Resolves `.orbit` roots for commands that are allowed to create them.
+pub(crate) fn resolve_bootstrap_roots(
     cwd: &Path,
     root_override: Option<&Path>,
-) -> Result<PathBuf, OrbitError> {
-    resolve_data_root(cwd, root_override, ExplicitRootMode::AllowUninitialized)
+) -> Result<ResolvedOrbitRoots, OrbitError> {
+    resolve_roots(cwd, root_override, ExplicitRootMode::AllowUninitialized)
 }
 
 /// Core implementation for `.orbit` workspace root discovery.
 ///
 /// Explicit roots from `--root` and `ORBIT_ROOT` win first. Linked git
-/// worktrees then resolve through the main checkout, intentionally ignoring a
-/// worktree-local `.orbit/`, before registry overrides and legacy walk-up run.
-fn resolve_data_root(
+/// worktrees then resolve shared state through the main checkout while exposing
+/// the linked checkout's local `.orbit/`, before registry overrides and legacy
+/// walk-up run.
+fn resolve_roots(
     cwd: &Path,
     root_override: Option<&Path>,
     explicit_root_mode: ExplicitRootMode,
-) -> Result<PathBuf, OrbitError> {
+) -> Result<ResolvedOrbitRoots, OrbitError> {
     // 1. --root flag (escape hatch)
     if let Some(root) = root_override {
         let root =
             resolve_explicit_root_path_value(&root.to_string_lossy(), cwd, explicit_root_mode)?;
-        return Ok(log_resolved_data_root(cwd, "explicit_root", root));
+        return Ok(log_resolved_roots(
+            cwd,
+            "explicit_root",
+            ResolvedOrbitRoots::pinned(root),
+        ));
     }
 
     // 2. ORBIT_ROOT env (escape hatch)
@@ -67,24 +97,41 @@ fn resolve_data_root(
         && !explicit.trim().is_empty()
     {
         let root = resolve_explicit_root_path_value(&explicit, cwd, explicit_root_mode)?;
-        return Ok(log_resolved_data_root(cwd, "orbit_root_env", root));
+        return Ok(log_resolved_roots(
+            cwd,
+            "orbit_root_env",
+            ResolvedOrbitRoots::pinned(root),
+        ));
     }
 
-    // 3. Linked git worktree's main checkout .orbit/
+    // 3. Linked git worktree's main checkout .orbit/ as shared_root
     if let Some(orbit_dir) = find_main_worktree_orbit_dir(cwd) {
-        let root = resolve_orbit_dir_candidate(&orbit_dir)?;
-        return Ok(log_resolved_data_root(cwd, "git_worktree_main", root));
+        let shared_root = resolve_orbit_dir_candidate(&orbit_dir)?;
+        let local_root = local_worktree_orbit_dir(cwd);
+        return Ok(log_resolved_roots(
+            cwd,
+            "git_worktree_main",
+            ResolvedOrbitRoots::new(shared_root, local_root),
+        ));
     }
 
     // 4. path_overrides in global registry (longest prefix match)
     if let Some(ws) = resolve_from_path_override(cwd) {
-        return Ok(log_resolved_data_root(cwd, "path_override", ws));
+        return Ok(log_resolved_roots(
+            cwd,
+            "path_override",
+            ResolvedOrbitRoots::pinned(ws),
+        ));
     }
 
     // 5. Walk up from cwd to find first workspace .orbit/ directory
     if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd) {
         let root = resolve_orbit_dir_candidate(&orbit_dir)?;
-        return Ok(log_resolved_data_root(cwd, "walk_up", root));
+        return Ok(log_resolved_roots(
+            cwd,
+            "walk_up",
+            ResolvedOrbitRoots::pinned(root),
+        ));
     }
 
     // 6. Legacy: git repo root (for repos without .orbit/ directory yet).
@@ -95,7 +142,11 @@ fn resolve_data_root(
     if let Some(repo_root) = paths::find_git_repo_root(cwd) {
         let candidate = repo_root.join(".orbit");
         if !is_global_orbit_dir(&candidate) {
-            return Ok(log_resolved_data_root(cwd, "git_repo_root", candidate));
+            return Ok(log_resolved_roots(
+                cwd,
+                "git_repo_root",
+                ResolvedOrbitRoots::pinned(candidate),
+            ));
         }
     }
 
@@ -107,7 +158,11 @@ fn resolve_data_root(
             cwd_root.display()
         )));
     }
-    Ok(log_resolved_data_root(cwd, "cwd_fallback", cwd_root))
+    Ok(log_resolved_roots(
+        cwd,
+        "cwd_fallback",
+        ResolvedOrbitRoots::pinned(cwd_root),
+    ))
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -125,6 +180,11 @@ fn resolve_from_path_override(cwd: &Path) -> Option<PathBuf> {
 
 fn find_main_worktree_orbit_dir(cwd: &Path) -> Option<PathBuf> {
     Some(paths::find_git_main_worktree_root(cwd)?.join(".orbit"))
+}
+
+fn local_worktree_orbit_dir(cwd: &Path) -> PathBuf {
+    let worktree_root = paths::find_git_worktree_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    paths::normalize_path_components(&worktree_root.join(".orbit"))
 }
 
 /// Walks up the directory tree from `start` looking for the first workspace
@@ -172,14 +232,19 @@ fn resolve_orbit_dir_candidate(orbit_dir: &Path) -> Result<PathBuf, OrbitError> 
     Ok(orbit_dir.to_path_buf())
 }
 
-fn log_resolved_data_root(cwd: &Path, source: &'static str, root: PathBuf) -> PathBuf {
+fn log_resolved_roots(
+    cwd: &Path,
+    source: &'static str,
+    roots: ResolvedOrbitRoots,
+) -> ResolvedOrbitRoots {
     tracing::debug!(
         source,
         cwd = %cwd.display(),
-        orbit_root = %root.display(),
-        "resolved Orbit data root"
+        shared_root = %roots.shared_root.display(),
+        local_root = %roots.local_root.display(),
+        "resolved Orbit roots"
     );
-    root
+    roots
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,24 +331,28 @@ fn resolve_root_path_value(raw: &str, base_dir: &Path) -> Result<PathBuf, OrbitE
     paths::resolve_path_value(raw, base_dir, "root path")
 }
 
-/// Like [`resolve_initialize_data_root`] but never falls through to the
+/// Like [`resolve_initialize_roots`] but never falls through to the
 /// `<cwd>/.orbit` bootstrap fallback. Returns `Ok(None)` when no initialized
 /// workspace is discovered anywhere in the chain.
 ///
 /// Explicit roots (`--root`, `ORBIT_ROOT`) keep their `RequireInitialized`
 /// semantics: pointing at an uninitialized path is still a hard error, since
 /// the user explicitly asked for that root.
-pub(crate) fn try_resolve_initialized_data_root(
+pub(crate) fn try_resolve_initialized_roots(
     cwd: &Path,
     root_override: Option<&Path>,
-) -> Result<Option<PathBuf>, OrbitError> {
+) -> Result<Option<ResolvedOrbitRoots>, OrbitError> {
     if let Some(root) = root_override {
         let root = resolve_explicit_root_path_value(
             &root.to_string_lossy(),
             cwd,
             ExplicitRootMode::RequireInitialized,
         )?;
-        return Ok(Some(log_resolved_data_root(cwd, "explicit_root", root)));
+        return Ok(Some(log_resolved_roots(
+            cwd,
+            "explicit_root",
+            ResolvedOrbitRoots::pinned(root),
+        )));
     }
 
     if let Ok(explicit) = std::env::var("ORBIT_ROOT")
@@ -291,27 +360,44 @@ pub(crate) fn try_resolve_initialized_data_root(
     {
         let root =
             resolve_explicit_root_path_value(&explicit, cwd, ExplicitRootMode::RequireInitialized)?;
-        return Ok(Some(log_resolved_data_root(cwd, "orbit_root_env", root)));
+        return Ok(Some(log_resolved_roots(
+            cwd,
+            "orbit_root_env",
+            ResolvedOrbitRoots::pinned(root),
+        )));
     }
 
     if let Some(orbit_dir) = find_main_worktree_orbit_dir(cwd)
         && is_initialized_orbit_root(&orbit_dir)
     {
-        let root = resolve_orbit_dir_candidate(&orbit_dir)?;
-        return Ok(Some(log_resolved_data_root(cwd, "git_worktree_main", root)));
+        let shared_root = resolve_orbit_dir_candidate(&orbit_dir)?;
+        let local_root = local_worktree_orbit_dir(cwd);
+        return Ok(Some(log_resolved_roots(
+            cwd,
+            "git_worktree_main",
+            ResolvedOrbitRoots::new(shared_root, local_root),
+        )));
     }
 
     if let Some(ws) = resolve_from_path_override(cwd)
         && is_initialized_orbit_root(&ws)
     {
-        return Ok(Some(log_resolved_data_root(cwd, "path_override", ws)));
+        return Ok(Some(log_resolved_roots(
+            cwd,
+            "path_override",
+            ResolvedOrbitRoots::pinned(ws),
+        )));
     }
 
     if let Some(orbit_dir) = find_orbit_dir_walk_up(cwd)
         && is_initialized_orbit_root(&orbit_dir)
     {
         let root = resolve_orbit_dir_candidate(&orbit_dir)?;
-        return Ok(Some(log_resolved_data_root(cwd, "walk_up", root)));
+        return Ok(Some(log_resolved_roots(
+            cwd,
+            "walk_up",
+            ResolvedOrbitRoots::pinned(root),
+        )));
     }
 
     Ok(None)
@@ -337,9 +423,9 @@ mod tests {
         seed_initialized_workspace_root(&orbit_root);
 
         let resolved =
-            resolve_initialize_data_root(repo.path(), Some(repo.path())).expect("resolve root");
+            resolve_initialize_roots(repo.path(), Some(repo.path())).expect("resolve root");
 
-        assert_eq!(resolved, orbit_root);
+        assert_pinned_roots(&resolved, &orbit_root);
     }
 
     #[test]
@@ -351,9 +437,9 @@ mod tests {
             .expect("write root pollution");
 
         let resolved =
-            resolve_initialize_data_root(repo.path(), Some(repo.path())).expect("resolve root");
+            resolve_initialize_roots(repo.path(), Some(repo.path())).expect("resolve root");
 
-        assert_eq!(resolved, orbit_root);
+        assert_pinned_roots(&resolved, &orbit_root);
     }
 
     #[test]
@@ -362,7 +448,7 @@ mod tests {
         let root = parent.path().join("not-an-orbit-root");
         fs::create_dir_all(&root).expect("create uninitialized root");
 
-        let err = resolve_initialize_data_root(parent.path(), Some(&root))
+        let err = resolve_initialize_roots(parent.path(), Some(&root))
             .expect_err("uninitialized root should fail");
 
         assert!(matches!(
@@ -382,9 +468,9 @@ mod tests {
         seed_initialized_workspace_root(&orbit_root);
 
         let resolved =
-            resolve_initialize_data_root(repo.path(), Some(&orbit_root)).expect("resolve root");
+            resolve_initialize_roots(repo.path(), Some(&orbit_root)).expect("resolve root");
 
-        assert_eq!(resolved, orbit_root);
+        assert_pinned_roots(&resolved, &orbit_root);
     }
 
     #[test]
@@ -392,10 +478,9 @@ mod tests {
         let parent = tempdir().expect("parent tempdir");
         let root = parent.path().join("new-orbit-root");
 
-        let resolved =
-            resolve_bootstrap_data_root(parent.path(), Some(&root)).expect("resolve root");
+        let resolved = resolve_bootstrap_roots(parent.path(), Some(&root)).expect("resolve root");
 
-        assert_eq!(resolved, root);
+        assert_pinned_roots(&resolved, &root);
         assert!(!root.exists());
     }
 
@@ -412,10 +497,10 @@ mod tests {
         seed_initialized_workspace_root(&env_repo.path().join(".orbit"));
         let _env = EnvVarGuard::set("ORBIT_ROOT", env_repo.path().as_os_str().to_os_string());
 
-        let resolved = resolve_initialize_data_root(worktree.path(), Some(explicit_repo.path()))
+        let resolved = resolve_initialize_roots(worktree.path(), Some(explicit_repo.path()))
             .expect("resolve explicit root");
 
-        assert_eq!(resolved, explicit_repo.path().join(".orbit"));
+        assert_pinned_roots(&resolved, &explicit_repo.path().join(".orbit"));
     }
 
     #[test]
@@ -429,10 +514,9 @@ mod tests {
         seed_initialized_workspace_root(&env_repo.path().join(".orbit"));
         let _env = EnvVarGuard::set("ORBIT_ROOT", env_repo.path().as_os_str().to_os_string());
 
-        let resolved =
-            resolve_initialize_data_root(worktree.path(), None).expect("resolve env root");
+        let resolved = resolve_initialize_roots(worktree.path(), None).expect("resolve env root");
 
-        assert_eq!(resolved, env_repo.path().join(".orbit"));
+        assert_pinned_roots(&resolved, &env_repo.path().join(".orbit"));
     }
 
     #[test]
@@ -448,10 +532,9 @@ mod tests {
         seed_initialized_workspace_root(&worktree_orbit);
 
         let resolved =
-            resolve_initialize_data_root(worktree.path(), None).expect("resolve worktree root");
+            resolve_initialize_roots(worktree.path(), None).expect("resolve worktree root");
 
-        assert_eq!(resolved, main_orbit);
-        assert_ne!(resolved, worktree_orbit);
+        assert_roots(&resolved, &main_orbit, &worktree_orbit);
     }
 
     #[test]
@@ -463,10 +546,14 @@ mod tests {
         seed_fake_git_worktree(main_repo.path(), worktree.path());
 
         let resolved =
-            resolve_bootstrap_data_root(worktree.path(), None).expect("resolve worktree root");
+            resolve_bootstrap_roots(worktree.path(), None).expect("resolve worktree root");
 
-        assert_eq!(resolved, main_repo.path().join(".orbit"));
-        assert!(!resolved.exists());
+        assert_roots(
+            &resolved,
+            &main_repo.path().join(".orbit"),
+            &worktree.path().join(".orbit"),
+        );
+        assert!(!resolved.shared_root.exists());
         assert!(!worktree.path().join(".orbit").exists());
     }
 
@@ -480,9 +567,9 @@ mod tests {
         let orbit_root = repo.path().join(".orbit");
         seed_initialized_workspace_root(&orbit_root);
 
-        let resolved = resolve_initialize_data_root(&nested, None).expect("resolve walk-up root");
+        let resolved = resolve_initialize_roots(&nested, None).expect("resolve walk-up root");
 
-        assert_eq!(resolved, orbit_root);
+        assert_pinned_roots(&resolved, &orbit_root);
     }
 
     #[test]
@@ -494,7 +581,7 @@ mod tests {
         let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
         let _orbit_root = EnvVarGuard::remove("ORBIT_ROOT");
 
-        let err = resolve_bootstrap_data_root(home.path(), None)
+        let err = resolve_bootstrap_roots(home.path(), None)
             .expect_err("bootstrap should refuse to adopt the global root as a workspace");
 
         assert!(matches!(
@@ -513,7 +600,7 @@ mod tests {
         let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
         let _orbit_root = EnvVarGuard::remove("ORBIT_ROOT");
 
-        let err = resolve_bootstrap_data_root(home.path(), None)
+        let err = resolve_bootstrap_roots(home.path(), None)
             .expect_err("bootstrap should refuse $HOME/.orbit via git_repo_root + cwd_fallback");
 
         assert!(matches!(
@@ -533,10 +620,10 @@ mod tests {
         let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
         let _orbit_root = EnvVarGuard::remove("ORBIT_ROOT");
 
-        let resolved = resolve_bootstrap_data_root(&repo, None).expect("resolve bootstrap root");
+        let resolved = resolve_bootstrap_roots(&repo, None).expect("resolve bootstrap root");
 
-        assert_eq!(resolved, repo.join(".orbit"));
-        assert_ne!(resolved, global_orbit);
+        assert_pinned_roots(&resolved, &repo.join(".orbit"));
+        assert_ne!(resolved.shared_root, global_orbit);
     }
 
     #[test]
@@ -545,7 +632,7 @@ mod tests {
         let _env = EnvVarGuard::remove("ORBIT_ROOT");
         let nowhere = tempdir().expect("nowhere tempdir");
 
-        let resolved = try_resolve_initialized_data_root(nowhere.path(), None)
+        let resolved = try_resolve_initialized_roots(nowhere.path(), None)
             .expect("try_resolve completes without error");
 
         assert!(resolved.is_none());
@@ -562,10 +649,10 @@ mod tests {
         let orbit_root = repo.path().join(".orbit");
         seed_initialized_workspace_root(&orbit_root);
 
-        let resolved = try_resolve_initialized_data_root(&nested, None)
+        let resolved = try_resolve_initialized_roots(&nested, None)
             .expect("try_resolve completes without error");
 
-        assert_eq!(resolved, Some(orbit_root));
+        assert_optional_pinned_roots(&resolved, &orbit_root);
     }
 
     #[test]
@@ -578,10 +665,10 @@ mod tests {
         let main_orbit = main_repo.path().join(".orbit");
         seed_initialized_workspace_root(&main_orbit);
 
-        let resolved = try_resolve_initialized_data_root(worktree.path(), None)
+        let resolved = try_resolve_initialized_roots(worktree.path(), None)
             .expect("try_resolve completes without error");
 
-        assert_eq!(resolved, Some(main_orbit));
+        assert_optional_roots(&resolved, &main_orbit, &worktree.path().join(".orbit"));
     }
 
     #[test]
@@ -594,7 +681,7 @@ mod tests {
         // No `.orbit/` exists at all — main worktree resolution finds the
         // path but it's uninitialized, so try_resolve falls through.
 
-        let resolved = try_resolve_initialized_data_root(worktree.path(), None)
+        let resolved = try_resolve_initialized_roots(worktree.path(), None)
             .expect("try_resolve completes without error");
 
         assert!(resolved.is_none());
@@ -611,10 +698,10 @@ mod tests {
         seed_initialized_workspace_root(&orbit_root);
         let elsewhere = tempdir().expect("elsewhere tempdir");
 
-        let resolved = try_resolve_initialized_data_root(elsewhere.path(), Some(repo.path()))
+        let resolved = try_resolve_initialized_roots(elsewhere.path(), Some(repo.path()))
             .expect("try_resolve completes without error");
 
-        assert_eq!(resolved, Some(orbit_root));
+        assert_optional_pinned_roots(&resolved, &orbit_root);
     }
 
     #[test]
@@ -625,7 +712,7 @@ mod tests {
         let bogus = parent.path().join("not-an-orbit-root");
         fs::create_dir_all(&bogus).expect("create bogus dir");
 
-        let err = try_resolve_initialized_data_root(parent.path(), Some(&bogus))
+        let err = try_resolve_initialized_roots(parent.path(), Some(&bogus))
             .expect_err("uninitialized override should error");
 
         assert!(matches!(
@@ -639,6 +726,28 @@ mod tests {
         fs::create_dir_all(path.join("resources")).expect("create resources");
         fs::create_dir_all(path.join("tasks")).expect("create tasks");
         fs::create_dir_all(path.join("state")).expect("create state");
+    }
+
+    fn assert_pinned_roots(roots: &ResolvedOrbitRoots, root: &Path) {
+        assert_roots(roots, root, root);
+    }
+
+    fn assert_roots(roots: &ResolvedOrbitRoots, shared_root: &Path, local_root: &Path) {
+        assert_eq!(roots.shared_root, shared_root);
+        assert_eq!(roots.local_root, local_root);
+    }
+
+    fn assert_optional_pinned_roots(roots: &Option<ResolvedOrbitRoots>, root: &Path) {
+        assert_optional_roots(roots, root, root);
+    }
+
+    fn assert_optional_roots(
+        roots: &Option<ResolvedOrbitRoots>,
+        shared_root: &Path,
+        local_root: &Path,
+    ) {
+        let roots = roots.as_ref().expect("expected resolved roots");
+        assert_roots(roots, shared_root, local_root);
     }
 
     fn seed_fake_git_worktree(main_repo: &Path, worktree: &Path) {

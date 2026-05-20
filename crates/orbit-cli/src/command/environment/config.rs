@@ -40,7 +40,8 @@ pub struct ConfigShowArgs {
 impl Execute for ConfigShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let global_root = runtime.global_root();
-        let workspace_root = runtime.data_root();
+        let shared_root = runtime.shared_root();
+        let local_root = runtime.local_root();
         let config_path = runtime.config_path();
         let (inherit, pass) = runtime.execution_env_config();
         let (codex_sandbox, codex_approval_policy) = runtime.codex_execution_config();
@@ -50,9 +51,11 @@ impl Execute for ConfigShowArgs {
         if self.json {
             crate::output::json::print_pretty(&json!({
                 "global_root": global_root.to_string_lossy(),
-                "workspace_root": workspace_root.to_string_lossy(),
-                "root": workspace_root.to_string_lossy(),
-                "selected_root": workspace_root.to_string_lossy(),
+                "shared_root": shared_root.to_string_lossy(),
+                "local_root": local_root.to_string_lossy(),
+                "workspace_root": shared_root.to_string_lossy(),
+                "root": shared_root.to_string_lossy(),
+                "selected_root": shared_root.to_string_lossy(),
                 "path": config_path.to_string_lossy(),
                 "config_path": config_path.to_string_lossy(),
                 "exists": config_path.exists(),
@@ -76,7 +79,8 @@ impl Execute for ConfigShowArgs {
             }))
         } else {
             println!("Global root:         {}", global_root.to_string_lossy());
-            println!("Workspace root:      {}", workspace_root.to_string_lossy());
+            println!("Shared root:         {}", shared_root.to_string_lossy());
+            println!("Local root:          {}", local_root.to_string_lossy());
             println!("Config path:         {}", config_path.to_string_lossy());
             println!("Exists:              {}", config_path.exists());
             println!("Execution env inherit: {}", inherit);

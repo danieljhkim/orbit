@@ -72,6 +72,7 @@ pub struct WorkspaceRegistry {
 pub struct WorkspacePaths {
     pub repo_root: PathBuf,
     pub orbit_dir: PathBuf,
+    pub local_dir: PathBuf,
     pub global_dir: PathBuf,
     pub resources_dir: PathBuf,
     pub state_dir: PathBuf,
@@ -94,6 +95,15 @@ pub struct WorkspacePaths {
 
 impl WorkspacePaths {
     pub fn new(repo_root: PathBuf, orbit_dir: PathBuf, global_dir: PathBuf) -> Self {
+        Self::new_with_local(repo_root, orbit_dir.clone(), orbit_dir, global_dir)
+    }
+
+    pub fn new_with_local(
+        repo_root: PathBuf,
+        orbit_dir: PathBuf,
+        local_dir: PathBuf,
+        global_dir: PathBuf,
+    ) -> Self {
         let resources_dir = orbit_dir.join("resources");
         let state_dir = orbit_dir.join("state");
         Self {
@@ -116,6 +126,7 @@ impl WorkspacePaths {
             worktrees_dir: state_dir.join("worktrees"),
             repo_root,
             orbit_dir,
+            local_dir,
             global_dir,
         }
     }

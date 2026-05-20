@@ -97,8 +97,9 @@ impl WorkspaceInitArgs {
         root_override: Option<&std::path::Path>,
     ) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().map_err(|e| OrbitError::Io(e.to_string()))?;
-        let (global_root, orbit_dir) =
-            OrbitRuntime::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
+        let roots = OrbitRuntime::resolve_bootstrap_roots_for_cwd(&cwd, root_override)?;
+        let orbit_dir = roots.shared_root;
+        let global_root = roots.global_root;
         let registry_path = workspace_registry::registry_path_for(&global_root);
         let mcp = self.mcp;
         let hooks = self.hooks;

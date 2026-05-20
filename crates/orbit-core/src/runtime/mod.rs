@@ -40,8 +40,8 @@ use crate::context::OrbitStores;
 
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
 pub(crate) use resolve::{
-    resolve_bootstrap_data_root, resolve_global_root, resolve_initialize_data_root,
-    try_resolve_initialized_data_root,
+    ResolvedOrbitRoots, resolve_bootstrap_roots, resolve_global_root, resolve_initialize_roots,
+    try_resolve_initialized_roots,
 };
 pub(crate) use store_delegates::TaskRecordUpdateParams;
 
@@ -53,6 +53,23 @@ pub struct OrbitRuntime {
     _temp_dir: Option<Arc<builder::TempDir>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrbitRuntimeRoots {
+    pub global_root: PathBuf,
+    pub shared_root: PathBuf,
+    pub local_root: PathBuf,
+}
+
+impl OrbitRuntimeRoots {
+    fn new(global_root: PathBuf, resolved: ResolvedOrbitRoots) -> Self {
+        Self {
+            global_root,
+            shared_root: resolved.shared_root,
+            local_root: resolved.local_root,
+        }
+    }
+}
+
 impl OrbitRuntime {
     pub fn initialize() -> Result<Self, OrbitError> {
         Self::initialize_with_root_override(None)
@@ -60,9 +77,9 @@ impl OrbitRuntime {
 
     pub fn initialize_with_root_override(root_override: Option<&Path>) -> Result<Self, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let (global_root, workspace_root) = Self::resolve_roots_for_cwd(&cwd, root_override)?;
-        ensure_orbit_root_initialized(&global_root, &workspace_root)?;
-        Self::from_roots(&global_root, &workspace_root)
+        let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
+        ensure_orbit_root_initialized(&roots.global_root, &roots.shared_root)?;
+        Self::from_resolved_roots(&roots.global_root, &roots.shared_root, &roots.local_root)
     }
 
     /// Initialize a runtime against an already-initialized workspace, returning
@@ -76,53 +93,59 @@ impl OrbitRuntime {
         root_override: Option<&Path>,
     ) -> Result<Option<Self>, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let Some(workspace_root) = try_resolve_initialized_data_root(&cwd, root_override)? else {
+        let Some(resolved) = try_resolve_initialized_roots(&cwd, root_override)? else {
             return Ok(None);
         };
         let global_root = resolve_global_root()?;
-        Ok(Some(Self::from_roots(&global_root, &workspace_root)?))
+        Ok(Some(Self::from_resolved_roots(
+            &global_root,
+            &resolved.shared_root,
+            &resolved.local_root,
+        )?))
     }
 
     pub fn resolve_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,
-    ) -> Result<(PathBuf, PathBuf), OrbitError> {
-        let workspace_root = resolve_initialize_data_root(cwd, root_override)?;
-        Ok((resolve_global_root()?, workspace_root))
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        let resolved = resolve_initialize_roots(cwd, root_override)?;
+        Ok(OrbitRuntimeRoots::new(resolve_global_root()?, resolved))
     }
 
     pub fn resolve_bootstrap_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,
-    ) -> Result<(PathBuf, PathBuf), OrbitError> {
-        let workspace_root = resolve_bootstrap_data_root(cwd, root_override)?;
-        Self::bootstrap_roots_from_workspace_root(workspace_root, root_override)
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        let resolved = resolve_bootstrap_roots(cwd, root_override)?;
+        Self::bootstrap_roots_from_resolved_roots(resolved, root_override)
     }
 
-    fn bootstrap_roots_from_workspace_root(
-        workspace_root: PathBuf,
+    fn bootstrap_roots_from_resolved_roots(
+        resolved: ResolvedOrbitRoots,
         root_override: Option<&Path>,
-    ) -> Result<(PathBuf, PathBuf), OrbitError> {
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
         let global_root = if has_explicit_root_override(root_override) {
-            workspace_root.clone()
+            resolved.shared_root.clone()
         } else {
             resolve_global_root()?
         };
-        Ok((global_root, workspace_root))
+        Ok(OrbitRuntimeRoots::new(global_root, resolved))
     }
 
     pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
-        let context = builder::build_context_from_data_root(data_root)?;
-        Ok(Self {
-            activity_executors: build_activity_executor_registry(&context)?,
-            context,
-            event_log: event_bus::EventLog::default(),
-            _temp_dir: None,
-        })
+        Self::from_resolved_roots(data_root, data_root, data_root)
     }
 
     pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
-        let context = builder::build_context_from_roots(global_root, workspace_root)?;
+        Self::from_resolved_roots(global_root, workspace_root, workspace_root)
+    }
+
+    pub fn from_resolved_roots(
+        global_root: &Path,
+        shared_root: &Path,
+        local_root: &Path,
+    ) -> Result<Self, OrbitError> {
+        let context = builder::build_context_from_roots(global_root, shared_root, local_root)?;
         Ok(Self {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
@@ -189,8 +212,16 @@ impl OrbitRuntime {
         )
     }
 
+    pub fn shared_root(&self) -> PathBuf {
+        self.context.shared_root().to_path_buf()
+    }
+
+    pub fn local_root(&self) -> PathBuf {
+        self.context.local_root().to_path_buf()
+    }
+
     pub fn data_root(&self) -> PathBuf {
-        self.context.data_root().to_path_buf()
+        self.shared_root()
     }
 
     pub fn global_root(&self) -> PathBuf {
@@ -200,8 +231,8 @@ impl OrbitRuntime {
     /// Returns the effective config.toml path.
     /// Workspace config replaces global if present; otherwise global.
     pub fn config_path(&self) -> PathBuf {
-        let ws_config = self.data_root().join("config.toml");
-        if ws_config.exists() && self.data_root() != self.global_root() {
+        let ws_config = self.shared_root().join("config.toml");
+        if ws_config.exists() && self.shared_root() != self.global_root() {
             ws_config
         } else {
             self.global_root().join("config.toml")
@@ -352,7 +383,11 @@ impl OrbitRuntime {
     }
 
     pub(crate) fn data_root_path(&self) -> &Path {
-        self.context.data_root()
+        self.shared_root_path()
+    }
+
+    pub(crate) fn shared_root_path(&self) -> &Path {
+        self.context.shared_root()
     }
 
     pub(crate) fn execution_env_policy(&self) -> &crate::config::ExecutionEnvPolicy {
@@ -493,11 +528,12 @@ mod tests {
         let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
         let _orbit_root = EnvVarGuard::set("ORBIT_ROOT", workspace_root.as_os_str().to_os_string());
 
-        let (global_root, resolved_workspace_root) =
+        let resolved_roots =
             OrbitRuntime::resolve_roots_for_cwd(repo.path(), None).expect("resolve roots");
 
-        assert_eq!(global_root, home.path().join(".orbit"));
-        assert_eq!(resolved_workspace_root, workspace_root);
+        assert_eq!(resolved_roots.global_root, home.path().join(".orbit"));
+        assert_eq!(resolved_roots.shared_root, workspace_root);
+        assert_eq!(resolved_roots.local_root, workspace_root);
     }
 
     fn seed_initialized_workspace_root(path: &Path) {

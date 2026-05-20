@@ -28,17 +28,13 @@ use crate::context::{
 use crate::skill_catalog::SkillCatalog;
 use crate::workspace_registry;
 
-/// Legacy single-root builder. Treats data_root as both global and workspace root.
-pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitContext, OrbitError> {
-    build_context_from_roots(data_root, data_root)
-}
-
-/// Two-root builder. Global root provides activities, jobs, executors, policies,
-/// config, global skills, and SQLite. Workspace root provides tasks,
-/// optional skill overrides, and runtime state.
+/// Runtime builder. Global root provides activities, jobs, executors, policies,
+/// config, global skills, and SQLite. Shared root provides existing workspace
+/// state. Local root is carried for per-worktree artifact phases.
 pub(crate) fn build_context_from_roots(
     global_root: &Path,
     workspace_root: &Path,
+    local_root: &Path,
 ) -> Result<OrbitContext, OrbitError> {
     let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
     let persistence = &runtime_config.persistence;
@@ -53,9 +49,10 @@ pub(crate) fn build_context_from_roots(
             .unwrap_or(workspace_root)
             .to_path_buf()
     });
-    let paths = WorkspacePaths::new(
+    let paths = WorkspacePaths::new_with_local(
         repo_root,
         workspace_root.to_path_buf(),
+        local_root.to_path_buf(),
         global_root.to_path_buf(),
     );
 
@@ -240,7 +237,7 @@ pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), Orbit
         .map_err(|e| OrbitError::Io(e.to_string()))?;
     let data_root = guard.path().to_path_buf();
 
-    let context = build_context_from_roots(&data_root, &data_root)?;
+    let context = build_context_from_roots(&data_root, &data_root, &data_root)?;
     Ok((context, guard))
 }
 

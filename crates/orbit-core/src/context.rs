@@ -259,9 +259,19 @@ impl OrbitContext {
         }
     }
 
+    /// Returns the shared .orbit/ data directory.
+    pub(crate) fn shared_root(&self) -> &Path {
+        &self.paths.orbit_dir
+    }
+
+    /// Returns the worktree-local .orbit/ data directory.
+    pub(crate) fn local_root(&self) -> &Path {
+        &self.paths.local_dir
+    }
+
     /// Returns the .orbit/ data directory (backward-compatible alias).
     pub(crate) fn data_root(&self) -> &Path {
-        &self.paths.orbit_dir
+        self.shared_root()
     }
 
     pub(crate) fn global_root(&self) -> &Path {

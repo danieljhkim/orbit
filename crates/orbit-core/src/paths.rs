@@ -74,6 +74,18 @@ pub(crate) fn find_git_repo_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
+pub(crate) fn find_git_worktree_root(start: &Path) -> Option<PathBuf> {
+    git_rev_parse_path(start, "--show-toplevel").or_else(|| {
+        start
+            .ancestors()
+            .find(|ancestor| {
+                let git_path = ancestor.join(".git");
+                git_path.is_dir() || git_path.is_file()
+            })
+            .map(normalize_path_components)
+    })
+}
+
 pub(crate) fn find_git_main_worktree_root(start: &Path) -> Option<PathBuf> {
     find_git_main_worktree_root_with_git(start)
         .or_else(|| find_git_main_worktree_root_from_gitfile(start))
