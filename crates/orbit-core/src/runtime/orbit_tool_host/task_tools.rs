@@ -182,6 +182,23 @@ pub(super) fn reject(
     serialize_task(runtime, &task)
 }
 
+pub(super) fn reopen(
+    runtime: &OrbitRuntime,
+    input: Value,
+    agent: Option<String>,
+    model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let id = required_string(&input, &["id"], "id")?;
+    let task = runtime.reopen_task_with_identity(
+        &id,
+        optional_string(&input, "note")?,
+        optional_string(&input, "comment")?,
+        agent,
+        model,
+    )?;
+    serialize_task(runtime, &task)
+}
+
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
     let task = runtime.get_task(&id)?;

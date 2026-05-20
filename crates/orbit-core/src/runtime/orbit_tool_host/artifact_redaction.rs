@@ -222,6 +222,13 @@ fn policy_for_action(action: OrbitBuiltinAction) -> Option<ActionPolicy> {
             path_arrays: &[],
             nested_arrays: &[],
         }),
+        OrbitBuiltinAction::TaskReopen => Some(ActionPolicy {
+            free_text_fields: &["note", "comment"],
+            free_text_arrays: &[],
+            path_fields: &[],
+            path_arrays: &[],
+            nested_arrays: &[],
+        }),
         OrbitBuiltinAction::ReviewThreadAdd => Some(ActionPolicy {
             free_text_fields: &["body"],
             free_text_arrays: &[],
@@ -276,6 +283,7 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::TaskAdd
             | OrbitBuiltinAction::TaskUpdate
             | OrbitBuiltinAction::TaskReject
+            | OrbitBuiltinAction::TaskReopen
             | OrbitBuiltinAction::ReviewThreadAdd
             | OrbitBuiltinAction::ReviewThreadReply
             | OrbitBuiltinAction::FrictionAdd
@@ -514,7 +522,8 @@ fn artifact_target(
         }),
         OrbitBuiltinAction::TaskAdd
         | OrbitBuiltinAction::TaskUpdate
-        | OrbitBuiltinAction::TaskReject => {
+        | OrbitBuiltinAction::TaskReject
+        | OrbitBuiltinAction::TaskReopen => {
             let id = response_string(response, "id")?;
             Ok(ArtifactTarget {
                 artifact_type: "task",
@@ -574,6 +583,7 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::TaskAdd => "orbit.task.add",
         OrbitBuiltinAction::TaskUpdate => "orbit.task.update",
         OrbitBuiltinAction::TaskReject => "orbit.task.reject",
+        OrbitBuiltinAction::TaskReopen => "orbit.task.reopen",
         OrbitBuiltinAction::ReviewThreadAdd => "orbit.task.review_thread.add",
         OrbitBuiltinAction::ReviewThreadReply => "orbit.task.review_thread.reply",
         OrbitBuiltinAction::FrictionAdd => "orbit.friction.add",

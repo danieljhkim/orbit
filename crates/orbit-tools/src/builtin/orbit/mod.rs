@@ -63,6 +63,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task::locks_release::OrbitTaskLocksReleaseTool);
     registry.register(task::start::OrbitTaskStartTool);
     registry.register(task::reject::OrbitTaskRejectTool);
+    registry.register(task::reopen::OrbitTaskReopenTool);
     registry.register(task::show::OrbitTaskShowTool);
     registry.register(task::list::OrbitTaskListTool);
     registry.register(task::search::OrbitTaskSearchTool);

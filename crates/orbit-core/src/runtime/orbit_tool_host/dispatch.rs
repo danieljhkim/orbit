@@ -95,6 +95,7 @@ pub(super) fn execute(
             super::task_locks::reserve(runtime, input, agent, model, reservation_owner)
         }
         OrbitBuiltinAction::TaskReject => super::task_tools::reject(runtime, input, agent, model),
+        OrbitBuiltinAction::TaskReopen => super::task_tools::reopen(runtime, input, agent, model),
         OrbitBuiltinAction::TaskShow => super::task_tools::show(runtime, input),
         OrbitBuiltinAction::TaskStart => super::task_tools::start(runtime, input, agent, model),
         OrbitBuiltinAction::TaskUpdate => super::task_tools::update(runtime, input, agent, model),

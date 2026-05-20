@@ -72,6 +72,7 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.semantic.related",
         "orbit.semantic.search",
         "orbit.task.artifact.put",
+        "orbit.task.reopen",
         "proc.spawn",
     ] {
         assert!(
@@ -188,6 +189,29 @@ fn task_delete_schema_exposes_optional_force_boolean() {
 
     assert_eq!(force_param.param_type, "boolean");
     assert!(!force_param.required);
+}
+
+#[test]
+fn task_reopen_schema_documents_done_to_backlog_recovery() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.task.reopen")
+        .expect("task reopen schema");
+
+    assert!(schema.description.contains("done -> backlog"));
+    assert!(
+        schema.parameters.iter().any(|param| param.name == "model"),
+        "reopen should expose model attribution"
+    );
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .any(|param| param.name == "comment"),
+        "reopen should support comments"
+    );
 }
 
 fn registered_tool_names() -> BTreeSet<String> {

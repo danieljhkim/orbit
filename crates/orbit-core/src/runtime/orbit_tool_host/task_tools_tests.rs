@@ -381,6 +381,118 @@ fn task_delete_tool_allows_forced_protected_statuses() {
 }
 
 #[test]
+fn task_reopen_tool_moves_done_task_to_backlog_with_history() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Prematurely done task",
+        "A mistaken completion should be recoverable.",
+        TaskStatus::Done,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.update",
+        json!({
+            "id": task.id.clone(),
+            "title": "Still closed",
+        }),
+        Some("codex".to_string()),
+        Some("gpt-5.5".to_string()),
+    ));
+    assert_eq!(
+        message,
+        format!(
+            "task {} is done and cannot be modified; reopen it first",
+            task.id
+        )
+    );
+
+    runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id.clone(),
+                "comment": "Comment-only updates remain allowed while done.",
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("comment-only update succeeds while done");
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.reopen",
+            json!({
+                "id": task.id.clone(),
+                "note": "Completion was premature.",
+                "comment": "Ready to work again.",
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task reopen tool succeeds");
+
+    assert_eq!(
+        output.get("status").and_then(Value::as_str),
+        Some("backlog")
+    );
+    assert!(
+        output["comments"]
+            .as_array()
+            .expect("comments")
+            .iter()
+            .any(|comment| {
+                comment.get("message").and_then(Value::as_str) == Some("Ready to work again.")
+                    && comment.get("by").and_then(Value::as_str) == Some("codex")
+            })
+    );
+    assert!(
+        output["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| {
+                event.get("event").and_then(Value::as_str) == Some("reopened")
+                    && event.get("by").and_then(Value::as_str) == Some("codex")
+                    && event.get("from_status").and_then(Value::as_str) == Some("done")
+                    && event.get("to_status").and_then(Value::as_str) == Some("backlog")
+                    && event.get("note").and_then(Value::as_str)
+                        == Some("Completion was premature.")
+            })
+    );
+}
+
+#[test]
+fn task_reopen_tool_rejects_unsupported_statuses() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Backlog task",
+        "Only completed tasks can be reopened.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.reopen",
+        json!({ "id": task.id.clone() }),
+        Some("codex".to_string()),
+        Some("gpt-5.5".to_string()),
+    ));
+
+    assert_eq!(
+        message,
+        format!(
+            "task '{}' is in status 'backlog'; reopen requires 'done'",
+            task.id
+        )
+    );
+}
+
+#[test]
 fn task_add_tool_persists_dependencies() {
     let (_root, runtime, repo_root) = test_runtime();
     let dependency = create_task(

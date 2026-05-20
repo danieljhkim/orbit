@@ -106,13 +106,13 @@ impl OrbitRuntime {
         }
         if params.has_any_mutation() && task.status == TaskStatus::Archived {
             return Err(OrbitError::InvalidInput(format!(
-                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                "task {id} is {} and cannot be modified; unarchive it first",
                 task.status
             )));
         }
         if params.has_non_comment_mutation() && task.status == TaskStatus::Done {
             return Err(OrbitError::InvalidInput(format!(
-                "task {id} is {} and cannot be modified; unarchive or reopen it first",
+                "task {id} is {} and cannot be modified; reopen it first",
                 task.status
             )));
         }

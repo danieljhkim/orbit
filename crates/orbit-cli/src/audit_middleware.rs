@@ -302,6 +302,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 TaskSubcommand::Unarchive(args) => {
                     ("unarchive", Some("task"), Some(args.id.as_str()))
                 }
+                TaskSubcommand::Reopen(args) => ("reopen", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Delete(args) => ("delete", Some("task"), Some(args.id.as_str())),
                 TaskSubcommand::Search(_) => ("search", None, None),
                 TaskSubcommand::Templates(_) => ("templates", None, None),

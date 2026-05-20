@@ -8,6 +8,7 @@ pub mod locks;
 pub mod locks_release;
 pub mod locks_reserve;
 pub mod reject;
+pub mod reopen;
 pub mod search;
 pub mod show;
 pub mod start;

@@ -6,8 +6,8 @@ use crate::command::Execute;
 use super::add::TaskAddArgs;
 use super::artifact::TaskArtifactCommand;
 use super::lifecycle::{
-    TaskApproveArgs, TaskArchiveArgs, TaskDeleteArgs, TaskRejectArgs, TaskSearchArgs,
-    TaskStartArgs, TaskUnarchiveArgs,
+    TaskApproveArgs, TaskArchiveArgs, TaskDeleteArgs, TaskRejectArgs, TaskReopenArgs,
+    TaskSearchArgs, TaskStartArgs, TaskUnarchiveArgs,
 };
 use super::lint::TaskLintArgs;
 use super::list::{TaskListArgs, TaskLocksArgs};
@@ -56,6 +56,8 @@ pub enum TaskSubcommand {
     Archive(TaskArchiveArgs),
     /// Unarchive a task (archived → backlog)
     Unarchive(TaskUnarchiveArgs),
+    /// Reopen a completed task (done → backlog)
+    Reopen(TaskReopenArgs),
     /// Delete a task permanently
     Delete(TaskDeleteArgs),
     /// Search tasks by title, description, or external ref ID
@@ -86,6 +88,7 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Reject(args) => args.execute(runtime),
             TaskSubcommand::Archive(args) => args.execute(runtime),
             TaskSubcommand::Unarchive(args) => args.execute(runtime),
+            TaskSubcommand::Reopen(args) => args.execute(runtime),
             TaskSubcommand::Delete(args) => args.execute(runtime),
             TaskSubcommand::Search(args) => args.execute(runtime),
             TaskSubcommand::Templates(cmd) => cmd.execute(runtime),
@@ -119,5 +122,25 @@ mod tests {
         );
         assert!(!help.contains("proposed → archived"), "{help}");
         assert!(!help.contains("review → backlog"), "{help}");
+        assert!(
+            help.contains("Reopen a completed task (done → backlog)"),
+            "{help}"
+        );
+    }
+
+    #[test]
+    fn task_reopen_help_describes_done_to_backlog() {
+        let err = match Cli::try_parse_from(["orbit", "task", "reopen", "--help"]) {
+            Ok(_) => panic!("task reopen help should exit before parsing args"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.kind(), ErrorKind::DisplayHelp);
+
+        let help = err.to_string();
+        assert!(
+            help.contains("Reopen a completed task (done → backlog)"),
+            "{help}"
+        );
     }
 }

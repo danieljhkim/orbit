@@ -6,7 +6,8 @@
 //! violates one of the four invariants below.
 //!
 //! ### Invariants (blocklist)
-//! 1. **Done is terminal** — no transitions out of done.
+//! 1. **Done is terminal for ordinary status updates** — use the dedicated
+//!    reopen operation to move a mistakenly completed task back to backlog.
 //! 2. **Archived requires dedicated command** — use `orbit task archive`; the
 //!    bare `--status archived` path is rejected.
 //! 3. **Friction is legacy-only** — new friction reports are stored through
@@ -23,7 +24,7 @@
 //! | Someday      | Future-scoped — wanted but not yet actionable. Agents skip someday tasks. |
 //! | InProgress   | Actively being worked on. |
 //! | Review       | Implementation complete; awaiting review/merge. |
-//! | Done         | Accepted and closed. Terminal. |
+//! | Done         | Accepted and closed. Reopenable to Backlog through the dedicated command/tool only. |
 //! | Blocked      | Temporarily paused. |
 //! | Archived     | Soft-deleted. Restorable to Backlog. |
 //! | Rejected     | Declined. Can be re-opened. |
@@ -67,7 +68,7 @@ pub enum TaskStatus {
     InProgress,
     /// Implementation complete; awaiting review/merge.
     Review,
-    /// Accepted and closed. Terminal — no further transitions.
+    /// Accepted and closed. Reopenable through the dedicated command/tool only.
     Done,
     /// Temporarily paused (waiting on a dependency or decision).
     Blocked,
@@ -132,7 +133,8 @@ impl TaskStatus {
 
     /// Validates a status transition using a short blocklist of invariants:
     ///
-    /// 1. **Done is terminal** — no transitions out of done.
+    /// 1. **Done is terminal for ordinary status updates** — dedicated reopen
+    ///    command/tool code handles the audited Done -> Backlog recovery path.
     /// 2. **Archived requires dedicated command** — use `orbit task archive`, not a
     ///    bare status update (enforced upstream; blocked here as defense-in-depth).
     /// 3. **Friction is legacy-only** — new friction reports use
@@ -147,7 +149,7 @@ impl TaskStatus {
             return Ok(());
         }
 
-        // Done is terminal.
+        // Done is terminal for ordinary status updates.
         if *self == TaskStatus::Done {
             return Err(format!(
                 "invalid status transition: {} -> {} (done is terminal)",

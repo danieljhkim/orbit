@@ -625,6 +625,58 @@ impl OrbitRuntime {
         })
     }
 
+    pub fn reopen_task(
+        &self,
+        id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        self.reopen_task_with_identity(id, note, comment, None, None)
+    }
+
+    pub fn reopen_task_with_identity(
+        &self,
+        id: &str,
+        note: Option<String>,
+        comment: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        let (canonical_agent, canonical_model) =
+            self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
+        let task = self.get_task(id)?;
+
+        if task.status != TaskStatus::Done {
+            return Err(OrbitError::InvalidInput(format!(
+                "task '{id}' is in status '{}'; reopen requires 'done'",
+                task.status
+            )));
+        }
+
+        let actor = self.actor().clone();
+        let effective_label = effective_actor_label(
+            &actor.label,
+            canonical_agent.as_deref(),
+            canonical_model.as_deref(),
+        );
+        let append_comments = build_task_comments(comment, effective_label.as_str())?;
+
+        self.with_mutation(|| {
+            let task = self.stores().tasks().update(
+                id,
+                StoreTaskUpdateParams {
+                    actor: effective_label.clone(),
+                    status: Some(TaskStatus::Backlog),
+                    status_event: Some("reopened".to_string()),
+                    status_note: note.clone(),
+                    append_comments: append_comments.clone(),
+                    ..Default::default()
+                },
+            )?;
+            Ok((task.clone(), OrbitEvent::TaskUpdated { id: id.to_string() }))
+        })
+    }
+
     pub fn delete_task(&self, id: &str) -> Result<(), OrbitError> {
         self.with_mutation(|| {
             let deleted = self.stores().tasks().delete(id)?;

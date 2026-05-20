@@ -118,6 +118,7 @@ pub enum OrbitBuiltinAction {
     TaskLocksRelease,
     TaskLocksReserve,
     TaskReject,
+    TaskReopen,
     TaskShow,
     TaskStart,
     TaskUpdate,

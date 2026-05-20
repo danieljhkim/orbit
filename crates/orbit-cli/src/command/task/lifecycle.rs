@@ -236,6 +236,46 @@ impl Execute for TaskUnarchiveArgs {
 }
 
 #[derive(Args)]
+#[command(about = "Reopen a completed task (done -> backlog)")]
+pub struct TaskReopenArgs {
+    /// Task ID
+    pub id: String,
+    /// Optional lifecycle note
+    #[arg(long)]
+    pub note: Option<String>,
+    /// Append a task comment
+    #[arg(long)]
+    pub comment: Option<String>,
+    /// Explicit agent name to persist on the task artifact
+    #[arg(long)]
+    pub agent: Option<String>,
+    /// Explicit agent model to persist on the task artifact
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Execute for TaskReopenArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let task = runtime.reopen_task_with_identity(
+            &self.id,
+            self.note,
+            self.comment,
+            self.agent,
+            self.model,
+        )?;
+        if self.json {
+            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+        } else {
+            println!("Reopened task '{}'", task.id);
+            Ok(())
+        }
+    }
+}
+
+#[derive(Args)]
 pub struct TaskDeleteArgs {
     /// Task ID
     pub id: String,

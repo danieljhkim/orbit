@@ -39,6 +39,7 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
     "orbit.task.locks.release",
     "orbit.task.locks.reserve",
     "orbit.task.reject",
+    "orbit.task.reopen",
     "orbit.task.review_thread.add",
     "orbit.task.review_thread.list",
     "orbit.task.review_thread.reply",
