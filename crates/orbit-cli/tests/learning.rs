@@ -277,16 +277,26 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
 }
 
 #[test]
-fn cli_search_returns_matched_by_annotation_array() {
+fn orbit_search_kind_learning_path_returns_matched_by_annotation_array() {
+    // ORB-00202: the `learning search --path` axis migrated to
+    // `orbit search --kind learning --path`. The unified search surface
+    // preserves the `matched_by` annotation for active-only path queries.
     let workspace = TestWorkspace::new();
     workspace.add_learning("path scope", &["foo/**"], &[]);
     workspace.add_learning("tag scope", &[], &["alpha"]);
 
-    let path_hits = workspace.run_json(
-        &["learning", "search", "--path", "foo/bar.rs", "--json"],
-        "search by path",
+    let response = workspace.run_json(
+        &[
+            "search",
+            "--kind",
+            "learning",
+            "--path",
+            "foo/bar.rs",
+            "--json",
+        ],
+        "orbit search --kind learning --path",
     );
-    let arr = path_hits.as_array().expect("array");
+    let arr = response["results"].as_array().expect("results array");
     assert!(
         !arr.is_empty(),
         "path search should return at least one row"
@@ -303,7 +313,10 @@ fn cli_search_returns_matched_by_annotation_array() {
 }
 
 #[test]
-fn cli_search_accepts_absolute_paths_inside_workspace() {
+fn orbit_search_kind_learning_accepts_absolute_paths_inside_workspace() {
+    // ORB-00202: absolute-path normalization (inside the workspace root)
+    // moved from `learning search --path` to `orbit search --kind learning
+    // --path`.
     let workspace = TestWorkspace::new();
     let learning = workspace.add_learning("path scope", &["foo/**"], &[]);
     let target = workspace.work.join("foo/bar.rs");
@@ -311,13 +324,15 @@ fn cli_search_accepts_absolute_paths_inside_workspace() {
     fs::write(&target, "pub fn example() {}\n").expect("write target");
     let absolute = target.to_string_lossy().to_string();
 
-    let path_hits = workspace.run_json(
-        &["learning", "search", "--path", &absolute, "--json"],
-        "search by absolute path",
+    let response = workspace.run_json(
+        &[
+            "search", "--kind", "learning", "--path", &absolute, "--json",
+        ],
+        "orbit search --kind learning --path <absolute>",
     );
-    let ids: Vec<&str> = path_hits
+    let ids: Vec<&str> = response["results"]
         .as_array()
-        .expect("array")
+        .expect("results array")
         .iter()
         .map(|row| row["id"].as_str().expect("id"))
         .collect();

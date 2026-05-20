@@ -5,9 +5,7 @@
 //! `orbit.learning.*` MCP tool output byte-for-byte (per the CLI-parity
 //! acceptance criterion).
 
-use orbit_core::{
-    EvidenceKind, Learning, LearningComment, LearningSearchResult, LearningVoteSummary,
-};
+use orbit_core::{EvidenceKind, Learning, LearningComment, LearningVoteSummary};
 use serde_json::{Value, json};
 
 pub(crate) fn learning_to_json(learning: &Learning) -> Value {
@@ -53,21 +51,6 @@ pub(crate) fn learning_show_to_json(
         );
     }
     value
-}
-
-pub(crate) fn learning_search_result_to_json(result: &LearningSearchResult) -> Value {
-    let learning = &result.learning;
-    json!({
-        "id": learning.id,
-        "summary": learning.summary,
-        "scope": {
-            "paths": learning.scope.paths,
-            "tags": learning.scope.tags,
-        },
-        "updated_at": learning.updated_at.to_rfc3339(),
-        "priority": learning.priority,
-        "matched_by": result.matched_by,
-    })
 }
 
 pub(crate) fn learning_comment_to_json(comment: &LearningComment) -> Value {

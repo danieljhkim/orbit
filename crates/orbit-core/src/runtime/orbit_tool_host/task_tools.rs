@@ -128,6 +128,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let job_run_id = optional_string(&input, "job_run_id")?;
     let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let ready = optional_bool_alias(&input, &["ready"])?;
+    let path = optional_string(&input, "path")?;
     let all_tasks = runtime.list_tasks_filtered(
         status,
         None,
@@ -141,24 +142,15 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .into_iter()
         .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
         .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
+        .filter(|task| {
+            path.as_deref()
+                .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
+        })
         .collect::<Vec<_>>();
     Ok(Value::Array(
         tasks
             .into_iter()
             .filter(|task| task_type.is_none_or(|kind| task.task_type == kind))
-            .map(|task| task_to_json(&task, &status_by_id))
-            .collect::<Vec<_>>(),
-    ))
-}
-
-pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let query = required_string(&input, &["query"], "query")?;
-    let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
-    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
-    let tasks = runtime.search_tasks_filtered(&query, &tags)?;
-    Ok(Value::Array(
-        tasks
-            .into_iter()
             .map(|task| task_to_json(&task, &status_by_id))
             .collect::<Vec<_>>(),
     ))

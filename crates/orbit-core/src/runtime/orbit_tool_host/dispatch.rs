@@ -26,7 +26,6 @@ pub(super) fn execute(
         }
         OrbitBuiltinAction::DocsList => super::docs_tools::list(runtime, input),
         OrbitBuiltinAction::DocsShow => super::docs_tools::show(runtime, input),
-        OrbitBuiltinAction::DocsSearch => super::docs_tools::search(runtime, input),
         OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),
         OrbitBuiltinAction::DocsReindex => super::docs_tools::reindex(runtime, input),
         OrbitBuiltinAction::DocsMigrate => super::docs_tools::migrate(runtime, input),
@@ -50,7 +49,6 @@ pub(super) fn execute(
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
         OrbitBuiltinAction::LearningReindex => super::learning_tools::reindex(runtime, input),
-        OrbitBuiltinAction::LearningSearch => super::learning_tools::search(runtime, input),
         OrbitBuiltinAction::LearningShow => super::learning_tools::show(runtime, input),
         OrbitBuiltinAction::LearningSupersede => {
             super::learning_tools::supersede(runtime, input, agent, model)
@@ -89,7 +87,6 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskDelete => super::task_tools::delete(runtime, input),
         OrbitBuiltinAction::TaskLint => super::task_tools::lint(runtime, input),
         OrbitBuiltinAction::TaskList => super::task_tools::list(runtime, input),
-        OrbitBuiltinAction::TaskSearch => super::task_tools::search(runtime, input),
         OrbitBuiltinAction::TaskLocks => super::task_locks::list(runtime),
         OrbitBuiltinAction::TaskLocksRelease => {
             super::task_locks::release(runtime, input, agent, model)

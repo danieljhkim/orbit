@@ -1,14 +1,14 @@
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use orbit_core::{DocType, OrbitError, OrbitRuntime, SearchResult};
+use orbit_core::{DocType, OrbitError, OrbitRuntime};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::command::Execute;
 
 #[derive(Args)]
-#[command(about = "Search and manage the indexed docs corpus")]
+#[command(about = "List, show, and curate the indexed docs corpus")]
 pub struct DocsCommand {
     #[command(subcommand)]
     pub command: DocsSubcommand,
@@ -20,8 +20,6 @@ pub enum DocsSubcommand {
     List(DocsListArgs),
     /// Show one doc with parsed frontmatter and body
     Show(DocsShowArgs),
-    /// Search docs and ADRs by summary, tags, type, title, related features, and status
-    Search(DocsSearchArgs),
     /// Register an additional docs root in .orbit/config.toml
     Add(DocsAddArgs),
     /// Rebuild the docs index (v1 is walk-on-demand)
@@ -50,21 +48,6 @@ pub struct DocsShowArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
-}
-
-#[derive(Args)]
-pub struct DocsSearchArgs {
-    /// Query matched against docs and ADR metadata
-    pub query: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-    /// Maximum number of matches to return (default 20)
-    #[arg(long)]
-    pub limit: Option<usize>,
-    /// Include superseded ADRs in search results
-    #[arg(long)]
-    pub include_superseded: bool,
 }
 
 #[derive(Args)]
@@ -98,7 +81,6 @@ impl Execute for DocsCommand {
         match self.command {
             DocsSubcommand::List(args) => args.execute(runtime),
             DocsSubcommand::Show(args) => args.execute(runtime),
-            DocsSubcommand::Search(args) => args.execute(runtime),
             DocsSubcommand::Add(args) => args.execute(runtime),
             DocsSubcommand::Reindex(args) => args.execute(runtime),
             DocsSubcommand::Migrate(args) => args.execute(runtime),
@@ -175,47 +157,6 @@ impl Execute for DocsShowArgs {
                 );
             }
             println!("\n{}", shown.body);
-            Ok(())
-        }
-    }
-}
-
-impl Execute for DocsSearchArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let results = runtime.search_docs(&self.query, self.limit, self.include_superseded)?;
-        if self.json {
-            print_json(&results)
-        } else {
-            let mut table = crate::output::table::build_table(&[
-                "ORIGIN",
-                "PATH",
-                "TYPE/STATUS",
-                "SUMMARY/TITLE",
-                "MATCHED",
-            ]);
-            for result in results {
-                match result {
-                    SearchResult::Doc(result) => {
-                        table.add_row(vec![
-                            "doc".to_string(),
-                            result.record.path,
-                            result.record.doc_type,
-                            result.record.summary,
-                            result.matched_by.join(", "),
-                        ]);
-                    }
-                    SearchResult::Adr(result) => {
-                        table.add_row(vec![
-                            "adr".to_string(),
-                            result.path.to_string_lossy().into_owned(),
-                            result.status.to_string(),
-                            result.title,
-                            result.matched_by.join(", "),
-                        ]);
-                    }
-                }
-            }
-            println!("{table}");
             Ok(())
         }
     }

@@ -169,7 +169,6 @@ fn json_error_output_preference(command: &Commands) -> Option<bool> {
         Commands::Docs(DocsCommand { command }) => match command {
             DocsSubcommand::List(args) => args.json.then_some(true),
             DocsSubcommand::Show(args) => args.json.then_some(true),
-            DocsSubcommand::Search(args) => args.json.then_some(true),
             DocsSubcommand::Add(args) => args.json.then_some(true),
             DocsSubcommand::Reindex(args) => args.json.then_some(true),
             DocsSubcommand::Migrate(args) => args.json.then_some(true),

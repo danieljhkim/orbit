@@ -46,6 +46,14 @@ impl Tool for OrbitTaskListTool {
                 param_type: "boolean".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "path".to_string(),
+                description:
+                    "Filter to tasks whose `context_files` selectors apply to this path. Supports file:, dir:, symbol:, and bare path selectors; bidirectional containment."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::super::identity_params());
         ToolSchema {

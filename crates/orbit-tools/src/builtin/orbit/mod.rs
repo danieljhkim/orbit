@@ -40,7 +40,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(adr::update::OrbitAdrUpdateTool);
     registry.register(docs::OrbitDocsListTool);
     registry.register(docs::OrbitDocsShowTool);
-    registry.register(docs::OrbitDocsSearchTool);
     registry.register(docs::OrbitDocsAddTool);
     registry.register(docs::OrbitDocsReindexTool);
     registry.register(docs::OrbitDocsMigrateTool);
@@ -66,7 +65,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task::reject::OrbitTaskRejectTool);
     registry.register(task::show::OrbitTaskShowTool);
     registry.register(task::list::OrbitTaskListTool);
-    registry.register(task::search::OrbitTaskSearchTool);
     registry.register(task::update::OrbitTaskUpdateTool);
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
@@ -86,7 +84,6 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::list::OrbitLearningListTool);
     registry.register(learning::prune::OrbitLearningPruneTool);
     registry.register(learning::reindex::OrbitLearningReindexTool);
-    registry.register(learning::search::OrbitLearningSearchTool);
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);

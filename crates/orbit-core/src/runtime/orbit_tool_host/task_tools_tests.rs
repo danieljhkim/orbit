@@ -29,7 +29,9 @@ fn assert_task_titles(output: &Value, expected: &[&str]) {
 }
 
 #[test]
-fn execute_tool_command_searches_tasks_for_agents() {
+fn execute_tool_command_searches_tasks_for_agents_via_orbit_search() {
+    // ORB-00202: `orbit.task.search` was deleted in phase 2; the substring
+    // case migrates to `orbit.search --kind task`.
     let (_root, runtime, repo_root) = test_runtime();
     let title_match = create_task(
         &runtime,
@@ -58,14 +60,14 @@ fn execute_tool_command_searches_tasks_for_agents() {
 
     let output = runtime
         .execute_tool_command(
-            "orbit.task.search",
-            json!({ "query": "sEaRcH" }),
+            "orbit.search",
+            json!({ "query": "sEaRcH", "kind": "task" }),
             Some("codex".to_string()),
             Some("gpt-5.4".to_string()),
         )
         .expect("search tool succeeds");
 
-    let matches = output.as_array().expect("search returns an array");
+    let matches = output["results"].as_array().expect("results array");
     let ids = matches
         .iter()
         .filter_map(|task| task.get("id").and_then(Value::as_str))
@@ -1010,25 +1012,28 @@ fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
         .expect("list by both tags");
     assert_task_titles(&both_list, &["Perf bench task"]);
 
+    // ORB-00202: `orbit.task.search` was deleted; the search+tag case
+    // routes through `orbit.search --kind task --tag <...>`. Results land
+    // under `output["results"]` rather than the top-level array.
     let bench_search = runtime
         .execute_tool_command(
-            "orbit.task.search",
-            json!({ "query": "tag-search", "tag": ["bench"] }),
+            "orbit.search",
+            json!({ "query": "tag-search", "kind": "task", "tag": ["bench"] }),
             Some("codex".to_string()),
             Some("gpt-5.5".to_string()),
         )
         .expect("search by tag");
-    assert_task_titles(&bench_search, &["Bench task", "Perf bench task"]);
+    assert_task_titles(&bench_search["results"], &["Bench task", "Perf bench task"]);
 
     let both_search = runtime
         .execute_tool_command(
-            "orbit.task.search",
-            json!({ "query": "tag-search", "tag": ["perf", "bench"] }),
+            "orbit.search",
+            json!({ "query": "tag-search", "kind": "task", "tag": ["perf", "bench"] }),
             Some("codex".to_string()),
             Some("gpt-5.5".to_string()),
         )
         .expect("search by both tags");
-    assert_task_titles(&both_search, &["Perf bench task"]);
+    assert_task_titles(&both_search["results"], &["Perf bench task"]);
 }
 
 #[test]

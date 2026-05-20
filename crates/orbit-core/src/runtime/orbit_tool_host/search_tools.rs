@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use orbit_common::types::{OrbitError, optional_string_alias, optional_u32_alias};
+use orbit_common::types::{
+    OrbitError, optional_string_alias, optional_string_list_alias, optional_u32_alias,
+};
 use serde_json::Value;
 
 use crate::{GlobalSearchKind, GlobalSearchParams, OrbitRuntime};
@@ -42,6 +44,10 @@ pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
                 "semanticModel",
             ],
         )?,
+        tags: optional_string_list_alias(&input, &["tag", "tags"])?.unwrap_or_default(),
+        all: optional_bool_alias(&input, &["all"])?.unwrap_or(false),
+        status: optional_string_list_alias(&input, &["status", "statuses"])?.unwrap_or_default(),
+        path: optional_string_alias(&input, &["path"])?,
     })?;
     serde_json::to_value(result)
         .map_err(|error| OrbitError::Execution(format!("serialize search result: {error}")))
