@@ -34,7 +34,7 @@ Launch each legacy parallel-batch worker through the durable pipeline surface (`
 - **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
 - **[T20260425-2010]** — Refactor `orbit run` task workflow commands and revive `duel-plan` as a seeded run workflow.
 - **[T20260426-0047]** — Make v2 activity catalog discovery honor workspace-over-global `MergeByKey` precedence and remove the public `orbit activity run` command.
-- **[T20260426-0526]** — Restore v2 job invocation trace persistence so `orbit metrics` can report agent and tool usage.
+- **[T20260426-0526]** — Restore v2 job invocation trace persistence so dashboard metrics surfaces can report agent and tool usage.
 - **[T20260426-0519]** — Move file-backed activity/job audit traces under `.orbit/state/audit`.
 - **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
 - **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.

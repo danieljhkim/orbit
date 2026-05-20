@@ -468,8 +468,8 @@ spec:
             r#"#!/bin/sh
 cat >/dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"fake"}'
-printf '%s\n' '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"orbit metrics","aggregated_output":"","exit_code":null,"status":"in_progress"}}'
-printf '%s\n' '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"orbit metrics","aggregated_output":"ok","exit_code":0,"status":"completed"}}'
+printf '%s\n' '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"orbit graph","aggregated_output":"","exit_code":null,"status":"in_progress"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"orbit graph","aggregated_output":"ok","exit_code":0,"status":"completed"}}'
 printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"ok":true},"error":null}'
 printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":25,"output_tokens":12}}'
 "#,

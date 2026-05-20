@@ -31,7 +31,6 @@ sidebar:
 |---------|---------|
 | `orbit graph` | Build and query the knowledge graph. See [Knowledge Graph](../concepts/knowledge-graph). |
 | `orbit audit` | Query the audit event log. |
-| `orbit metrics` | Inspect token, tool-call, and knowledge-pack metrics. |
 | `orbit run history` | Show recent job runs. Filter to one job with `-j <job_id>`. |
 | `orbit run show [run_id]` | Show structured state and step summary for a job run (defaults to latest). |
 | `orbit run logs [run_id]` | Print raw stdout/stderr captured for a job run. |

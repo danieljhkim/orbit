@@ -488,28 +488,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
-        Commands::Metrics(cmd) => {
-            use crate::command::metrics::MetricsSubcommand;
-            let (sub, target_id) = match &cmd.command {
-                None => ("overview", None),
-                Some(MetricsSubcommand::Overview(_)) => ("overview", None),
-                Some(MetricsSubcommand::Knowledge(_)) => ("graph", None),
-                Some(MetricsSubcommand::Activity(_)) => ("activity", None),
-                Some(MetricsSubcommand::Task(args)) => ("task", Some(args.id.as_str())),
-                Some(MetricsSubcommand::Tools(_)) => ("tools", None),
-                Some(MetricsSubcommand::Invocations(_)) => ("invocations", None),
-            };
-            CommandMeta {
-                command: "metrics".to_string(),
-                subcommand: Some(sub.to_string()),
-                tool_name: None,
-                target_type: Some("metrics".to_string()),
-                target_id: target_id.map(String::from),
-                role: "admin".to_string(),
-                arguments_json: None,
-                job_run_id: None,
-            }
-        }
         Commands::Graph(cmd) => {
             let sub = match &cmd.subcommand {
                 crate::command::graph::GraphSubcommand::Build(_) => "build",

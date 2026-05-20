@@ -14,7 +14,7 @@ pub mod web;
 
 pub use definitions::{activity, executor, job, policy, skill, tool};
 pub use environment::{config, init, workspace};
-pub use observe::{audit, graph, metrics};
+pub use observe::{audit, graph};
 
 use std::path::PathBuf;
 
@@ -58,7 +58,6 @@ Observe:
   graph       Query the knowledge graph
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
-  metrics     Show metrics
 
 Definitions:
   activity    View activity definitions
@@ -103,7 +102,6 @@ pub enum Commands {
     Graph(graph::GraphCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
-    Metrics(metrics::MetricsCommand),
 
     // ── Definitions ──
     Activity(activity::ActivityCommand),
@@ -141,7 +139,6 @@ impl Execute for Commands {
             Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
-            Commands::Metrics(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),

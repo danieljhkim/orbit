@@ -148,7 +148,7 @@ Folded instances:
 - Cost: audit review now spans two related storage layouts instead of one.
 - Cost: some read-only inspection paths no longer shared the same asset-validation gate as active workflow execution paths.
 - Cost: direct v2 execution now has persistence side effects and can record synthetic job-level steps that were not literal authored YAML steps.
-- Cost: job execution now has another persistence side effect, and CLI metrics remain limited by the provider harness output format.
+- Cost: job execution now has another persistence side effect, and dashboard metrics remain limited by the provider harness output format.
 - Cost: existing local `.orbit/audit/` artifacts are legacy files; readers looking for historical runs may need to check both locations during any manual transition period.
 - Cost: the runtime layer now owns a read-side view model for audit JSONL, so envelope schema changes must update both writer and accessor tests together.
 - Cost: scripts and muscle memory that used the removed aliases must migrate to the `orbit run` forms.
@@ -572,7 +572,7 @@ The plumbing adds a single optional field to `TaskAutomationUpdate` (`context_fi
 - **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
 - **[T20260425-2010]** — Refactor `orbit run` task workflow commands and revive `duel-plan` as a seeded run workflow.
 - **[T20260426-0047]** — Make v2 activity catalog discovery honor workspace-over-global `MergeByKey` precedence and remove the public `orbit activity run` command.
-- **[T20260426-0526]** — Restore v2 job invocation trace persistence so `orbit metrics` can report agent and tool usage.
+- **[T20260426-0526]** — Restore v2 job invocation trace persistence so dashboard metrics surfaces can report agent and tool usage.
 - **[T20260426-0519]** — Move file-backed activity/job audit traces under `.orbit/state/audit`.
 - **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
 - **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.
