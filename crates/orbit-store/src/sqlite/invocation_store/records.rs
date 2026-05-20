@@ -357,7 +357,7 @@ impl InvocationListQuery {
         T: ToSql + 'static,
     {
         self.push_value(value);
-        // L20260520-1: nested EXISTS filters need the bind index inserted at the placeholder.
+        // L-0024: nested EXISTS filters need the bind index inserted at the placeholder.
         let placeholder = format!("?{}", self.len());
         self.conditions.push(sql.replacen('?', &placeholder, 1));
     }

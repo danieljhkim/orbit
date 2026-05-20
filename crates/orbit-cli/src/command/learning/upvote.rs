@@ -6,7 +6,7 @@ use crate::command::Execute;
 
 #[derive(Args)]
 pub struct LearningUpvoteArgs {
-    /// Learning ID (e.g. L20260511-1)
+    /// Learning ID (e.g. L-0001)
     #[arg(long = "id")]
     pub id: String,
     /// Voter model or canonical agent family

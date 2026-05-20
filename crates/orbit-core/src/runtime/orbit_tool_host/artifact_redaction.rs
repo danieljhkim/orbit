@@ -787,7 +787,7 @@ mod tests {
 
         let events = runtime
             .list_audit_events(None, Some("orbit.task.add".to_string()), None, None, 16)
-            .expect("L20260517-9: same backing query as `orbit audit list --json`");
+            .expect("L-0009: same backing query as `orbit audit list --json`");
         let redaction_event = events
             .iter()
             .find(|event| event.command == "artifact_redaction")
@@ -873,7 +873,7 @@ mod tests {
         assert_eq!(output["redactions_applied"], false);
         let events = runtime
             .list_audit_events(None, Some("orbit.task.update".to_string()), None, None, 16)
-            .expect("L20260517-9: same backing query as `orbit audit list --json`");
+            .expect("L-0009: same backing query as `orbit audit list --json`");
         assert!(
             events
                 .iter()

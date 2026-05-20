@@ -317,7 +317,7 @@ mod tests {
         search_by_path.insert(
             "crates/orbit-engine/src/lib.rs".to_string(),
             vec![json!({
-                "id": "L20260515-0001",
+                "id": "L-0001",
                 "summary": "Remember the engine rule.",
                 "body": "full body must stay out",
                 "updated_at": "2026-05-15T00:00:00Z",
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(
             structured.get("learnings"),
             Some(&json!([{
-                "id": "L20260515-0001",
+                "id": "L-0001",
                 "summary": "Remember the engine rule."
             }]))
         );
@@ -401,7 +401,7 @@ mod tests {
         search_by_path.insert(
             "crates/orbit-engine/src/lib.rs".to_string(),
             vec![json!({
-                "id": "L20260515-0001",
+                "id": "L-0001",
                 "summary": "Already injected at L1.",
                 "updated_at": "2026-05-15T00:00:00Z",
                 "priority": null
@@ -413,7 +413,7 @@ mod tests {
             }),
             search_by_path,
         ));
-        let initial_state = LearningInjectionState::seeded(["L20260515-0001".to_string()]);
+        let initial_state = LearningInjectionState::seeded(["L-0001".to_string()]);
         let server = OrbitToolServer::new_for_test(
             host,
             None,
@@ -437,7 +437,7 @@ mod tests {
         let states = server.learning_states.lock().await;
         let state = states.get(PROCESS_LEARNING_SESSION_KEY).expect("state");
         assert_eq!(state.count, 1);
-        assert!(state.emitted_ids.contains("L20260515-0001"));
+        assert!(state.emitted_ids.contains("L-0001"));
     }
 
     #[tokio::test]
@@ -449,7 +449,7 @@ mod tests {
                 .map(|row_idx| {
                     let id_idx = call_idx * 5 + row_idx;
                     json!({
-                        "id": format!("L20260515-{id_idx:04}"),
+                        "id": format!("L-{id_idx:04}"),
                         "summary": format!("Learning {id_idx}"),
                         "updated_at": "2026-05-15T00:00:00Z",
                         "priority": null

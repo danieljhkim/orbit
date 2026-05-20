@@ -26,7 +26,7 @@ use orbit_core::{OrbitError, OrbitRuntime};
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
 const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");
-// L20260519-5: Keep embedded dashboard JS modules in sync with /static routes.
+// L-0021: Keep embedded dashboard JS modules in sync with /static routes.
 const APP_JS: &str = include_str!("../assets/dashboard/app.js");
 const COMMON_JS: &str = include_str!("../assets/dashboard/common.js");
 const TASKS_JS: &str = include_str!("../assets/dashboard/tasks.js");

@@ -5,9 +5,9 @@ use chrono::{DateTime, Utc};
 use orbit_common::types::OrbitError;
 use serde_json::Value;
 
-use super::constants::{
-    LEARNING_COMMENTS_FILE_NAME, LEARNING_DOC_FILE_EXT, LEARNING_DOC_FILE_NAME,
-};
+#[cfg(test)]
+use super::constants::LEARNING_DOC_FILE_EXT;
+use super::constants::{LEARNING_COMMENTS_FILE_NAME, LEARNING_DOC_FILE_NAME};
 
 pub(super) fn learning_dir_path(root: &Path, id: &str) -> PathBuf {
     root.join(id)
@@ -35,18 +35,18 @@ pub(super) fn locate_learning(root: &Path, id: &str) -> Result<Option<PathBuf>, 
     Ok(None)
 }
 
-/// Allocate the next sequential learning id of the form `L<YYYYMMDD>-<NNNN>`.
+/// Allocate the next sequential learning id of the form `L-NNNN`.
 ///
 /// `<NNNN>` is monotonically increasing across every per-entity learning
-/// directory for the given day; allocation rolls over each calendar day.
+/// directory. Runtime-backed stores use the SQLite id allocator; this scan
+/// helper remains for layout-focused tests and legacy fallback checks.
 ///
 /// **Caller contract**: must hold an allocation lock (see
 /// [`super::lock::acquire_learning_allocation_lock`]) for the duration of
 /// the scan and the subsequent file creation, so the scan-then-allocate
 /// window remains serialized across concurrent writers.
-pub(super) fn next_learning_id(root: &Path, now: DateTime<Utc>) -> Result<String, OrbitError> {
-    let date = now.format("%Y%m%d").to_string();
-    let prefix = format!("L{date}-");
+#[cfg(test)]
+pub(super) fn next_learning_id(root: &Path, _now: DateTime<Utc>) -> Result<String, OrbitError> {
     let mut max_suffix: u32 = 0;
 
     if root.exists() {
@@ -64,10 +64,7 @@ pub(super) fn next_learning_id(root: &Path, now: DateTime<Utc>) -> Result<String
             if file_type.is_dir() && !learning_doc_path(root, &id).is_file() {
                 continue;
             }
-            let Some(tail) = id.strip_prefix(&prefix) else {
-                continue;
-            };
-            if let Ok(n) = tail.parse::<u32>() {
+            if let Some(n) = parse_learning_sequence(&id) {
                 max_suffix = max_suffix.max(n);
             }
         }
@@ -76,7 +73,8 @@ pub(super) fn next_learning_id(root: &Path, now: DateTime<Utc>) -> Result<String
     let next = max_suffix
         .checked_add(1)
         .ok_or_else(|| OrbitError::Execution("learning id counter overflow".to_string()))?;
-    Ok(format!("L{date}-{next}"))
+    let width = next.to_string().len().max(4);
+    Ok(format!("L-{next:0width$}"))
 }
 
 /// Allocate the next sequential learning comment id of the form
@@ -134,6 +132,7 @@ pub(super) fn next_learning_comment_id(
     Ok(format!("C{date}-{next}"))
 }
 
+#[cfg(test)]
 fn learning_id_from_layout_entry(name: &str, is_dir: bool) -> Option<String> {
     if is_dir {
         return is_valid_learning_id(name).then(|| name.to_string());
@@ -142,14 +141,14 @@ fn learning_id_from_layout_entry(name: &str, is_dir: bool) -> Option<String> {
     is_valid_learning_id(stem).then(|| stem.to_string())
 }
 
-/// Validate that `id` is shaped as `L<YYYYMMDD>-<digits>` and free of path
+/// Validate that `id` is shaped as `L-NNNN` and free of path
 /// traversal characters.
 pub(super) fn validate_learning_id(id: &str) -> Result<(), OrbitError> {
     if is_valid_learning_id(id) {
         return Ok(());
     }
     Err(OrbitError::InvalidInput(format!(
-        "learning id must match L<YYYYMMDD>-<digits>: {id}"
+        "learning id must match L-NNNN: {id}"
     )))
 }
 
@@ -163,37 +162,15 @@ pub(super) fn validate_learning_comment_id(id: &str) -> Result<(), OrbitError> {
 }
 
 fn is_valid_learning_id(id: &str) -> bool {
-    let Some(raw) = id.strip_prefix('L') else {
-        return false;
-    };
-    if raw.len() < 10 {
-        return false;
+    parse_learning_sequence(id).is_some()
+}
+
+fn parse_learning_sequence(id: &str) -> Option<u32> {
+    let suffix = id.strip_prefix("L-")?;
+    if suffix.len() < 4 || !suffix.as_bytes().iter().all(u8::is_ascii_digit) {
+        return None;
     }
-    let Some(date) = raw.get(0..8) else {
-        return false;
-    };
-    if !date.as_bytes().iter().all(u8::is_ascii_digit) {
-        return false;
-    }
-    let Some(year) = date.get(0..4) else {
-        return false;
-    };
-    let Some(month) = date.get(4..6) else {
-        return false;
-    };
-    if !year.as_bytes().iter().all(u8::is_ascii_digit) {
-        return false;
-    }
-    if !matches!(
-        month,
-        "01" | "02" | "03" | "04" | "05" | "06" | "07" | "08" | "09" | "10" | "11" | "12"
-    ) {
-        return false;
-    }
-    let Some(tail) = raw.get(8..).and_then(|value| value.strip_prefix('-')) else {
-        return false;
-    };
-    !tail.is_empty() && tail.as_bytes().iter().all(u8::is_ascii_digit)
+    suffix.parse::<u32>().ok()
 }
 
 fn is_valid_learning_comment_id(id: &str) -> bool {
@@ -238,32 +215,25 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let now = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
         let id = next_learning_id(dir.path(), now).expect("next id");
-        assert_eq!(id, "L20260511-1");
+        assert_eq!(id, "L-0001");
     }
 
     #[test]
     fn next_learning_id_scans_active_and_superseded_dirs() {
         let dir = tempdir().expect("tempdir");
-        fs::create_dir_all(dir.path().join("L20260511-1")).expect("seed active dir");
-        fs::write(
-            dir.path().join("L20260511-1").join(LEARNING_DOC_FILE_NAME),
-            "",
-        )
-        .expect("seed active");
-        fs::create_dir_all(dir.path().join("L20260511-3")).expect("seed superseded dir");
-        fs::write(
-            dir.path().join("L20260511-3").join(LEARNING_DOC_FILE_NAME),
-            "",
-        )
-        .expect("seed superseded");
+        fs::create_dir_all(dir.path().join("L-0001")).expect("seed active dir");
+        fs::write(dir.path().join("L-0001").join(LEARNING_DOC_FILE_NAME), "").expect("seed active");
+        fs::create_dir_all(dir.path().join("L-0003")).expect("seed superseded dir");
+        fs::write(dir.path().join("L-0003").join(LEARNING_DOC_FILE_NAME), "")
+            .expect("seed superseded");
 
         let now = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
         let id = next_learning_id(dir.path(), now).expect("next id");
-        assert_eq!(id, "L20260511-4");
+        assert_eq!(id, "L-0004");
     }
 
     #[test]
-    fn next_learning_id_ignores_other_days() {
+    fn next_learning_id_ignores_legacy_date_ids() {
         let dir = tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join("L20260510-99")).expect("seed yesterday dir");
         fs::write(
@@ -273,46 +243,33 @@ mod tests {
         .expect("seed yesterday");
         let now = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
         let id = next_learning_id(dir.path(), now).expect("next id");
-        assert_eq!(id, "L20260511-1");
+        assert_eq!(id, "L-0001");
     }
 
     #[test]
     fn locate_learning_finds_record_in_either_state() {
         let dir = tempdir().expect("tempdir");
-        fs::create_dir_all(dir.path().join("L20260511-1")).expect("mk active");
-        fs::create_dir_all(dir.path().join("L20260511-2")).expect("mk superseded");
-        fs::write(
-            dir.path().join("L20260511-1").join(LEARNING_DOC_FILE_NAME),
-            "",
-        )
-        .expect("active");
-        fs::write(
-            dir.path().join("L20260511-2").join(LEARNING_DOC_FILE_NAME),
-            "",
-        )
-        .expect("superseded");
+        fs::create_dir_all(dir.path().join("L-0001")).expect("mk active");
+        fs::create_dir_all(dir.path().join("L-0002")).expect("mk superseded");
+        fs::write(dir.path().join("L-0001").join(LEARNING_DOC_FILE_NAME), "").expect("active");
+        fs::write(dir.path().join("L-0002").join(LEARNING_DOC_FILE_NAME), "").expect("superseded");
 
-        let path = locate_learning(dir.path(), "L20260511-1")
+        let path = locate_learning(dir.path(), "L-0001")
             .expect("locate")
             .expect("found");
-        assert_eq!(
-            path,
-            dir.path().join("L20260511-1").join(LEARNING_DOC_FILE_NAME)
-        );
+        assert_eq!(path, dir.path().join("L-0001").join(LEARNING_DOC_FILE_NAME));
 
-        let path = locate_learning(dir.path(), "L20260511-2")
+        let path = locate_learning(dir.path(), "L-0002")
             .expect("locate")
             .expect("found");
-        assert_eq!(
-            path,
-            dir.path().join("L20260511-2").join(LEARNING_DOC_FILE_NAME)
-        );
+        assert_eq!(path, dir.path().join("L-0002").join(LEARNING_DOC_FILE_NAME));
     }
 
     #[test]
     fn validate_learning_id_accepts_well_formed_ids() {
-        assert!(validate_learning_id("L20260511-1").is_ok());
-        assert!(validate_learning_id("L20260511-9999").is_ok());
+        assert!(validate_learning_id("L-0001").is_ok());
+        assert!(validate_learning_id("L-9999").is_ok());
+        assert!(validate_learning_id("L-10000").is_ok());
     }
 
     #[test]
@@ -321,10 +278,11 @@ mod tests {
             "",
             "  ",
             "T20260511-1",
-            "L20261311-1",
-            "L20260511-",
-            "L20260511-1/escape",
-            "../L20260511-1",
+            "L20260511-1",
+            "L-001",
+            "L-",
+            "L-0001/escape",
+            "../L-0001",
         ] {
             assert!(
                 validate_learning_id(bad).is_err(),

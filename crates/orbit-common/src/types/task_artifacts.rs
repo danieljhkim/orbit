@@ -594,7 +594,7 @@ updated_at: 2026-05-10T12:00:00Z
             },
             TaskRelation {
                 relation_type: TaskRelationType::Resolves,
-                target: "L20260517-1".to_string(),
+                target: "L-0001".to_string(),
             },
         ];
 
@@ -609,7 +609,7 @@ updated_at: 2026-05-10T12:00:00Z
     #[test]
     fn produces_and_resolves_accept_cross_artifact_targets() {
         for relation_type in [TaskRelationType::Produces, TaskRelationType::Resolves] {
-            for target in ["ORB-00002", "F2026-05-007", "L20260517-1", "ADR-0001"] {
+            for target in ["ORB-00002", "F2026-05-007", "L-0001", "ADR-0001"] {
                 let relations = vec![TaskRelation {
                     relation_type,
                     target: target.to_string(),
@@ -632,7 +632,7 @@ updated_at: 2026-05-10T12:00:00Z
             TaskRelationType::Supersedes,
             TaskRelationType::RelatedTo,
         ] {
-            for target in ["F2026-05-007", "L20260517-1", "ADR-0001", "not-an-id"] {
+            for target in ["F2026-05-007", "L-0001", "ADR-0001", "not-an-id"] {
                 let relations = vec![TaskRelation {
                     relation_type,
                     target: target.to_string(),

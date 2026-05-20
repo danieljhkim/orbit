@@ -54,7 +54,7 @@ fn round_trip_persistence_preserves_all_fields_including_phase_two_reservations(
 #[test]
 fn forward_compat_fixture_with_symbols_and_semantic_seed_loads_and_round_trips() {
     let dir = tempdir().expect("tempdir");
-    let id = "L20260511-9";
+    let id = "L-0009";
     let yaml = format!(
         "schema_version: 1\n\
          id: {id}\n\
@@ -110,9 +110,9 @@ fn id_format_increments_within_a_day() {
         .create_learning_at(create_params("c", vec![], vec![]), now)
         .expect("third");
 
-    assert_eq!(first.id, "L20260511-1");
-    assert_eq!(second.id, "L20260511-2");
-    assert_eq!(third.id, "L20260511-3");
+    assert_eq!(first.id, "L-0001");
+    assert_eq!(second.id, "L-0002");
+    assert_eq!(third.id, "L-0003");
 }
 
 #[test]

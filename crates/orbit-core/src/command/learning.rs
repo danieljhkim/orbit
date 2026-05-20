@@ -23,7 +23,9 @@ use crate::OrbitRuntime;
 
 impl OrbitRuntime {
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
-        self.stores().learnings().add(params)
+        let learning = self.stores().learnings().add(params)?;
+        self.record_id_allocation_audit("learning", &learning.id)?;
+        Ok(learning)
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {

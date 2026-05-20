@@ -91,19 +91,19 @@ fn migrate_layout_preserves_list_parity_and_reindex_projection() {
     let root = dir.path().join("learnings");
     std::fs::create_dir_all(root.join("superseded")).expect("legacy dirs");
     std::fs::write(
-        root.join("L20260517-1.yaml"),
-        legacy_learning_yaml("L20260517-1", "active", "Active rule", 10),
+        root.join("L-0001.yaml"),
+        legacy_learning_yaml("L-0001", "active", "Active rule", 10),
     )
     .expect("active yaml");
     std::fs::write(
-        root.join("superseded").join("L20260517-2.yaml"),
-        legacy_learning_yaml("L20260517-2", "superseded", "Old rule", 20),
+        root.join("superseded").join("L-0002.yaml"),
+        legacy_learning_yaml("L-0002", "superseded", "Old rule", 20),
     )
     .expect("superseded yaml");
 
-    let legacy_active = read_learning_file(&root.join("L20260517-1.yaml")).expect("active");
+    let legacy_active = read_learning_file(&root.join("L-0001.yaml")).expect("active");
     let legacy_superseded =
-        read_learning_file(&root.join("superseded").join("L20260517-2.yaml")).expect("superseded");
+        read_learning_file(&root.join("superseded").join("L-0002.yaml")).expect("superseded");
     let index = Store::open_in_memory().expect("index");
     index
         .upsert_learning_index_row(&legacy_active)
@@ -112,11 +112,11 @@ fn migrate_layout_preserves_list_parity_and_reindex_projection() {
         .upsert_learning_index_row(&legacy_superseded)
         .expect("index superseded");
     let before_active_row = index
-        .get_learning_index_row("L20260517-1")
+        .get_learning_index_row("L-0001")
         .expect("row active")
         .expect("present");
     let before_superseded_row = index
-        .get_learning_index_row("L20260517-2")
+        .get_learning_index_row("L-0002")
         .expect("row superseded")
         .expect("present");
 
@@ -134,14 +134,14 @@ fn migrate_layout_preserves_list_parity_and_reindex_projection() {
     assert_eq!(superseded, vec![legacy_superseded]);
     assert_eq!(
         index
-            .get_learning_index_row("L20260517-1")
+            .get_learning_index_row("L-0001")
             .expect("row active after")
             .expect("present"),
         before_active_row
     );
     assert_eq!(
         index
-            .get_learning_index_row("L20260517-2")
+            .get_learning_index_row("L-0002")
             .expect("row superseded after")
             .expect("present"),
         before_superseded_row

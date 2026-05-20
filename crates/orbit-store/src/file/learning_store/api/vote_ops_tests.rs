@@ -81,7 +81,7 @@ fn upvote_rejects_missing_task_missing_learning_and_superseded_learning() {
     assert!(!votes_jsonl_path(dir.path(), &learning.id).exists());
 
     let error = store
-        .upvote_learning(upvote_params("L20260517-404", "claude", Some("ORB-1")))
+        .upvote_learning(upvote_params("L-0404", "claude", Some("ORB-1")))
         .expect_err("missing learning rejected");
     assert!(matches!(
         error,
@@ -90,12 +90,7 @@ fn upvote_rejects_missing_task_missing_learning_and_superseded_learning() {
             ..
         }
     ));
-    assert!(
-        !dir.path()
-            .join("L20260517-404")
-            .join("votes.jsonl")
-            .exists()
-    );
+    assert!(!dir.path().join("L-0404").join("votes.jsonl").exists());
 
     let replacement = store
         .create_learning(create_params("replacement", vec![], vec![]))

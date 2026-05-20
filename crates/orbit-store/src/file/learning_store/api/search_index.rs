@@ -147,6 +147,7 @@ impl LearningFileStore {
                 evidence: Vec::new(),
                 supersedes: None,
                 superseded_by: None,
+                legacy_ids: Vec::new(),
                 created_at: updated_at,
                 updated_at,
                 created_by: None,

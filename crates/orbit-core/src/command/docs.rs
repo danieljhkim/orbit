@@ -1474,7 +1474,7 @@ fn parse_artifact_ref(raw: &str) -> Result<ArtifactRef, String> {
         return Ok(ArtifactRef::Adr(trimmed.to_string()));
     }
     Err(format!(
-        "unknown related_artifacts reference `{trimmed}`; expected ORB-NNNNN, LYYYYMMDD-N, FYYYY-MM-NNN, or ADR-NNNN"
+        "unknown related_artifacts reference `{trimmed}`; expected ORB-NNNNN, L-NNNN, FYYYY-MM-NNN, or ADR-NNNN"
     ))
 }
 
@@ -1485,16 +1485,10 @@ fn is_task_ref(value: &str) -> bool {
 }
 
 fn is_learning_ref(value: &str) -> bool {
-    let Some(rest) = value.strip_prefix('L') else {
+    let Some(ordinal) = value.strip_prefix("L-") else {
         return false;
     };
-    let Some((date, ordinal)) = rest.split_once('-') else {
-        return false;
-    };
-    date.len() == 8
-        && date.chars().all(|ch| ch.is_ascii_digit())
-        && !ordinal.is_empty()
-        && ordinal.chars().all(|ch| ch.is_ascii_digit())
+    ordinal.len() >= 4 && ordinal.chars().all(|ch| ch.is_ascii_digit())
 }
 
 fn is_friction_ref(value: &str) -> bool {
@@ -1597,7 +1591,7 @@ mod tests {
     #[test]
     fn strict_frontmatter_accepts_locked_schema() {
         let parsed = parse_frontmatter(
-            "---\ntype: design\nsummary: Hook rewrite design\ntags: [hook, audit]\nrelated_artifacts: [ORB-00160, ADR-0168, L20260514-3, F2026-05-001]\n---\n# Body\n",
+            "---\ntype: design\nsummary: Hook rewrite design\ntags: [hook, audit]\nrelated_artifacts: [ORB-00160, ADR-0168, L-0003, F2026-05-001]\n---\n# Body\n",
         )
         .expect("valid frontmatter");
         assert_eq!(parsed.doc_type, DocType::Design);

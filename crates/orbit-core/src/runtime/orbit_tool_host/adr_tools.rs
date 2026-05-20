@@ -39,6 +39,7 @@ pub(super) fn add(
         related_tasks,
         body,
     })?;
+    runtime.record_id_allocation_audit("adr", &adr.id)?;
     Ok(adr_to_json(&adr))
 }
 
@@ -328,8 +329,11 @@ fn record_transition_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OrbitRuntime;
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
-    use orbit_common::types::NotFoundKind;
+    use orbit_common::types::{LearningScope, NotFoundKind};
+    use orbit_store::LearningCreateParams;
+    use tempfile::tempdir;
 
     fn assert_adr_field(value: &Value, field: &str, expected: &str) {
         let actual = value
@@ -377,6 +381,112 @@ mod tests {
             response["related_tasks"].as_array().unwrap().is_empty(),
             "related_tasks empty per ADR-008"
         );
+    }
+
+    #[test]
+    fn add_adr_and_learning_emit_id_allocation_audit_events() {
+        let (_guard, runtime, repo_root) = test_runtime();
+        let adr = add(
+            &runtime,
+            json!({"title": "Audited", "owner": "codex", "body": "Body"}),
+            None,
+            None,
+        )
+        .expect("add adr");
+        let adr_id = adr["id"].as_str().expect("adr id").to_string();
+        let learning = runtime
+            .create_learning(LearningCreateParams {
+                summary: "Audited learning".to_string(),
+                scope: LearningScope::default(),
+                body: String::new(),
+                evidence: Vec::new(),
+                created_by: Some("codex".to_string()),
+                priority: None,
+            })
+            .expect("add learning");
+
+        let events = runtime
+            .list_audit_events_with_kind(
+                None,
+                None,
+                Some("id_allocation".to_string()),
+                None,
+                None,
+                10,
+            )
+            .expect("audit list");
+        let repo_root = repo_root.to_string_lossy().to_string();
+        let payloads = events
+            .iter()
+            .map(|event| {
+                serde_json::from_str::<Value>(
+                    event.arguments_json.as_deref().expect("arguments json"),
+                )
+                .expect("payload")
+            })
+            .collect::<Vec<_>>();
+
+        assert!(payloads.iter().any(|payload| {
+            payload["kind"].as_str() == Some("adr")
+                && payload["id"].as_str() == Some(adr_id.as_str())
+                && payload["worktree_root"].as_str() == Some(repo_root.as_str())
+        }));
+        assert!(payloads.iter().any(|payload| {
+            payload["kind"].as_str() == Some("learning")
+                && payload["id"].as_str() == Some(learning.id.as_str())
+                && payload["worktree_root"].as_str() == Some(repo_root.as_str())
+        }));
+    }
+
+    #[test]
+    fn add_adr_and_learning_keep_body_files_in_shared_root_when_local_root_differs() {
+        let root = tempdir().expect("tempdir");
+        let global_root = root.path().join("global");
+        let shared_repo = root.path().join("repo");
+        let local_worktree = root.path().join("linked-worktree");
+        let shared_root = shared_repo.join(".orbit");
+        let local_root = local_worktree.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("global root");
+        std::fs::create_dir_all(&shared_root).expect("shared root");
+        std::fs::create_dir_all(&local_root).expect("local root");
+        let runtime = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+            .expect("runtime");
+
+        let adr = add(
+            &runtime,
+            json!({"title": "Shared ADR", "owner": "codex", "body": "Body"}),
+            None,
+            None,
+        )
+        .expect("add adr");
+        let adr_id = adr["id"].as_str().expect("adr id");
+        let learning = runtime
+            .create_learning(LearningCreateParams {
+                summary: "Shared learning".to_string(),
+                scope: LearningScope::default(),
+                body: String::new(),
+                evidence: Vec::new(),
+                created_by: Some("codex".to_string()),
+                priority: None,
+            })
+            .expect("add learning");
+
+        assert!(
+            shared_root
+                .join("adrs/proposed")
+                .join(adr_id)
+                .join("body.md")
+                .is_file()
+        );
+        assert!(
+            shared_root
+                .join("learnings")
+                .join(&learning.id)
+                .join("learning.yaml")
+                .is_file()
+        );
+        assert!(!local_root.join("adrs").exists());
+        assert!(!local_root.join("learnings").exists());
     }
 
     #[test]

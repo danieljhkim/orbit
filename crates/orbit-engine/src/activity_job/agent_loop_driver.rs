@@ -717,7 +717,7 @@ mod tests {
         let _guard = ReplayEnvGuard::set_fixture(fixture.path());
         let host = LearningReplayHost {
             reminders: vec![LearningReminder {
-                id: "L20260515-0001".to_string(),
+                id: "L-0001".to_string(),
                 summary: "Remember to validate the output.".to_string(),
                 comments: Vec::new(),
             }],
@@ -740,7 +740,7 @@ mod tests {
             first_user_text(&session),
             "<system-reminder>\n\
 Project learnings relevant to this task:\n\n\
-- [L20260515-0001] Remember to validate the output.\n\n\
+- [L-0001] Remember to validate the output.\n\n\
 Read full body via `orbit.learning.show <id>` if needed.\n\
 </system-reminder>\n\n\
 baseline prompt"
@@ -780,7 +780,7 @@ baseline prompt"
         let host = LearningReplayHost {
             reminders: (0..7)
                 .map(|idx| LearningReminder {
-                    id: format!("L20260515-{idx:04}"),
+                    id: format!("L-{idx:04}"),
                     summary: format!("Learning {idx}"),
                     comments: Vec::new(),
                 })
@@ -801,8 +801,8 @@ baseline prompt"
         .expect("replay should finish");
 
         let text = first_user_text(&session);
-        assert!(text.contains("[L20260515-0004] Learning 4"));
-        assert!(!text.contains("L20260515-0005"));
+        assert!(text.contains("[L-0004] Learning 4"));
+        assert!(!text.contains("L-0005"));
         assert_eq!(session.learning_injection_state().count, 5);
     }
 }

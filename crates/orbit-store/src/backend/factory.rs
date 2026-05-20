@@ -11,7 +11,6 @@ use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
     SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
 };
-use crate::Store;
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
 use crate::file::job_store::JobFileStore;
@@ -19,6 +18,7 @@ use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskV2Store;
 use crate::sqlite::task_registry::TaskRegistryStore;
+use crate::{IdAllocator, Store};
 
 pub struct WorkspaceTaskBackends {
     pub task: Arc<dyn TaskStoreBackend>,
@@ -59,8 +59,16 @@ pub fn workspace_job_run_store(root: PathBuf) -> Arc<dyn JobRunStoreBackend> {
 /// indexed in the shared SQLite `store`. The returned `Arc<dyn AdrStoreBackend>`
 /// is the trait-object surface consumed by `orbit-tools::orbit.adr.*` once
 /// T20260511-2 wires it through `orbit-core`.
-pub fn workspace_adr_backends(adr_dir: PathBuf, store: Store) -> Arc<dyn AdrStoreBackend> {
-    Arc::new(AdrFileStore::new_with_index(adr_dir, store))
+pub fn workspace_adr_backends(
+    adr_dir: PathBuf,
+    store: Store,
+    id_allocator: IdAllocator,
+) -> Arc<dyn AdrStoreBackend> {
+    Arc::new(AdrFileStore::new_with_index_and_allocator(
+        adr_dir,
+        store,
+        id_allocator,
+    ))
 }
 
 /// Constructs the workspace-scoped project-learnings store backed by
@@ -70,11 +78,13 @@ pub fn workspace_adr_backends(adr_dir: PathBuf, store: Store) -> Arc<dyn AdrStor
 pub fn workspace_learning_backend(
     learning_dir: PathBuf,
     store: Store,
+    id_allocator: IdAllocator,
 ) -> Result<Arc<dyn LearningStoreBackend>, orbit_common::types::OrbitError> {
     LearningFileStore::reject_legacy_flat_layout(&learning_dir)?;
-    Ok(Arc::new(LearningFileStore::new_with_index(
+    Ok(Arc::new(LearningFileStore::new_with_index_and_allocator(
         learning_dir,
         store,
+        id_allocator,
     )))
 }
 
@@ -194,10 +204,12 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         let root = temp.path().join("learnings");
         std::fs::create_dir_all(&root).expect("create learnings");
-        std::fs::write(root.join("L20260517-1.yaml"), "").expect("legacy learning");
+        std::fs::write(root.join("L-0001.yaml"), "").expect("legacy learning");
         let store = Store::open_in_memory().expect("open store");
 
-        let err = match workspace_learning_backend(root, store) {
+        let id_allocator =
+            IdAllocator::for_test_roots(temp.path().join("adrs"), temp.path().join("learnings2"));
+        let err = match workspace_learning_backend(root, store, id_allocator) {
             Ok(_) => panic!("legacy rejected"),
             Err(err) => err,
         };

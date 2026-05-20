@@ -117,7 +117,7 @@ async fn supersede_returns_not_found_when_target_id_is_missing() {
 
     let response = request_supersede(
         runtime,
-        "L20260516-9999",
+        "L-9999",
         Some("http://localhost:7878"),
         Some(json!({ "by": replacement.id })),
     )

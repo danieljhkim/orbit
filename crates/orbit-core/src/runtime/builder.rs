@@ -8,13 +8,16 @@ use orbit_store::sqlite::task_registry::{
     task_registry_path, write_workspace_config,
 };
 use orbit_store::{
-    Store, audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
+    AuditEventInsertParams, IdAllocator, IdAllocatorConfig, LearningIdMigrationReport, Store,
+    audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
     workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
 
-use orbit_common::types::{DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths};
+use orbit_common::types::{
+    AuditEventStatus, DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths, audit_execution_id,
+};
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 
@@ -57,9 +60,28 @@ pub(crate) fn build_context_from_roots(
     );
 
     let task_backends = build_v2_task_backends(global_root, &paths)?;
-    let adr_store = workspace_adr_backends(persistence.adr_dir.clone(), store.clone());
-    let learning_store =
-        workspace_learning_backend(persistence.learning_dir.clone(), store.clone())?;
+    let id_allocator = IdAllocator::open(IdAllocatorConfig::new(
+        persistence.semantic_db.clone(),
+        paths.state_dir.join(".id_alloc.lock"),
+        paths.orbit_dir.clone(),
+        worktree_root_from_local_root(local_root),
+        persistence.adr_dir.clone(),
+        persistence.learning_dir.clone(),
+    ))?;
+    let learning_id_migration = id_allocator.migrate_learning_ids()?;
+    if !learning_id_migration.is_empty() {
+        record_learning_id_migration_audit(&store, &paths, &learning_id_migration)?;
+    }
+    let adr_store = workspace_adr_backends(
+        persistence.adr_dir.clone(),
+        store.clone(),
+        id_allocator.clone(),
+    );
+    let learning_store = workspace_learning_backend(
+        persistence.learning_dir.clone(),
+        store.clone(),
+        id_allocator,
+    )?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
     let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());
@@ -158,6 +180,55 @@ fn registered_repo_root(global_root: &Path, workspace_root: &Path) -> Option<Pat
         let orbit_dir_canonical = std::fs::canonicalize(&workspace.orbit_dir)
             .unwrap_or_else(|_| workspace.orbit_dir.clone());
         (orbit_dir_canonical == workspace_root_canonical).then(|| workspace.root.clone())
+    })
+}
+
+fn worktree_root_from_local_root(local_root: &Path) -> PathBuf {
+    local_root
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| local_root.to_path_buf())
+}
+
+fn record_learning_id_migration_audit(
+    store: &Store,
+    paths: &WorkspacePaths,
+    report: &LearningIdMigrationReport,
+) -> Result<(), OrbitError> {
+    let payload = serde_json::json!({
+        "kind": "LearningIdFormatMigration",
+        "rename_map": report.rename_map(),
+        "worktree_root": worktree_root_from_local_root(&paths.local_dir).to_string_lossy(),
+    });
+    let arguments_json = serde_json::to_string(&payload)
+        .map_err(|error| OrbitError::Execution(format!("serialize migration audit: {error}")))?;
+    store.insert_audit_event_record(&AuditEventInsertParams {
+        execution_id: audit_execution_id("audit-learning-id-migration"),
+        command: "learning".to_string(),
+        subcommand: Some("id-format-migration".to_string()),
+        tool_name: Some("orbit.learning.id_migration".to_string()),
+        target_type: Some("LearningIdFormatMigration".to_string()),
+        target_id: None,
+        role: "admin".to_string(),
+        status: AuditEventStatus::Success,
+        exit_code: 0,
+        duration_ms: 0,
+        working_directory: paths.repo_root.to_string_lossy().into_owned(),
+        arguments_json: Some(arguments_json),
+        stdout_truncated: None,
+        stderr_truncated: None,
+        error_message: None,
+        host: std::env::var("HOSTNAME").ok(),
+        pid: std::process::id(),
+        session_id: None,
+        task_id: None,
+        job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
+        activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        step_index: std::env::var("ORBIT_STEP_INDEX")
+            .ok()
+            .and_then(|s| s.parse().ok()),
     })
 }
 
