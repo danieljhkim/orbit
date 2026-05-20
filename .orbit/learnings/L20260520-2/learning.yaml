@@ -1,0 +1,19 @@
+schema_version: 1
+id: L20260520-2
+status: active
+scope:
+  paths:
+  - crates/orbit-core/src/command/job/run/tests/**/*.rs
+  - crates/orbit-common/src/utility/process_identity.rs
+  tags:
+  - validation
+  - process-identity
+summary: When job owner tests fail with missing tokens, check whether `ps` is blocked before debugging Orbit code.
+body: 'While validating ORB-00199 in the Codex macOS execution environment, `cargo test -p orbit-cli -p orbit-core -p orbit-store` failed only in job owner identity tests. The root cause was environmental: running `ps -p $$ -o lstart=` returned `operation not permitted`, so process identity tokens could not be persisted and cancellation reported `owner_identity_mismatch`. Before chasing runtime or store changes, verify `ps` availability in the active sandbox.'
+evidence:
+- kind: task
+  reference: ORB-00199
+created_at: 2026-05-20T05:34:46.946154Z
+updated_at: 2026-05-20T05:34:46.946154Z
+created_by: codex
+priority: 100
