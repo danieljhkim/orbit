@@ -303,7 +303,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                     ("unarchive", Some("task"), Some(args.id.as_str()))
                 }
                 TaskSubcommand::Delete(args) => ("delete", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Search(_) => ("search", None, None),
                 TaskSubcommand::Templates(_) => ("templates", None, None),
                 TaskSubcommand::ReviewThread(_) => ("review-thread", Some("task"), None),
                 TaskSubcommand::PruneContext(_) => ("prune-context", None, None),
@@ -353,7 +352,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             let (sub, target_id) = match &cmd.command {
                 DocsSubcommand::List(_) => ("list", None),
                 DocsSubcommand::Show(args) => ("show", Some(args.path.as_str())),
-                DocsSubcommand::Search(_) => ("search", None),
                 DocsSubcommand::Add(args) => ("add", Some(args.path.as_str())),
                 DocsSubcommand::Reindex(_) => ("reindex", None),
                 DocsSubcommand::Migrate(_) => ("migrate", None),
@@ -375,7 +373,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 LearningSubcommand::Add(_) => "add",
                 LearningSubcommand::Comment(_) => "comment",
                 LearningSubcommand::List(_) => "list",
-                LearningSubcommand::Search(_) => "search",
                 LearningSubcommand::Show(_) => "show",
                 LearningSubcommand::Update(_) => "update",
                 LearningSubcommand::Upvote(_) => "upvote",
@@ -992,9 +989,9 @@ mod tests {
         fn success_via_runtime_yields_exactly_one_row() {
             let runtime = fresh_runtime();
             {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.search"));
+                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.search"));
                 let result = runtime.execute_tool_command(
-                    "orbit.task.search",
+                    "orbit.search",
                     json!({ "query": "anything" }),
                     None,
                     None,
@@ -1003,7 +1000,7 @@ mod tests {
                 guard.mark_success();
             }
             assert_eq!(
-                count_rows(&runtime, "orbit.task.search"),
+                count_rows(&runtime, "orbit.search"),
                 1,
                 "runtime owns the row, guard suppressed"
             );
@@ -1031,7 +1028,7 @@ mod tests {
         fn invalid_json_bail_before_runtime_yields_exactly_one_row() {
             let runtime = fresh_runtime();
             {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.search"));
+                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.search"));
                 // Simulate a CLI invalid-JSON parse failure that happens
                 // before `execute_tool_command` is reached.
                 let parse_err = OrbitError::InvalidInput("invalid JSON input: ...".to_string());
@@ -1040,7 +1037,7 @@ mod tests {
                 // audit row.
             }
             assert_eq!(
-                count_rows(&runtime, "orbit.task.search"),
+                count_rows(&runtime, "orbit.search"),
                 1,
                 "guard records its own row when runtime is never reached"
             );
@@ -1050,12 +1047,12 @@ mod tests {
         fn dry_run_bail_before_runtime_yields_exactly_one_row() {
             let runtime = fresh_runtime();
             {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.search"));
+                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.search"));
                 // `--dry-run` returns Ok without invoking the runtime.
                 guard.mark_success();
             }
             assert_eq!(
-                count_rows(&runtime, "orbit.task.search"),
+                count_rows(&runtime, "orbit.search"),
                 1,
                 "guard records its own row for the dry-run short-circuit"
             );

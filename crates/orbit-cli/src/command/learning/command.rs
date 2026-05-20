@@ -9,7 +9,6 @@ use super::list::LearningListArgs;
 use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
 use super::reindex::LearningReindexArgs;
-use super::search::LearningSearchArgs;
 use super::show::LearningShowArgs;
 use super::supersede::LearningSupersedeArgs;
 use super::update::LearningUpdateArgs;
@@ -36,8 +35,6 @@ pub enum LearningSubcommand {
     Comment(LearningCommentCommand),
     /// List learnings filtered by status, tag, or path
     List(LearningListArgs),
-    /// Search active learnings by path glob OR tag OR substring
-    Search(LearningSearchArgs),
     /// Show a single learning by ID
     Show(LearningShowArgs),
     /// Update an existing active learning
@@ -60,7 +57,6 @@ impl Execute for LearningSubcommand {
             LearningSubcommand::Add(args) => args.execute(runtime),
             LearningSubcommand::Comment(args) => args.execute(runtime),
             LearningSubcommand::List(args) => args.execute(runtime),
-            LearningSubcommand::Search(args) => args.execute(runtime),
             LearningSubcommand::Show(args) => args.execute(runtime),
             LearningSubcommand::Update(args) => args.execute(runtime),
             LearningSubcommand::Upvote(args) => args.execute(runtime),

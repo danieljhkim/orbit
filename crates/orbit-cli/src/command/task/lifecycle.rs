@@ -1,10 +1,10 @@
-use clap::{ArgAction, Args};
+use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::command::Execute;
 
-use super::output::{print_task_table, task_to_json_for_runtime};
+use super::output::task_to_json_for_runtime;
 
 #[derive(Args)]
 pub struct TaskStartArgs {
@@ -257,35 +257,6 @@ impl Execute for TaskDeleteArgs {
             }))
         } else {
             println!("Deleted task '{}'", self.id);
-            Ok(())
-        }
-    }
-}
-
-#[derive(Args)]
-pub struct TaskSearchArgs {
-    /// Search query
-    pub query: String,
-    /// Filter by tag. Repeat for AND semantics.
-    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
-    pub tags: Vec<String>,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-impl Execute for TaskSearchArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let tasks = runtime.search_tasks_filtered(&self.query, &self.tags)?;
-
-        if self.json {
-            let json_tasks: Vec<Value> = tasks
-                .iter()
-                .map(|task| task_to_json_for_runtime(runtime, task))
-                .collect::<Result<_, _>>()?;
-            crate::output::json::print_pretty(&Value::Array(json_tasks))
-        } else {
-            print_task_table(&tasks, false);
             Ok(())
         }
     }

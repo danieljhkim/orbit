@@ -5,7 +5,6 @@ use crate::{OrbitBuiltinAction, Tool, ToolContext};
 
 pub struct OrbitDocsListTool;
 pub struct OrbitDocsShowTool;
-pub struct OrbitDocsSearchTool;
 pub struct OrbitDocsAddTool;
 pub struct OrbitDocsReindexTool;
 pub struct OrbitDocsMigrateTool;
@@ -49,34 +48,6 @@ impl Tool for OrbitDocsShowTool {
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         super::execute_host_action(ctx, input, OrbitBuiltinAction::DocsShow)
-    }
-}
-
-impl Tool for OrbitDocsSearchTool {
-    fn schema(&self) -> ToolSchema {
-        ToolSchema {
-            name: "orbit.docs.search".to_string(),
-            description: "Search docs and ADRs together by docs frontmatter and ADR metadata."
-                .to_string(),
-            parameters: vec![
-                required_param("query", "Query text.", "string"),
-                optional_param(
-                    "limit",
-                    "Maximum number of results. Default: 20.",
-                    "integer",
-                ),
-                optional_param(
-                    "include_superseded",
-                    "Include superseded ADRs. Default: false.",
-                    "boolean",
-                ),
-            ],
-            builtin: true,
-        }
-    }
-
-    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        super::execute_host_action(ctx, input, OrbitBuiltinAction::DocsSearch)
     }
 }
 

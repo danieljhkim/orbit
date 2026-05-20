@@ -102,7 +102,6 @@ spec:
     - orbit.graph.*
     - orbit.search
     - orbit.semantic.*
-    - orbit.learning.search
     - orbit.learning.show
     - orbit.learning.list
     - orbit.learning.add

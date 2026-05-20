@@ -21,14 +21,6 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     to_json(runtime.show_doc(&path)?)
 }
 
-pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let query = required_string(&input, &["query"], "query")?;
-    let limit = optional_usize(&input, "limit")?;
-    let include_superseded =
-        optional_bool_alias(&input, &["include_superseded", "includeSuperseded"])?.unwrap_or(false);
-    to_json(runtime.search_docs(&query, limit, include_superseded)?)
-}
-
 pub(super) fn add(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let path = required_string(&input, &["path"], "path")?;
     to_json(runtime.add_docs_root(&path)?)
@@ -41,23 +33,6 @@ pub(super) fn reindex(runtime: &OrbitRuntime, _input: Value) -> Result<Value, Or
 pub(super) fn migrate(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let dry_run = optional_bool_alias(&input, &["dry_run", "dryRun"])?.unwrap_or(false);
     to_json(runtime.migrate_docs(dry_run)?)
-}
-
-fn optional_usize(input: &Value, key: &str) -> Result<Option<usize>, OrbitError> {
-    match input.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(number)) => number
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .map(Some)
-            .ok_or_else(|| OrbitError::InvalidInput(format!("`{key}` must be a positive integer"))),
-        Some(Value::String(raw)) => raw.trim().parse::<usize>().map(Some).map_err(|error| {
-            OrbitError::InvalidInput(format!("`{key}` must be a positive integer: {error}"))
-        }),
-        _ => Err(OrbitError::InvalidInput(format!(
-            "`{key}` must be a positive integer"
-        ))),
-    }
 }
 
 fn to_json<T: serde::Serialize>(value: T) -> Result<Value, OrbitError> {

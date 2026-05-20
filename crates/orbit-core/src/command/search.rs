@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use orbit_common::types::OrbitError;
+use orbit_common::types::{AdrStatus, LearningStatus, OrbitError, TaskStatus};
+use orbit_common::utility::glob::compile_glob_regex;
 use orbit_search::{SemanticRelatedParams, SemanticSearchParams};
 use orbit_store::LearningSearchParams;
 use serde::Serialize;
@@ -79,7 +80,7 @@ pub enum GlobalSearchMode {
     Neighbor,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GlobalSearchParams {
     pub query: Option<String>,
     // ADR-0175: hybrid free-text ranking and task-neighbor lookup are distinct modes.
@@ -89,6 +90,21 @@ pub struct GlobalSearchParams {
     pub limit: usize,
     pub field: Option<String>,
     pub model: Option<String>,
+    /// AND-filter by tag. Repeat for multi-tag AND semantics. Applies to
+    /// task, doc, learning (and `all`). ADR is a no-op until phase 3 adds a
+    /// free-form `tags` field to ADR frontmatter.
+    pub tags: Vec<String>,
+    /// Include normally-hidden statuses for the queried kind(s). Mutually
+    /// overridden by `status`.
+    pub all: bool,
+    /// Explicit per-kind status override (set semantics). When non-empty,
+    /// takes precedence over the `all` widener.
+    pub status: Vec<String>,
+    /// Cross-kind applicability filter. Task: selector-mapping against
+    /// `context_files`. Learning: glob-containment against `scope.paths`.
+    /// ADR: deferred to phase 3 (returns empty). Doc: out of scope
+    /// (returns empty).
+    pub path: Option<String>,
 }
 
 impl GlobalSearchParams {
@@ -171,14 +187,20 @@ impl OrbitRuntime {
             });
         }
 
-        let query = params
+        let query_owned = params
             .query
             .as_deref()
             .map(str::trim)
-            .filter(|query| !query.is_empty())
-            .ok_or_else(|| {
-                OrbitError::InvalidInput("search query must not be empty".to_string())
-            })?;
+            .filter(|q| !q.is_empty())
+            .map(str::to_string);
+        let has_path = params.path.is_some();
+
+        if query_owned.is_none() && !has_path {
+            return Err(OrbitError::InvalidInput(
+                "search requires either a query or --path".to_string(),
+            ));
+        }
+
         let mode = if params.hybrid {
             GlobalSearchMode::Hybrid
         } else {
@@ -192,95 +214,50 @@ impl OrbitRuntime {
             );
         }
 
+        let tag_filter: Vec<String> = params
+            .tags
+            .iter()
+            .map(|tag| tag.trim().to_lowercase())
+            .filter(|tag| !tag.is_empty())
+            .collect();
+
         if params.kind.includes_tasks() {
-            if params.hybrid {
-                let search = self.semantic_search(SemanticSearchParams {
-                    query: query.to_string(),
+            results.extend(self.task_branch(
+                &params,
+                query_owned.as_deref(),
+                &tag_filter,
+                limit,
+            )?);
+        }
+
+        if params.kind.includes_docs() {
+            // Docs are out of scope for `--path`; skip the docs branch entirely
+            // when `--path` is set.
+            if !has_path {
+                results.extend(self.doc_branch(
+                    &params,
+                    query_owned.as_deref(),
+                    &tag_filter,
                     limit,
-                    field: params.field,
-                    kind: Some("task".to_string()),
-                    model: params.model,
-                })?;
-                results.extend(search.results.into_iter().map(semantic_hit_to_global));
-            } else {
-                let mut tasks = self.search_tasks_filtered(query, &[])?;
-                tasks.truncate(limit);
-                results.extend(tasks.into_iter().map(|task| GlobalSearchHit {
-                    kind: "task".to_string(),
-                    source: "lexical".to_string(),
-                    id: Some(task.id),
-                    path: None,
-                    title: Some(task.title),
-                    summary: Some(task.description),
-                    status: Some(task.status.to_string()),
-                    best_field: None,
-                    snippet: None,
-                    score: None,
-                    matched_by: None,
-                }));
+                )?);
             }
         }
 
-        if params.kind.includes_docs() || params.kind.includes_adrs() {
-            let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
-            let docs = self.search_docs(query, Some(docs_limit), false)?;
-            for result in docs {
-                match result {
-                    SearchResult::Doc(result) if params.kind.includes_docs() => {
-                        results.push(GlobalSearchHit {
-                            kind: "doc".to_string(),
-                            source: "lexical".to_string(),
-                            id: None,
-                            path: Some(result.record.path),
-                            title: None,
-                            summary: Some(result.record.summary),
-                            status: Some(result.record.doc_type),
-                            best_field: None,
-                            snippet: None,
-                            score: Some(result.score as f32),
-                            matched_by: Some(result.matched_by),
-                        });
-                    }
-                    SearchResult::Adr(result) if params.kind.includes_adrs() => {
-                        results.push(GlobalSearchHit {
-                            kind: "adr".to_string(),
-                            source: "lexical".to_string(),
-                            id: Some(result.id),
-                            path: Some(result.path.to_string_lossy().into_owned()),
-                            title: Some(result.title),
-                            summary: None,
-                            status: Some(result.status.to_string()),
-                            best_field: None,
-                            snippet: None,
-                            score: Some(result.score as f32),
-                            matched_by: Some(result.matched_by),
-                        });
-                    }
-                    _ => {}
-                }
+        if params.kind.includes_adrs() {
+            // ADR `--tag` and `--path` are deferred to phase 3 — skip the ADR
+            // branch entirely when either filter is set.
+            if !has_path && tag_filter.is_empty() {
+                results.extend(self.adr_branch(&params, query_owned.as_deref(), limit)?);
             }
         }
 
         if params.kind.includes_learnings() {
-            let learnings = self.search_learnings(LearningSearchParams {
-                path: None,
-                tag: None,
-                query: Some(query.to_string()),
-                limit: Some(limit),
-            })?;
-            results.extend(learnings.into_iter().map(|result| GlobalSearchHit {
-                kind: "learning".to_string(),
-                source: "lexical".to_string(),
-                id: Some(result.learning.id),
-                path: None,
-                title: None,
-                summary: Some(result.learning.summary),
-                status: Some(result.learning.status.as_str().to_string()),
-                best_field: None,
-                snippet: None,
-                score: None,
-                matched_by: Some(result.matched_by),
-            }));
+            results.extend(self.learning_branch(
+                &params,
+                query_owned.as_deref(),
+                &tag_filter,
+                limit,
+            )?);
         }
 
         results.truncate(limit);
@@ -290,6 +267,263 @@ impl OrbitRuntime {
             results,
             notes,
         })
+    }
+
+    fn task_branch(
+        &self,
+        params: &GlobalSearchParams,
+        query: Option<&str>,
+        tag_filter: &[String],
+        limit: usize,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let statuses = resolve_task_statuses(params)?;
+
+        let candidates = if params.hybrid
+            && let Some(query) = query
+        {
+            let search = self.semantic_search(SemanticSearchParams {
+                query: query.to_string(),
+                limit: limit.saturating_mul(2).max(limit),
+                field: params.field.clone(),
+                kind: Some("task".to_string()),
+                model: params.model.clone(),
+            })?;
+            // Resolve task records so we can apply the post-filters.
+            let mut hits: Vec<(GlobalSearchHit, Option<orbit_common::types::Task>)> = Vec::new();
+            for hit in search.results.into_iter() {
+                let task = self.get_task(&hit.source_id).ok();
+                hits.push((semantic_hit_to_global(hit), task));
+            }
+            hits
+        } else if let Some(query) = query {
+            let mut tasks = self.search_tasks_filtered(query, &[])?;
+            tasks.truncate(limit.saturating_mul(2).max(limit));
+            tasks
+                .into_iter()
+                .map(|task| (lexical_task_hit(&task), Some(task)))
+                .collect()
+        } else {
+            // No query → enumerate tasks (used by `--path` and `--tag`).
+            let tasks = self.list_tasks()?;
+            tasks
+                .into_iter()
+                .map(|task| (lexical_task_hit(&task), Some(task)))
+                .collect()
+        };
+
+        let path = params.path.as_deref();
+
+        let mut out = Vec::new();
+        for (mut hit, task) in candidates {
+            let Some(task) = task else { continue };
+            if !statuses.contains(&task.status) {
+                continue;
+            }
+            if !tag_filter.is_empty() && !task_has_all_tags(&task, tag_filter) {
+                continue;
+            }
+            if let Some(path) = path
+                && !task_selectors_contain_path(&task.context_files, path)
+            {
+                continue;
+            }
+            // Override status to keep semantic hits coherent.
+            hit.status = Some(task.status.to_string());
+            out.push(hit);
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    fn doc_branch(
+        &self,
+        _params: &GlobalSearchParams,
+        query: Option<&str>,
+        tag_filter: &[String],
+        limit: usize,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let Some(query) = query else {
+            // Without a query, no doc results — docs are content-indexed, not
+            // applicability-indexed.
+            return Ok(Vec::new());
+        };
+
+        let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
+        let docs = self.search_docs(query, Some(docs_limit), true)?;
+        let mut out = Vec::new();
+        for result in docs {
+            if let SearchResult::Doc(result) = result {
+                if !tag_filter.is_empty() {
+                    let record_tags = &result.record.tags;
+                    if !tag_filter
+                        .iter()
+                        .all(|tag| record_tags.iter().any(|candidate| candidate == tag))
+                    {
+                        continue;
+                    }
+                }
+                out.push(GlobalSearchHit {
+                    kind: "doc".to_string(),
+                    source: "lexical".to_string(),
+                    id: None,
+                    path: Some(result.record.path),
+                    title: None,
+                    summary: Some(result.record.summary),
+                    status: Some(result.record.doc_type),
+                    best_field: None,
+                    snippet: None,
+                    score: Some(result.score as f32),
+                    matched_by: Some(result.matched_by),
+                });
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    fn adr_branch(
+        &self,
+        params: &GlobalSearchParams,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let Some(query) = query else {
+            return Ok(Vec::new());
+        };
+        let statuses = resolve_adr_statuses(params)?;
+        let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
+        // Pass `true` so the underlying lexical pass admits superseded ADRs;
+        // we apply the status filter ourselves below.
+        let docs = self.search_docs(query, Some(docs_limit), true)?;
+        let mut out = Vec::new();
+        for result in docs {
+            if let SearchResult::Adr(result) = result {
+                if !statuses.contains(&result.status) {
+                    continue;
+                }
+                out.push(GlobalSearchHit {
+                    kind: "adr".to_string(),
+                    source: "lexical".to_string(),
+                    id: Some(result.id),
+                    path: Some(result.path.to_string_lossy().into_owned()),
+                    title: Some(result.title),
+                    summary: None,
+                    status: Some(result.status.to_string()),
+                    best_field: None,
+                    snippet: None,
+                    score: Some(result.score as f32),
+                    matched_by: Some(result.matched_by),
+                });
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    fn learning_branch(
+        &self,
+        params: &GlobalSearchParams,
+        query: Option<&str>,
+        tag_filter: &[String],
+        limit: usize,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let statuses = resolve_learning_statuses(params)?;
+        let active_only = statuses == vec![LearningStatus::Active];
+
+        // Fast path: when the status set is exactly `[Active]` and we have a
+        // query *or* path *or* a single tag, route through the indexed
+        // `search_learnings` for speed.
+        let single_tag = match tag_filter {
+            [tag] => Some(tag.clone()),
+            _ => None,
+        };
+        if active_only && (query.is_some() || params.path.is_some() || single_tag.is_some()) {
+            let learnings = self.search_learnings(LearningSearchParams {
+                path: params.path.clone(),
+                tag: single_tag,
+                query: query.map(str::to_string),
+                limit: Some(limit.saturating_mul(2).max(limit)),
+            })?;
+            let mut out = Vec::new();
+            for result in learnings {
+                // Multi-tag AND filter on top of the index pass.
+                if tag_filter.len() > 1 && !learning_has_all_tags(&result.learning, tag_filter) {
+                    continue;
+                }
+                out.push(GlobalSearchHit {
+                    kind: "learning".to_string(),
+                    source: "lexical".to_string(),
+                    id: Some(result.learning.id),
+                    path: None,
+                    title: None,
+                    summary: Some(result.learning.summary),
+                    status: Some(result.learning.status.as_str().to_string()),
+                    best_field: None,
+                    snippet: None,
+                    score: None,
+                    matched_by: Some(result.matched_by),
+                });
+            }
+            out.truncate(limit);
+            return Ok(out);
+        }
+
+        // Slow path: enumerate learnings honoring the requested status set,
+        // then filter in-memory. Used when `--all`/`--status` widens beyond
+        // the active set or when a multi-tag AND is requested.
+        let mut out = Vec::new();
+        for status in &statuses {
+            let learnings = self.list_learnings(Some(*status))?;
+            for learning in learnings {
+                if let Some(query) = query
+                    && !learning
+                        .summary
+                        .to_lowercase()
+                        .contains(&query.to_lowercase())
+                {
+                    continue;
+                }
+                if !tag_filter.is_empty() && !learning_has_all_tags(&learning, tag_filter) {
+                    continue;
+                }
+                if let Some(path) = params.path.as_deref()
+                    && !learning_scope_contains_path(&learning, path)?
+                {
+                    continue;
+                }
+                out.push(GlobalSearchHit {
+                    kind: "learning".to_string(),
+                    source: "lexical".to_string(),
+                    id: Some(learning.id),
+                    path: None,
+                    title: None,
+                    summary: Some(learning.summary),
+                    status: Some(learning.status.as_str().to_string()),
+                    best_field: None,
+                    snippet: None,
+                    score: None,
+                    matched_by: None,
+                });
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+}
+
+fn lexical_task_hit(task: &orbit_common::types::Task) -> GlobalSearchHit {
+    GlobalSearchHit {
+        kind: "task".to_string(),
+        source: "lexical".to_string(),
+        id: Some(task.id.clone()),
+        path: None,
+        title: Some(task.title.clone()),
+        summary: Some(task.description.clone()),
+        status: Some(task.status.to_string()),
+        best_field: None,
+        snippet: None,
+        score: None,
+        matched_by: None,
     }
 }
 
@@ -307,6 +541,172 @@ fn semantic_hit_to_global(hit: orbit_search::SemanticHit) -> GlobalSearchHit {
         score: Some(hit.score),
         matched_by: None,
     }
+}
+
+fn task_has_all_tags(task: &orbit_common::types::Task, tag_filter: &[String]) -> bool {
+    tag_filter.iter().all(|needle| {
+        task.tags
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
+    })
+}
+
+fn learning_has_all_tags(learning: &orbit_common::types::Learning, tag_filter: &[String]) -> bool {
+    tag_filter.iter().all(|needle| {
+        learning
+            .scope
+            .tags
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
+    })
+}
+
+/// Test whether any of a task's `context_files` selectors apply to `query_path`.
+///
+/// Selectors take three forms: `file:<path>`, `dir:<path>`, and
+/// `symbol:<file>#<name>:<kind>`. A bare path (no prefix) is treated as a
+/// file selector. Matching is bidirectional path-containment:
+///
+/// - exact equality matches.
+/// - `query_path` lies within a scope directory.
+/// - `scope` lies within a query directory (when the user passes a parent
+///   directory, every selector under it matches).
+///
+/// All three selector forms collapse to a single normalized scope path
+/// before the comparison.
+pub fn task_selectors_contain_path(selectors: &[String], query_path: &str) -> bool {
+    let query = normalize_path_for_match(query_path);
+    selectors
+        .iter()
+        .any(|selector| selector_matches_path(selector, &query))
+}
+
+fn selector_matches_path(selector: &str, query: &str) -> bool {
+    let scope = if let Some(after) = selector.strip_prefix("file:") {
+        after
+    } else if let Some(after) = selector.strip_prefix("dir:") {
+        after
+    } else if let Some(after) = selector.strip_prefix("symbol:") {
+        // symbol:<file>#<name>:<kind> — keep only the file portion.
+        after.split('#').next().unwrap_or(after)
+    } else {
+        selector
+    };
+    let scope = normalize_path_for_match(scope);
+    paths_overlap(&scope, query)
+}
+
+fn normalize_path_for_match(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .replace('\\', "/")
+}
+
+fn paths_overlap(a: &str, b: &str) -> bool {
+    if a == b {
+        return !a.is_empty();
+    }
+    is_within(a, b) || is_within(b, a)
+}
+
+fn is_within(inner: &str, outer: &str) -> bool {
+    if outer.is_empty() {
+        return false;
+    }
+    if let Some(rest) = inner.strip_prefix(outer) {
+        return rest.starts_with('/');
+    }
+    false
+}
+
+fn learning_scope_contains_path(
+    learning: &orbit_common::types::Learning,
+    query_path: &str,
+) -> Result<bool, OrbitError> {
+    let normalized = orbit_common::utility::glob::normalize_glob_path(query_path)?;
+    for rule in &learning.scope.paths {
+        if let Ok(regex) = compile_glob_regex(rule)
+            && regex.is_match(&normalized)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn resolve_task_statuses(params: &GlobalSearchParams) -> Result<Vec<TaskStatus>, OrbitError> {
+    if !params.status.is_empty() {
+        let mut out = Vec::new();
+        for raw in &params.status {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let status = TaskStatus::from_str(trimmed).map_err(OrbitError::InvalidInput)?;
+            if !out.contains(&status) {
+                out.push(status);
+            }
+        }
+        return Ok(out);
+    }
+    let mut set = vec![
+        TaskStatus::Proposed,
+        TaskStatus::Backlog,
+        TaskStatus::InProgress,
+        TaskStatus::Review,
+    ];
+    if params.all {
+        set.extend([TaskStatus::Done, TaskStatus::Rejected, TaskStatus::Archived]);
+    }
+    Ok(set)
+}
+
+fn resolve_learning_statuses(
+    params: &GlobalSearchParams,
+) -> Result<Vec<LearningStatus>, OrbitError> {
+    if !params.status.is_empty() {
+        let mut out = Vec::new();
+        for raw in &params.status {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let status = LearningStatus::from_str(trimmed).map_err(OrbitError::InvalidInput)?;
+            if !out.contains(&status) {
+                out.push(status);
+            }
+        }
+        return Ok(out);
+    }
+    let mut set = vec![LearningStatus::Active];
+    if params.all {
+        set.push(LearningStatus::Superseded);
+    }
+    Ok(set)
+}
+
+fn resolve_adr_statuses(params: &GlobalSearchParams) -> Result<Vec<AdrStatus>, OrbitError> {
+    if !params.status.is_empty() {
+        let mut out = Vec::new();
+        for raw in &params.status {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let status = AdrStatus::from_str(trimmed).map_err(OrbitError::InvalidInput)?;
+            if !out.contains(&status) {
+                out.push(status);
+            }
+        }
+        return Ok(out);
+    }
+    let mut set = vec![AdrStatus::Proposed, AdrStatus::Accepted];
+    if params.all {
+        set.push(AdrStatus::Superseded);
+    }
+    Ok(set)
 }
 
 #[cfg(test)]
@@ -329,5 +729,69 @@ mod tests {
             serde_json::to_value(GlobalSearchMode::Neighbor).expect("serialize mode"),
             json!("neighbor")
         );
+    }
+
+    #[test]
+    fn file_selector_matches_exact_path() {
+        let selectors = vec!["file:src/auth/login.rs".to_string()];
+        assert!(task_selectors_contain_path(&selectors, "src/auth/login.rs"));
+        assert!(!task_selectors_contain_path(
+            &selectors,
+            "src/auth/logout.rs"
+        ));
+    }
+
+    #[test]
+    fn dir_selector_matches_contained_path() {
+        let selectors = vec!["dir:src/auth/".to_string()];
+        assert!(task_selectors_contain_path(&selectors, "src/auth/login.rs"));
+        assert!(task_selectors_contain_path(
+            &selectors,
+            "src/auth/handlers/post.rs"
+        ));
+        assert!(!task_selectors_contain_path(
+            &selectors,
+            "src/billing/charge.rs"
+        ));
+    }
+
+    #[test]
+    fn symbol_selector_matches_file_component() {
+        let selectors = vec!["symbol:src/auth/login.rs#login_handler:function".to_string()];
+        assert!(task_selectors_contain_path(&selectors, "src/auth/login.rs"));
+        assert!(!task_selectors_contain_path(
+            &selectors,
+            "src/auth/logout.rs"
+        ));
+    }
+
+    #[test]
+    fn unrelated_dir_selector_does_not_match() {
+        let selectors = vec!["dir:crates/orbit-search/".to_string()];
+        assert!(!task_selectors_contain_path(
+            &selectors,
+            "src/auth/login.rs"
+        ));
+    }
+
+    #[test]
+    fn parent_dir_query_matches_descendant_selectors() {
+        let selectors = vec![
+            "file:src/auth/login.rs".to_string(),
+            "dir:src/auth/handlers/".to_string(),
+            "symbol:src/auth/logout.rs#logout:function".to_string(),
+        ];
+        for selector in &selectors {
+            assert!(
+                task_selectors_contain_path(std::slice::from_ref(selector), "src/auth/"),
+                "selector {selector} should match parent dir query"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_selector_treated_as_file() {
+        let selectors = vec!["src/auth/login.rs".to_string()];
+        assert!(task_selectors_contain_path(&selectors, "src/auth/login.rs"));
     }
 }

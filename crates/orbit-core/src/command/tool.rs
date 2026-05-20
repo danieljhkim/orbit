@@ -697,7 +697,7 @@ mod audit_tests {
 
         let outcome = runtime
             .execute_tool_command_dispatch(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything", "model": "gpt-5.5" }),
                 None,
                 None,
@@ -707,15 +707,15 @@ mod audit_tests {
         assert!(outcome.audit_recorded);
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(events.len(), 1, "exactly one audit row");
         let row = &events[0];
         assert_eq!(row.command, "tool");
         assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
-        assert_eq!(row.tool_name.as_deref(), Some("orbit.task.search"));
+        assert_eq!(row.tool_name.as_deref(), Some("orbit.search"));
         assert_eq!(row.target_type.as_deref(), Some("tool"));
-        assert_eq!(row.target_id.as_deref(), Some("orbit.task.search"));
+        assert_eq!(row.target_id.as_deref(), Some("orbit.search"));
         assert_eq!(row.role, "gpt-5.5");
         assert_eq!(row.status, AuditEventStatus::Success);
         assert_eq!(row.exit_code, 0);
@@ -765,7 +765,7 @@ mod audit_tests {
         // still capture the failure — this is the gap that bypassed audit
         // before the closure-wrapping fix.
         let result = runtime.execute_tool_command_dispatch(
-            "orbit.task.search",
+            "orbit.search",
             json!({ "query": "anything" }),
             Some("claude".to_string()),
             Some("gpt-5.5".to_string()),
@@ -774,7 +774,7 @@ mod audit_tests {
         assert!(result.is_err(), "identity rejection propagates");
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(
             events.len(),
@@ -795,7 +795,7 @@ mod audit_tests {
 
         runtime
             .execute_tool_command(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything", "model": "gpt-5.5" }),
                 None,
                 None,
@@ -803,7 +803,7 @@ mod audit_tests {
             .expect("dispatch ok");
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].subcommand.as_deref(), Some("run"));
@@ -824,7 +824,7 @@ mod audit_tests {
                     barrier.wait();
                     runtime
                         .execute_tool_command_dispatch(
-                            "orbit.task.search",
+                            "orbit.search",
                             json!({ "query": "anything", "model": "gpt-5.5" }),
                             None,
                             None,
@@ -840,13 +840,7 @@ mod audit_tests {
         }
 
         let events = runtime
-            .list_audit_events(
-                None,
-                Some("orbit.task.search".to_string()),
-                None,
-                None,
-                workers,
-            )
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, workers)
             .expect("list audit events");
         let execution_ids: BTreeSet<_> = events.iter().map(|event| &event.execution_id).collect();
 
@@ -863,7 +857,7 @@ mod audit_tests {
 
         runtime
             .execute_tool_command_dispatch(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything" }),
                 None,
                 None,
@@ -1080,7 +1074,7 @@ mod audit_tests {
 
         let outcome = runtime
             .execute_tool_command_dispatch(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything", "model": "gpt-5.5" }),
                 None,
                 None,
@@ -1091,7 +1085,7 @@ mod audit_tests {
         assert!(outcome.audit_recorded);
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         let row = events
             .iter()

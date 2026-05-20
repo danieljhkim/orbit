@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
 #[test]
-fn cli_docs_list_show_and_search_json() {
+fn cli_docs_list_and_show_json() {
     let workspace = TestWorkspace::new();
     workspace.write(
         "docs/pattern.md",
@@ -29,31 +29,12 @@ fn cli_docs_list_show_and_search_json() {
     let shown = workspace.run_json(&["docs", "show", "docs/pattern.md", "--json"], "docs show");
     assert_eq!(shown["frontmatter"]["type"], "pattern");
     assert!(shown["body"].as_str().expect("body").contains("# Guard"));
-
-    let results = workspace.run_json(
-        &["docs", "search", "RAII", "--limit", "1", "--json"],
-        "docs search",
-    );
-    assert_eq!(
-        results,
-        json!([
-            {
-                "Doc": {
-                    "path": "docs/pattern.md",
-                    "type": "pattern",
-                    "summary": "RAII guard pattern",
-                    "tags": ["rust", "guard"],
-                    "related_artifacts": ["ORB-00160"],
-                    "score": 84,
-                    "matched_by": ["summary"]
-                }
-            }
-        ])
-    );
 }
 
 #[test]
-fn cli_docs_search_federates_docs_and_adrs() {
+fn cli_orbit_search_federates_docs_and_adrs() {
+    // ORB-00202: federated lexical search moved from `orbit docs search` to
+    // `orbit search --kind all` / `--kind doc` / `--kind adr`.
     let workspace = TestWorkspace::new();
     workspace.write(
         "docs/orbit-docs.md",
@@ -66,47 +47,26 @@ fn cli_docs_search_federates_docs_and_adrs() {
     );
 
     let results = workspace.run_json(
-        &["docs", "search", "orbit-docs", "--limit", "5", "--json"],
-        "docs search federated",
+        &["search", "orbit-docs", "--limit", "5", "--json"],
+        "orbit search federated",
     );
-    let adr_path = format!(".orbit/adrs/proposed/{adr_id}/body.md");
-
-    assert_eq!(
-        results,
-        json!([
-            {
-                "Doc": {
-                    "path": "docs/orbit-docs.md",
-                    "type": "design",
-                    "summary": "Docs search context",
-                    "tags": ["orbit-docs"],
-                    "score": 120,
-                    "matched_by": ["tag:orbit-docs"]
-                }
-            },
-            {
-                "Adr": {
-                    "id": adr_id,
-                    "title": "Federated ADR search",
-                    "status": "proposed",
-                    "path": adr_path,
-                    "related_features": ["orbit-docs"],
-                    "score": 120,
-                    "matched_by": ["related_feature:orbit-docs"]
-                }
-            }
-        ])
+    let hits = results["results"].as_array().expect("results array");
+    assert!(
+        hits.iter()
+            .any(|hit| hit["kind"] == "doc" && hit["path"] == "docs/orbit-docs.md"),
+        "expected doc hit in {hits:?}"
     );
-
-    let plain = workspace.run(&["docs", "search", "orbit-docs"], "docs search table");
-    let stdout = String::from_utf8_lossy(&plain.stdout);
-    assert!(stdout.contains("ORIGIN"));
-    assert!(stdout.contains("doc"));
-    assert!(stdout.contains("adr"));
+    assert!(
+        hits.iter()
+            .any(|hit| hit["kind"] == "adr" && hit["id"] == adr_id),
+        "expected adr hit ({adr_id}) in {hits:?}"
+    );
 }
 
 #[test]
-fn cli_docs_search_superseded_adrs_are_opt_in() {
+fn cli_orbit_search_kind_adr_all_includes_superseded() {
+    // ORB-00202: the old `orbit docs search --include-superseded` case is
+    // covered by `orbit search --kind adr --all`.
     let workspace = TestWorkspace::new();
     let old_id = workspace.add_adr(
         "Archive policy old",
@@ -123,51 +83,32 @@ fn cli_docs_search_superseded_adrs_are_opt_in() {
     workspace.supersede_adr(&old_id, &new_id);
 
     let default_results = workspace.run_json(
-        &["docs", "search", "archive-policy", "--json"],
-        "docs search default superseded",
+        &["search", "archive-policy", "--kind", "adr", "--json"],
+        "orbit search adr default",
     );
+    let default_hits = default_results["results"].as_array().expect("results");
     assert!(
-        !default_results
-            .as_array()
-            .expect("array")
-            .iter()
-            .any(|result| result["Adr"]["id"] == old_id)
+        !default_hits.iter().any(|hit| hit["id"] == old_id),
+        "default --kind adr must exclude superseded ADRs"
     );
 
-    let included_results = workspace.run_json(
+    let widened = workspace.run_json(
         &[
-            "docs",
             "search",
             "archive-policy",
-            "--include-superseded",
+            "--kind",
+            "adr",
+            "--all",
             "--json",
         ],
-        "docs search include superseded",
+        "orbit search adr all",
     );
+    let widened_hits = widened["results"].as_array().expect("results");
     assert!(
-        included_results
-            .as_array()
-            .expect("array")
+        widened_hits
             .iter()
-            .any(|result| result["Adr"]["id"] == old_id && result["Adr"]["status"] == "superseded")
-    );
-
-    let tool_results = workspace.run_json(
-        &[
-            "tool",
-            "run",
-            "orbit.docs.search",
-            "--input",
-            "{\"query\":\"archive-policy\",\"include_superseded\":true}",
-        ],
-        "tool run docs search include superseded",
-    );
-    assert!(
-        tool_results
-            .as_array()
-            .expect("array")
-            .iter()
-            .any(|result| result["Adr"]["id"] == old_id)
+            .any(|hit| hit["id"] == old_id && hit["status"] == "superseded"),
+        "--kind adr --all should surface the superseded record"
     );
 }
 
@@ -296,33 +237,17 @@ fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
     for name in [
         "orbit.docs.list",
         "orbit.docs.show",
-        "orbit.docs.search",
         "orbit.docs.add",
         "orbit.docs.reindex",
         "orbit.docs.migrate",
     ] {
         assert!(names.contains(&name), "missing docs tool {name}");
     }
-    let docs_search = tools
-        .as_array()
-        .expect("tools")
-        .iter()
-        .find(|tool| tool["name"] == "orbit.docs.search")
-        .expect("docs search tool");
+    // ORB-00202: `orbit.docs.search` deleted in phase 2.
     assert!(
-        docs_search["description"]
-            .as_str()
-            .expect("description")
-            .contains("ADRs")
+        !names.contains(&"orbit.docs.search"),
+        "orbit.docs.search must be deleted in phase 2"
     );
-    let parameter_names = docs_search["parameters"]
-        .as_array()
-        .expect("parameters")
-        .iter()
-        .map(|param| param["name"].as_str().expect("parameter name"))
-        .collect::<Vec<_>>();
-    assert!(parameter_names.contains(&"include_superseded"));
-    assert!(!parameter_names.contains(&"include_adrs"));
 
     let output = workspace.run_json(
         &["tool", "run", "orbit.docs.list", "--input", "{}"],

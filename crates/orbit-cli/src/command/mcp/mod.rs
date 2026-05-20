@@ -34,7 +34,6 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
     "orbit.task.delete",
     "orbit.task.lint",
     "orbit.task.list",
-    "orbit.task.search",
     "orbit.task.locks",
     "orbit.task.locks.release",
     "orbit.task.locks.reserve",
@@ -82,7 +81,6 @@ pub(crate) const SEMANTIC_TOOL_NAMES: &[&str] = &[
 pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[
     "orbit.docs.list",
     "orbit.docs.show",
-    "orbit.docs.search",
     "orbit.docs.add",
     "orbit.docs.reindex",
     "orbit.docs.migrate",
@@ -94,7 +92,6 @@ pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.comment.delete",
     "orbit.learning.comment.list",
     "orbit.learning.list",
-    "orbit.learning.search",
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.supersede",
@@ -571,17 +568,25 @@ mod tests {
 
         #[test]
         fn happy_path_dispatch_records_one_audit_row_via_runtime() {
+            // ORB-00202: migrated from deleted `orbit.task.search` to
+            // `orbit.search`, the unified replacement.
             let runtime = OrbitRuntime::in_memory().expect("build test runtime");
             let host = RuntimeMcpHost {
                 runtime: runtime.clone(),
             };
             let value = host
-                .call_tool("orbit.task.search", json!({ "query": "anything" }))
+                .call_tool(
+                    "orbit.search",
+                    json!({ "query": "anything", "kind": "task" }),
+                )
                 .expect("dispatch ok");
-            assert!(value.is_array(), "task search returns an array");
+            assert!(
+                value.get("results").is_some(),
+                "orbit.search returns wrapped results"
+            );
 
             let events = runtime
-                .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+                .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
                 .expect("list audit events");
             assert_eq!(events.len(), 1, "exactly one audit row for happy path");
             assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
@@ -589,11 +594,16 @@ mod tests {
         }
 
         #[test]
-        fn learning_search_is_exposed_to_mcp_dispatch() {
+        fn orbit_search_is_exposed_to_mcp_dispatch() {
+            // ORB-00202: `orbit.learning.search` was deleted; the unified
+            // `orbit.search` surface is exposed instead.
             let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-            let value = audited_mcp_call(&runtime, "orbit.learning.search", json!({}))
-                .expect("learning search dispatch ok");
-            assert!(value.is_array(), "learning search returns an array");
+            let value = audited_mcp_call(&runtime, "orbit.search", json!({ "query": "anything" }))
+                .expect("orbit.search dispatch ok");
+            assert!(
+                value.get("results").is_some(),
+                "orbit.search returns wrapped results"
+            );
         }
 
         #[test]

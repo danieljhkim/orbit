@@ -98,7 +98,7 @@ spec:
 
     # Narrow mutation surface
 
-    You have `orbit.task.list`, `orbit.task.search`, `orbit.task.show`,
+    You have `orbit.task.list`, `orbit.task.show`,
     and `orbit.search` for reading
     descriptions, checking status changes, and surfacing related prior tasks
     when dependency ordering is ambiguous, plus `orbit.pipeline.invoke`
@@ -115,7 +115,6 @@ spec:
     current deterministic task snapshot for this cycle.
   tools:
     - orbit.task.list
-    - orbit.task.search
     - orbit.task.show
     - orbit.pipeline.invoke
     - orbit.graph.*

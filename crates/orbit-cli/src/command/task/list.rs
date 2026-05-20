@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use clap::{ArgAction, Args};
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
-    build_task_status_index, task_dependencies_ready,
+    build_task_status_index, task_dependencies_ready, task_selectors_contain_path,
 };
 use serde_json::{Value, json};
 
@@ -15,7 +15,7 @@ use super::output::{
 
 #[derive(Args)]
 #[command(
-    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --json"
+    after_help = "Examples:\n  orbit task list\n  orbit task list --all\n  orbit task list --status backlog\n  orbit task list --status friction\n  orbit task list --status in-progress,review\n  orbit task list --type feature\n  orbit task list --priority high\n  orbit task list --parent T12345678-123456\n  orbit task list --ref jira:ENG-1234\n  orbit task list --has-ref jira\n  orbit task list --tag perf --tag bench\n  orbit task list --path src/auth/login.rs\n  orbit task list --json"
 )]
 pub struct TaskListArgs {
     /// Filter by one or more statuses (comma-separated). Defaults to backlog,in-progress.
@@ -48,6 +48,12 @@ pub struct TaskListArgs {
     /// Keep only tasks whose dependencies are already satisfied
     #[arg(long)]
     pub ready: bool,
+    /// Filter to tasks whose `context_files` selectors apply to this path.
+    /// Selector forms supported: `file:`, `dir:`, `symbol:`, and bare paths.
+    /// Bidirectional containment — passing a directory matches every
+    /// selector under it.
+    #[arg(long)]
+    pub path: Option<String>,
     /// Output full task objects as JSON
     #[arg(long)]
     pub json: bool,
@@ -68,6 +74,7 @@ impl Execute for TaskListArgs {
         let parent_id = self.parent_id;
         let job_run_id = self.job_run_id;
         let tags = self.tags;
+        let path = self.path;
         let external_ref = self
             .external_ref
             .as_deref()
@@ -115,6 +122,10 @@ impl Execute for TaskListArgs {
                 })
             })
             .filter(|t| !ready || task_dependencies_ready(t, &status_by_id))
+            .filter(|t| {
+                path.as_deref()
+                    .is_none_or(|p| task_selectors_contain_path(&t.context_files, p))
+            })
             .collect();
 
         if self.ops {

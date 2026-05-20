@@ -60,6 +60,38 @@ impl Tool for OrbitSearchTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "tag".to_string(),
+                description:
+                    "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning; ADR is deferred to phase 3."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "all".to_string(),
+                description:
+                    "Include normally-hidden statuses for the queried kind. Task adds done/rejected/archived; ADR adds superseded; learning adds superseded; doc is a no-op."
+                        .to_string(),
+                param_type: "boolean".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "status".to_string(),
+                description:
+                    "Explicit per-kind status override (set semantics). Overrides `all` when provided."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "path".to_string(),
+                description:
+                    "Filter to artifacts applicable to this filesystem path. Task: selector containment. Learning: glob-containment over scope.paths. ADR deferred (returns empty); doc out of scope (returns empty)."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::model_identity_params());
         ToolSchema {

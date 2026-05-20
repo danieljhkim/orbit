@@ -4,7 +4,6 @@ use orbit_common::types::{
     Learning, LearningComment, LearningVoteSummary, OrbitError, Task, TaskArtifact, TaskComment,
     TaskHistoryEntry, TaskStatus, build_task_status_index, resolve_task_dependencies,
 };
-use orbit_store::LearningSearchResult;
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
@@ -69,24 +68,6 @@ pub(super) fn learning_comment_to_json(comment: &LearningComment) -> Value {
         "body": comment.body,
         "author_model": comment.author_model,
         "created_at": comment.created_at.to_rfc3339(),
-    })
-}
-
-/// Search result projection — envelope-only per §4.5. Excludes `body`,
-/// `evidence`, and `created_by`; carries `matched_by` annotation so
-/// callers can attribute matches to their scope axis (§5.3).
-pub(super) fn learning_search_result_to_json(result: &LearningSearchResult) -> Value {
-    let learning = &result.learning;
-    json!({
-        "id": learning.id,
-        "summary": learning.summary,
-        "scope": {
-            "paths": learning.scope.paths,
-            "tags": learning.scope.tags,
-        },
-        "updated_at": learning.updated_at.to_rfc3339(),
-        "priority": learning.priority,
-        "matched_by": result.matched_by,
     })
 }
 

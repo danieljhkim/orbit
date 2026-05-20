@@ -6,8 +6,8 @@ use crate::command::Execute;
 use super::add::TaskAddArgs;
 use super::artifact::TaskArtifactCommand;
 use super::lifecycle::{
-    TaskApproveArgs, TaskArchiveArgs, TaskDeleteArgs, TaskRejectArgs, TaskSearchArgs,
-    TaskStartArgs, TaskUnarchiveArgs,
+    TaskApproveArgs, TaskArchiveArgs, TaskDeleteArgs, TaskRejectArgs, TaskStartArgs,
+    TaskUnarchiveArgs,
 };
 use super::lint::TaskLintArgs;
 use super::list::{TaskListArgs, TaskLocksArgs};
@@ -58,8 +58,6 @@ pub enum TaskSubcommand {
     Unarchive(TaskUnarchiveArgs),
     /// Delete a task permanently
     Delete(TaskDeleteArgs),
-    /// Search tasks by title, description, or external ref ID
-    Search(TaskSearchArgs),
     /// Manage task templates
     Templates(TaskTemplatesCommand),
     /// Manage review threads on a task
@@ -87,7 +85,6 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Archive(args) => args.execute(runtime),
             TaskSubcommand::Unarchive(args) => args.execute(runtime),
             TaskSubcommand::Delete(args) => args.execute(runtime),
-            TaskSubcommand::Search(args) => args.execute(runtime),
             TaskSubcommand::Templates(cmd) => cmd.execute(runtime),
             TaskSubcommand::ReviewThread(cmd) => cmd.execute(runtime),
             TaskSubcommand::PruneContext(args) => args.execute(runtime),

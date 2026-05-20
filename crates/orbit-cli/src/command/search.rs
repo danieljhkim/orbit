@@ -1,4 +1,4 @@
-use clap::{ArgGroup, Args, ValueEnum};
+use clap::{ArgAction, ArgGroup, Args, ValueEnum};
 use orbit_core::{GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
@@ -6,13 +6,18 @@ use crate::command::Execute;
 #[derive(Args)]
 #[command(
     about = "Search tasks, docs, learnings, and ADRs",
-    after_help = "Index coverage note: vector search runs against tasks only today; docs, learnings, and ADRs use lexical matching regardless of --hybrid."
+    after_help = "Index coverage note: vector search runs against tasks only today; docs, learnings, and ADRs use lexical matching regardless of --hybrid.\n\nADR support for --tag and --path is deferred to phase 3 (ORB-00203); for --kind adr those filters return empty."
 )]
 #[command(group(
-    ArgGroup::new("search_input")
+    ArgGroup::new("query_mode")
         .args(["query", "semantic"])
-        .required(true)
         .multiple(false)
+))]
+#[command(group(
+    ArgGroup::new("search_input")
+        .args(["query", "semantic", "path"])
+        .required(true)
+        .multiple(true)
 ))]
 pub struct SearchCommand {
     /// Free-text query. Defaults to lexical matching unless --hybrid is set.
@@ -38,6 +43,25 @@ pub struct SearchCommand {
     /// Optional semantic embedding model alias, such as bge-small.
     #[arg(long)]
     pub model: Option<String>,
+    /// Filter by tag (AND semantics). Applies to task, doc, learning; ADR
+    /// is deferred to phase 3 and returns empty when this is set.
+    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
+    pub tags: Vec<String>,
+    /// Include normally-hidden statuses for the queried kind. Task adds
+    /// done/rejected/archived; ADR adds superseded; learning adds
+    /// superseded; doc is a no-op.
+    #[arg(long)]
+    pub all: bool,
+    /// Explicit per-kind status override (comma-separated set). Composes with
+    /// --tag and --path; overrides --all.
+    #[arg(long, value_delimiter = ',')]
+    pub status: Vec<String>,
+    /// Filter to artifacts applicable to this filesystem path. Task: selector
+    /// containment over `context_files`. Learning: glob-containment over
+    /// `scope.paths`. ADR: deferred to phase 3 (returns empty). Doc: out of
+    /// scope (returns empty).
+    #[arg(long)]
+    pub path: Option<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -86,7 +110,12 @@ impl Execute for SearchCommand {
             limit: self.limit,
             field: self.field,
             model: self.model,
+            tags: self.tags,
+            all: self.all,
+            status: self.status,
+            path: self.path,
         })?;
+
 
         if self.json {
             crate::output::json::print_pretty(&serde_json::json!(response))

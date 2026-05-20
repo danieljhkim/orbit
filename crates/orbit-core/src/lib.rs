@@ -56,6 +56,7 @@ pub use command::docs::{
 pub use command::learning::migrate_learning_layout_at;
 pub use command::search::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchMode, GlobalSearchParams, GlobalSearchResponse,
+    task_selectors_contain_path,
 };
 pub use command::task_template::TaskTemplate;
 pub use command::workflow::{

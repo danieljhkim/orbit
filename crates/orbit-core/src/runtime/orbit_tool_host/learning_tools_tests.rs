@@ -74,7 +74,6 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
         "orbit.learning.list",
         "orbit.learning.prune",
         "orbit.learning.reindex",
-        "orbit.learning.search",
         "orbit.learning.show",
         "orbit.learning.supersede",
         "orbit.learning.update",
@@ -85,6 +84,13 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
             "missing tool: {expected}; got {names:?}"
         );
     }
+    // ORB-00202: `orbit.learning.search` was deleted in phase 2; the
+    // substring case moves to `orbit.search --kind learning` and the
+    // structural cases move to `orbit.learning.list --path/--tag`.
+    assert!(
+        !names.contains(&"orbit.learning.search"),
+        "orbit.learning.search must be deleted in phase 2"
+    );
 
     // Spot-check the documented field names from design §5.2.
     let add_schema = schemas
@@ -100,22 +106,6 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
         assert!(
             add_field_names.contains(&required),
             "orbit.learning.add missing field: {required}",
-        );
-    }
-
-    let search_schema = schemas
-        .iter()
-        .find(|s| s.name == "orbit.learning.search")
-        .expect("search schema");
-    let search_field_names: Vec<&str> = search_schema
-        .parameters
-        .iter()
-        .map(|p| p.name.as_str())
-        .collect();
-    for required in ["path", "tag", "query", "limit"] {
-        assert!(
-            search_field_names.contains(&required),
-            "orbit.learning.search missing field: {required}"
         );
     }
 
@@ -268,156 +258,43 @@ fn comment_tools_add_list_and_delete() {
     assert_eq!(deleted.as_array().expect("array").len(), 1);
 }
 
-// --- AC #4: scope-OR with dedup --------------------------------------
+// --- ORB-00202: orbit.learning.list path filter uses glob-containment
 
 #[test]
-fn search_does_scope_or_with_dedup_on_combined_axes() {
+fn list_path_filter_uses_glob_containment() {
     let (_guard, runtime, _repo_root) = test_runtime();
-    let paths_only = create_minimal(&runtime, "paths only", &["foo/**"], &[]);
-    let tags_only = create_minimal(&runtime, "tags only", &[], &["perf"]);
-    let both = create_minimal(&runtime, "both axes", &["foo/**"], &["perf"]);
-
-    // Path-only hits paths_only + both.
-    let by_path =
-        super::learning_tools::search(&runtime, json!({"path": "foo/bar.rs"})).expect("by path");
-    let ids = ids_from_array(&by_path);
-    assert!(ids.contains(&paths_only.id));
-    assert!(ids.contains(&both.id));
-    assert!(!ids.contains(&tags_only.id));
-
-    // Tag-only hits tags_only + both.
-    let by_tag = super::learning_tools::search(&runtime, json!({"tag": "perf"})).expect("by tag");
-    let ids = ids_from_array(&by_tag);
-    assert!(ids.contains(&tags_only.id));
-    assert!(ids.contains(&both.id));
-    assert!(!ids.contains(&paths_only.id));
-
-    // Combined: every learning surfaces exactly once.
-    let combined =
-        super::learning_tools::search(&runtime, json!({"path": "foo/bar.rs", "tag": "perf"}))
-            .expect("combined");
-    let ids = ids_from_array(&combined);
-    assert_eq!(ids.len(), 3);
-
-    // AC #5: matched_by has both axes for the `both` record.
-    let both_row = find_id(&combined, &both.id).expect("both row");
-    let matched_by = both_row["matched_by"]
-        .as_array()
-        .expect("matched_by array")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    assert!(matched_by.iter().any(|axis| axis.starts_with("path:")));
-    assert!(matched_by.iter().any(|axis| axis.starts_with("tag:")));
-}
-
-#[test]
-fn search_accepts_absolute_paths_inside_workspace() {
-    let (_guard, runtime, repo_root) = test_runtime();
-    let learning = create_minimal(&runtime, "paths only", &["foo/**"], &[]);
-    let absolute = repo_root.join("foo/bar.rs").to_string_lossy().to_string();
-
-    let by_path =
-        super::learning_tools::search(&runtime, json!({"path": absolute})).expect("by path");
-    let ids = ids_from_array(&by_path);
-    assert!(ids.contains(&learning.id));
-}
-
-#[test]
-fn search_accepts_absolute_paths_inside_linked_worktree() {
-    let (_guard, runtime, repo_root) = test_runtime();
-    let worktree = tempfile::tempdir().expect("worktree tempdir");
-    seed_fake_git_worktree(&repo_root, worktree.path());
-    let learning = create_minimal(&runtime, "paths only", &["foo/**"], &[]);
-    let absolute = worktree
-        .path()
-        .join("foo/bar.rs")
-        .to_string_lossy()
-        .to_string();
-
-    let by_path =
-        super::learning_tools::search(&runtime, json!({"path": absolute})).expect("by path");
-    let ids = ids_from_array(&by_path);
-    assert!(ids.contains(&learning.id));
-}
-
-// --- AC #5: matched_by always present on search results --------------
-
-#[test]
-fn search_annotates_every_result_with_matched_by() {
-    let (_guard, runtime, _repo_root) = test_runtime();
-    create_minimal(&runtime, "first", &["foo/**"], &["alpha"]);
-    create_minimal(&runtime, "second", &["bar/**"], &["alpha"]);
-
-    let results = super::learning_tools::search(&runtime, json!({"tag": "alpha"})).expect("search");
-    let array = results.as_array().expect("array");
-    assert_eq!(array.len(), 2);
-    for row in array {
-        let matched_by = row["matched_by"].as_array().expect("matched_by present");
-        assert!(!matched_by.is_empty(), "matched_by must not be empty");
-        for axis in matched_by {
-            let raw = axis.as_str().expect("string");
-            assert!(
-                raw.starts_with("path:") || raw.starts_with("tag:") || raw.starts_with("query:"),
-                "matched_by axis must be path:|tag:|query:; got {raw}"
-            );
-        }
-    }
-}
-
-// --- AC #6: ranking honors priority desc then updated_at desc --------
-
-#[test]
-fn search_ranks_priority_desc_then_updated_at_desc() {
-    let (_guard, runtime, _repo_root) = test_runtime();
-
-    // Recent low priority (no priority set).
-    let recent_low = create_minimal(&runtime, "recent low", &["foo/**"], &[]);
-    // Old high priority — created next but with explicit priority set.
-    let high_priority = runtime
-        .create_learning(LearningCreateParams {
-            summary: "old high priority".to_string(),
-            scope: LearningScope {
-                paths: vec!["foo/**".to_string()],
-                ..Default::default()
-            },
-            body: String::new(),
-            evidence: Vec::new(),
-            created_by: None,
-            priority: Some(10),
-        })
-        .expect("high");
-    // Mid record with priority = 5.
-    let mid = runtime
-        .create_learning(LearningCreateParams {
-            summary: "mid".to_string(),
-            scope: LearningScope {
-                paths: vec!["foo/**".to_string()],
-                ..Default::default()
-            },
-            body: String::new(),
-            evidence: Vec::new(),
-            created_by: None,
-            priority: Some(5),
-        })
-        .expect("mid");
+    let scoped = create_minimal(&runtime, "scoped", &["foo/**"], &[]);
+    let unscoped = create_minimal(&runtime, "unscoped", &["bar/**"], &[]);
 
     let results =
-        super::learning_tools::search(&runtime, json!({"path": "foo/bar.rs"})).expect("search");
+        super::learning_tools::list(&runtime, json!({"path": "foo/bar.rs"})).expect("by path");
     let ids = ids_from_array(&results);
-    let high_pos = ids.iter().position(|id| id == &high_priority.id).unwrap();
-    let mid_pos = ids.iter().position(|id| id == &mid.id).unwrap();
-    let low_pos = ids.iter().position(|id| id == &recent_low.id).unwrap();
     assert!(
-        high_pos < mid_pos && mid_pos < low_pos,
-        "expected priority desc ranking, got {ids:?}"
+        ids.contains(&scoped.id),
+        "glob-containment should match foo/bar.rs against scope foo/**"
+    );
+    assert!(
+        !ids.contains(&unscoped.id),
+        "unrelated scope must not match"
     );
 }
 
-// --- AC #8: supersession excludes from default search ----------------
+#[test]
+fn list_tag_filter_uses_case_insensitive_equality() {
+    let (_guard, runtime, _repo_root) = test_runtime();
+    let tagged = create_minimal(&runtime, "tagged", &[], &["perf"]);
+    let untagged = create_minimal(&runtime, "untagged", &[], &["other"]);
+
+    let results = super::learning_tools::list(&runtime, json!({"tag": "perf"})).expect("by tag");
+    let ids = ids_from_array(&results);
+    assert!(ids.contains(&tagged.id));
+    assert!(!ids.contains(&untagged.id));
+}
+
+// --- AC #8: supersession excludes from default list ------------------
 
 #[test]
-fn supersede_excludes_from_default_search_but_surfaces_under_list_superseded() {
+fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
     let (_guard, runtime, _repo_root) = test_runtime();
     let old = create_minimal(&runtime, "old", &["foo/**"], &[]);
     let new = create_minimal(&runtime, "new", &["foo/**"], &[]);
@@ -425,9 +302,9 @@ fn supersede_excludes_from_default_search_but_surfaces_under_list_superseded() {
     super::learning_tools::supersede(&runtime, json!({"id": old.id, "with": new.id}), None, None)
         .expect("supersede");
 
-    let results =
-        super::learning_tools::search(&runtime, json!({"path": "foo/bar.rs"})).expect("search");
-    let ids = ids_from_array(&results);
+    let active =
+        super::learning_tools::list(&runtime, json!({"status": "active"})).expect("active list");
+    let ids = ids_from_array(&active);
     assert!(!ids.contains(&old.id));
     assert!(ids.contains(&new.id));
 
@@ -447,8 +324,8 @@ fn reindex_rebuilds_index_after_truncation() {
     let response = super::learning_tools::reindex(&runtime, Value::Null).expect("reindex");
     assert!(response["rebuilt_count"].as_u64().unwrap() >= 1);
 
-    // Pre-condition holds: search still finds the learning.
-    let results = super::learning_tools::search(&runtime, json!({"tag": "alpha"})).expect("search");
+    // Pre-condition holds: list still finds the learning by tag.
+    let results = super::learning_tools::list(&runtime, json!({"tag": "alpha"})).expect("list");
     let ids = ids_from_array(&results);
     assert!(ids.contains(&learning.id));
 }
