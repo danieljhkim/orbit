@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>orbit</title>
+    <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -29,6 +30,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab" data-tab="tasks" type="button">Tasks</button>
       <button class="tab" data-tab="scoreboard" type="button">Scoreboard</button>
+      <button class="tab" data-tab="metrics" type="button">Metrics</button>
       <button class="tab" data-tab="audit" type="button">Audit</button>
       <button class="tab" data-tab="diagnostics" type="button">Diagnostics</button>
       <button class="tab" data-tab="knowledge" type="button">Knowledge</button>
@@ -150,6 +152,47 @@
             </div>
           </section>
         </div>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="metrics">
+      <main style="grid-template-columns: 1fr;">
+        <section class="panel" id="metrics-panel">
+          <header><span id="metrics-title">Metrics</span><span class="count" id="metrics-count">-</span></header>
+          <nav class="subtabs" id="metrics-subtabs">
+            <button class="subtab" data-subtab="knowledge" type="button">Knowledge</button>
+            <button class="subtab" data-subtab="activity" type="button">Activity</button>
+            <button class="subtab" data-subtab="tools" type="button">Tools</button>
+            <button class="subtab" data-subtab="task" type="button">Task</button>
+            <button class="subtab" data-subtab="invocations" type="button">Invocations</button>
+          </nav>
+          <div class="controls metrics-controls" id="metrics-task-controls" style="display: none;">
+            <form class="metrics-form compact" id="metrics-task-form">
+              <label>task_id<input type="search" id="metrics-task-id" autocomplete="off" spellcheck="false" /></label>
+              <button class="action" type="submit">Apply</button>
+            </form>
+          </div>
+          <div class="controls metrics-controls" id="metrics-invocation-controls" style="display: none;">
+            <form class="metrics-form" id="metrics-invocation-form">
+              <label>since<input type="text" id="metrics-filter-since" autocomplete="off" spellcheck="false" /></label>
+              <label>until<input type="text" id="metrics-filter-until" autocomplete="off" spellcheck="false" /></label>
+              <label>job_run_id<input type="text" id="metrics-filter-job-run-id" autocomplete="off" spellcheck="false" /></label>
+              <label>activity_id<input type="text" id="metrics-filter-activity-id" autocomplete="off" spellcheck="false" /></label>
+              <label>task_id<input type="text" id="metrics-filter-task-id" autocomplete="off" spellcheck="false" /></label>
+              <label>agent<input type="text" id="metrics-filter-agent" autocomplete="off" spellcheck="false" /></label>
+              <label>model<input type="text" id="metrics-filter-model" autocomplete="off" spellcheck="false" /></label>
+              <label>tool_name<input type="text" id="metrics-filter-tool-name" autocomplete="off" spellcheck="false" /></label>
+              <label>limit<input type="number" id="metrics-filter-limit" min="1" max="500" value="50" /></label>
+              <button class="action" type="submit">Apply</button>
+            </form>
+          </div>
+          <div class="body scoreboard-table-wrap" id="metrics-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+        </section>
       </main>
     </section>
     <section class="tab-pane" data-tab="run-detail">

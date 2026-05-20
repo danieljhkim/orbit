@@ -32,6 +32,7 @@ mod frictions;
 mod jobs;
 mod learnings;
 mod log;
+mod metrics;
 mod runs;
 mod scoreboard;
 mod tasks;
@@ -345,6 +346,11 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
         .route("/log/stream", get(log::stream_log))
         .route("/audit/summary", get(audit::audit_summary))
         .route("/scoreboard", get(scoreboard::scoreboard))
+        .route("/metrics/knowledge", get(metrics::knowledge_metrics))
+        .route("/metrics/activity", get(metrics::activity_metrics))
+        .route("/metrics/tools", get(metrics::tool_metrics))
+        .route("/metrics/task/:id", get(metrics::task_metrics))
+        .route("/metrics/invocations", get(metrics::invocation_metrics))
         .route(
             "/diagnostics/metrics",
             get(diagnostics::list_diagnostics_metrics),
@@ -649,6 +655,9 @@ default_crew = "silver"
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }
+
+#[cfg(test)]
+mod metrics_tests;
 
 #[cfg(test)]
 mod tasks_tests;

@@ -357,7 +357,9 @@ impl InvocationListQuery {
         T: ToSql + 'static,
     {
         self.push_value(value);
-        self.conditions.push(format!("{sql}{}", self.len()));
+        // L20260520-1: nested EXISTS filters need the bind index inserted at the placeholder.
+        let placeholder = format!("?{}", self.len());
+        self.conditions.push(sql.replacen('?', &placeholder, 1));
     }
 
     fn push_value<T>(&mut self, value: T)
@@ -392,7 +394,7 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use orbit_common::types::{InvocationTrace, RoleSlot};
+    use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
 
     use super::*;
 
@@ -449,5 +451,68 @@ mod tests {
             .expect("list records");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].slot, None);
+    }
+
+    #[test]
+    fn invocation_records_filter_by_nested_task_and_tool() {
+        let store = Store::open_in_memory().expect("open store");
+
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: "jrun-filter-match".to_string(),
+                activity_id: "implement_one".to_string(),
+                agent: "codex".to_string(),
+                model: Some("gpt-5.5".to_string()),
+                slot: None,
+                task_ids: vec!["ORB-1".to_string()],
+                trace: InvocationTrace {
+                    usage: TokenUsage {
+                        input: 10,
+                        output: 5,
+                        ..Default::default()
+                    },
+                    tool_calls: vec![ToolCallTrace {
+                        seq: 0,
+                        tool_name: "fs.read".to_string(),
+                        result_bytes: 42,
+                        result_payload: None,
+                    }],
+                    duration_ms: 100,
+                },
+            })
+            .expect("insert matching invocation");
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: "jrun-filter-other".to_string(),
+                activity_id: "implement_one".to_string(),
+                agent: "codex".to_string(),
+                model: Some("gpt-5.5".to_string()),
+                slot: None,
+                task_ids: vec!["ORB-2".to_string()],
+                trace: InvocationTrace {
+                    tool_calls: vec![ToolCallTrace {
+                        seq: 0,
+                        tool_name: "fs.write".to_string(),
+                        result_bytes: 9,
+                        result_payload: None,
+                    }],
+                    ..Default::default()
+                },
+            })
+            .expect("insert other invocation");
+
+        let records = store
+            .list_invocation_records(&InvocationQuery {
+                task_id: Some("ORB-1".to_string()),
+                tool_name: Some("fs.read".to_string()),
+                limit: 10,
+                ..Default::default()
+            })
+            .expect("list filtered records");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].job_run_id, "jrun-filter-match");
+        assert_eq!(records[0].task_ids, vec!["ORB-1"]);
+        assert_eq!(records[0].tool_calls[0].tool_name, "fs.read");
     }
 }

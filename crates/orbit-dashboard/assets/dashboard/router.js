@@ -2,7 +2,7 @@
 // Pure vanilla JS, split into ES module with no build step.
 //
 // Moved from app.js (router was the widest cross-cut for subsequent module splits).
-// Owns: TABS, DIAG_SUBTABS, RUN_DETAIL_SUBTABS, KNOWLEDGE_SUBTABS, parseHashRoute,
+// Owns: TABS, DIAG_SUBTABS, METRICS_SUBTABS, RUN_DETAIL_SUBTABS, KNOWLEDGE_SUBTABS, parseHashRoute,
 // setActiveTab, set*Subtab helpers, initTabs, navigateToRun.
 //
 // All mutable dashboard state remains in app.js. Router receives a context object
@@ -22,8 +22,9 @@ import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
 
-const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "knowledge", "run-detail"];
+const TABS = ["tasks", "scoreboard", "metrics", "audit", "diagnostics", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors"];
+const METRICS_SUBTABS = ["knowledge", "activity", "tools", "task", "invocations"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
 
@@ -80,6 +81,15 @@ function setDiagSubtabImpl(ctx, name) {
     $("runs-body").style.display = "none";
     ctx.renderDiagnostics();
   }
+}
+
+function setMetricsSubtabImpl(ctx, name) {
+  if (!METRICS_SUBTABS.includes(name)) name = "knowledge";
+  ctx.setMetricsSubtab(name);
+  for (const btn of document.querySelectorAll("#metrics-subtabs .subtab")) {
+    btn.classList.toggle("active", btn.dataset.subtab === name);
+  }
+  if (typeof ctx.renderMetrics === "function") ctx.renderMetrics();
 }
 
 function setKnowledgeSubtabImpl(ctx, name) {
@@ -169,6 +179,10 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     const sub = DIAG_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getDiagSubtab();
     setDiagSubtabImpl(ctx, sub);
     hash = `#diagnostics/${sub}`;
+  } else if (top === "metrics") {
+    const sub = METRICS_SUBTABS.includes(segments[1]) ? segments[1] : ctx.getMetricsSubtab();
+    setMetricsSubtabImpl(ctx, sub);
+    hash = `#metrics/${sub}`;
   } else if (top === "audit") {
     ctx.applyAuditHashQuery(query);
     const sub = ["events", "policy"].includes(segments[1]) ? segments[1] : ctx.getActiveAuditSubtab();
@@ -210,6 +224,11 @@ function initTabsImpl(ctx) {
   for (const btn of document.querySelectorAll("#diag-subtabs .subtab")) {
     btn.addEventListener("click", () =>
       setActiveTabImpl(ctx, `diagnostics/${btn.dataset.subtab}`, { refresh: false }),
+    );
+  }
+  for (const btn of document.querySelectorAll("#metrics-subtabs .subtab")) {
+    btn.addEventListener("click", () =>
+      setActiveTabImpl(ctx, `metrics/${btn.dataset.subtab}`, { refresh: false }),
     );
   }
   for (const btn of document.querySelectorAll("#run-detail-subtabs .subtab")) {
