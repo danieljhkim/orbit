@@ -23,6 +23,7 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 serde_yaml.workspace = true
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

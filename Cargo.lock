@@ -2141,6 +2141,7 @@ dependencies = [
  "futures-core",
  "orbit-common",
  "orbit-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",

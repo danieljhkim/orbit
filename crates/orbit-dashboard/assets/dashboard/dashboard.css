@@ -195,7 +195,8 @@
       #audit-search,
       #learning-search,
       #adr-search,
-      #friction-search {
+      #friction-search,
+      .metrics-form input {
         flex: 0 1 280px;
         min-width: 160px;
         background: var(--bg);
@@ -213,7 +214,8 @@
       #audit-search:focus,
       #learning-search:focus,
       #adr-search:focus,
-      #friction-search:focus {
+      #friction-search:focus,
+      .metrics-form input:focus {
         border-color: var(--accent);
       }
       
@@ -1134,6 +1136,104 @@
       .scoreboard-table-wrap table.scoreboard-table th,
       .scoreboard-table-wrap table.scoreboard-table td {
         padding: 6px 12px;
+      }
+
+      .metrics-controls {
+        align-items: stretch;
+      }
+
+      .metrics-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+        width: 100%;
+      }
+
+      .metrics-form.compact {
+        grid-template-columns: minmax(180px, 320px) max-content;
+        align-items: end;
+      }
+
+      .metrics-form label {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 4px;
+        color: var(--fg-dim);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .metrics-form input {
+        width: 100%;
+        min-width: 0;
+        flex-basis: auto;
+        font-family: var(--font-mono);
+      }
+
+      .metrics-form .action {
+        align-self: end;
+        justify-self: start;
+      }
+
+      .metrics-summary {
+        display: grid;
+        gap: 14px;
+        padding: 14px 16px 18px;
+        background: var(--bg);
+      }
+
+      .metrics-summary-section {
+        border: 1px solid var(--border);
+        background: #050505;
+      }
+
+      .metrics-summary-section h3 {
+        margin: 0;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        color: var(--fg-dim);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .metrics-kv-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+
+      .metrics-kv {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 3px;
+        padding: 10px;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .metrics-kv .label {
+        color: var(--fg-dim);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+      }
+
+      .metrics-kv .value {
+        overflow: hidden;
+        color: var(--fg);
+        font-family: var(--font-mono);
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .metrics-kv .value.accent {
+        color: var(--accent-hover);
       }
 
       table.sb-leaderboard {
