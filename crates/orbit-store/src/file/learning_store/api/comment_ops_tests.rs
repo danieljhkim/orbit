@@ -21,7 +21,8 @@ fn learning_comments_round_trip_and_create_file_lazily() {
         .create_learning(create_params("target", vec![], vec![]))
         .expect("create");
     let comments_path = comments_jsonl_path(dir.path(), &learning.id);
-    assert!(!comments_path.exists());
+    assert!(comments_path.exists());
+    assert_eq!(line_count(&comments_path), 0);
 
     let now = Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap();
     let comment = store
@@ -31,6 +32,7 @@ fn learning_comments_round_trip_and_create_file_lazily() {
     assert_eq!(comment.id, "C20260517-1");
     assert_eq!(comment.body, "useful note");
     assert!(comments_path.exists());
+    assert_eq!(line_count(&comments_path), 1);
     let listed = store
         .list_learning_comments(&learning.id, false)
         .expect("list");
@@ -87,7 +89,7 @@ fn learning_comment_rejects_superseded_parent_before_append() {
     assert!(
         matches!(error, OrbitError::InvalidInput(message) if message.contains("orbit.learning.supersede"))
     );
-    assert!(!comments_jsonl_path(dir.path(), &old.id).exists());
+    assert_eq!(line_count(&comments_jsonl_path(dir.path(), &old.id)), 0);
 }
 
 #[test]

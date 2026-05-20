@@ -14,9 +14,9 @@ use orbit_common::types::{
     LearningVoteSummary, all_agent_families, normalize_agent_family_for_model,
 };
 use orbit_store::{
-    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams,
+    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
     LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
-    learning_layout::LearningLayoutMigrationReport,
+    RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
 
 use crate::OrbitRuntime;
@@ -29,10 +29,18 @@ impl OrbitRuntime {
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
-        self.stores()
-            .learnings()
-            .get(id)?
-            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.to_string()))
+        match self.stores().learnings().get_federated(id)? {
+            Some(learning) => Ok(learning),
+            None => {
+                if let Some(stub) = self.stores().learnings().remote_stub(id)? {
+                    return Err(remote_artifact_error("learning", &stub));
+                }
+                Err(OrbitError::not_found(
+                    NotFoundKind::Learning,
+                    id.to_string(),
+                ))
+            }
+        }
     }
 
     pub fn list_learnings(
@@ -40,6 +48,16 @@ impl OrbitRuntime {
         status: Option<LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError> {
         self.stores().learnings().list(status)
+    }
+
+    pub fn list_learning_entries(
+        &self,
+        status: Option<LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        self.stores()
+            .learnings()
+            .list_entries(status, include_remote)
     }
 
     pub fn search_learnings(
@@ -168,6 +186,15 @@ impl OrbitRuntime {
         }
         Ok((stale, deleted))
     }
+}
+
+fn remote_artifact_error(kind: &str, stub: &RemoteArtifactStub) -> OrbitError {
+    OrbitError::Store(format!(
+        "{kind} {} is recorded in another worktree and its body is not locally readable; worktree_root={}, branch={}",
+        stub.id,
+        stub.worktree_root.display(),
+        stub.branch.as_deref().unwrap_or("<none>")
+    ))
 }
 
 pub fn migrate_learning_layout_at(

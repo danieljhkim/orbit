@@ -6,13 +6,14 @@ use orbit_common::types::{
 };
 
 use super::contracts::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, ExecutorDefStoreBackend,
-    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
-    LearningCommentDeleteParams, LearningCreateParams, LearningSearchParams, LearningSearchResult,
-    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams,
-    TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
+    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrStoreBackend,
+    ExecutorDefStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend,
+    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
+    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
+    LearningUpvoteParams, PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReviewStoreBackend,
+    TaskReviewUpdateParams, TaskStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
@@ -314,6 +315,10 @@ impl AdrStoreBackend for AdrFileStore {
         resolve::<Adr, _>(self, id)
     }
 
+    fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
+        AdrFileStore::get_adr_federated(self, id)
+    }
+
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError> {
         self.list_adrs()
     }
@@ -335,6 +340,32 @@ impl AdrStoreBackend for AdrFileStore {
             legacy_id,
             validation_warned,
         )
+    }
+
+    fn list_adr_entries_filtered(
+        &self,
+        status: Option<AdrStatus>,
+        owner: Option<&str>,
+        feature: Option<&str>,
+        task_id: Option<&str>,
+        legacy_id: Option<&str>,
+        validation_warned: Option<bool>,
+        include_remote: bool,
+    ) -> Result<Vec<AdrListEntry>, OrbitError> {
+        AdrFileStore::list_adr_entries_filtered(
+            self,
+            status,
+            owner,
+            feature,
+            task_id,
+            legacy_id,
+            validation_warned,
+            include_remote,
+        )
+    }
+
+    fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        AdrFileStore::get_adr_remote_stub(self, id)
     }
 
     fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
@@ -373,8 +404,24 @@ impl LearningStoreBackend for LearningFileStore {
         resolve::<Learning, _>(self, id)
     }
 
+    fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
+        LearningFileStore::get_learning_federated(self, id)
+    }
+
     fn list_learnings(&self, status: Option<LearningStatus>) -> Result<Vec<Learning>, OrbitError> {
         self.list_learnings(status)
+    }
+
+    fn list_learning_entries(
+        &self,
+        status: Option<LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        LearningFileStore::list_learning_entries(self, status, include_remote)
+    }
+
+    fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        LearningFileStore::get_learning_remote_stub(self, id)
     }
 
     fn search_learnings(

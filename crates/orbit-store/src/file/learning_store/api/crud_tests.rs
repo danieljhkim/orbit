@@ -33,6 +33,22 @@ fn round_trip_persistence_preserves_all_fields_including_phase_two_reservations(
             priority: None,
         };
         let learning = store.create_learning(params).expect("create");
+        let learning_dir = path_root.join(&learning.id);
+        assert!(learning_dir.join("votes.jsonl").is_file());
+        assert!(learning_dir.join("comments.jsonl").is_file());
+        let allocation = store
+            .id_allocator
+            .learning_allocation(&learning.id)
+            .expect("allocation")
+            .expect("allocation exists");
+        assert_eq!(
+            allocation.worktree_root,
+            std::fs::canonicalize(&path_root).expect("canonical learning root")
+        );
+        assert_eq!(
+            allocation.body_path.as_deref(),
+            Some(std::path::Path::new("L-0001/learning.yaml"))
+        );
         (learning.id.clone(), learning)
     };
 

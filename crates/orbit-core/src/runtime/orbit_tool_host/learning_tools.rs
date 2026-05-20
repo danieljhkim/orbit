@@ -12,7 +12,10 @@ use orbit_common::types::{
     EvidenceKind, LearningEvidence, LearningScope, LearningStatus, NotFoundKind, OrbitError,
     optional_string, optional_string_alias, required_string,
 };
-use orbit_store::{LearningCreateParams, LearningUpdateParams, LearningUpvoteParams};
+use orbit_store::{
+    LearningCreateParams, LearningListEntry, LearningUpdateParams, LearningUpvoteParams,
+    RemoteArtifactStub,
+};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -53,11 +56,7 @@ pub(super) fn add(
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let learning = runtime
-        .stores()
-        .learnings()
-        .get(&id)?
-        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
+    let learning = runtime.get_learning(&id)?;
     let vote_summary = runtime.stores().learnings().vote_summary(&id)?;
     Ok(learning_show_to_json(&learning, &vote_summary))
 }
@@ -71,11 +70,16 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .as_deref()
         .map(orbit_common::utility::glob::normalize_glob_path)
         .transpose()?;
+    let include_remote =
+        optional_bool_alias(&input, &["include_remote", "includeRemote"])?.unwrap_or(false);
 
-    let learnings = runtime.stores().learnings().list(status)?;
+    let learnings = runtime.list_learning_entries(status, include_remote)?;
     let filtered: Vec<_> = learnings
         .into_iter()
-        .filter(|l| {
+        .filter(|entry| {
+            let LearningListEntry::Local(l) = entry else {
+                return tag.is_none() && path_normalized.is_none();
+            };
             if let Some(ref tag) = tag
                 && !l.scope.tags.iter().any(|t| t == tag)
             {
@@ -94,8 +98,38 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         })
         .collect();
     Ok(Value::Array(
-        filtered.iter().map(learning_to_json).collect(),
+        filtered.iter().map(learning_entry_to_json).collect(),
     ))
+}
+
+fn learning_entry_to_json(entry: &LearningListEntry) -> Value {
+    match entry {
+        LearningListEntry::Local(learning) => {
+            let mut value = learning_to_json(learning);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("remote".to_string(), Value::Bool(false));
+            }
+            value
+        }
+        LearningListEntry::Remote(stub) => remote_stub_to_json(stub),
+    }
+}
+
+fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
+    json!({
+        "id": stub.id,
+        "kind": stub.kind,
+        "status": stub.status,
+        "remote": true,
+        "remote_marker": format!("[remote: {}]", stub.worktree_root.display()),
+        "worktree_root": stub.worktree_root.to_string_lossy(),
+        "branch": stub.branch,
+        "body_path": stub.body_path.as_ref().map(|path| path.to_string_lossy().to_string()),
+        "summary": Value::Null,
+        "body": Value::Null,
+        "scope": Value::Null,
+        "evidence": Value::Null,
+    })
 }
 
 pub(super) fn upvote(

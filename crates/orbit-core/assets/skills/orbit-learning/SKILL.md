@@ -11,6 +11,14 @@ Curate durable, scope-injected guidance that survives across sessions and agents
 
 Use this skill when the user reports a recurring failure mode, when a code review surfaces a non-obvious gotcha worth preserving, when an incident root-cause turns into a guardrail, or when a workflow insight ("we always X before Y in this crate") is worth pushing to future agents. Do **not** use it for one-off task notes — those belong on the task itself.
 
+Learning artifact files are written into the current worktree's
+`.orbit/learnings/L-NNNN/` subtree, while IDs are allocated globally through
+the shared allocator. Stage new learning files from your task worktree
+alongside the code/doc change that produced the guidance; sibling worktrees
+will see remote stubs until those body files are locally readable. The
+canonical learning ID format is `L-NNNN`; legacy `L<YYYYMMDD>-N` IDs were
+migrated by ORB-00200 and should only appear in `legacy_ids`.
+
 ## Tool Invocation
 
 Both surfaces accept the same JSON. Use the CLI examples when shell access is available; use the MCP names when the Orbit plugin exposes them.
@@ -67,6 +75,10 @@ Run `orbit tool list | grep orbit.learning` if you suspect the local tool surfac
 ## Operating Rules
 
 - **Never edit `.orbit/learnings/<id>/learning.yaml` directly.** All writes go through the tools so envelope cache, supersede pointers, and audit events stay consistent.
+- **Stage new learning artifacts from the current worktree.** `add` creates
+  `learning.yaml`, `votes.jsonl`, and `comments.jsonl` under
+  `.orbit/learnings/L-NNNN/` in the worktree where you ran the tool; commit
+  those files with the branch that needs the guidance.
 - **Use comments for footnotes, not rewrites.** `orbit.learning.comment.add` is for brief observations tied to the current wording of a learning; the body is capped at 500 characters. For corrections, delete the old comment and add a new one. For material guidance changes, create a replacement learning and use `orbit.learning.supersede`.
 - **Never invent learning IDs.** `add` allocates them; cite returned IDs verbatim.
 - **One learning, one piece of guidance.** If a record needs three sub-points, it is probably three learnings with overlapping scopes — easier to maintain and prune.

@@ -7,10 +7,13 @@ use orbit_common::types::{
     normalize_learning_tags,
 };
 
-use super::super::layout::{learning_doc_path, locate_learning, validate_learning_id};
+use super::super::layout::{
+    comments_jsonl_path, learning_doc_path, locate_learning, validate_learning_id, votes_jsonl_path,
+};
 use super::super::record::{read_learning_file, write_learning_file};
 use super::store::LearningFileStore;
 use crate::backend::{LearningCreateParams, LearningUpdateParams};
+use crate::{IdAllocationRecord, LearningListEntry, RemoteArtifactStub};
 
 impl LearningFileStore {
     pub(crate) fn create_learning(
@@ -63,6 +66,9 @@ impl LearningFileStore {
 
         let path = learning_doc_path(&self.root, &id);
         write_learning_file(&path, &learning, LearningStatus::Active)?;
+        ensure_empty_sidecar(&votes_jsonl_path(&self.root, &id))?;
+        ensure_empty_sidecar(&comments_jsonl_path(&self.root, &id))?;
+        self.id_allocator.record_learning_body_path(&id, &path)?;
         self.upsert_index_row(&learning);
         self.invalidate_envelope_cache();
         Ok(learning)
@@ -74,6 +80,16 @@ impl LearningFileStore {
             return Ok(None);
         };
         Ok(Some(read_learning_file(&path)?))
+    }
+
+    pub(crate) fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
+        validate_learning_id(id)?;
+        if let Some(record) = self.id_allocator.learning_allocation(id)?
+            && let Some(learning) = self.read_learning_allocation(&record)?
+        {
+            return Ok(Some(learning));
+        }
+        self.get_learning(id)
     }
 
     pub(crate) fn list_learnings(
@@ -116,6 +132,43 @@ impl LearningFileStore {
                 .then_with(|| a.id.cmp(&b.id))
         });
         Ok(out)
+    }
+
+    pub(crate) fn list_learning_entries(
+        &self,
+        status: Option<LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        let mut entries = Vec::new();
+        for record in self.id_allocator.learning_allocations()? {
+            if let Some(learning) = self.read_learning_allocation(&record)? {
+                if status.is_none_or(|expected| learning.status == expected) {
+                    entries.push(LearningListEntry::Local(learning));
+                }
+                continue;
+            }
+            if include_remote && status.is_none() {
+                entries.push(LearningListEntry::Remote(remote_stub_from_allocation(
+                    &record,
+                )));
+            }
+        }
+        entries.sort_by(|left, right| learning_entry_id(right).cmp(learning_entry_id(left)));
+        Ok(entries)
+    }
+
+    pub(crate) fn get_learning_remote_stub(
+        &self,
+        id: &str,
+    ) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        validate_learning_id(id)?;
+        let Some(record) = self.id_allocator.learning_allocation(id)? else {
+            return Ok(None);
+        };
+        if self.read_learning_allocation(&record)?.is_some() {
+            return Ok(None);
+        }
+        Ok(Some(remote_stub_from_allocation(&record)))
     }
 
     pub(crate) fn update_learning(
@@ -168,5 +221,48 @@ impl LearningFileStore {
         self.upsert_index_row(&learning);
         self.invalidate_envelope_cache();
         Ok(learning)
+    }
+
+    fn read_learning_allocation(
+        &self,
+        record: &IdAllocationRecord,
+    ) -> Result<Option<Learning>, OrbitError> {
+        let Some(path) = record.resolved_body_path() else {
+            return self.get_learning(&record.id);
+        };
+        if !path.is_file() {
+            return Ok(None);
+        }
+        Ok(Some(read_learning_file(&path)?))
+    }
+}
+
+fn ensure_empty_sidecar(path: &std::path::Path) -> Result<(), OrbitError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map(|_| ())
+        .map_err(|error| OrbitError::Io(error.to_string()))
+}
+
+fn remote_stub_from_allocation(record: &IdAllocationRecord) -> RemoteArtifactStub {
+    RemoteArtifactStub {
+        id: record.id.clone(),
+        kind: record.kind.as_str().to_string(),
+        status: record.status.clone(),
+        worktree_root: record.worktree_root.clone(),
+        branch: record.branch.clone(),
+        body_path: record.body_path.clone(),
+    }
+}
+
+fn learning_entry_id(entry: &LearningListEntry) -> &str {
+    match entry {
+        LearningListEntry::Local(learning) => &learning.id,
+        LearningListEntry::Remote(stub) => &stub.id,
     }
 }

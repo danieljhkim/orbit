@@ -72,16 +72,11 @@ pub(crate) fn build_context_from_roots(
     if !learning_id_migration.is_empty() {
         record_learning_id_migration_audit(&store, &paths, &learning_id_migration)?;
     }
-    let adr_store = workspace_adr_backends(
-        persistence.adr_dir.clone(),
-        store.clone(),
-        id_allocator.clone(),
-    );
-    let learning_store = workspace_learning_backend(
-        persistence.learning_dir.clone(),
-        store.clone(),
-        id_allocator,
-    )?;
+    let local_adr_dir = paths.local_dir.join("adrs");
+    let local_learning_dir = paths.local_dir.join("learnings");
+    let adr_store = workspace_adr_backends(local_adr_dir, store.clone(), id_allocator.clone());
+    let learning_store =
+        workspace_learning_backend(local_learning_dir, store.clone(), id_allocator)?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
     let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());

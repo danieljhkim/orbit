@@ -97,3 +97,4 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | Command Audit   | GlobalOnly         | Single authoritative SQLite event trail          |
 | Semantic Index  | WorkspaceOnly      | Task-derived embeddings stay with the workspace  |
 | Run Traces      | WorkspaceOnly      | Per-repo activity/job JSONL and blob artifacts   |
+| ADR/Learning IDs | Shared allocator + worktree-local bodies | ID rows live in shared `.orbit/state/semantic.db`; body files live in the current worktree so they can be staged with code |

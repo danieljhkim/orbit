@@ -10,7 +10,7 @@ use orbit_common::types::{
     audit_execution_id, normalize_optional_attribution_label, optional_string,
     optional_string_alias, optional_string_list_alias, required_string,
 };
-use orbit_store::{AdrCreateParams, AdrDocumentUpdateParams};
+use orbit_store::{AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, RemoteArtifactStub};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -76,8 +76,15 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
             .next()
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
     } else {
-        adrs.get(&id_value)?
-            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
+        match adrs.get_federated(&id_value)? {
+            Some(adr) => adr,
+            None => {
+                if let Some(stub) = adrs.remote_stub(&id_value)? {
+                    return Err(remote_artifact_error("ADR", &stub));
+                }
+                return Err(OrbitError::not_found(NotFoundKind::Adr, id_value.clone()));
+            }
+        }
     };
     Ok(adr_to_json(&adr))
 }
@@ -92,16 +99,20 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let legacy_id = optional_string_alias(&input, &["legacy_id", "legacyId"])?;
     let validation_warned =
         super::input::optional_bool_alias(&input, &["validation_warned", "validation"])?;
+    let include_remote =
+        super::input::optional_bool_alias(&input, &["include_remote", "includeRemote"])?
+            .unwrap_or(false);
 
-    let adrs = runtime.stores().adrs().list_filtered(
+    let adrs = runtime.stores().adrs().list_entries_filtered(
         status,
         owner.as_deref(),
         feature.as_deref(),
         task_id.as_deref(),
         legacy_id.as_deref(),
         validation_warned,
+        include_remote,
     )?;
-    Ok(Value::Array(adrs.iter().map(adr_to_json).collect()))
+    Ok(Value::Array(adrs.iter().map(adr_entry_to_json).collect()))
 }
 
 pub(super) fn update(
@@ -265,6 +276,46 @@ fn adr_to_json(adr: &Adr) -> Value {
         "validation_warnings": adr.validation_warnings,
         "legacy_validation": adr.legacy_validation.to_string(),
     })
+}
+
+fn adr_entry_to_json(entry: &AdrListEntry) -> Value {
+    match entry {
+        AdrListEntry::Local(adr) => {
+            let mut value = adr_to_json(adr);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("remote".to_string(), Value::Bool(false));
+            }
+            value
+        }
+        AdrListEntry::Remote(stub) => remote_stub_to_json(stub),
+    }
+}
+
+fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
+    json!({
+        "id": stub.id,
+        "kind": stub.kind,
+        "status": stub.status,
+        "remote": true,
+        "remote_marker": format!("[remote: {}]", stub.worktree_root.display()),
+        "worktree_root": stub.worktree_root.to_string_lossy(),
+        "branch": stub.branch,
+        "body_path": stub.body_path.as_ref().map(|path| path.to_string_lossy().to_string()),
+        "title": Value::Null,
+        "owner": Value::Null,
+        "related_features": Value::Null,
+        "related_tasks": Value::Null,
+        "legacy_ids": Value::Null,
+    })
+}
+
+fn remote_artifact_error(kind: &str, stub: &RemoteArtifactStub) -> OrbitError {
+    OrbitError::Store(format!(
+        "{kind} {} is recorded in another worktree and its body is not locally readable; worktree_root={}, branch={}",
+        stub.id,
+        stub.worktree_root.display(),
+        stub.branch.as_deref().unwrap_or("<none>")
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -439,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn add_adr_and_learning_keep_body_files_in_shared_root_when_local_root_differs() {
+    fn add_adr_and_learning_keep_body_files_in_local_root_when_local_root_differs() {
         let root = tempdir().expect("tempdir");
         let global_root = root.path().join("global");
         let shared_repo = root.path().join("repo");
@@ -472,21 +523,21 @@ mod tests {
             .expect("add learning");
 
         assert!(
-            shared_root
+            local_root
                 .join("adrs/proposed")
                 .join(adr_id)
                 .join("body.md")
                 .is_file()
         );
         assert!(
-            shared_root
+            local_root
                 .join("learnings")
                 .join(&learning.id)
                 .join("learning.yaml")
                 .is_file()
         );
-        assert!(!local_root.join("adrs").exists());
-        assert!(!local_root.join("learnings").exists());
+        assert!(!shared_root.join("adrs").exists());
+        assert!(!shared_root.join("learnings").exists());
     }
 
     #[test]

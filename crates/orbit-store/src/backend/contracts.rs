@@ -8,6 +8,7 @@ use orbit_common::types::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
 
 use crate::sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
@@ -21,6 +22,28 @@ pub struct AdrCreateParams {
     pub related_features: Vec<String>,
     pub related_tasks: Vec<String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteArtifactStub {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub worktree_root: PathBuf,
+    pub branch: Option<String>,
+    pub body_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdrListEntry {
+    Local(Adr),
+    Remote(RemoteArtifactStub),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LearningListEntry {
+    Local(Learning),
+    Remote(RemoteArtifactStub),
 }
 
 /// Parameters for a partial update to an existing ADR document.
@@ -336,6 +359,7 @@ pub trait TaskStoreBackend: Send + Sync {
 pub trait AdrStoreBackend: Send + Sync {
     fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
+    fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
     fn list_adrs_filtered(
         &self,
@@ -346,6 +370,18 @@ pub trait AdrStoreBackend: Send + Sync {
         legacy_id: Option<&str>,
         validation_warned: Option<bool>,
     ) -> Result<Vec<Adr>, OrbitError>;
+    #[allow(clippy::too_many_arguments)]
+    fn list_adr_entries_filtered(
+        &self,
+        status: Option<AdrStatus>,
+        owner: Option<&str>,
+        feature: Option<&str>,
+        task_id: Option<&str>,
+        legacy_id: Option<&str>,
+        validation_warned: Option<bool>,
+        include_remote: bool,
+    ) -> Result<Vec<AdrListEntry>, OrbitError>;
+    fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
     fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError>;
     fn update_adr_document(
         &self,
@@ -672,10 +708,17 @@ pub struct LearningCommentDeleteParams {
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
+    fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
     fn list_learnings(
         &self,
         status: Option<orbit_common::types::LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError>;
+    fn list_learning_entries(
+        &self,
+        status: Option<orbit_common::types::LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError>;
+    fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
     fn search_learnings(
         &self,
         params: LearningSearchParams,

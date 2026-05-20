@@ -114,23 +114,23 @@ pub mod learning_layout {
 use chrono::{DateTime, Utc};
 
 pub use backend::{
-    ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend,
+    ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrStoreBackend,
     AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery,
     JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
-    LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend, ReleasedTaskReservation,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict,
-    TaskLockHolder, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
-    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
-    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
-    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
-    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, WorkspaceTaskBackends,
-    audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
-    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
+    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
+    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
+    ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
+    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
+    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
+    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
+    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
+    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
+    TaskReservationReleaseParams, TaskReservationReleaseReason, TaskReservationReleaseResult,
+    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
+    TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
+    global_policy_def_store, layered_policy_def_store, task_reservation_store_sqlite,
+    tool_store_sqlite, workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
 pub use invocation_store_impl::{
@@ -144,8 +144,8 @@ pub use sqlite::audit_event_store::{
 };
 pub use sqlite::connection::{Store, StoreTx};
 pub use sqlite::id_allocator::{
-    IdAllocation, IdAllocationKind, IdAllocator, IdAllocatorConfig, LearningIdMigrationReport,
-    LearningIdRename, ensure_id_allocation_schema,
+    IdAllocation, IdAllocationKind, IdAllocationRecord, IdAllocator, IdAllocatorConfig,
+    LearningIdMigrationReport, LearningIdRename, ensure_id_allocation_schema,
 };
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {

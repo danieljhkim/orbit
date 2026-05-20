@@ -28,6 +28,14 @@ impl Tool for OrbitLearningListTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "include_remote".to_string(),
+                description:
+                    "Include allocation rows whose body files are not locally readable as remote stubs."
+                        .to_string(),
+                param_type: "boolean".to_string(),
+                required: false,
+            },
         ];
         ToolSchema {
             name: "orbit.learning.list".to_string(),

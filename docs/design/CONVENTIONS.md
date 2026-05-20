@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-05-18
+last_updated: 2026-05-20
 status: Accepted
 ---
 
@@ -239,5 +239,6 @@ Until those exist: cross-review and author judgment are the quality mechanism. W
 | Task Lineage | [docs/design/task-lineage/](./task-lineage/) | claude |
 | Task Sync | [docs/design/task-sync/](./task-sync/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
+| Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |
 
 Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for flipping ADR status when tasks ship, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.

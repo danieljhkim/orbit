@@ -52,6 +52,14 @@ impl Tool for OrbitAdrListTool {
                 param_type: "boolean".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "include_remote".to_string(),
+                description:
+                    "Include allocation rows whose body files are not locally readable as remote stubs."
+                        .to_string(),
+                param_type: "boolean".to_string(),
+                required: false,
+            },
         ];
         ToolSchema {
             name: "orbit.adr.list".to_string(),

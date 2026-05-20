@@ -2,7 +2,7 @@
 #![allow(clippy::expect_used)]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use orbit_common::types::{Adr, AdrStatus, LegacyValidation, NotFoundKind, OrbitError};
@@ -15,7 +15,7 @@ use super::layout::{AdrStateDir, adr_dir, state_dir_path, validate_adr_id};
 use super::lock::acquire_adr_lock;
 use crate::backend::{AdrCreateParams, AdrDocumentUpdateParams};
 use crate::file::layout::read_child_dirs;
-use crate::{IdAllocator, Store};
+use crate::{AdrListEntry, IdAllocationRecord, IdAllocator, RemoteArtifactStub, Store};
 
 pub(crate) struct AdrFileStore {
     root: PathBuf,
@@ -101,6 +101,8 @@ impl AdrFileStore {
 
         let target_dir = adr_dir(&self.root, AdrStateDir::Proposed, &id);
         write_bundle_at(&target_dir, &bundle)?;
+        self.id_allocator
+            .record_adr_body_path(&id, &super::layout::body_path(&target_dir))?;
 
         let adr = bundle_to_adr(bundle);
         self.upsert_index_row(&adr);
@@ -114,6 +116,16 @@ impl AdrFileStore {
         };
         let bundle = read_bundle_at(&dir)?;
         Ok(Some(bundle_to_adr(bundle)))
+    }
+
+    pub(crate) fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
+        validate_adr_id(id)?;
+        if let Some(record) = self.id_allocator.adr_allocation(id)?
+            && let Some(adr) = self.read_adr_allocation(&record)?
+        {
+            return Ok(Some(adr));
+        }
+        self.get_adr(id)
     }
 
     pub(crate) fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError> {
@@ -192,6 +204,66 @@ impl AdrFileStore {
         Ok(adrs)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn list_adr_entries_filtered(
+        &self,
+        status: Option<AdrStatus>,
+        owner: Option<&str>,
+        feature: Option<&str>,
+        task_id: Option<&str>,
+        legacy_id: Option<&str>,
+        validation_warned: Option<bool>,
+        include_remote: bool,
+    ) -> Result<Vec<AdrListEntry>, OrbitError> {
+        let mut entries = Vec::new();
+        for record in self.id_allocator.adr_allocations()? {
+            if let Some(adr) = self.read_adr_allocation(&record)? {
+                if matches_filter(
+                    &adr,
+                    status,
+                    owner,
+                    feature,
+                    task_id,
+                    legacy_id,
+                    validation_warned,
+                ) {
+                    entries.push(AdrListEntry::Local(adr));
+                }
+                continue;
+            }
+
+            if include_remote
+                && remote_adr_matches_filter(
+                    &record,
+                    status,
+                    owner,
+                    feature,
+                    task_id,
+                    legacy_id,
+                    validation_warned,
+                )
+            {
+                entries.push(AdrListEntry::Remote(remote_stub_from_allocation(&record)));
+            }
+        }
+        entries.sort_by(|left, right| adr_entry_id(right).cmp(adr_entry_id(left)));
+        Ok(entries)
+    }
+
+    pub(crate) fn get_adr_remote_stub(
+        &self,
+        id: &str,
+    ) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        validate_adr_id(id)?;
+        let Some(record) = self.id_allocator.adr_allocation(id)? else {
+            return Ok(None);
+        };
+        if self.read_adr_allocation(&record)?.is_some() {
+            return Ok(None);
+        }
+        Ok(Some(remote_stub_from_allocation(&record)))
+    }
+
     /// Updates ADR status, moving the bundle between state directories and
     /// refreshing the index row. Index update is best-effort: a failure is
     /// logged but does not roll back the filesystem move.
@@ -227,6 +299,8 @@ impl AdrFileStore {
             bundle.doc.adr.accepted_at = Some(now);
         }
         write_bundle_at(&target_dir, &bundle)?;
+        self.id_allocator
+            .record_adr_body_path(id, &super::layout::body_path(&target_dir))?;
         self.upsert_index_row(&bundle.doc.adr);
         Ok(())
     }
@@ -373,6 +447,8 @@ impl AdrFileStore {
         moved.doc.adr.status = AdrStatus::Superseded;
         moved.doc.adr.last_updated = Utc::now();
         write_bundle_at(&target_dir, &moved)?;
+        self.id_allocator
+            .record_adr_body_path(old_id, &super::layout::body_path(&target_dir))?;
         self.upsert_index_row(&moved.doc.adr);
 
         // Append `old` to `new.supersedes` (idempotent — skip if already present).
@@ -420,6 +496,20 @@ impl AdrFileStore {
             }
         }
         Ok(None)
+    }
+
+    fn read_adr_allocation(&self, record: &IdAllocationRecord) -> Result<Option<Adr>, OrbitError> {
+        let Some(body_path) = record.resolved_body_path() else {
+            return self.get_adr(&record.id);
+        };
+        let Some(dir) = body_path.parent() else {
+            return Ok(None);
+        };
+        if !super::layout::adr_doc_path(dir).is_file() {
+            return Ok(None);
+        }
+        let bundle = read_bundle_at(dir)?;
+        Ok(Some(bundle_to_adr(bundle)))
     }
 
     fn upsert_index_row(&self, adr: &Adr) {
@@ -584,6 +674,63 @@ fn sort_by_id_desc(adrs: &mut [Adr]) {
     adrs.sort_by(|a, b| b.id.cmp(&a.id));
 }
 
+fn remote_stub_from_allocation(record: &IdAllocationRecord) -> RemoteArtifactStub {
+    RemoteArtifactStub {
+        id: record.id.clone(),
+        kind: record.kind.as_str().to_string(),
+        status: record.status.clone(),
+        worktree_root: record.worktree_root.clone(),
+        branch: record.branch.clone(),
+        body_path: record.body_path.clone(),
+    }
+}
+
+fn adr_entry_id(entry: &AdrListEntry) -> &str {
+    match entry {
+        AdrListEntry::Local(adr) => &adr.id,
+        AdrListEntry::Remote(stub) => &stub.id,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn remote_adr_matches_filter(
+    record: &IdAllocationRecord,
+    status: Option<AdrStatus>,
+    owner: Option<&str>,
+    feature: Option<&str>,
+    task_id: Option<&str>,
+    legacy_id: Option<&str>,
+    validation_warned: Option<bool>,
+) -> bool {
+    if owner.is_some()
+        || feature.is_some()
+        || task_id.is_some()
+        || legacy_id.is_some()
+        || validation_warned.is_some()
+    {
+        return false;
+    }
+    if let Some(status) = status
+        && remote_adr_status(record.body_path.as_deref()) != Some(status)
+    {
+        return false;
+    }
+    true
+}
+
+fn remote_adr_status(body_path: Option<&Path>) -> Option<AdrStatus> {
+    let path = body_path?;
+    path.components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .find_map(|component| match component {
+            "proposed" => Some(AdrStatus::Proposed),
+            "accepted" => Some(AdrStatus::Accepted),
+            "superseded" => Some(AdrStatus::Superseded),
+            "deleted" => Some(AdrStatus::Deleted),
+            _ => None,
+        })
+}
+
 fn insert_adr_row(conn: &rusqlite::Connection, adr: &Adr) -> Result<(), OrbitError> {
     let related_features = serde_json::to_string(&adr.related_features)
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -658,6 +805,19 @@ mod tests {
         let dir = tempdir.path().join("proposed").join("ADR-0001");
         assert!(dir.join("adr.yaml").is_file());
         assert!(dir.join("body.md").is_file());
+        let allocation = store
+            .id_allocator
+            .adr_allocation(&adr.id)
+            .expect("allocation")
+            .expect("allocation exists");
+        assert_eq!(
+            allocation.worktree_root,
+            std::fs::canonicalize(tempdir.path()).expect("canonical tempdir")
+        );
+        assert_eq!(
+            allocation.body_path.as_deref(),
+            Some(std::path::Path::new("proposed/ADR-0001/body.md"))
+        );
 
         let loaded = store
             .get_adr("ADR-0001")

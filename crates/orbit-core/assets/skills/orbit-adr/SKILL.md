@@ -11,6 +11,12 @@ Create and maintain Orbit ADR artifacts through the registered tool surface. ADR
 
 ADRs and orbit-docs are sibling indexes by design. ADRs keep their stricter lifecycle and dedicated allocation through `orbit.adr.*`; `orbit search --kind all` (and `--kind adr`) surfaces ADR metadata read-only alongside doc results. For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'` and inspect the accepted ADR covering the sibling-index search overlay.
 
+ADR artifact files are written into the current worktree's `.orbit/adrs/...`
+subtree, while IDs are allocated globally through the shared allocator. Stage
+new ADR files from your task worktree alongside the code/doc change that
+motivated them; sibling worktrees will see remote stubs until that worktree's
+body files are locally readable.
+
 ## Tool Invocation
 
 Both surfaces accept the same JSON. Use the CLI examples below when shell access is available; use the MCP names when the Orbit plugin exposes them.
@@ -67,6 +73,9 @@ Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, a
 
 - Never edit `.orbit/adrs/<status>/<id>/adr.yaml` or `body.md` directly.
 - Never invent the global ADR ID. `orbit.adr.add` allocates it.
+- Stage newly created ADR files from the current worktree together with the
+  implementation they justify; the allocator prevents cross-worktree ID
+  collisions, but the body files belong to the branch that created them.
 - Create an ADR only when all three are true:
   - A real alternative was on the table.
   - The choice constrains future work.

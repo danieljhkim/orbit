@@ -125,7 +125,8 @@ fn cli_learning_comment_add_list_delete_round_trips_with_tombstone() {
         .join(".orbit/learnings")
         .join(id)
         .join("comments.jsonl");
-    assert!(!comments_path.exists());
+    assert!(comments_path.exists());
+    assert!(fs::read_to_string(&comments_path).unwrap().is_empty());
 
     let comment = workspace.run_json(
         &[
@@ -199,7 +200,7 @@ fn cli_learning_comment_add_list_delete_round_trips_with_tombstone() {
 }
 
 #[test]
-fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_file() {
+fn cli_learning_comment_rejects_missing_and_superseded_parents_without_appending() {
     let workspace = TestWorkspace::new();
     let output = run_orbit(
         &workspace.work,
@@ -266,14 +267,13 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        !workspace
-            .work
-            .join(".orbit/learnings")
-            .join(old["id"].as_str().unwrap())
-            .join("comments.jsonl")
-            .exists()
-    );
+    let comments_path = workspace
+        .work
+        .join(".orbit/learnings")
+        .join(old["id"].as_str().unwrap())
+        .join("comments.jsonl");
+    assert!(comments_path.exists());
+    assert!(fs::read_to_string(comments_path).unwrap().is_empty());
 }
 
 #[test]

@@ -6,14 +6,15 @@ use orbit_common::types::{
 };
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, AuditEventFilter,
+    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrStoreBackend, AuditEventFilter,
     AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunQuery,
     JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
-    LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReservationCheckParams,
-    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
+    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
+    RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
@@ -718,6 +719,10 @@ impl AdrRecords<'_> {
         self.store.get_adr(id)
     }
 
+    pub(crate) fn get_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
+        self.store.get_adr_federated(id)
+    }
+
     /// Unfiltered list. The tool surface uses [`Self::list_filtered`]; this
     /// helper exists for maintenance / CLI tooling layered on top later.
     #[allow(dead_code)]
@@ -743,6 +748,32 @@ impl AdrRecords<'_> {
             legacy_id,
             validation_warned,
         )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn list_entries_filtered(
+        &self,
+        status: Option<AdrStatus>,
+        owner: Option<&str>,
+        feature: Option<&str>,
+        task_id: Option<&str>,
+        legacy_id: Option<&str>,
+        validation_warned: Option<bool>,
+        include_remote: bool,
+    ) -> Result<Vec<AdrListEntry>, OrbitError> {
+        self.store.list_adr_entries_filtered(
+            status,
+            owner,
+            feature,
+            task_id,
+            legacy_id,
+            validation_warned,
+            include_remote,
+        )
+    }
+
+    pub(crate) fn remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        self.store.get_adr_remote_stub(id)
     }
 
     pub(crate) fn update_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
@@ -782,8 +813,24 @@ impl LearningRecords<'_> {
         self.store.get_learning(id)
     }
 
+    pub(crate) fn get_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
+        self.store.get_learning_federated(id)
+    }
+
     pub(crate) fn list(&self, status: Option<LearningStatus>) -> Result<Vec<Learning>, OrbitError> {
         self.store.list_learnings(status)
+    }
+
+    pub(crate) fn list_entries(
+        &self,
+        status: Option<LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        self.store.list_learning_entries(status, include_remote)
+    }
+
+    pub(crate) fn remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        self.store.get_learning_remote_stub(id)
     }
 
     pub(crate) fn search(

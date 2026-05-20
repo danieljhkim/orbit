@@ -8,7 +8,7 @@ use fs2::FileExt;
 use orbit_common::types::OrbitError;
 use orbit_common::utility::fs::atomic_write_text;
 use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
-use rusqlite::{Connection, Transaction, TransactionBehavior, params};
+use rusqlite::{Connection, Transaction, TransactionBehavior, params, types::Type};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
@@ -38,6 +38,29 @@ pub struct IdAllocation {
     pub kind: IdAllocationKind,
     pub id: String,
     pub worktree_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdAllocationRecord {
+    pub kind: IdAllocationKind,
+    pub id: String,
+    pub allocated_at: i64,
+    pub worktree_root: PathBuf,
+    pub branch: Option<String>,
+    pub status: String,
+    pub body_path: Option<PathBuf>,
+}
+
+impl IdAllocationRecord {
+    pub fn resolved_body_path(&self) -> Option<PathBuf> {
+        self.body_path.as_ref().map(|body_path| {
+            if body_path.is_absolute() {
+                body_path.clone()
+            } else {
+                self.worktree_root.join(body_path)
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +186,30 @@ impl IdAllocator {
         self.allocate(IdAllocationKind::Learning)
     }
 
+    pub fn record_adr_body_path(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
+        self.record_body_path(IdAllocationKind::Adr, id, body_path)
+    }
+
+    pub fn record_learning_body_path(&self, id: &str, body_path: &Path) -> Result<(), OrbitError> {
+        self.record_body_path(IdAllocationKind::Learning, id, body_path)
+    }
+
+    pub fn adr_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
+        self.allocation(IdAllocationKind::Adr, id)
+    }
+
+    pub fn learning_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
+        self.allocation(IdAllocationKind::Learning, id)
+    }
+
+    pub fn adr_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        self.allocations(IdAllocationKind::Adr)
+    }
+
+    pub fn learning_allocations(&self) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        self.allocations(IdAllocationKind::Learning)
+    }
+
     pub fn migrate_learning_ids(&self) -> Result<LearningIdMigrationReport, OrbitError> {
         let _lock = self.acquire_lock()?;
         let mut conn = self.lock_conn()?;
@@ -191,6 +238,7 @@ impl IdAllocator {
             &self.inner.worktree_root,
             best_effort_branch(&self.inner.worktree_root),
             STATUS_RESERVED,
+            None,
             false,
         )?;
         tx.commit()
@@ -230,6 +278,7 @@ impl IdAllocator {
                 }
                 let allocated_at =
                     yaml_epoch(&child.join("adr.yaml")).unwrap_or_else(|_| now_epoch());
+                let body_path = relative_to(&child.join("body.md"), &self.inner.shared_root);
                 insert_allocation(
                     tx,
                     IdAllocationKind::Adr,
@@ -238,7 +287,16 @@ impl IdAllocator {
                     &self.inner.shared_root,
                     None,
                     STATUS_MERGED,
+                    Some(&body_path),
                     true,
+                )?;
+                update_body_metadata_if_missing(
+                    tx,
+                    IdAllocationKind::Adr,
+                    id,
+                    &self.inner.shared_root,
+                    None,
+                    &body_path,
                 )?;
             }
         }
@@ -258,6 +316,7 @@ impl IdAllocator {
             }
             let allocated_at =
                 yaml_epoch(&child.join("learning.yaml")).unwrap_or_else(|_| now_epoch());
+            let body_path = relative_to(&child.join("learning.yaml"), &self.inner.shared_root);
             insert_allocation(
                 tx,
                 IdAllocationKind::Learning,
@@ -266,7 +325,16 @@ impl IdAllocator {
                 &self.inner.shared_root,
                 None,
                 STATUS_MERGED,
+                Some(&body_path),
                 true,
+            )?;
+            update_body_metadata_if_missing(
+                tx,
+                IdAllocationKind::Learning,
+                id,
+                &self.inner.shared_root,
+                None,
+                &body_path,
             )?;
         }
         Ok(())
@@ -349,11 +417,97 @@ impl IdAllocator {
                 &self.inner.shared_root,
                 None,
                 STATUS_MERGED,
+                Some(&relative_to(
+                    &new_dir.join("learning.yaml"),
+                    &self.inner.shared_root,
+                )),
                 true,
             )?;
         }
 
         Ok(LearningIdMigrationReport { renames })
+    }
+
+    fn record_body_path(
+        &self,
+        kind: IdAllocationKind,
+        id: &str,
+        body_path: &Path,
+    ) -> Result<(), OrbitError> {
+        let relative_body_path = relative_to(body_path, &self.inner.worktree_root);
+        let branch = best_effort_branch(&self.inner.worktree_root);
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let updated = tx
+            .execute(
+                "UPDATE id_allocations
+                 SET worktree_root = ?3, branch = ?4, body_path = ?5
+                 WHERE kind = ?1 AND id = ?2",
+                params![
+                    kind.as_str(),
+                    id,
+                    self.inner.worktree_root.to_string_lossy(),
+                    branch,
+                    relative_body_path.to_string_lossy(),
+                ],
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        if updated == 0 {
+            return Err(OrbitError::Store(format!(
+                "id allocation row missing for {} {id}",
+                kind.as_str()
+            )));
+        }
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(())
+    }
+
+    fn allocation(
+        &self,
+        kind: IdAllocationKind,
+        id: &str,
+    ) -> Result<Option<IdAllocationRecord>, OrbitError> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
+                 FROM id_allocations
+                 WHERE kind = ?1 AND id = ?2",
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let mut rows = stmt
+            .query_map(params![kind.as_str(), id], allocation_record_from_row)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        match rows.next() {
+            Some(row) => row
+                .map(Some)
+                .map_err(|error| OrbitError::Store(error.to_string())),
+            None => Ok(None),
+        }
+    }
+
+    fn allocations(&self, kind: IdAllocationKind) -> Result<Vec<IdAllocationRecord>, OrbitError> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
+                 FROM id_allocations
+                 WHERE kind = ?1
+                 ORDER BY id DESC",
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let rows = stmt
+            .query_map([kind.as_str()], allocation_record_from_row)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row.map_err(|error| OrbitError::Store(error.to_string()))?);
+        }
+        Ok(records)
     }
 
     fn acquire_lock(&self) -> Result<File, OrbitError> {
@@ -398,6 +552,7 @@ pub fn ensure_id_allocation_schema(conn: &Connection) -> Result<(), OrbitError> 
                 worktree_root TEXT NOT NULL,
                 branch TEXT,
                 status TEXT NOT NULL,
+                body_path TEXT,
                 PRIMARY KEY (kind, id),
                 CHECK (kind IN ('adr', 'learning')),
                 CHECK (status IN ('reserved', 'merged', 'abandoned'))
@@ -410,7 +565,9 @@ pub fn ensure_id_allocation_schema(conn: &Connection) -> Result<(), OrbitError> 
             ON id_allocations(allocated_at);
         "#,
     )
-    .map_err(|error| OrbitError::Store(error.to_string()))
+    .map_err(|error| OrbitError::Store(error.to_string()))?;
+    add_column_if_missing(conn, "id_allocations", "body_path", "TEXT")?;
+    Ok(())
 }
 
 fn next_id_for_kind(tx: &Transaction<'_>, kind: IdAllocationKind) -> Result<String, OrbitError> {
@@ -454,6 +611,7 @@ fn insert_allocation(
     worktree_root: &Path,
     branch: Option<String>,
     status: &str,
+    body_path: Option<&Path>,
     ignore_existing: bool,
 ) -> Result<(), OrbitError> {
     let verb = if ignore_existing {
@@ -462,8 +620,8 @@ fn insert_allocation(
         "INSERT"
     };
     let sql = format!(
-        "{verb} INTO id_allocations(kind, id, allocated_at, worktree_root, branch, status) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+        "{verb} INTO id_allocations(kind, id, allocated_at, worktree_root, branch, status, body_path) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
     );
     tx.execute(
         &sql,
@@ -474,10 +632,85 @@ fn insert_allocation(
             worktree_root.to_string_lossy(),
             branch,
             status,
+            body_path.map(|path| path.to_string_lossy().into_owned()),
         ],
     )
     .map_err(|error| OrbitError::Store(error.to_string()))?;
     Ok(())
+}
+
+fn update_body_metadata_if_missing(
+    tx: &Transaction<'_>,
+    kind: IdAllocationKind,
+    id: &str,
+    worktree_root: &Path,
+    branch: Option<String>,
+    body_path: &Path,
+) -> Result<(), OrbitError> {
+    tx.execute(
+        "UPDATE id_allocations
+         SET worktree_root = ?3, branch = COALESCE(branch, ?4), body_path = ?5
+         WHERE kind = ?1 AND id = ?2 AND (body_path IS NULL OR body_path = '')",
+        params![
+            kind.as_str(),
+            id,
+            worktree_root.to_string_lossy(),
+            branch,
+            body_path.to_string_lossy(),
+        ],
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))?;
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_type: &str,
+) -> Result<(), OrbitError> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    for row in rows {
+        if row.map_err(|error| OrbitError::Store(error.to_string()))? == column {
+            return Ok(());
+        }
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {column_type}"),
+        [],
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))?;
+    Ok(())
+}
+
+fn allocation_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<IdAllocationRecord> {
+    let kind_raw: String = row.get(0)?;
+    let kind = match kind_raw.as_str() {
+        KIND_ADR => IdAllocationKind::Adr,
+        KIND_LEARNING => IdAllocationKind::Learning,
+        _ => {
+            return Err(rusqlite::Error::InvalidColumnType(
+                0,
+                "kind".to_string(),
+                Type::Text,
+            ));
+        }
+    };
+    let body_path: Option<String> = row.get(6)?;
+    Ok(IdAllocationRecord {
+        kind,
+        id: row.get(1)?,
+        allocated_at: row.get(2)?,
+        worktree_root: PathBuf::from(row.get::<_, String>(3)?),
+        branch: row.get(4)?,
+        status: row.get(5)?,
+        body_path: body_path.map(PathBuf::from),
+    })
 }
 
 pub fn parse_adr_sequence(id: &str) -> Option<u32> {
@@ -632,6 +865,14 @@ fn absolutize(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
 }
 
+fn relative_to(path: &Path, root: &Path) -> PathBuf {
+    let path = absolutize(path.to_path_buf());
+    let root = absolutize(root.to_path_buf());
+    path.strip_prefix(&root)
+        .map(Path::to_path_buf)
+        .unwrap_or(path)
+}
+
 fn enable_best_effort_wal_mode(conn: &Connection) {
     match conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0)) {
         Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
@@ -680,6 +921,28 @@ mod tests {
             )
             .expect("table exists");
         assert_eq!(exists, 1);
+        assert!(id_allocations_has_column(&conn, "body_path"));
+    }
+
+    #[test]
+    fn schema_adds_body_path_to_existing_id_allocations_table() {
+        let conn = Connection::open_in_memory().expect("open db");
+        conn.execute_batch(
+            "CREATE TABLE id_allocations (
+                kind TEXT NOT NULL,
+                id TEXT NOT NULL,
+                allocated_at INTEGER NOT NULL,
+                worktree_root TEXT NOT NULL,
+                branch TEXT,
+                status TEXT NOT NULL,
+                PRIMARY KEY (kind, id)
+            );",
+        )
+        .expect("legacy allocation table");
+
+        ensure_id_allocation_schema(&conn).expect("schema");
+
+        assert!(id_allocations_has_column(&conn, "body_path"));
     }
 
     #[test]
@@ -898,6 +1161,18 @@ mod tests {
         let conn = Connection::open(db_path).expect("open db");
         conn.query_row("SELECT COUNT(*) FROM id_allocations", [], |row| row.get(0))
             .expect("count")
+    }
+
+    fn id_allocations_has_column(conn: &Connection, column: &str) -> bool {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(id_allocations)")
+            .expect("table info");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query columns");
+        rows.into_iter()
+            .map(|row| row.expect("column"))
+            .any(|name| name == column)
     }
 
     fn write_legacy_learning(

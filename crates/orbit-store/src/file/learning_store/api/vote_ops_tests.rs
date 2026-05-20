@@ -21,7 +21,11 @@ fn upvote_creates_lazy_votes_file_and_show_summary_reads_it() {
         .create_learning(create_params("vote target", vec![], vec![]))
         .expect("create");
     let votes_path = votes_jsonl_path(dir.path(), &learning.id);
-    assert!(!votes_path.exists(), "votes file should be lazy");
+    assert!(
+        votes_path.exists(),
+        "votes file is created with the learning"
+    );
+    assert_eq!(line_count(&votes_path), 0);
 
     let now = Utc.with_ymd_and_hms(2026, 5, 17, 12, 0, 0).unwrap();
     let summary = store
@@ -78,7 +82,7 @@ fn upvote_rejects_missing_task_missing_learning_and_superseded_learning() {
     assert!(
         matches!(error, OrbitError::InvalidInput(message) if message.contains("free-floating votes"))
     );
-    assert!(!votes_jsonl_path(dir.path(), &learning.id).exists());
+    assert_eq!(line_count(&votes_jsonl_path(dir.path(), &learning.id)), 0);
 
     let error = store
         .upvote_learning(upvote_params("L-0404", "claude", Some("ORB-1")))

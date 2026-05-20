@@ -82,7 +82,7 @@ pub use orbit_common::utility::redaction::{
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
 pub use orbit_store::{AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate};
 pub use orbit_store::{
-    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams,
+    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
     LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
 };
 pub use runtime::OrbitRuntime;
