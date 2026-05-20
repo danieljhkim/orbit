@@ -7,7 +7,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use orbit_common::types::TaskArtifact;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
-use orbit_core::{OrbitRuntime, TaskStatus};
+use orbit_core::{OrbitRuntime, TaskComplexity, TaskStatus};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -302,5 +302,47 @@ async fn patch_api_accepts_in_progress_hyphen_from_dashboard_and_returns_in_prog
         body["status"],
         serde_json::json!("in-progress"),
         "response must continue to expose dashboard display spelling"
+    );
+}
+
+/// Contract test: /tasks projection (and /tasks/:id) must include `complexity` string
+/// when TaskComplexity is set on the task (low/medium/hard). Null complexity omits the key
+/// or yields null (per current projection); this test asserts presence for a hard task.
+#[tokio::test]
+async fn list_tasks_includes_complexity_when_set() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let with_complexity = runtime
+        .add_task(TaskAddParams {
+            title: "Hard task for complexity display".to_string(),
+            description: "Task with explicit complexity for dashboard test.".to_string(),
+            status: Some(TaskStatus::Backlog),
+            workspace_path: Some(".".to_string()),
+            complexity: Some(TaskComplexity::Hard),
+            ..Default::default()
+        })
+        .expect("seed task with complexity");
+    // Also seed one without to ensure list works
+    let _without = runtime
+        .add_task(TaskAddParams {
+            title: "Plain task no complexity".to_string(),
+            description: "no complexity set".to_string(),
+            status: Some(TaskStatus::Backlog),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("seed plain task");
+
+    let response = request(runtime, "/tasks").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let arr = body.as_array().expect("tasks list is array");
+    let found = arr
+        .iter()
+        .find(|t| t["id"] == serde_json::json!(with_complexity.id))
+        .expect("task present in /tasks");
+    assert_eq!(
+        found.get("complexity"),
+        Some(&serde_json::json!("hard")),
+        "complexity must be projected as string for dashboard"
     );
 }

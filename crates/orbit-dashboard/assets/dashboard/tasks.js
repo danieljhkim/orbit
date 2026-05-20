@@ -1,7 +1,7 @@
 // Orbit dashboard task-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, statusPill, priorityCell, patchJson, syncNodes } from './common.js';
+import { complexityCell, el, priorityCell, statusPill, patchJson, syncNodes } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -137,6 +137,7 @@ const TASK_META_FIELDS = [
   ["job_run_id", "job_run"],
   ["created_at", "created"],
   ["updated_at", "updated"],
+  ["complexity", "complexity"],
 ];
 
 const RELATION_GROUPS = [
@@ -864,11 +865,12 @@ export function renderTasks(tasks, context) {
         el("span", { class: "title", text: t.title }),
         priorityCell(t.priority),
         el("span", { class: "type mono", text: t.type }),
+        complexityCell(t.complexity),
         buildCrewUpdateControl(t, context),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${t.complexity || ""}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);

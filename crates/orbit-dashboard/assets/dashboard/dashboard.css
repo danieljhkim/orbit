@@ -29,6 +29,9 @@
         --priority-medium: #f59e0b;
         --priority-low: #71717a;
         --priority-critical: #f87171;
+        --complexity-low: #71717a;
+        --complexity-medium: #f59e0b;
+        --complexity-hard: #ef4444;
         
         --state-success: #10b981;
         --state-active: #10b981;
@@ -307,7 +310,7 @@
       
       .row {
         display: grid;
-        grid-template-columns: minmax(80px, max-content) minmax(140px, 1fr) 72px 82px minmax(138px, 180px);
+        grid-template-columns: minmax(80px, max-content) minmax(140px, 1fr) 72px 82px 64px minmax(138px, 180px);
         gap: 12px;
         padding: 8px 16px;
         margin: 0;
@@ -347,7 +350,7 @@
         font-size: 13px;
         min-width: 0;
       }
-      .row .priority, .row .type { font-size: 12px; color: var(--fg-dim); text-align: right; }
+      .row .priority, .row .type, .row .complexity { font-size: 12px; color: var(--fg-dim); text-align: right; }
       .row .crew-cell {
         display: grid;
         gap: 4px;
@@ -393,16 +396,17 @@
 
       @media (max-width: 760px) {
         .row {
-          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr) minmax(128px, 0.8fr);
+          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr) auto minmax(110px, 1fr);
           grid-template-areas:
-            "id title crew"
-            "priority type crew";
+            "id title title crew"
+            "priority type complexity crew";
           gap: 4px 8px;
         }
         .row .id { grid-area: id; }
         .row .title { grid-area: title; }
         .row .priority { grid-area: priority; text-align: left; }
         .row .type { grid-area: type; text-align: left; }
+        .row .complexity { grid-area: complexity; text-align: left; }
         .row .crew-cell { grid-area: crew; align-self: stretch; }
         #task-filter { max-width: none; }
       }
@@ -412,9 +416,13 @@
           grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr);
           grid-template-areas:
             "id title"
-            "priority crew"
-            "type crew";
+            "priority type"
+            "complexity crew";
         }
+        .row .priority { grid-area: priority; text-align: left; }
+        .row .type { grid-area: type; text-align: left; }
+        .row .complexity { grid-area: complexity; text-align: left; }
+        .row .crew-cell { grid-area: crew; align-self: stretch; }
       }
       
       .row-detail {
