@@ -70,6 +70,8 @@ If you are about to call `pack` or `show` on each candidate to verify which one 
 
 Pass `allow_fuzzy: true` to recover from typos and partial recall in symbol names or file basenames. The fuzzy pass is case-insensitive and only runs when the deterministic pass returns zero results; when any exact result exists, no fuzzy candidate appears. Each fuzzy hit is tagged `match_kind: "fuzzy"` and carries a `score` in [0.0, 1.0] (higher is closer; 1.0 is reserved for exact, which would have hit the deterministic path). Off by default. Source-regex queries ignore the flag. The `format: "selectors"` projection returns only selectors, so it intentionally drops `match_kind` and `score`.
 
+MCP surface (sanitized tool name under the loaded `orbit-graph` skill): invoke `orbit_graph_search` with `allow_fuzzy: true` in the arguments map (or as `<parameter name="allow_fuzzy">true</parameter>` in XML form). The same suppression and `match_kind`/`score` output rules apply.
+
 ## When `fs.read` Is Acceptable
 
 - Graph returned `knowledge_unavailable`
