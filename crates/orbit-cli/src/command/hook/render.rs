@@ -57,7 +57,7 @@ mod tests {
 
     fn reminders() -> Vec<LearningReminder> {
         vec![LearningReminder {
-            id: "L20260519-1".to_string(),
+            id: "L-0017".to_string(),
             summary: "Use JSON hook context for Codex".to_string(),
             comments: Vec::new(),
         }]
@@ -75,7 +75,7 @@ mod tests {
             value["hookSpecificOutput"]["additionalContext"]
                 .as_str()
                 .expect("additional context")
-                .contains("- [L20260519-1] Use JSON hook context for Codex")
+                .contains("- [L-0017] Use JSON hook context for Codex")
         );
     }
 

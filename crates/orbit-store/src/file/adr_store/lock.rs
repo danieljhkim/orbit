@@ -5,18 +5,10 @@ use fs2::FileExt;
 use orbit_common::types::OrbitError;
 
 const LOCKS_DIR_NAME: &str = ".locks";
-const ADR_ALLOCATION_LOCK_FILE_NAME: &str = "adr-allocation.lock";
 
 pub(super) fn acquire_adr_lock(root: &Path, id: &str) -> Result<File, OrbitError> {
     let path = adr_lock_path(root, id);
     acquire_lock(path, &format!("adr '{id}'"))
-}
-
-pub(super) fn acquire_adr_allocation_lock(root: &Path) -> Result<File, OrbitError> {
-    let path = root
-        .join(LOCKS_DIR_NAME)
-        .join(ADR_ALLOCATION_LOCK_FILE_NAME);
-    acquire_lock(path, "adr allocation")
 }
 
 fn acquire_lock(path: PathBuf, label: &str) -> Result<File, OrbitError> {

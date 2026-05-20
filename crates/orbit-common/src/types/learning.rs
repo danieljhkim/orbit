@@ -150,6 +150,9 @@ pub struct Learning {
     /// exclusive with `status = Active` for well-formed records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<OrbitId>,
+    /// Historical IDs retained after format migrations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legacy_ids: Vec<OrbitId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -424,7 +427,7 @@ mod tests {
     fn sample_learning() -> Learning {
         let ts = Utc.with_ymd_and_hms(2026, 5, 11, 0, 0, 0).unwrap();
         Learning {
-            id: "L20260511-1".to_string(),
+            id: "L-0001".to_string(),
             status: LearningStatus::Active,
             scope: LearningScope {
                 paths: vec!["crates/orbit-engine/**/perf*.rs".to_string()],
@@ -440,6 +443,7 @@ mod tests {
             }],
             supersedes: None,
             superseded_by: None,
+            legacy_ids: Vec::new(),
             created_at: ts,
             updated_at: ts,
             created_by: Some("claude-opus-4-7".to_string()),
@@ -484,7 +488,7 @@ mod tests {
 
     #[test]
     fn learning_loads_minimal_yaml_with_phase_two_defaults() {
-        let yaml = r#"id: L20260511-2
+        let yaml = r#"id: L-0002
 status: active
 scope:
   paths: []
@@ -498,7 +502,7 @@ updated_at: 2026-05-11T00:00:00Z
         assert!(learning.scope.symbols.is_empty());
         assert!(learning.scope.semantic_seed.is_none());
         assert!(learning.evidence.is_empty());
-        assert_eq!(learning.id, "L20260511-2");
+        assert_eq!(learning.id, "L-0002");
         assert_eq!(learning.status, LearningStatus::Active);
     }
 
@@ -520,7 +524,7 @@ updated_at: 2026-05-11T00:00:00Z
     #[test]
     fn render_reminder_block_matches_design_shape() {
         let block = render_reminder_block(&[LearningReminder {
-            id: "L20260509-0001".to_string(),
+            id: "L-0001".to_string(),
             summary: "Verify output equivalence before freezing a result.".to_string(),
             comments: Vec::new(),
         }]);
@@ -529,7 +533,7 @@ updated_at: 2026-05-11T00:00:00Z
             block,
             "<system-reminder>\n\
 Project learnings relevant to this task:\n\n\
-- [L20260509-0001] Verify output equivalence before freezing a result.\n\n\
+- [L-0001] Verify output equivalence before freezing a result.\n\n\
 Read full body via `orbit.learning.show <id>` if needed.\n\
 </system-reminder>"
         );
@@ -624,24 +628,24 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
     fn render_reminder_block_renders_comments_under_learning() {
         let ts = Utc.with_ymd_and_hms(2026, 5, 17, 0, 0, 0).unwrap();
         let block = render_reminder_block(&[LearningReminder {
-            id: "L20260517-1".to_string(),
+            id: "L-0001".to_string(),
             summary: "Remember the important thing.".to_string(),
             comments: vec![LearningComment {
                 id: "C20260517-1".to_string(),
-                learning_id: "L20260517-1".to_string(),
+                learning_id: "L-0001".to_string(),
                 body: "Use the narrow helper.\nExtra detail stays hidden.".to_string(),
                 author_model: "codex".to_string(),
                 created_at: ts,
             }],
         }]);
 
-        assert!(block.contains("- [L20260517-1] Remember the important thing.\n"));
+        assert!(block.contains("- [L-0001] Remember the important thing.\n"));
         assert!(block.contains("  - [C20260517-1] Use the narrow helper.\n"));
     }
 
     #[test]
     fn forward_compat_fixture_with_symbols_and_semantic_seed_round_trips() {
-        let yaml = r#"id: L20260511-3
+        let yaml = r#"id: L-0003
 status: active
 scope:
   paths:

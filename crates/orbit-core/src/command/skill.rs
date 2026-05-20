@@ -277,7 +277,7 @@ mod drift_tests {
             }
         }
 
-        // L20260519-4: retired skills can leave dangling symlinks behind, so
+        // L-0020: retired skills can leave dangling symlinks behind, so
         // keep this reverse check strict about orphan plugin entries.
         // Reverse: no orphan symlinks in plugin/skills/ (catches stale entries
         // for retired skills and accidental inclusion of an excluded skill).

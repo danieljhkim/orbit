@@ -53,7 +53,7 @@ fn learning_comment_validation_rejects_bad_bodies_and_missing_parent_before_file
         assert!(matches!(error, OrbitError::InvalidInput(_)));
     }
 
-    let missing = "L20260517-404";
+    let missing = "L-0404";
     let error = store
         .add_learning_comment(comment_params(missing, "valid"))
         .expect_err("missing parent");

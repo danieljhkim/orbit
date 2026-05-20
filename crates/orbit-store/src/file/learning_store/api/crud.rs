@@ -7,10 +7,7 @@ use orbit_common::types::{
     normalize_learning_tags,
 };
 
-use super::super::layout::{
-    learning_doc_path, locate_learning, next_learning_id, validate_learning_id,
-};
-use super::super::lock::acquire_learning_allocation_lock;
+use super::super::layout::{learning_doc_path, locate_learning, validate_learning_id};
 use super::super::record::{read_learning_file, write_learning_file};
 use super::store::LearningFileStore;
 use crate::backend::{LearningCreateParams, LearningUpdateParams};
@@ -42,8 +39,7 @@ impl LearningFileStore {
             )));
         }
 
-        let _allocation_lock = acquire_learning_allocation_lock(&self.root)?;
-        let id = next_learning_id(&self.root, now)?;
+        let id = self.id_allocator.allocate_learning()?.id;
 
         let mut scope = params.scope;
         scope.paths = normalize_learning_paths(scope.paths);
@@ -58,6 +54,7 @@ impl LearningFileStore {
             evidence: params.evidence,
             supersedes: None,
             superseded_by: None,
+            legacy_ids: Vec::new(),
             created_at: now,
             updated_at: now,
             created_by: params.created_by,

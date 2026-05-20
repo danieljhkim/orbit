@@ -143,6 +143,10 @@ pub use sqlite::audit_event_store::{
     AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
 };
 pub use sqlite::connection::{Store, StoreTx};
+pub use sqlite::id_allocator::{
+    IdAllocation, IdAllocationKind, IdAllocator, IdAllocatorConfig, LearningIdMigrationReport,
+    LearningIdRename, ensure_id_allocation_schema,
+};
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)

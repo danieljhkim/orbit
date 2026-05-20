@@ -11,27 +11,44 @@ use rusqlite::params;
 use super::bundle::{AdrBundle, bundle_to_adr, read_bundle_at, validate_bundle, write_bundle_at};
 use super::constants::ADR_SCHEMA_VERSION;
 use super::doc::AdrFileDocument;
-use super::layout::{AdrStateDir, adr_dir, next_adr_id, state_dir_path, validate_adr_id};
-use super::lock::{acquire_adr_allocation_lock, acquire_adr_lock};
-use crate::Store;
+use super::layout::{AdrStateDir, adr_dir, state_dir_path, validate_adr_id};
+use super::lock::acquire_adr_lock;
 use crate::backend::{AdrCreateParams, AdrDocumentUpdateParams};
 use crate::file::layout::read_child_dirs;
+use crate::{IdAllocator, Store};
 
 pub(crate) struct AdrFileStore {
     root: PathBuf,
     index: Option<Store>,
+    id_allocator: IdAllocator,
 }
 
 impl AdrFileStore {
     #[cfg(test)]
     pub(crate) fn new(root: PathBuf) -> Self {
-        Self { root, index: None }
+        let id_allocator = IdAllocator::for_test_roots(root.clone(), root.join(".learnings"));
+        Self {
+            root,
+            index: None,
+            id_allocator,
+        }
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_index(root: PathBuf, index: Store) -> Self {
+        let id_allocator = IdAllocator::for_test_roots(root.clone(), root.join(".learnings"));
+        Self::new_with_index_and_allocator(root, index, id_allocator)
+    }
+
+    pub(crate) fn new_with_index_and_allocator(
+        root: PathBuf,
+        index: Store,
+        id_allocator: IdAllocator,
+    ) -> Self {
         Self {
             root,
             index: Some(index),
+            id_allocator,
         }
     }
 
@@ -55,8 +72,7 @@ impl AdrFileStore {
             ));
         }
 
-        let _allocation_lock = acquire_adr_allocation_lock(&self.root)?;
-        let id = next_adr_id(&self.root)?;
+        let id = self.id_allocator.allocate_adr()?.id;
         let now = Utc::now();
         let adr = Adr {
             id: id.clone(),

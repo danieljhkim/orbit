@@ -952,14 +952,11 @@ mod tests {
     fn summary_counts_knowledge_artifacts_by_author_family() {
         let temp = tempfile::tempdir().expect("create tempdir");
         let learnings = vec![
-            test_learning("L20260518-1", Some("gpt-5.5")),
-            test_learning("L20260518-2", Some("claude-opus-4-7")),
-            test_learning("L20260518-3", None),
+            test_learning("L-0015", Some("gpt-5.5")),
+            test_learning("L-0016", Some("claude-opus-4-7")),
+            test_learning("L-0003", None),
         ];
-        let learning_votes = vec![
-            ("L20260518-1".to_string(), 2),
-            ("L20260518-2".to_string(), 1),
-        ];
+        let learning_votes = vec![("L-0015".to_string(), 2), ("L-0016".to_string(), 1)];
         let now = Utc::now();
         let adrs = vec![
             test_adr("ADR-0001", "codex", AdrStatus::Accepted, Some(now)),
@@ -1265,6 +1262,7 @@ mod tests {
             evidence: Vec::new(),
             supersedes: None,
             superseded_by: None,
+            legacy_ids: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             created_by: created_by.map(str::to_string),

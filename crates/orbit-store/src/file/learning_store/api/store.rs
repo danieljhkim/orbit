@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use orbit_common::types::OrbitError;
 
 use super::search_index::EnvelopeSnapshot;
-use crate::Store;
+use crate::{IdAllocator, Store};
 
 /// Workspace-scoped, filesystem-backed learning store.
 ///
@@ -25,23 +25,37 @@ use crate::Store;
 pub(crate) struct LearningFileStore {
     pub(super) root: PathBuf,
     pub(super) index: Option<Store>,
+    pub(super) id_allocator: IdAllocator,
     pub(super) envelope_cache: RwLock<Option<std::sync::Arc<Vec<EnvelopeSnapshot>>>>,
 }
 
 impl LearningFileStore {
     #[cfg(test)]
     pub(crate) fn new(root: PathBuf) -> Self {
+        let id_allocator = IdAllocator::for_test_roots(root.join(".adrs"), root.clone());
         Self {
             root,
             index: None,
+            id_allocator,
             envelope_cache: RwLock::new(None),
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_index(root: PathBuf, index: Store) -> Self {
+        let id_allocator = IdAllocator::for_test_roots(root.join(".adrs"), root.clone());
+        Self::new_with_index_and_allocator(root, index, id_allocator)
+    }
+
+    pub(crate) fn new_with_index_and_allocator(
+        root: PathBuf,
+        index: Store,
+        id_allocator: IdAllocator,
+    ) -> Self {
         Self {
             root,
             index: Some(index),
+            id_allocator,
             envelope_cache: RwLock::new(None),
         }
     }

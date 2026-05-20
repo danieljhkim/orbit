@@ -242,8 +242,8 @@ mod tests {
         let root = dir.path().join("learnings");
         fs::create_dir_all(root.join("superseded")).expect("dirs");
         fs::write(root.join("tags.yaml"), "tags:\n  rust: {}\n").expect("tags");
-        fs::write(root.join("L20260517-1.yaml"), "id: L20260517-1\nstatus: active\ncreated_at: 2026-05-17T00:00:00Z\nupdated_at: 2026-05-17T00:00:00Z\n").expect("active");
-        fs::write(root.join("superseded").join("L20260517-2.yaml"), "id: L20260517-2\nstatus: superseded\ncreated_at: 2026-05-17T00:00:00Z\nupdated_at: 2026-05-17T00:00:00Z\n").expect("superseded");
+        fs::write(root.join("L-0001.yaml"), "id: L-0001\nstatus: active\ncreated_at: 2026-05-17T00:00:00Z\nupdated_at: 2026-05-17T00:00:00Z\n").expect("active");
+        fs::write(root.join("superseded").join("L-0002.yaml"), "id: L-0002\nstatus: superseded\ncreated_at: 2026-05-17T00:00:00Z\nupdated_at: 2026-05-17T00:00:00Z\n").expect("superseded");
         let tags_before = fs::read(root.join("tags.yaml")).expect("read tags");
 
         let report = migrate_learning_layout(&root, dir.path()).expect("migrate");
@@ -251,10 +251,10 @@ mod tests {
         assert_eq!(report.moved_active, 1);
         assert_eq!(report.moved_superseded, 1);
         assert!(report.removed_superseded_dir);
-        assert!(!root.join("L20260517-1.yaml").exists());
+        assert!(!root.join("L-0001.yaml").exists());
         assert!(!root.join("superseded").exists());
-        assert!(root.join("L20260517-1").join("learning.yaml").is_file());
-        assert!(root.join("L20260517-2").join("learning.yaml").is_file());
+        assert!(root.join("L-0001").join("learning.yaml").is_file());
+        assert!(root.join("L-0002").join("learning.yaml").is_file());
         assert_eq!(
             fs::read(root.join("tags.yaml")).expect("read tags"),
             tags_before
@@ -265,8 +265,8 @@ mod tests {
     fn migration_is_noop_on_per_entity_layout() {
         let dir = tempdir().expect("tempdir");
         let root = dir.path().join("learnings");
-        fs::create_dir_all(root.join("L20260517-1")).expect("dirs");
-        fs::write(root.join("L20260517-1").join("learning.yaml"), "").expect("learning");
+        fs::create_dir_all(root.join("L-0001")).expect("dirs");
+        fs::write(root.join("L-0001").join("learning.yaml"), "").expect("learning");
 
         let report = migrate_learning_layout(&root, dir.path()).expect("migrate");
 
@@ -280,7 +280,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let root = dir.path().join("learnings");
         fs::create_dir_all(&root).expect("dirs");
-        fs::write(root.join("L20260517-1.yaml"), "").expect("legacy");
+        fs::write(root.join("L-0001.yaml"), "").expect("legacy");
         let lock_path = dir.path().join(WORKSPACE_LOCK_RELATIVE_PATH);
         fs::create_dir_all(lock_path.parent().expect("lock parent")).expect("lock dir");
         let mut lock = OpenOptions::new()
@@ -304,7 +304,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let root = dir.path().join("learnings");
         fs::create_dir_all(&root).expect("dirs");
-        fs::write(root.join("L20260517-1.yaml"), "").expect("legacy");
+        fs::write(root.join("L-0001.yaml"), "").expect("legacy");
 
         let err = reject_legacy_flat_layout(&root).expect_err("legacy rejected");
 

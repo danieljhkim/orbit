@@ -7,7 +7,7 @@ use super::output::learning_show_to_json;
 
 #[derive(Args)]
 pub struct LearningShowArgs {
-    /// Learning ID (e.g. L20260511-1)
+    /// Learning ID (e.g. L-0001)
     pub id: String,
     /// Output as JSON
     #[arg(long)]

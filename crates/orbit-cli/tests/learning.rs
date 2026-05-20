@@ -209,7 +209,7 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
             "comment",
             "add",
             "--learning-id",
-            "L20260517-404",
+            "L-0404",
             "--body",
             "valid",
             "--model",
@@ -226,7 +226,7 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
     assert!(
         !workspace
             .work
-            .join(".orbit/learnings/L20260517-404/comments.jsonl")
+            .join(".orbit/learnings/L-0404/comments.jsonl")
             .exists()
     );
 
@@ -497,7 +497,7 @@ fn guardrail_rejects_flat_learning_root_files() {
     let temp = tempdir().expect("tempdir");
     let learnings = temp.path().join(".orbit/learnings");
     fs::create_dir_all(&learnings).expect("create learnings");
-    fs::write(learnings.join("L20260517-1.yaml"), "").expect("legacy flat file");
+    fs::write(learnings.join("L-0001.yaml"), "").expect("legacy flat file");
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

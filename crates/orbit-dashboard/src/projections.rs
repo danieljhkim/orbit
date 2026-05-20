@@ -343,6 +343,7 @@ pub(crate) fn learning_to_json(learning: &Learning) -> Value {
             .collect::<Vec<_>>(),
         "supersedes": learning.supersedes,
         "superseded_by": learning.superseded_by,
+        "legacy_ids": learning.legacy_ids,
         "created_at": learning.created_at.to_rfc3339(),
         "updated_at": learning.updated_at.to_rfc3339(),
         "created_by": learning.created_by,

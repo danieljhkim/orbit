@@ -1,8 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{AdrStatus, OrbitError};
+use orbit_common::types::AdrStatus;
+#[cfg(test)]
+use orbit_common::types::OrbitError;
 
 use super::constants::{ADR_YAML, BODY_MD};
+#[cfg(test)]
 use crate::file::layout::read_child_dirs;
 
 pub(super) use orbit_common::types::validate_adr_id;
@@ -70,16 +73,15 @@ pub(super) fn body_path(adr_dir: &Path) -> PathBuf {
     adr_dir.join(BODY_MD)
 }
 
+#[cfg(test)]
 /// Allocates the next sequential ADR id (e.g. `ADR-0001`).
 ///
 /// Scans all four state directories, parses any `ADR-NNNN` directory names, and
 /// returns the next integer formatted with at least 4 digits of padding (wider
 /// pads grow naturally once the counter exceeds 9999).
 ///
-/// **Caller contract**: the caller must hold an allocation lock
-/// (see [`super::lock::acquire_adr_allocation_lock`]) for the duration of the
-/// scan and the subsequent directory creation, so the scan-then-allocate window
-/// remains serialized across concurrent writers.
+/// Runtime-backed stores use the SQLite id allocator; this scan helper remains
+/// for layout-focused tests and legacy fallback checks.
 pub(super) fn next_adr_id(root: &Path) -> Result<String, OrbitError> {
     let mut max_seen: u32 = 0;
 
@@ -105,6 +107,7 @@ pub(super) fn next_adr_id(root: &Path) -> Result<String, OrbitError> {
     Ok(format!("ADR-{next:0width$}"))
 }
 
+#[cfg(test)]
 fn parse_adr_dir_name(name: &str) -> Option<u32> {
     let suffix = name.strip_prefix("ADR-")?;
     if suffix.len() < 4 {

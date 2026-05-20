@@ -42,7 +42,7 @@ pub(super) fn add(
     let priority = parse_optional_priority(&input)?;
     let created_by = optional_string_alias(&input, &["created_by", "createdBy"])?.or(model);
 
-    let learning = runtime.stores().learnings().add(LearningCreateParams {
+    let learning = runtime.create_learning(LearningCreateParams {
         summary,
         scope,
         body,

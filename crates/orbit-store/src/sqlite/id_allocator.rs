@@ -1,0 +1,931 @@
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use chrono::{DateTime, Utc};
+use fs2::FileExt;
+use orbit_common::types::OrbitError;
+use orbit_common::utility::fs::atomic_write_text;
+use orbit_common::utility::git::{CurrentBranchStatus, current_branch};
+use rusqlite::{Connection, Transaction, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
+use serde_yaml::{Mapping, Value};
+
+const KIND_ADR: &str = "adr";
+const KIND_LEARNING: &str = "learning";
+const STATUS_MERGED: &str = "merged";
+const STATUS_RESERVED: &str = "reserved";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdAllocationKind {
+    Adr,
+    Learning,
+}
+
+impl IdAllocationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Adr => KIND_ADR,
+            Self::Learning => KIND_LEARNING,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdAllocation {
+    pub kind: IdAllocationKind,
+    pub id: String,
+    pub worktree_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct IdAllocatorConfig {
+    pub semantic_db_path: PathBuf,
+    pub lock_path: PathBuf,
+    pub shared_root: PathBuf,
+    pub worktree_root: PathBuf,
+    pub adr_root: PathBuf,
+    pub learning_root: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct IdAllocator {
+    inner: Arc<IdAllocatorInner>,
+}
+
+struct IdAllocatorInner {
+    conn: Mutex<Connection>,
+    lock_path: PathBuf,
+    shared_root: PathBuf,
+    worktree_root: PathBuf,
+    adr_root: PathBuf,
+    learning_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LearningIdRename {
+    pub old_id: String,
+    pub new_id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LearningIdMigrationReport {
+    pub renames: Vec<LearningIdRename>,
+}
+
+impl LearningIdMigrationReport {
+    pub fn is_empty(&self) -> bool {
+        self.renames.is_empty()
+    }
+
+    pub fn rename_map(&self) -> BTreeMap<String, String> {
+        self.renames
+            .iter()
+            .map(|rename| (rename.old_id.clone(), rename.new_id.clone()))
+            .collect()
+    }
+}
+
+impl IdAllocatorConfig {
+    pub fn new(
+        semantic_db_path: PathBuf,
+        lock_path: PathBuf,
+        shared_root: PathBuf,
+        worktree_root: PathBuf,
+        adr_root: PathBuf,
+        learning_root: PathBuf,
+    ) -> Self {
+        Self {
+            semantic_db_path,
+            lock_path,
+            shared_root,
+            worktree_root,
+            adr_root,
+            learning_root,
+        }
+    }
+}
+
+impl IdAllocator {
+    pub fn open(config: IdAllocatorConfig) -> Result<Self, OrbitError> {
+        if let Some(parent) = config.semantic_db_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| OrbitError::Store(error.to_string()))?;
+        }
+        let conn = Connection::open(&config.semantic_db_path)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        enable_best_effort_wal_mode(&conn);
+        conn.pragma_update(None, "busy_timeout", "5000")
+            .map_err(|e| OrbitError::Store(format!("failed to set busy_timeout: {e}")))?;
+        ensure_id_allocation_schema(&conn)?;
+
+        let allocator = Self {
+            inner: Arc::new(IdAllocatorInner {
+                conn: Mutex::new(conn),
+                lock_path: config.lock_path,
+                shared_root: absolutize(config.shared_root),
+                worktree_root: absolutize(config.worktree_root),
+                adr_root: config.adr_root,
+                learning_root: config.learning_root,
+            }),
+        };
+        allocator.backfill_existing_ids()?;
+        Ok(allocator)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_roots(adr_root: PathBuf, learning_root: PathBuf) -> Self {
+        let base = if learning_root.starts_with(&adr_root) {
+            adr_root.clone()
+        } else if adr_root.starts_with(&learning_root) {
+            learning_root.clone()
+        } else {
+            adr_root.clone()
+        };
+        let state_dir = base.join(".id-allocator-test-state");
+        Self::open(IdAllocatorConfig::new(
+            state_dir.join("semantic.db"),
+            state_dir.join(".id_alloc.lock"),
+            base.clone(),
+            base,
+            adr_root,
+            learning_root,
+        ))
+        .expect("test id allocator")
+    }
+
+    pub fn allocate_adr(&self) -> Result<IdAllocation, OrbitError> {
+        self.allocate(IdAllocationKind::Adr)
+    }
+
+    pub fn allocate_learning(&self) -> Result<IdAllocation, OrbitError> {
+        self.allocate(IdAllocationKind::Learning)
+    }
+
+    pub fn migrate_learning_ids(&self) -> Result<LearningIdMigrationReport, OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+
+        let report = self.migrate_learning_ids_in_transaction(&tx)?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(report)
+    }
+
+    fn allocate(&self, kind: IdAllocationKind) -> Result<IdAllocation, OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let next = next_id_for_kind(&tx, kind)?;
+        insert_allocation(
+            &tx,
+            kind,
+            &next,
+            Utc::now().timestamp(),
+            &self.inner.worktree_root,
+            best_effort_branch(&self.inner.worktree_root),
+            STATUS_RESERVED,
+            false,
+        )?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(IdAllocation {
+            kind,
+            id: next,
+            worktree_root: self.inner.worktree_root.clone(),
+        })
+    }
+
+    fn backfill_existing_ids(&self) -> Result<(), OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        self.backfill_adrs(&tx)?;
+        self.backfill_canonical_learnings(&tx)?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(())
+    }
+
+    fn backfill_adrs(&self, tx: &Transaction<'_>) -> Result<(), OrbitError> {
+        for state in ["proposed", "accepted", "superseded", "deleted"] {
+            let dir = self.inner.adr_root.join(state);
+            if !dir.is_dir() {
+                continue;
+            }
+            for child in child_dirs(&dir)? {
+                let Some(id) = child.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if parse_adr_sequence(id).is_none() || !child.join("adr.yaml").is_file() {
+                    continue;
+                }
+                let allocated_at =
+                    yaml_epoch(&child.join("adr.yaml")).unwrap_or_else(|_| now_epoch());
+                insert_allocation(
+                    tx,
+                    IdAllocationKind::Adr,
+                    id,
+                    allocated_at,
+                    &self.inner.shared_root,
+                    None,
+                    STATUS_MERGED,
+                    true,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn backfill_canonical_learnings(&self, tx: &Transaction<'_>) -> Result<(), OrbitError> {
+        if !self.inner.learning_root.is_dir() {
+            return Ok(());
+        }
+        for child in child_dirs(&self.inner.learning_root)? {
+            let Some(id) = child.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if parse_learning_sequence(id).is_none() || !child.join("learning.yaml").is_file() {
+                continue;
+            }
+            let allocated_at =
+                yaml_epoch(&child.join("learning.yaml")).unwrap_or_else(|_| now_epoch());
+            insert_allocation(
+                tx,
+                IdAllocationKind::Learning,
+                id,
+                allocated_at,
+                &self.inner.shared_root,
+                None,
+                STATUS_MERGED,
+                true,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn migrate_learning_ids_in_transaction(
+        &self,
+        tx: &Transaction<'_>,
+    ) -> Result<LearningIdMigrationReport, OrbitError> {
+        if !self.inner.learning_root.is_dir() {
+            return Ok(LearningIdMigrationReport::default());
+        }
+
+        let mut entries = Vec::new();
+        for child in child_dirs(&self.inner.learning_root)? {
+            let Some(old_id) = child.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !is_legacy_learning_id(old_id) {
+                continue;
+            }
+            let yaml_path = child.join("learning.yaml");
+            if !yaml_path.is_file() {
+                continue;
+            }
+            let created_at = yaml_epoch(&yaml_path)?;
+            entries.push((created_at, old_id.to_string(), child, yaml_path));
+        }
+        entries.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+
+        if entries.is_empty() {
+            return Ok(LearningIdMigrationReport::default());
+        }
+
+        let existing_max = max_sequence(tx, IdAllocationKind::Learning)?;
+        let mut renames = Vec::with_capacity(entries.len());
+        for (offset, (_, old_id, _, _)) in entries.iter().enumerate() {
+            let next = existing_max
+                .checked_add(offset as u32)
+                .and_then(|value| value.checked_add(1))
+                .ok_or_else(|| OrbitError::Execution("learning id counter overflow".to_string()))?;
+            renames.push(LearningIdRename {
+                old_id: old_id.clone(),
+                new_id: format_learning_id(next),
+            });
+        }
+        let rename_map: BTreeMap<String, String> = renames
+            .iter()
+            .map(|rename| (rename.old_id.clone(), rename.new_id.clone()))
+            .collect();
+
+        for ((created_at, old_id, old_dir, yaml_path), rename) in entries.iter().zip(&renames) {
+            let new_dir = self.inner.learning_root.join(&rename.new_id);
+            if new_dir.exists() {
+                return Err(OrbitError::Migration(format!(
+                    "cannot migrate learning id {old_id} to {}: destination already exists",
+                    rename.new_id
+                )));
+            }
+
+            let mut value = read_yaml_value(yaml_path)?;
+            rewrite_learning_yaml(&mut value, old_id, &rename.new_id, &rename_map)?;
+            let rendered = serde_yaml::to_string(&value)
+                .map_err(|error| OrbitError::Migration(error.to_string()))?;
+            atomic_write_text(yaml_path, &rendered).map_err(|error| {
+                OrbitError::Io(format!("write {}: {error}", yaml_path.display()))
+            })?;
+            fs::rename(old_dir, &new_dir).map_err(|error| {
+                OrbitError::Io(format!(
+                    "rename {} to {}: {error}",
+                    old_dir.display(),
+                    new_dir.display()
+                ))
+            })?;
+            insert_allocation(
+                tx,
+                IdAllocationKind::Learning,
+                &rename.new_id,
+                *created_at,
+                &self.inner.shared_root,
+                None,
+                STATUS_MERGED,
+                true,
+            )?;
+        }
+
+        Ok(LearningIdMigrationReport { renames })
+    }
+
+    fn acquire_lock(&self) -> Result<File, OrbitError> {
+        let parent = self.inner.lock_path.parent().ok_or_else(|| {
+            OrbitError::Store(format!(
+                "cannot determine id allocation lock parent for '{}'",
+                self.inner.lock_path.display()
+            ))
+        })?;
+        fs::create_dir_all(parent).map_err(|error| OrbitError::Io(error.to_string()))?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&self.inner.lock_path)
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        file.lock_exclusive().map_err(|error| {
+            OrbitError::Store(format!(
+                "failed to acquire id allocation lock '{}': {error}",
+                self.inner.lock_path.display()
+            ))
+        })?;
+        Ok(file)
+    }
+
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, OrbitError> {
+        self.inner
+            .conn
+            .lock()
+            .map_err(|error| OrbitError::Store(format!("mutex poisoned: {error}")))
+    }
+}
+
+pub fn ensure_id_allocation_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS id_allocations (
+                kind TEXT NOT NULL,
+                id TEXT NOT NULL,
+                allocated_at INTEGER NOT NULL,
+                worktree_root TEXT NOT NULL,
+                branch TEXT,
+                status TEXT NOT NULL,
+                PRIMARY KEY (kind, id),
+                CHECK (kind IN ('adr', 'learning')),
+                CHECK (status IN ('reserved', 'merged', 'abandoned'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_id_allocations_kind_status
+            ON id_allocations(kind, status);
+
+            CREATE INDEX IF NOT EXISTS idx_id_allocations_allocated_at
+            ON id_allocations(allocated_at);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+fn next_id_for_kind(tx: &Transaction<'_>, kind: IdAllocationKind) -> Result<String, OrbitError> {
+    let next = max_sequence(tx, kind)?
+        .checked_add(1)
+        .ok_or_else(|| OrbitError::Execution("id counter overflow".to_string()))?;
+    Ok(match kind {
+        IdAllocationKind::Adr => format_adr_id(next),
+        IdAllocationKind::Learning => format_learning_id(next),
+    })
+}
+
+fn max_sequence(tx: &Transaction<'_>, kind: IdAllocationKind) -> Result<u32, OrbitError> {
+    let mut stmt = tx
+        .prepare("SELECT id FROM id_allocations WHERE kind = ?1")
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let rows = stmt
+        .query_map([kind.as_str()], |row| row.get::<_, String>(0))
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+
+    let mut max_seen = 0u32;
+    for row in rows {
+        let id = row.map_err(|error| OrbitError::Store(error.to_string()))?;
+        let sequence = match kind {
+            IdAllocationKind::Adr => parse_adr_sequence(&id),
+            IdAllocationKind::Learning => parse_learning_sequence(&id),
+        };
+        if let Some(sequence) = sequence {
+            max_seen = max_seen.max(sequence);
+        }
+    }
+    Ok(max_seen)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_allocation(
+    tx: &Transaction<'_>,
+    kind: IdAllocationKind,
+    id: &str,
+    allocated_at: i64,
+    worktree_root: &Path,
+    branch: Option<String>,
+    status: &str,
+    ignore_existing: bool,
+) -> Result<(), OrbitError> {
+    let verb = if ignore_existing {
+        "INSERT OR IGNORE"
+    } else {
+        "INSERT"
+    };
+    let sql = format!(
+        "{verb} INTO id_allocations(kind, id, allocated_at, worktree_root, branch, status) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+    );
+    tx.execute(
+        &sql,
+        params![
+            kind.as_str(),
+            id,
+            allocated_at,
+            worktree_root.to_string_lossy(),
+            branch,
+            status,
+        ],
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))?;
+    Ok(())
+}
+
+pub fn parse_adr_sequence(id: &str) -> Option<u32> {
+    let suffix = id.strip_prefix("ADR-")?;
+    parse_padded_sequence(suffix)
+}
+
+pub fn parse_learning_sequence(id: &str) -> Option<u32> {
+    let suffix = id.strip_prefix("L-")?;
+    parse_padded_sequence(suffix)
+}
+
+fn parse_padded_sequence(suffix: &str) -> Option<u32> {
+    if suffix.len() < 4 || !suffix.as_bytes().iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    suffix.parse::<u32>().ok()
+}
+
+fn format_adr_id(sequence: u32) -> String {
+    let width = sequence.to_string().len().max(4);
+    format!("ADR-{sequence:0width$}")
+}
+
+fn format_learning_id(sequence: u32) -> String {
+    let width = sequence.to_string().len().max(4);
+    format!("L-{sequence:0width$}")
+}
+
+fn child_dirs(root: &Path) -> Result<Vec<PathBuf>, OrbitError> {
+    let mut dirs = Vec::new();
+    for entry in fs::read_dir(root).map_err(|error| OrbitError::Io(error.to_string()))? {
+        let entry = entry.map_err(|error| OrbitError::Io(error.to_string()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        if file_type.is_dir() {
+            dirs.push(entry.path());
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
+}
+
+fn yaml_epoch(path: &Path) -> Result<i64, OrbitError> {
+    let value = read_yaml_value(path)?;
+    let raw = value
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String("created_at".to_string())))
+        .and_then(Value::as_str)
+        .ok_or_else(|| OrbitError::Migration(format!("{}: missing created_at", path.display())))?;
+    DateTime::parse_from_rfc3339(raw)
+        .map(|timestamp| timestamp.timestamp())
+        .map_err(|error| {
+            OrbitError::Migration(format!(
+                "{}: invalid created_at timestamp `{raw}`: {error}",
+                path.display()
+            ))
+        })
+}
+
+fn read_yaml_value(path: &Path) -> Result<Value, OrbitError> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
+    serde_yaml::from_str(&raw)
+        .map_err(|error| OrbitError::Migration(format!("parse {}: {error}", path.display())))
+}
+
+fn rewrite_learning_yaml(
+    value: &mut Value,
+    old_id: &str,
+    new_id: &str,
+    rename_map: &BTreeMap<String, String>,
+) -> Result<(), OrbitError> {
+    let mapping = value
+        .as_mapping_mut()
+        .ok_or_else(|| OrbitError::Migration("learning yaml must be a mapping".to_string()))?;
+    mapping.insert(
+        Value::String("id".to_string()),
+        Value::String(new_id.to_string()),
+    );
+    add_legacy_id(mapping, old_id);
+    rewrite_value_strings(value, rename_map, false);
+    Ok(())
+}
+
+fn add_legacy_id(mapping: &mut Mapping, old_id: &str) {
+    let key = Value::String("legacy_ids".to_string());
+    let entry = mapping
+        .entry(key)
+        .or_insert_with(|| Value::Sequence(Vec::new()));
+    if let Value::Sequence(values) = entry
+        && !values.iter().any(|value| value.as_str() == Some(old_id))
+    {
+        values.push(Value::String(old_id.to_string()));
+    }
+}
+
+fn rewrite_value_strings(
+    value: &mut Value,
+    rename_map: &BTreeMap<String, String>,
+    in_legacy_ids: bool,
+) {
+    match value {
+        Value::String(raw) if !in_legacy_ids => {
+            for (old_id, new_id) in rename_map {
+                if raw.contains(old_id) {
+                    *raw = raw.replace(old_id, new_id);
+                }
+            }
+        }
+        Value::Sequence(values) => {
+            for item in values {
+                rewrite_value_strings(item, rename_map, in_legacy_ids);
+            }
+        }
+        Value::Mapping(mapping) => {
+            for (key, child) in mapping {
+                let child_in_legacy_ids = key.as_str() == Some("legacy_ids");
+                rewrite_value_strings(child, rename_map, child_in_legacy_ids);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_legacy_learning_id(id: &str) -> bool {
+    let Some(rest) = id.strip_prefix('L') else {
+        return false;
+    };
+    let Some((date, suffix)) = rest.split_once('-') else {
+        return false;
+    };
+    date.len() == 8
+        && date.as_bytes().iter().all(u8::is_ascii_digit)
+        && !suffix.is_empty()
+        && suffix.as_bytes().iter().all(u8::is_ascii_digit)
+}
+
+fn now_epoch() -> i64 {
+    Utc::now().timestamp()
+}
+
+fn best_effort_branch(worktree_root: &Path) -> Option<String> {
+    match current_branch(worktree_root).ok()? {
+        CurrentBranchStatus::Named(branch) => Some(branch),
+        CurrentBranchStatus::DetachedHead | CurrentBranchStatus::NoCurrentBranch => None,
+    }
+}
+
+fn absolutize(path: PathBuf) -> PathBuf {
+    fs::canonicalize(&path).unwrap_or(path)
+}
+
+fn enable_best_effort_wal_mode(conn: &Connection) {
+    match conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0)) {
+        Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
+        Ok(mode) => {
+            orbit_common::tracing::warn!(
+                target: "orbit.store.id_allocator",
+                journal_mode = mode.as_str(),
+                "requested WAL mode on semantic database, but SQLite kept the active journal mode",
+            );
+        }
+        Err(error) => {
+            orbit_common::tracing::warn!(
+                target: "orbit.store.id_allocator",
+                error = %error,
+                "could not set WAL mode on semantic database; continuing with default journal mode",
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+    use std::process::Command;
+
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn schema_is_idempotent_for_preexisting_semantic_db() {
+        let conn = Connection::open_in_memory().expect("open db");
+        conn.execute_batch("CREATE TABLE embeddings(source_id TEXT);")
+            .expect("legacy semantic table");
+
+        ensure_id_allocation_schema(&conn).expect("schema");
+        ensure_id_allocation_schema(&conn).expect("schema again");
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='id_allocations'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("table exists");
+        assert_eq!(exists, 1);
+    }
+
+    #[test]
+    fn open_creates_schema_in_preexisting_semantic_db_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let config = allocator_config(temp.path());
+        if let Some(parent) = config.semantic_db_path.parent() {
+            std::fs::create_dir_all(parent).expect("state dir");
+        }
+        {
+            let conn = Connection::open(&config.semantic_db_path).expect("open db");
+            conn.execute_batch("CREATE TABLE embeddings(source_id TEXT);")
+                .expect("legacy semantic table");
+        }
+
+        let _allocator = IdAllocator::open(config.clone()).expect("allocator");
+        let conn = Connection::open(&config.semantic_db_path).expect("reopen db");
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='id_allocations'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("table exists");
+        assert_eq!(exists, 1);
+    }
+
+    #[test]
+    fn allocates_dense_adr_and_learning_ids() {
+        let temp = TempDir::new().expect("tempdir");
+        let allocator = IdAllocator::open(IdAllocatorConfig::new(
+            temp.path().join("state/semantic.db"),
+            temp.path().join("state/.id_alloc.lock"),
+            temp.path().join(".orbit"),
+            temp.path().to_path_buf(),
+            temp.path().join(".orbit/adrs"),
+            temp.path().join(".orbit/learnings"),
+        ))
+        .expect("allocator");
+
+        assert_eq!(allocator.allocate_adr().expect("adr").id, "ADR-0001");
+        assert_eq!(allocator.allocate_adr().expect("adr").id, "ADR-0002");
+        assert_eq!(
+            allocator.allocate_learning().expect("learning").id,
+            "L-0001"
+        );
+        assert_eq!(
+            allocator.allocate_learning().expect("learning").id,
+            "L-0002"
+        );
+    }
+
+    #[test]
+    fn backfills_existing_adrs_idempotently_and_allocates_after_max() {
+        let temp = TempDir::new().expect("tempdir");
+        let shared_root = temp.path().join(".orbit");
+        let adr_root = shared_root.join("adrs");
+        let adr_dir = adr_root.join("accepted/ADR-0007");
+        std::fs::create_dir_all(&adr_dir).expect("adr dir");
+        std::fs::write(
+            adr_dir.join("adr.yaml"),
+            "schema_version: 1\nid: ADR-0007\ncreated_at: 2026-05-17T00:00:00Z\n",
+        )
+        .expect("adr yaml");
+        let config = allocator_config(temp.path());
+
+        let allocator = IdAllocator::open(config.clone()).expect("allocator");
+        assert_eq!(allocation_count(&config.semantic_db_path), 1);
+        drop(allocator);
+
+        let allocator = IdAllocator::open(config.clone()).expect("allocator reopen");
+        assert_eq!(allocation_count(&config.semantic_db_path), 1);
+        assert_eq!(allocator.allocate_adr().expect("allocate").id, "ADR-0008");
+    }
+
+    #[test]
+    fn learning_id_format_migration_renames_and_is_idempotent() {
+        let temp = TempDir::new().expect("tempdir");
+        let learning_root = temp.path().join(".orbit/learnings");
+        write_legacy_learning(&learning_root, "L20260518-2", "2026-05-18T00:00:00Z", None);
+        write_legacy_learning(
+            &learning_root,
+            "L20260517-1",
+            "2026-05-17T00:00:00Z",
+            Some("L20260518-2"),
+        );
+
+        let config = allocator_config(temp.path());
+        let allocator = IdAllocator::open(config.clone()).expect("allocator");
+        let report = allocator.migrate_learning_ids().expect("migrate");
+        assert_eq!(
+            report.renames,
+            vec![
+                LearningIdRename {
+                    old_id: "L20260517-1".to_string(),
+                    new_id: "L-0001".to_string(),
+                },
+                LearningIdRename {
+                    old_id: "L20260518-2".to_string(),
+                    new_id: "L-0002".to_string(),
+                },
+            ]
+        );
+
+        let first = std::fs::read_to_string(learning_root.join("L-0001/learning.yaml"))
+            .expect("first yaml");
+        assert!(first.contains("id: L-0001"));
+        assert!(first.contains("- L20260517-1"));
+        assert!(first.contains("supersedes: L-0002"));
+        assert!(!learning_root.join("L20260517-1").exists());
+        assert_eq!(allocation_count(&config.semantic_db_path), 2);
+
+        let second_report = allocator.migrate_learning_ids().expect("migrate again");
+        assert!(second_report.is_empty());
+        assert_eq!(allocation_count(&config.semantic_db_path), 2);
+    }
+
+    #[test]
+    fn multi_process_allocation_is_dense_for_adrs_and_learnings() {
+        for kind in [IdAllocationKind::Adr, IdAllocationKind::Learning] {
+            assert_multi_process_dense(kind);
+        }
+    }
+
+    #[test]
+    fn allocate_ids_child() {
+        let Ok(kind) = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_KIND") else {
+            return;
+        };
+        let root = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_ROOT").expect("root env");
+        let output = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT").expect("output env");
+        let count: usize = std::env::var("ORBIT_ID_ALLOCATOR_CHILD_COUNT")
+            .expect("count env")
+            .parse()
+            .expect("count parse");
+        let kind = match kind.as_str() {
+            "adr" => IdAllocationKind::Adr,
+            "learning" => IdAllocationKind::Learning,
+            other => panic!("unknown kind {other}"),
+        };
+        let allocator = IdAllocator::open(allocator_config(Path::new(&root))).expect("allocator");
+        let mut ids = Vec::with_capacity(count);
+        for _ in 0..count {
+            let allocation = match kind {
+                IdAllocationKind::Adr => allocator.allocate_adr(),
+                IdAllocationKind::Learning => allocator.allocate_learning(),
+            }
+            .expect("allocate");
+            ids.push(allocation.id);
+        }
+        std::fs::write(output, ids.join("\n")).expect("write ids");
+    }
+
+    fn assert_multi_process_dense(kind: IdAllocationKind) {
+        let temp = TempDir::new().expect("tempdir");
+        let exe = std::env::current_exe().expect("current exe");
+        let count = 50usize;
+        let output_a = temp.path().join("ids-a.txt");
+        let output_b = temp.path().join("ids-b.txt");
+        let kind_name = kind.as_str();
+
+        let mut child_a = Command::new(&exe)
+            .args([
+                "--exact",
+                "sqlite::id_allocator::tests::allocate_ids_child",
+                "--nocapture",
+            ])
+            .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
+            .env("ORBIT_ID_ALLOCATOR_CHILD_ROOT", temp.path())
+            .env("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT", &output_a)
+            .env("ORBIT_ID_ALLOCATOR_CHILD_COUNT", count.to_string())
+            .spawn()
+            .expect("spawn child a");
+        let mut child_b = Command::new(&exe)
+            .args([
+                "--exact",
+                "sqlite::id_allocator::tests::allocate_ids_child",
+                "--nocapture",
+            ])
+            .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
+            .env("ORBIT_ID_ALLOCATOR_CHILD_ROOT", temp.path())
+            .env("ORBIT_ID_ALLOCATOR_CHILD_OUTPUT", &output_b)
+            .env("ORBIT_ID_ALLOCATOR_CHILD_COUNT", count.to_string())
+            .spawn()
+            .expect("spawn child b");
+
+        assert!(child_a.wait().expect("wait a").success());
+        assert!(child_b.wait().expect("wait b").success());
+
+        let mut ids = read_id_file(&output_a);
+        ids.extend(read_id_file(&output_b));
+        let unique: BTreeSet<_> = ids.iter().cloned().collect();
+        assert_eq!(unique.len(), count * 2, "ids collided: {ids:?}");
+        let sequences: Vec<_> = unique
+            .iter()
+            .map(|id| match kind {
+                IdAllocationKind::Adr => parse_adr_sequence(id).expect("adr seq"),
+                IdAllocationKind::Learning => parse_learning_sequence(id).expect("learning seq"),
+            })
+            .collect();
+        assert_eq!(sequences, (1..=(count as u32 * 2)).collect::<Vec<_>>());
+    }
+
+    fn allocator_config(root: &Path) -> IdAllocatorConfig {
+        IdAllocatorConfig::new(
+            root.join(".orbit/state/semantic.db"),
+            root.join(".orbit/state/.id_alloc.lock"),
+            root.join(".orbit"),
+            root.to_path_buf(),
+            root.join(".orbit/adrs"),
+            root.join(".orbit/learnings"),
+        )
+    }
+
+    fn allocation_count(db_path: &Path) -> i64 {
+        let conn = Connection::open(db_path).expect("open db");
+        conn.query_row("SELECT COUNT(*) FROM id_allocations", [], |row| row.get(0))
+            .expect("count")
+    }
+
+    fn write_legacy_learning(
+        learning_root: &Path,
+        id: &str,
+        created_at: &str,
+        supersedes: Option<&str>,
+    ) {
+        let dir = learning_root.join(id);
+        std::fs::create_dir_all(&dir).expect("learning dir");
+        let supersedes_line = supersedes
+            .map(|value| format!("supersedes: {value}\n"))
+            .unwrap_or_default();
+        std::fs::write(
+            dir.join("learning.yaml"),
+            format!(
+                "schema_version: 1\nid: {id}\nstatus: active\nscope:\n  paths: []\n  tags: []\nsummary: Test\nbody: ''\nevidence: []\n{supersedes_line}created_at: {created_at}\nupdated_at: {created_at}\n"
+            ),
+        )
+        .expect("learning yaml");
+    }
+
+    fn read_id_file(path: &Path) -> Vec<String> {
+        std::fs::read_to_string(path)
+            .expect("read ids")
+            .lines()
+            .map(str::to_string)
+            .filter(|line| !line.is_empty())
+            .collect()
+    }
+}

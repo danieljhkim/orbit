@@ -25,7 +25,7 @@ pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
             .map(|limit| limit as usize)
             .unwrap_or(10),
         field: optional_string_alias(&input, &["field"])?,
-        // L20260517-6: `model` is tool-run provenance; embedding selection uses a separate field.
+        // L-0006: `model` is tool-run provenance; embedding selection uses a separate field.
         model: optional_string_alias(
             &input,
             &[
