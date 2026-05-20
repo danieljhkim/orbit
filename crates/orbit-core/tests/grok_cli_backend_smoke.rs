@@ -18,7 +18,6 @@ fn seed_grok_executor(runtime: &OrbitRuntime) {
     let mut def = ExecutorDef::from_resource_spec(
         resource.metadata.name,
         resource.spec.clone(),
-        "test:assets/executors/grok.yaml",
         resource.spec.created_at,
         resource.spec.updated_at,
     );

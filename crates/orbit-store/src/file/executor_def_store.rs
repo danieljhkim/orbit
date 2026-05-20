@@ -72,7 +72,6 @@ impl ExecutorDefFileStore {
                 stdout_format: def.stdout_format,
                 model_pair_override: def.model_pair_override.clone(),
                 model_flag: def.model_flag.clone(),
-                legacy_models: None,
                 timeout_seconds: def.timeout_seconds,
                 env: def.env.clone(),
                 sandbox: def.sandbox,
@@ -105,7 +104,6 @@ fn parse_executor_def(content: &str, label: String) -> Result<ExecutorDef, Orbit
     Ok(ExecutorDef::from_resource_spec(
         doc.metadata.name,
         doc.spec.clone(),
-        &label,
         doc.spec.created_at,
         doc.spec.updated_at,
     ))

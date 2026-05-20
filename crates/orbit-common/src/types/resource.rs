@@ -180,9 +180,6 @@ pub struct ExecutorResourceSpec {
     pub model_pair_override: Option<ModelPairOverride>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_flag: Option<String>,
-    /// Deprecated alias for `model_pair_override`; remove after one release.
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "models")]
-    pub legacy_models: Option<ModelPairOverride>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
     #[serde(default)]

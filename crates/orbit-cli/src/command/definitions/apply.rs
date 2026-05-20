@@ -123,14 +123,7 @@ fn apply_executor(
         .as_ref()
         .map(|executor| executor.created_at)
         .unwrap_or(doc.spec.created_at);
-    let source_label = format!("{}: Executor resource", path.display());
-    let def = ExecutorDef::from_resource_spec(
-        name.to_string(),
-        doc.spec,
-        &source_label,
-        created_at,
-        Utc::now(),
-    );
+    let def = ExecutorDef::from_resource_spec(name.to_string(), doc.spec, created_at, Utc::now());
     runtime.upsert_executor_def(&def)?;
     println!("executor/{name} applied");
     Ok(())

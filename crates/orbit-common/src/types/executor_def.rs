@@ -154,7 +154,6 @@ impl ExecutorDef {
     pub fn from_resource_spec(
         name: String,
         spec: ExecutorResourceSpec,
-        source_label: &str,
         created_at: DateTime<Utc>,
         updated_at: DateTime<Utc>,
     ) -> Self {
@@ -164,7 +163,6 @@ impl ExecutorDef {
             args,
             stdout_format,
             model_pair_override,
-            legacy_models,
             model_flag,
             timeout_seconds,
             env,
@@ -174,21 +172,13 @@ impl ExecutorDef {
             updated_at: _,
         } = spec;
 
-        if legacy_models.is_some() {
-            tracing::warn!(
-                target: "orbit.executor.def",
-                source = %source_label,
-                "deprecated `models` key on executor def; rename to `model_pair_override` for AgentModelPair audit/envelope/review overrides. Runtime model selection is not controlled by this field; encode it in `args`, and set `ORBIT_AGENT_MODEL` via `env:` for explicit audit attribution."
-            );
-        }
-
         Self {
             name,
             executor_type,
             command,
             args,
             stdout_format,
-            model_pair_override: model_pair_override.or(legacy_models),
+            model_pair_override,
             model_flag,
             timeout_seconds,
             env,
@@ -206,73 +196,21 @@ impl ExecutorDef {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Write};
-    use std::sync::{Arc, Mutex};
-
-    use tracing_subscriber::filter::LevelFilter;
-    use tracing_subscriber::fmt::MakeWriter;
-
     use super::*;
     use crate::types::ExecutorResource;
 
-    #[derive(Clone)]
-    struct CaptureMakeWriter(Arc<Mutex<Vec<u8>>>);
-
-    struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
-
-    impl<'a> MakeWriter<'a> for CaptureMakeWriter {
-        type Writer = CaptureWriter;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            CaptureWriter(Arc::clone(&self.0))
-        }
-    }
-
-    impl Write for CaptureWriter {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.0
-                .lock()
-                .expect("capture writer lock")
-                .extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn capture_warnings<F, T>(f: F) -> (T, String)
-    where
-        F: FnOnce() -> T,
-    {
-        let buffer = Arc::new(Mutex::new(Vec::new()));
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(CaptureMakeWriter(Arc::clone(&buffer)))
-            .with_max_level(LevelFilter::WARN)
-            .with_target(true)
-            .with_ansi(false)
-            .without_time()
-            .finish();
-        let result = tracing::subscriber::with_default(subscriber, f);
-        let logs = String::from_utf8(buffer.lock().expect("capture buffer lock").clone())
-            .expect("captured logs are utf8");
-        (result, logs)
-    }
-
-    fn def_from_yaml(yaml: &str, source_label: &str) -> ExecutorDef {
+    fn def_from_yaml(yaml: &str) -> ExecutorDef {
         let resource: ExecutorResource = serde_yaml::from_str(yaml).expect("parse executor yaml");
         ExecutorDef::from_resource_spec(
             resource.metadata.name,
             resource.spec.clone(),
-            source_label,
             resource.spec.created_at,
             resource.spec.updated_at,
         )
     }
 
     #[test]
-    fn roundtrips_model_pair_override_without_legacy_models_key() {
+    fn roundtrips_model_pair_override_without_removed_models_key() {
         let def = def_from_yaml(
             r#"
 schemaVersion: 2
@@ -290,7 +228,6 @@ spec:
     weak: gemini-3-flash
   model_flag: "-m"
 "#,
-            "roundtrip",
         );
 
         assert_eq!(
@@ -313,56 +250,13 @@ spec:
         );
         assert!(
             !serialized.contains("models:"),
-            "serialized executor def should not use legacy key: {serialized}"
+            "serialized executor def should not use removed key: {serialized}"
         );
     }
 
     #[test]
-    fn legacy_models_deserializes_with_deprecation_warning() {
-        let (def, logs) = capture_warnings(|| {
-            def_from_yaml(
-                r#"
-schemaVersion: 2
-kind: Executor
-metadata:
-  name: gemini
-spec:
-  executor_type: direct_agent
-  command: gemini
-  models:
-    strong: gemini-3.1-pro
-    weak: gemini-3-flash
-"#,
-                "legacy",
-            )
-        });
-
-        assert_eq!(
-            def.model_pair_override(),
-            Some(&ModelPairOverride {
-                strong: "gemini-3.1-pro".to_string(),
-                weak: "gemini-3-flash".to_string(),
-            })
-        );
-        assert_eq!(
-            logs.matches("deprecated `models` key").count(),
-            1,
-            "expected one deprecation warning, got: {logs}"
-        );
-        assert!(
-            logs.contains("orbit.executor.def"),
-            "warning should use executor def target: {logs}"
-        );
-        assert!(logs.contains("model_pair_override"), "{logs}");
-        assert!(logs.contains("AgentModelPair"), "{logs}");
-        assert!(logs.contains("args"), "{logs}");
-        assert!(logs.contains("env:"), "{logs}");
-        assert!(logs.contains("ORBIT_AGENT_MODEL"), "{logs}");
-    }
-
-    #[test]
-    fn legacy_models_rejects_unknown_keys() {
-        let err = serde_yaml::from_str::<ExecutorResource>(
+    fn models_key_does_not_override_model_pair() {
+        let def = def_from_yaml(
             r#"
 schemaVersion: 2
 kind: Executor
@@ -374,14 +268,12 @@ spec:
   models:
     strong: gemini-3.1-pro
     weak: gemini-3-flash
-    extra: unsupported
 "#,
-        )
-        .expect_err("unknown model-pair keys should be rejected");
+        );
 
         assert!(
-            err.to_string().contains("extra"),
-            "error should name the unsupported key: {err}"
+            def.model_pair_override().is_none(),
+            "removed `models` key must not populate model_pair_override"
         );
     }
 }

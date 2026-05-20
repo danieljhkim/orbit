@@ -85,7 +85,6 @@ fn parse_default_executor(name: &str, yaml: &str) -> Result<ExecutorDef, OrbitEr
     Ok(ExecutorDef::from_resource_spec(
         resource.metadata.name,
         resource.spec.clone(),
-        &format!("embedded:{name}"),
         resource.spec.created_at,
         resource.spec.updated_at,
     ))
