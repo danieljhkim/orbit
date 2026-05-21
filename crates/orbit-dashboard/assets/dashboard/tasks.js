@@ -490,6 +490,11 @@ function buildTaskDetail(task, context) {
     rightCol.appendChild(buildTagRow(task.tags));
   }
 
+  const assignment = el("div", { class: "assignment" });
+  assignment.appendChild(complexityCell(task.complexity));
+  assignment.appendChild(buildCrewUpdateControl(task, context));
+  addField(rightCol, "assignment", assignment);
+
   const meta = el("div", { class: "meta-list" });
   let metaCount = 0;
   for (const [key, label] of TASK_META_FIELDS) {
@@ -659,7 +664,7 @@ function buildCrewUpdateControl(task, context) {
   select.dataset.currentValue = currentValue;
 
   const defaultOption = el("option", {
-    text: `default: ${resolvedCrewName(task)}`,
+    text: resolvedCrewName(task),
   });
   defaultOption.value = "";
   select.appendChild(defaultOption);
@@ -865,8 +870,6 @@ export function renderTasks(tasks, context) {
         el("span", { class: "title", text: t.title }),
         priorityCell(t.priority),
         el("span", { class: "type mono", text: t.type }),
-        complexityCell(t.complexity),
-        buildCrewUpdateControl(t, context),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
