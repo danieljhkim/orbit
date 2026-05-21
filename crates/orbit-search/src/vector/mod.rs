@@ -121,20 +121,4 @@ pub fn cosine_similarity(left: &[f32], right: &[f32]) -> Result<f32, OrbitError>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cosine_helper_scores_toy_vectors() {
-        assert!(
-            (cosine_similarity(&[1.0, 0.0, 0.0], &[1.0, 0.0, 0.0]).unwrap() - 1.0).abs() < 0.0001
-        );
-        assert!(
-            cosine_similarity(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0])
-                .unwrap()
-                .abs()
-                < 0.0001
-        );
-        assert!(cosine_similarity(&[1.0, 0.0, 0.0], &[-1.0, 0.0, 0.0]).unwrap() < -0.999);
-    }
-}
+mod tests;

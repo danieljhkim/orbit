@@ -35,6 +35,9 @@ mod rpc;
 mod subprocess;
 mod vector;
 
+#[cfg(test)]
+mod tests;
+
 pub use commands::{
     AdrIndexParams, AdrIndexResult, AdrSemanticHit, AdrSemanticSearchParams,
     AdrSemanticSearchResult, CompanionStatus, DocIndexParams, DocIndexResult, DocSemanticHit,

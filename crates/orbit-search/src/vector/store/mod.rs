@@ -94,3 +94,6 @@ fn enable_best_effort_wal_mode(conn: &Connection) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
