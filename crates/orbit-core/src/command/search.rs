@@ -83,13 +83,11 @@ pub enum GlobalSearchMode {
 #[derive(Debug, Clone, Default)]
 pub struct GlobalSearchParams {
     pub query: Option<String>,
-    // ADR-0175: hybrid free-text ranking and task-neighbor lookup are distinct modes.
+    // ADR-0179: hybrid free-text ranking and task-neighbor lookup are distinct modes.
     pub hybrid: bool,
     pub semantic: Option<String>,
     pub kind: GlobalSearchKind,
     pub limit: usize,
-    pub field: Option<String>,
-    pub model: Option<String>,
     /// AND-filter by tag. Repeat for multi-tag AND semantics. Applies to
     /// task, doc, learning, ADR (and `all`).
     pub tags: Vec<String>,
@@ -153,6 +151,7 @@ impl OrbitRuntime {
         params: GlobalSearchParams,
     ) -> Result<GlobalSearchResponse, OrbitError> {
         let limit = params.normalized_limit();
+        let status_filters = SearchStatusFilters::parse(&params.status)?;
         let mut results = Vec::new();
         let mut notes = Vec::new();
 
@@ -174,7 +173,7 @@ impl OrbitRuntime {
             let related = self.semantic_related(SemanticRelatedParams {
                 task_id: semantic_id,
                 limit,
-                model: params.model,
+                model: None,
             })?;
             results.extend(related.results.into_iter().map(semantic_hit_to_global));
             return Ok(GlobalSearchResponse {
@@ -221,6 +220,7 @@ impl OrbitRuntime {
         if params.kind.includes_tasks() {
             results.extend(self.task_branch(
                 &params,
+                &status_filters,
                 query_owned.as_deref(),
                 &tag_filter,
                 limit,
@@ -233,6 +233,7 @@ impl OrbitRuntime {
             if !has_path {
                 results.extend(self.doc_branch(
                     &params,
+                    &status_filters,
                     query_owned.as_deref(),
                     &tag_filter,
                     limit,
@@ -241,12 +242,19 @@ impl OrbitRuntime {
         }
 
         if params.kind.includes_adrs() {
-            results.extend(self.adr_branch(&params, query_owned.as_deref(), &tag_filter, limit)?);
+            results.extend(self.adr_branch(
+                &params,
+                &status_filters,
+                query_owned.as_deref(),
+                &tag_filter,
+                limit,
+            )?);
         }
 
         if params.kind.includes_learnings() {
             results.extend(self.learning_branch(
                 &params,
+                &status_filters,
                 query_owned.as_deref(),
                 &tag_filter,
                 limit,
@@ -265,11 +273,12 @@ impl OrbitRuntime {
     fn task_branch(
         &self,
         params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let statuses = resolve_task_statuses(params)?;
+        let statuses = resolve_task_statuses(params, status_filters);
 
         let candidates = if params.hybrid
             && let Some(query) = query
@@ -277,9 +286,9 @@ impl OrbitRuntime {
             let search = self.semantic_search(SemanticSearchParams {
                 query: query.to_string(),
                 limit: limit.saturating_mul(2).max(limit),
-                field: params.field.clone(),
+                field: None,
                 kind: Some("task".to_string()),
-                model: params.model.clone(),
+                model: None,
             })?;
             // Resolve task records so we can apply the post-filters.
             let mut hits: Vec<(GlobalSearchHit, Option<orbit_common::types::Task>)> = Vec::new();
@@ -331,10 +340,12 @@ impl OrbitRuntime {
     fn doc_branch(
         &self,
         _params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let _doc_status_active = status_filters.doc_active.unwrap_or(true);
         let Some(query) = query else {
             if tag_filter.is_empty() {
                 // Without a query or tag filter, no doc results — docs are
@@ -401,11 +412,12 @@ impl OrbitRuntime {
     fn adr_branch(
         &self,
         params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let statuses = resolve_adr_statuses(params)?;
+        let statuses = resolve_adr_statuses(params, status_filters);
         let path = params.path.as_deref();
 
         let Some(query) = query else {
@@ -468,11 +480,12 @@ impl OrbitRuntime {
     fn learning_branch(
         &self,
         params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let statuses = resolve_learning_statuses(params)?;
+        let statuses = resolve_learning_statuses(params, status_filters);
         let active_only = statuses == vec![LearningStatus::Active];
 
         // Fast path: when the status set is exactly `[Active]` and we have a
@@ -745,82 +758,169 @@ fn learning_scope_contains_path(
     Ok(false)
 }
 
-fn resolve_task_statuses(params: &GlobalSearchParams) -> Result<Vec<TaskStatus>, OrbitError> {
-    if !params.status.is_empty() {
-        let mut out = Vec::new();
-        for raw in &params.status {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let status = TaskStatus::from_str(trimmed).map_err(OrbitError::InvalidInput)?;
-            if !out.contains(&status) {
-                out.push(status);
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SearchStatusFilters {
+    task: Option<Vec<TaskStatus>>,
+    doc_active: Option<bool>,
+    learning: Option<Vec<LearningStatus>>,
+    adr: Option<Vec<AdrStatus>>,
+}
+
+impl SearchStatusFilters {
+    fn parse(raw_statuses: &[String]) -> Result<Self, OrbitError> {
+        // ADR-0179: status tokens are kind-qualified to avoid cross-corpus ambiguity.
+        let mut filters = Self::default();
+        for raw in raw_statuses {
+            for token in raw
+                .split(',')
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+            {
+                let Some((kind, value)) = token.split_once(':') else {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "status token `{token}` must use `kind:value` form"
+                    )));
+                };
+                let kind = kind.trim().to_ascii_lowercase();
+                let value = value.trim().to_ascii_lowercase();
+                if kind.is_empty() || value.is_empty() {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "status token `{token}` must use `kind:value` form"
+                    )));
+                }
+                match kind.as_str() {
+                    "task" => filters.push_task_status(&value)?,
+                    "doc" => filters.set_doc_status(&value)?,
+                    "learning" => filters.push_learning_status(&value)?,
+                    "adr" => filters.push_adr_status(&value)?,
+                    other => {
+                        return Err(OrbitError::InvalidInput(format!(
+                            "invalid status kind `{other}` in token `{token}`; expected task, doc, learning, or adr"
+                        )));
+                    }
+                }
             }
         }
-        return Ok(out);
+        Ok(filters)
     }
-    let mut set = vec![
+
+    fn push_task_status(&mut self, value: &str) -> Result<(), OrbitError> {
+        let statuses = self.task.get_or_insert_with(Vec::new);
+        if value == "open" {
+            extend_unique(statuses, task_open_statuses());
+            return Ok(());
+        }
+        let status = TaskStatus::from_str(value).map_err(|_| {
+            OrbitError::InvalidInput(format!(
+                "invalid status `{value}` for kind `task`; expected open, proposed, friction, backlog, in-progress, review, done, blocked, archived, rejected, or someday"
+            ))
+        })?;
+        push_unique(statuses, status);
+        Ok(())
+    }
+
+    fn set_doc_status(&mut self, value: &str) -> Result<(), OrbitError> {
+        if value != "active" {
+            return Err(OrbitError::InvalidInput(format!(
+                "invalid status `{value}` for kind `doc`; expected active"
+            )));
+        }
+        self.doc_active = Some(true);
+        Ok(())
+    }
+
+    fn push_learning_status(&mut self, value: &str) -> Result<(), OrbitError> {
+        let status = LearningStatus::from_str(value).map_err(|_| {
+            OrbitError::InvalidInput(format!(
+                "invalid status `{value}` for kind `learning`; expected active or superseded"
+            ))
+        })?;
+        let statuses = self.learning.get_or_insert_with(Vec::new);
+        push_unique(statuses, status);
+        Ok(())
+    }
+
+    fn push_adr_status(&mut self, value: &str) -> Result<(), OrbitError> {
+        let status = AdrStatus::from_str(value).map_err(|_| {
+            OrbitError::InvalidInput(format!(
+                "invalid status `{value}` for kind `adr`; expected proposed, accepted, superseded, or deleted"
+            ))
+        })?;
+        let statuses = self.adr.get_or_insert_with(Vec::new);
+        push_unique(statuses, status);
+        Ok(())
+    }
+}
+
+fn push_unique<T: PartialEq>(values: &mut Vec<T>, value: T) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
+fn extend_unique<T: Copy + PartialEq>(values: &mut Vec<T>, incoming: &[T]) {
+    for value in incoming {
+        push_unique(values, *value);
+    }
+}
+
+fn task_open_statuses() -> &'static [TaskStatus] {
+    &[
         TaskStatus::Proposed,
         TaskStatus::Backlog,
         TaskStatus::InProgress,
         TaskStatus::Review,
-    ];
+    ]
+}
+
+fn resolve_task_statuses(
+    params: &GlobalSearchParams,
+    status_filters: &SearchStatusFilters,
+) -> Vec<TaskStatus> {
+    if let Some(statuses) = &status_filters.task {
+        return statuses.clone();
+    }
+    let mut set = task_open_statuses().to_vec();
     if params.all {
         set.extend([TaskStatus::Done, TaskStatus::Rejected, TaskStatus::Archived]);
     }
-    Ok(set)
+    set
 }
 
 fn resolve_learning_statuses(
     params: &GlobalSearchParams,
-) -> Result<Vec<LearningStatus>, OrbitError> {
-    if !params.status.is_empty() {
-        let mut out = Vec::new();
-        for raw in &params.status {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let status = LearningStatus::from_str(trimmed).map_err(OrbitError::InvalidInput)?;
-            if !out.contains(&status) {
-                out.push(status);
-            }
-        }
-        return Ok(out);
+    status_filters: &SearchStatusFilters,
+) -> Vec<LearningStatus> {
+    if let Some(statuses) = &status_filters.learning {
+        return statuses.clone();
     }
     let mut set = vec![LearningStatus::Active];
     if params.all {
         set.push(LearningStatus::Superseded);
     }
-    Ok(set)
+    set
 }
 
-fn resolve_adr_statuses(params: &GlobalSearchParams) -> Result<Vec<AdrStatus>, OrbitError> {
-    if !params.status.is_empty() {
-        let mut out = Vec::new();
-        for raw in &params.status {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let status = AdrStatus::from_str(trimmed).map_err(OrbitError::InvalidInput)?;
-            if !out.contains(&status) {
-                out.push(status);
-            }
-        }
-        return Ok(out);
+fn resolve_adr_statuses(
+    params: &GlobalSearchParams,
+    status_filters: &SearchStatusFilters,
+) -> Vec<AdrStatus> {
+    if let Some(statuses) = &status_filters.adr {
+        return statuses.clone();
     }
     let mut set = vec![AdrStatus::Proposed, AdrStatus::Accepted];
     if params.all {
         set.push(AdrStatus::Superseded);
     }
-    Ok(set)
+    set
 }
 
 #[cfg(test)]
 mod tests {
-    use orbit_store::AdrCreateParams;
+    use std::fs;
+
+    use orbit_common::types::{TaskPriority, TaskType};
+    use orbit_store::{AdrCreateParams, TaskCreateParams};
     use serde_json::json;
 
     use super::*;
@@ -842,20 +942,68 @@ mod tests {
     }
 
     fn add_tagged_adr(runtime: &OrbitRuntime) -> String {
+        add_adr(runtime, "ADR tag path bridge", "## Context\n\nTest.\n")
+    }
+
+    fn add_adr(runtime: &OrbitRuntime, title: &str, body: &str) -> String {
         runtime
             .stores()
             .adrs()
             .add(AdrCreateParams {
-                title: "ADR tag path bridge".to_string(),
+                title: title.to_string(),
                 owner: "codex".to_string(),
                 related_features: Vec::new(),
                 related_tasks: Vec::new(),
                 tags: vec!["Perf".to_string(), "orbit-search".to_string()],
                 paths: vec!["crates/orbit-search/**".to_string()],
-                body: "## Context\n\nTest.\n".to_string(),
+                body: body.to_string(),
             })
             .expect("add adr")
             .id
+    }
+
+    fn add_task_with_status(runtime: &OrbitRuntime, title: &str, status: TaskStatus) -> String {
+        runtime
+            .stores()
+            .tasks()
+            .create(TaskCreateParams {
+                actor: "test".to_string(),
+                parent_id: None,
+                title: title.to_string(),
+                description: "needle task body".to_string(),
+                acceptance_criteria: Vec::new(),
+                dependencies: Vec::new(),
+                relations: Vec::new(),
+                tags: Vec::new(),
+                plan: String::new(),
+                execution_summary: String::new(),
+                context_files: Vec::new(),
+                workspace_path: Some(runtime.paths().repo_root.to_string_lossy().into_owned()),
+                repo_root: None,
+                created_by: Some("test".to_string()),
+                planned_by: None,
+                implemented_by: None,
+                status,
+                priority: TaskPriority::Medium,
+                complexity: None,
+                task_type: TaskType::Chore,
+                external_refs: Vec::new(),
+                source_task_id: None,
+                crew: None,
+                comments: Vec::new(),
+            })
+            .expect("create task")
+            .id
+    }
+
+    fn add_doc(runtime: &OrbitRuntime, path: &str, summary: &str) {
+        let doc_path = runtime.paths().repo_root.join(path);
+        fs::create_dir_all(doc_path.parent().expect("doc parent")).expect("create doc parent");
+        fs::write(
+            doc_path,
+            format!("---\ntype: context\nsummary: {summary}\n---\n\nneedle doc body\n"),
+        )
+        .expect("write doc");
     }
 
     #[test]
@@ -946,6 +1094,90 @@ mod tests {
                 ][..]
             )
         );
+    }
+
+    #[test]
+    fn global_search_status_filter_requires_kind_prefix() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let error = runtime
+            .global_search(GlobalSearchParams {
+                query: Some("needle".to_string()),
+                status: vec!["open".to_string()],
+                ..Default::default()
+            })
+            .expect_err("bare status token should fail");
+
+        assert!(error.to_string().contains("`open`"));
+        assert!(error.to_string().contains("kind:value"));
+    }
+
+    #[test]
+    fn global_search_status_filter_reports_invalid_kind_values() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let task_error = runtime
+            .global_search(GlobalSearchParams {
+                query: Some("needle".to_string()),
+                status: vec!["task:not-a-status".to_string()],
+                ..Default::default()
+            })
+            .expect_err("invalid task status should fail");
+        assert!(task_error.to_string().contains("`not-a-status`"));
+        assert!(task_error.to_string().contains("`task`"));
+
+        let doc_error = runtime
+            .global_search(GlobalSearchParams {
+                query: Some("needle".to_string()),
+                status: vec!["doc:proposed".to_string()],
+                ..Default::default()
+            })
+            .expect_err("invalid doc status should fail");
+        assert!(doc_error.to_string().contains("`proposed`"));
+        assert!(doc_error.to_string().contains("`doc`"));
+    }
+
+    #[test]
+    fn global_search_status_filter_applies_per_kind_tokens() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let open_task = add_task_with_status(&runtime, "needle open task", TaskStatus::Backlog);
+        let closed_task = add_task_with_status(&runtime, "needle closed task", TaskStatus::Done);
+        add_doc(&runtime, "docs/status-active.md", "needle active doc");
+        add_doc(&runtime, "docs/status-other.md", "unrelated summary");
+        let proposed_adr = add_adr(&runtime, "needle proposed ADR", "## Context\n\nneedle.\n");
+        let accepted_adr = add_adr(&runtime, "needle accepted ADR", "## Context\n\nneedle.\n");
+        runtime
+            .stores()
+            .adrs()
+            .update_status(&accepted_adr, AdrStatus::Accepted)
+            .expect("accept adr");
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                query: Some("needle".to_string()),
+                status: vec![
+                    "task:open".to_string(),
+                    "doc:active".to_string(),
+                    "adr:proposed".to_string(),
+                ],
+                ..Default::default()
+            })
+            .expect("search with per-kind status filters");
+        let ids = response
+            .results
+            .iter()
+            .filter_map(|hit| hit.id.as_deref())
+            .collect::<Vec<_>>();
+        let paths = response
+            .results
+            .iter()
+            .filter_map(|hit| hit.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert!(ids.contains(&open_task.as_str()));
+        assert!(!ids.contains(&closed_task.as_str()));
+        assert!(ids.contains(&proposed_adr.as_str()));
+        assert!(!ids.contains(&accepted_adr.as_str()));
+        assert!(paths.contains(&"docs/status-active.md"));
+        assert!(!paths.contains(&"docs/status-other.md"));
     }
 
     #[test]

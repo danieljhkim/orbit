@@ -339,11 +339,9 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
         }
         Commands::Search(cmd) => CommandMeta {
             command: "search".to_string(),
-            // ORB-00202: preserve the `--kind` discriminator in the audit row.
-            // The unified `orbit search` replaced three per-domain commands;
-            // without this, downstream queries lose the ability to distinguish
-            // task / doc / learning / adr searches.
-            subcommand: Some(cmd.kind.to_string()),
+            // ORB-00202 preserved `--kind`; ORB-00205 adds mode labels so
+            // query/similar/path searches stay distinguishable in audit rows.
+            subcommand: Some(cmd.audit_subcommand()),
             tool_name: None,
             target_type: Some("search".to_string()),
             target_id: None,

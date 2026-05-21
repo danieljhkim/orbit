@@ -34,7 +34,7 @@ fn cli_docs_list_and_show_json() {
 #[test]
 fn cli_orbit_search_federates_docs_and_adrs() {
     // ORB-00202: federated lexical search moved from `orbit docs search` to
-    // `orbit search --kind all` / `--kind doc` / `--kind adr`.
+    // `orbit search <query> --kind all` / `--kind doc` / `--kind adr`.
     let workspace = TestWorkspace::new();
     workspace.write(
         "docs/orbit-docs.md",

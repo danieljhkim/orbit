@@ -3,7 +3,7 @@ summary: "Semantic Search — Vision"
 type: design
 title: "Semantic Search — Vision"
 owner: claude
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 status: Draft
 feature: orbit-search
 doc_role: vision
@@ -60,7 +60,7 @@ The schema is ready for any answer; the UX is not yet chosen.
 
 ### 1.5 Cross-task semantic links
 
-Once embeddings exist, the cheapest possible feature is "show me tasks similar to this one" — already in scope as `orbit search --semantic <task-id>`. Less obvious:
+Once embeddings exist, the cheapest possible feature is "show me tasks similar to this one" — already in scope as `orbit search similar <task-id>`. Less obvious:
 
 - **Auto-detect duplicate task creation.** Run the new task's `purpose` through cosine before insert; if a high-similarity match exists, warn the user.
 - **Auto-suggest dependencies.** A new task's content is highly similar to an in-progress task — should it depend on it?

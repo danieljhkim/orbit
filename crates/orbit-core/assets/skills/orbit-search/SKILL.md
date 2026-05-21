@@ -27,8 +27,8 @@ orbit search "slow inference after model swap" --limit 5
 orbit tool run orbit.search --input '{"query":"slow inference after model swap","limit":5,"model":"<agent-family>"}'
 
 # Cross-artifact label and path filters
-orbit search --tag perf --kind all
-orbit search --path crates/orbit-search/src/lib.rs --kind all
+orbit search "scheduler" --tag perf --kind all
+orbit search path crates/orbit-search/src/lib.rs --kind all
 orbit tool run orbit.search --input '{"tag":"perf","kind":"all","model":"<agent-family>"}'
 orbit tool run orbit.search --input '{"path":"crates/orbit-search/src/lib.rs","kind":"all","model":"<agent-family>"}'
 
@@ -37,13 +37,15 @@ orbit search "agent loop deadlock" --hybrid --kind task --limit 5
 orbit tool run orbit.search --input '{"query":"agent loop deadlock","hybrid":true,"kind":"task","limit":5,"model":"<agent-family>"}'
 
 # Cosine neighbors of a known task
-orbit search --semantic "<task-id>" --limit 5
+orbit search similar "<task-id>" --limit 5
 orbit tool run orbit.search --input '{"semantic":"<task-id>","limit":5,"model":"<agent-family>"}'
 ```
 
-`--semantic <id>` is mutually exclusive with a positional query and uses task vectors, so it requires the companion.
+`orbit search similar <id>` uses task vectors, so it requires the companion. The MCP tool keeps the parameterized form: `semantic: "<task-id>"`.
 
-`--tag` uses AND semantics when repeated. `--path` is an applicability filter: task results use selector containment over `context_files`; learning and ADR results use glob-containment over their stored path scopes; docs are content-indexed and do not match by applicability path.
+`--tag` uses AND semantics when repeated. `orbit search path <path>` is the CLI applicability lookup: task results use selector containment over `context_files`; learning and ADR results use glob-containment over their stored path scopes; docs are content-indexed and do not match by applicability path. The MCP equivalent is `{"path":"<path>"}`.
+
+`--status` values must use `kind:value` tokens, for example `--status task:open,doc:active,adr:proposed`. Bare status tokens are rejected so same-named statuses across corpora stay unambiguous.
 
 ## Index Coverage
 

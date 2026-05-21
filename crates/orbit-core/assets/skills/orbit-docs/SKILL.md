@@ -46,7 +46,7 @@ Doc = explanatory context. It is PR-reviewed Markdown, retrieved through `orbit.
 
 ## Routing Notes
 
-- ADRs are owned by `orbit-adr` and live at `.orbit/adrs/{accepted,proposed,superseded}/<adr-id>/`. Orbit-docs does not walk `.orbit/`, but `orbit search --kind all` and `orbit search --kind adr` federate ADR metadata alongside doc hits. Use `--all` to include superseded ADRs for archaeology.
+- ADRs are owned by `orbit-adr` and live at `.orbit/adrs/{accepted,proposed,superseded}/<adr-id>/`. Orbit-docs does not walk `.orbit/`, but `orbit search <query> --kind all` and `orbit search <query> --kind adr` federate ADR metadata alongside doc hits. Use `--all` to include superseded ADRs for archaeology.
 - For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-docs"}'` and inspect the accepted ADR that covers the sibling-index search overlay.
 - Learnings are owned by `orbit-learning`; cross-reference them from docs with `related_artifacts`.
 - `orbit-design` is retired. Use `orbit-docs` for docs retrieval and `orbit-adr` when creating, accepting, or superseding ADRs.
@@ -64,13 +64,13 @@ CLI and MCP forms are equivalent:
 | Reindex | `orbit docs reindex` | `orbit.docs.reindex` |
 | Migrate | `orbit docs migrate --dry-run` | `orbit.docs.migrate` |
 
-`orbit search --kind all` federates doc and ADR hits in one call. Use `--kind doc` for doc-only matches, `--kind adr` for ADR-only matches, and `--kind adr --all` (or `--status accepted,superseded`) to include superseded ADRs for archaeology. See `orbit-search` for the full flag matrix (`--tag`, `--path`, `--status`).
+`orbit search <query> --kind all` federates doc and ADR hits in one call. Use `--kind doc` for doc-only matches, `--kind adr` for ADR-only matches, and `--kind adr --all` (or `--status adr:accepted,adr:superseded`) to include superseded ADRs for archaeology. See `orbit-search` for the full flag matrix (`--tag`, `orbit search path <path>`, `--status kind:value`).
 
 `reindex` is a v1 no-op because the indexer walks on demand. `migrate` backfills locked frontmatter for `docs/design/<feature>/*.md` and `docs/design-patterns/*.md`; it never touches `.orbit/`.
 
 ## Workflow
 
-1. Use `orbit search --kind all <query> --json` first when looking for context across docs and ADRs (or `--kind doc` / `--kind adr` to narrow).
+1. Use `orbit search <query> --kind all --json` first when looking for context across docs and ADRs (or `--kind doc` / `--kind adr` to narrow).
 2. Use `orbit docs show <path> --json` for the full Markdown body.
 3. Use `orbit docs list --json --type <type>` or `--tag <tag>` when browsing.
 4. Use `orbit docs add <path>` only for existing non-`.orbit/` roots that should be searched going forward.
