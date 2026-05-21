@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::str::FromStr;
 
 use orbit_common::types::{AdrStatus, LearningStatus, OrbitError, TaskStatus};
@@ -14,6 +14,7 @@ use crate::{OrbitRuntime, SearchResult};
 const DEFAULT_LIMIT: usize = 10;
 const DOC_SEARCH_OVERFETCH: usize = 4;
 const DOC_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical doc search";
+const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
 
 #[cfg(test)]
 thread_local! {
@@ -163,7 +164,6 @@ impl OrbitRuntime {
     ) -> Result<GlobalSearchResponse, OrbitError> {
         let limit = params.normalized_limit();
         let status_filters = SearchStatusFilters::parse(&params.status)?;
-        let mut results = Vec::new();
         let mut notes = Vec::new();
 
         if let Some(semantic_id) = params.semantic {
@@ -186,7 +186,11 @@ impl OrbitRuntime {
                 limit,
                 model: None,
             })?;
-            results.extend(related.results.into_iter().map(semantic_hit_to_global));
+            let results = related
+                .results
+                .into_iter()
+                .map(semantic_hit_to_global)
+                .collect();
             return Ok(GlobalSearchResponse {
                 mode: GlobalSearchMode::Neighbor,
                 kind: params.kind,
@@ -222,12 +226,17 @@ impl OrbitRuntime {
         };
 
         if params.hybrid && (params.kind.includes_learnings() || params.kind.includes_adrs()) {
-            notes
-                .push("learnings and ADRs use lexical matching regardless of --hybrid".to_string());
+            push_skip_note(
+                &mut notes,
+                "learning/ADR hybrid vector",
+                "learnings and ADRs use lexical matching regardless of --hybrid",
+            );
         }
 
+        let mut branches = Vec::new();
+
         if params.kind.includes_tasks() {
-            results.extend(self.task_branch(
+            branches.push(self.task_branch(
                 &params,
                 &status_filters,
                 query_owned.as_deref(),
@@ -237,10 +246,14 @@ impl OrbitRuntime {
         }
 
         if params.kind.includes_docs() {
-            // Docs are out of scope for `--path`; skip the docs branch entirely
-            // when `--path` is set.
-            if !has_path {
-                results.extend(self.doc_branch(
+            if has_path {
+                push_skip_note(
+                    &mut notes,
+                    "doc",
+                    "--path is set; docs are not path-filtered yet",
+                );
+            } else {
+                branches.push(self.doc_branch(
                     &params,
                     &status_filters,
                     query_owned.as_deref(),
@@ -252,7 +265,7 @@ impl OrbitRuntime {
         }
 
         if params.kind.includes_adrs() {
-            results.extend(self.adr_branch(
+            branches.push(self.adr_branch(
                 &params,
                 &status_filters,
                 query_owned.as_deref(),
@@ -262,7 +275,7 @@ impl OrbitRuntime {
         }
 
         if params.kind.includes_learnings() {
-            results.extend(self.learning_branch(
+            branches.push(self.learning_branch(
                 &params,
                 &status_filters,
                 query_owned.as_deref(),
@@ -271,7 +284,7 @@ impl OrbitRuntime {
             )?);
         }
 
-        results.truncate(limit);
+        let results = merge_round_robin(branches, limit);
         Ok(GlobalSearchResponse {
             mode,
             kind: params.kind,
@@ -386,7 +399,7 @@ impl OrbitRuntime {
             return Ok(out);
         };
 
-        let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
+        let docs_limit = doc_search_candidate_limit(limit);
         let docs = self.search_docs(query, Some(docs_limit), true)?;
         if params.hybrid {
             // ADR-0180: doc vectors are opt-in and fall back to lexical rather than failing user search.
@@ -578,7 +591,7 @@ impl OrbitRuntime {
             return Ok(out);
         };
 
-        let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
+        let docs_limit = doc_search_candidate_limit(limit);
         // Pass `true` so the underlying lexical pass admits superseded ADRs;
         // we apply the status filter ourselves below.
         let docs = self.search_docs(query, Some(docs_limit), true)?;
@@ -739,6 +752,37 @@ fn semantic_hit_to_global(hit: orbit_search::SemanticHit) -> GlobalSearchHit {
     }
 }
 
+fn merge_round_robin(branches: Vec<Vec<GlobalSearchHit>>, limit: usize) -> Vec<GlobalSearchHit> {
+    let mut queues = branches
+        .into_iter()
+        .filter(|branch| !branch.is_empty())
+        .map(|branch| branch.into_iter().collect::<VecDeque<_>>())
+        .collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(limit);
+
+    while out.len() < limit && !queues.is_empty() {
+        let mut index = 0;
+        while index < queues.len() && out.len() < limit {
+            if let Some(hit) = queues[index].pop_front() {
+                out.push(hit);
+            }
+            if queues[index].is_empty() {
+                queues.remove(index);
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    out
+}
+
+fn doc_search_candidate_limit(limit: usize) -> usize {
+    limit
+        .saturating_mul(DOC_SEARCH_OVERFETCH)
+        .max(DOC_SEARCH_MIN_CANDIDATES)
+}
+
 #[derive(Debug, Clone)]
 struct DocHybridCandidate {
     hit: GlobalSearchHit,
@@ -850,7 +894,15 @@ fn warn_doc_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
         reason,
         "falling back to lexical doc search"
     );
-    notes.push(format!("{DOC_HYBRID_FALLBACK_NOTE}: {reason}"));
+    push_skip_note(
+        notes,
+        "doc hybrid vector",
+        &format!("{DOC_HYBRID_FALLBACK_NOTE}: {reason}"),
+    );
+}
+
+fn push_skip_note(notes: &mut Vec<String>, branch: &str, reason: &str) {
+    notes.push(format!("{branch} branch skipped: {reason}"));
 }
 
 fn doc_result_to_global(
@@ -1207,8 +1259,8 @@ fn resolve_adr_statuses(
 mod tests {
     use std::fs;
 
-    use orbit_common::types::{TaskPriority, TaskType};
-    use orbit_store::{AdrCreateParams, TaskCreateParams};
+    use orbit_common::types::{LearningScope, TaskPriority, TaskType};
+    use orbit_store::{AdrCreateParams, LearningCreateParams, TaskCreateParams};
     use serde_json::json;
 
     use super::*;
@@ -1303,6 +1355,59 @@ mod tests {
         .expect("write doc");
     }
 
+    fn add_learning(runtime: &OrbitRuntime, summary: &str) -> String {
+        runtime
+            .create_learning(LearningCreateParams {
+                summary: summary.to_string(),
+                scope: LearningScope::default(),
+                body: format!("{summary} body"),
+                evidence: Vec::new(),
+                created_by: Some("test".to_string()),
+                priority: None,
+            })
+            .expect("add learning")
+            .id
+    }
+
+    // L-0026: keep each caller's query unique; in-memory doc files share the temp parent.
+    fn seed_search_fixture(
+        runtime: &OrbitRuntime,
+        query: &str,
+        task_count: usize,
+        doc_count: usize,
+        adr_count: usize,
+        learning_count: usize,
+    ) {
+        for index in 0..task_count {
+            add_task_with_status(
+                runtime,
+                &format!("{query} task {index:02}"),
+                TaskStatus::Backlog,
+            );
+        }
+        for index in 0..doc_count {
+            add_doc(
+                runtime,
+                &format!("docs/{query}-doc-{index:02}.md"),
+                &format!("{query} doc {index:02}"),
+            );
+        }
+        for index in 0..adr_count {
+            add_adr(
+                runtime,
+                &format!("{query} ADR {index:02}"),
+                &format!("## Context\n\n{query} adr body.\n"),
+            );
+        }
+        for index in 0..learning_count {
+            add_learning(runtime, &format!("{query} learning {index:02}"));
+        }
+    }
+
+    fn count_kind(results: &[GlobalSearchHit], kind: &str) -> usize {
+        results.iter().filter(|hit| hit.kind == kind).count()
+    }
+
     fn doc_semantic_hit(path: &str, score: f32) -> DocSemanticHit {
         DocSemanticHit {
             source_id: path.to_string(),
@@ -1324,6 +1429,156 @@ mod tests {
             *cell.borrow_mut() = None;
         });
         out
+    }
+
+    #[test]
+    fn global_search_all_round_robins_total_limit_across_kinds() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let query = "fairlimit8";
+        seed_search_fixture(&runtime, query, 20, 20, 20, 20);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                query: Some(query.to_string()),
+                kind: GlobalSearchKind::All,
+                limit: 8,
+                ..Default::default()
+            })
+            .expect("search all");
+
+        assert_eq!(response.results.len(), 8);
+        for kind in ["task", "doc", "adr", "learning"] {
+            let count = count_kind(&response.results, kind);
+            assert!(
+                (1..=3).contains(&count),
+                "{kind} should contribute 1..=3 results, got {count}: {:?}",
+                response.results
+            );
+        }
+    }
+
+    #[test]
+    fn global_search_all_limit_four_takes_one_from_each_kind() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let query = "fairlimit4";
+        seed_search_fixture(&runtime, query, 20, 20, 20, 20);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                query: Some(query.to_string()),
+                kind: GlobalSearchKind::All,
+                limit: 4,
+                ..Default::default()
+            })
+            .expect("search all");
+
+        assert_eq!(response.results.len(), 4);
+        for kind in ["task", "doc", "adr", "learning"] {
+            assert_eq!(count_kind(&response.results, kind), 1, "{kind} count");
+        }
+    }
+
+    #[test]
+    fn global_search_single_kind_limit_keeps_task_behavior() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let query = "fairtaskonly";
+        seed_search_fixture(&runtime, query, 20, 20, 20, 20);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                query: Some(query.to_string()),
+                kind: GlobalSearchKind::Task,
+                limit: 8,
+                ..Default::default()
+            })
+            .expect("search tasks");
+
+        assert_eq!(response.results.len(), 8);
+        assert!(response.results.iter().all(|hit| hit.kind == "task"));
+    }
+
+    #[test]
+    fn global_search_all_redistributes_when_one_kind_has_fewer_hits() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let query = "fairshortdoc";
+        seed_search_fixture(&runtime, query, 20, 1, 20, 20);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                query: Some(query.to_string()),
+                kind: GlobalSearchKind::All,
+                limit: 12,
+                ..Default::default()
+            })
+            .expect("search all");
+
+        assert_eq!(response.results.len(), 12);
+    }
+
+    #[test]
+    fn global_search_all_preserves_in_kind_task_ranking() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let query = "fairrank";
+        seed_search_fixture(&runtime, query, 20, 20, 20, 20);
+
+        let task_only = runtime
+            .global_search(GlobalSearchParams {
+                query: Some(query.to_string()),
+                kind: GlobalSearchKind::Task,
+                limit: 8,
+                ..Default::default()
+            })
+            .expect("task branch");
+        let merged = runtime
+            .global_search(GlobalSearchParams {
+                query: Some(query.to_string()),
+                kind: GlobalSearchKind::All,
+                limit: 8,
+                ..Default::default()
+            })
+            .expect("merged search");
+
+        let task_only_ids = task_only
+            .results
+            .iter()
+            .map(|hit| hit.id.as_deref().expect("task id"))
+            .collect::<Vec<_>>();
+        let merged_task_ids = merged
+            .results
+            .iter()
+            .filter(|hit| hit.kind == "task")
+            .map(|hit| hit.id.as_deref().expect("task id"))
+            .collect::<Vec<_>>();
+
+        assert!(!merged_task_ids.is_empty());
+        assert_eq!(
+            merged_task_ids.as_slice(),
+            &task_only_ids[..merged_task_ids.len()],
+            "merged task hits should keep task-branch order"
+        );
+    }
+
+    #[test]
+    fn global_search_path_filter_notes_doc_branch_skip() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        add_doc(&runtime, "docs/path-note.md", "needle path note");
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                kind: GlobalSearchKind::All,
+                path: Some("crates/orbit-cli/".to_string()),
+                ..Default::default()
+            })
+            .expect("path search");
+
+        assert!(
+            response
+                .notes
+                .iter()
+                .any(|note| note.contains("doc branch skipped") && note.contains("--path")),
+            "notes should mention doc branch and --path: {:?}",
+            response.notes
+        );
     }
 
     #[test]
@@ -1496,7 +1751,11 @@ mod tests {
         assert!(!ids.contains(&closed_task.as_str()));
         assert!(ids.contains(&proposed_adr.as_str()));
         assert!(!ids.contains(&accepted_adr.as_str()));
-        assert!(paths.contains(&"docs/status-active.md"));
+        assert!(
+            paths.contains(&"docs/status-active.md"),
+            "expected active doc path in results: {:?}",
+            response.results
+        );
         assert!(!paths.contains(&"docs/status-other.md"));
     }
 

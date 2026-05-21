@@ -24,7 +24,8 @@ pub struct SearchCommand {
     /// Restrict results to one corpus kind.
     #[arg(long, value_enum, default_value_t = SearchKindArg::All, global = true)]
     pub kind: SearchKindArg,
-    /// Maximum number of results to return.
+    /// Maximum total results returned (across all kinds when --kind all;
+    /// round-robin per kind to ensure fair representation).
     #[arg(long, default_value_t = 10, global = true)]
     pub limit: usize,
     /// Filter by tag (AND semantics). Applies to task, doc, learning, and ADR.
