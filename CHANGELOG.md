@@ -16,38 +16,13 @@
 - **Design-doc decay-check surface removed**: `orbit design check`, `orbit.design.check` MCP tool, the wrapper script, and `make check-design-docs` are gone. Use `orbit design init/list/show` + same-PR update rule. ([ORB-00112])
 - **Search namespace split**: `orbit.semantic.search`, `orbit.semantic.related`, and the `orbit-semantic` skill are removed in favor of `orbit.search` and `orbit-search`; `orbit semantic reindex` is now `orbit semantic index`. Historical `semantic.search` / `semantic.related` audit event names are orphaned by this hard break because there are no external audit-history consumers yet. ([ORB-00196])
 
-### Features
+### Highlights
 
-- **Doc-corpus embeddings and hybrid doc search**: `orbit docs index` walks configured docs roots, embeds `{path,title,tags,body}` into `source_kind="doc"` rows, skips unchanged content hashes, and sweeps stale doc paths. `orbit search <query> --kind doc --hybrid` blends lexical doc scoring with cosine using `[docs.search].semantic_weight` (default `0.5`) and falls back to lexical with a warning when the companion or doc rows are unavailable. ([ORB-00206])
-- **ADR envelope v2 tags and paths**: ADR `adr.yaml` envelopes now carry `schema_version: 2` plus `tags` and `paths` fields. Existing ADR envelopes are backfilled with explicit empty lists, `orbit.adr.add` / `orbit.adr.update` accept the new fields, `orbit.adr.list` filters by `tag` and `path`, and the phase-2 `orbit search --tag/--path --kind adr` deferrals are closed. ([ORB-00203])
-- **`orbit-guide` first-time-setup skill** with explicit carve-out from the `orbit` router; seeded skill set 11 → 12. ([ORB-00126])
-- **Secret redaction at the artifact write boundary**: action-keyed sanitizer at the tool-host entrance covers ADR / learning / task / review-thread / friction writes; whole-token credentials reject via `OrbitError::SensitiveInput`; responses gain `redactions_applied: bool`. ([ORB-00138])
-- **`orbit run duel-plan` non-blocking by default**; `--wait` opts back in. ([ORB-00125])
-- **`--planner-a` / `--planner-b` / `--arbiter` overrides** for `orbit run duel-plan`. ([ORB-00147])
-- **Dashboard Audit / Diagnostics side panels** + per-actor `implement_one` aggregate. ([ORB-00142])
-- **Scoreboard reworked**: section grouping + 4×4 head-to-head matrix ([ORB-00144]); unified leaderboard-matrix UX with inline bars and leader badges ([ORB-00154]); friction-report counts reconstructed from the append-only record stream ([ORB-00143]).
-- **Unified `orbit search` surface**: lexical search spans tasks, docs, learnings, and ADRs by default; `--semantic --kind task` opts into hybrid BM25 + cosine ranking and `--related <id>` performs task-neighbor lookup. `orbit semantic` now manages only companion lifecycle (`install`, `uninstall`, `stats`, `index`). ([ORB-00196])
-
-### Fixes
-
-- **Planning-duel identity from manifest metadata** when the artifact signature is absent. ([ORB-00124])
-- **Grok Diagnostics token/tool counts non-zero**. ([ORB-00139])
-- **Friction auto-close fires on every path to `done`** (not only `approve`). ([ORB-00134])
-- **`orbit.task.start` guard relocated to `agent_implement.yaml`** — reverts v0.6.0 skill-layer overreach. ([ORB-00131])
-- **Dashboard responsiveness at ~1000px and ~1200px** (column layout + crew selector). ([ORB-00113], [ORB-00114])
-
-### Chores
-
-- **Submodule decomposition sweep** — nine oversized modules split with no external API change: [ORB-00115], [ORB-00116], [ORB-00117], [ORB-00118], [ORB-00119], [ORB-00120], [ORB-00121], [ORB-00122], [ORB-00123].
-- **`orbit-dashboard` crate extracted from `orbit-cli`**. ([ORB-00146])
-- **Dashboard JS module split**: `common.js` + ES modules ([ORB-00145]); `tasks.js` extracted ([ORB-00149]).
-- **Full `make ci` gate green again** after Linux clippy import + tail-end cleanup. ([ORB-00128])
-- **Implementer prompt hardened** with scope / duplication / dead-code / workspace-pin guardrails. ([ORB-00148])
-- **Reviewer skill teaches systemic-prompt-insufficiency friction filing**. ([ORB-00150])
-- **Inline ADR / learning citations** at load-bearing constraints in `orbit-adr` / `orbit-learning`. ([ORB-00132], [ORB-00133])
-- **Workspace-local `.orbit/orbit.db` no longer created at init** (v0.5-era leftover; canonical audit DB lives elsewhere per L20260517-9). ([ORB-00140])
-- **Release-CI quick-disable** to unblock v0.6.0 promotion. ([ORB-00110])
-- **Unattributed commits**: ADR-0165 + learnings L20260517-9/-10/-11/-14 ([commit b2b6f52e], [commit f0c10cef], [commit 509f3628], [commit 31a2aa1f], [commit 959572d5], [commit c952ccd7]); injection-layer coverage matrix ([commit ab6d8dce]); stale `KNOWLEDGE_BASE.md` removed ([commit 0ddb01d0]); nextest for CI ([commit 157aedd3]); back-merge procedure in `RELEASING.md` ([commit 8554d183]); design-doc YAML frontmatter ([commit 21f5ec53]); agent-observations log + AO-002 + ADR-0167 ([commit db070461], [commit cfc88ecd], [commit 4af52069]); `GEMINI.md` + plan-duel hypothesis ([commit 34ce5dea], [commit a01fa58a]); `PLANNING_DUEL_INSTRUCTION` graph rubric ([commit 38f6c675]); dashboard metric trim ([commit ac664f4e]).
+- **Doc-corpus embeddings and hybrid doc search**: `orbit docs index` embeds the configured docs roots; `orbit search <query> --kind doc --hybrid` blends lexical and cosine scoring, falling back to lexical when the companion is unavailable. ([ORB-00206])
+- **Unified `orbit search` surface**: lexical search spans tasks, docs, learnings, and ADRs by default; `--semantic --kind task` opts into hybrid BM25 + cosine; `--related <id>` does task-neighbor lookup. `orbit semantic` is now companion-lifecycle only. ([ORB-00196])
+- **Secret redaction at the artifact write boundary**: tool-host sanitizer covers ADR / learning / task / review-thread / friction writes; whole-token credentials reject via `OrbitError::SensitiveInput`; responses gain `redactions_applied: bool`. ([ORB-00138])
+- **`orbit-guide` first-time-setup skill** with explicit carve-out from the `orbit` router. ([ORB-00126])
+- **Dashboard Audit / Diagnostics side panels** and reworked scoreboard with section grouping, 4×4 head-to-head matrix, and inline-bar leaderboard. ([ORB-00142], [ORB-00144], [ORB-00154])
 
 ## 0.6.0
 
