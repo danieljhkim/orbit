@@ -3,7 +3,7 @@ summary: "Project Learnings — Design"
 type: design
 title: "Project Learnings — Design"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-05-21
 status: Draft
 feature: project-learnings
 doc_role: design
@@ -255,7 +255,8 @@ orbit learning reindex                    # rebuild SQLite index from YAML
 orbit learning prune [--stale-only]       # report or delete stale learnings
 
 # Free-text content match (formerly the per-domain `learning` subcommand of `orbit search`) lives on the unified search surface:
-orbit search --kind learning <text> [--tag T] [--path P] [--all] [--status SET] [--limit N]
+orbit search <text> --kind learning [--tag T] [--all] [--status learning:active] [--limit N]
+orbit search path <path> --kind learning [--tag T] [--all] [--status learning:active]
 ```
 
 `add`, `update`, and `supersede` write the YAML and update the index atomically. `upvote` appends to the learning's `votes.jsonl` sidecar and is idempotent for `(learning_id, voter_model, task_id)`. `orbit learning list --path/--tag` and `orbit search --kind learning` are the fast read paths used by the injection layers (the runtime-side `search_learnings` helper is the in-process equivalent).

@@ -16,7 +16,7 @@ impl Tool for OrbitSearchTool {
                 required: false,
             },
             ToolParam {
-                // ADR-0175: expose the free-text vector ranker as hybrid, not semantic.
+                // ADR-0179: expose the free-text vector ranker as hybrid, not semantic.
                 name: "hybrid".to_string(),
                 description:
                     "Opt into hybrid BM25 + cosine ranking for task vectors; other kinds remain lexical."
@@ -25,7 +25,7 @@ impl Tool for OrbitSearchTool {
                 required: false,
             },
             ToolParam {
-                // ADR-0175: semantic carries the task ID for cosine-neighbor lookup.
+                // ADR-0179: semantic carries the task ID for cosine-neighbor lookup on MCP.
                 name: "semantic".to_string(),
                 description:
                     "Task ID for cosine-neighbor lookup. Mutually exclusive with query."
@@ -47,20 +47,6 @@ impl Tool for OrbitSearchTool {
                 required: false,
             },
             ToolParam {
-                name: "field".to_string(),
-                description:
-                    "Optional indexed task field filter for semantic task search.".to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "embedding_model".to_string(),
-                description: "Optional semantic embedding model alias, such as bge-small."
-                    .to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
-            ToolParam {
                 name: "tag".to_string(),
                 description:
                     "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning, and ADR."
@@ -79,7 +65,7 @@ impl Tool for OrbitSearchTool {
             ToolParam {
                 name: "status".to_string(),
                 description:
-                    "Explicit per-kind status override (set semantics). Overrides `all` when provided."
+                    "Explicit per-kind status override using kind:value tokens, such as task:open,doc:active,adr:proposed. Overrides `all` for the named kind."
                         .to_string(),
                 param_type: "string_list".to_string(),
                 required: false,
@@ -125,5 +111,7 @@ mod tests {
         assert!(params.contains(&("hybrid", "boolean")));
         assert!(params.contains(&("semantic", "string")));
         assert!(!params.iter().any(|(name, _)| *name == "related"));
+        assert!(!params.iter().any(|(name, _)| *name == "field"));
+        assert!(!params.iter().any(|(name, _)| *name == "embedding_model"));
     }
 }

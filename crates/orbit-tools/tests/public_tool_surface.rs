@@ -94,23 +94,21 @@ fn workflow_critical_tools_remain_registered() {
 }
 
 #[test]
-fn global_search_schema_uses_v2_task_field_names() {
+fn global_search_schema_drops_retired_semantic_tuning_params() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
     let schema = registry
         .get_schema("orbit.search")
         .expect("global search schema");
-    let field = schema
+    let names = schema
         .parameters
         .iter()
-        .find(|param| param.name == "field")
-        .expect("field parameter");
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
 
-    assert_eq!(
-        field.description,
-        "Optional indexed task field filter for semantic task search."
-    );
+    assert!(!names.contains(&"field"));
+    assert!(!names.contains(&"embedding_model"));
 }
 
 #[test]

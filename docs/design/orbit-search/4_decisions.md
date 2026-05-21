@@ -195,7 +195,7 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 **Consequences.**
 - Re-running `orbit semantic install` after upgrading Orbit naturally refreshes stale companions without requiring users to uninstall first.
 - Task mutation output stays trustworthy: background indexing remains best-effort and cannot leak companion stderr into successful `task.add` / `task.update` command output.
-- Direct commands such as `orbit search --hybrid`, `orbit search --semantic <task-id>`, and `orbit semantic index` still show actionable companion stderr because they use the inherited-stderr path.
+- Direct commands such as `orbit search <query> --hybrid`, `orbit search similar <task-id>`, and `orbit semantic index` still show actionable companion stderr because they use the inherited-stderr path.
 - Cost: install now trusts the companion's `--version-info` protocol. If a broken companion cannot answer the probe, Orbit conservatively replaces it, which can redownload or recopy the binary even when the file might have been usable for embeddings.
 
 ---
@@ -218,7 +218,7 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 
 ## ADR-0175 — Rename search mode and neighbor flags
 
-**Status:** Accepted · 2026-05-20 · [ORB-00204]
+**Status:** Superseded by ADR-0179 · 2026-05-21 · [ORB-00204]
 
 **Context.** Phase 1 used the semantic name for the hybrid BM25 plus cosine mode toggle and a separate related-task flag for cosine-neighbor lookup. That inverted the intuitive reading of semantic search: users expect semantic plus an ID to mean nearest neighbors, while hybrid is the honest name for the ranking algorithm.
 
@@ -227,7 +227,7 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 **Consequences.**
 - The CLI and MCP surfaces match user vocabulary before external consumers depend on the phase-1 names.
 - Historical phase-1 audit payloads that carried `semantic: true` are orphaned by the hard break, matching the no-shim policy for this young surface.
-- Documentation and packaged skills must distinguish the `orbit semantic` lifecycle command from the `--semantic <id>` search flag.
+- Documentation and packaged skills must distinguish the `orbit semantic` lifecycle command from the MCP `semantic: "<id>"` search parameter. ADR-0179 replaces the CLI flag form with `orbit search similar <id>`.
 - Cost: Agents and docs written against phase 1 need a one-time rename sweep, and ORB-00202 may need a rebase because it edits adjacent search surfaces.
 - Cost: historical audit event names `semantic.search` and `semantic.related` become orphaned event types, accepted because no external audit-history consumers exist yet.
 
@@ -239,17 +239,34 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 
 **Context.** After [ADR-0174] and [ADR-0175] consolidated `orbit search` as the unified query surface, the per-domain `task`, `docs`, and `learning` `search` subcommands of `orbit` became redundant for content-similarity queries. The `learning` variant in particular bundled three unrelated operations under one verb: substring search (content), path-glob applicability lookup (structural), and tag filter (structural). Agents pre-edit also need a single cross-kind command that answers *"given this file path, what tasks / learnings / ADRs apply here?"* — the context-pack query.
 
-**Decision.** Hard-remove the per-domain `task`, `docs`, and `learning` `search` subcommands of `orbit` (CLI + MCP). Re-home their filters under universal flags on `orbit search`: `--tag <T>` (AND semantics, repeatable, case-insensitive), `--all` (kind-aware status widener), `--status <comma-set>` (explicit per-kind override), and `--path <P>` (cross-kind applicability filter — selector-mapping for tasks, glob-containment for learnings and ADRs after [ORB-00203], out of scope for docs). Add `orbit task list --path`; flip `orbit learning list --path` from exact-match to glob-containment. The old `--include-superseded` mental model from the retired per-domain doc surface is replaced by `orbit search --kind adr --all`. The structural-vs-content split — `search` for indexed content, `list` for structural filters — is enforced by the flag layout.
+**Decision.** Hard-remove the per-domain `task`, `docs`, and `learning` `search` subcommands of `orbit` (CLI + MCP). Re-home their filters under the unified search surface: `--tag <T>` (AND semantics, repeatable, case-insensitive), `--all` (kind-aware status widener), `--status` (superseded by ADR-0179's `kind:value` syntax), and path applicability lookup (superseded by ADR-0179's `orbit search path <path>` CLI form; MCP keeps the `path` parameter). Add `orbit task list --path`; flip `orbit learning list --path` from exact-match to glob-containment. The old `--include-superseded` mental model from the retired per-domain doc surface is replaced by `orbit search --kind adr --all`. The structural-vs-content split — `search` for indexed content, `list` for structural filters — is enforced by the command layout.
 
 **Consequences.**
 - One mental model: `orbit search` queries indexed content, `orbit <kind> list` filters structural metadata.
-- The agent context-pack query collapses to a single command (`orbit search --path <file> --kind all`).
-- Universal `--all` / `--status` vocabulary replaces the patchwork of kind-specific flags (`--include-superseded`).
+- The agent context-pack query collapses to a single command (`orbit search path <file> --kind all`).
+- Universal `--all` / `--status kind:value` vocabulary replaces the patchwork of kind-specific flags (`--include-superseded`).
 - ORB-00203 fills the ADR filter branches by adding ADR `tags` and `paths`, without changing the public search surface.
 - Cost: the `learning list --path` semantics flip is the only observable behavior change. Scripts calling `orbit learning list --path 'src/auth/**'` expecting exact-match scoped lookups will now also see paths *inside* that glob. The migration target for ex-`learning search --path` callers is unchanged because the new semantics match what that deleted command already did.
 - Cost: during phase 2, ADR carried `--tag` and `--path` placeholders in two flag positions; ORB-00203 closes that gap by making those positions real filters.
 - Cost: `AdrStatus` has no `Deprecated` variant, so `--all` adds `Superseded` only on ADRs. Asymmetric with task widening (which gets multiple terminal states); revisited if a deprecated state ever becomes load-bearing.
 - Audit-row granularity is preserved by mapping `--kind` onto the `subcommand` field. Before consolidation, `orbit task search` / `orbit docs search` / `orbit learning search` produced distinct `(command, subcommand)` rows; after consolidation, `orbit search --kind X` produces `(command="search", subcommand="<kind>")` so downstream audit queries can still distinguish task / doc / learning / adr searches. Free-text content vs. structural lookup is not currently captured in the audit schema and is out of scope for this ADR.
+
+---
+
+## ADR-0179 — Split `orbit search` modes and require per-kind statuses
+
+**Status:** Accepted · 2026-05-21 · [ORB-00205]
+
+**Context.** ADR-0175 corrected the search flag names after phase 1, but the resulting CLI still mixed a positional query with mode flags and allowed flat status tokens whose meaning changed by corpus kind. The real alternatives were to keep extending that single-command flag matrix, or split the user-facing CLI modes before more corpora grow vector support.
+
+**Decision.** Use three explicit CLI forms: `orbit search <query>` for free-text search, `orbit search similar <id>` for cosine-neighbor lookup, and `orbit search path <path>` for applicability lookup. Require `--status` values to use `kind:value` tokens such as `task:open`, `doc:active`, and `adr:proposed`. Remove the CLI field-selection and embedding-model flags, and remove the parallel MCP `field` and `embedding_model` parameters while keeping MCP `model` only as provenance.
+
+**Consequences.**
+- The CLI no longer has a top-level `<query | --semantic | --path>` trichotomy; each primary search operation has its own visible form.
+- Status filters are unambiguous across task, doc, learning, and ADR corpora.
+- MCP remains a parameterized tool surface, but it mirrors the reduced public parameter set and the same per-kind status parser.
+- Cost: `similar` and `path` become reserved words immediately after `orbit search`; searching those literal words requires passing a quoted/free-text query with additional context.
+- Cost: callers using the young mode flags, flat `--status`, the retired CLI field/model flags, MCP `field`, or MCP `embedding_model` surfaces must migrate with no compatibility shim.
 
 ---
 
@@ -263,5 +280,6 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 - [ORB-00204] — Rename `orbit search` flags to `--hybrid` for free-text vector ranking and `--semantic <id>` for task-neighbor lookup. The task that accepted and implemented ADR-0175.
 - [ORB-00202] — Consolidate per-domain search subcommands and add cross-kind `--path` / `--tag` filters. The task that proposed and implemented ADR-0176.
 - [ORB-00203] — Add ADR envelope `tags` and `paths` so ADRs participate in cross-kind `--tag` / `--path` search filters.
+- [ORB-00205] — Split `orbit search` into query / similar / path forms and require per-kind `--status` syntax. The task that accepted and implemented ADR-0179.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

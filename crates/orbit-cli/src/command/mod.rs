@@ -159,8 +159,12 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        Cli, Commands, hook::HookSubcommand, mcp::McpSubcommand, search::SearchKindArg,
-        semantic::SemanticSubcommand, web::WebSubcommand,
+        Cli, Commands,
+        hook::HookSubcommand,
+        mcp::McpSubcommand,
+        search::{SearchKindArg, SearchSubcommand},
+        semantic::SemanticSubcommand,
+        web::WebSubcommand,
     };
 
     #[test]
@@ -259,30 +263,52 @@ mod tests {
             Commands::Search(args) => {
                 assert_eq!(args.query.as_deref(), Some("semantic search design"));
                 assert!(args.hybrid);
-                assert_eq!(args.semantic, None);
+                assert!(args.command.is_none());
             }
             _ => panic!("expected top-level search command"),
         }
     }
 
     #[test]
-    fn cli_parses_top_level_search_semantic_neighbor() {
-        let cli = Cli::parse_from(["orbit", "search", "--semantic", "ORB-1"]);
+    fn cli_parses_top_level_search_similar_neighbor() {
+        let cli = Cli::parse_from(["orbit", "search", "similar", "ORB-1"]);
         match cli.command {
             Commands::Search(args) => {
                 assert_eq!(args.query, None);
-                assert_eq!(args.semantic.as_deref(), Some("ORB-1"));
+                match args.command {
+                    Some(SearchSubcommand::Similar(similar)) => {
+                        assert_eq!(similar.id, "ORB-1");
+                    }
+                    _ => panic!("expected search similar"),
+                }
             }
             _ => panic!("expected top-level search command"),
         }
     }
 
     #[test]
-    fn cli_parses_top_level_search_tag_only_filter() {
-        let cli = Cli::parse_from(["orbit", "search", "--tag", "perf", "--kind", "adr"]);
+    fn cli_parses_top_level_search_path_lookup() {
+        let cli = Cli::parse_from(["orbit", "search", "path", "crates/orbit-cli/"]);
         match cli.command {
             Commands::Search(args) => {
                 assert_eq!(args.query, None);
+                match args.command {
+                    Some(SearchSubcommand::Path(path)) => {
+                        assert_eq!(path.path, "crates/orbit-cli/");
+                    }
+                    _ => panic!("expected search path"),
+                }
+            }
+            _ => panic!("expected top-level search command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_top_level_search_tag_filter() {
+        let cli = Cli::parse_from(["orbit", "search", "perf", "--tag", "perf", "--kind", "adr"]);
+        match cli.command {
+            Commands::Search(args) => {
+                assert_eq!(args.query.as_deref(), Some("perf"));
                 assert_eq!(args.tags, vec!["perf"]);
                 assert_eq!(args.kind, SearchKindArg::Adr);
             }
@@ -292,7 +318,7 @@ mod tests {
 
     #[test]
     fn cli_rejects_search_query_with_semantic_neighbor() {
-        assert!(Cli::try_parse_from(["orbit", "search", "query", "--semantic", "ORB-1"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "search", "query", "ORB-1"]).is_err());
     }
 
     #[test]
@@ -302,11 +328,27 @@ mod tests {
     }
 
     #[test]
-    fn cli_rejects_search_semantic_without_value() {
+    fn cli_rejects_search_semantic_flag() {
+        assert!(Cli::try_parse_from(["orbit", "search", "--semantic", "ORB-1"]).is_err());
+    }
+
+    #[test]
+    fn cli_rejects_retired_search_field_and_model_flags() {
+        assert!(Cli::try_parse_from(["orbit", "search", "query", "--field", "title"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "search", "query", "--model", "bge-small"]).is_err());
         assert!(
-            Cli::try_parse_from(["orbit", "search", "query", "--semantic", "--kind", "task"])
+            Cli::try_parse_from(["orbit", "search", "similar", "ORB-1", "--field", "title"])
                 .is_err()
         );
+        assert!(
+            Cli::try_parse_from(["orbit", "search", "path", "crates/", "--model", "bge-small"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn cli_rejects_retired_search_path_flag() {
+        assert!(Cli::try_parse_from(["orbit", "search", "--path", "crates/"]).is_err());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use clap::{ArgAction, ArgGroup, Args, ValueEnum};
+use clap::{ArgAction, Args, Subcommand, ValueEnum};
 use orbit_core::{GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, OrbitError, OrbitRuntime};
 
 use crate::command::Execute;
@@ -6,64 +6,61 @@ use crate::command::Execute;
 #[derive(Args)]
 #[command(
     about = "Search tasks, docs, learnings, and ADRs",
-    after_help = "Index coverage note: vector search runs against tasks only today; docs, learnings, and ADRs use lexical matching regardless of --hybrid."
+    subcommand_precedence_over_arg = true,
+    after_help = "Forms:\n  orbit search <query>\n  orbit search similar <id>\n  orbit search path <path>\n\nIndex coverage note: vector search runs against tasks only today; docs, learnings, and ADRs use lexical matching regardless of --hybrid."
 )]
-#[command(group(
-    ArgGroup::new("query_mode")
-        .args(["query", "semantic"])
-        .multiple(false)
-))]
-#[command(group(
-    ArgGroup::new("search_input")
-        .args(["query", "semantic", "path", "tags"])
-        .required(true)
-        .multiple(true)
-))]
 pub struct SearchCommand {
     /// Free-text query. Defaults to lexical matching unless --hybrid is set.
     #[arg(value_name = "query")]
     pub query: Option<String>,
-    // ADR-0175: `--hybrid` names the free-text BM25 + cosine ranker.
+
+    #[command(subcommand)]
+    pub command: Option<SearchSubcommand>,
+
+    // ADR-0179: free-text search keeps the hybrid ranker; neighbor/path modes are separate forms.
     /// Use hybrid BM25 + cosine ranking for indexed task fields. Other kinds remain lexical.
     #[arg(long)]
     pub hybrid: bool,
-    // ADR-0175: `--semantic <id>` names task-neighbor lookup.
-    /// Find cosine-neighbor tasks for a known task ID. Requires task vectors.
-    #[arg(long, value_name = "id")]
-    pub semantic: Option<String>,
     /// Restrict results to one corpus kind.
-    #[arg(long, value_enum, default_value_t = SearchKindArg::All)]
+    #[arg(long, value_enum, default_value_t = SearchKindArg::All, global = true)]
     pub kind: SearchKindArg,
     /// Maximum number of results to return.
-    #[arg(long, default_value_t = 10)]
+    #[arg(long, default_value_t = 10, global = true)]
     pub limit: usize,
-    /// Optional indexed task field filter for semantic task search.
-    #[arg(long)]
-    pub field: Option<String>,
-    /// Optional semantic embedding model alias, such as bge-small.
-    #[arg(long)]
-    pub model: Option<String>,
     /// Filter by tag (AND semantics). Applies to task, doc, learning, and ADR.
-    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
+    #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',', global = true)]
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind. Task adds
     /// done/rejected/archived; ADR adds superseded; learning adds
     /// superseded; doc is a no-op.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub all: bool,
-    /// Explicit per-kind status override (comma-separated set). Composes with
-    /// --tag and --path; overrides --all.
-    #[arg(long, value_delimiter = ',')]
+    /// Explicit per-kind status override, e.g. task:open,doc:active,adr:proposed.
+    #[arg(long, value_delimiter = ',', global = true)]
     pub status: Vec<String>,
-    /// Filter to artifacts applicable to this filesystem path. Task: selector
-    /// containment over `context_files`. Learning: glob-containment over
-    /// `scope.paths`. ADR: glob-containment over `paths`. Doc: out of scope
-    /// (returns empty).
-    #[arg(long)]
-    pub path: Option<String>,
     /// Output as JSON.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum SearchSubcommand {
+    /// Find cosine-neighbor tasks for a known task ID. Requires task vectors.
+    Similar(SearchSimilarArgs),
+    /// Filter to artifacts applicable to this filesystem path.
+    Path(SearchPathArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct SearchSimilarArgs {
+    #[arg(value_name = "id")]
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct SearchPathArgs {
+    #[arg(value_name = "path")]
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -101,18 +98,17 @@ impl From<SearchKindArg> for GlobalSearchKind {
 
 impl Execute for SearchCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let input = self.search_input()?;
         let response = runtime.global_search(GlobalSearchParams {
-            query: self.query,
-            hybrid: self.hybrid,
-            semantic: self.semantic,
+            query: input.query,
+            hybrid: input.hybrid,
+            semantic: input.semantic,
             kind: self.kind.into(),
             limit: self.limit,
-            field: self.field,
-            model: self.model,
             tags: self.tags,
             all: self.all,
             status: self.status,
-            path: self.path,
+            path: input.path,
         })?;
 
         if self.json {
@@ -125,6 +121,82 @@ impl Execute for SearchCommand {
             Ok(())
         }
     }
+}
+
+impl SearchCommand {
+    pub fn audit_subcommand(&self) -> String {
+        let mode = match &self.command {
+            Some(SearchSubcommand::Similar(_)) => "similar",
+            Some(SearchSubcommand::Path(_)) => "path",
+            None => "query",
+        };
+        format!("{mode}:{}", self.kind)
+    }
+
+    fn search_input(&self) -> Result<SearchInput, OrbitError> {
+        match &self.command {
+            Some(SearchSubcommand::Similar(args)) => {
+                if self.query.as_deref().is_some_and(|query| !query.is_empty()) {
+                    return Err(OrbitError::InvalidInput(
+                        "`orbit search <query>` and `orbit search similar <id>` are mutually exclusive"
+                            .to_string(),
+                    ));
+                }
+                if self.hybrid {
+                    return Err(OrbitError::InvalidInput(
+                        "`--hybrid` only applies to `orbit search <query>`".to_string(),
+                    ));
+                }
+                Ok(SearchInput {
+                    query: None,
+                    hybrid: false,
+                    semantic: Some(args.id.clone()),
+                    path: None,
+                })
+            }
+            Some(SearchSubcommand::Path(args)) => {
+                if self.query.as_deref().is_some_and(|query| !query.is_empty()) {
+                    return Err(OrbitError::InvalidInput(
+                        "`orbit search <query>` and `orbit search path <path>` are mutually exclusive"
+                            .to_string(),
+                    ));
+                }
+                if self.hybrid {
+                    return Err(OrbitError::InvalidInput(
+                        "`--hybrid` only applies to `orbit search <query>`".to_string(),
+                    ));
+                }
+                Ok(SearchInput {
+                    query: None,
+                    hybrid: false,
+                    semantic: None,
+                    path: Some(args.path.clone()),
+                })
+            }
+            None => {
+                let query = self.query.clone().filter(|query| !query.trim().is_empty());
+                let Some(query) = query else {
+                    return Err(OrbitError::InvalidInput(
+                        "search requires an input. Usage: `orbit search <query>`, `orbit search similar <id>`, or `orbit search path <path>`"
+                            .to_string(),
+                    ));
+                };
+                Ok(SearchInput {
+                    query: Some(query),
+                    hybrid: self.hybrid,
+                    semantic: None,
+                    path: None,
+                })
+            }
+        }
+    }
+}
+
+struct SearchInput {
+    query: Option<String>,
+    hybrid: bool,
+    semantic: Option<String>,
+    path: Option<String>,
 }
 
 fn print_search_table(results: &[GlobalSearchHit]) {
