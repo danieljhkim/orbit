@@ -56,6 +56,3 @@ impl CodexCliTransport {
         self.model.as_deref()
     }
 }
-
-#[cfg(test)]
-mod tests;

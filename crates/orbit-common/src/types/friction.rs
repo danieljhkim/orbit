@@ -95,6 +95,3 @@ pub struct FrictionEntry {
     #[serde(default)]
     pub actor_identity: ActorIdentity,
 }
-
-#[cfg(test)]
-mod tests;

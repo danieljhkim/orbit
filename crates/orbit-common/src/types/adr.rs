@@ -260,6 +260,3 @@ pub fn normalize_adr_paths(raw_paths: Vec<String>) -> Vec<String> {
     }
     normalized
 }
-
-#[cfg(test)]
-mod tests;

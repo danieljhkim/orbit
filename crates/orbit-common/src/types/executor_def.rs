@@ -193,6 +193,3 @@ impl ExecutorDef {
         self.model_pair_override.as_ref()
     }
 }
-
-#[cfg(test)]
-mod tests;

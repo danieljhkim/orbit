@@ -169,6 +169,3 @@ pub fn normalize_agent_family_for_model(
 
     Ok(agent.or(inferred))
 }
-
-#[cfg(test)]
-mod tests;

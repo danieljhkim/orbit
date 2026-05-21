@@ -446,6 +446,3 @@ fn is_path_ancestor(parent: &str, child: &str) -> bool {
         .strip_prefix(parent)
         .is_some_and(|suffix| suffix.starts_with('/'))
 }
-
-#[cfg(test)]
-mod tests;

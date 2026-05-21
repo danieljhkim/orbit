@@ -132,7 +132,9 @@ fn parse_json_envelope(exec_result: &ExecutionResult) -> ResponseParseResult {
     Ok((envelope, state, trace))
 }
 
-fn synthesize_response(
+// Visible through `response.rs` to sibling-layout tests; keeping this private
+// would require nesting tests back under `envelope`.
+pub(in crate::types) fn synthesize_response(
     exec_result: &ExecutionResult,
 ) -> Option<(AgentResponseEnvelope, AgentResponseStatus, InvocationTrace)> {
     if is_timeout(exec_result) {
@@ -179,7 +181,9 @@ fn synthesize_response(
 // `usage` block carries token counts even when the embedded Orbit response
 // envelope is malformed or missing — losing that data on the synthesize path
 // is what made claude show as zero tokens on the scoreboard.
-fn synthesize_trace(exec_result: &ExecutionResult) -> InvocationTrace {
+// Visible through `response.rs` to sibling-layout tests; this is a narrow
+// crate-internal seam for fallback trace behavior.
+pub(in crate::types) fn synthesize_trace(exec_result: &ExecutionResult) -> InvocationTrace {
     match parse_json_documents(&exec_result.stdout) {
         Ok(documents) => extract_invocation_trace(&documents, exec_result.duration_ms),
         Err(_) => InvocationTrace {
@@ -252,7 +256,3 @@ fn deserialize_envelope(value: &Value) -> Option<AgentResponseEnvelope> {
     }
     serde_json::from_value(value.clone()).ok()
 }
-
-#[cfg(test)]
-#[path = "envelope/tests/mod.rs"]
-mod tests;

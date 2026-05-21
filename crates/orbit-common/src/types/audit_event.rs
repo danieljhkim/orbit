@@ -114,6 +114,3 @@ pub struct AuditStats {
     pub p95_duration_ms: i64,
     pub max_duration_ms: i64,
 }
-
-#[cfg(test)]
-mod tests;

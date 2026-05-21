@@ -182,6 +182,3 @@ pub struct BranchOutcome {
     pub branch_id: String,
     pub outcome: String,
 }
-
-#[cfg(test)]
-mod tests;

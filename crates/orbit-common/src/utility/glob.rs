@@ -135,6 +135,3 @@ pub fn compile_glob_regex(rule: &str) -> Result<Regex, regex::Error> {
     pattern.push('$');
     Regex::new(&pattern)
 }
-
-#[cfg(test)]
-mod tests;

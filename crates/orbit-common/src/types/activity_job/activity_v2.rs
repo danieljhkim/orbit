@@ -275,6 +275,3 @@ const fn default_cli_wall_clock_timeout_seconds() -> u64 {
 const fn default_groundhog_attempt_budget() -> u32 {
     3
 }
-
-#[cfg(test)]
-mod tests;

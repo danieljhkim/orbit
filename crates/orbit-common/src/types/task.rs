@@ -903,6 +903,3 @@ fn find_dependency_path(
     visiting.remove(current);
     None
 }
-
-#[cfg(test)]
-mod tests;

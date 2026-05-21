@@ -101,6 +101,3 @@ struct V2EnvelopeYaml<T> {
     metadata: crate::types::ResourceMetadata,
     spec: T,
 }
-
-#[cfg(test)]
-mod tests;

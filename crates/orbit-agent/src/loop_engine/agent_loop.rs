@@ -519,6 +519,3 @@ fn preview_request(req: &TurnRequest<'_>, transport: &dyn LoopTransport) -> Vec<
     });
     serde_json::to_vec(&value).unwrap_or_default()
 }
-
-#[cfg(test)]
-mod tests;
