@@ -11,13 +11,4 @@ pub(super) fn mcp_structured_content(value: Value) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn mcp_structured_content_preserves_existing_objects() {
-        let value = json!({ "ok": true });
-        assert_eq!(mcp_structured_content(value.clone()), value);
-    }
-}
+mod tests;
