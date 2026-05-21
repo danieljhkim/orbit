@@ -64,6 +64,82 @@ fn cli_orbit_search_federates_docs_and_adrs() {
 }
 
 #[test]
+fn cli_orbit_search_limit_help_describes_total_round_robin_limit() {
+    let workspace = TestWorkspace::new();
+
+    let output = workspace.run(&["search", "--help"], "orbit search help");
+    let help = String::from_utf8_lossy(&output.stdout);
+
+    assert!(help.contains("Maximum total results returned"));
+    assert!(help.contains("round-robin per kind"));
+    assert!(help.contains("[default: 10]"));
+}
+
+#[test]
+fn cli_orbit_search_path_notes_doc_branch_skip_in_json_and_table_modes() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/path-note.md",
+        "---\ntype: context\nsummary: path note\n---\nBody\n",
+    );
+
+    let response = workspace.run_json(
+        &["search", "path", "crates/orbit-cli/", "--json"],
+        "orbit search path json",
+    );
+    let notes = response["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| {
+            let note = note.as_str().expect("note");
+            note.contains("doc branch skipped") && note.contains("--path")
+        }),
+        "JSON notes should mention doc branch and --path: {notes:?}"
+    );
+
+    let output = workspace.run(
+        &["search", "path", "crates/orbit-cli/"],
+        "orbit search path table",
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("note: ")
+            && stderr.contains("doc branch skipped")
+            && stderr.contains("--path"),
+        "table-mode stderr should include prefixed note: {stderr}"
+    );
+}
+
+#[test]
+fn cli_orbit_search_hybrid_doc_json_reports_lexical_fallback_note() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/hybrid-note.md",
+        "---\ntype: context\nsummary: hybrid-note\n---\nhybrid-note body\n",
+    );
+
+    let response = workspace.run_json(
+        &[
+            "search",
+            "hybrid-note",
+            "--hybrid",
+            "--kind",
+            "doc",
+            "--json",
+        ],
+        "orbit search hybrid doc",
+    );
+    let notes = response["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| {
+            note.as_str()
+                .expect("note")
+                .contains("falling back to lexical doc search")
+        }),
+        "hybrid doc notes should preserve lexical fallback warning: {notes:?}"
+    );
+}
+
+#[test]
 fn cli_orbit_search_kind_adr_all_includes_superseded() {
     // ORB-00202: the old `orbit docs search --include-superseded` case is
     // covered by `orbit search --kind adr --all`.
