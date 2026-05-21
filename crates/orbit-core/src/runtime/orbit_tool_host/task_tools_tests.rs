@@ -970,6 +970,81 @@ fn task_update_tool_replaces_tags() {
 }
 
 #[test]
+fn task_update_tool_replaces_context_files_and_keeps_future_paths() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let src_dir = repo_root.join("src");
+    fs::create_dir_all(&src_dir).expect("create src dir");
+    fs::write(src_dir.join("lib.rs"), "pub fn before() {}\n").expect("write source file");
+    fs::write(src_dir.join("main.rs"), "fn main() {}\n").expect("write source file");
+
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Context update",
+                "description": "Exercise context_files replacement through tool input.",
+                "workspace": repo_root.to_string_lossy(),
+                "context_files": ["file:src/lib.rs"],
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task add tool succeeds");
+    let task_id = added["id"].as_str().expect("task id").to_string();
+    let created_updated_at = added["updated_at"]
+        .as_str()
+        .expect("created updated_at")
+        .to_string();
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "context_files": ["[\"file:src/main.rs\", \"file:src/future.rs\"]"],
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task update tool replaces context_files");
+
+    assert_eq!(
+        output.get("context_files"),
+        Some(&json!(["file:src/main.rs", "file:src/future.rs"]))
+    );
+    assert_ne!(
+        output.get("updated_at").and_then(Value::as_str),
+        Some(created_updated_at.as_str())
+    );
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": output["id"].as_str().expect("task id") }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+        )
+        .expect("task show tool succeeds");
+    assert_eq!(
+        shown.get("context_files"),
+        Some(&json!(["file:src/main.rs", "file:src/future.rs"]))
+    );
+
+    let events = runtime
+        .list_session_events(10)
+        .expect("session events")
+        .into_iter()
+        .filter(|event| event.event_type == "TaskUpdated")
+        .collect::<Vec<_>>();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.payload["data"]["id"] == shown["id"]),
+        "{events:#?}"
+    );
+}
+
+#[test]
 fn task_list_and_search_tools_filter_by_tags_with_and_semantics() {
     let (_root, runtime, _repo_root) = test_runtime();
     for (title, tags) in [
