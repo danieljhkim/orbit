@@ -55,6 +55,13 @@ fn run_pretooluse(
     };
 
     let caps = caps_from_env();
+    if !runtime
+        .learning_hook_target_is_searchable(&payload.target_path)
+        .map_err(|error| format!("classify learning target path: {error}"))?
+    {
+        return Ok(());
+    }
+
     let results = runtime
         .search_learnings(LearningSearchParams {
             path: Some(payload.target_path.clone()),

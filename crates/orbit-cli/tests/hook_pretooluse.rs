@@ -32,6 +32,41 @@ fn quiet_inputs_exit_successfully_without_stdout() {
 }
 
 #[test]
+fn global_skill_read_paths_exit_quietly_without_warning() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Catch-all reminders stay scoped to the workspace", &["**"]);
+    let absolute_skill = workspace.home.join(".orbit/skills/orbit/SKILL.md");
+
+    for (label, path) in [
+        (
+            "tilde global skill",
+            "~/.orbit/skills/orbit/SKILL.md".to_string(),
+        ),
+        (
+            "absolute global skill",
+            absolute_skill.to_string_lossy().to_string(),
+        ),
+    ] {
+        let payload = json!({"tool_name": "Read", "path": path}).to_string();
+        let output = workspace.run_hook(
+            &payload,
+            &[("ORBIT_SESSION_ID", "global-skill-session")],
+            label,
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "{label} stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("learning hook failed open"),
+            "{label} stderr: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn matching_payload_emits_reminder_state_and_audit_event() {
     let workspace = TestWorkspace::new();
     let learning = workspace.add_learning("Always keep hook reminders audited", &["src/**"]);
@@ -74,6 +109,34 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
         serde_json::from_str(event["arguments_json"].as_str().expect("arguments_json"))
             .expect("audit arguments JSON");
     assert_eq!(arguments["learning_ids"], json!([learning_id]));
+}
+
+#[test]
+fn in_workspace_absolute_payload_still_emits_reminder() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.add_learning("Absolute workspace paths still match", &["src/**"]);
+    let learning_id = learning["id"].as_str().expect("learning id");
+    let target = workspace.work.join("src/lib.rs");
+    let payload =
+        json!({"tool_name": "Read", "path": target.to_string_lossy().to_string()}).to_string();
+
+    let output = workspace.run_hook(
+        &payload,
+        &[("ORBIT_SESSION_ID", "absolute-workspace-session")],
+        "absolute workspace hook",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(&format!(
+            "- [{learning_id}] Absolute workspace paths still match"
+        )),
+        "stdout: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("learning hook failed open"),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]
