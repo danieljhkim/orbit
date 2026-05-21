@@ -72,6 +72,3 @@ pub(super) fn build_name_map(
     }
     Ok(map)
 }
-
-#[cfg(test)]
-mod tests;

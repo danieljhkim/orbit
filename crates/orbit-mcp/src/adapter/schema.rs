@@ -157,6 +157,3 @@ pub(super) fn property_for(param_type: &str) -> Map<String, Value> {
     }
     m
 }
-
-#[cfg(test)]
-mod tests;

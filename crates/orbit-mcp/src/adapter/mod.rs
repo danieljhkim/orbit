@@ -13,6 +13,9 @@ mod structured;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 

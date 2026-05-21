@@ -25,5 +25,8 @@ pub mod decision;
 pub mod engine;
 mod evaluator;
 
+#[cfg(test)]
+mod tests;
+
 pub use decision::PolicyDecision;
 pub use engine::{FsPolicyEvaluation, PolicyEngine};

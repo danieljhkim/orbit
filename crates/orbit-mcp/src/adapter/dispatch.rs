@@ -18,7 +18,11 @@ use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
-    fn refresh_name_map(&self, schemas: &[ToolSchema]) -> Result<(), ToolNameCollision> {
+    // pub(super) visibility widened from private so that adapter::tests (sibling under adapter)
+    // can exercise the name-mapping and canonical-name logic after collapsing the nested
+    // tests/ anti-pattern. These remain internal to the adapter module; not part of the
+    // crate-public API. See ORB-00242.
+    pub(super) fn refresh_name_map(&self, schemas: &[ToolSchema]) -> Result<(), ToolNameCollision> {
         let map = match build_name_map(schemas) {
             Ok(map) => map,
             Err(err) => {
@@ -30,19 +34,19 @@ impl OrbitToolServer {
         Ok(())
     }
 
-    fn replace_name_map(&self, map: HashMap<String, String>) {
+    pub(super) fn replace_name_map(&self, map: HashMap<String, String>) {
         if let Ok(mut guard) = self.name_map.write() {
             *guard = map;
         }
     }
 
-    fn clear_name_map(&self) {
+    pub(super) fn clear_name_map(&self) {
         if let Ok(mut guard) = self.name_map.write() {
             guard.clear();
         }
     }
 
-    fn canonical_name(&self, advertised: &str) -> Result<String, ToolNameCollision> {
+    pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, ToolNameCollision> {
         let schemas = self.host.list_tool_schemas();
         let map = match build_name_map(&schemas) {
             Ok(map) => map,
@@ -126,6 +130,3 @@ impl ServerHandler for OrbitToolServer {
         self.call_tool_request(req).await
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -1,4 +1,4 @@
-use super::*;
+use super::super::name_map::{build_name_map, sanitize_tool_name};
 use serde_json::Value;
 
 use super::super::test_support::tool_schema;
