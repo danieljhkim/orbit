@@ -1,11 +1,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use orbit_common::types::{OrbitError, WorkspacePaths};
 use orbit_store::{friction_store, global_executor_def_store, global_policy_def_store};
-use regex::{Captures, Regex};
 
 use crate::OrbitRuntime;
 use crate::command::activity::seed_default_activities;
@@ -21,8 +19,6 @@ use crate::config::{RawAgentRoleConfig, RuntimeConfig, seed_default_config};
 use crate::runtime::resolve_global_root;
 
 const LEGACY_WORKSPACE_SEEDED_SKILL_IDS: [&str; 2] = ["orbit-approve-task", "orbit-pr"];
-const DESIGN_CONVENTIONS_TEMPLATE: &str = include_str!("../../../../docs/design/CONVENTIONS.md");
-const DESIGN_DIR: &str = "docs/design";
 
 #[derive(Debug, Clone)]
 pub struct InitResult {
@@ -246,18 +242,6 @@ pub fn seed_default_orbitignore(workspace_root: &Path) -> Result<bool, OrbitErro
     Ok(true)
 }
 
-pub fn seed_design_conventions(repo_root: &Path, owner: &str) -> Result<bool, OrbitError> {
-    let conventions_path = repo_root.join(DESIGN_DIR).join("CONVENTIONS.md");
-    if conventions_path.exists() {
-        return Ok(false);
-    }
-    let owner = normalize_owner(owner);
-    let content = conventions_with_owner(&owner)?;
-    atomic_write_text(&conventions_path, &content)
-        .map_err(|error| OrbitError::Io(error.to_string()))?;
-    Ok(true)
-}
-
 pub fn build_initial_graph(
     workspace_root: &Path,
     orbit_dir: &Path,
@@ -307,42 +291,6 @@ pub(crate) fn skill_link_roots(base_root: &Path) -> Vec<PathBuf> {
 
 fn find_git_repo_root(start: &Path) -> Option<PathBuf> {
     crate::paths::find_git_repo_root(start)
-}
-
-fn conventions_with_owner(owner: &str) -> Result<String, OrbitError> {
-    Ok(owner_regex()?
-        .replacen(DESIGN_CONVENTIONS_TEMPLATE, 1, |captures: &Captures<'_>| {
-            let matched = captures
-                .get(0)
-                .map(|value| value.as_str().trim_start())
-                .unwrap_or_default();
-            if matched.starts_with("owner:") {
-                format!("owner: {owner}")
-            } else {
-                format!("**Owner:** {owner}")
-            }
-        })
-        .to_string())
-}
-
-fn normalize_owner(owner: &str) -> String {
-    let owner = owner.trim();
-    if owner.is_empty() {
-        "human".to_string()
-    } else {
-        owner.to_string()
-    }
-}
-
-fn owner_regex() -> Result<&'static Regex, OrbitError> {
-    static REGEX: OnceLock<Result<Regex, String>> = OnceLock::new();
-    REGEX
-        .get_or_init(|| {
-            Regex::new(r"(?m)^\s*(?:\*\*Owner:\*\*|owner:)\s*(.*?)\s*$")
-                .map_err(|error| error.to_string())
-        })
-        .as_ref()
-        .map_err(|error| OrbitError::Execution(format!("compile owner regex: {error}")))
 }
 
 fn seed_scoreboard_templates(orbit_root: &Path) -> Result<(), OrbitError> {
@@ -652,24 +600,6 @@ mod tests {
     use super::*;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn seed_design_conventions_rewrites_owner_once() {
-        let root = tempdir().expect("tempdir");
-        let seeded = seed_design_conventions(root.path(), "codex").expect("seed conventions");
-        assert!(seeded);
-        let conventions = fs::read_to_string(root.path().join(DESIGN_DIR).join("CONVENTIONS.md"))
-            .expect("read conventions");
-        assert!(conventions.contains("owner: codex"));
-        assert!(!conventions.contains("owner: daniel"));
-
-        let second = seed_design_conventions(root.path(), "claude").expect("idempotent");
-        assert!(!second);
-        let conventions = fs::read_to_string(root.path().join(DESIGN_DIR).join("CONVENTIONS.md"))
-            .expect("read conventions again");
-        assert!(conventions.contains("owner: codex"));
-        assert!(!conventions.contains("owner: claude"));
-    }
 
     #[test]
     fn global_init_seeds_skills_and_home_level_links() {

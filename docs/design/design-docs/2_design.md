@@ -3,7 +3,7 @@ summary: "Design Docs — Design"
 type: design
 title: "Design Docs — Design"
 owner: claude
-last_updated: 2026-05-17
+last_updated: 2026-05-20
 status: Draft
 feature: design-docs
 doc_role: design
@@ -120,7 +120,7 @@ Tool registry definitions in [`crates/orbit-tools/src/builtin/orbit/design/`](..
 
 ### 5.3 Init scaffolding behavior
 
-`init_feature` validates the name (lowercase, hyphenated, path-safe — rejects spaces, uppercase, special chars), errors if the folder already exists ([4_decisions.md ADR-006](./4_decisions.md) bans clobber), creates `specs/` and `references/`, and writes the four numbered docs with frontmatter populated from today's date and the caller's identity. The body of each scaffolded doc contains the required section headers as empty placeholders so the author starts from the canonical structure rather than a blank file. CONVENTIONS.md is *not* re-seeded by `init_feature` — it lives once at `docs/design/CONVENTIONS.md` and predates this tooling; `seed_design_conventions` exists for `orbit init` to drop a copy when scaffolding a fresh repo.
+`init_feature` validates the name (lowercase, hyphenated, path-safe — rejects spaces, uppercase, special chars), errors if the folder already exists ([4_decisions.md ADR-006](./4_decisions.md) bans clobber), creates `specs/` and `references/`, and writes the four numbered docs with frontmatter populated from today's date and the caller's identity. The body of each scaffolded doc contains the required section headers as empty placeholders so the author starts from the canonical structure rather than a blank file. CONVENTIONS.md is *not* re-seeded by `init_feature` — it lives once at `docs/design/CONVENTIONS.md` and predates this tooling; downstream repos that want a copy author it by hand.
 
 ---
 

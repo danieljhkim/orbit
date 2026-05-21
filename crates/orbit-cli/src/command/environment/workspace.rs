@@ -4,7 +4,6 @@ use orbit_common::types::{Workspace, WorkspaceStatus};
 use orbit_core::command::agent_rules::{InjectionAction, inject_agent_rules};
 use orbit_core::command::init::{
     InitOptions, build_initial_graph, init_workspace_at_root, seed_default_orbitignore,
-    seed_design_conventions,
 };
 use orbit_core::workspace_registry;
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -46,9 +45,6 @@ pub struct WorkspaceInitArgs {
     /// Set up PreToolUse learning hooks for auto-detected agent providers.
     #[arg(long)]
     pub hooks: bool,
-    /// Seed docs/design/CONVENTIONS.md when it does not already exist.
-    #[arg(long)]
-    pub design: bool,
     /// Inject (or refresh) an Orbit workflow-rules block in CLAUDE.md and AGENTS.md at the workspace root.
     #[arg(long)]
     pub inject_agent_rules: bool,
@@ -185,9 +181,6 @@ impl WorkspaceInitArgs {
                 ..Default::default()
             },
         )?;
-        if self.design {
-            seed_design_conventions(cwd, "human")?;
-        }
         seed_default_orbitignore(cwd)?;
         ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
 
@@ -274,7 +267,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: true,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -338,7 +330,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -394,7 +385,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -443,7 +433,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -488,7 +477,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -533,7 +521,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -578,7 +565,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -645,7 +631,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -667,100 +652,6 @@ mod tests {
             std::fs::read_to_string(workspace.path().join(".orbitignore"))
                 .expect("read .orbitignore"),
             default_orbitignore_template()
-        );
-    }
-
-    #[test]
-    fn workspace_init_design_flag_seeds_conventions() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
-        let workspace = tempdir().expect("workspace tempdir");
-        let home = tempdir().expect("home tempdir");
-
-        let previous_home = std::env::var_os("HOME");
-        let previous_cwd = std::env::current_dir().expect("capture cwd");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
-        std::env::set_current_dir(workspace.path()).expect("enter workspace");
-
-        let result = WorkspaceInitArgs {
-            name: None,
-            base_branch: "main".to_string(),
-            mcp: false,
-            hooks: false,
-            design: true,
-            inject_agent_rules: false,
-            refresh_defaults: false,
-        }
-        .execute_without_runtime(None);
-
-        std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-        match previous_home {
-            Some(value) => unsafe {
-                std::env::set_var("HOME", value);
-            },
-            None => unsafe {
-                std::env::remove_var("HOME");
-            },
-        }
-
-        result.expect("workspace init");
-        let conventions = std::fs::read_to_string(
-            workspace
-                .path()
-                .join("docs")
-                .join("design")
-                .join("CONVENTIONS.md"),
-        )
-        .expect("read conventions");
-        assert!(conventions.contains("owner: human"));
-        assert!(!conventions.contains("owner: daniel"));
-    }
-
-    #[test]
-    fn workspace_init_without_design_flag_leaves_conventions_absent() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
-        let workspace = tempdir().expect("workspace tempdir");
-        let home = tempdir().expect("home tempdir");
-
-        let previous_home = std::env::var_os("HOME");
-        let previous_cwd = std::env::current_dir().expect("capture cwd");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
-        std::env::set_current_dir(workspace.path()).expect("enter workspace");
-
-        let result = WorkspaceInitArgs {
-            name: None,
-            base_branch: "main".to_string(),
-            mcp: false,
-            hooks: false,
-            design: false,
-            inject_agent_rules: false,
-            refresh_defaults: false,
-        }
-        .execute_without_runtime(None);
-
-        std::env::set_current_dir(previous_cwd).expect("restore cwd");
-
-        match previous_home {
-            Some(value) => unsafe {
-                std::env::set_var("HOME", value);
-            },
-            None => unsafe {
-                std::env::remove_var("HOME");
-            },
-        }
-
-        result.expect("workspace init");
-        assert!(
-            !workspace
-                .path()
-                .join("docs")
-                .join("design")
-                .join("CONVENTIONS.md")
-                .exists()
         );
     }
 
@@ -787,7 +678,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }
@@ -836,7 +726,6 @@ mod tests {
             base_branch: "main".to_string(),
             mcp: false,
             hooks: false,
-            design: false,
             inject_agent_rules: false,
             refresh_defaults: false,
         }

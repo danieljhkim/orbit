@@ -2120,7 +2120,6 @@ dependencies = [
  "orbit-search",
  "orbit-store",
  "orbit-tools",
- "regex",
  "rusqlite",
  "serde",
  "serde_json",
