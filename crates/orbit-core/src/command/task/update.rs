@@ -79,9 +79,9 @@ impl OrbitRuntime {
         {
             let normalized = normalize_context_files_for_write(candidates, &prune_root)?;
             emit_graph_unavailable_warning_if_needed(&normalized, self.data_root_path());
-            let (kept, dropped) = prune_missing_context_files(&prune_root, normalized);
-            params.context_files = Some(kept);
-            dropped
+            // L-0030: explicit replacements preserve draft/future selectors; pruning stays read-time.
+            params.context_files = Some(normalized);
+            Vec::new()
         } else {
             let normalized = canonicalize_context_files_for_read(&task.context_files, &prune_root);
             if normalized != task.context_files {
