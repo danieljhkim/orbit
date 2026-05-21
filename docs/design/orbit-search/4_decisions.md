@@ -249,6 +249,7 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 - Cost: the `learning list --path` semantics flip is the only observable behavior change. Scripts calling `orbit learning list --path 'src/auth/**'` expecting exact-match scoped lookups will now also see paths *inside* that glob. The migration target for ex-`learning search --path` callers is unchanged because the new semantics match what that deleted command already did.
 - Cost: during phase 2, ADR carried `--tag` and `--path` placeholders in two flag positions; ORB-00203 closes that gap by making those positions real filters.
 - Cost: `AdrStatus` has no `Deprecated` variant, so `--all` adds `Superseded` only on ADRs. Asymmetric with task widening (which gets multiple terminal states); revisited if a deprecated state ever becomes load-bearing.
+- Audit-row granularity is preserved by mapping `--kind` onto the `subcommand` field. Before consolidation, `orbit task search` / `orbit docs search` / `orbit learning search` produced distinct `(command, subcommand)` rows; after consolidation, `orbit search --kind X` produces `(command="search", subcommand="<kind>")` so downstream audit queries can still distinguish task / doc / learning / adr searches. Free-text content vs. structural lookup is not currently captured in the audit schema and is out of scope for this ADR.
 
 ---
 

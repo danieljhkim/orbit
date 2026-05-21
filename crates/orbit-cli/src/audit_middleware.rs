@@ -337,9 +337,13 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
-        Commands::Search(_) => CommandMeta {
+        Commands::Search(cmd) => CommandMeta {
             command: "search".to_string(),
-            subcommand: None,
+            // ORB-00202: preserve the `--kind` discriminator in the audit row.
+            // The unified `orbit search` replaced three per-domain commands;
+            // without this, downstream queries lose the ability to distinguish
+            // task / doc / learning / adr searches.
+            subcommand: Some(cmd.kind.to_string()),
             tool_name: None,
             target_type: Some("search".to_string()),
             target_id: None,
@@ -834,6 +838,31 @@ mod tests {
         let meta = meta_for(&["orbit", "tool", "run", "orbit.graph.search"]);
 
         assert_eq!(meta.role, "agent");
+    }
+
+    #[test]
+    fn search_audit_meta_preserves_kind_discriminator() {
+        // ORB-00202: `orbit search --kind X` collapsed three per-domain
+        // `<command> search` rows into one. Ensure the `--kind` value is
+        // surfaced via `subcommand` so downstream audit queries can still
+        // distinguish task / doc / learning / adr searches.
+        let task = meta_for(&["orbit", "search", "foo", "--kind", "task"]);
+        assert_eq!(task.command, "search");
+        assert_eq!(task.subcommand.as_deref(), Some("task"));
+        assert_eq!(task.target_type.as_deref(), Some("search"));
+
+        let learning = meta_for(&["orbit", "search", "foo", "--kind", "learning"]);
+        assert_eq!(learning.subcommand.as_deref(), Some("learning"));
+
+        let doc = meta_for(&["orbit", "search", "foo", "--kind", "doc"]);
+        assert_eq!(doc.subcommand.as_deref(), Some("doc"));
+
+        let adr = meta_for(&["orbit", "search", "foo", "--kind", "adr"]);
+        assert_eq!(adr.subcommand.as_deref(), Some("adr"));
+
+        // Default `--kind all` is captured explicitly rather than left blank.
+        let all = meta_for(&["orbit", "search", "foo"]);
+        assert_eq!(all.subcommand.as_deref(), Some("all"));
     }
 
     #[test]
