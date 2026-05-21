@@ -395,6 +395,3 @@ pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
         "planning_duel_roles": roles_output["planning_duel_roles"].clone(),
     }))
 }
-
-#[cfg(test)]
-mod tests;

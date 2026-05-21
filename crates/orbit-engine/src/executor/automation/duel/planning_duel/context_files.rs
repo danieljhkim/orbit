@@ -155,6 +155,3 @@ fn bullet_entry(line: &str) -> Option<String> {
         Some(token.to_string())
     }
 }
-
-#[cfg(test)]
-mod tests;

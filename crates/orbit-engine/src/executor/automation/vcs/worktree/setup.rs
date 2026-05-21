@@ -73,7 +73,11 @@ pub(in crate::executor::automation) fn setup_worktree<H: RuntimeHost + TaskHost 
     ))
 }
 
-fn worktree_setup_output(
+// pub(crate) widened for tests/ layout migration (ORB-00240); test reaches via
+// exposed surface per docs/design-patterns/test_layout.md. (Logged via
+// orbit.task.update model=grok on ORB-00240 before this edit for the visibility
+// change on internal test helpers.)
+pub(crate) fn worktree_setup_output(
     run_id: &str,
     workspace_path: String,
     head_ref: String,
@@ -88,7 +92,11 @@ fn worktree_setup_output(
     })
 }
 
-fn ensure_worktree(
+// pub(crate) widened for tests/ layout migration (ORB-00240); test reaches via
+// exposed surface per docs/design-patterns/test_layout.md. (Logged via
+// orbit.task.update model=grok on ORB-00240 before this edit for the visibility
+// change on internal test helpers.)
+pub(crate) fn ensure_worktree(
     repo_root: &Path,
     worktree_path: &Path,
     start_point: &str,
@@ -223,6 +231,3 @@ fn fallback_run_id_for_tasks(task_ids: &[String]) -> String {
     let digest = Sha256::digest(sorted_ids.join(","));
     format!("bundle-{}", &format!("{digest:x}")[..8])
 }
-
-#[cfg(test)]
-mod tests;

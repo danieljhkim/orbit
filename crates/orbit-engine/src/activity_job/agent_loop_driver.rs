@@ -450,6 +450,3 @@ fn run_loop<T: LoopTransport>(
         Err(err) => Err(DispatchError::AgentLoopFailed(format!("{err:?}"))),
     }
 }
-
-#[cfg(test)]
-mod tests;

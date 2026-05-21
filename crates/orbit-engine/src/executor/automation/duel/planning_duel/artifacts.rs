@@ -20,7 +20,8 @@ use super::types::{
 
 const PLANNING_DUEL_ARTIFACT_PREFIX: &str = "planning-duel/";
 const PLANNING_DUEL_PLAN_EXTENSION: &str = ".md";
-const WINNER_ARTIFACT_PATH: &str = "planning-duel/winner.json";
+// pub(crate) widened for sibling tests ORB-00240 because the const was private (module-only) and the test helper winner_marker in the folded planning_duel/tests/artifacts.rs now requires crate-visible access via `use super::super::artifacts::*;` (first logged via orbit.task.update comment on ORB-00240 per rules).
+pub(crate) const WINNER_ARTIFACT_PATH: &str = "planning-duel/winner.json";
 const TASKS_DIR_NAME: &str = "tasks";
 const TASK_ARTIFACTS_DIR_NAME: &str = "artifacts";
 const AUTHOR_SIGNATURE_PREFIX: &str = "*authored by: ";
@@ -659,6 +660,3 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
         "winner_slot": winner_slot.map(|slot| slot.as_str().to_string()),
     }))
 }
-
-#[cfg(test)]
-mod tests;

@@ -14,6 +14,9 @@ mod log_format;
 mod parse;
 mod projections;
 
+#[cfg(test)]
+mod tests;
+
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 

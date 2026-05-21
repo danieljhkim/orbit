@@ -123,6 +123,3 @@ pub(crate) fn spawn_macos_sandboxed_with(
         _profile_temp: Some(profile_temp),
     })
 }
-
-#[cfg(test)]
-mod tests;

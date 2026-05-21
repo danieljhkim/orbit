@@ -101,6 +101,3 @@ fn evaluate_atom(atom: &str) -> Result<bool, OrbitError> {
         )))
     }
 }
-
-#[cfg(test)]
-mod tests;

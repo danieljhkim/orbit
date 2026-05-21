@@ -303,6 +303,3 @@ pub(super) fn record_planning_duel_scores<H: RuntimeHost + TaskHost + ?Sized>(
         "recorded": true,
     }))
 }
-
-#[cfg(test)]
-mod tests;

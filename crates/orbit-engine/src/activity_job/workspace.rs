@@ -51,6 +51,3 @@ fn validate_declared_workspace_path(path: &str) -> Result<Option<PathBuf>, Dispa
 pub(crate) fn canonicalize_dir(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
-
-#[cfg(test)]
-mod tests;

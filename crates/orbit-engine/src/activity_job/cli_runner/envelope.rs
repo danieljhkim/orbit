@@ -109,6 +109,3 @@ pub(in crate::activity_job) fn task_id_from_input(input: &Value) -> Option<&str>
                 .and_then(non_empty)
         })
 }
-
-#[cfg(test)]
-mod tests;

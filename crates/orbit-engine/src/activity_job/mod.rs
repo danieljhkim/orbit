@@ -16,6 +16,9 @@ pub mod orbit_tool_executor;
 pub mod tool_enforcement;
 pub mod workspace;
 
+#[cfg(test)]
+mod tests;
+
 pub use agent_loop_driver::{
     drive_agent_loop, drive_agent_loop_with_session, drive_agent_loop_with_tool_context,
     reset_replay_transport,

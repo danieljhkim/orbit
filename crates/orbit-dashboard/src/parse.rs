@@ -74,6 +74,3 @@ pub(crate) fn parse_duration_seconds(raw: &str) -> Result<u64, orbit_core::Orbit
     };
     Ok(secs)
 }
-
-#[cfg(test)]
-mod tests;

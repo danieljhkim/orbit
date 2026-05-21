@@ -556,6 +556,3 @@ fn escape_html(raw: &str) -> String {
     }
     escaped
 }
-
-#[cfg(test)]
-mod tests;

@@ -242,6 +242,3 @@ fn invocation_failed_outcome(err: OrbitError) -> AttemptOutcome {
     let message = err.to_string();
     AttemptOutcome::failed(AGENT_INVOCATION_FAILED, message)
 }
-
-#[cfg(test)]
-mod tests;

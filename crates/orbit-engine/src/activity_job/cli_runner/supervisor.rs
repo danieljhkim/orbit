@@ -286,6 +286,3 @@ fn line_text(raw_line: &[u8]) -> String {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     String::from_utf8_lossy(line).into_owned()
 }
-
-#[cfg(test)]
-mod tests;

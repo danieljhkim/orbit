@@ -14,3 +14,6 @@ pub(super) use worktree::{cleanup_worktree, setup_worktree};
 pub(in crate::executor::automation) use worktree::{
     ensure_shared_worktree, resolve_shared_worktree_path,
 };
+
+#[cfg(test)]
+mod tests;

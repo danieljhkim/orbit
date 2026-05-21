@@ -211,6 +211,3 @@ fn resolve_remote_base_ref(repo_root: &Path, branch: &str) -> Result<String, Orb
         "unable to resolve fetched remote base ref '{remote_base}' for task worktree creation"
     )))
 }
-
-#[cfg(test)]
-mod tests;
