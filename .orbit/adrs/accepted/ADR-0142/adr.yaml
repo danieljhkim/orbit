@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0142
 title: Bounded Live Log Tail
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - user-interface
 related_tasks:
 - T20260430-29
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - user-interface/ADR-004

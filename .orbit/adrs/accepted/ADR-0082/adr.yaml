@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0082
 title: Pack favors prompt-time responsiveness over inline refresh
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260505-5
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-025

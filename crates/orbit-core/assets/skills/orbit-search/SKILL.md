@@ -26,6 +26,12 @@ Use these shapes:
 orbit search "slow inference after model swap" --limit 5
 orbit tool run orbit.search --input '{"query":"slow inference after model swap","limit":5,"model":"<agent-family>"}'
 
+# Cross-artifact label and path filters
+orbit search --tag perf --kind all
+orbit search --path crates/orbit-search/src/lib.rs --kind all
+orbit tool run orbit.search --input '{"tag":"perf","kind":"all","model":"<agent-family>"}'
+orbit tool run orbit.search --input '{"path":"crates/orbit-search/src/lib.rs","kind":"all","model":"<agent-family>"}'
+
 # Hybrid BM25 + cosine over task fields; other kinds remain lexical
 orbit search "agent loop deadlock" --hybrid --kind task --limit 5
 orbit tool run orbit.search --input '{"query":"agent loop deadlock","hybrid":true,"kind":"task","limit":5,"model":"<agent-family>"}'
@@ -36,6 +42,8 @@ orbit tool run orbit.search --input '{"semantic":"<task-id>","limit":5,"model":"
 ```
 
 `--semantic <id>` is mutually exclusive with a positional query and uses task vectors, so it requires the companion.
+
+`--tag` uses AND semantics when repeated. `--path` is an applicability filter: task results use selector containment over `context_files`; learning and ADR results use glob-containment over their stored path scopes; docs are content-indexed and do not match by applicability path.
 
 ## Index Coverage
 

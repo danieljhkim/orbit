@@ -5,7 +5,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use orbit_common::types::{Adr, AdrStatus, LegacyValidation, NotFoundKind, OrbitError};
+use orbit_common::types::{
+    Adr, AdrStatus, LegacyValidation, NotFoundKind, OrbitError, normalize_adr_paths,
+    normalize_adr_tags,
+};
+use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 use rusqlite::params;
 
 use super::bundle::{AdrBundle, bundle_to_adr, read_bundle_at, validate_bundle, write_bundle_at};
@@ -84,6 +88,8 @@ impl AdrFileStore {
             last_updated: now,
             related_features: params.related_features,
             related_tasks: params.related_tasks,
+            tags: normalize_adr_tags(params.tags),
+            paths: normalize_adr_paths(params.paths),
             supersedes: Vec::new(),
             superseded_by: None,
             legacy_ids: Vec::new(),
@@ -164,8 +170,11 @@ impl AdrFileStore {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
     ) -> Result<Vec<Adr>, OrbitError> {
+        let normalized_path = normalized_filter_path(path)?;
         if self.index.is_none() {
             // Fall back to filesystem walk + in-memory filter. Preserves
             // test ergonomics where `AdrFileStore::new` skips the index.
@@ -178,6 +187,8 @@ impl AdrFileStore {
                     feature,
                     task_id,
                     legacy_id,
+                    tag,
+                    normalized_path.as_deref(),
                     validation_warned,
                 )
             });
@@ -196,7 +207,19 @@ impl AdrFileStore {
 
         let mut adrs = Vec::with_capacity(ids.len());
         for id in ids {
-            if let Some(adr) = self.get_adr(&id)? {
+            if let Some(adr) = self.get_adr(&id)?
+                && matches_filter(
+                    &adr,
+                    status,
+                    owner,
+                    feature,
+                    task_id,
+                    legacy_id,
+                    tag,
+                    normalized_path.as_deref(),
+                    validation_warned,
+                )
+            {
                 adrs.push(adr);
             }
         }
@@ -212,9 +235,12 @@ impl AdrFileStore {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError> {
+        let normalized_path = normalized_filter_path(path)?;
         let mut entries = Vec::new();
         for record in self.id_allocator.adr_allocations()? {
             if let Some(adr) = self.read_adr_allocation(&record)? {
@@ -225,6 +251,8 @@ impl AdrFileStore {
                     feature,
                     task_id,
                     legacy_id,
+                    tag,
+                    normalized_path.as_deref(),
                     validation_warned,
                 ) {
                     entries.push(AdrListEntry::Local(adr));
@@ -240,6 +268,8 @@ impl AdrFileStore {
                     feature,
                     task_id,
                     legacy_id,
+                    tag,
+                    normalized_path.as_deref(),
                     validation_warned,
                 )
             {
@@ -335,6 +365,12 @@ impl AdrFileStore {
         }
         if let Some(ref tasks) = fields.related_tasks {
             bundle.doc.adr.related_tasks = tasks.clone();
+        }
+        if let Some(ref tags) = fields.tags {
+            bundle.doc.adr.tags = normalize_adr_tags(tags.clone());
+        }
+        if let Some(ref paths) = fields.paths {
+            bundle.doc.adr.paths = normalize_adr_paths(paths.clone());
         }
         if let Some(ref supersedes) = fields.supersedes {
             bundle.doc.adr.supersedes = supersedes.clone();
@@ -634,6 +670,8 @@ fn matches_filter(
     feature: Option<&str>,
     task_id: Option<&str>,
     legacy_id: Option<&str>,
+    tag: Option<&str>,
+    normalized_path: Option<&str>,
     validation_warned: Option<bool>,
 ) -> bool {
     if let Some(status) = status
@@ -661,6 +699,20 @@ fn matches_filter(
     {
         return false;
     }
+    if let Some(tag) = tag
+        && !tag.trim().is_empty()
+        && !adr
+            .tags
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+    {
+        return false;
+    }
+    if let Some(path) = normalized_path
+        && !adr_paths_contain_path(&adr.paths, path)
+    {
+        return false;
+    }
     if let Some(warned) = validation_warned {
         let is_warned = matches!(adr.legacy_validation, LegacyValidation::Warned);
         if warned != is_warned {
@@ -668,6 +720,18 @@ fn matches_filter(
         }
     }
     true
+}
+
+fn normalized_filter_path(path: Option<&str>) -> Result<Option<String>, OrbitError> {
+    path.map(normalize_glob_path).transpose()
+}
+
+fn adr_paths_contain_path(rules: &[String], normalized_path: &str) -> bool {
+    rules.iter().any(|rule| {
+        compile_glob_regex(rule)
+            .map(|regex| regex.is_match(normalized_path))
+            .unwrap_or(false)
+    })
 }
 
 fn sort_by_id_desc(adrs: &mut [Adr]) {
@@ -700,12 +764,16 @@ fn remote_adr_matches_filter(
     feature: Option<&str>,
     task_id: Option<&str>,
     legacy_id: Option<&str>,
+    tag: Option<&str>,
+    normalized_path: Option<&str>,
     validation_warned: Option<bool>,
 ) -> bool {
     if owner.is_some()
         || feature.is_some()
         || task_id.is_some()
         || legacy_id.is_some()
+        || tag.is_some()
+        || normalized_path.is_some()
         || validation_warned.is_some()
     {
         return false;
@@ -736,6 +804,8 @@ fn insert_adr_row(conn: &rusqlite::Connection, adr: &Adr) -> Result<(), OrbitErr
         .map_err(|e| OrbitError::Store(e.to_string()))?;
     let related_tasks =
         serde_json::to_string(&adr.related_tasks).map_err(|e| OrbitError::Store(e.to_string()))?;
+    let tags = serde_json::to_string(&adr.tags).map_err(|e| OrbitError::Store(e.to_string()))?;
+    let paths = serde_json::to_string(&adr.paths).map_err(|e| OrbitError::Store(e.to_string()))?;
     let legacy_ids =
         serde_json::to_string(&adr.legacy_ids).map_err(|e| OrbitError::Store(e.to_string()))?;
     let supersedes =
@@ -746,10 +816,10 @@ fn insert_adr_row(conn: &rusqlite::Connection, adr: &Adr) -> Result<(), OrbitErr
     conn.execute(
         "INSERT INTO adrs (
             id, status, title, owner,
-            related_features, related_tasks, legacy_ids, supersedes,
+            related_features, related_tasks, tags, paths, legacy_ids, supersedes,
             superseded_by, validation_warnings, legacy_validation,
             created_at, accepted_at, last_updated
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             adr.id,
             adr.status.cli_name(),
@@ -757,6 +827,8 @@ fn insert_adr_row(conn: &rusqlite::Connection, adr: &Adr) -> Result<(), OrbitErr
             adr.owner,
             related_features,
             related_tasks,
+            tags,
+            paths,
             legacy_ids,
             supersedes,
             adr.superseded_by,
@@ -785,6 +857,8 @@ mod tests {
             owner: "claude".to_string(),
             related_features: Vec::new(),
             related_tasks: Vec::new(),
+            tags: Vec::new(),
+            paths: Vec::new(),
             body: body.to_string(),
         }
     }
@@ -1026,7 +1100,7 @@ mod tests {
         assert_eq!(count_index_rows(&store), 1);
 
         let listed = store
-            .list_adrs_filtered(None, None, None, None, None, None)
+            .list_adrs_filtered(None, None, None, None, None, None, None, None)
             .expect("list filtered");
         let ids: Vec<String> = listed.iter().map(|a| a.id.clone()).collect();
         assert_eq!(ids, vec![adr.id]);
@@ -1043,13 +1117,31 @@ mod tests {
             .expect("accept");
 
         let accepted = store
-            .list_adrs_filtered(Some(AdrStatus::Accepted), None, None, None, None, None)
+            .list_adrs_filtered(
+                Some(AdrStatus::Accepted),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("list accepted");
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].id, adr.id);
 
         let proposed = store
-            .list_adrs_filtered(Some(AdrStatus::Proposed), None, None, None, None, None)
+            .list_adrs_filtered(
+                Some(AdrStatus::Proposed),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("list proposed");
         assert!(proposed.is_empty(), "no proposed ADRs after promotion");
     }
@@ -1065,7 +1157,7 @@ mod tests {
         assert_eq!(count_index_rows(&store), 0);
 
         let listed = store
-            .list_adrs_filtered(None, None, None, None, None, None)
+            .list_adrs_filtered(None, None, None, None, None, None, None, None)
             .expect("list filtered");
         assert!(listed.is_empty());
     }
@@ -1079,6 +1171,8 @@ mod tests {
                 owner: "claude".to_string(),
                 related_features: Vec::new(),
                 related_tasks: Vec::new(),
+                tags: Vec::new(),
+                paths: Vec::new(),
                 body: "body".to_string(),
             })
             .expect("add claude");
@@ -1088,12 +1182,14 @@ mod tests {
                 owner: "codex".to_string(),
                 related_features: Vec::new(),
                 related_tasks: Vec::new(),
+                tags: Vec::new(),
+                paths: Vec::new(),
                 body: "body".to_string(),
             })
             .expect("add codex");
 
         let filtered = store
-            .list_adrs_filtered(None, Some("claude"), None, None, None, None)
+            .list_adrs_filtered(None, Some("claude"), None, None, None, None, None, None)
             .expect("filter by owner");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, claude.id);
@@ -1121,7 +1217,16 @@ mod tests {
             .expect("set legacy id");
 
         let filtered = store
-            .list_adrs_filtered(None, None, None, None, Some("activity-job/ADR-039"), None)
+            .list_adrs_filtered(
+                None,
+                None,
+                None,
+                None,
+                Some("activity-job/ADR-039"),
+                None,
+                None,
+                None,
+            )
             .expect("filter by legacy id");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].id, target.id);
@@ -1147,7 +1252,7 @@ mod tests {
         assert_eq!(count_index_rows(&store), 3);
 
         let listed = store
-            .list_adrs_filtered(None, None, None, None, None, None)
+            .list_adrs_filtered(None, None, None, None, None, None, None, None)
             .expect("list rebuilt");
         let mut ids: Vec<String> = listed.iter().map(|a| a.id.clone()).collect();
         ids.sort();
@@ -1171,13 +1276,22 @@ mod tests {
             .expect("accept b");
 
         let accepted = store
-            .list_adrs_filtered(Some(AdrStatus::Accepted), None, None, None, None, None)
+            .list_adrs_filtered(
+                Some(AdrStatus::Accepted),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .expect("fallback filter");
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].id, b.id);
 
         let all = store
-            .list_adrs_filtered(None, None, None, None, None, None)
+            .list_adrs_filtered(None, None, None, None, None, None, None, None)
             .expect("fallback list");
         // ID-desc sort: b was allocated after a.
         let ids: Vec<String> = all.iter().map(|adr| adr.id.clone()).collect();

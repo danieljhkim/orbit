@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0060
 title: Branch-scoped refs over a single shared ref
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260421-0358
 - T20260505-1
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-002

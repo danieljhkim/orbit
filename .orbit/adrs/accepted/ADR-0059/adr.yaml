@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0059
 title: Content-addressed objects + mutable refs
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260407-0222
 - T20260411-0424
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-001

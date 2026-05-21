@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0118
 title: Workspace-local semantic DB separate from global audit/tool DB
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - semantic-search
 related_tasks:
 - T20260510-9
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - semantic-search/ADR-006

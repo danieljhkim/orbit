@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0130
 title: Symbol identity stability is a load-bearing assumption; failure modes are named, not designed away
 status: proposed
@@ -8,6 +8,8 @@ last_updated: 2026-05-11T02:06:39.435248Z
 related_features:
 - task-lineage
 related_tasks: []
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - task-lineage/ADR-010

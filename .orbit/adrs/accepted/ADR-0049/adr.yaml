@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0049
 title: Friction reports are append-only records, not lifecycle tasks
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260510-13
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-024

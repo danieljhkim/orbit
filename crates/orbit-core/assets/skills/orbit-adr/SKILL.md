@@ -57,8 +57,10 @@ Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, a
 3. Write the body with exactly the required sections: `## Context`, `## Decision`, `## Consequences`.
 4. Include at least one consequences bullet starting with `Cost:`.
 5. Set `related_features` to feature folder names such as `task-artifacts`, `activity-job`, or `policy-sandbox`.
-6. Leave `related_tasks` empty for speculative proposed ADRs when no task exists yet. Do not create or invent a task just to satisfy an ADR proposal. Acceptance requires a real related task.
-7. **Close the loop with a source citation when the ADR has a code anchor.** If the ADR encodes a constraint enforced at a small set of code sites — a `ToolParam` requiring a field, a validation check, a guarded code path — drop a one-line citation comment at each enforcement site in the Rust source so the next reader of that line sees the rationale before they reason their way to weakening it:
+6. Populate `tags` with free-form labels when the decision should join cross-artifact label queries such as `orbit search --tag auth --kind all`. Keep `related_features` for structural feature-folder names.
+7. Populate `paths` with repo-relative globs when the decision constrains specific code or docs areas and should appear in pre-edit `orbit search --path <file> --kind all` lookups.
+8. Leave `related_tasks` empty for speculative proposed ADRs when no task exists yet. Do not create or invent a task just to satisfy an ADR proposal. Acceptance requires a real related task.
+9. **Close the loop with a source citation when the ADR has a code anchor.** If the ADR encodes a constraint enforced at a small set of code sites — a `ToolParam` requiring a field, a validation check, a guarded code path — drop a one-line citation comment at each enforcement site in the Rust source so the next reader of that line sees the rationale before they reason their way to weakening it:
 
    ```rust
    // <adr-id>: <one-line rationale>
@@ -114,6 +116,8 @@ Create a proposed ADR:
   "owner": "codex",
   "related_features": ["task-artifacts"],
   "related_tasks": [],
+  "tags": ["task-artifacts"],
+  "paths": ["crates/orbit-store/**"],
   "model": "<agent-family>"
 }
 ```

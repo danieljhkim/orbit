@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0173
 title: Dashboard owns invocation metrics surfaces
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 - activity-job
 related_tasks:
 - ORB-00190
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []

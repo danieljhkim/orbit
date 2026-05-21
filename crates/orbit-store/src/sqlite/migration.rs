@@ -109,9 +109,9 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
 
             -- ADR envelope index. Bodies live on disk under <root>/<state>/<id>/body.md;
             -- this table indexes the YAML envelope fields for filter queries.
-            -- Arrays (related_features, related_tasks, legacy_ids, supersedes,
-            -- validation_warnings) are stored as JSON-encoded strings so filters
-            -- can use `LIKE '%"<value>"%'` until the corpus warrants junction
+            -- Arrays (related_features, related_tasks, tags, paths, legacy_ids,
+            -- supersedes, validation_warnings) are stored as JSON-encoded strings
+            -- so filters can use `LIKE '%"<value>"%'` until the corpus warrants junction
             -- tables. Per ADR-010 in docs/design/adr-artifact, FTS5 over body
             -- content is owned by `orbit-search::vector`, not this schema.
             CREATE TABLE IF NOT EXISTS adrs (
@@ -121,6 +121,8 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
                 owner TEXT NOT NULL,
                 related_features TEXT NOT NULL DEFAULT '[]',
                 related_tasks TEXT NOT NULL DEFAULT '[]',
+                tags TEXT NOT NULL DEFAULT '[]',
+                paths TEXT NOT NULL DEFAULT '[]',
                 legacy_ids TEXT NOT NULL DEFAULT '[]',
                 supersedes TEXT NOT NULL DEFAULT '[]',
                 superseded_by TEXT,
@@ -139,12 +141,24 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
 
     ensure_agent_sessions_schema(conn)?;
     ensure_tools_schema(conn)?;
+    ensure_adr_index_schema(conn)?;
     ensure_audit_events_schema(conn)?;
     ensure_task_reservations_schema(conn)?;
     ensure_learning_index_schema(conn)?;
     ensure_invocation_schema(conn)?;
 
     Ok(())
+}
+
+fn ensure_adr_index_schema(conn: &Connection) -> Result<(), OrbitError> {
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE adrs ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "ALTER TABLE adrs ADD COLUMN paths TEXT NOT NULL DEFAULT '[]'",
+    )
 }
 
 fn ensure_learning_index_schema(conn: &Connection) -> Result<(), OrbitError> {
@@ -623,6 +637,8 @@ mod tests {
             })
             .collect();
         assert_eq!(primary_key_columns, vec!["id"]);
+        assert!(table_has_column(&conn, "adrs", "tags").expect("tags column"));
+        assert!(table_has_column(&conn, "adrs", "paths").expect("paths column"));
 
         for index_name in ["idx_adrs_status", "idx_adrs_owner"] {
             let count: i64 = conn

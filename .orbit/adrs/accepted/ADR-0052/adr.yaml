@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0052
 title: Structured checkpoints live in the task plan
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260420-0509-2
 - T20260420-0510-2
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - groundhog/ADR-003

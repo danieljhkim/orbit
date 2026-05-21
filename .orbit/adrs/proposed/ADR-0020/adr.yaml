@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0020
 title: Auto-generate per-feature `4_decisions.md` index
 status: proposed
@@ -8,6 +8,8 @@ last_updated: 2026-05-11T02:06:39.302388Z
 related_features:
 - adr-artifact
 related_tasks: []
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - adr-artifact/ADR-006

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0106
 title: Claude state surface includes `$HOME/.claude.json` siblings, not just `$HOME/.claude/`
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260508-13
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-014

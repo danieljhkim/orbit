@@ -159,8 +159,8 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        Cli, Commands, hook::HookSubcommand, mcp::McpSubcommand, semantic::SemanticSubcommand,
-        web::WebSubcommand,
+        Cli, Commands, hook::HookSubcommand, mcp::McpSubcommand, search::SearchKindArg,
+        semantic::SemanticSubcommand, web::WebSubcommand,
     };
 
     #[test]
@@ -272,6 +272,19 @@ mod tests {
             Commands::Search(args) => {
                 assert_eq!(args.query, None);
                 assert_eq!(args.semantic.as_deref(), Some("ORB-1"));
+            }
+            _ => panic!("expected top-level search command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_top_level_search_tag_only_filter() {
+        let cli = Cli::parse_from(["orbit", "search", "--tag", "perf", "--kind", "adr"]);
+        match cli.command {
+            Commands::Search(args) => {
+                assert_eq!(args.query, None);
+                assert_eq!(args.tags, vec!["perf"]);
+                assert_eq!(args.kind, SearchKindArg::Adr);
             }
             _ => panic!("expected top-level search command"),
         }

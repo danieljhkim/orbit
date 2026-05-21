@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0162
 title: Promote python decay checker to first-class `orbit design` CLI + MCP
 status: superseded
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - ORB-00019
 - ORB-00103
+tags: []
+paths: []
 supersedes: []
 superseded_by: ADR-0165
 legacy_ids:

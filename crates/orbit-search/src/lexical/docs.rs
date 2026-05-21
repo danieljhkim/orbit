@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use orbit_common::types::AdrStatus;
+use orbit_common::types::{AdrStatus, OrbitError};
+use orbit_common::utility::glob::{compile_glob_regex, normalize_glob_path};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -25,6 +26,8 @@ pub struct AdrSearchSource {
     pub title: String,
     pub status: AdrStatus,
     pub path: PathBuf,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
     pub related_features: Vec<String>,
 }
 
@@ -48,6 +51,8 @@ pub struct AdrSearchResult {
     pub title: String,
     pub status: AdrStatus,
     pub path: PathBuf,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
     pub related_features: Vec<String>,
     pub score: usize,
     pub matched_by: Vec<String>,
@@ -103,6 +108,16 @@ pub fn score_adr_record(adr: AdrSearchSource, query_lower: &str) -> Option<AdrSe
             matched_by.push(format!("related_feature:{feature}"));
         }
     }
+    for tag in &adr.tags {
+        let lower = tag.to_ascii_lowercase();
+        if lower == query_lower {
+            score += 120;
+            matched_by.push(format!("tag:{tag}"));
+        } else if lower.contains(query_lower) {
+            score += 60;
+            matched_by.push(format!("tag:{tag}"));
+        }
+    }
     let status = adr.status.cli_name();
     if status.contains(query_lower) {
         score += 30;
@@ -116,10 +131,21 @@ pub fn score_adr_record(adr: AdrSearchSource, query_lower: &str) -> Option<AdrSe
         title: adr.title,
         status: adr.status,
         path: adr.path,
+        tags: adr.tags,
+        paths: adr.paths,
         related_features: adr.related_features,
         score,
         matched_by,
     })
+}
+
+pub fn adr_paths_contain_path(rules: &[String], query_path: &str) -> Result<bool, OrbitError> {
+    let normalized = normalize_glob_path(query_path)?;
+    Ok(rules.iter().any(|rule| {
+        compile_glob_regex(rule)
+            .map(|regex| regex.is_match(&normalized))
+            .unwrap_or(false)
+    }))
 }
 
 pub fn sort_search_results(results: &mut [SearchResult]) {
@@ -163,6 +189,8 @@ mod tests {
                 .join(status.cli_name())
                 .join(id)
                 .join("body.md"),
+            tags: Vec::new(),
+            paths: Vec::new(),
             related_features: related_features
                 .into_iter()
                 .map(ToString::to_string)
@@ -270,5 +298,38 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["ADR-0001", "ADR-0002"]);
+    }
+
+    #[test]
+    fn score_adr_record_matches_tags() {
+        let mut adr = adr_fixture(
+            "ADR-0001",
+            "Boundary",
+            AdrStatus::Accepted,
+            vec!["orbit-docs"],
+        );
+        adr.tags = vec!["adr-schema".to_string(), "Cross-Cutting".to_string()];
+
+        let result = score_adr_record(adr, "cross-cutting").expect("tag match");
+
+        assert_eq!(result.score, 120);
+        assert_eq!(result.matched_by, vec!["tag:Cross-Cutting"]);
+    }
+
+    #[test]
+    fn adr_paths_containment_matches_positive_and_negative_cases() {
+        let paths = vec![
+            "crates/orbit-search/**".to_string(),
+            "docs/design/adr-artifact/**".to_string(),
+        ];
+
+        assert!(
+            adr_paths_contain_path(&paths, "crates/orbit-search/src/lib.rs")
+                .expect("positive match")
+        );
+        assert!(
+            !adr_paths_contain_path(&paths, "crates/orbit-core/src/lib.rs")
+                .expect("negative match")
+        );
     }
 }

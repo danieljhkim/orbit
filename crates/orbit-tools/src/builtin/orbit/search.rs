@@ -63,7 +63,7 @@ impl Tool for OrbitSearchTool {
             ToolParam {
                 name: "tag".to_string(),
                 description:
-                    "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning; ADR is deferred to phase 3."
+                    "AND-filter by tag. Repeat or pass an array. Applies to task, doc, learning, and ADR."
                         .to_string(),
                 param_type: "string_list".to_string(),
                 required: false,
@@ -87,7 +87,7 @@ impl Tool for OrbitSearchTool {
             ToolParam {
                 name: "path".to_string(),
                 description:
-                    "Filter to artifacts applicable to this filesystem path. Task: selector containment. Learning: glob-containment over scope.paths. ADR deferred (returns empty); doc out of scope (returns empty)."
+                    "Filter to artifacts applicable to this filesystem path. Task: selector containment. Learning and ADR: glob-containment over applicability globs. Doc out of scope (returns empty)."
                         .to_string(),
                 param_type: "string".to_string(),
                 required: false,

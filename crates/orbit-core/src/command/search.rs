@@ -91,8 +91,7 @@ pub struct GlobalSearchParams {
     pub field: Option<String>,
     pub model: Option<String>,
     /// AND-filter by tag. Repeat for multi-tag AND semantics. Applies to
-    /// task, doc, learning (and `all`). ADR is a no-op until phase 3 adds a
-    /// free-form `tags` field to ADR frontmatter.
+    /// task, doc, learning, ADR (and `all`).
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind(s). Mutually
     /// overridden by `status`.
@@ -101,9 +100,8 @@ pub struct GlobalSearchParams {
     /// takes precedence over the `all` widener.
     pub status: Vec<String>,
     /// Cross-kind applicability filter. Task: selector-mapping against
-    /// `context_files`. Learning: glob-containment against `scope.paths`.
-    /// ADR: deferred to phase 3 (returns empty). Doc: out of scope
-    /// (returns empty).
+    /// `context_files`. Learning and ADR: glob-containment against
+    /// applicability path globs. Doc: out of scope (returns empty).
     pub path: Option<String>,
 }
 
@@ -194,10 +192,16 @@ impl OrbitRuntime {
             .filter(|q| !q.is_empty())
             .map(str::to_string);
         let has_path = params.path.is_some();
+        let tag_filter: Vec<String> = params
+            .tags
+            .iter()
+            .map(|tag| tag.trim().to_lowercase())
+            .filter(|tag| !tag.is_empty())
+            .collect();
 
-        if query_owned.is_none() && !has_path {
+        if query_owned.is_none() && !has_path && tag_filter.is_empty() {
             return Err(OrbitError::InvalidInput(
-                "search requires either a query or --path".to_string(),
+                "search requires a query, --path, or --tag".to_string(),
             ));
         }
 
@@ -213,13 +217,6 @@ impl OrbitRuntime {
                     .to_string(),
             );
         }
-
-        let tag_filter: Vec<String> = params
-            .tags
-            .iter()
-            .map(|tag| tag.trim().to_lowercase())
-            .filter(|tag| !tag.is_empty())
-            .collect();
 
         if params.kind.includes_tasks() {
             results.extend(self.task_branch(
@@ -244,11 +241,7 @@ impl OrbitRuntime {
         }
 
         if params.kind.includes_adrs() {
-            // ADR `--tag` and `--path` are deferred to phase 3 — skip the ADR
-            // branch entirely when either filter is set.
-            if !has_path && tag_filter.is_empty() {
-                results.extend(self.adr_branch(&params, query_owned.as_deref(), limit)?);
-            }
+            results.extend(self.adr_branch(&params, query_owned.as_deref(), &tag_filter, limit)?);
         }
 
         if params.kind.includes_learnings() {
@@ -343,9 +336,32 @@ impl OrbitRuntime {
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let Some(query) = query else {
-            // Without a query, no doc results — docs are content-indexed, not
-            // applicability-indexed.
-            return Ok(Vec::new());
+            if tag_filter.is_empty() {
+                // Without a query or tag filter, no doc results — docs are
+                // content-indexed, not applicability-indexed.
+                return Ok(Vec::new());
+            }
+            let mut out = Vec::new();
+            for record in self.list_docs(None, None)? {
+                if !doc_has_all_tags(&record, tag_filter) {
+                    continue;
+                }
+                out.push(GlobalSearchHit {
+                    kind: "doc".to_string(),
+                    source: "lexical".to_string(),
+                    id: None,
+                    path: Some(record.path),
+                    title: None,
+                    summary: Some(record.frontmatter.summary),
+                    status: Some(record.frontmatter.doc_type.as_str().to_string()),
+                    best_field: None,
+                    snippet: None,
+                    score: None,
+                    matched_by: Some(tag_filter.iter().map(|tag| format!("tag:{tag}")).collect()),
+                });
+            }
+            out.truncate(limit);
+            return Ok(out);
         };
 
         let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
@@ -355,10 +371,11 @@ impl OrbitRuntime {
             if let SearchResult::Doc(result) = result {
                 if !tag_filter.is_empty() {
                     let record_tags = &result.record.tags;
-                    if !tag_filter
-                        .iter()
-                        .all(|tag| record_tags.iter().any(|candidate| candidate == tag))
-                    {
+                    if !tag_filter.iter().all(|tag| {
+                        record_tags
+                            .iter()
+                            .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+                    }) {
                         continue;
                     }
                 }
@@ -385,12 +402,32 @@ impl OrbitRuntime {
         &self,
         params: &GlobalSearchParams,
         query: Option<&str>,
+        tag_filter: &[String],
         limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
-        let Some(query) = query else {
-            return Ok(Vec::new());
-        };
         let statuses = resolve_adr_statuses(params)?;
+        let path = params.path.as_deref();
+
+        let Some(query) = query else {
+            let mut out = Vec::new();
+            for adr in self.stores().adrs().list()? {
+                if !statuses.contains(&adr.status) {
+                    continue;
+                }
+                if !tag_filter.is_empty() && !adr_has_all_tags(&adr, tag_filter) {
+                    continue;
+                }
+                if let Some(path) = path
+                    && !orbit_search::adr_paths_contain_path(&adr.paths, path)?
+                {
+                    continue;
+                }
+                out.push(adr_to_global_hit(adr, filter_matched_by(tag_filter, path)));
+            }
+            out.truncate(limit);
+            return Ok(out);
+        };
+
         let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
         // Pass `true` so the underlying lexical pass admits superseded ADRs;
         // we apply the status filter ourselves below.
@@ -399,6 +436,14 @@ impl OrbitRuntime {
         for result in docs {
             if let SearchResult::Adr(result) = result {
                 if !statuses.contains(&result.status) {
+                    continue;
+                }
+                if !tag_filter.is_empty() && !adr_result_has_all_tags(&result, tag_filter) {
+                    continue;
+                }
+                if let Some(path) = path
+                    && !orbit_search::adr_paths_contain_path(&result.paths, path)?
+                {
                     continue;
                 }
                 out.push(GlobalSearchHit {
@@ -561,6 +606,70 @@ fn learning_has_all_tags(learning: &orbit_common::types::Learning, tag_filter: &
     })
 }
 
+fn doc_has_all_tags(record: &crate::DocRecord, tag_filter: &[String]) -> bool {
+    tag_filter.iter().all(|needle| {
+        record
+            .frontmatter
+            .tags
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
+    })
+}
+
+fn adr_has_all_tags(adr: &orbit_common::types::Adr, tag_filter: &[String]) -> bool {
+    tag_filter.iter().all(|needle| {
+        adr.tags
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
+    })
+}
+
+fn adr_result_has_all_tags(result: &orbit_search::AdrSearchResult, tag_filter: &[String]) -> bool {
+    tag_filter.iter().all(|needle| {
+        result
+            .tags
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(needle))
+    })
+}
+
+fn adr_to_global_hit(
+    adr: orbit_common::types::Adr,
+    matched_by: Option<Vec<String>>,
+) -> GlobalSearchHit {
+    let path = std::path::PathBuf::from(".orbit")
+        .join("adrs")
+        .join(adr.status.cli_name())
+        .join(&adr.id)
+        .join("body.md");
+    GlobalSearchHit {
+        kind: "adr".to_string(),
+        source: "lexical".to_string(),
+        id: Some(adr.id),
+        path: Some(path.to_string_lossy().into_owned()),
+        title: Some(adr.title),
+        summary: None,
+        status: Some(adr.status.to_string()),
+        best_field: None,
+        snippet: None,
+        score: None,
+        matched_by,
+    }
+}
+
+fn filter_matched_by(tag_filter: &[String], path: Option<&str>) -> Option<Vec<String>> {
+    let mut matched = Vec::new();
+    matched.extend(tag_filter.iter().map(|tag| format!("tag:{tag}")));
+    if let Some(path) = path {
+        matched.push(format!("path:{path}"));
+    }
+    if matched.is_empty() {
+        None
+    } else {
+        Some(matched)
+    }
+}
+
 /// Test whether any of a task's `context_files` selectors apply to `query_path`.
 ///
 /// Selectors take three forms: `file:<path>`, `dir:<path>`, and
@@ -711,6 +820,7 @@ fn resolve_adr_statuses(params: &GlobalSearchParams) -> Result<Vec<AdrStatus>, O
 
 #[cfg(test)]
 mod tests {
+    use orbit_store::AdrCreateParams;
     use serde_json::json;
 
     use super::*;
@@ -728,6 +838,113 @@ mod tests {
         assert_eq!(
             serde_json::to_value(GlobalSearchMode::Neighbor).expect("serialize mode"),
             json!("neighbor")
+        );
+    }
+
+    fn add_tagged_adr(runtime: &OrbitRuntime) -> String {
+        runtime
+            .stores()
+            .adrs()
+            .add(AdrCreateParams {
+                title: "ADR tag path bridge".to_string(),
+                owner: "codex".to_string(),
+                related_features: Vec::new(),
+                related_tasks: Vec::new(),
+                tags: vec!["Perf".to_string(), "orbit-search".to_string()],
+                paths: vec!["crates/orbit-search/**".to_string()],
+                body: "## Context\n\nTest.\n".to_string(),
+            })
+            .expect("add adr")
+            .id
+    }
+
+    #[test]
+    fn global_search_adr_tag_filter_matches_case_insensitive() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let adr_id = add_tagged_adr(&runtime);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                kind: GlobalSearchKind::Adr,
+                tags: vec!["perf".to_string()],
+                ..Default::default()
+            })
+            .expect("search by tag");
+
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].id.as_deref(), Some(adr_id.as_str()));
+        assert_eq!(
+            response.results[0].matched_by.as_deref(),
+            Some(&["tag:perf".to_string()][..])
+        );
+
+        let negative = runtime
+            .global_search(GlobalSearchParams {
+                kind: GlobalSearchKind::Adr,
+                tags: vec!["security".to_string()],
+                ..Default::default()
+            })
+            .expect("search by missing tag");
+        assert!(negative.results.is_empty());
+    }
+
+    #[test]
+    fn global_search_adr_path_filter_matches_glob_containment() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let adr_id = add_tagged_adr(&runtime);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                kind: GlobalSearchKind::Adr,
+                path: Some("crates/orbit-search/src/lib.rs".to_string()),
+                ..Default::default()
+            })
+            .expect("search by path");
+
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].id.as_deref(), Some(adr_id.as_str()));
+        assert_eq!(
+            response.results[0].matched_by.as_deref(),
+            Some(&["path:crates/orbit-search/src/lib.rs".to_string()][..])
+        );
+
+        let negative = runtime
+            .global_search(GlobalSearchParams {
+                kind: GlobalSearchKind::Adr,
+                path: Some("crates/orbit-core/src/lib.rs".to_string()),
+                ..Default::default()
+            })
+            .expect("search by missing path");
+        assert!(negative.results.is_empty());
+    }
+
+    #[test]
+    fn global_search_all_unions_adr_hits_for_tag_and_path_filters() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let adr_id = add_tagged_adr(&runtime);
+
+        let response = runtime
+            .global_search(GlobalSearchParams {
+                kind: GlobalSearchKind::All,
+                tags: vec!["perf".to_string()],
+                path: Some("crates/orbit-search/src/lib.rs".to_string()),
+                ..Default::default()
+            })
+            .expect("search all by tag and path");
+
+        let adr_hit = response
+            .results
+            .iter()
+            .find(|hit| hit.kind == "adr" && hit.id.as_deref() == Some(adr_id.as_str()))
+            .expect("adr hit");
+        assert_eq!(
+            adr_hit.matched_by.as_deref(),
+            Some(
+                &[
+                    "tag:perf".to_string(),
+                    "path:crates/orbit-search/src/lib.rs".to_string(),
+                ][..]
+            )
         );
     }
 

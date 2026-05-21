@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0042
 title: Command-audit rows carry task / run / activity correlation IDs
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260428-7
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-017

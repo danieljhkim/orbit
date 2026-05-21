@@ -35,10 +35,16 @@ impl OrbitRuntime {
             let vote_count = self.learning_vote_summary(&learning.id)?.vote_count as u64;
             learning_vote_counts.push((learning.id.clone(), vote_count));
         }
-        let adrs =
-            self.stores()
-                .adrs()
-                .list_filtered(None::<AdrStatus>, None, None, None, None, None)?;
+        let adrs = self.stores().adrs().list_filtered(
+            None::<AdrStatus>,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
         let frictions = orbit_store::friction_store::list_frictions(
             &self.data_root().join("frictions"),
             &orbit_store::friction_store::FrictionListFilter::default(),

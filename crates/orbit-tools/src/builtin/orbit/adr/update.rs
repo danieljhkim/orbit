@@ -55,6 +55,22 @@ impl Tool for OrbitAdrUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "tags".to_string(),
+                description:
+                    "Replacement free-form ADR labels. Empty list clears existing tags; absence leaves them unchanged."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "paths".to_string(),
+                description:
+                    "Replacement repo-relative applicability globs. Empty list clears existing paths; absence leaves them unchanged."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "supersedes".to_string(),
                 description: "Replacement supersedes list.".to_string(),
                 param_type: "string_list".to_string(),

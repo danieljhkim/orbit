@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0004
 title: Seeded task-shipment workflows are deterministic, recoverable, and lock-aware
 status: accepted
@@ -25,6 +25,8 @@ related_tasks:
 - T20260505-10
 - T20260506-18
 - T20260509-14
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-023

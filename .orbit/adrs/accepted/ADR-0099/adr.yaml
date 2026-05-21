@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0099
 title: Children spawn as process-group leaders so orphan subprocesses are reapable
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260417-0558-4
 - T20260328-221810
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-007

@@ -21,6 +21,8 @@ pub struct AdrCreateParams {
     pub owner: String,
     pub related_features: Vec<String>,
     pub related_tasks: Vec<String>,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
     pub body: String,
 }
 
@@ -58,6 +60,8 @@ pub struct AdrDocumentUpdateParams {
     pub body: Option<String>,
     pub related_features: Option<Vec<String>>,
     pub related_tasks: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+    pub paths: Option<Vec<String>>,
     pub supersedes: Option<Vec<String>>,
     pub superseded_by: Option<Option<String>>,
     pub legacy_ids: Option<Vec<String>>,
@@ -368,6 +372,8 @@ pub trait AdrStoreBackend: Send + Sync {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
     ) -> Result<Vec<Adr>, OrbitError>;
     #[allow(clippy::too_many_arguments)]
@@ -378,6 +384,8 @@ pub trait AdrStoreBackend: Send + Sync {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError>;

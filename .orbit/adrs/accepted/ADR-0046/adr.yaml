@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0046
 title: Loop audit JSONL files materialize on first loop event
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260506-2
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-021

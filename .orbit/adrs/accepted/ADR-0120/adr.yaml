@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0120
 title: Version-aware companion refresh and quiet background indexing
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - semantic-search
 related_tasks:
 - T20260510-26
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - semantic-search/ADR-008

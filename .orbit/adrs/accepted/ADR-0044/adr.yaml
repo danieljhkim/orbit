@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0044
 title: Task-review feedback scores separately from PR review comments
 status: accepted
@@ -12,6 +12,8 @@ related_tasks:
 - T20260428-17
 - T20260430-4
 - T20260430-5
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-019

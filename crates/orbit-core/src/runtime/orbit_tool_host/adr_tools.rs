@@ -31,12 +31,16 @@ pub(super) fn add(
         optional_string_list_alias(&input, &["related_features", "features"])?.unwrap_or_default();
     let related_tasks =
         optional_string_list_alias(&input, &["related_tasks", "tasks"])?.unwrap_or_default();
+    let tags = optional_string_list_alias(&input, &["tags"])?.unwrap_or_default();
+    let paths = optional_string_list_alias(&input, &["paths"])?.unwrap_or_default();
 
     let adr = runtime.stores().adrs().add(AdrCreateParams {
         title,
         owner,
         related_features,
         related_tasks,
+        tags,
+        paths,
         body,
     })?;
     runtime.record_id_allocation_audit("adr", &adr.id)?;
@@ -64,7 +68,8 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 
     let adrs = runtime.stores().adrs();
     let adr = if by_legacy {
-        let matches = adrs.list_filtered(None, None, None, None, Some(&id_value), None)?;
+        let matches =
+            adrs.list_filtered(None, None, None, None, Some(&id_value), None, None, None)?;
         if matches.len() > 1 {
             return Err(OrbitError::InvalidInput(format!(
                 "legacy_id `{id_value}` resolves to {} ADRs; specify the canonical id",
@@ -97,6 +102,8 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let feature = optional_string(&input, "feature")?;
     let task_id = optional_string_alias(&input, &["task_id", "task"])?;
     let legacy_id = optional_string_alias(&input, &["legacy_id", "legacyId"])?;
+    let tag = optional_string(&input, "tag")?;
+    let path = optional_string(&input, "path")?;
     let validation_warned =
         super::input::optional_bool_alias(&input, &["validation_warned", "validation"])?;
     let include_remote =
@@ -109,6 +116,8 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         feature.as_deref(),
         task_id.as_deref(),
         legacy_id.as_deref(),
+        tag.as_deref(),
+        path.as_deref(),
         validation_warned,
         include_remote,
     )?;
@@ -137,6 +146,8 @@ pub(super) fn update(
         body: optional_string(&input, "body")?,
         related_features: optional_string_list_alias(&input, &["related_features", "features"])?,
         related_tasks: optional_string_list_alias(&input, &["related_tasks", "tasks"])?,
+        tags: optional_string_list_alias(&input, &["tags"])?,
+        paths: optional_string_list_alias(&input, &["paths"])?,
         supersedes: optional_string_list_alias(&input, &["supersedes"])?,
         superseded_by: None, // see below: clients use orbit.adr.supersede
         legacy_ids: optional_string_list_alias(&input, &["legacy_ids", "legacyIds"])?,
@@ -248,6 +259,8 @@ fn has_document_changes(fields: &AdrDocumentUpdateParams) -> bool {
         || fields.body.is_some()
         || fields.related_features.is_some()
         || fields.related_tasks.is_some()
+        || fields.tags.is_some()
+        || fields.paths.is_some()
         || fields.supersedes.is_some()
         || fields.legacy_ids.is_some()
         || fields.validation_warnings.is_some()
@@ -270,6 +283,8 @@ fn adr_to_json(adr: &Adr) -> Value {
         "last_updated": adr.last_updated.to_rfc3339(),
         "related_features": adr.related_features,
         "related_tasks": adr.related_tasks,
+        "tags": adr.tags,
+        "paths": adr.paths,
         "supersedes": adr.supersedes,
         "superseded_by": adr.superseded_by,
         "legacy_ids": adr.legacy_ids,
@@ -305,6 +320,8 @@ fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
         "owner": Value::Null,
         "related_features": Value::Null,
         "related_tasks": Value::Null,
+        "tags": Value::Null,
+        "paths": Value::Null,
         "legacy_ids": Value::Null,
     })
 }
@@ -636,6 +653,55 @@ mod tests {
         let arr = listed.as_array().expect("array");
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["id"], b["id"]);
+    }
+
+    #[test]
+    fn list_filters_by_tag_and_path() {
+        let (_guard, runtime, _repo_root) = test_runtime();
+        let target = add(
+            &runtime,
+            json!({
+                "title": "Tagged",
+                "owner": "codex",
+                "body": "b",
+                "tags": ["Perf", "orbit-search"],
+                "paths": ["crates/orbit-search/**"],
+            }),
+            None,
+            None,
+        )
+        .expect("target");
+        let _other = add(
+            &runtime,
+            json!({
+                "title": "Other",
+                "owner": "codex",
+                "body": "b",
+                "tags": ["security"],
+                "paths": ["crates/orbit-core/**"],
+            }),
+            None,
+            None,
+        )
+        .expect("other");
+
+        let by_tag = list(&runtime, json!({"tag": "PERF"})).expect("list by tag");
+        let tag_rows = by_tag.as_array().expect("tag array");
+        assert_eq!(tag_rows.len(), 1);
+        assert_eq!(tag_rows[0]["id"], target["id"]);
+
+        let by_path = list(&runtime, json!({"path": "crates/orbit-search/src/lib.rs"}))
+            .expect("list by path");
+        let path_rows = by_path.as_array().expect("path array");
+        assert_eq!(path_rows.len(), 1);
+        assert_eq!(path_rows[0]["id"], target["id"]);
+
+        let missing = list(
+            &runtime,
+            json!({"tag": "PERF", "path": "crates/orbit-core/src/lib.rs"}),
+        )
+        .expect("list by negative intersection");
+        assert!(missing.as_array().expect("missing array").is_empty());
     }
 
     #[test]

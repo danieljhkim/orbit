@@ -3,7 +3,7 @@ summary: "ADR Artifact — Overview"
 type: design
 title: "ADR Artifact — Overview"
 owner: claude
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 status: Draft
 feature: adr-artifact
 doc_role: overview
@@ -53,7 +53,9 @@ A typed record with structured metadata and a markdown body:
 - `supersedes` / `superseded_by` — optional ID references for chains
 - `related_features` — list of feature folder names this decision touches (N:M, not 1:1)
 - `related_tasks` — list of Orbit task IDs that proposed or shipped the decision
-- `legacy_id` — optional, set during migration (e.g. `"activity-job/ADR-017"`) so historical references resolve
+- `tags` — free-form labels for cross-artifact queries, distinct from constrained `related_features`
+- `paths` — repo-relative glob patterns for code or docs areas constrained by the decision
+- `legacy_ids` — optional aliases set during migration (e.g. `"activity-job/ADR-017"`) so historical references resolve
 
 Numbering is **global, not per-feature.** The current per-feature scheme (`ADR-001` exists in multiple folders) makes cross-folder reference ambiguous and is the first thing migration breaks. Globally unique IDs let any doc cite any ADR without folder qualification.
 

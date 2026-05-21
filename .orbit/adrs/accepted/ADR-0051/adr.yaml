@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0051
 title: HTTP-only first ship
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - groundhog
 related_tasks:
 - T20260420-0510-2
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - groundhog/ADR-002

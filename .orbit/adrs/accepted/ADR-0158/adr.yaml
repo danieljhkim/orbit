@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0158
 title: Four numbered docs with strict role separation
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - design-docs
 related_tasks:
 - ORB-00103
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - design-docs/ADR-001

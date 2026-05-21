@@ -45,6 +45,22 @@ impl Tool for OrbitAdrListTool {
                 required: false,
             },
             ToolParam {
+                name: "tag".to_string(),
+                description:
+                    "Filter by free-form ADR tag. Case-insensitive equality against any tag."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "path".to_string(),
+                description:
+                    "Filter by repo-relative path contained by any ADR `paths` glob."
+                        .to_string(),
+                param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "validation_warned".to_string(),
                 description:
                     "When true, return only ADRs with `legacy_validation = warned`. When false, exclude them."
@@ -64,7 +80,7 @@ impl Tool for OrbitAdrListTool {
         ToolSchema {
             name: "orbit.adr.list".to_string(),
             description:
-                "List ADRs filtered by status, owner, feature, task_id, legacy_id, or validation flag. Returns envelope-only records sorted descending by global ID."
+                "List ADRs filtered by status, owner, feature, task_id, legacy_id, tag, path, or validation flag. Returns envelope-only records sorted descending by global ID."
                     .to_string(),
             parameters,
             builtin: true,

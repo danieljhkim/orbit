@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0081
 title: Keep MCP graph exposure equal to the read-only graph tool set
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260428-3
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-023

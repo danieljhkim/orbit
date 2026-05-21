@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0102
 title: '`NoSandbox` is the default `Sandbox` impl; real isolation is deferred'
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260417-0550
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-010

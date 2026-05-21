@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0058
 title: Separate prompt-facing memory from audit record
 status: proposed
@@ -10,6 +10,8 @@ related_features:
 related_tasks:
 - T20260420-0509
 - T20260420-0510-2
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - groundhog/ADR-009

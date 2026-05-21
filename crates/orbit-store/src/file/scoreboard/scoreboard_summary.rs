@@ -1286,6 +1286,8 @@ mod tests {
             last_updated: Utc::now(),
             related_features: Vec::new(),
             related_tasks: Vec::new(),
+            tags: Vec::new(),
+            paths: Vec::new(),
             supersedes: Vec::new(),
             superseded_by: None,
             legacy_ids: Vec::new(),

@@ -5,10 +5,10 @@
 ### Breaking Changes
 
 - **Per-domain `search` subcommands removed; cross-kind filters on `orbit search`**: `orbit task search`, `orbit docs search`, `orbit learning search` (and the matching `orbit.task.search`, `orbit.docs.search`, `orbit.learning.search` MCP tools) are hard-removed. Replacement: `orbit search --kind {task,doc,learning,adr,all} <query>` for content-similarity, and `orbit <kind> list --filter` for structural filters. `orbit search` gains four new flags:
-  - `--tag <T>` (repeatable, AND semantics; applies to task/doc/learning; ADR returns empty until phase 3).
+  - `--tag <T>` (repeatable, AND semantics; applies to task/doc/learning/ADR).
   - `--all` — kind-aware status widener (task: adds `done,rejected,archived`; learning + adr: adds `superseded`; doc: no-op).
   - `--status <comma-set>` — explicit per-kind override.
-  - `--path <P>` — cross-kind applicability filter (task: selector-mapping over `context_files`; learning: glob-containment over `scope.paths`; ADR/doc no-op until phase 3).
+  - `--path <P>` — cross-kind applicability filter (task: selector-mapping over `context_files`; learning: glob-containment over `scope.paths`; ADR: glob-containment over `paths`; doc remains content-indexed and returns empty).
   The old `--include-superseded` mental model is covered by `orbit search --kind adr --all`. `orbit task list` and `orbit.task.list` gain a new `--path` parameter (selector-mapping). **Behavior change** (called out): `orbit learning list --path` flips from exact-match to glob-containment — a learning with `scope.paths: ['src/auth/**']` now returns on `--path src/auth/login.rs` (previously returned only on exact `src/auth/**` match). Audit event names `orbit.task.search` / `orbit.docs.search` / `orbit.learning.search` are orphaned by the no-shim deletion. ([ORB-00202])
 - **`orbit search` flag rename**: free-text vector ranking is now `--hybrid` / `hybrid: true`; task-neighbor lookup is now `--semantic <id>` / `semantic: "<id>"`. The old `--semantic` boolean and `--related <id>` surfaces are hard-removed; JSON mode values are now `hybrid` and `neighbor`. Historical phase-1 audit payloads carrying `semantic: true` are orphaned by the no-shim rename. ([ORB-00204])
 - **Design-doc decay-check surface removed**: `orbit design check`, `orbit.design.check` MCP tool, the wrapper script, and `make check-design-docs` are gone. Use `orbit design init/list/show` + same-PR update rule. ([ORB-00112])
@@ -16,6 +16,7 @@
 
 ### Features
 
+- **ADR envelope v2 tags and paths**: ADR `adr.yaml` envelopes now carry `schema_version: 2` plus `tags` and `paths` fields. Existing ADR envelopes are backfilled with explicit empty lists, `orbit.adr.add` / `orbit.adr.update` accept the new fields, `orbit.adr.list` filters by `tag` and `path`, and the phase-2 `orbit search --tag/--path --kind adr` deferrals are closed. ([ORB-00203])
 - **`orbit-guide` first-time-setup skill** with explicit carve-out from the `orbit` router; seeded skill set 11 → 12. ([ORB-00126])
 - **Secret redaction at the artifact write boundary**: action-keyed sanitizer at the tool-host entrance covers ADR / learning / task / review-thread / friction writes; whole-token credentials reject via `OrbitError::SensitiveInput`; responses gain `redactions_applied: bool`. ([ORB-00138])
 - **`orbit run duel-plan` non-blocking by default**; `--wait` opts back in. ([ORB-00125])

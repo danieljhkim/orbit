@@ -48,7 +48,7 @@ pub use companion::{
 pub use embedder::{DEFAULT_MODEL, Embedder, ModelSpec, default_model, supported_models};
 pub use lexical::docs::{
     AdrSearchResult, AdrSearchSource, DocSearchResult, DocSearchSource, SearchResult,
-    score_adr_record, score_doc_record, sort_search_results,
+    adr_paths_contain_path, score_adr_record, score_doc_record, sort_search_results,
 };
 pub use noop::NoopEmbedder;
 pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult};
