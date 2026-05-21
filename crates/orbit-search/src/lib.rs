@@ -37,12 +37,12 @@ mod vector;
 
 pub use commands::{
     CompanionStatus, DocIndexParams, DocIndexResult, DocSemanticHit, DocSemanticSearchParams,
-    DocSemanticSearchResult, ScoreBreakdown, SemanticHit, SemanticInstallParams,
-    SemanticInstallResult, SemanticReindexParams, SemanticReindexResult, SemanticRelatedParams,
-    SemanticRelatedResult, SemanticSearchParams, SemanticSearchResult, SemanticStatsResult,
-    SemanticUninstallParams, SemanticUninstallResult, doc_index, doc_semantic_search,
-    semantic_install, semantic_reindex, semantic_related, semantic_search, semantic_stats,
-    semantic_uninstall,
+    DocSemanticSearchResult, IndexKind, ScoreBreakdown, SemanticHit, SemanticIndexParams,
+    SemanticIndexResult, SemanticInstallParams, SemanticInstallResult, SemanticReindexParams,
+    SemanticReindexResult, SemanticRelatedParams, SemanticRelatedResult, SemanticSearchParams,
+    SemanticSearchResult, SemanticStatsResult, SemanticUninstallParams, SemanticUninstallResult,
+    TaskIndexResult, doc_index, doc_semantic_search, semantic_index, semantic_install,
+    semantic_reindex, semantic_related, semantic_search, semantic_stats, semantic_uninstall,
 };
 pub use companion::{
     CompanionPaths, INSTALL_REMEDIATION, locate_companion, platform_companion_filename, platform_id,

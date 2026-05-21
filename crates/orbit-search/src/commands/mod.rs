@@ -17,7 +17,10 @@ mod uninstall;
 pub use doc_index::{DocIndexParams, DocIndexResult};
 pub use doc_search::{DocSemanticHit, DocSemanticSearchParams, DocSemanticSearchResult};
 pub use install::{SemanticInstallParams, SemanticInstallResult};
-pub use reindex::{SemanticReindexParams, SemanticReindexResult};
+pub use reindex::{
+    IndexKind, SemanticIndexParams, SemanticIndexResult, SemanticReindexParams,
+    SemanticReindexResult, TaskIndexResult,
+};
 pub use related::{SemanticRelatedParams, SemanticRelatedResult};
 pub use search::{ScoreBreakdown, SemanticHit, SemanticSearchParams, SemanticSearchResult};
 pub use stats::{CompanionStatus, SemanticStatsResult};
@@ -78,12 +81,20 @@ pub fn semantic_uninstall(
     uninstall::run(params)
 }
 
+pub fn semantic_index(
+    vector_store: &VectorStore,
+    tasks: &[Task],
+    params: SemanticIndexParams,
+) -> Result<TaskIndexResult, OrbitError> {
+    reindex::run(vector_store, tasks, params)
+}
+
 pub fn semantic_reindex(
     vector_store: &VectorStore,
     tasks: &[Task],
     params: SemanticReindexParams,
 ) -> Result<SemanticReindexResult, OrbitError> {
-    reindex::run(vector_store, tasks, params)
+    semantic_index(vector_store, tasks, params)
 }
 
 pub fn doc_index(

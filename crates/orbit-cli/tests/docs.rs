@@ -256,10 +256,118 @@ fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
     assert!(!output.as_array().expect("array").is_empty());
 }
 
+#[test]
+#[cfg(unix)]
+fn cli_docs_index_is_semantic_docs_alias_for_json_output() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    workspace.write(
+        "docs/context.md",
+        "---\ntype: context\nsummary: Context document\ntags: [semantic]\n---\nBody\n",
+    );
+
+    let docs =
+        workspace.run_json_with_companion(&["docs", "index", "--force", "--json"], "docs index");
+    let semantic = workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "docs", "--force", "--json"],
+        "semantic index docs",
+    );
+
+    assert_eq!(semantic, docs);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_semantic_index_all_json_contains_tasks_and_docs() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    workspace.write(
+        "docs/context.md",
+        "---\ntype: context\nsummary: Context document\ntags: [semantic]\n---\nBody\n",
+    );
+    workspace.run_json(
+        &[
+            "task",
+            "add",
+            "--title",
+            "Index all",
+            "--description",
+            "Exercise task indexing.",
+            "--acceptance-criteria",
+            "both corpora indexed",
+            "--json",
+        ],
+        "task add",
+    );
+
+    let result = workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "all", "--force", "--json"],
+        "semantic index all",
+    );
+
+    assert_eq!(result["tasks"]["model_id"], "bge-small-en-v1.5");
+    assert!(
+        result["tasks"]["report"]["embedded_chunks"]
+            .as_u64()
+            .expect("task chunks")
+            > 0
+    );
+    assert_eq!(result["docs"]["model_id"], "bge-small-en-v1.5");
+    assert_eq!(result["docs"]["indexed_sources"], 1);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_semantic_index_all_keeps_task_rows_when_docs_fail() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    workspace.run_json(
+        &[
+            "task",
+            "add",
+            "--title",
+            "Partial progress",
+            "--description",
+            "Exercise all-kind resilience.",
+            "--acceptance-criteria",
+            "task rows persist",
+            "--json",
+        ],
+        "task add",
+    );
+    workspace.write(
+        "docs/broken.md",
+        "---\ntype: context\nsummary: Broken doc\n---\nBody\n",
+    );
+    let broken = workspace.work.join("docs/broken.md");
+    make_unreadable(&broken);
+
+    let output = workspace.run_failure_with_companion(
+        &["semantic", "index", "--kind", "all", "--json"],
+        "semantic index all with unreadable docs",
+    );
+    restore_readable(&broken);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("read"),
+        "stderr should explain docs read failure: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stats =
+        workspace.run_json_with_companion(&["semantic", "stats", "--json"], "semantic stats");
+    let rows = stats["rows"]["counts"].as_array().expect("counts");
+    assert!(
+        rows.iter()
+            .any(|row| row["source_kind"] == "task" && row["rows"].as_u64().unwrap_or(0) > 0),
+        "task rows should be present after docs failure: {rows:?}"
+    );
+}
+
 struct TestWorkspace {
     _temp: TempDir,
     home: PathBuf,
     work: PathBuf,
+    companion: PathBuf,
 }
 
 impl TestWorkspace {
@@ -267,12 +375,14 @@ impl TestWorkspace {
         let temp = tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let work = temp.path().join("work");
+        let companion = temp.path().join("mock-companion");
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&work).expect("work");
         let workspace = Self {
             _temp: temp,
             home,
             work,
+            companion,
         };
         workspace.run(
             &["workspace", "init", "--name", "docs-cli-test"],
@@ -307,6 +417,75 @@ impl TestWorkspace {
                 String::from_utf8_lossy(&output.stderr)
             )
         })
+    }
+
+    #[cfg(unix)]
+    fn run_with_companion(&self, args: &[&str], label: &str) -> Output {
+        let output = run_orbit_with_companion(&self.work, &self.home, args, Some(&self.companion));
+        assert!(
+            output.status.success(),
+            "{label} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    #[cfg(unix)]
+    fn run_json_with_companion(&self, args: &[&str], label: &str) -> Value {
+        let output = self.run_with_companion(args, label);
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{label} produced invalid JSON: {error}\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    }
+
+    #[cfg(unix)]
+    fn run_failure_with_companion(&self, args: &[&str], label: &str) -> Output {
+        let output = run_orbit_with_companion(&self.work, &self.home, args, Some(&self.companion));
+        assert!(
+            !output.status.success(),
+            "{label} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    #[cfg(unix)]
+    fn write_mock_companion(&self) {
+        write_executable(
+            &self.companion,
+            r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  if [ -z "$id" ]; then
+    id=0
+  fi
+  case "$line" in
+    *'"method":"info"'*)
+      printf '{"id":%s,"result":{"model_id":"bge-small-en-v1.5","dim":2,"max_input_tokens":512,"version":"0.3.1"}}\n' "$id"
+      ;;
+    *'"method":"token_count"'*)
+      printf '{"id":%s,"result":{"tokens":1}}\n' "$id"
+      ;;
+    *'"method":"embed"'*)
+      printf '{"id":%s,"result":{"vectors":[[1.0,0.0]]}}\n' "$id"
+      ;;
+    *'"method":"exit"'*)
+      printf '{"id":%s,"result":{"ok":true}}\n' "$id"
+      exit 0
+      ;;
+    *)
+      printf '{"id":%s,"error":{"code":"unknown","message":"unknown request"}}\n' "$id"
+      ;;
+  esac
+done
+"#,
+        );
     }
 
     fn tool_run(&self, tool: &str, input: Value, label: &str) -> Value {
@@ -353,12 +532,52 @@ impl TestWorkspace {
 }
 
 fn run_orbit(work: &PathBuf, home: &PathBuf, args: &[&str]) -> Output {
+    run_orbit_with_companion(work, home, args, None)
+}
+
+fn run_orbit_with_companion(
+    work: &PathBuf,
+    home: &PathBuf,
+    args: &[&str],
+    companion: Option<&std::path::Path>,
+) -> Output {
     let mut cmd = cargo_bin_cmd!("orbit");
     cmd.current_dir(work)
         .env("HOME", home)
         .env("ORBIT_HOME", home.join(".orbit-global"))
         .env_remove("ORBIT_ROOT")
-        .args(args)
-        .output()
-        .expect("run orbit")
+        .env_remove("ORBIT_SEARCH_COMPANION")
+        .args(args);
+    if let Some(path) = companion {
+        cmd.env("ORBIT_SEARCH_COMPANION", path);
+    }
+    cmd.output().expect("run orbit")
+}
+
+#[cfg(unix)]
+fn write_executable(path: &std::path::Path, content: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::write(path, content).expect("write executable");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod executable");
+}
+
+#[cfg(unix)]
+fn make_unreadable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o000);
+    fs::set_permissions(path, permissions).expect("chmod unreadable");
+}
+
+#[cfg(unix)]
+fn restore_readable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o644);
+    fs::set_permissions(path, permissions).expect("chmod readable");
 }

@@ -76,8 +76,9 @@ impl Tool for OrbitDocsIndexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.docs.index".to_string(),
-            description: "Build or refresh doc corpus embeddings under configured [docs].roots."
-                .to_string(),
+            description:
+                "Alias for orbit.semantic.index with kind=docs under configured [docs].roots."
+                    .to_string(),
             parameters: vec![
                 optional_param(
                     "model",
