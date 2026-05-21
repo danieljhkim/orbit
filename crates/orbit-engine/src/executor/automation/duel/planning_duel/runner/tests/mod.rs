@@ -21,8 +21,8 @@ use crate::context::{
 };
 use crate::executor::registry::ActivityExecutorRegistry;
 
-use crate::executor::automation::duel::planning_duel::artifacts;
 use super::super::run_planning_duel;
+use crate::executor::automation::duel::planning_duel::artifacts;
 
 struct PlanningDuelHost {
     task: Mutex<Task>,

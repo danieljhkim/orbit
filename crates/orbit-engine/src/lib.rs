@@ -58,7 +58,7 @@ pub use context::{
     AgentRoleConfig, AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost,
     ExecutionContext, ExecutorHost, ExecutorLookupHost, JobRunHost, JobRunResult, PrConfig,
     RuntimeHost, STALE_RUN_GRACE_SECONDS, TaskActivityUpdate, TaskAutomationUpdate, TaskHost,
-    TaskReadHost, TaskWriteHost, execution_working_directory,
+    TaskReadHost, TaskWriteHost, ensure_task_can_enter_workflow, execution_working_directory,
     execution_working_directory_with_task, input_workspace_path, redact_attempt_outcome,
 };
 pub use executor::automation::{

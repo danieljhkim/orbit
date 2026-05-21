@@ -24,7 +24,10 @@
 #   the first child pipeline finishes.
 # - The dispatched child pipeline runs while the reservation is still valid;
 #   a fresh `orbit.task.locks.reserve` call from another bundle will either
-#   wait or surface `task.locks.reserve.denied`. After `invoke_and_wait`
+#   wait or surface `task.locks.reserve.denied`. `invoke_and_wait` re-checks
+#   worktree workflow admission immediately before child dispatch; stale
+#   `review` / `done` tasks return a succeeded no-op output so the reservation
+#   can be released without launching a child run. After `invoke_and_wait`
 #   returns a terminal child-run status, `release_reservation` frees the
 #   reservation immediately before `require_child_success` fails the gate on
 #   a non-succeeded child. TTL remains the fallback for abandoned/crashed runs.
@@ -82,6 +85,8 @@ spec:
           base_branch: "{{ input.base_branch }}"
           base_sync: "{{ input.base_sync }}"
           auto_push: true
+        admission_task_ids: "{{ input.task_ids }}"
+        admission_workflow: worktree_setup
         timeout_seconds: "{{ input.dispatch_timeout_seconds }}"
 
     - id: release_reservation

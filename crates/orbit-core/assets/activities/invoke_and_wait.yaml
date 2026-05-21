@@ -16,7 +16,11 @@ spec:
     `failed`, `cancelled`, or `timeout`. A `timeout` here means the
     WAIT side of the activity exceeded `timeout_seconds`; the child
     Run itself may still be running — callers that care must inspect
-    `run_id` to decide follow-up.
+    `run_id` to decide follow-up. Gate workflows may pass
+    `admission_task_ids` and `admission_workflow` to re-check workflow
+    admission immediately before dispatch; stale `review` / `done` tasks
+    return a succeeded no-op output with `skipped: true` and do not submit a
+    child Run.
   input_schema_json:
     type: object
     required: [job_name, run_input]
@@ -35,6 +39,12 @@ spec:
       priority:
         type: string
         enum: [low, medium, high, critical]
+      admission_task_ids:
+        type: array
+        items:
+          type: string
+      admission_workflow:
+        type: string
   output_schema_json:
     type: object
     required: [status, run_id]
@@ -50,5 +60,13 @@ spec:
         type: object
       error:
         type: string
+      skipped:
+        type: boolean
+      reason:
+        type: string
+      task_statuses:
+        type: array
+        items:
+          type: object
   action: invoke_and_wait
   config: {}
