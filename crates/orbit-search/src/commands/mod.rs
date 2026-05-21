@@ -173,3 +173,6 @@ pub fn semantic_related(
 ) -> Result<SemanticRelatedResult, OrbitError> {
     related::run(vector_store, tasks, params)
 }
+
+#[cfg(test)]
+mod tests;
