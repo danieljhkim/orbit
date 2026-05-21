@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::Output;
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
@@ -73,6 +74,8 @@ fn cli_orbit_search_limit_help_describes_total_round_robin_limit() {
     assert!(help.contains("Maximum total results returned"));
     assert!(help.contains("round-robin per kind"));
     assert!(help.contains("[default: 10]"));
+    assert!(help.contains("ADRs use lexical matching regardless of --hybrid."));
+    assert!(!help.contains("learnings and ADRs use lexical matching"));
 }
 
 #[test]
@@ -137,6 +140,161 @@ fn cli_orbit_search_hybrid_doc_json_reports_lexical_fallback_note() {
         }),
         "hybrid doc notes should preserve lexical fallback warning: {notes:?}"
     );
+}
+
+#[test]
+fn cli_orbit_search_hybrid_learning_json_reports_lexical_fallback_note_missing_companion() {
+    let workspace = TestWorkspace::new();
+    let learning = workspace.run_json(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "hybrid-learning-note literal",
+            "--tag",
+            "hybrid-learning-note",
+            "--json",
+        ],
+        "add learning",
+    );
+
+    let response = workspace.run_json(
+        &[
+            "search",
+            "hybrid-learning-note",
+            "--hybrid",
+            "--kind",
+            "learning",
+            "--json",
+        ],
+        "orbit search hybrid learning missing companion",
+    );
+    let notes = response["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| {
+            note.as_str()
+                .expect("note")
+                .contains("falling back to lexical")
+        }),
+        "hybrid learning notes should preserve lexical fallback warning: {notes:?}"
+    );
+    assert_eq!(response["results"][0]["source"], "lexical");
+    assert_eq!(response["results"][0]["id"], learning["id"]);
+
+    let output = workspace.run(
+        &[
+            "search",
+            "hybrid-learning-note",
+            "--hybrid",
+            "--kind",
+            "learning",
+        ],
+        "orbit search hybrid learning missing companion table",
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("note: ") && stderr.contains("falling back to lexical"),
+        "table-mode stderr should include fallback note: {stderr}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_orbit_search_hybrid_learning_json_reports_lexical_fallback_note_empty_embeddings() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    let learning = workspace.run_json(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "hybrid-learning-empty literal",
+            "--tag",
+            "hybrid-learning-empty",
+            "--json",
+        ],
+        "add learning",
+    );
+
+    let response = workspace.run_json_with_companion(
+        &[
+            "search",
+            "hybrid-learning-empty",
+            "--hybrid",
+            "--kind",
+            "learning",
+            "--json",
+        ],
+        "orbit search hybrid learning empty embeddings",
+    );
+    let notes = response["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| {
+            note.as_str()
+                .expect("note")
+                .contains("falling back to lexical")
+        }),
+        "hybrid learning notes should preserve lexical fallback warning: {notes:?}"
+    );
+    assert_eq!(response["results"][0]["source"], "lexical");
+    assert_eq!(response["results"][0]["id"], learning["id"]);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_orbit_search_hybrid_learning_ranking_differs_from_lexical() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    let semantic = workspace.run_json(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "conceptual guidance",
+            "--body",
+            "semantic-target operational insight",
+            "--json",
+        ],
+        "add semantic learning",
+    );
+    let literal = workspace.run_json(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "foo literal guidance",
+            "--body",
+            "literal body",
+            "--priority",
+            "100",
+            "--json",
+        ],
+        "add literal learning",
+    );
+    workspace.run_json_with_companion(
+        &[
+            "semantic",
+            "index",
+            "--kind",
+            "learnings",
+            "--force",
+            "--json",
+        ],
+        "semantic index learnings",
+    );
+
+    let lexical = workspace.run_json(
+        &["search", "foo", "--kind", "learning", "--json"],
+        "learning lexical search",
+    );
+    let hybrid = workspace.run_json_with_companion(
+        &["search", "foo", "--kind", "learning", "--hybrid", "--json"],
+        "learning hybrid search",
+    );
+
+    assert_eq!(lexical["results"][0]["id"], literal["id"]);
+    assert_eq!(hybrid["results"][0]["id"], semantic["id"]);
+    assert_ne!(lexical["results"][0]["id"], hybrid["results"][0]["id"]);
 }
 
 #[test]
@@ -390,6 +548,88 @@ fn cli_semantic_index_all_json_contains_tasks_and_docs() {
     );
     assert_eq!(result["docs"]["model_id"], "bge-small-en-v1.5");
     assert_eq!(result["docs"]["indexed_sources"], 1);
+    assert_eq!(result["learnings"]["model_id"], "bge-small-en-v1.5");
+    assert_eq!(result["learnings"]["indexed_sources"], 0);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_semantic_index_learnings_is_idempotent_status_agnostic_and_sweeps_stale() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    let old = workspace.run_json(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "learning-index-old",
+            "--body",
+            "## Rule\nKeep the old rule indexed.\n\n## Why\nSuperseded records remain searchable when explicitly requested.\n",
+            "--tag",
+            "semantic",
+            "--json",
+        ],
+        "add old learning",
+    );
+    let new = workspace.run_json(
+        &[
+            "learning",
+            "add",
+            "--summary",
+            "learning-index-new",
+            "--body",
+            "## Rule\nReplacement rule.\n\n## How to apply\nUse the replacement.\n",
+            "--tag",
+            "semantic",
+            "--json",
+        ],
+        "add new learning",
+    );
+    let old_id = old["id"].as_str().expect("old id");
+    let new_id = new["id"].as_str().expect("new id");
+
+    let first = workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "learnings", "--json"],
+        "semantic index learnings",
+    );
+    assert_eq!(first["indexed_sources"], 2);
+    assert!(
+        first["report"]["embedded_chunks"].as_u64().unwrap_or(0)
+            > learning_dir_count(&workspace.work) as u64
+    );
+    assert!(
+        count_learning_embeddings(&workspace.work, None)
+            > learning_dir_count(&workspace.work) as i64
+    );
+
+    let second = workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "learnings", "--json"],
+        "semantic index learnings idempotent",
+    );
+    assert_eq!(second["report"]["embedded_chunks"], 0);
+    assert!(second["report"]["skipped_fields"].as_u64().unwrap_or(0) > 0);
+
+    workspace.run_json(
+        &["learning", "supersede", old_id, "--with", new_id, "--json"],
+        "supersede learning",
+    );
+    workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "learnings", "--json"],
+        "semantic index superseded learnings",
+    );
+    assert!(
+        count_learning_embeddings(&workspace.work, Some(old_id)) > 0,
+        "superseded learning should remain indexed"
+    );
+
+    fs::remove_dir_all(workspace.work.join(".orbit/learnings").join(new_id))
+        .expect("delete learning directory");
+    workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "learnings", "--json"],
+        "semantic index after learning deletion",
+    );
+    assert_eq!(count_learning_embeddings(&workspace.work, Some(new_id)), 0);
+    assert!(count_learning_embeddings(&workspace.work, Some(old_id)) > 0);
 }
 
 #[test]
@@ -549,7 +789,14 @@ while IFS= read -r line; do
       printf '{"id":%s,"result":{"tokens":1}}\n' "$id"
       ;;
     *'"method":"embed"'*)
-      printf '{"id":%s,"result":{"vectors":[[1.0,0.0]]}}\n' "$id"
+      case "$line" in
+        *'"texts":["foo"]'*|*semantic-target*)
+          printf '{"id":%s,"result":{"vectors":[[1.0,0.0]]}}\n' "$id"
+          ;;
+        *)
+          printf '{"id":%s,"result":{"vectors":[[0.0,1.0]]}}\n' "$id"
+          ;;
+      esac
       ;;
     *'"method":"exit"'*)
       printf '{"id":%s,"result":{"ok":true}}\n' "$id"
@@ -609,6 +856,40 @@ done
 
 fn run_orbit(work: &PathBuf, home: &PathBuf, args: &[&str]) -> Output {
     run_orbit_with_companion(work, home, args, None)
+}
+
+fn learning_dir_count(work: &std::path::Path) -> usize {
+    fs::read_dir(work.join(".orbit/learnings"))
+        .expect("read learnings")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("L-"))
+        })
+        .count()
+}
+
+fn count_learning_embeddings(work: &std::path::Path, source_id: Option<&str>) -> i64 {
+    let conn = Connection::open(work.join(".orbit/state/semantic.db")).expect("open semantic db");
+    match source_id {
+        Some(source_id) => conn
+            .query_row(
+                "SELECT COUNT(*) FROM embeddings WHERE source_kind = 'learning' AND source_id = ?1",
+                params![source_id],
+                |row| row.get(0),
+            )
+            .expect("count learning source embeddings"),
+        None => conn
+            .query_row(
+                "SELECT COUNT(*) FROM embeddings WHERE source_kind = 'learning'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count learning embeddings"),
+    }
 }
 
 fn run_orbit_with_companion(

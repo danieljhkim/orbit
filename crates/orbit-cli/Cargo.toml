@@ -37,6 +37,7 @@ url.workspace = true
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
+rusqlite.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 tempfile = "3"

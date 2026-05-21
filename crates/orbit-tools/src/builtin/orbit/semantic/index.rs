@@ -10,7 +10,7 @@ impl Tool for OrbitSemanticIndexTool {
         ToolSchema {
             name: "orbit.semantic.index".to_string(),
             description:
-                "Rebuild semantic embeddings for tasks, docs, or both in the active workspace."
+                "Rebuild semantic embeddings for tasks, docs, learnings, or all indexed corpora in the active workspace."
                     .to_string(),
             parameters: vec![
                 ToolParam {
@@ -28,7 +28,8 @@ impl Tool for OrbitSemanticIndexTool {
                 },
                 ToolParam {
                     name: "kind".to_string(),
-                    description: "Corpus to rebuild: tasks (default), docs, or all.".to_string(),
+                    description: "Corpus to rebuild: tasks (default), docs, learnings, or all."
+                        .to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
