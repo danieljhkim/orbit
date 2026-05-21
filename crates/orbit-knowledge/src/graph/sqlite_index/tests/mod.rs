@@ -4,3 +4,4 @@
 //! SQL vs navigator assertions for children/lineage/search etc).
 
 mod equivalence;
+mod reader;

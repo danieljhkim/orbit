@@ -407,5 +407,3 @@ fn selector_for_index_row(row: &GraphIndexNodeRow) -> String {
         })
 }
 
-#[cfg(test)]
-mod tests;

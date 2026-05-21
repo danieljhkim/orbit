@@ -60,7 +60,8 @@ fn gemini_state_dir(home: Option<&OsStr>) -> Option<PathBuf> {
 
 /// Grok Build documents `GROK_HOME` as the override for its config/state
 /// directory; otherwise it writes under `$HOME/.grok`.
-fn grok_state_dir(home: Option<&OsStr>, grok_home: Option<&OsStr>) -> Option<PathBuf> {
+// pub(crate) widened for sibling-layout tests in macos_sandbox/tests/provider_dirs.rs (ORB-00241)
+pub(crate) fn grok_state_dir(home: Option<&OsStr>, grok_home: Option<&OsStr>) -> Option<PathBuf> {
     non_empty_env_path(grok_home)
         .or_else(|| non_empty_env_path(home).map(|path| path.join(".grok")))
 }
@@ -170,12 +171,3 @@ fn emit_grok_json_file_allow(state_dir: &Path, file_name: &str, out: &mut String
         sbpl_escape(&tmp_regex)
     ));
 }
-
-/// Spawn `program` under `sandbox-exec -f <profile>`. Returns the running
-/// [`Child`] paired with a [`NamedTempFile`] holding the compiled profile;
-/// the caller must keep the `NamedTempFile` alive until the child exits, or
-/// the kernel may lose the profile mid-run.
-/// When `cwd` is set, it is applied to the outer `sandbox-exec` wrapper and
-/// inherited by the wrapped child.
-#[cfg(test)]
-mod tests;

@@ -108,5 +108,3 @@ fn subpath_root(rule: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests;

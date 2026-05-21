@@ -1,11 +1,12 @@
+use std::fs;
 use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use super::super::*;
+use super::super::hash::*;
 
 use crate::graph::object_store::RefName;
-use crate::pipeline::context::BuildConfig;
+use crate::pipeline::context::{BuildConfig, PipelineContext};
 
 #[test]
 fn compute_hashes_skips_missing_files_without_error() {

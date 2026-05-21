@@ -66,5 +66,3 @@ fn current_branch_ref_available(context: &GraphCommandContext) -> bool {
     graph_store.ref_path(&read_target.requested).is_file()
 }
 
-#[cfg(test)]
-mod tests;

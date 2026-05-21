@@ -1,3 +1,3 @@
 #![allow(missing_docs)]
 
-mod hash;
+mod object_store;

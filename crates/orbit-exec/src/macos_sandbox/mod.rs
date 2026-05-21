@@ -32,6 +32,8 @@ pub(crate) mod sbpl_filter;
 pub(crate) mod spawn;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests;
 
 pub use compile::compile_macos_sandbox_profile;
 pub use provider_dirs::{claude_state_dir_from_env, grok_state_dir_from_env};

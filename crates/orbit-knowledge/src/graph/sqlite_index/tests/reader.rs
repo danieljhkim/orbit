@@ -1,11 +1,11 @@
 //! Tests for GraphIndexReader::open / open_current (stale/missing/valid/readonly cases).
 //! Fixtures build minimal graphs via GraphObjectStore.
 
-use super::super::super::super::nodes::{
+use super::super::super::nodes::{
     BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode,
 };
-use super::super::super::super::object_store::GraphObjectStore;
-use super::super::super::*; // items from sqlite_index (e.g. GRAPH_SQLITE_INDEX_SCHEMA_VERSION) + siblings
+use super::super::super::object_store::GraphObjectStore;
+use super::super::*; // items from sqlite_index (e.g. GRAPH_SQLITE_INDEX_SCHEMA_VERSION) + siblings
 use rusqlite::Connection;
 
 #[test]
@@ -92,7 +92,7 @@ fn open_valid_index_uses_read_only_connection() {
 fn write_fixture_index() -> (
     tempfile::TempDir,
     GraphObjectStore,
-    super::super::super::super::object_store::CurrentRef,
+    super::super::super::object_store::CurrentRef,
 ) {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let store = GraphObjectStore::new(temp_dir.path());

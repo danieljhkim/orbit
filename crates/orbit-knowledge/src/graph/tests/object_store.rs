@@ -1,9 +1,93 @@
-//! Tests for write_graph (including sqlite index creation, idempotency, replacement for different refs).
+//! Unit tests for `object_store`, folded from nested anti-pattern per ORB-00241.
+//! Originally split by concern; combined into single sibling test file.
 
-use super::super::*;
-use crate::graph::nodes::{BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode};
+use super::super::object_store::*;
+
+// --- from read_options / write_graph concerns ---
+use super::super::nodes::{BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
+
+// --- dir_depth tests (for private helper) ---
+
+#[test]
+fn dir_depth_root_location_is_zero() {
+    // Regression for T20260421-0652: root location produced by
+    // `build_graph_dirs` is `"./"`, which must normalize to depth 0 so the
+    // depth-descending sort in `write_graph` writes root after its
+    // children.
+    assert_eq!(dir_depth("./"), 0);
+    assert_eq!(dir_depth("."), 0);
+    assert_eq!(dir_depth(""), 0);
+    assert_eq!(dir_depth("/"), 0);
+}
+
+#[test]
+fn dir_depth_counts_segments_not_slashes() {
+    assert_eq!(dir_depth("src/"), 1);
+    assert_eq!(dir_depth("src"), 1);
+    assert_eq!(dir_depth("src/foo/"), 2);
+    assert_eq!(dir_depth("src/foo/bar/"), 3);
+}
+
+#[test]
+fn dir_depth_ignores_current_dir_segments() {
+    // Paths like "./src/" should count "src" only — the leading "." is a
+    // relative-path marker, not a depth segment.
+    assert_eq!(dir_depth("./src/"), 1);
+    assert_eq!(dir_depth("./src/foo/"), 2);
+}
+
+#[test]
+fn dir_depth_is_strict_weak_order_root_first_by_descending_depth() {
+    // Depth-descending sort must place nested dirs before root.
+    let mut locations = vec!["./", "src/", "src/foo/"];
+    locations.sort_by_key(|location| std::cmp::Reverse(dir_depth(location)));
+    assert_eq!(locations, vec!["src/foo/", "src/", "./"]);
+}
+
+// --- read_options tests ---
+
+#[test]
+fn graph_read_options_gate_blob_source_hydration() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let store = GraphObjectStore::new(temp_dir.path());
+    let graph = fixture_graph();
+    let current_ref = store.write_graph(&graph).expect("write graph");
+    let ref_name = RefName::new("main").expect("valid ref");
+    store
+        .write_ref_atomic(&ref_name, &current_ref)
+        .expect("write ref");
+
+    let default_graph = store
+        .read_graph(
+            &ref_name,
+            None,
+            Some(&ref_name),
+            GraphReadOptions::default(),
+        )
+        .expect("read graph without hydration");
+    assert_eq!(default_graph.files[0].source, "");
+    assert!(default_graph.files[0].source_blob_hash.is_some());
+    assert_eq!(default_graph.leaves[0].source, "");
+    assert!(default_graph.leaves[0].source_blob_hash.is_some());
+
+    let hydrated_graph = store
+        .read_graph(
+            &ref_name,
+            None,
+            Some(&ref_name),
+            GraphReadOptions {
+                hydrate_file_source: true,
+                hydrate_leaf_source: true,
+            },
+        )
+        .expect("read graph with hydration");
+    assert_eq!(hydrated_graph.files[0].source, graph.files[0].source);
+    assert_eq!(hydrated_graph.leaves[0].source, graph.leaves[0].source);
+}
+
+// --- write_graph tests ---
 
 #[test]
 fn write_graph_creates_sqlite_index_schema_and_rows() {
@@ -151,7 +235,7 @@ fn write_graph_replaces_sqlite_index_for_different_ref() {
     assert_eq!(old_leaf_count, 0);
 }
 
-// --- test helpers (local to this concern) ---
+// --- shared test helpers ---
 
 fn fixture_graph() -> CodebaseGraphV1 {
     CodebaseGraphV1 {

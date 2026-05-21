@@ -235,5 +235,3 @@ fn try_summary_via_sql_index(
     }))
 }
 
-#[cfg(test)]
-mod tests;

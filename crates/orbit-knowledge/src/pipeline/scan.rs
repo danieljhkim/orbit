@@ -212,5 +212,3 @@ fn git_ignored_paths(repo_path: &Path, paths: &[PathBuf]) -> HashSet<PathBuf> {
     ignored
 }
 
-#[cfg(test)]
-mod tests;

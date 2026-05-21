@@ -147,6 +147,3 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
 
     Ok(out)
 }
-
-#[cfg(test)]
-mod tests;
