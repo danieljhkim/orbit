@@ -18,7 +18,7 @@ use orbit_knowledge::metrics::{KnowledgeStatsSummary, aggregate as aggregate_kno
 use rusqlite::{Connection, params};
 use tower::ServiceExt;
 
-use super::router;
+use super::super::router;
 use super::test_support::{body_json, seed_run};
 
 const RUN_ID: &str = "jrun-metrics-api";

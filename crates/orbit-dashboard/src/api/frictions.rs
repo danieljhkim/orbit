@@ -172,7 +172,3 @@ fn run_friction_tool(
     }
     runtime.run_tool(name, input)
 }
-
-#[cfg(test)]
-#[path = "frictions_tests.rs"]
-mod tests;

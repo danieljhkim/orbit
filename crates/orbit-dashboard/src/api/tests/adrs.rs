@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::super::router;
-use super::super::test_support::body_json;
+use super::test_support::body_json;
 
 const ADR_BODY: &str = "## Context\nFixture context.\n\n## Decision\nFixture decision.\n\n## Consequences\n- Dashboard behavior is observable.\n- Cost: Test fixtures carry enough ADR shape to pass validation.\n";
 

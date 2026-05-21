@@ -1,20 +1,28 @@
 //! Test-only allowlist: the original tests under orbit-cli passed the same lints via
 //! the crate-level test harness configuration; duplicated here for the extracted crate.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use orbit_core::InvocationRecord;
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use axum::response::Response;
 use chrono::Utc;
 use orbit_core::OrbitRuntime;
 use serde_json::json;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
+use super::super::diagnostics::{
+    diagnostics_friction_row, diagnostics_metrics_values, global_error_rows_from_path,
+    parse_structured_error_line,
+};
 use super::super::router;
-use super::super::test_support::{body_json, write_lines};
-use super::*;
+use super::test_support::{body_json, write_lines};
+use orbit_common::utility::blob_store::BlobStore;
 
 async fn request_dashboard_errors(runtime: OrbitRuntime) -> Response {
     Router::new()
@@ -89,7 +97,7 @@ fn diagnostics_metrics_values_adapt_invocation_records() {
     let ts = chrono::DateTime::parse_from_rfc3339("2026-05-05T03:29:45Z")
         .expect("parse timestamp")
         .with_timezone(&Utc);
-    let rows = diagnostics_metrics_values(vec![InvocationRecord {
+    let rows = diagnostics_metrics_values(vec![orbit_core::InvocationRecord {
         id: 7,
         ts,
         job_run_id: "jrun-1".to_string(),

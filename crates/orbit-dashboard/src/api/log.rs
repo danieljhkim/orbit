@@ -63,7 +63,9 @@ pub(super) async fn stream_log(Query(q): Query<LogQuery>) -> Response {
     }
 }
 
-fn read_log_snapshot_from_path(
+// Widened to pub(super) so tests under api/tests/ (per-module layout migration ORB-00224)
+// can exercise the snapshot/stream logic without per-handler tests/ subdirs.
+pub(super) fn read_log_snapshot_from_path(
     path: &std::path::Path,
     query: &LogQuery,
 ) -> Result<Vec<RenderedLogEvent>, orbit_core::OrbitError> {
@@ -81,7 +83,8 @@ fn read_log_snapshot_from_path(
         .map_err(|e| orbit_core::OrbitError::Io(format!("read log {}: {e}", path.display())))
 }
 
-fn log_filters(query: &LogQuery) -> Result<LogFilters, orbit_core::OrbitError> {
+// Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
+pub(super) fn log_filters(query: &LogQuery) -> Result<LogFilters, orbit_core::OrbitError> {
     LogFilters::from_query_parts(
         query.target.as_deref().and_then(non_empty_string),
         query.level.as_deref().and_then(non_empty_string),
@@ -123,7 +126,8 @@ fn spawn_log_sse_frames(path: PathBuf, filters: LogFilters) -> mpsc::Receiver<St
     rx
 }
 
-fn read_appended_log_events(
+// Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
+pub(super) fn read_appended_log_events(
     path: &std::path::Path,
     filters: &LogFilters,
     offset: &mut u64,
@@ -164,7 +168,8 @@ fn read_appended_log_events(
     Ok(events)
 }
 
-fn format_sse_frame(event: &RenderedLogEvent) -> Result<String, serde_json::Error> {
+// Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
+pub(super) fn format_sse_frame(event: &RenderedLogEvent) -> Result<String, serde_json::Error> {
     serde_json::to_string(event).map(|json| format!("data: {json}\n\n"))
 }
 
@@ -177,120 +182,5 @@ impl Stream for ReceiverSseStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.rx.poll_recv(cx).map(|item| item.map(Ok))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::Write;
-
-    use serde_json::json;
-    use tempfile::tempdir;
-
-    use super::super::test_support::write_lines;
-    use super::*;
-
-    #[test]
-    fn log_snapshot_filters_target_level_and_since() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("orbit.jsonl");
-        write_lines(
-            &path,
-            &[
-                json!({
-                    "timestamp": "2026-04-27T01:00:01Z",
-                    "level": "INFO",
-                    "target": "orbit.policy.deny",
-                    "fields": {"tool": "fs.read", "path": "/tmp/a"}
-                })
-                .to_string(),
-                json!({
-                    "timestamp": "2026-04-27T01:00:03Z",
-                    "level": "WARN",
-                    "target": "orbit.policy.deny",
-                    "fields": {"tool": "fs.write", "path": "/etc/passwd"}
-                })
-                .to_string(),
-                json!({
-                    "timestamp": "2026-04-27T01:00:04Z",
-                    "level": "ERROR",
-                    "target": "orbit.job.step_finished",
-                    "fields": {"step_id": "build", "outcome": "failed", "success": false}
-                })
-                .to_string(),
-            ],
-        );
-
-        let events = read_log_snapshot_from_path(
-            &path,
-            &LogQuery {
-                limit: Some(10),
-                target: Some("orbit.policy".to_string()),
-                level: Some("warn".to_string()),
-                since: Some("2026-04-27T01:00:02Z".to_string()),
-            },
-        )
-        .expect("snapshot");
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].source, "policy");
-        assert_eq!(events[0].code, "DENY");
-        assert_eq!(events[0].level, "warn");
-        assert!(events[0].message_html.contains("<b>path</b>="));
-    }
-
-    #[test]
-    fn log_snapshot_rejects_limit_above_max() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("orbit.jsonl");
-        write_lines(&path, &[]);
-
-        let err = read_log_snapshot_from_path(
-            &path,
-            &LogQuery {
-                limit: Some(LOG_MAX_LIMIT + 1),
-                ..LogQuery::default()
-            },
-        )
-        .expect_err("limit should be rejected");
-
-        assert!(err.to_string().contains("limit must be <= 500"));
-    }
-
-    #[test]
-    fn log_stream_framing_emits_one_data_frame_per_appended_line() {
-        let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("orbit.jsonl");
-        write_lines(&path, &[]);
-        let mut offset = std::fs::metadata(&path).expect("metadata").len();
-        let mut leftover = String::new();
-
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .expect("append");
-        writeln!(
-            file,
-            "{}",
-            json!({
-                "timestamp": "2026-04-27T01:00:05Z",
-                "level": "INFO",
-                "target": "orbit.job.step_started",
-                "fields": {"job_run_id": "run-1", "step_id": "build"}
-            })
-        )
-        .expect("write event");
-        file.flush().expect("flush");
-
-        let events =
-            read_appended_log_events(&path, &LogFilters::default(), &mut offset, &mut leftover)
-                .expect("read appended");
-        assert_eq!(events.len(), 1);
-
-        let frame = format_sse_frame(&events[0]).expect("frame");
-        assert!(frame.starts_with("data: "));
-        assert!(frame.ends_with("\n\n"));
-        assert!(frame.contains("\"source\":\"job\""));
-        assert!(frame.contains("build"));
     }
 }
