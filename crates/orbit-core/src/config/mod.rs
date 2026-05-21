@@ -24,3 +24,6 @@ pub(crate) use bootstrap::seed_default_config;
 pub(crate) use persistence::PersistenceConfig;
 pub use raw::{RawAgentRoleConfig, RawCrewEntry};
 pub(crate) use runtime::{CodexExecutionPolicy, DuelConfig, ExecutionEnvPolicy, RuntimeConfig};
+
+#[cfg(test)]
+mod tests;

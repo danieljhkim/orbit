@@ -5,7 +5,7 @@
 //! - `query` — list/show/history entry points plus backend queries.
 //! - `reconcile` — stale-run reconciliation, terminal timing repair, audit parsing.
 //! - `owner` — process signalling, owner identity classification, liveness probes (Unix + shims).
-//! - `tests/*` — helpers and regression tests split by concern (cancel, reconcile, owner identity).
+//! - `tests/*` — helpers and regression tests split by concern (actions, reconcile, owner).
 
 mod actions;
 mod owner;
