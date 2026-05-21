@@ -2,7 +2,11 @@ use orbit_common::types::{
     OrbitError, ToolParam, ToolSchema, optional_string, optional_string_list_alias,
 };
 use orbit_knowledge::commands::pack::{self, PackInput};
-use serde_json::{Value, json};
+use orbit_knowledge::{
+    KnowledgeEntryKind, KnowledgePackAutoRefreshDiagnostic, KnowledgePackDiagnostics,
+    KnowledgePackResult,
+};
+use serde_json::Value;
 
 use crate::{Tool, ToolContext};
 
@@ -81,11 +85,13 @@ impl Tool for OrbitKnowledgePackTool {
             explicit_knowledge_dir,
         );
 
-        Ok(if summary {
-            summarize_pack_json(pack)
-        } else {
-            pack
-        })
+        if summary {
+            summarize_pack(&mut pack);
+        }
+        pack.refresh_metric_fields();
+
+        serde_json::to_value(pack)
+            .map_err(|error| OrbitError::Execution(format!("serialize knowledge pack: {error}")))
     }
 }
 
@@ -143,7 +149,7 @@ fn parse_refresh(input: &Value) -> Result<bool, OrbitError> {
 }
 
 fn add_refresh_diagnostics(
-    pack: &mut Value,
+    pack: &mut KnowledgePackResult,
     auto_refresh_skipped: bool,
     explicit_ref: Option<&str>,
     explicit_knowledge_dir: bool,
@@ -151,54 +157,37 @@ fn add_refresh_diagnostics(
     if !auto_refresh_skipped || explicit_ref.is_some() || explicit_knowledge_dir {
         return;
     }
-    let Some(obj) = pack.as_object_mut() else {
-        return;
-    };
 
-    obj.insert(
-        "diagnostics".to_string(),
-        json!({
-            "auto_refresh": {
-                "status": "skipped",
-                "reason": "orbit.graph.pack reads the existing graph snapshot by default so selector gathering returns promptly.",
-                "remediation": "Run `orbit graph build` for an explicit refresh, or pass `refresh: true` when an inline refresh is acceptable."
-            }
-        }),
-    );
+    pack.diagnostics
+        .get_or_insert_with(KnowledgePackDiagnostics::default)
+        .auto_refresh = Some(KnowledgePackAutoRefreshDiagnostic {
+        status: "skipped".to_string(),
+        reason: "orbit.graph.pack reads the existing graph snapshot by default so selector gathering returns promptly.".to_string(),
+        remediation: "Run `orbit graph build` for an explicit refresh, or pass `refresh: true` when an inline refresh is acceptable.".to_string(),
+    });
 }
 
-fn summarize_pack_json(mut pack: Value) -> Value {
-    let Some(entries) = pack.get_mut("entries").and_then(Value::as_array_mut) else {
-        return pack;
-    };
-
-    for entry in entries {
+fn summarize_pack(pack: &mut KnowledgePackResult) {
+    for entry in &mut pack.entries {
         summarize_pack_entry(entry);
     }
-
-    pack
 }
 
-fn summarize_pack_entry(entry: &mut Value) {
-    let Some(obj) = entry.as_object_mut() else {
-        return;
-    };
-    if obj.get("kind").and_then(Value::as_str) != Some("leaf") {
+fn summarize_pack_entry(entry: &mut orbit_knowledge::KnowledgePackEntry) {
+    if entry.kind != KnowledgeEntryKind::Leaf {
         return;
     }
 
-    obj.remove("source");
+    entry.source = None;
 
-    let Some(selector) = obj.get("selector").and_then(Value::as_str) else {
-        return;
-    };
-    let Some(file_path) = selector
+    let Some(file_path) = entry
+        .selector
         .strip_prefix("symbol:")
         .and_then(|rest| rest.split_once('#').map(|(path, _)| path.to_string()))
     else {
         return;
     };
-    obj.insert("file".to_string(), Value::String(file_path));
+    entry.file = Some(file_path);
 }
 
 #[cfg(test)]

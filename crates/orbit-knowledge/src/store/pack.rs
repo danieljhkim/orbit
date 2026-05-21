@@ -187,27 +187,7 @@ impl KnowledgeStore {
 }
 
 pub(super) fn unresolved_entry(selector: String) -> KnowledgePackEntry {
-    KnowledgePackEntry {
-        selector,
-        kind: KnowledgeEntryKind::Unresolved,
-        reason: None,
-        name: None,
-        language: None,
-        description: None,
-        extension: None,
-        imports: None,
-        exports: None,
-        re_exports: None,
-        children: None,
-        symbol_summary: None,
-        source: None,
-        hint: None,
-        start_line: None,
-        end_line: None,
-        input_signature: None,
-        output_signature: None,
-        resolved: false,
-    }
+    KnowledgePackEntry::unresolved(selector)
 }
 
 fn project_entry(
@@ -247,6 +227,7 @@ fn project_entry(
 
     KnowledgePackEntry {
         selector,
+        file: None,
         kind,
         reason: None,
         name: str_field("name"),

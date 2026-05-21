@@ -1,9 +1,7 @@
-use serde_json::Value;
-
 use crate::commands::{GraphCommandContext, knowledge_error_from_orbit};
 use crate::graph::GraphReadOptions;
 use crate::graph::object_store::{GraphObjectStore, resolve_graph_read_target};
-use crate::{KnowledgeError, Selector};
+use crate::{KnowledgeError, KnowledgePackResult, Selector};
 
 #[derive(Debug, Clone)]
 pub struct PackInput {
@@ -16,7 +14,7 @@ pub struct PackInput {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackResult {
-    pub pack: Value,
+    pub pack: KnowledgePackResult,
     pub auto_refresh_skipped: bool,
 }
 
@@ -27,7 +25,7 @@ pub fn run(input: PackInput) -> Result<PackResult, KnowledgeError> {
     let auto_refresh_skipped = !input.refresh && current_branch_ref_available(&input.context);
     let skip_auto_refresh = input.context.explicit_knowledge_dir || auto_refresh_skipped;
     let pack = service
-        .pack_json(
+        .pack_result(
             &selectors,
             input.context.workspace_root.as_deref(),
             skip_auto_refresh,

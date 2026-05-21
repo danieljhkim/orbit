@@ -1,15 +1,15 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
-use serde_json::Value;
 
 use crate::extract::{self, Language};
 use crate::graph::object_store::{GraphObjectStore, GraphReadOptions, resolve_graph_read_target};
 use crate::lock::GraphLockGuard;
 use crate::pipeline::context::BuildConfig;
 use crate::{
-    KnowledgeError, KnowledgeStore, Selector, WorkingGraph, WorkingLeaf, load_task_working_graph,
-    overlay_pack_with_working_graph, pack_from_working_graph, save_task_working_graph,
+    KnowledgeError, KnowledgePackResult, KnowledgeStore, Selector, WorkingGraph, WorkingLeaf,
+    load_task_working_graph, overlay_pack_with_working_graph, pack_from_working_graph,
+    save_task_working_graph,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl TaskGraphService {
         }
     }
 
-    pub fn pack_json(
+    pub fn pack_result(
         &self,
         selectors: &[Selector],
         workspace_root: Option<&Path>,
@@ -47,7 +47,7 @@ impl TaskGraphService {
         explicit_ref: Option<&str>,
         read_options: GraphReadOptions,
         selector_timeout_ms: Option<u64>,
-    ) -> Result<Value, OrbitError> {
+    ) -> Result<KnowledgePackResult, OrbitError> {
         if explicit_ref.is_none() {
             self.maybe_refresh_knowledge_graph(workspace_root, skip_auto_refresh);
         }
@@ -109,17 +109,13 @@ impl TaskGraphService {
                         if let Some(graph) = working_graph.as_ref() {
                             let pack =
                                 pack_from_working_graph(&self.knowledge_dir, selectors, graph);
-                            return serde_json::to_value(pack).map_err(|serialize| {
-                                OrbitError::Execution(format!(
-                                    "failed to serialize knowledge pack: {serialize}"
-                                ))
-                            });
+                            return Ok(KnowledgePackResult::from_pack(pack));
                         }
-                        return serde_json::to_value(error).map_err(|serialize| {
-                            OrbitError::Execution(format!(
-                                "failed to serialize knowledge error: {serialize}"
-                            ))
-                        });
+                        return Ok(KnowledgePackResult::from_error(
+                            self.knowledge_dir.display().to_string(),
+                            selectors,
+                            error,
+                        ));
                     }
                 }
             }
@@ -131,8 +127,7 @@ impl TaskGraphService {
             pack
         };
 
-        serde_json::to_value(pack)
-            .map_err(|error| OrbitError::Execution(format!("serialize knowledge pack: {error}")))
+        Ok(KnowledgePackResult::from_pack(pack))
     }
 
     pub fn mutate<T, F>(

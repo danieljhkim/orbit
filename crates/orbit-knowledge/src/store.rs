@@ -26,8 +26,9 @@ pub use task_state::{
     save_task_working_graph, task_working_graph_state_path,
 };
 pub use types::{
-    KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry, KnowledgePackTimeout, LeafData,
-    SymbolSummary, UnresolvedSelectorReason,
+    KnowledgeEntryKind, KnowledgePack, KnowledgePackAutoRefreshDiagnostic,
+    KnowledgePackDiagnostics, KnowledgePackEntry, KnowledgePackErrorDiagnostic,
+    KnowledgePackResult, KnowledgePackTimeout, LeafData, SymbolSummary, UnresolvedSelectorReason,
 };
 
 use graph_io::{GraphIndexFile, ManifestFile};

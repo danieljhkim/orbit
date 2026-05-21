@@ -109,11 +109,6 @@ fn pack_single_entry(context: &GraphCommandContext, selector: &str) -> Value {
     })
     .expect("pack selector");
 
-    result
-        .pack
-        .get("entries")
-        .and_then(Value::as_array)
-        .and_then(|entries| entries.first())
-        .cloned()
-        .expect("single pack entry")
+    let entry = result.pack.entries.first().expect("single pack entry");
+    serde_json::to_value(entry).expect("serialize pack entry")
 }
