@@ -2127,6 +2127,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tempfile",
+ "tiktoken-rs",
  "toml",
  "tracing",
 ]

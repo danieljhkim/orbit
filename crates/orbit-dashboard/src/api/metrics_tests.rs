@@ -211,6 +211,7 @@ async fn metrics_endpoints_return_runtime_shapes() {
     let decoded_knowledge: orbit_core::knowledge_stats::KnowledgeStatsSummary =
         serde_json::from_slice(&knowledge_bytes).expect("knowledge json");
     assert_eq!(decoded_knowledge, expected_knowledge);
+    assert!(decoded_knowledge.total_runs > 0);
     assert_eq!(
         knowledge_bytes,
         serde_json::to_vec(&expected_knowledge).expect("expected knowledge json")
