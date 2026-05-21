@@ -2073,6 +2073,7 @@ dependencies = [
  "orbit-mcp",
  "predicates",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",

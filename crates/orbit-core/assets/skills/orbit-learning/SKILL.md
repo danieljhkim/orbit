@@ -27,7 +27,7 @@ Both surfaces accept the same JSON. Use the CLI examples when shell access is av
 |------|-----|-----|
 | `orbit.learning.add` | `orbit_learning_add({...})` | `orbit learning add --summary "..." --path "crates/orbit-core/**/*.rs" --tag rust --body-file note.md` |
 | `orbit.learning.list` | `orbit_learning_list({...})` | `orbit learning list --status active --tag rust` (also `--path <glob-or-file>`) |
-| `orbit.search` | `orbit_search({...})` | `orbit search --kind learning <text>` (free-text content match) |
+| `orbit.search` | `orbit_search({...})` | `orbit search --kind learning <text>` (lexical free-text match; add `--hybrid` after `orbit semantic index --kind learnings` for lexical + semantic ranking) |
 | `orbit.learning.show` | `orbit_learning_show({...})` | `orbit learning show --id L-0001` |
 | `orbit.learning.comment.add` | `orbit_learning_comment_add({...})` | `orbit learning comment add --learning-id L-0001 --body "Narrow note" --model codex` |
 | `orbit.learning.comment.list` | `orbit_learning_comment_list({...})` | `orbit learning comment list --learning-id L-0001` |
@@ -46,7 +46,8 @@ Run `orbit tool list | grep orbit.learning` if you suspect the local tool surfac
 1. **Search before adding.** Before creating a new learning, check whether one already covers the same scope:
    - `orbit learning list --path <path-you-care-about>` for path-anchored guidance (glob-containment).
    - `orbit learning list --tag <tag>` for cross-cutting topics.
-   - `orbit search --kind learning <substring>` for content match against `summary` and body (case-insensitive).
+   - `orbit search --kind learning <substring>` for lexical content match against `summary` and body (case-insensitive).
+   - `orbit search --kind learning --hybrid <query>` when the semantic companion is installed and learning embeddings have been indexed with `orbit semantic index --kind learnings`; this blends lexical ranking with semantic matches over learning summary/body/tags and falls back to lexical results when vectors are unavailable.
    If a near-match exists, prefer `update` (refine the existing record) or `supersede` (replace it with a new ID) over creating a duplicate.
 
 2. **Add with tight scope.** A learning is only useful when its `scope` triggers the right injections — not too broad (noise) and not too narrow (never fires). `scope: { paths?, tags? }` matches as **paths OR tags** (a record fires when *any* path glob OR *any* tag hits). Include `evidence: [{ kind: "task"|"commit"|"external", ref: "..." }]` whenever the learning came from a real incident, PR, or task — future readers (and prune logic) lean on it. Use `priority` (0–255) sparingly; it is the secondary search ranking key, not a "this is important" badge.

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use crate::commands::doc_index::DocIndexResult;
+use crate::commands::learning_index::LearningIndexResult;
 use crate::commands::parse_model;
 use crate::vector::{UpsertReport, VectorStore};
 use crate::{Embedder, SubprocessEmbedder};
@@ -12,6 +13,7 @@ use crate::{Embedder, SubprocessEmbedder};
 pub enum IndexKind {
     Tasks,
     Docs,
+    Learnings,
     All,
 }
 
@@ -28,9 +30,10 @@ impl FromStr for IndexKind {
         match raw {
             "tasks" => Ok(Self::Tasks),
             "docs" => Ok(Self::Docs),
+            "learnings" => Ok(Self::Learnings),
             "all" => Ok(Self::All),
             value => Err(OrbitError::InvalidInput(format!(
-                "unsupported semantic index kind `{value}`; supported values: tasks, docs, all"
+                "unsupported semantic index kind `{value}`; supported values: tasks, docs, learnings, all"
             ))),
         }
     }
@@ -79,9 +82,16 @@ pub enum SemanticIndexResult {
         indexed_sources: usize,
         stale_sources: Vec<String>,
     },
+    Learnings {
+        model_id: String,
+        report: UpsertReport,
+        indexed_sources: usize,
+        stale_sources: Vec<String>,
+    },
     All {
         tasks: TaskIndexResult,
         docs: DocIndexResult,
+        learnings: LearningIndexResult,
     },
 }
 
@@ -97,6 +107,17 @@ impl From<TaskIndexResult> for SemanticIndexResult {
 impl From<DocIndexResult> for SemanticIndexResult {
     fn from(result: DocIndexResult) -> Self {
         Self::Docs {
+            model_id: result.model_id,
+            report: result.report,
+            indexed_sources: result.indexed_sources,
+            stale_sources: result.stale_sources,
+        }
+    }
+}
+
+impl From<LearningIndexResult> for SemanticIndexResult {
+    fn from(result: LearningIndexResult) -> Self {
+        Self::Learnings {
             model_id: result.model_id,
             report: result.report,
             indexed_sources: result.indexed_sources,
@@ -144,9 +165,22 @@ mod tests {
         assert_eq!(docs.kind, Some(IndexKind::Docs));
         assert_eq!(docs.resolved_kind(), IndexKind::Docs);
 
+        let learnings: SemanticIndexParams =
+            serde_json::from_str(r#"{"kind":"learnings"}"#).unwrap();
+        assert_eq!(learnings.kind, Some(IndexKind::Learnings));
+        assert_eq!(learnings.resolved_kind(), IndexKind::Learnings);
+
         let all: SemanticIndexParams = serde_json::from_str(r#"{"kind":"all"}"#).unwrap();
         assert_eq!(all.kind, Some(IndexKind::All));
         assert_eq!(all.resolved_kind(), IndexKind::All);
+    }
+
+    #[test]
+    fn semantic_index_kind_rejects_singular_learning() {
+        let error = IndexKind::from_str("learning").expect_err("singular kind should fail");
+
+        assert!(error.to_string().contains("`learning`"));
+        assert!(error.to_string().contains("learnings"));
     }
 
     #[test]

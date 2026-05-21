@@ -278,7 +278,22 @@ mod tests {
             assert!(message.contains("possible values"), "{message}");
             assert!(message.contains("tasks"), "{message}");
             assert!(message.contains("docs"), "{message}");
+            assert!(message.contains("learnings"), "{message}");
             assert!(message.contains("all"), "{message}");
+        }
+    }
+
+    #[test]
+    fn cli_semantic_index_parses_learnings_kind() {
+        let cli = Cli::parse_from(["orbit", "semantic", "index", "--kind", "learnings"]);
+        match cli.command {
+            Commands::Semantic(command) => match command.command {
+                SemanticSubcommand::Index(args) => {
+                    assert_eq!(args.kind, SemanticIndexKindArg::Learnings);
+                }
+                _ => panic!("expected semantic index"),
+            },
+            _ => panic!("expected top-level semantic command"),
         }
     }
 
@@ -291,7 +306,7 @@ mod tests {
         let help = error.to_string();
         assert!(
             help.contains(
-                "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), all (rebuilds both)."
+                "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), learnings, all (rebuilds all indexed corpora)."
             ),
             "{help}"
         );

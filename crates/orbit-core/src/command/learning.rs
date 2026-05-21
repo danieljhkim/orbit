@@ -5,6 +5,7 @@
 //! dispatch layer. Tool-host and CLI both reach into
 //! `runtime.stores().learnings()`, which is the single source of truth.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
@@ -18,8 +19,37 @@ use orbit_store::{
     LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
     RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
+use serde::Deserialize;
 
 use crate::OrbitRuntime;
+
+#[derive(Debug, Deserialize)]
+struct LearningConfigFile {
+    learning: Option<LearningConfigSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LearningConfigSection {
+    search: Option<LearningSearchConfigSection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LearningSearchConfig {
+    pub semantic_weight: f32,
+}
+
+impl Default for LearningSearchConfig {
+    fn default() -> Self {
+        Self {
+            semantic_weight: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LearningSearchConfigSection {
+    semantic_weight: Option<f32>,
+}
 
 impl OrbitRuntime {
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
@@ -66,6 +96,10 @@ impl OrbitRuntime {
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let params = normalize_learning_search_params(&self.paths().repo_root, params)?;
         self.stores().learnings().search(params)
+    }
+
+    pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
+        read_learning_search_config_from_config_path(&self.config_path())
     }
 
     pub fn upvote_learning(
@@ -186,6 +220,35 @@ impl OrbitRuntime {
         }
         Ok((stale, deleted))
     }
+}
+
+pub fn parse_learning_search_config_from_config_toml(
+    raw: &str,
+) -> Result<LearningSearchConfig, OrbitError> {
+    if raw.trim().is_empty() {
+        return Ok(LearningSearchConfig::default());
+    }
+    let parsed = toml::from_str::<LearningConfigFile>(raw).map_err(|error| {
+        OrbitError::InvalidInput(format!("invalid learning config in config.toml: {error}"))
+    })?;
+    let semantic_weight = parsed
+        .learning
+        .and_then(|section| section.search)
+        .and_then(|section| section.semantic_weight)
+        .unwrap_or_else(|| LearningSearchConfig::default().semantic_weight)
+        .clamp(0.0, 1.0);
+    Ok(LearningSearchConfig { semantic_weight })
+}
+
+fn read_learning_search_config_from_config_path(
+    path: &Path,
+) -> Result<LearningSearchConfig, OrbitError> {
+    if !path.exists() {
+        return Ok(LearningSearchConfig::default());
+    }
+    let raw = fs::read_to_string(path)
+        .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
+    parse_learning_search_config_from_config_toml(&raw)
 }
 
 fn remote_artifact_error(kind: &str, stub: &RemoteArtifactStub) -> OrbitError {
@@ -391,4 +454,43 @@ fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, OrbitError> {
         canonical.push(component);
     }
     Ok(canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn learning_search_config_defaults_and_clamps_semantic_weight() {
+        assert_eq!(
+            parse_learning_search_config_from_config_toml("")
+                .unwrap()
+                .semantic_weight,
+            0.5
+        );
+        assert_eq!(
+            parse_learning_search_config_from_config_toml(
+                "[learning.search]\nsemantic_weight = 0.7\n"
+            )
+            .unwrap()
+            .semantic_weight,
+            0.7
+        );
+        assert_eq!(
+            parse_learning_search_config_from_config_toml(
+                "[learning.search]\nsemantic_weight = -1.0\n"
+            )
+            .unwrap()
+            .semantic_weight,
+            0.0
+        );
+        assert_eq!(
+            parse_learning_search_config_from_config_toml(
+                "[learning.search]\nsemantic_weight = 2.0\n"
+            )
+            .unwrap()
+            .semantic_weight,
+            1.0
+        );
+    }
 }

@@ -4,7 +4,8 @@ use std::str::FromStr;
 use orbit_common::types::{AdrStatus, LearningStatus, OrbitError, TaskStatus};
 use orbit_common::utility::glob::compile_glob_regex;
 use orbit_search::{
-    DocSemanticHit, DocSemanticSearchParams, SemanticRelatedParams, SemanticSearchParams,
+    DocSemanticHit, DocSemanticSearchParams, LearningSemanticHit, LearningSemanticSearchParams,
+    SemanticRelatedParams, SemanticSearchParams,
 };
 use orbit_store::LearningSearchParams;
 use serde::Serialize;
@@ -14,12 +15,16 @@ use crate::{OrbitRuntime, SearchResult};
 const DEFAULT_LIMIT: usize = 10;
 const DOC_SEARCH_OVERFETCH: usize = 4;
 const DOC_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical doc search";
+const LEARNING_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical learning search";
 const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
 
 #[cfg(test)]
 thread_local! {
     static DOC_SEMANTIC_SEARCH_OVERRIDE:
         std::cell::RefCell<Option<Result<Vec<DocSemanticHit>, String>>> =
+        const { std::cell::RefCell::new(None) };
+    static LEARNING_SEMANTIC_SEARCH_OVERRIDE:
+        std::cell::RefCell<Option<Result<Vec<LearningSemanticHit>, String>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -225,11 +230,11 @@ impl OrbitRuntime {
             GlobalSearchMode::Lexical
         };
 
-        if params.hybrid && (params.kind.includes_learnings() || params.kind.includes_adrs()) {
+        if params.hybrid && params.kind.includes_adrs() {
             push_skip_note(
                 &mut notes,
-                "learning/ADR hybrid vector",
-                "learnings and ADRs use lexical matching regardless of --hybrid",
+                "ADR hybrid vector",
+                "ADRs use lexical matching regardless of --hybrid",
             );
         }
 
@@ -281,6 +286,7 @@ impl OrbitRuntime {
                 query_owned.as_deref(),
                 &tag_filter,
                 limit,
+                &mut notes,
             )?);
         }
 
@@ -635,6 +641,35 @@ impl OrbitRuntime {
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
+        notes: &mut Vec<String>,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let lexical =
+            self.learning_lexical_hits(params, status_filters, query, tag_filter, limit)?;
+        if !params.hybrid {
+            return Ok(lexical);
+        }
+        let Some(query) = query else {
+            return Ok(lexical);
+        };
+
+        self.hybrid_learning_hits(
+            query,
+            lexical,
+            params,
+            status_filters,
+            tag_filter,
+            limit,
+            notes,
+        )
+    }
+
+    fn learning_lexical_hits(
+        &self,
+        params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
+        query: Option<&str>,
+        tag_filter: &[String],
+        limit: usize,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let statuses = resolve_learning_statuses(params, status_filters);
         let active_only = statuses == vec![LearningStatus::Active];
@@ -718,6 +753,124 @@ impl OrbitRuntime {
         out.truncate(limit);
         Ok(out)
     }
+
+    fn hybrid_learning_hits(
+        &self,
+        query: &str,
+        lexical: Vec<GlobalSearchHit>,
+        params: &GlobalSearchParams,
+        status_filters: &SearchStatusFilters,
+        tag_filter: &[String],
+        limit: usize,
+        notes: &mut Vec<String>,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let learning_limit = doc_search_candidate_limit(limit);
+        let lexical_fallback = lexical.clone();
+        let mut lexical_learnings = BTreeMap::<String, LearningHybridCandidate>::new();
+        let lexical_count = lexical.len();
+        for (idx, hit) in lexical.into_iter().enumerate() {
+            let Some(id) = hit.id.clone() else {
+                continue;
+            };
+            lexical_learnings.insert(
+                id,
+                LearningHybridCandidate {
+                    hit: GlobalSearchHit {
+                        source: "hybrid".to_string(),
+                        ..hit
+                    },
+                    lexical_score: Some((lexical_count - idx) as f32),
+                    semantic_score: None,
+                    semantic: None,
+                },
+            );
+        }
+
+        let semantic = match self.learning_semantic_hits(query, learning_limit) {
+            Ok(result) if result.is_empty() => {
+                warn_learning_hybrid_fallback(notes, "no learning embeddings found");
+                return Ok(lexical_fallback);
+            }
+            Ok(result) => result,
+            Err(error) => {
+                warn_learning_hybrid_fallback(notes, &error.to_string());
+                return Ok(lexical_fallback);
+            }
+        };
+
+        let statuses = resolve_learning_statuses(params, status_filters);
+        let path = params.path.as_deref();
+        let mut candidates = lexical_learnings;
+        for hit in semantic {
+            let learning = match self.get_learning(&hit.source_id) {
+                Ok(learning) => learning,
+                Err(_) => continue,
+            };
+            if !statuses.contains(&learning.status) {
+                continue;
+            }
+            if !tag_filter.is_empty() && !learning_has_all_tags(&learning, tag_filter) {
+                continue;
+            }
+            if let Some(path) = path
+                && !learning_scope_contains_path(&learning, path)?
+            {
+                continue;
+            }
+
+            candidates
+                .entry(hit.source_id.clone())
+                .and_modify(|candidate| {
+                    candidate.semantic_score = Some(hit.score);
+                    candidate.semantic = Some(hit.clone());
+                })
+                .or_insert_with(|| LearningHybridCandidate {
+                    hit: GlobalSearchHit {
+                        kind: "learning".to_string(),
+                        source: "hybrid".to_string(),
+                        id: Some(learning.id),
+                        path: None,
+                        title: None,
+                        summary: Some(learning.summary),
+                        status: Some(learning.status.as_str().to_string()),
+                        best_field: None,
+                        snippet: None,
+                        score: None,
+                        matched_by: None,
+                    },
+                    lexical_score: None,
+                    semantic_score: Some(hit.score),
+                    semantic: Some(hit),
+                });
+        }
+
+        let weight = self.learning_search_config()?.semantic_weight;
+        let mut ranked =
+            blend_learning_hybrid_candidates(candidates.into_values().collect(), weight);
+        ranked.truncate(limit);
+        Ok(ranked)
+    }
+
+    fn learning_semantic_hits(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<LearningSemanticHit>, OrbitError> {
+        #[cfg(test)]
+        if let Some(result) = LEARNING_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
+            return result.map_err(OrbitError::Execution);
+        }
+
+        Ok(orbit_search::learning_semantic_search(
+            &self.stores().semantic_vector,
+            LearningSemanticSearchParams {
+                query: query.to_string(),
+                limit,
+                model: None,
+            },
+        )?
+        .results)
+    }
 }
 
 fn lexical_task_hit(task: &orbit_common::types::Task) -> GlobalSearchHit {
@@ -791,6 +944,14 @@ struct DocHybridCandidate {
     semantic: Option<DocSemanticHit>,
 }
 
+#[derive(Debug, Clone)]
+struct LearningHybridCandidate {
+    hit: GlobalSearchHit,
+    lexical_score: Option<f32>,
+    semantic_score: Option<f32>,
+    semantic: Option<LearningSemanticHit>,
+}
+
 fn lexical_doc_hits_with_adrs(
     lexical_docs: BTreeMap<String, orbit_search::DocSearchResult>,
     lexical_adrs: Vec<GlobalSearchHit>,
@@ -832,6 +993,46 @@ fn blend_doc_hybrid_candidates(
             let path = candidate.hit.path.as_deref().unwrap_or_default();
             let lexical = lexical_scores.get(path).copied().unwrap_or(0.0);
             let semantic = semantic_scores.get(path).copied().unwrap_or(0.0);
+            let score = semantic_weight.mul_add(semantic, lexical_weight * lexical);
+            candidate.hit.score = Some(score);
+            if let Some(semantic_hit) = candidate.semantic {
+                candidate.hit.best_field = Some(semantic_hit.best_field);
+                candidate.hit.snippet = Some(semantic_hit.snippet);
+            }
+            candidate.hit
+        })
+        .collect::<Vec<_>>();
+    out.sort_by(compare_global_hits_by_score);
+    out
+}
+
+fn blend_learning_hybrid_candidates(
+    candidates: Vec<LearningHybridCandidate>,
+    semantic_weight: f32,
+) -> Vec<GlobalSearchHit> {
+    let lexical_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
+        candidate
+            .hit
+            .id
+            .as_ref()
+            .zip(candidate.lexical_score)
+            .map(|(id, score)| (id.clone(), score))
+    }));
+    let semantic_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
+        candidate
+            .hit
+            .id
+            .as_ref()
+            .zip(candidate.semantic_score)
+            .map(|(id, score)| (id.clone(), score))
+    }));
+    let lexical_weight = 1.0 - semantic_weight;
+    let mut out = candidates
+        .into_iter()
+        .map(|mut candidate| {
+            let id = candidate.hit.id.as_deref().unwrap_or_default();
+            let lexical = lexical_scores.get(id).copied().unwrap_or(0.0);
+            let semantic = semantic_scores.get(id).copied().unwrap_or(0.0);
             let score = semantic_weight.mul_add(semantic, lexical_weight * lexical);
             candidate.hit.score = Some(score);
             if let Some(semantic_hit) = candidate.semantic {
@@ -898,6 +1099,19 @@ fn warn_doc_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
         notes,
         "doc hybrid vector",
         &format!("{DOC_HYBRID_FALLBACK_NOTE}: {reason}"),
+    );
+}
+
+fn warn_learning_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
+    orbit_common::tracing::warn!(
+        target: "orbit.search.learnings",
+        reason,
+        "falling back to lexical learning search"
+    );
+    push_skip_note(
+        notes,
+        "learning hybrid vector",
+        &format!("{LEARNING_HYBRID_FALLBACK_NOTE}: {reason}"),
     );
 }
 
@@ -1356,14 +1570,26 @@ mod tests {
     }
 
     fn add_learning(runtime: &OrbitRuntime, summary: &str) -> String {
+        add_learning_with(runtime, summary, &[], None)
+    }
+
+    fn add_learning_with(
+        runtime: &OrbitRuntime,
+        summary: &str,
+        tags: &[&str],
+        priority: Option<u8>,
+    ) -> String {
         runtime
             .create_learning(LearningCreateParams {
                 summary: summary.to_string(),
-                scope: LearningScope::default(),
+                scope: LearningScope {
+                    tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+                    ..Default::default()
+                },
                 body: format!("{summary} body"),
                 evidence: Vec::new(),
                 created_by: Some("test".to_string()),
-                priority: None,
+                priority,
             })
             .expect("add learning")
             .id
@@ -1417,6 +1643,15 @@ mod tests {
         }
     }
 
+    fn learning_semantic_hit(id: &str, score: f32) -> LearningSemanticHit {
+        LearningSemanticHit {
+            source_id: id.to_string(),
+            best_field: "summary".to_string(),
+            snippet: "semantic learning snippet".to_string(),
+            score,
+        }
+    }
+
     fn with_doc_semantic_override<T>(
         result: Result<Vec<DocSemanticHit>, String>,
         f: impl FnOnce() -> T,
@@ -1426,6 +1661,20 @@ mod tests {
         });
         let out = f();
         DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
+        out
+    }
+
+    fn with_learning_semantic_override<T>(
+        result: Result<Vec<LearningSemanticHit>, String>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        LEARNING_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
+            *cell.borrow_mut() = Some(result);
+        });
+        let out = f();
+        LEARNING_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
             *cell.borrow_mut() = None;
         });
         out
@@ -1888,6 +2137,212 @@ mod tests {
         };
         let out = blend_doc_hybrid_candidates(
             vec![DocHybridCandidate {
+                hit,
+                lexical_score: Some(0.42),
+                semantic_score: None,
+                semantic: None,
+            }],
+            0.5,
+        );
+
+        assert!((out[0].score.expect("score") - 0.21).abs() < 0.0001);
+    }
+
+    #[test]
+    fn global_search_learning_lexical_mode_keeps_legacy_json_shape() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let id = add_learning_with(
+            &runtime,
+            "lexstable literal learning",
+            &["lexstable"],
+            Some(50),
+        );
+
+        let response = with_learning_semantic_override(
+            Err("semantic should not be called".to_string()),
+            || {
+                runtime
+                    .global_search(GlobalSearchParams {
+                        query: Some("lexstable".to_string()),
+                        kind: GlobalSearchKind::Learning,
+                        limit: 5,
+                        ..Default::default()
+                    })
+                    .expect("learning lexical search")
+            },
+        );
+
+        assert_eq!(response.mode, GlobalSearchMode::Lexical);
+        assert_eq!(
+            serde_json::to_value(&response.results).expect("serialize results"),
+            json!([
+                {
+                    "kind": "learning",
+                    "source": "lexical",
+                    "id": id,
+                    "summary": "lexstable literal learning",
+                    "status": "active",
+                    "matched_by": ["query:summary"]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn global_search_learning_hybrid_ranking_differs_from_lexical() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let semantic_id = add_learning(&runtime, "conceptual async-lock guidance");
+        let lexical_id =
+            add_learning_with(&runtime, "rankdiff literal foo guidance", &[], Some(100));
+
+        let lexical = runtime
+            .global_search(GlobalSearchParams {
+                query: Some("rankdiff".to_string()),
+                kind: GlobalSearchKind::Learning,
+                limit: 2,
+                ..Default::default()
+            })
+            .expect("learning lexical search");
+        let hybrid = with_learning_semantic_override(
+            Ok(vec![
+                learning_semantic_hit(&semantic_id, 1.0),
+                learning_semantic_hit(&lexical_id, 0.0),
+            ]),
+            || {
+                runtime
+                    .global_search(GlobalSearchParams {
+                        query: Some("rankdiff".to_string()),
+                        hybrid: true,
+                        kind: GlobalSearchKind::Learning,
+                        limit: 2,
+                        ..Default::default()
+                    })
+                    .expect("learning hybrid search")
+            },
+        );
+
+        assert_eq!(lexical.results[0].id.as_deref(), Some(lexical_id.as_str()));
+        assert_eq!(hybrid.results[0].id.as_deref(), Some(semantic_id.as_str()));
+        assert_ne!(lexical.results[0].id, hybrid.results[0].id);
+    }
+
+    #[test]
+    fn global_search_learning_hybrid_uses_learning_semantic_weight() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let semantic_id = add_learning(&runtime, "learningweight conceptual guidance");
+        let lexical_id = add_learning_with(
+            &runtime,
+            "learningweight literal foo guidance",
+            &[],
+            Some(100),
+        );
+        let semantic = vec![
+            learning_semantic_hit(&semantic_id, 1.0),
+            learning_semantic_hit(&lexical_id, 0.0),
+        ];
+
+        let top_id = |weight: f32| {
+            fs::write(
+                runtime.config_path(),
+                format!("[learning.search]\nsemantic_weight = {weight:.1}\n"),
+            )
+            .expect("write config");
+            with_learning_semantic_override(Ok(semantic.clone()), || {
+                runtime
+                    .global_search(GlobalSearchParams {
+                        query: Some("learningweight".to_string()),
+                        hybrid: true,
+                        kind: GlobalSearchKind::Learning,
+                        limit: 2,
+                        ..Default::default()
+                    })
+                    .expect("learning hybrid search")
+                    .results
+                    .into_iter()
+                    .next()
+                    .expect("top result")
+                    .id
+                    .expect("learning id")
+            })
+        };
+
+        assert_eq!(top_id(0.0), lexical_id);
+        assert_eq!(top_id(1.0), semantic_id);
+        assert_eq!(top_id(0.5), semantic_id);
+    }
+
+    #[test]
+    fn global_search_learning_hybrid_falls_back_to_lexical_on_semantic_error() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let id = add_learning(&runtime, "learnfallback error literal");
+
+        let response =
+            with_learning_semantic_override(Err("companion missing".to_string()), || {
+                runtime
+                    .global_search(GlobalSearchParams {
+                        query: Some("learnfallback".to_string()),
+                        hybrid: true,
+                        kind: GlobalSearchKind::Learning,
+                        limit: 3,
+                        ..Default::default()
+                    })
+                    .expect("fallback search")
+            });
+
+        assert!(
+            response
+                .notes
+                .iter()
+                .any(|note| note.contains("falling back to lexical"))
+        );
+        assert_eq!(response.results[0].source, "lexical");
+        assert_eq!(response.results[0].id.as_deref(), Some(id.as_str()));
+    }
+
+    #[test]
+    fn global_search_learning_hybrid_falls_back_when_learning_embeddings_empty() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let id = add_learning(&runtime, "learnfallback empty literal");
+
+        let response = with_learning_semantic_override(Ok(Vec::new()), || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    query: Some("learnfallback".to_string()),
+                    hybrid: true,
+                    kind: GlobalSearchKind::Learning,
+                    limit: 3,
+                    ..Default::default()
+                })
+                .expect("fallback search")
+        });
+
+        assert!(
+            response
+                .notes
+                .iter()
+                .any(|note| note.contains("falling back to lexical"))
+        );
+        assert_eq!(response.results[0].source, "lexical");
+        assert_eq!(response.results[0].id.as_deref(), Some(id.as_str()));
+    }
+
+    #[test]
+    fn learning_hybrid_handles_single_candidate_side() {
+        let hit = GlobalSearchHit {
+            kind: "learning".to_string(),
+            source: "hybrid".to_string(),
+            id: Some("L-0001".to_string()),
+            path: None,
+            title: None,
+            summary: None,
+            status: None,
+            best_field: None,
+            snippet: None,
+            score: None,
+            matched_by: None,
+        };
+        let out = blend_learning_hybrid_candidates(
+            vec![LearningHybridCandidate {
                 hit,
                 lexical_score: Some(0.42),
                 semantic_score: None,

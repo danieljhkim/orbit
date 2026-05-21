@@ -7,7 +7,7 @@ use crate::command::Execute;
 #[command(
     about = "Search tasks, docs, learnings, and ADRs",
     subcommand_precedence_over_arg = true,
-    after_help = "Forms:\n  orbit search <query>\n  orbit search similar <id>\n  orbit search path <path>\n\nIndex coverage note: learnings and ADRs use lexical matching regardless of --hybrid."
+    after_help = "Forms:\n  orbit search <query>\n  orbit search similar <id>\n  orbit search path <path>\n\nIndex coverage note: ADRs use lexical matching regardless of --hybrid."
 )]
 pub struct SearchCommand {
     /// Free-text query. Defaults to lexical matching unless --hybrid is set.
