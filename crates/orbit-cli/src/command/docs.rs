@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use orbit_core::command::docs::DocIndexParams;
+use orbit_core::command::semantic::{IndexKind, SemanticIndexParams, SemanticIndexResult};
 use orbit_core::{DocType, OrbitError, OrbitRuntime};
 use serde::Serialize;
 use serde_json::Value;
@@ -187,24 +187,40 @@ impl Execute for DocsAddArgs {
 
 impl Execute for DocsIndexArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.index_docs(DocIndexParams {
+        let result = runtime.semantic_index(SemanticIndexParams {
             model: self.model,
             force: self.force,
+            kind: Some(IndexKind::Docs),
         })?;
         if self.json {
             crate::output::json::print_pretty(&serde_json::json!(result))
         } else {
-            println!(
-                "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
-                result.model_id,
-                result.indexed_sources,
-                result.report.embedded_chunks,
-                result.report.skipped_fields,
-                result.stale_sources.len()
-            );
-            Ok(())
+            print_docs_index_text(result)
         }
     }
+}
+
+fn print_docs_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> {
+    let SemanticIndexResult::Docs {
+        model_id,
+        report,
+        indexed_sources,
+        stale_sources,
+    } = result
+    else {
+        return Err(OrbitError::Execution(
+            "docs index alias returned a non-docs report".to_string(),
+        ));
+    };
+    println!(
+        "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+        model_id,
+        indexed_sources,
+        report.embedded_chunks,
+        report.skipped_fields,
+        stale_sources.len()
+    );
+    Ok(())
 }
 
 impl Execute for DocsMigrateArgs {

@@ -164,7 +164,7 @@ mod tests {
         hook::HookSubcommand,
         mcp::McpSubcommand,
         search::{SearchKindArg, SearchSubcommand},
-        semantic::SemanticSubcommand,
+        semantic::{SemanticIndexKindArg, SemanticSubcommand},
         web::WebSubcommand,
     };
 
@@ -240,14 +240,61 @@ mod tests {
 
     #[test]
     fn cli_parses_semantic_index() {
-        let cli = Cli::parse_from(["orbit", "semantic", "index", "--force"]);
+        let cli = Cli::parse_from(["orbit", "semantic", "index", "--force", "--kind", "docs"]);
         match cli.command {
             Commands::Semantic(command) => match command.command {
-                SemanticSubcommand::Index(args) => assert!(args.force),
+                SemanticSubcommand::Index(args) => {
+                    assert!(args.force);
+                    assert_eq!(args.kind, SemanticIndexKindArg::Docs);
+                }
                 _ => panic!("expected semantic index"),
             },
             _ => panic!("expected top-level semantic command"),
         }
+    }
+
+    #[test]
+    fn cli_semantic_index_defaults_kind_to_tasks() {
+        let cli = Cli::parse_from(["orbit", "semantic", "index"]);
+        match cli.command {
+            Commands::Semantic(command) => match command.command {
+                SemanticSubcommand::Index(args) => {
+                    assert_eq!(args.kind, SemanticIndexKindArg::Tasks);
+                }
+                _ => panic!("expected semantic index"),
+            },
+            _ => panic!("expected top-level semantic command"),
+        }
+    }
+
+    #[test]
+    fn cli_semantic_index_rejects_future_kinds_at_clap_layer() {
+        for kind in ["adr", "learning"] {
+            let error = match Cli::try_parse_from(["orbit", "semantic", "index", "--kind", kind]) {
+                Ok(_) => panic!("future kinds should be rejected"),
+                Err(error) => error,
+            };
+            let message = error.to_string();
+            assert!(message.contains("possible values"), "{message}");
+            assert!(message.contains("tasks"), "{message}");
+            assert!(message.contains("docs"), "{message}");
+            assert!(message.contains("all"), "{message}");
+        }
+    }
+
+    #[test]
+    fn cli_semantic_index_help_explains_kind_principle() {
+        let error = match Cli::try_parse_from(["orbit", "semantic", "index", "--help"]) {
+            Ok(_) => panic!("help exits before parsing"),
+            Err(error) => error,
+        };
+        let help = error.to_string();
+        assert!(
+            help.contains(
+                "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), all (rebuilds both)."
+            ),
+            "{help}"
+        );
     }
 
     #[test]

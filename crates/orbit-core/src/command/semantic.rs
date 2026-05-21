@@ -1,10 +1,10 @@
 use orbit_common::types::OrbitError;
 
 pub use orbit_search::{
-    CompanionStatus, ScoreBreakdown, SemanticHit, SemanticInstallParams, SemanticInstallResult,
-    SemanticReindexParams, SemanticReindexResult, SemanticRelatedParams, SemanticRelatedResult,
-    SemanticSearchParams, SemanticSearchResult, SemanticStatsResult, SemanticUninstallParams,
-    SemanticUninstallResult,
+    CompanionStatus, IndexKind, ScoreBreakdown, SemanticHit, SemanticIndexParams,
+    SemanticIndexResult, SemanticInstallParams, SemanticInstallResult, SemanticRelatedParams,
+    SemanticRelatedResult, SemanticSearchParams, SemanticSearchResult, SemanticStatsResult,
+    SemanticUninstallParams, SemanticUninstallResult, TaskIndexResult,
 };
 
 use crate::OrbitRuntime;
@@ -24,12 +24,45 @@ impl OrbitRuntime {
         orbit_search::semantic_uninstall(params)
     }
 
-    pub fn semantic_reindex(
+    pub fn semantic_index(
         &self,
-        params: SemanticReindexParams,
-    ) -> Result<SemanticReindexResult, OrbitError> {
+        params: SemanticIndexParams,
+    ) -> Result<SemanticIndexResult, OrbitError> {
+        match params.resolved_kind() {
+            IndexKind::Tasks => self
+                .semantic_index_tasks(params)
+                .map(SemanticIndexResult::from),
+            IndexKind::Docs => self
+                .semantic_index_docs(params)
+                .map(SemanticIndexResult::from),
+            IndexKind::All => {
+                let tasks = self.semantic_index_tasks(params.clone());
+                let docs = self.semantic_index_docs(params);
+                match (tasks, docs) {
+                    (Ok(tasks), Ok(docs)) => Ok(SemanticIndexResult::All { tasks, docs }),
+                    (Err(error), _) => Err(error),
+                    (_, Err(error)) => Err(error),
+                }
+            }
+        }
+    }
+
+    fn semantic_index_tasks(
+        &self,
+        params: SemanticIndexParams,
+    ) -> Result<TaskIndexResult, OrbitError> {
         let tasks = self.stores().tasks().list()?;
-        orbit_search::semantic_reindex(&self.stores().semantic_vector, &tasks, params)
+        orbit_search::semantic_index(&self.stores().semantic_vector, &tasks, params)
+    }
+
+    fn semantic_index_docs(
+        &self,
+        params: SemanticIndexParams,
+    ) -> Result<orbit_search::DocIndexResult, OrbitError> {
+        self.index_docs(orbit_search::DocIndexParams {
+            model: params.model,
+            force: params.force,
+        })
     }
 
     pub fn semantic_stats(&self) -> Result<SemanticStatsResult, OrbitError> {

@@ -1,5 +1,9 @@
+use std::str::FromStr;
+
 use orbit_common::types::{OrbitError, optional_string_alias};
-use orbit_search::{SemanticInstallParams, SemanticReindexParams, SemanticUninstallParams};
+use orbit_search::{
+    IndexKind, SemanticIndexParams, SemanticInstallParams, SemanticUninstallParams,
+};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -25,9 +29,13 @@ pub(super) fn stats(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
 }
 
 pub(super) fn index(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    to_json(runtime.semantic_reindex(SemanticReindexParams {
+    let kind = optional_string_alias(&input, &["kind"])?
+        .map(|raw| IndexKind::from_str(&raw))
+        .transpose()?;
+    to_json(runtime.semantic_index(SemanticIndexParams {
         model: optional_string_alias(&input, &["model", "embedding_model", "embeddingModel"])?,
         force: optional_bool_alias(&input, &["force"])?.unwrap_or(false),
+        kind,
     })?)
 }
 

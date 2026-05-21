@@ -1,6 +1,7 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::command::semantic::{
-    SemanticInstallParams, SemanticReindexParams, SemanticUninstallParams,
+    IndexKind, SemanticIndexParams, SemanticIndexResult, SemanticInstallParams,
+    SemanticUninstallParams,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde_json::json;
@@ -22,7 +23,7 @@ pub enum SemanticSubcommand {
     Uninstall(SemanticUninstallArgs),
     /// Show orbit-search index and companion status
     Stats(SemanticStatsArgs),
-    /// Rebuild task embeddings
+    /// Rebuild semantic embeddings
     Index(SemanticIndexArgs),
 }
 
@@ -53,8 +54,33 @@ pub struct SemanticIndexArgs {
     pub model: Option<String>,
     #[arg(long)]
     pub force: bool,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = SemanticIndexKindArg::Tasks,
+        value_name = "KIND",
+        help = "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), all (rebuilds both)."
+    )]
+    pub kind: SemanticIndexKindArg,
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SemanticIndexKindArg {
+    Tasks,
+    Docs,
+    All,
+}
+
+impl From<SemanticIndexKindArg> for IndexKind {
+    fn from(value: SemanticIndexKindArg) -> Self {
+        match value {
+            SemanticIndexKindArg::Tasks => Self::Tasks,
+            SemanticIndexKindArg::Docs => Self::Docs,
+            SemanticIndexKindArg::All => Self::All,
+        }
+    }
 }
 
 #[derive(Args)]
@@ -126,20 +152,57 @@ impl Execute for SemanticUninstallArgs {
 
 impl Execute for SemanticIndexArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.semantic_reindex(SemanticReindexParams {
+        let result = runtime.semantic_index(SemanticIndexParams {
             model: self.model,
             force: self.force,
+            kind: Some(self.kind.into()),
         })?;
         if self.json {
             crate::output::json::print_pretty(&json!(result))
         } else {
-            println!(
-                "Indexed semantic search: model={} embedded_chunks={} skipped_fields={}",
-                result.model_id, result.report.embedded_chunks, result.report.skipped_fields
-            );
-            Ok(())
+            print_semantic_index_text(result)
         }
     }
+}
+
+fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> {
+    match result {
+        SemanticIndexResult::Tasks { model_id, report } => {
+            println!(
+                "Indexed semantic search: model={} embedded_chunks={} skipped_fields={}",
+                model_id, report.embedded_chunks, report.skipped_fields
+            );
+        }
+        SemanticIndexResult::Docs {
+            model_id,
+            report,
+            indexed_sources,
+            stale_sources,
+        } => {
+            println!(
+                "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                model_id,
+                indexed_sources,
+                report.embedded_chunks,
+                report.skipped_fields,
+                stale_sources.len()
+            );
+        }
+        SemanticIndexResult::All { tasks, docs } => {
+            println!(
+                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={}",
+                tasks.model_id,
+                tasks.report.embedded_chunks,
+                tasks.report.skipped_fields,
+                docs.model_id,
+                docs.indexed_sources,
+                docs.report.embedded_chunks,
+                docs.report.skipped_fields,
+                docs.stale_sources.len()
+            );
+        }
+    }
+    Ok(())
 }
 
 impl Execute for SemanticStatsArgs {

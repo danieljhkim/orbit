@@ -1,5 +1,5 @@
 use orbit_common::types::OrbitError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::commands::parse_model;
 use crate::vector::{DocEmbeddingSource, UpsertReport, VectorStore};
@@ -11,7 +11,7 @@ pub struct DocIndexParams {
     pub force: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocIndexResult {
     pub model_id: String,
     pub report: UpsertReport,

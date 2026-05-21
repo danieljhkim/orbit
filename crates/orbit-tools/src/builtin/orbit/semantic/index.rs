@@ -9,7 +9,9 @@ impl Tool for OrbitSemanticIndexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "orbit.semantic.index".to_string(),
-            description: "Rebuild task embeddings for the active workspace.".to_string(),
+            description:
+                "Rebuild semantic embeddings for tasks, docs, or both in the active workspace."
+                    .to_string(),
             parameters: vec![
                 ToolParam {
                     name: "model".to_string(),
@@ -22,6 +24,12 @@ impl Tool for OrbitSemanticIndexTool {
                     name: "force".to_string(),
                     description: "Re-embed unchanged task fields.".to_string(),
                     param_type: "boolean".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "kind".to_string(),
+                    description: "Corpus to rebuild: tasks (default), docs, or all.".to_string(),
+                    param_type: "string".to_string(),
                     required: false,
                 },
             ],
