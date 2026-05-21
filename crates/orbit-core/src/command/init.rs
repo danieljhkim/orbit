@@ -702,6 +702,15 @@ mod tests {
                 .exists()
         );
         assert!(
+            home.path()
+                .join(".orbit")
+                .join("skills")
+                .join("orbit-debug-job-failure")
+                .join("references")
+                .join("common_failures.md")
+                .exists()
+        );
+        assert!(
             !home
                 .path()
                 .join(".orbit")

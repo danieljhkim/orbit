@@ -57,6 +57,12 @@ const DEFAULT_SKILL_FILES: [(&str, &str); 12] = [
     ),
 ];
 
+const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 1] = [(
+    "orbit-debug-job-failure",
+    "references/common_failures.md",
+    include_str!("../../assets/skills/orbit-debug-job-failure/references/common_failures.md"),
+)];
+
 /// Skills intentionally NOT shipped in `plugin/skills/` because they depend on
 /// CLI-only surfaces the Claude Code plugin does not expose. The CLI still
 /// seeds them; the plugin omits the symlink. Update this list when adding a
@@ -100,9 +106,30 @@ pub(crate) fn seed_default_skills(
         }
         let rendered = inject_skill_template_tokens(content, orbit_root);
         write_text_with_parent(&path, &rendered)?;
+        seed_default_skill_resources(&skills_root.join(id), id, orbit_root, overwrite)?;
         count += 1;
     }
     Ok(count)
+}
+
+fn seed_default_skill_resources(
+    skill_dir: &Path,
+    skill_id: &str,
+    orbit_root: &Path,
+    overwrite: bool,
+) -> Result<(), OrbitError> {
+    for (resource_skill_id, relative_path, content) in DEFAULT_SKILL_RESOURCE_FILES {
+        if resource_skill_id != skill_id {
+            continue;
+        }
+        let path = skill_dir.join(relative_path);
+        if !overwrite && path.exists() {
+            continue;
+        }
+        let rendered = inject_skill_template_tokens(content, orbit_root);
+        write_text_with_parent(&path, &rendered)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn is_default_skill_file_for_root(
