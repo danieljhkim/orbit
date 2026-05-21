@@ -2,7 +2,7 @@
 // Pure vanilla JS, split into ES modules with no build step.
 
 import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson, syncNodes, positiveIntParam } from './common.js';
-import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, wireSearch } from './tasks.js';
+import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
 import { fetchAndRenderMetrics, initMetrics, renderMetrics } from './metrics.js';
@@ -979,6 +979,83 @@ function wireFrictionSearch() {
   });
 }
 
+/* Global task ID resolver (ORB-00211).
+   - Only fires on exact ^ORB-\d{5}$ (case-insens) after trim/upper.
+   - 250ms debounce to avoid hammering dashboard_status_index full scan.
+   - On success: switch tab, clear per-tab search, freshen lastTasks, openVisible (active status)
+     or setPinnedExternalTask + render (for done/rejected/archived bypassing filter).
+   - Error: inline .error + span msg with ID, cleared on any next input.
+   - Works from any tab because header input + sAT('tasks').
+*/
+function wireGlobalTaskResolver() {
+  const input = $("global-task-id");
+  if (!input) return;
+  let debounce = null;
+  const ID_RE = /^ORB-\d{5}$/i;
+
+  function clearError() {
+    input.classList.remove("error");
+    const wrap = input.parentNode;
+    if (wrap && wrap.classList) wrap.classList.remove("error");
+    const err = $("global-task-id-error");
+    if (err) err.textContent = "";
+  }
+
+  input.addEventListener("input", () => {
+    clearError();
+    if (debounce) clearTimeout(debounce);
+    const raw = (input.value || "").trim();
+    if (!raw) return;
+    const candidate = raw.toUpperCase();
+    if (!ID_RE.test(candidate)) {
+      // partial input: explicitly do not fetch (per AC and CPU guard)
+      return;
+    }
+    // full match: debounce then fetch exactly once
+    debounce = setTimeout(() => {
+      const id = candidate;
+      fetch(`/api/tasks/${encodeURIComponent(id)}`, { headers: { accept: "application/json" } })
+        .then(async (res) => {
+          if (res.ok) {
+            const task = await res.json();
+            sAT("tasks");
+            searchQuery = "";
+            const ts = $("task-search");
+            if (ts) ts.value = "";
+            // freshen cache so open sees latest (incl sidecars)
+            const idx = lastTasks.findIndex((t) => t && t.id === task.id);
+            if (idx >= 0) lastTasks[idx] = task;
+            else lastTasks.push(task);
+            const ctx = taskContext();
+            if (activeStatuses.has(task.status)) {
+              openVisibleTask(task.id, ctx);
+            } else {
+              setPinnedExternalTask(task, ctx);
+              renderTasks(lastTasks, ctx);
+            }
+            // success: clear the jump input for next use
+            input.value = "";
+          } else if (res.status === 404) {
+            showGlobalIdError(id, `${id} not found`);
+          } else {
+            showGlobalIdError(id, `Error ${res.status} resolving ${id}`);
+          }
+        })
+        .catch(() => {
+          showGlobalIdError(id, `Network error resolving ${id}`);
+        });
+    }, 250);
+  });
+
+  function showGlobalIdError(id, msg) {
+    input.classList.add("error");
+    const wrap = input.parentNode;
+    if (wrap && wrap.classList) wrap.classList.add("error");
+    const err = $("global-task-id-error");
+    if (err) err.textContent = msg;
+  }
+}
+
 function fmtRelative(iso) {
   return fmtTimestamp(iso);
 }
@@ -1284,6 +1361,7 @@ wireSearch(tasksContext);
 wireLearningSearch();
 wireAdrSearch();
 wireFrictionSearch();
+wireGlobalTaskResolver();
 buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
 $("refresh-btn").addEventListener("click", refreshDashboard);
