@@ -19,15 +19,15 @@ use tracing::{Event, Level, Metadata, Subscriber, span};
 
 use super::*;
 
-mod audit_tests;
-mod fanout_tests;
-mod loop_tests;
-mod parallel_tests;
-mod pipeline_durability_tests;
-mod recovery_tests;
-mod step_tests;
-mod target_tests;
-mod templating_tests;
+mod audit;
+mod fanout;
+mod r#loop;
+mod parallel;
+mod pipeline_durability;
+mod recovery;
+mod step;
+mod target;
+mod templating;
 
 fn test_writer(run_id: &str) -> V2AuditWriter {
     let inner: std::sync::Arc<dyn AuditSink> = std::sync::Arc::new(NullSink);
