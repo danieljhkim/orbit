@@ -129,6 +129,3 @@ fn filter_grok_inner_sandbox_args(args: &[String]) -> Vec<String> {
     }
     filtered
 }
-
-#[cfg(test)]
-mod tests;

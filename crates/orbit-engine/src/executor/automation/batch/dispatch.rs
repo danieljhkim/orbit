@@ -319,6 +319,3 @@ fn priority_rank(priority: TaskPriority) -> u8 {
         TaskPriority::Critical => 3,
     }
 }
-
-#[cfg(test)]
-mod tests;

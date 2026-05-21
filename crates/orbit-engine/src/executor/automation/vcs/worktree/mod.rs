@@ -149,3 +149,6 @@ fn shared_worktree_branch_name(run_id: &str) -> Result<String, OrbitError> {
         sanitize_worktree_token(run_id)?
     ))
 }
+
+#[cfg(test)]
+mod tests;

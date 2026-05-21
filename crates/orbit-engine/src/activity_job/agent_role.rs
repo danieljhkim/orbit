@@ -67,6 +67,3 @@ pub fn apply_resolved_settings(spec: &mut AgentLoopSpec, resolved: &ResolvedAgen
     spec.model = resolved.model.clone();
     spec.backend = resolved.backend;
 }
-
-#[cfg(test)]
-mod tests;

@@ -142,6 +142,3 @@ pub(in crate::executor::automation) fn select_duel_roles<H: RuntimeHost + TaskHo
 
     Ok(output)
 }
-
-#[cfg(test)]
-mod tests;

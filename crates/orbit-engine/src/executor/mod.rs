@@ -15,3 +15,6 @@ pub mod registry;
 pub mod traits;
 
 pub(crate) use traits::ActivityExecutor;
+
+#[cfg(test)]
+mod tests;

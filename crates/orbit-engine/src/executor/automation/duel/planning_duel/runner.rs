@@ -255,6 +255,3 @@ pub(crate) fn run_planning_duel<H: RuntimeHost + TaskHost + Sync + ?Sized>(
         "recorded": true,
     }))
 }
-
-#[cfg(test)]
-mod tests;

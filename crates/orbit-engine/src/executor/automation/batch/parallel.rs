@@ -20,7 +20,11 @@ const DEFAULT_PARALLEL_BASE: &str = "main";
 const DEFAULT_PARALLELISM: usize = 4;
 const DEFAULT_WORKER_TIMEOUT_SECS: u64 = 7200;
 const WORKER_WAIT_POLL_SECS: u64 = 1;
-const PARALLEL_WORKER_JOB_ID: &str = "job_parallel_task_worker";
+// pub(crate) widened for tests/ layout migration (ORB-00240); test reaches via
+// exposed surface per docs/design-patterns/test_layout.md. (Logged via
+// orbit.task.update model=grok on ORB-00240 before this edit for the visibility
+// change on internal const used by timeout tests.)
+pub(crate) const PARALLEL_WORKER_JOB_ID: &str = "job_parallel_task_worker";
 
 /// Extract the `run_id` from an activity input value, returning a trimmed
 /// non-empty string. Used by downstream batch activities that need to resolve
@@ -656,6 +660,3 @@ pub(super) fn tasks_conflict(left: &[String], right: &[String]) -> bool {
 fn paths_conflict(left: &str, right: &str) -> bool {
     overlaps(left, right)
 }
-
-#[cfg(test)]
-mod tests;

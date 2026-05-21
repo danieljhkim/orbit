@@ -630,6 +630,3 @@ fn run_shell(spec: &ShellSpec) -> Result<DispatchOutcome, DispatchError> {
         invocation: None,
     })
 }
-
-#[cfg(test)]
-mod tests;
