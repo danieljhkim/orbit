@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
+use orbit_core::command::docs::DocIndexParams;
 use orbit_core::{DocType, OrbitError, OrbitRuntime};
 use serde::Serialize;
 use serde_json::Value;
@@ -22,8 +23,9 @@ pub enum DocsSubcommand {
     Show(DocsShowArgs),
     /// Register an additional docs root in .orbit/config.toml
     Add(DocsAddArgs),
-    /// Rebuild the docs index (v1 is walk-on-demand)
-    Reindex(DocsReindexArgs),
+    // ADR-0180: docs embeddings are built by an explicit admin verb; the old no-op reindex verb is retired.
+    /// Build or refresh doc corpus embeddings
+    Index(DocsIndexArgs),
     /// Backfill locked docs frontmatter for legacy docs
     Migrate(DocsMigrateArgs),
 }
@@ -60,10 +62,16 @@ pub struct DocsAddArgs {
 }
 
 #[derive(Args)]
-pub struct DocsReindexArgs {
+pub struct DocsIndexArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+    /// Re-embed even when content hashes are unchanged
+    #[arg(long)]
+    pub force: bool,
+    /// Embedding model alias to use for indexing
+    #[arg(long)]
+    pub model: Option<String>,
 }
 
 #[derive(Args)]
@@ -82,7 +90,7 @@ impl Execute for DocsCommand {
             DocsSubcommand::List(args) => args.execute(runtime),
             DocsSubcommand::Show(args) => args.execute(runtime),
             DocsSubcommand::Add(args) => args.execute(runtime),
-            DocsSubcommand::Reindex(args) => args.execute(runtime),
+            DocsSubcommand::Index(args) => args.execute(runtime),
             DocsSubcommand::Migrate(args) => args.execute(runtime),
         }
     }
@@ -177,13 +185,23 @@ impl Execute for DocsAddArgs {
     }
 }
 
-impl Execute for DocsReindexArgs {
+impl Execute for DocsIndexArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let message = runtime.reindex_docs()?;
+        let result = runtime.index_docs(DocIndexParams {
+            model: self.model,
+            force: self.force,
+        })?;
         if self.json {
-            crate::output::json::print_pretty(&serde_json::json!({ "message": message }))
+            crate::output::json::print_pretty(&serde_json::json!(result))
         } else {
-            println!("{message}");
+            println!(
+                "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                result.model_id,
+                result.indexed_sources,
+                result.report.embedded_chunks,
+                result.report.skipped_fields,
+                result.stale_sources.len()
+            );
             Ok(())
         }
     }

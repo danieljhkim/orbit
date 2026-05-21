@@ -135,17 +135,19 @@ Customizing crews (which model runs planner/implementer/reviewer), the base bran
 
 ## Semantic Search (optional)
 
-`orbit search` is the unified query surface for tasks, docs, learnings, and ADRs. It defaults to lexical matching. Opt into hybrid embedding + BM25 ranking over task fields with `--hybrid`, or find cosine-neighbor tasks with `orbit search similar <task-id>`. The embedder runs as a separate companion subprocess, so semantic search has zero cost when unused.
+`orbit search` is the unified query surface for tasks, docs, learnings, and ADRs. It defaults to lexical matching. Opt into hybrid embedding ranking over task fields or indexed docs with `--hybrid`, or find cosine-neighbor tasks with `orbit search similar <task-id>`. The embedder runs as a separate companion subprocess, so semantic search has zero cost when unused.
 
 ```bash
 orbit semantic install    # one-time: download companion + default model (bge-small)
 orbit semantic index      # backfill existing tasks
+orbit docs index          # backfill docs for --kind doc --hybrid
 orbit search "race in the scheduler when locks overlap"
 orbit search "race in the scheduler when locks overlap" --hybrid --kind task
+orbit search "why tasks serialize ORB ids" --hybrid --kind doc
 orbit search similar ORB-00042
 ```
 
-After install, task writes are embedded automatically in the background; `index` is only needed for the initial backfill. Companion + models live under `~/.orbit/embed/`; the per-workspace index at `.orbit/state/semantic.db`. Vector search is task-only today; docs, learnings, and ADRs remain lexical even when `--hybrid` is set.
+After install, task writes are embedded automatically in the background; `orbit semantic index` is only needed for the initial task backfill. Docs are indexed explicitly with `orbit docs index`, which skips unchanged content hashes and sweeps stale doc paths. Companion + models live under `~/.orbit/embed/`; the per-workspace index is `.orbit/state/semantic.db`. Learnings and ADRs remain lexical even when `--hybrid` is set.
 
 ---
 

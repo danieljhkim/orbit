@@ -1,15 +1,15 @@
 ---
 title: "Orbit Docs — Decisions"
 owner: claude
-last_updated: 2026-05-19
+last_updated: 2026-05-21
 status: Draft
 feature: orbit-docs
 doc_role: decisions
 type: design
-summary: "Orbit Docs — accepted ADRs: locked frontmatter schema, `.orbit/` vs `docs/` locating principle, ID-prefix dispatch for `related_artifacts`."
+summary: "Orbit Docs — accepted ADRs: locked frontmatter schema, `.orbit/` vs `docs/` locating principle, ID-prefix dispatch, and doc embeddings indexing."
 tags: [orbit-docs]
 related_features: [orbit-docs]
-related_artifacts: [ADR-0169, ADR-0170, ADR-0171, ORB-00163]
+related_artifacts: [ADR-0169, ADR-0170, ADR-0171, ADR-0180, ORB-00163, ORB-00206]
 ---
 
 # Orbit Docs — Decisions
@@ -67,8 +67,25 @@ ADR allocation is non-negotiable: the global ID is minted via `orbit.adr.add` *b
 
 ---
 
+## ADR-0180 — Doc corpus embeddings use `docs index` and opt-in hybrid search
+
+**Status:** Accepted · 2026-05-21 · [ORB-00206]
+
+**Context.** Doc search was lexical-only after [ORB-00202] unified the query surface, while the orbit-search store already had a `source_kind` discriminator that could hold docs. The alternatives were to keep semantic ranking deferred, add a separate docs search verb, or reuse the existing vector store behind the unified `orbit search --kind doc --hybrid` path.
+
+**Decision.** Use `orbit docs index` as the explicit admin verb that embeds configured docs roots into `source_kind = "doc"` rows, and keep retrieval opt-in through `orbit search <query> --kind doc --hybrid`. Lexical doc search remains the default, ADRs stay lifecycle-owned and lexical-only, and `[docs.search].semantic_weight` tunes the blend without adding another CLI flag.
+
+**Consequences.**
+- The old no-op docs indexing verb is retired rather than kept as a shim, so the docs lifecycle verb now matches `orbit semantic index`.
+- Doc embeddings reuse orbit-search storage and companion model selection without adding an orbit-search to orbit-core dependency.
+- Hybrid doc search can improve concept queries while preserving lexical fallback when the companion or doc rows are unavailable.
+- Cost: the docs index becomes a second freshness loop next to task semantic indexing; operators must run `orbit docs index` after substantial doc moves or edits until background indexing exists.
+
+---
+
 ## Task References
 
 - [ORB-00163] — Introduce `orbit docs` indexed knowledge base and `orbit-docs` skill
+- [ORB-00206] — Add doc-corpus embeddings: `orbit docs index` and hybrid scoring for `orbit search --kind doc`
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

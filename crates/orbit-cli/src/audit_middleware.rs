@@ -355,7 +355,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 DocsSubcommand::List(_) => ("list", None),
                 DocsSubcommand::Show(args) => ("show", Some(args.path.as_str())),
                 DocsSubcommand::Add(args) => ("add", Some(args.path.as_str())),
-                DocsSubcommand::Reindex(_) => ("reindex", None),
+                DocsSubcommand::Index(_) => ("index", None),
                 DocsSubcommand::Migrate(_) => ("migrate", None),
             };
             CommandMeta {

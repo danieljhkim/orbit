@@ -6,7 +6,7 @@ use crate::{OrbitBuiltinAction, Tool, ToolContext};
 pub struct OrbitDocsListTool;
 pub struct OrbitDocsShowTool;
 pub struct OrbitDocsAddTool;
-pub struct OrbitDocsReindexTool;
+pub struct OrbitDocsIndexTool;
 pub struct OrbitDocsMigrateTool;
 
 impl Tool for OrbitDocsListTool {
@@ -72,18 +72,30 @@ impl Tool for OrbitDocsAddTool {
     }
 }
 
-impl Tool for OrbitDocsReindexTool {
+impl Tool for OrbitDocsIndexTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
-            name: "orbit.docs.reindex".to_string(),
-            description: "No-op v1 docs reindex surface; docs are walked on demand.".to_string(),
-            parameters: Vec::new(),
+            name: "orbit.docs.index".to_string(),
+            description: "Build or refresh doc corpus embeddings under configured [docs].roots."
+                .to_string(),
+            parameters: vec![
+                optional_param(
+                    "model",
+                    "Embedding model alias to use for indexing.",
+                    "string",
+                ),
+                optional_param(
+                    "force",
+                    "Re-embed even when content hashes are unchanged.",
+                    "boolean",
+                ),
+            ],
             builtin: true,
         }
     }
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
-        super::execute_host_action(ctx, input, OrbitBuiltinAction::DocsReindex)
+        super::execute_host_action(ctx, input, OrbitBuiltinAction::DocsIndex)
     }
 }
 

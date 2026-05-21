@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- **Docs indexing verb renamed**: `orbit docs reindex` / `orbit.docs.reindex` is removed. Use `orbit docs index [--json] [--force] [--model <alias>]` / `orbit.docs.index` to build doc-corpus embeddings. ([ORB-00206])
 - **`orbit search` mode split and per-kind status syntax**: the query surface now has three visible CLI forms: `orbit search <query>`, `orbit search similar <id>`, and `orbit search path <path>`. The old `orbit search --semantic <id>` and `orbit search --path <path>` forms are removed. `--status` now requires `kind:value` tokens such as `task:open,doc:active,adr:proposed`; bare tokens like `--status open` are rejected. CLI `--field` / `--model` and MCP `field` / `embedding_model` are removed from `orbit search`; MCP `model` remains provenance-only. ADR-0179 supersedes ADR-0175. ([ORB-00205])
 - **Per-domain `search` subcommands removed; cross-kind filters on `orbit search`**: `orbit task search`, `orbit docs search`, `orbit learning search` (and the matching `orbit.task.search`, `orbit.docs.search`, `orbit.learning.search` MCP tools) are hard-removed. Replacement: `orbit search --kind {task,doc,learning,adr,all} <query>` for content-similarity, and `orbit <kind> list --filter` for structural filters. `orbit search` gains four new flags:
   - `--tag <T>` (repeatable, AND semantics; applies to task/doc/learning/ADR).
@@ -17,6 +18,7 @@
 
 ### Features
 
+- **Doc-corpus embeddings and hybrid doc search**: `orbit docs index` walks configured docs roots, embeds `{path,title,tags,body}` into `source_kind="doc"` rows, skips unchanged content hashes, and sweeps stale doc paths. `orbit search <query> --kind doc --hybrid` blends lexical doc scoring with cosine using `[docs.search].semantic_weight` (default `0.5`) and falls back to lexical with a warning when the companion or doc rows are unavailable. ([ORB-00206])
 - **ADR envelope v2 tags and paths**: ADR `adr.yaml` envelopes now carry `schema_version: 2` plus `tags` and `paths` fields. Existing ADR envelopes are backfilled with explicit empty lists, `orbit.adr.add` / `orbit.adr.update` accept the new fields, `orbit.adr.list` filters by `tag` and `path`, and the phase-2 `orbit search --tag/--path --kind adr` deferrals are closed. ([ORB-00203])
 - **`orbit-guide` first-time-setup skill** with explicit carve-out from the `orbit` router; seeded skill set 11 → 12. ([ORB-00126])
 - **Secret redaction at the artifact write boundary**: action-keyed sanitizer at the tool-host entrance covers ADR / learning / task / review-thread / friction writes; whole-token credentials reject via `OrbitError::SensitiveInput`; responses gain `redactions_applied: bool`. ([ORB-00138])

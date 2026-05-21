@@ -51,7 +51,8 @@ pub use orbit_store::{
 
 pub use command::docs::{
     AdrSearchResult, ArtifactRef, DocAddOutcome, DocFrontmatter, DocMigrationChange,
-    DocMigrationReport, DocRecord, DocSearchResult, DocShow, DocType, SearchResult, TaskRelatedDoc,
+    DocMigrationReport, DocRecord, DocSearchResult, DocShow, DocType, DocsSearchConfig,
+    SearchResult, TaskRelatedDoc,
 };
 pub use command::learning::migrate_learning_layout_at;
 pub use command::search::{

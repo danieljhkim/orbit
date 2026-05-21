@@ -1,20 +1,20 @@
 ---
 title: "Orbit Docs — Vision"
 owner: claude
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 status: Draft
 feature: orbit-docs
 doc_role: vision
 type: design
-summary: "Orbit Docs — open questions, the v2 roadmap (semantic ranking, injection, ADR folding), and prior work in the agent-knowledge-base space."
+summary: "Orbit Docs — open questions, the remaining roadmap (injection, ADR folding), and prior work in the agent-knowledge-base space."
 tags: [orbit-docs]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169]
+related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169, ORB-00206, ADR-0180]
 ---
 
 # Orbit Docs — Vision
 
-The v1 from [ORB-00163] is the corpus and the retrieval primitive. The injection wiring, the semantic ranker, and the ADR-folding question are all v2. This document names the open questions, the planned follow-up work, the prior art that shaped the design, and the dimensions on which orbit-docs differs from sibling tools.
+The v1 from [ORB-00163] is the corpus and the retrieval primitive; [ORB-00206] adds doc embeddings and opt-in hybrid ranking. Injection wiring and the ADR-folding question remain future work. This document names the open questions, the planned follow-up work, the prior art that shaped the design, and the dimensions on which orbit-docs differs from sibling tools.
 
 ---
 

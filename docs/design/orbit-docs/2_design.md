@@ -1,21 +1,21 @@
 ---
 title: "Orbit Docs — Design"
 owner: claude
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 status: Draft
 feature: orbit-docs
 doc_role: design
 type: design
-summary: "Orbit Docs — frontmatter schema, walker, tolerant indexer, six-verb surface, and the `.orbit/` exclusion invariant."
+summary: "Orbit Docs — frontmatter schema, walker, doc embeddings index, hybrid search, and the `.orbit/` exclusion invariant."
 tags: [orbit-docs]
 paths: ["crates/orbit-core/src/command/docs.rs", "crates/orbit-cli/src/command/docs.rs"]
 related_features: [orbit-docs]
-related_artifacts: [ORB-00163, ADR-0169, ADR-0170, ADR-0171]
+related_artifacts: [ORB-00163, ORB-00206, ADR-0169, ADR-0170, ADR-0171, ADR-0180]
 ---
 
 # Orbit Docs — Design
 
-This document specifies what [ORB-00163] shipped: the locked frontmatter schema, the strict-then-tolerant parser, the walker (including the `.orbit/` exclusion invariant), the six-verb CLI / MCP surface, and the migration verb that backfills legacy docs. It also names the v1 limitations the v2 follow-ups ([ORB-00164] through [ORB-00169]) address.
+This document specifies what [ORB-00163] and [ORB-00206] ship: the locked frontmatter schema, the strict-then-tolerant parser, the walker (including the `.orbit/` exclusion invariant), the six-verb CLI / MCP surface, doc-corpus embeddings, hybrid doc search, and the migration verb that backfills legacy docs. It also names the remaining limitations the follow-ups ([ORB-00164] through [ORB-00169]) address.
 
 The design lives in two files: [crates/orbit-core/src/command/docs.rs](../../../crates/orbit-core/src/command/docs.rs) (~1290 lines, parser + walker + verb implementations + tests) and [crates/orbit-cli/src/command/docs.rs](../../../crates/orbit-cli/src/command/docs.rs) (~250 lines, clap argument shapes + table rendering). The MCP twin lives in [crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/docs_tools.rs).
 
@@ -213,15 +213,15 @@ JSON shape: `{ "path", "frontmatter", "body" }`.
 
 ### 6.3 `orbit search --kind doc <query>`
 
-See §5. Returns the ranked list with `score` and `matched_by` (list of which fields hit).
+See §5. Returns the ranked list with `score` and `matched_by` (list of which fields hit). Without `--hybrid`, the output is lexical-only. With `--hybrid`, Orbit embeds the query, retrieves `source_kind = "doc"` rows, min-max normalizes lexical and cosine scores, and blends them with `[docs.search].semantic_weight` (default `0.5`, clamped to `[0.0, 1.0]`). If the companion is missing or no doc embeddings exist, the command warns and falls back to lexical results.
 
 ### 6.4 `orbit docs add <path>`
 
 Idempotently appends a normalized path to `[docs].roots`. Refuses non-existent paths and `.orbit/` paths. Writes back to `.orbit/config.toml`, preserving the rest of the file by round-tripping through `toml::Value`. Idempotency is determined by normalized path comparison (trailing `/` and case ignored on the candidate-vs-existing check).
 
-### 6.5 `orbit docs reindex`
+### 6.5 `orbit docs index [--json] [--force] [--model <alias>]`
 
-v1 no-op. Returns `"indexer is walk-on-demand; nothing to do."`. The verb exists so the surface is stable for [ORB-00168] (semantic embeddings index).
+Walks configured docs roots, reads each Markdown body through the tolerant parser, maps each doc to `{path, title, tags, body}`, and calls the orbit-search vector store with `source_kind = "doc"`. `--force` bypasses the existing `content_hash` skip, while the default path is idempotent. After indexing, the command deletes stale doc rows whose `source_id` no longer appears in the live docs corpus.
 
 ### 6.6 `orbit docs migrate [--dry-run]`
 
@@ -244,7 +244,7 @@ Five tools, registered in `safe_mcp_tool_names` ([crates/orbit-cli/src/command/m
 orbit.docs.list
 orbit.docs.show
 orbit.docs.add
-orbit.docs.reindex
+orbit.docs.index
 orbit.docs.migrate
 ```
 
@@ -260,20 +260,23 @@ The per-domain doc-search MCP tool was retired by [ORB-00202]; content-similarit
 [docs]
 roots = ["docs/"]                     # default when section absent
 # roots = ["docs/", "apps/*/docs/"]   # monorepo example
+
+[docs.search]
+semantic_weight = 0.5                 # default; clamped to 0.0..1.0
 ```
 
-When the section is absent or the file is empty, the default is `["docs/"]`. `parse_docs_roots_from_config_toml` is the inner parser; `OrbitRuntime::docs_roots` is the call site that resolves the configured path.
+When the section is absent or the file is empty, the default root is `["docs/"]` and the default hybrid semantic weight is `0.5`. `parse_docs_roots_from_config_toml` and `parse_docs_search_config_from_config_toml` are the inner parsers; `OrbitRuntime::docs_roots` and `OrbitRuntime::docs_search_config` are the call sites that resolve the configured path.
 
 ---
 
 ## 9. Concerns & Honest Limitations
 
-- **No body indexing.** Search is summary + tags + type only. A doc whose body contains the queried concept but whose frontmatter doesn't will not surface. This is by design until semantic ranking exists ([ORB-00168]).
+- **Lexical search is still frontmatter-only.** Plain `orbit search --kind doc` scores summary + tags + type only. Body-level concept recall requires `orbit docs index` plus `orbit search --kind doc --hybrid`.
 - **`migration_diff` is not a real diff.** It prints the first 12 lines of `before` and first 16 lines of `after` glued together with `@@` markers. Misleading label. [ORB-00164] tracks the fix.
 - **`update_existing_frontmatter` hand-edits YAML by line.** Works for simple `key: scalar` legacy headers. Will misbehave on multi-line block scalars (`description: |`) and quoted values containing colons. [ORB-00164] tracks the round-trip-through-`serde_yaml` fix.
 - **`is_git_ignored` shells out per file.** Acceptable at ~100 docs. Will degrade at thousands. [ORB-00164] tracks the batched-stdin or `ignore`-crate fix.
 - **No hook-time or task-time injection yet.** The retrieval primitive ships in v1; injection is [ORB-00166] and [ORB-00167].
-- **No semantic ranking.** v1 is BM25-ish substring + exact-match. v2 is [ORB-00168].
+- **Doc semantic freshness is explicit.** Task writes enqueue background embeddings, but docs require `orbit docs index` until a future watcher/background indexer exists.
 - **ADRs are not in the corpus.** [ORB-00169] is the design question.
 
 ---

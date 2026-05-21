@@ -238,7 +238,7 @@ fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
         "orbit.docs.list",
         "orbit.docs.show",
         "orbit.docs.add",
-        "orbit.docs.reindex",
+        "orbit.docs.index",
         "orbit.docs.migrate",
     ] {
         assert!(names.contains(&name), "missing docs tool {name}");

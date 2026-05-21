@@ -36,11 +36,13 @@ mod subprocess;
 mod vector;
 
 pub use commands::{
-    CompanionStatus, ScoreBreakdown, SemanticHit, SemanticInstallParams, SemanticInstallResult,
-    SemanticReindexParams, SemanticReindexResult, SemanticRelatedParams, SemanticRelatedResult,
-    SemanticSearchParams, SemanticSearchResult, SemanticStatsResult, SemanticUninstallParams,
-    SemanticUninstallResult, semantic_install, semantic_reindex, semantic_related, semantic_search,
-    semantic_stats, semantic_uninstall,
+    CompanionStatus, DocIndexParams, DocIndexResult, DocSemanticHit, DocSemanticSearchParams,
+    DocSemanticSearchResult, ScoreBreakdown, SemanticHit, SemanticInstallParams,
+    SemanticInstallResult, SemanticReindexParams, SemanticReindexResult, SemanticRelatedParams,
+    SemanticRelatedResult, SemanticSearchParams, SemanticSearchResult, SemanticStatsResult,
+    SemanticUninstallParams, SemanticUninstallResult, doc_index, doc_semantic_search,
+    semantic_install, semantic_reindex, semantic_related, semantic_search, semantic_stats,
+    semantic_uninstall,
 };
 pub use companion::{
     CompanionPaths, INSTALL_REMEDIATION, locate_companion, platform_companion_filename, platform_id,
@@ -53,4 +55,7 @@ pub use lexical::docs::{
 pub use noop::NoopEmbedder;
 pub use rpc::{RpcError, RpcRequest, RpcResponse, RpcResult};
 pub use subprocess::SubprocessEmbedder;
-pub use vector::{EmbedWorker, SemanticStats, UpsertReport, VectorStore};
+pub use vector::{
+    DocEmbeddingSource, EmbedWorker, SOURCE_KIND_DOC, SOURCE_KIND_TASK, SemanticStats,
+    UpsertReport, VectorStore,
+};

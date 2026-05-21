@@ -5,6 +5,8 @@
 //! top-level `OrbitRuntime` exposes thin delegates that build the runtime's
 //! shared state into these calls.
 
+mod doc_index;
+mod doc_search;
 mod install;
 mod reindex;
 mod related;
@@ -12,6 +14,8 @@ mod search;
 mod stats;
 mod uninstall;
 
+pub use doc_index::{DocIndexParams, DocIndexResult};
+pub use doc_search::{DocSemanticHit, DocSemanticSearchParams, DocSemanticSearchResult};
 pub use install::{SemanticInstallParams, SemanticInstallResult};
 pub use reindex::{SemanticReindexParams, SemanticReindexResult};
 pub use related::{SemanticRelatedParams, SemanticRelatedResult};
@@ -23,7 +27,7 @@ use std::fs;
 
 use orbit_common::types::{OrbitError, Task};
 
-use crate::vector::VectorStore;
+use crate::vector::{DocEmbeddingSource, VectorStore};
 use crate::{CompanionPaths, ModelSpec, default_model};
 
 pub(crate) const DEFAULT_RELEASE_BASE_URL: &str =
@@ -82,6 +86,14 @@ pub fn semantic_reindex(
     reindex::run(vector_store, tasks, params)
 }
 
+pub fn doc_index(
+    vector_store: &VectorStore,
+    docs: &[DocEmbeddingSource],
+    params: DocIndexParams,
+) -> Result<DocIndexResult, OrbitError> {
+    doc_index::run(vector_store, docs, params)
+}
+
 pub fn semantic_stats(
     vector_store: &VectorStore,
     task_ids: &[String],
@@ -94,6 +106,13 @@ pub fn semantic_search(
     params: SemanticSearchParams,
 ) -> Result<SemanticSearchResult, OrbitError> {
     search::run(vector_store, params)
+}
+
+pub fn doc_semantic_search(
+    vector_store: &VectorStore,
+    params: DocSemanticSearchParams,
+) -> Result<DocSemanticSearchResult, OrbitError> {
+    doc_search::run(vector_store, params)
 }
 
 pub fn semantic_related(

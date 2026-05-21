@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use crate::command::docs::DocType;
+use crate::command::docs::{DocIndexParams, DocType};
 use orbit_common::types::{OrbitError, optional_string, required_string};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::OrbitRuntime;
 
@@ -26,8 +26,10 @@ pub(super) fn add(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitEr
     to_json(runtime.add_docs_root(&path)?)
 }
 
-pub(super) fn reindex(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
-    Ok(json!({ "message": runtime.reindex_docs()? }))
+pub(super) fn index(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let model = optional_string(&input, "model")?;
+    let force = optional_bool_alias(&input, &["force"])?.unwrap_or(false);
+    to_json(runtime.index_docs(DocIndexParams { model, force })?)
 }
 
 pub(super) fn migrate(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {

@@ -6,12 +6,14 @@
 //! - [`upsert`] — `upsert_embeddings`, the BLAKE3-deduped per-field write path,
 //!   plus its private SQL helpers (`delete_field_rows`, content-hash check).
 //! - [`tasks`] — `index_task` / `reindex_tasks` task-corpus entry points.
+//! - [`docs`] — `index_doc` / `reindex_docs` docs-corpus entry points.
 //! - [`queries`] — `delete_source` and `stats` read/cascade operations.
 //!
 //! This file owns the `VectorStore` struct itself plus the connection-handle
 //! plumbing (`open`, `open_in_memory`, `connection`, the WAL pragma helper)
 //! and the small `pub(super)` constants shared across the submodules above.
 
+mod docs;
 mod queries;
 mod schema;
 mod tasks;
@@ -23,7 +25,9 @@ use std::sync::{Arc, Mutex};
 use orbit_common::types::OrbitError;
 use rusqlite::Connection;
 
-pub(super) const SOURCE_KIND_TASK: &str = "task";
+pub const SOURCE_KIND_TASK: &str = "task";
+// ADR-0180: docs share the embeddings table through source_kind, not a separate schema.
+pub const SOURCE_KIND_DOC: &str = "doc";
 
 #[derive(Clone)]
 pub struct VectorStore {

@@ -41,7 +41,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(docs::OrbitDocsListTool);
     registry.register(docs::OrbitDocsShowTool);
     registry.register(docs::OrbitDocsAddTool);
-    registry.register(docs::OrbitDocsReindexTool);
+    registry.register(docs::OrbitDocsIndexTool);
     registry.register(docs::OrbitDocsMigrateTool);
     registry.register(groundhog::checkpoint_success::OrbitGroundhogCheckpointSuccessTool);
     registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);

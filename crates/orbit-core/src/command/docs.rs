@@ -9,9 +9,12 @@ use std::str::FromStr;
 use orbit_common::types::{Adr, AdrStatus, OrbitError, Task};
 use orbit_common::utility::glob::{match_glob, normalize_glob_path};
 use orbit_common::utility::selector::anchor_path;
-pub use orbit_search::{AdrSearchResult, DocSearchResult, SearchResult};
+pub use orbit_search::{
+    AdrSearchResult, DocIndexParams, DocIndexResult, DocSearchResult, SearchResult,
+};
 use orbit_search::{
-    AdrSearchSource, DocSearchSource, score_adr_record, score_doc_record, sort_search_results,
+    AdrSearchSource, DocEmbeddingSource, DocSearchSource, score_adr_record, score_doc_record,
+    sort_search_results,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::json;
@@ -235,11 +238,34 @@ struct DocsConfigFile {
 #[derive(Debug, Deserialize)]
 struct DocsConfigSection {
     roots: Option<Vec<String>>,
+    search: Option<DocsSearchConfigSection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DocsSearchConfig {
+    pub semantic_weight: f32,
+}
+
+impl Default for DocsSearchConfig {
+    fn default() -> Self {
+        Self {
+            semantic_weight: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DocsSearchConfigSection {
+    semantic_weight: Option<f32>,
 }
 
 impl OrbitRuntime {
     pub fn docs_roots(&self) -> Result<Vec<String>, OrbitError> {
         read_docs_roots_from_config_path(&self.config_path())
+    }
+
+    pub fn docs_search_config(&self) -> Result<DocsSearchConfig, OrbitError> {
+        read_docs_search_config_from_config_path(&self.config_path())
     }
 
     pub fn list_docs(
@@ -330,8 +356,10 @@ impl OrbitRuntime {
         add_docs_root(&self.paths().repo_root, &self.config_path(), path)
     }
 
-    pub fn reindex_docs(&self) -> Result<String, OrbitError> {
-        Ok("indexer is walk-on-demand; nothing to do.".to_string())
+    pub fn index_docs(&self, params: DocIndexParams) -> Result<DocIndexResult, OrbitError> {
+        let roots = self.docs_roots()?;
+        let sources = doc_embedding_sources(&self.paths().repo_root, &roots)?;
+        orbit_search::doc_index(&self.stores().semantic_vector, &sources, params)
     }
 
     pub fn migrate_docs(&self, dry_run: bool) -> Result<DocMigrationReport, OrbitError> {
@@ -352,6 +380,24 @@ pub fn parse_docs_roots_from_config_toml(raw: &str) -> Result<Vec<String>, Orbit
         .unwrap_or_else(default_doc_roots))
 }
 
+pub fn parse_docs_search_config_from_config_toml(
+    raw: &str,
+) -> Result<DocsSearchConfig, OrbitError> {
+    if raw.trim().is_empty() {
+        return Ok(DocsSearchConfig::default());
+    }
+    let parsed = toml::from_str::<DocsConfigFile>(raw).map_err(|error| {
+        OrbitError::InvalidInput(format!("invalid docs config in config.toml: {error}"))
+    })?;
+    let semantic_weight = parsed
+        .docs
+        .and_then(|section| section.search)
+        .and_then(|section| section.semantic_weight)
+        .unwrap_or_else(|| DocsSearchConfig::default().semantic_weight)
+        .clamp(0.0, 1.0);
+    Ok(DocsSearchConfig { semantic_weight })
+}
+
 fn read_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitError> {
     if !path.exists() {
         return Ok(default_doc_roots());
@@ -359,6 +405,15 @@ fn read_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitErr
     let raw = fs::read_to_string(path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
     parse_docs_roots_from_config_toml(&raw)
+}
+
+fn read_docs_search_config_from_config_path(path: &Path) -> Result<DocsSearchConfig, OrbitError> {
+    if !path.exists() {
+        return Ok(DocsSearchConfig::default());
+    }
+    let raw = fs::read_to_string(path)
+        .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
+    parse_docs_search_config_from_config_toml(&raw)
 }
 
 fn read_task_context_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitError> {
@@ -863,6 +918,23 @@ fn doc_search_source(record: DocRecord) -> DocSearchSource {
             .map(|artifact| artifact.as_str().to_string())
             .collect(),
     }
+}
+
+fn doc_embedding_sources(
+    repo_root: &Path,
+    roots: &[String],
+) -> Result<Vec<DocEmbeddingSource>, OrbitError> {
+    let mut sources = Vec::new();
+    for record in walk_docs_roots(repo_root, roots)? {
+        let shown = show_doc(repo_root, roots, &record.path)?;
+        sources.push(DocEmbeddingSource {
+            path: record.path,
+            title: shown.frontmatter.summary,
+            tags: shown.frontmatter.tags,
+            body: shown.body,
+        });
+    }
+    Ok(sources)
 }
 
 fn adr_search_source(adr: Adr) -> AdrSearchSource {
@@ -1753,6 +1825,34 @@ mod tests {
             parse_docs_roots_from_config_toml("[docs]\nroots = [\"docs/\", \"apps/*/docs/\"]\n")
                 .unwrap(),
             vec!["docs/", "apps/*/docs/"]
+        );
+    }
+
+    #[test]
+    fn docs_search_config_defaults_and_clamps_semantic_weight() {
+        assert_eq!(
+            parse_docs_search_config_from_config_toml("")
+                .unwrap()
+                .semantic_weight,
+            0.5
+        );
+        assert_eq!(
+            parse_docs_search_config_from_config_toml("[docs.search]\nsemantic_weight = 0.7\n")
+                .unwrap()
+                .semantic_weight,
+            0.7
+        );
+        assert_eq!(
+            parse_docs_search_config_from_config_toml("[docs.search]\nsemantic_weight = -1.0\n")
+                .unwrap()
+                .semantic_weight,
+            0.0
+        );
+        assert_eq!(
+            parse_docs_search_config_from_config_toml("[docs.search]\nsemantic_weight = 2.0\n")
+                .unwrap()
+                .semantic_weight,
+            1.0
         );
     }
 
