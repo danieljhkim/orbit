@@ -100,6 +100,34 @@ fn allocates_dense_adr_and_learning_ids() {
 }
 
 #[test]
+fn abandoned_learning_allocation_advances_sequence_but_is_hidden() {
+    let temp = TempDir::new().expect("tempdir");
+    let allocator = IdAllocator::open(allocator_config(temp.path())).expect("allocator");
+
+    let first = allocator.allocate_learning().expect("first");
+    allocator
+        .abandon_learning(&first.id)
+        .expect("abandon first");
+    let second = allocator.allocate_learning().expect("second");
+
+    assert_eq!(first.id, "L-0001");
+    assert_eq!(second.id, "L-0002");
+    assert!(
+        allocator
+            .learning_allocation(&first.id)
+            .expect("first allocation")
+            .is_none()
+    );
+    let visible: Vec<_> = allocator
+        .learning_allocations()
+        .expect("allocations")
+        .into_iter()
+        .map(|record| record.id)
+        .collect();
+    assert_eq!(visible, vec!["L-0002"]);
+}
+
+#[test]
 fn backfills_existing_adrs_idempotently_and_allocates_after_max() {
     let temp = TempDir::new().expect("tempdir");
     let shared_root = temp.path().join(".orbit");
@@ -211,7 +239,7 @@ fn assert_multi_process_dense(kind: IdAllocationKind) {
     let mut child_a = Command::new(&exe)
         .args([
             "--exact",
-            "sqlite::id_allocator::tests::allocate_ids_child",
+            "sqlite::id_allocator::tests::id_allocator::allocate_ids_child",
             "--nocapture",
         ])
         .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)
@@ -223,7 +251,7 @@ fn assert_multi_process_dense(kind: IdAllocationKind) {
     let mut child_b = Command::new(&exe)
         .args([
             "--exact",
-            "sqlite::id_allocator::tests::allocate_ids_child",
+            "sqlite::id_allocator::tests::id_allocator::allocate_ids_child",
             "--nocapture",
         ])
         .env("ORBIT_ID_ALLOCATOR_CHILD_KIND", kind_name)

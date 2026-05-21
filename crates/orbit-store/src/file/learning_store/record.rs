@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_common::types::{
     Learning, LearningComment, LearningCommentEvent, LearningStatus, NotFoundKind, OrbitError,
@@ -11,6 +12,8 @@ use super::constants::LEARNING_SCHEMA_VERSION;
 use super::doc::{LearningFileDocument, serialize_learning_doc_yaml};
 use super::layout::validate_learning_id;
 use crate::file::yaml_doc::{read_yaml_with, write_yaml_atomic_with};
+
+static LEARNING_CREATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Read a learning YAML file at the given path. Returns a learning not-found error
 /// when the file is missing on disk.
@@ -56,6 +59,80 @@ pub(super) fn write_learning_file(
         learning: learning.clone(),
     };
     write_yaml_atomic_with(path, &doc, serialize_learning_doc_yaml)
+}
+
+/// Create a learning record at `path` without clobbering an existing body.
+///
+/// Returns `Ok(false)` when the target path already exists. The no-clobber
+/// write stages the full YAML in the same directory, then hard-links it into
+/// place so the final file appears atomically only if the destination is absent.
+pub(super) fn create_learning_file_exclusive(
+    path: &Path,
+    learning: &Learning,
+    expected_state: LearningStatus,
+) -> Result<bool, OrbitError> {
+    validate_learning_id(&learning.id)?;
+    if learning.status != expected_state {
+        return Err(OrbitError::Store(format!(
+            "learning '{}' status {:?} does not match destination state {:?}",
+            learning.id, learning.status, expected_state
+        )));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        OrbitError::Store(format!(
+            "cannot determine learning file parent for '{}'",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|e| OrbitError::Io(e.to_string()))?;
+
+    let doc = LearningFileDocument {
+        schema_version: LEARNING_SCHEMA_VERSION,
+        learning: learning.clone(),
+    };
+    let yaml = serialize_learning_doc_yaml(&doc)?;
+    let temp_path = exclusive_temp_path(path);
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temp_path)
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    file.write_all(yaml.as_bytes())
+        .and_then(|_| file.flush())
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    drop(file);
+
+    match fs::hard_link(&temp_path, path) {
+        Ok(()) => {
+            fs::remove_file(&temp_path).map_err(|error| OrbitError::Io(error.to_string()))?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&temp_path);
+            Ok(false)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            Err(OrbitError::Io(format!(
+                "link {} to {}: {error}",
+                temp_path.display(),
+                path.display()
+            )))
+        }
+    }
+}
+
+fn exclusive_temp_path(path: &Path) -> PathBuf {
+    let counter = LEARNING_CREATE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("learning.yaml");
+    path.with_file_name(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        counter
+    ))
 }
 
 pub(super) fn append_jsonl_comment_row(
