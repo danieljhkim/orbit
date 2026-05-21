@@ -32,18 +32,6 @@ export function priorityCell(p) {
   return node;
 }
 
-export function complexityCell(c) {
-  const text = c ? String(c) : "—";
-  const node = el("span", { class: "complexity mono", text });
-  if (c) {
-    node.style.color = `var(--complexity-${c}, var(--fg-dim))`;
-  } else {
-    node.style.color = "var(--fg-dim)";
-    node.style.opacity = "0.55";
-  }
-  return node;
-}
-
 export function stateCell(state) {
   const node = el("span", { class: "mono", text: state });
   node.style.color = `var(--state-${state}, var(--fg-dim))`;

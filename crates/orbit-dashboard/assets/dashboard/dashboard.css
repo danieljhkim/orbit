@@ -437,7 +437,36 @@
         .row .priority { grid-area: priority; text-align: left; }
         .row .type { grid-area: type; text-align: left; }
       }
-      
+
+      .row.header {
+        cursor: default;
+        background: transparent;
+        border-bottom: 1px solid var(--border);
+        padding: 2px 16px 6px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fg-dim);
+        pointer-events: none;
+      }
+      .row.header:hover {
+        background: transparent;
+        border-color: var(--border);
+      }
+      .row.header .id,
+      .row.header .title,
+      .row.header .priority,
+      .row.header .type {
+        font-size: inherit;
+        color: inherit;
+        font-family: var(--font-sans);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* text-align + grid-area (in narrow) inherited from .row.* + @media rules so columns align with data rows */
+      }
+
       .row-detail {
         padding: 16px 20px;
         background: #050505;
