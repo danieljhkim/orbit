@@ -79,5 +79,3 @@ fn load_hash_cache(ctx: &PipelineContext) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-#[cfg(test)]
-mod tests;

@@ -207,5 +207,3 @@ fn classify_ref_kind(path: &str) -> RefKind {
     }
 }
 
-#[cfg(test)]
-mod tests;

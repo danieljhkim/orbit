@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tempfile::tempdir;
 
-use super::super::OrbitIgnoreMatcher;
+use super::super::scan::OrbitIgnoreMatcher;
 
 #[test]
 fn orbitignore_matches_literal_filename() {

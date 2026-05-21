@@ -1,5 +1,5 @@
 use super::super::test_support::*;
-use super::*;
+use super::super::provider_dirs::*;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 

@@ -110,7 +110,8 @@ fn sandbox_exec_path_or_error() -> Result<PathBuf, OrbitError> {
     sandbox_exec_path().ok_or_else(|| OrbitError::Execution(sandbox_exec_unavailable_message()))
 }
 
-fn sandbox_exec_path_from<I, P>(candidates: I) -> Option<PathBuf>
+// pub(crate) widened for sibling-layout tests in macos_sandbox/tests/spawn.rs (ORB-00241)
+pub(crate) fn sandbox_exec_path_from<I, P>(candidates: I) -> Option<PathBuf>
 where
     I: IntoIterator<Item = P>,
     P: AsRef<Path>,
@@ -135,5 +136,3 @@ fn is_executable(path: &Path) -> bool {
     path.is_file()
 }
 
-#[cfg(test)]
-mod tests;

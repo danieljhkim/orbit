@@ -514,5 +514,3 @@ fn is_non_code_path(path: &str) -> bool {
     ) || lower.starts_with("docs/")
 }
 
-#[cfg(test)]
-mod tests;

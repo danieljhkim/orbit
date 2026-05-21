@@ -439,5 +439,3 @@ impl GraphIndexReader {
     }
 }
 
-#[cfg(test)]
-mod tests;

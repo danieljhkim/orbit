@@ -1029,7 +1029,8 @@ fn sha256_hex(data: &[u8]) -> String {
 /// The pre-fix implementation treated the leading `.` as a segment and
 /// returned 1, which tied root with its top-level children and caused
 /// `dir references missing dir child` errors during serialization (T20260421-0652).
-fn dir_depth(location: &str) -> usize {
+// Widened to pub(crate) so sibling tests/ can reach it (per ORB-00241 sibling test layout).
+pub(crate) fn dir_depth(location: &str) -> usize {
     let trimmed = location.trim_end_matches('/');
     if trimmed.is_empty() || trimmed == "." {
         return 0;
@@ -1040,5 +1041,3 @@ fn dir_depth(location: &str) -> usize {
         .count()
 }
 
-#[cfg(test)]
-mod tests;
