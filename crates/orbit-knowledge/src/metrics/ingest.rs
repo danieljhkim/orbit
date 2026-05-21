@@ -1,6 +1,8 @@
 use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, ToolCallTrace};
 use serde_json::Value;
 
+use crate::KnowledgePackResult;
+
 use super::summary::ratio;
 
 #[derive(Debug, Default)]
@@ -92,18 +94,28 @@ impl KnowledgeMetricsDelta {
         self.estimated_pack_tokens = self.estimated_pack_tokens.saturating_add(estimated_tokens);
 
         if let Some(payload) = call.result_payload.as_ref() {
-            self.explicit_raw_read_baseline = self
-                .explicit_raw_read_baseline
-                .saturating_add(sum_metric_fields(payload, RAW_BASELINE_KEYS));
-            self.explicit_pack_tokens = self
-                .explicit_pack_tokens
-                .saturating_add(sum_metric_fields(payload, PACK_TOKEN_KEYS));
-            self.unresolved_count = self
-                .unresolved_count
-                .saturating_add(count_unresolved_selectors(payload));
-            self.resolved_pack_entries = self
-                .resolved_pack_entries
-                .saturating_add(count_pack_entries(payload));
+            match serde_json::from_value::<KnowledgePackResult>(payload.clone()) {
+                Ok(pack) => {
+                    self.explicit_raw_read_baseline = self
+                        .explicit_raw_read_baseline
+                        .saturating_add(pack.raw_read_token_baseline);
+                    self.explicit_pack_tokens = self
+                        .explicit_pack_tokens
+                        .saturating_add(pack.knowledge_pack_tokens);
+                    self.unresolved_count = self.unresolved_count.saturating_add(
+                        pack.unresolved_selectors.len().min(u32::MAX as usize) as u32,
+                    );
+                    self.resolved_pack_entries = self
+                        .resolved_pack_entries
+                        .saturating_add(pack.entries.len() as u64);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "failed to decode orbit.graph.pack result payload for knowledge metrics"
+                    );
+                }
+            }
         }
     }
 
@@ -139,26 +151,6 @@ impl KnowledgeMetricsDelta {
     }
 }
 
-const RAW_BASELINE_KEYS: &[&str] = &[
-    "raw_read_token_baseline",
-    "rawReadTokenBaseline",
-    "raw_read_tokens",
-    "rawReadTokens",
-    "baseline_tokens",
-    "baselineTokens",
-    "source_tokens",
-    "sourceTokens",
-];
-
-const PACK_TOKEN_KEYS: &[&str] = &[
-    "knowledge_pack_tokens",
-    "knowledgePackTokens",
-    "pack_tokens",
-    "packTokens",
-    "compressed_tokens",
-    "compressedTokens",
-];
-
 fn tool_result_tokens(call: &ToolCallTrace) -> u64 {
     call.result_payload
         .as_ref()
@@ -182,90 +174,4 @@ fn value_token_count(value: &Value) -> u64 {
 
 fn bytes_to_token_estimate(bytes: u64) -> u64 {
     bytes.saturating_add(3) / 4
-}
-
-fn sum_metric_fields(value: &Value, keys: &[&str]) -> u64 {
-    match value {
-        Value::Object(map) => {
-            let direct = keys
-                .iter()
-                .filter_map(|key| map.get(*key))
-                .filter_map(value_as_u64)
-                .fold(0u64, u64::saturating_add);
-            if direct > 0 {
-                return direct;
-            }
-            map.values()
-                .map(|child| sum_metric_fields(child, keys))
-                .fold(0u64, u64::saturating_add)
-        }
-        Value::Array(items) => items
-            .iter()
-            .map(|child| sum_metric_fields(child, keys))
-            .fold(0u64, u64::saturating_add),
-        _ => 0,
-    }
-}
-
-fn count_unresolved_selectors(value: &Value) -> u32 {
-    fn count(value: &Value) -> u64 {
-        match value {
-            Value::Object(map) => map
-                .iter()
-                .map(|(key, child)| {
-                    if matches!(key.as_str(), "unresolved_selectors" | "unresolvedSelectors") {
-                        child
-                            .as_array()
-                            .map(|items| items.len() as u64)
-                            .unwrap_or(0)
-                    } else if matches!(
-                        key.as_str(),
-                        "knowledge_pack_unresolved_count"
-                            | "knowledgePackUnresolvedCount"
-                            | "unresolved_count"
-                            | "unresolvedCount"
-                    ) {
-                        value_as_u64(child).unwrap_or(0)
-                    } else {
-                        count(child)
-                    }
-                })
-                .fold(0u64, u64::saturating_add),
-            Value::Array(items) => items.iter().map(count).fold(0u64, u64::saturating_add),
-            _ => 0,
-        }
-    }
-
-    count(value).min(u32::MAX as u64) as u32
-}
-
-fn count_pack_entries(value: &Value) -> u64 {
-    match value {
-        Value::Object(map) => {
-            let direct = map
-                .get("entries")
-                .and_then(Value::as_array)
-                .map(|items| items.len() as u64)
-                .unwrap_or(0);
-            if direct > 0 {
-                return direct;
-            }
-            map.values()
-                .map(count_pack_entries)
-                .fold(0u64, u64::saturating_add)
-        }
-        Value::Array(items) => items
-            .iter()
-            .map(count_pack_entries)
-            .fold(0u64, u64::saturating_add),
-        _ => 0,
-    }
-}
-
-fn value_as_u64(value: &Value) -> Option<u64> {
-    match value {
-        Value::Number(number) => number.as_u64(),
-        Value::String(raw) => raw.parse::<u64>().ok(),
-        _ => None,
-    }
 }
