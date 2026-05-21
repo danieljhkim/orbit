@@ -2126,7 +2126,6 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tempfile",
- "tiktoken-rs",
  "toml",
  "tracing",
 ]
@@ -2141,6 +2140,7 @@ dependencies = [
  "futures-core",
  "orbit-common",
  "orbit-core",
+ "orbit-knowledge",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2204,6 +2204,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "tiktoken-rs",
  "toml",
  "tracing",
  "tree-sitter",

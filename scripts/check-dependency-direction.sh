@@ -35,7 +35,7 @@ allowed_internal_deps() {
       echo "orbit-common orbit-tools"
       ;;
     orbit-dashboard)
-      echo "orbit-common orbit-core"
+      echo "orbit-common orbit-core orbit-knowledge"
       ;;
     orbit-cli)
       echo "orbit-common orbit-core orbit-mcp orbit-dashboard"

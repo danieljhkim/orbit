@@ -6,8 +6,8 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_core::command::job::JobRunListParams;
-use orbit_core::knowledge_stats::aggregate as aggregate_knowledge_stats;
 use orbit_core::{InvocationQuery, OrbitRuntime};
+use orbit_knowledge::metrics::aggregate as aggregate_knowledge_stats;
 use serde::Deserialize;
 
 use super::{LimitQuery, map_runtime_error, non_empty_string};

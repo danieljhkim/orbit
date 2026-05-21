@@ -10,11 +10,11 @@ use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use orbit_common::types::KnowledgeRunMetrics;
 use orbit_core::command::job::JobRunListParams;
-use orbit_core::knowledge_stats::aggregate as aggregate_knowledge_stats;
 use orbit_core::{
     ActivityInvocationMetrics, InvocationQuery, InvocationRecord, JobRun, JobRunState,
     OrbitRuntime, TaskInvocationMetrics, ToolInvocationMetrics,
 };
+use orbit_knowledge::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use rusqlite::{Connection, params};
 use tower::ServiceExt;
 
@@ -208,7 +208,7 @@ async fn metrics_endpoints_return_runtime_shapes() {
             })
             .expect("list job runs"),
     );
-    let decoded_knowledge: orbit_core::knowledge_stats::KnowledgeStatsSummary =
+    let decoded_knowledge: KnowledgeStatsSummary =
         serde_json::from_slice(&knowledge_bytes).expect("knowledge json");
     assert_eq!(decoded_knowledge, expected_knowledge);
     assert!(decoded_knowledge.total_runs > 0);
