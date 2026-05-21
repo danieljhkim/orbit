@@ -22,16 +22,6 @@ mod validation;
 mod vote_ops;
 
 #[cfg(test)]
-mod comment_ops_tests;
-#[cfg(test)]
-mod crud_tests;
-#[cfg(test)]
-mod lifecycle_tests;
-#[cfg(test)]
-mod search_index_tests;
-#[cfg(test)]
-mod test_support;
-#[cfg(test)]
-mod vote_ops_tests;
+mod tests;
 
 pub(crate) use store::LearningFileStore;
