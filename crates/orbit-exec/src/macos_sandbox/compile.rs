@@ -253,14 +253,17 @@ mod tests {
         std::fs::create_dir_all(global.join("state/logs")).expect("global log dir");
         std::fs::create_dir_all(global.join("tasks")).expect("global tasks dir");
         std::fs::create_dir_all(workspace.join("state")).expect("workspace state dir");
+        std::fs::create_dir_all(workspace.join("adrs/.locks")).expect("workspace adr locks dir");
 
         let log_path = global.join("state/logs/orbit.jsonl");
         let db_wal_path = global.join("orbit.db-wal");
         let artifact_path = global
             .join("tasks/workspaces/orbit-test/ORB-00009/artifacts/files/planning-duel")
             .join("planner_a.md");
+        let id_alloc_lock_path = workspace.join("state/.id_alloc.lock");
         let semantic_wal_path = workspace.join("state/semantic.db-wal");
         let denied_path = global.join("not-allowed.txt");
+        let denied_workspace_path = workspace.join("adrs/.locks/should-stay-denied.lock");
 
         let resolved = ResolvedFsProfile {
             name: "gemini-direct-agent".to_string(),
@@ -269,6 +272,8 @@ mod tests {
                 format!("{}/state/logs/**", global.display()),
                 format!("{}/orbit.db*", global.display()),
                 format!("{}/tasks/**", global.display()),
+                format!("!{}/**", workspace.display()),
+                format!("{}/state/.id_alloc.lock", workspace.display()),
                 format!("{}/state/semantic.db*", workspace.display()),
             ],
         };
@@ -292,13 +297,15 @@ mod tests {
         profile_file.flush().expect("flush");
 
         let script = format!(
-            "set -e\n: > {}\n: > {}\nmkdir -p {}\nprintf '%s\\n' '*authored by: gemini / gemini-3.1-pro*' > {}\n: > {}\nif : > {} 2>/dev/null; then exit 99; else exit 0; fi\n",
+            "set -e\n: > {}\n: > {}\nmkdir -p {}\nprintf '%s\\n' '*authored by: gemini / gemini-3.1-pro*' > {}\n: > {}\n: > {}\nif : > {} 2>/dev/null; then exit 99; fi\nif : > {} 2>/dev/null; then exit 98; fi\n",
             shell_escape(&log_path),
             shell_escape(&db_wal_path),
             shell_escape(artifact_path.parent().expect("artifact parent")),
             shell_escape(&artifact_path),
+            shell_escape(&id_alloc_lock_path),
             shell_escape(&semantic_wal_path),
             shell_escape(&denied_path),
+            shell_escape(&denied_workspace_path),
         );
         let status = Command::new(sandbox_exec_path_for_test())
             .arg("-f")
@@ -321,12 +328,20 @@ mod tests {
             "planner artifact should be writable"
         );
         assert!(
+            id_alloc_lock_path.exists(),
+            "workspace id allocator lock should be writable"
+        );
+        assert!(
             semantic_wal_path.exists(),
             "semantic sidecar should be writable"
         );
         assert!(
             !denied_path.exists(),
             "arbitrary HOME/.orbit write should remain denied"
+        );
+        assert!(
+            !denied_workspace_path.exists(),
+            "unrelated workspace .orbit write should remain denied"
         );
     }
 
