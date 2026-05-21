@@ -9,6 +9,7 @@ let lastCrewPayload = { default_crew: null, crews: [] };
 let expandedTaskIds = new Set();
 let taskActionNotice = null;
 let crewUpdateErrors = new Map();
+let pinnedExternalTask = null;
 
 function taskList(context) {
   return context && typeof context.getTasks === "function" ? context.getTasks() : [];
@@ -186,6 +187,20 @@ export function openVisibleTask(taskId, context) {
     row.classList.add("data-changed");
     setTimeout(() => row.classList.remove("data-changed"), 1200);
   });
+}
+
+/* Global ID resolver support (ORB-00211): allow rendering detail for a task whose status
+   is outside the active chip filter (done/rejected/archived) without adding it to the
+   bulk-loaded list or mutating DASHBOARD_TASK_STATUSES. The pinned detail appears in a
+   highlighted block at top of #tasks-body; auto-clears if user later enables matching chip. */
+export function setPinnedExternalTask(task, context) {
+  if (!task || !task.id) return;
+  pinnedExternalTask = { task, id: task.id };
+}
+
+export function clearPinnedExternalTask(context) {
+  pinnedExternalTask = null;
+  if (context) renderTasks(taskList(context), context);
 }
 
 function refreshChips(context) {
@@ -816,15 +831,64 @@ function takeTaskActionNotice() {
 
 export function renderTasks(tasks, context) {
   const body = $("tasks-body");
+  if (!body) return;
+
+  // Auto-clear pinned external (global resolver) if its status+search now makes it
+  // visible in the normal filtered list (user enabled the chip or cleared search).
+  if (pinnedExternalTask && pinnedExternalTask.task) {
+    const p = pinnedExternalTask.task;
+    const q = (searchQueryValue(context) || "").toLowerCase();
+    const act = activeStatusSet(context);
+    const matchesQ = !q || (p.id && p.id.toLowerCase().includes(q)) || (p.title && p.title.toLowerCase().includes(q));
+    if (act.has(p.status) && matchesQ) {
+      pinnedExternalTask = null;
+    }
+  }
+
   const frag = document.createDocumentFragment();
   const notice = takeTaskActionNotice();
-  
+
+  // Render pinned external task detail (for statuses outside active filter) at top.
+  if (pinnedExternalTask && pinnedExternalTask.task) {
+    const ptask = pinnedExternalTask.task;
+    const pRow = el("div", {
+      class: "row pinned-external",
+      title: `${ptask.title} (global resolver; status ${ptask.status})`
+    }, [
+      el("span", { class: "id mono", text: ptask.id }),
+      el("span", { class: "title", text: ptask.title }),
+      statusPill(ptask.status),
+    ]);
+    pRow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (navigator.clipboard) navigator.clipboard.writeText(ptask.id).catch(() => {});
+    });
+    const pDetail = buildTaskDetail(ptask, context);
+    // Dismiss button to close the global detail without affecting chips
+    const dismiss = el("button", { class: "action", text: "Close" });
+    dismiss.title = "Dismiss global task detail";
+    dismiss.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      pinnedExternalTask = null;
+      renderTasks(taskList(context), context);
+    });
+    let acts = pDetail.querySelector(".actions");
+    if (!acts) {
+      acts = el("div", { class: "actions" });
+      pDetail.appendChild(acts);
+    }
+    acts.appendChild(dismiss);
+    const pWrap = el("div", { class: "pinned-task-wrap" }, [pRow, pDetail]);
+    pWrap.dataset.key = `pinned-${ptask.id}`;
+    frag.appendChild(pWrap);
+  }
+
   const filtered = filterTasks(tasks, context);
   $("tasks-count").textContent =
     filtered.length === tasks.length
       ? `${tasks.length}`
       : `${filtered.length}/${tasks.length}`;
-  if (filtered.length === 0) {
+  if (filtered.length === 0 && frag.children.length === 0) {
     const defaultText = tasks.length === 0 ? "No tasks available." : "No tasks match filter.";
     const emptyState = el("div", { class: "empty-state" }, [
       el("div", { class: "icon", text: "✧" }),
