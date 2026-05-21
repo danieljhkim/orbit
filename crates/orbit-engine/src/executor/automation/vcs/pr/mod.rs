@@ -7,13 +7,7 @@ mod merge;
 mod open;
 
 #[cfg(test)]
-mod body_tests;
-#[cfg(test)]
-mod merge_tests;
-#[cfg(test)]
-mod open_tests;
-#[cfg(test)]
-mod test_support;
+mod tests;
 
 pub(in crate::executor::automation) use merge::git_merge;
 #[allow(unused_imports)]

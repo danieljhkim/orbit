@@ -18,7 +18,7 @@ use crate::context::{
 };
 use crate::executor::registry::ActivityExecutorRegistry;
 
-use super::super::freshness::BranchFreshness;
+use super::super::super::freshness::BranchFreshness;
 
 #[derive(Clone, Debug)]
 pub struct ToolCall {

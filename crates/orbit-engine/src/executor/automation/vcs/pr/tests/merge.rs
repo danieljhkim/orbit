@@ -1,4 +1,4 @@
-use super::merge::merge_batch_pr;
+use super::super::merge::merge_batch_pr;
 use super::test_support::*;
 
 use crate::context::TaskReadHost;

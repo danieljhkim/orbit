@@ -1,4 +1,4 @@
-use super::body::*;
+use super::super::body::*;
 use super::test_support::*;
 
 #[test]

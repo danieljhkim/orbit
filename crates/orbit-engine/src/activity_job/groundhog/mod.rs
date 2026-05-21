@@ -285,3 +285,6 @@ fn required_input_string(input: &Value, key: &str) -> Result<String, DispatchErr
             DispatchError::GroundhogFailed(format!("missing `{key}` in groundhog input"))
         })
 }
+
+#[cfg(test)]
+mod tests;
