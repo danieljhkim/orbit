@@ -312,7 +312,7 @@
       
       .row {
         display: grid;
-        grid-template-columns: minmax(80px, max-content) minmax(140px, 1fr) 72px 82px 64px minmax(138px, 180px);
+        grid-template-columns: minmax(80px, max-content) minmax(140px, 1fr) 72px 82px;
         gap: 12px;
         padding: 8px 16px;
         margin: 0;
@@ -352,16 +352,16 @@
         font-size: 13px;
         min-width: 0;
       }
-      .row .priority, .row .type, .row .complexity { font-size: 12px; color: var(--fg-dim); text-align: right; }
-      .row .crew-cell {
+      .row .priority, .row .type { font-size: 12px; color: var(--fg-dim); text-align: right; }
+      .crew-cell {
         display: grid;
         gap: 4px;
         min-width: 0;
       }
       .task-crew-select {
-        width: 100%;
-        min-width: 0;
-        max-width: 100%;
+        width: auto;
+        min-width: 110px;
+        max-width: 200px;
         height: 28px;
         border: 1px solid var(--border);
         border-radius: 2px;
@@ -396,20 +396,24 @@
         white-space: nowrap;
       }
 
+      .assignment {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .detail-side .complexity {
+        flex-shrink: 0;
+        font-size: 12px;
+      }
+
       @media (max-width: 760px) {
         .row {
-          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr) auto minmax(110px, 1fr);
-          grid-template-areas:
-            "id title title crew"
-            "priority type complexity crew";
+          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr) auto auto;
           gap: 4px 8px;
         }
-        .row .id { grid-area: id; }
-        .row .title { grid-area: title; }
-        .row .priority { grid-area: priority; text-align: left; }
-        .row .type { grid-area: type; text-align: left; }
-        .row .complexity { grid-area: complexity; text-align: left; }
-        .row .crew-cell { grid-area: crew; align-self: stretch; }
+        .row .priority { text-align: left; }
+        .row .type { text-align: left; }
         #task-filter { max-width: none; }
       }
 
@@ -418,13 +422,10 @@
           grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr);
           grid-template-areas:
             "id title"
-            "priority type"
-            "complexity crew";
+            "priority type";
         }
         .row .priority { grid-area: priority; text-align: left; }
         .row .type { grid-area: type; text-align: left; }
-        .row .complexity { grid-area: complexity; text-align: left; }
-        .row .crew-cell { grid-area: crew; align-self: stretch; }
       }
       
       .row-detail {
