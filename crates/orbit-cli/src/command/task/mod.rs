@@ -17,3 +17,6 @@ pub use command::{TaskCommand, TaskSubcommand};
 // consumed by the dashboard API and is now unused in CLI proper.
 #[allow(unused_imports)]
 pub(crate) use list::task_locks_json;
+
+#[cfg(test)]
+mod tests;

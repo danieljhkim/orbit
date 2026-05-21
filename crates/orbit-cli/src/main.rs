@@ -197,3 +197,6 @@ fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool
 
     eprintln!("error: {error}");
 }
+
+#[cfg(test)]
+mod tests;

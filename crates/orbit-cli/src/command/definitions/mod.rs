@@ -7,3 +7,6 @@ pub mod job;
 pub mod policy;
 pub mod skill;
 pub mod tool;
+
+#[cfg(test)]
+mod tests;
