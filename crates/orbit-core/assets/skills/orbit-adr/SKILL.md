@@ -9,7 +9,7 @@ description: Use this whenever an Architecture Decision Record is being created,
 
 Create and maintain Orbit ADR artifacts through the registered tool surface. ADRs record decisions, not implementation plans: use them when a choice has a real alternative, constrains future work, and carries a non-trivial cost.
 
-ADRs and orbit-docs are sibling indexes by design. ADRs keep their stricter lifecycle and dedicated allocation through `orbit.adr.*`; `orbit search <query> --kind all` (and `--kind adr`) surfaces ADR metadata read-only alongside doc results. For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'` and inspect the accepted ADR covering the sibling-index search overlay.
+ADRs and orbit-docs are sibling indexes by design. ADRs keep their stricter lifecycle and dedicated allocation through `orbit.adr.*`; `orbit search <query> --kind all`, `--kind doc`, and `--kind adr` surface ADR metadata read-only alongside doc results. After `orbit semantic index --kind adrs`, `--hybrid` applies to `--kind adr` and to federated ADR results in `--kind doc` / `--kind all` queries. For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'` and inspect the accepted ADR covering the sibling-index search overlay.
 
 ADR artifact files are written into the current worktree's `.orbit/adrs/...`
 subtree, while IDs are allocated globally through the shared allocator. Stage
@@ -49,6 +49,7 @@ Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, a
 1. Inspect nearby decisions before adding a new one.
    - `orbit tool run orbit.adr.list --input '{"feature":"<feature>","model":"<agent-family>"}'`
   - `orbit tool run orbit.adr.show --input '{"id":"<adr-id>","model":"<agent-family>"}'`
+   - Use `orbit search "<concept>" --kind adr --hybrid` for concept retrieval when the semantic companion is installed and ADRs have been indexed with `orbit semantic index --kind adrs`; without vectors, Orbit falls back to lexical ADR results with a note.
    - Use `legacy_id` lookup for migrated per-feature references, for example `{"legacy_id":"activity-job/ADR-039"}`.
 2. Decide whether this is a new ADR, an update to a proposed ADR, or a supersession.
    - New decision: `orbit.adr.add`.

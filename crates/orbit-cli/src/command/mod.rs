@@ -268,18 +268,33 @@ mod tests {
     }
 
     #[test]
-    fn cli_semantic_index_rejects_future_kinds_at_clap_layer() {
+    fn cli_semantic_index_rejects_singular_kinds_at_clap_layer() {
         for kind in ["adr", "learning"] {
             let error = match Cli::try_parse_from(["orbit", "semantic", "index", "--kind", kind]) {
-                Ok(_) => panic!("future kinds should be rejected"),
+                Ok(_) => panic!("singular kinds should be rejected"),
                 Err(error) => error,
             };
             let message = error.to_string();
             assert!(message.contains("possible values"), "{message}");
             assert!(message.contains("tasks"), "{message}");
             assert!(message.contains("docs"), "{message}");
+            assert!(message.contains("adrs"), "{message}");
             assert!(message.contains("learnings"), "{message}");
             assert!(message.contains("all"), "{message}");
+        }
+    }
+
+    #[test]
+    fn cli_semantic_index_parses_adrs_kind() {
+        let cli = Cli::parse_from(["orbit", "semantic", "index", "--kind", "adrs"]);
+        match cli.command {
+            Commands::Semantic(command) => match command.command {
+                SemanticSubcommand::Index(args) => {
+                    assert_eq!(args.kind, SemanticIndexKindArg::Adrs);
+                }
+                _ => panic!("expected semantic index"),
+            },
+            _ => panic!("expected top-level semantic command"),
         }
     }
 
@@ -306,7 +321,7 @@ mod tests {
         let help = error.to_string();
         assert!(
             help.contains(
-                "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), learnings, all (rebuilds all indexed corpora)."
+                "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), adrs, learnings, all (rebuilds all indexed corpora)."
             ),
             "{help}"
         );

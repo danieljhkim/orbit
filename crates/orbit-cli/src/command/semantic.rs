@@ -59,7 +59,7 @@ pub struct SemanticIndexArgs {
         value_enum,
         default_value_t = SemanticIndexKindArg::Tasks,
         value_name = "KIND",
-        help = "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), learnings, all (rebuilds all indexed corpora)."
+        help = "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), adrs, learnings, all (rebuilds all indexed corpora)."
     )]
     pub kind: SemanticIndexKindArg,
     #[arg(long)]
@@ -70,6 +70,7 @@ pub struct SemanticIndexArgs {
 pub enum SemanticIndexKindArg {
     Tasks,
     Docs,
+    Adrs,
     Learnings,
     All,
 }
@@ -79,6 +80,7 @@ impl From<SemanticIndexKindArg> for IndexKind {
         match value {
             SemanticIndexKindArg::Tasks => Self::Tasks,
             SemanticIndexKindArg::Docs => Self::Docs,
+            SemanticIndexKindArg::Adrs => Self::Adrs,
             SemanticIndexKindArg::Learnings => Self::Learnings,
             SemanticIndexKindArg::All => Self::All,
         }
@@ -190,6 +192,21 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
                 stale_sources.len()
             );
         }
+        SemanticIndexResult::Adrs {
+            model_id,
+            report,
+            indexed_sources,
+            stale_sources,
+        } => {
+            println!(
+                "Indexed ADRs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                model_id,
+                indexed_sources,
+                report.embedded_chunks,
+                report.skipped_fields,
+                stale_sources.len()
+            );
+        }
         SemanticIndexResult::Learnings {
             model_id,
             report,
@@ -208,10 +225,11 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
         SemanticIndexResult::All {
             tasks,
             docs,
+            adrs,
             learnings,
         } => {
             println!(
-                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={} learnings_model={} learnings_indexed_sources={} learnings_embedded_chunks={} learnings_skipped_fields={} learnings_stale_sources={}",
+                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={} adrs_model={} adrs_indexed_sources={} adrs_embedded_chunks={} adrs_skipped_fields={} adrs_stale_sources={} learnings_model={} learnings_indexed_sources={} learnings_embedded_chunks={} learnings_skipped_fields={} learnings_stale_sources={}",
                 tasks.model_id,
                 tasks.report.embedded_chunks,
                 tasks.report.skipped_fields,
@@ -220,6 +238,11 @@ fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitErr
                 docs.report.embedded_chunks,
                 docs.report.skipped_fields,
                 docs.stale_sources.len(),
+                adrs.model_id,
+                adrs.indexed_sources,
+                adrs.report.embedded_chunks,
+                adrs.report.skipped_fields,
+                adrs.stale_sources.len(),
                 learnings.model_id,
                 learnings.indexed_sources,
                 learnings.report.embedded_chunks,
