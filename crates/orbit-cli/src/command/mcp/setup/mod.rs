@@ -6,6 +6,9 @@ mod providers;
 mod test_support;
 mod workspace;
 
+#[cfg(test)]
+mod tests;
+
 #[allow(unused_imports)]
 pub use args::ScopeArg;
 pub(crate) use args::init_auto_for_workspace;

@@ -13,6 +13,9 @@ pub struct LogCommand {
     pub command: LogSubcommand,
 }
 
+#[cfg(test)]
+mod tests;
+
 impl Execute for LogCommand {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         self.command.execute(runtime)

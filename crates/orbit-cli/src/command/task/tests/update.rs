@@ -2,7 +2,7 @@ use clap::Parser;
 
 use crate::command::{Cli, Commands};
 
-use super::super::command::TaskSubcommand;
+use super::super::TaskSubcommand;
 
 #[test]
 fn task_update_accepts_context_files_alias() {

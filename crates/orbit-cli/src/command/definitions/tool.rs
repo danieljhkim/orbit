@@ -319,7 +319,7 @@ const MINIMAL_TASK_FIELDS: &[&str] = &[
     "updated_at",
 ];
 
-fn shape_tool_output(
+pub(super) fn shape_tool_output(
     tool_name: &str,
     input: &Value,
     output: Value,
@@ -368,49 +368,6 @@ fn should_project_minimal_task_output(tool_name: &str, input: &Value) -> bool {
     true
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn list_output_uses_minimal_task_projection() {
-        let shaped = shape_tool_output(
-            "orbit.task.list",
-            &json!({ "status": "backlog" }),
-            json!([{
-                "id": "T20260422-0001",
-                "title": "Backlog task",
-                "status": "backlog",
-                "priority": "medium",
-                "type": "feature",
-                "dependencies": [],
-                "resolved_dependencies": [],
-                "implemented_by": null,
-                "created_at": "2026-04-22T00:00:00Z",
-                "updated_at": "2026-04-22T00:00:00Z",
-                "description": "should be filtered out"
-            }]),
-            false,
-            &[],
-        );
-
-        assert_eq!(
-            shaped,
-            json!([{
-                "id": "T20260422-0001",
-                "title": "Backlog task",
-                "status": "backlog",
-                "priority": "medium",
-                "type": "feature",
-                "dependencies": [],
-                "resolved_dependencies": [],
-                "implemented_by": null,
-                "created_at": "2026-04-22T00:00:00Z",
-                "updated_at": "2026-04-22T00:00:00Z"
-            }])
-        );
-    }
-}
 
 fn filter_top_level_fields(value: Value, fields: &[String]) -> Value {
     match value {

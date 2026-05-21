@@ -224,6 +224,3 @@ fn parse_artifact_args(raw_values: &[String]) -> Result<Vec<TaskArtifact>, Orbit
         })
         .collect()
 }
-
-#[cfg(test)]
-mod tests;
