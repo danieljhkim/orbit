@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use orbit_common::types::{OrbitError, TaskStatus};
+use orbit_common::types::OrbitError;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost};
+use crate::context::{RuntimeHost, TaskAutomationUpdate, TaskHost, ensure_task_can_enter_workflow};
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
 use super::super::git::{
@@ -86,30 +86,6 @@ fn worktree_setup_output(
         "head_ref": head_ref,
         "base_ref": base_ref,
     })
-}
-
-fn ensure_task_can_enter_workflow<H: TaskHost + ?Sized>(
-    host: &H,
-    task_id: &str,
-    workflow: &str,
-) -> Result<(), OrbitError> {
-    let task = host.get_task(task_id)?;
-    if matches!(
-        task.status,
-        TaskStatus::Proposed
-            | TaskStatus::Friction
-            | TaskStatus::Backlog
-            | TaskStatus::Rejected
-            | TaskStatus::Archived
-            | TaskStatus::InProgress
-    ) {
-        return Ok(());
-    }
-
-    Err(OrbitError::InvalidInput(format!(
-        "task '{}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'friction', 'backlog', 'rejected', 'archived', or 'in-progress'",
-        task.id, task.status
-    )))
 }
 
 fn ensure_worktree(

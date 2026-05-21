@@ -544,6 +544,14 @@ spec:
                     input["job_name"],
                     Value::String("task_{{ input.mode }}_pipeline".to_string())
                 );
+                assert_eq!(
+                    input["admission_task_ids"],
+                    Value::String("{{ input.task_ids }}".to_string())
+                );
+                assert_eq!(
+                    input["admission_workflow"],
+                    Value::String("worktree_setup".to_string())
+                );
             }
             other => panic!("expected dispatch target ref, got {other:?}"),
         }

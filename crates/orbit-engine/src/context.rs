@@ -311,6 +311,30 @@ pub trait TaskHost: TaskReadHost + TaskWriteHost {}
 
 impl<T> TaskHost for T where T: TaskReadHost + TaskWriteHost + ?Sized {}
 
+pub fn ensure_task_can_enter_workflow<H: TaskReadHost + ?Sized>(
+    host: &H,
+    task_id: &str,
+    workflow: &str,
+) -> Result<Task, OrbitError> {
+    let task = host.get_task(task_id)?;
+    if matches!(
+        task.status,
+        TaskStatus::Proposed
+            | TaskStatus::Friction
+            | TaskStatus::Backlog
+            | TaskStatus::Rejected
+            | TaskStatus::Archived
+            | TaskStatus::InProgress
+    ) {
+        return Ok(task);
+    }
+
+    Err(OrbitError::InvalidInput(format!(
+        "task '{}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'friction', 'backlog', 'rejected', 'archived', or 'in-progress'",
+        task.id, task.status
+    )))
+}
+
 pub trait AgentProtocolHost {
     fn build_agent_stdin_envelope_payload(
         &self,
