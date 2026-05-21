@@ -82,7 +82,7 @@ impl Tool for OrbitTaskAddTool {
             ToolParam {
                 name: "context_files".to_string(),
                 description:
-                    "Optional task context selectors as a comma-separated string or array of strings. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically."
+                    "Optional task context selectors as a comma-separated string or array of strings. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files referenced only for context. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically."
                         .to_string(),
                 param_type: "string_list".to_string(),
                 required: false,
@@ -90,7 +90,7 @@ impl Tool for OrbitTaskAddTool {
             ToolParam {
                 name: "context".to_string(),
                 description:
-                    "Legacy alias for `context_files`. Accepts the same selector-first input forms."
+                    "Legacy alias for `context_files`. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files that are only relevant background context. Prefer canonical selectors: `file:path`, `dir:path`, or `symbol:path#name:kind`."
                         .to_string(),
                 param_type: "string".to_string(),
                 required: false,
@@ -103,7 +103,7 @@ impl Tool for OrbitTaskAddTool {
             },
             ToolParam {
                 name: "complexity".to_string(),
-                description: "Optional task complexity level".to_string(),
+                description: "Optional task complexity level (low, medium, or hard)".to_string(),
                 param_type: "string".to_string(),
                 required: false,
             },
@@ -154,3 +154,6 @@ impl Tool for OrbitTaskAddTool {
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskAdd)
     }
 }
+
+#[cfg(test)]
+mod tests;

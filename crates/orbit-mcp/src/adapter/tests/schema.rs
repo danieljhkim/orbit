@@ -301,3 +301,75 @@ async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro
     assert_eq!(ev[0]["ref"], "ORB-00022");
     assert_eq!(ev[0]["kind"], "task");
 }
+
+/// ORB-00234: MCP schema for orbit_task_add now advertises the documented
+/// create-task fields with correct enums (verifiable via claude debug surface
+/// or this direct build).
+#[test]
+fn task_add_mcp_schema_exposes_complexity_enum_and_model_and_other_fields() {
+    // Use representative params that the real add schema includes (the
+    // build_input_schema only cares about the ones passed for enum injection).
+    let params = vec![
+        param_with_type("title", "string"),
+        param_with_type("description", "string"),
+        param_with_type("workspace", "string"),
+        param_with_type("complexity", "string"),
+        param_with_type("model", "string"),
+        param_with_type("dependencies", "string_list"),
+        param_with_type("relations", "array"),
+        param_with_type("parent_id", "string"),
+        param_with_type("source_task_id", "string"),
+        param_with_type("tags", "string_list"),
+        param_with_type("context_files", "string_list"),
+        param_with_type("context", "string"),
+        param_with_type("type", "string"),
+        param_with_type("status", "string"),
+    ];
+    let schema = build_input_schema("orbit.task.add", &params);
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("properties object");
+
+    // complexity must have the low/medium/hard enum
+    let comp = properties.get("complexity").expect("complexity in schema");
+    let comp_enum = comp
+        .get("enum")
+        .and_then(Value::as_array)
+        .expect("complexity enum array");
+    assert_eq!(
+        comp_enum,
+        &vec![
+            Value::String("low".into()),
+            Value::String("medium".into()),
+            Value::String("hard".into())
+        ]
+    );
+
+    // model must have the four families (injected for any tool's model)
+    let model = properties.get("model").expect("model in schema");
+    let model_enum = model
+        .get("enum")
+        .and_then(Value::as_array)
+        .expect("model enum array");
+    assert!(model_enum.iter().any(|v| v == "codex"));
+    assert!(model_enum.iter().any(|v| v == "grok"));
+
+    // other required fields for AC1 are present (real registry ToolParams carry
+    // descriptions; the partial synthetic list here proves the keys reach the
+    // MCP schema builder).
+    for key in [
+        "dependencies",
+        "relations",
+        "parent_id",
+        "source_task_id",
+        "tags",
+    ] {
+        properties.get(key).expect(&format!(
+            "{key} must appear in MCP schema properties for orbit.task.add"
+        ));
+    }
+
+    // (context desc rewrite verified via grep on the orbit-tools source per AC2;
+    // the MCP builder faithfully copies non-empty descriptions from ToolParam)
+}

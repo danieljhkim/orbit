@@ -82,6 +82,9 @@ const TASK_UPDATE_STATUS_ENUM: &[&str] = &[
     "rejected",
 ];
 
+const TASK_COMPLEXITY_ENUM: &[&str] = &["low", "medium", "hard"];
+const AGENT_FAMILY_ENUM: &[&str] = &["codex", "claude", "gemini", "grok"];
+
 pub(super) fn enum_values_for(
     tool_name: &str,
     param_name: &str,
@@ -91,6 +94,8 @@ pub(super) fn enum_values_for(
         ("orbit.task.update", "type") => Some(TASK_TYPE_ENUM),
         ("orbit.task.add", "status") => Some(TASK_ADD_STATUS_ENUM),
         ("orbit.task.update", "status") => Some(TASK_UPDATE_STATUS_ENUM),
+        ("orbit.task.add", "complexity") => Some(TASK_COMPLEXITY_ENUM),
+        (_, "model") => Some(AGENT_FAMILY_ENUM),
         _ => None,
     }
 }
