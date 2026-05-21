@@ -1,7 +1,7 @@
 // Orbit dashboard task-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { complexityCell, el, priorityCell, statusPill, patchJson, syncNodes } from './common.js';
+import { el, priorityCell, statusPill, patchJson, syncNodes } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -505,11 +505,9 @@ function buildTaskDetail(task, context) {
     rightCol.appendChild(buildTagRow(task.tags));
   }
 
-  const assignment = el("div", { class: "assignment" });
-  assignment.appendChild(complexityCell(task.complexity));
-  assignment.appendChild(buildCrewUpdateControl(task, context));
-  addField(rightCol, "assignment", assignment);
-
+  // Details before Assignment (per task: read-only meta first, mutating control second).
+  // Assignment contains *only* the crew dropdown (complexityCell removed; it lives in
+  // TASK_META_FIELDS inside Details).
   const meta = el("div", { class: "meta-list" });
   let metaCount = 0;
   for (const [key, label] of TASK_META_FIELDS) {
@@ -532,6 +530,10 @@ function buildTaskDetail(task, context) {
     metaCount++;
   }
   if (metaCount > 0) addField(rightCol, "details", meta);
+
+  const assignment = el("div", { class: "assignment" });
+  assignment.appendChild(buildCrewUpdateControl(task, context));
+  addField(rightCol, "assignment", assignment);
 
   if (Array.isArray(task.external_refs) && task.external_refs.length > 0) {
     addField(rightCol, "external refs", buildExternalRefs(task.external_refs));
@@ -899,6 +901,18 @@ export function renderTasks(tasks, context) {
   }
   const groups = new Map();
   if (notice) frag.appendChild(notice);
+
+  // Column header strip (once, before first group-header). Uses .row.header so grid
+  // (and all @media overrides) are identical to data rows; labels sit over ID/Title/Priority/Type.
+  const colHeader = el("div", { class: "row header" }, [
+    el("span", { class: "id", text: "ID" }),
+    el("span", { class: "title", text: "Title" }),
+    el("span", { class: "priority", text: "Priority" }),
+    el("span", { class: "type", text: "Type" }),
+  ]);
+  colHeader.dataset.key = "task-col-header";
+  frag.appendChild(colHeader);
+
   for (const t of filtered) {
     if (!groups.has(t.status)) groups.set(t.status, []);
     groups.get(t.status).push(t);
