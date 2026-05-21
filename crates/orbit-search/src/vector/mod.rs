@@ -12,6 +12,8 @@
 //!   `Task`.
 //! - [`doc_fields`] — extracts the per-field rows that get embedded for a
 //!   docs corpus record.
+//! - [`adr_fields`] — extracts the per-field rows that get embedded for
+//!   Architecture Decision Records.
 //! - [`learning_fields`] — extracts the per-field rows that get embedded for
 //!   project-learning records.
 //!
@@ -20,6 +22,7 @@
 //! (`cosine_similarity`, `encode_f32_blob`, `decode_f32_blob`) shared across
 //! those submodules.
 
+pub(crate) mod adr_fields;
 pub(crate) mod chunker;
 pub(crate) mod doc_fields;
 pub(crate) mod learning_fields;
@@ -28,9 +31,12 @@ pub(crate) mod store;
 pub(crate) mod task_fields;
 pub(crate) mod worker;
 
+pub use adr_fields::AdrEmbeddingSource;
 pub use doc_fields::DocEmbeddingSource;
 pub use learning_fields::LearningEmbeddingSource;
-pub use store::{SOURCE_KIND_DOC, SOURCE_KIND_LEARNING, SOURCE_KIND_TASK, VectorStore};
+pub use store::{
+    SOURCE_KIND_ADR, SOURCE_KIND_DOC, SOURCE_KIND_LEARNING, SOURCE_KIND_TASK, VectorStore,
+};
 pub use worker::EmbedWorker;
 
 use orbit_common::types::OrbitError;

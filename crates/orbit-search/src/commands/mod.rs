@@ -5,6 +5,8 @@
 //! top-level `OrbitRuntime` exposes thin delegates that build the runtime's
 //! shared state into these calls.
 
+mod adr_index;
+mod adr_search;
 mod doc_index;
 mod doc_search;
 mod install;
@@ -16,6 +18,8 @@ mod search;
 mod stats;
 mod uninstall;
 
+pub use adr_index::{AdrIndexParams, AdrIndexResult};
+pub use adr_search::{AdrSemanticHit, AdrSemanticSearchParams, AdrSemanticSearchResult};
 pub use doc_index::{DocIndexParams, DocIndexResult};
 pub use doc_search::{DocSemanticHit, DocSemanticSearchParams, DocSemanticSearchResult};
 pub use install::{SemanticInstallParams, SemanticInstallResult};
@@ -36,7 +40,7 @@ use std::fs;
 
 use orbit_common::types::{OrbitError, Task};
 
-use crate::vector::{DocEmbeddingSource, LearningEmbeddingSource, VectorStore};
+use crate::vector::{AdrEmbeddingSource, DocEmbeddingSource, LearningEmbeddingSource, VectorStore};
 use crate::{CompanionPaths, ModelSpec, default_model};
 
 pub(crate) const DEFAULT_RELEASE_BASE_URL: &str =
@@ -111,6 +115,14 @@ pub fn doc_index(
     doc_index::run(vector_store, docs, params)
 }
 
+pub fn adr_index(
+    vector_store: &VectorStore,
+    adrs: &[AdrEmbeddingSource],
+    params: AdrIndexParams,
+) -> Result<AdrIndexResult, OrbitError> {
+    adr_index::run(vector_store, adrs, params)
+}
+
 pub fn learning_index(
     vector_store: &VectorStore,
     learnings: &[LearningEmbeddingSource],
@@ -138,6 +150,13 @@ pub fn doc_semantic_search(
     params: DocSemanticSearchParams,
 ) -> Result<DocSemanticSearchResult, OrbitError> {
     doc_search::run(vector_store, params)
+}
+
+pub fn adr_semantic_search(
+    vector_store: &VectorStore,
+    params: AdrSemanticSearchParams,
+) -> Result<AdrSemanticSearchResult, OrbitError> {
+    adr_search::run(vector_store, params)
 }
 
 pub fn learning_semantic_search(

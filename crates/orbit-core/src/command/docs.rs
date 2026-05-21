@@ -9,12 +9,13 @@ use std::str::FromStr;
 use orbit_common::types::{Adr, AdrStatus, OrbitError, Task};
 use orbit_common::utility::glob::{match_glob, normalize_glob_path};
 use orbit_common::utility::selector::anchor_path;
-pub use orbit_search::{
-    AdrSearchResult, DocIndexParams, DocIndexResult, DocSearchResult, SearchResult,
-};
 use orbit_search::{
-    AdrSearchSource, DocEmbeddingSource, DocSearchSource, score_adr_record, score_doc_record,
-    sort_search_results,
+    AdrEmbeddingSource, AdrSearchSource, DocEmbeddingSource, DocSearchSource, score_adr_record,
+    score_doc_record, sort_search_results,
+};
+pub use orbit_search::{
+    AdrIndexParams, AdrIndexResult, AdrSearchResult, DocIndexParams, DocIndexResult,
+    DocSearchResult, SearchResult,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::json;
@@ -259,6 +260,34 @@ struct DocsSearchConfigSection {
     semantic_weight: Option<f32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdrConfigFile {
+    adr: Option<AdrConfigSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdrConfigSection {
+    search: Option<AdrSearchConfigSection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AdrSearchConfig {
+    pub semantic_weight: f32,
+}
+
+impl Default for AdrSearchConfig {
+    fn default() -> Self {
+        Self {
+            semantic_weight: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AdrSearchConfigSection {
+    semantic_weight: Option<f32>,
+}
+
 impl OrbitRuntime {
     pub fn docs_roots(&self) -> Result<Vec<String>, OrbitError> {
         read_docs_roots_from_config_path(&self.config_path())
@@ -266,6 +295,10 @@ impl OrbitRuntime {
 
     pub fn docs_search_config(&self) -> Result<DocsSearchConfig, OrbitError> {
         read_docs_search_config_from_config_path(&self.config_path())
+    }
+
+    pub fn adr_search_config(&self) -> Result<AdrSearchConfig, OrbitError> {
+        read_adr_search_config_from_config_path(&self.config_path())
     }
 
     pub fn list_docs(
@@ -362,6 +395,11 @@ impl OrbitRuntime {
         orbit_search::doc_index(&self.stores().semantic_vector, &sources, params)
     }
 
+    pub fn index_adrs(&self, params: AdrIndexParams) -> Result<AdrIndexResult, OrbitError> {
+        let sources = adr_embedding_sources(&self.paths().repo_root, self.stores().adrs().list()?)?;
+        orbit_search::adr_index(&self.stores().semantic_vector, &sources, params)
+    }
+
     pub fn migrate_docs(&self, dry_run: bool) -> Result<DocMigrationReport, OrbitError> {
         migrate_docs(&self.paths().repo_root, dry_run)
     }
@@ -398,6 +436,22 @@ pub fn parse_docs_search_config_from_config_toml(
     Ok(DocsSearchConfig { semantic_weight })
 }
 
+pub fn parse_adr_search_config_from_config_toml(raw: &str) -> Result<AdrSearchConfig, OrbitError> {
+    if raw.trim().is_empty() {
+        return Ok(AdrSearchConfig::default());
+    }
+    let parsed = toml::from_str::<AdrConfigFile>(raw).map_err(|error| {
+        OrbitError::InvalidInput(format!("invalid ADR config in config.toml: {error}"))
+    })?;
+    let semantic_weight = parsed
+        .adr
+        .and_then(|section| section.search)
+        .and_then(|section| section.semantic_weight)
+        .unwrap_or_else(|| AdrSearchConfig::default().semantic_weight)
+        .clamp(0.0, 1.0);
+    Ok(AdrSearchConfig { semantic_weight })
+}
+
 fn read_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitError> {
     if !path.exists() {
         return Ok(default_doc_roots());
@@ -414,6 +468,15 @@ fn read_docs_search_config_from_config_path(path: &Path) -> Result<DocsSearchCon
     let raw = fs::read_to_string(path)
         .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
     parse_docs_search_config_from_config_toml(&raw)
+}
+
+fn read_adr_search_config_from_config_path(path: &Path) -> Result<AdrSearchConfig, OrbitError> {
+    if !path.exists() {
+        return Ok(AdrSearchConfig::default());
+    }
+    let raw = fs::read_to_string(path)
+        .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
+    parse_adr_search_config_from_config_toml(&raw)
 }
 
 fn read_task_context_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitError> {
@@ -932,6 +995,30 @@ fn doc_embedding_sources(
             title: shown.frontmatter.summary,
             tags: shown.frontmatter.tags,
             body: shown.body,
+        });
+    }
+    Ok(sources)
+}
+
+fn adr_embedding_sources(
+    repo_root: &Path,
+    adrs: Vec<Adr>,
+) -> Result<Vec<AdrEmbeddingSource>, OrbitError> {
+    let mut sources = Vec::new();
+    // L-0028: ADR ids can briefly appear in multiple status directories; index one source per id.
+    let adrs = adrs
+        .into_iter()
+        .map(|adr| (adr.id.clone(), adr))
+        .collect::<BTreeMap<_, _>>();
+    for adr in adrs.into_values() {
+        let body_path = repo_root.join(adr_body_search_path(adr.status, &adr.id));
+        let body = fs::read_to_string(&body_path)
+            .map_err(|error| OrbitError::Io(format!("read {}: {error}", body_path.display())))?;
+        sources.push(AdrEmbeddingSource {
+            id: adr.id,
+            title: adr.title,
+            body,
+            tags: adr.tags,
         });
     }
     Ok(sources)
@@ -1850,6 +1937,34 @@ mod tests {
         );
         assert_eq!(
             parse_docs_search_config_from_config_toml("[docs.search]\nsemantic_weight = 2.0\n")
+                .unwrap()
+                .semantic_weight,
+            1.0
+        );
+    }
+
+    #[test]
+    fn adr_search_config_defaults_and_clamps_semantic_weight() {
+        assert_eq!(
+            parse_adr_search_config_from_config_toml("")
+                .unwrap()
+                .semantic_weight,
+            0.5
+        );
+        assert_eq!(
+            parse_adr_search_config_from_config_toml("[adr.search]\nsemantic_weight = 0.7\n")
+                .unwrap()
+                .semantic_weight,
+            0.7
+        );
+        assert_eq!(
+            parse_adr_search_config_from_config_toml("[adr.search]\nsemantic_weight = -1.0\n")
+                .unwrap()
+                .semantic_weight,
+            0.0
+        );
+        assert_eq!(
+            parse_adr_search_config_from_config_toml("[adr.search]\nsemantic_weight = 2.0\n")
                 .unwrap()
                 .semantic_weight,
             1.0

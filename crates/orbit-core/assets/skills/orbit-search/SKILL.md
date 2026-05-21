@@ -32,7 +32,7 @@ orbit search path crates/orbit-search/src/lib.rs --kind all
 orbit tool run orbit.search --input '{"tag":"perf","kind":"all","model":"<agent-family>"}'
 orbit tool run orbit.search --input '{"path":"crates/orbit-search/src/lib.rs","kind":"all","model":"<agent-family>"}'
 
-# Hybrid BM25 + cosine over task fields; other kinds remain lexical
+# Hybrid lexical + cosine over indexed task, doc, learning, or ADR fields
 orbit search "agent loop deadlock" --hybrid --kind task --limit 5
 orbit tool run orbit.search --input '{"query":"agent loop deadlock","hybrid":true,"kind":"task","limit":5,"model":"<agent-family>"}'
 
@@ -49,9 +49,7 @@ orbit tool run orbit.search --input '{"semantic":"<task-id>","limit":5,"model":"
 
 ## Index Coverage
 
-Lexical search covers tasks, docs, learnings, and ADRs. Vector search currently covers task fields only. When `--hybrid` is set for `--kind doc`, `--kind learning`, `--kind adr`, or those portions of `--kind all`, Orbit still uses lexical matching for those kinds.
-
-The help text for `orbit search --help` carries this asymmetry because it is user-visible behavior, not an implementation accident.
+Lexical search covers tasks, docs, learnings, and ADRs. Vector search covers task fields plus docs, learnings, and ADRs after their corpora are indexed with `orbit semantic index --kind docs|learnings|adrs`. When `--hybrid` is set and vectors are missing for a requested corpus, Orbit returns lexical results with a fallback note instead of failing the user search.
 
 ## When To Use
 
@@ -76,9 +74,9 @@ Do not use search for "find every symbol matching pattern X"; use `orbit.graph.s
 | Install companion/model | `orbit semantic install [--model MODEL] [--force]` | `orbit.semantic.install` |
 | Remove companion/model | `orbit semantic uninstall [--model MODEL] [--all]` | `orbit.semantic.uninstall` |
 | Show status | `orbit semantic stats` | `orbit.semantic.stats` |
-| Rebuild task embeddings | `orbit semantic index [--model MODEL] [--force]` | `orbit.semantic.index` |
+| Rebuild embeddings | `orbit semantic index --kind tasks|docs|learnings|adrs|all [--model MODEL] [--force]` | `orbit.semantic.index` |
 
-Do not run `install` without operator consent. If a semantic query fails because the companion is missing, fall back to plain `orbit search --kind task <query>` (lexical) and continue unless the user explicitly asked to enable embeddings.
+Do not run `install` without operator consent. If a semantic query fails because the companion is missing, fall back to plain `orbit search --kind <kind> <query>` (lexical) and continue unless the user explicitly asked to enable embeddings.
 
 ## Result Shape
 

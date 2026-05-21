@@ -74,7 +74,8 @@ fn cli_orbit_search_limit_help_describes_total_round_robin_limit() {
     assert!(help.contains("Maximum total results returned"));
     assert!(help.contains("round-robin per kind"));
     assert!(help.contains("[default: 10]"));
-    assert!(help.contains("ADRs use lexical matching regardless of --hybrid."));
+    assert!(!help.contains("ADRs use lexical matching regardless of --hybrid."));
+    assert!(!help.contains("Index coverage note"));
     assert!(!help.contains("learnings and ADRs use lexical matching"));
 }
 
@@ -199,6 +200,39 @@ fn cli_orbit_search_hybrid_learning_json_reports_lexical_fallback_note_missing_c
 }
 
 #[test]
+fn cli_orbit_search_hybrid_adr_json_reports_lexical_fallback_note_missing_companion() {
+    let workspace = TestWorkspace::new();
+    let adr_id = workspace.add_adr(
+        "hybrid-adr-note literal",
+        &["hybrid-adr-note"],
+        "## Decision\nHybrid ADR fallback remains lexical.\n",
+    );
+
+    let response = workspace.run_json(
+        &[
+            "search",
+            "hybrid-adr-note",
+            "--hybrid",
+            "--kind",
+            "adr",
+            "--json",
+        ],
+        "orbit search hybrid ADR missing companion",
+    );
+    let notes = response["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| {
+            note.as_str()
+                .expect("note")
+                .contains("falling back to lexical")
+        }),
+        "hybrid ADR notes should preserve lexical fallback warning: {notes:?}"
+    );
+    assert_eq!(response["results"][0]["source"], "lexical");
+    assert_eq!(response["results"][0]["id"], adr_id);
+}
+
+#[test]
 #[cfg(unix)]
 fn cli_orbit_search_hybrid_learning_json_reports_lexical_fallback_note_empty_embeddings() {
     let workspace = TestWorkspace::new();
@@ -238,6 +272,41 @@ fn cli_orbit_search_hybrid_learning_json_reports_lexical_fallback_note_empty_emb
     );
     assert_eq!(response["results"][0]["source"], "lexical");
     assert_eq!(response["results"][0]["id"], learning["id"]);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_orbit_search_hybrid_adr_json_reports_lexical_fallback_note_empty_embeddings() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    let adr_id = workspace.add_adr(
+        "hybrid-adr-empty literal",
+        &["hybrid-adr-empty"],
+        "## Decision\nHybrid ADR empty-index fallback remains lexical.\n",
+    );
+
+    let response = workspace.run_json_with_companion(
+        &[
+            "search",
+            "hybrid-adr-empty",
+            "--hybrid",
+            "--kind",
+            "adr",
+            "--json",
+        ],
+        "orbit search hybrid ADR empty embeddings",
+    );
+    let notes = response["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| {
+            note.as_str()
+                .expect("note")
+                .contains("falling back to lexical")
+        }),
+        "hybrid ADR notes should preserve lexical fallback warning: {notes:?}"
+    );
+    assert_eq!(response["results"][0]["source"], "lexical");
+    assert_eq!(response["results"][0]["id"], adr_id);
 }
 
 #[test]
@@ -294,6 +363,45 @@ fn cli_orbit_search_hybrid_learning_ranking_differs_from_lexical() {
 
     assert_eq!(lexical["results"][0]["id"], literal["id"]);
     assert_eq!(hybrid["results"][0]["id"], semantic["id"]);
+    assert_ne!(lexical["results"][0]["id"], hybrid["results"][0]["id"]);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_orbit_search_hybrid_adr_ranking_differs_from_lexical() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    let semantic_id = workspace.add_adr(
+        "Conceptual ADR",
+        &["semantic-adr"],
+        "## Decision\nsemantic-target operational insight.\n",
+    );
+    let literal_id = workspace.add_adr(
+        "foo literal ADR",
+        &["literal-adr"],
+        "## Decision\nliteral body.\n",
+    );
+    workspace.add_adr(
+        "foo secondary ADR",
+        &["literal-adr-secondary"],
+        "## Decision\nsecond literal body.\n",
+    );
+    workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "adrs", "--force", "--json"],
+        "semantic index ADRs",
+    );
+
+    let lexical = workspace.run_json(
+        &["search", "foo", "--kind", "adr", "--json"],
+        "ADR lexical search",
+    );
+    let hybrid = workspace.run_json_with_companion(
+        &["search", "foo", "--kind", "adr", "--hybrid", "--json"],
+        "ADR hybrid search",
+    );
+
+    assert_eq!(lexical["results"][0]["id"], literal_id);
+    assert_eq!(hybrid["results"][0]["id"], semantic_id);
     assert_ne!(lexical["results"][0]["id"], hybrid["results"][0]["id"]);
 }
 
@@ -548,8 +656,65 @@ fn cli_semantic_index_all_json_contains_tasks_and_docs() {
     );
     assert_eq!(result["docs"]["model_id"], "bge-small-en-v1.5");
     assert_eq!(result["docs"]["indexed_sources"], 1);
+    assert_eq!(result["adrs"]["model_id"], "bge-small-en-v1.5");
+    assert_eq!(result["adrs"]["indexed_sources"], 0);
     assert_eq!(result["learnings"]["model_id"], "bge-small-en-v1.5");
     assert_eq!(result["learnings"]["indexed_sources"], 0);
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_semantic_index_adrs_is_idempotent_status_agnostic_and_sweeps_stale() {
+    let workspace = TestWorkspace::new();
+    workspace.write_mock_companion();
+    let old_id = workspace.add_adr(
+        "adr-index-old",
+        &["adr-index"],
+        "## Context\nOld context.\n\n## Decision\nKeep old ADR indexed.\n\n## Consequences\nSuperseded ADRs remain searchable when explicitly requested.\n",
+    );
+    let new_id = workspace.add_adr(
+        "adr-index-new",
+        &["adr-index"],
+        "## Context\nNew context.\n\n## Decision\nUse the replacement ADR.\n\n## Consequences\nThe old ADR moves to superseded state.\n",
+    );
+    workspace.accept_adr(&new_id);
+
+    let first = workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "adrs", "--json"],
+        "semantic index ADRs",
+    );
+    assert_eq!(first["indexed_sources"], 2);
+    assert!(
+        first["report"]["embedded_chunks"].as_u64().unwrap_or(0)
+            > adr_dir_count(&workspace.work) as u64
+    );
+    assert!(count_adr_embeddings(&workspace.work, None) > adr_dir_count(&workspace.work) as i64);
+
+    let second = workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "adrs", "--json"],
+        "semantic index ADRs idempotent",
+    );
+    assert_eq!(second["report"]["embedded_chunks"], 0);
+    assert!(second["report"]["skipped_fields"].as_u64().unwrap_or(0) > 0);
+
+    workspace.supersede_adr(&old_id, &new_id);
+    workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "adrs", "--json"],
+        "semantic index superseded ADRs",
+    );
+    assert!(
+        count_adr_embeddings(&workspace.work, Some(&old_id)) > 0,
+        "superseded ADR should remain indexed"
+    );
+
+    fs::remove_dir_all(workspace.work.join(".orbit/adrs/accepted").join(&new_id))
+        .expect("delete ADR directory");
+    workspace.run_json_with_companion(
+        &["semantic", "index", "--kind", "adrs", "--json"],
+        "semantic index after ADR deletion",
+    );
+    assert_eq!(count_adr_embeddings(&workspace.work, Some(&new_id)), 0);
+    assert!(count_adr_embeddings(&workspace.work, Some(&old_id)) > 0);
 }
 
 #[test]
@@ -872,6 +1037,23 @@ fn learning_dir_count(work: &std::path::Path) -> usize {
         .count()
 }
 
+fn adr_dir_count(work: &std::path::Path) -> usize {
+    ["proposed", "accepted", "superseded", "deleted"]
+        .into_iter()
+        .map(|status| work.join(".orbit/adrs").join(status))
+        .filter(|dir| dir.is_dir())
+        .flat_map(|dir| fs::read_dir(dir).expect("read ADR status dir"))
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("ADR-"))
+        })
+        .count()
+}
+
 fn count_learning_embeddings(work: &std::path::Path, source_id: Option<&str>) -> i64 {
     let conn = Connection::open(work.join(".orbit/state/semantic.db")).expect("open semantic db");
     match source_id {
@@ -889,6 +1071,26 @@ fn count_learning_embeddings(work: &std::path::Path, source_id: Option<&str>) ->
                 |row| row.get(0),
             )
             .expect("count learning embeddings"),
+    }
+}
+
+fn count_adr_embeddings(work: &std::path::Path, source_id: Option<&str>) -> i64 {
+    let conn = Connection::open(work.join(".orbit/state/semantic.db")).expect("open semantic db");
+    match source_id {
+        Some(source_id) => conn
+            .query_row(
+                "SELECT COUNT(*) FROM embeddings WHERE source_kind = 'adr' AND source_id = ?1",
+                params![source_id],
+                |row| row.get(0),
+            )
+            .expect("count ADR source embeddings"),
+        None => conn
+            .query_row(
+                "SELECT COUNT(*) FROM embeddings WHERE source_kind = 'adr'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count ADR embeddings"),
     }
 }
 
