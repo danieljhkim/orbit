@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, LearningReminder};
+use orbit_common::types::{
+    LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError,
+};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -265,6 +267,21 @@ pub fn reminders_from_search_results(
 }
 
 impl OrbitRuntime {
+    pub fn learning_hook_target_is_searchable(
+        &self,
+        target_path: &str,
+    ) -> Result<bool, OrbitError> {
+        let normalized = target_path.trim().replace('\\', "/");
+        if normalized == "~" || normalized.starts_with("~/") {
+            return Ok(false);
+        }
+
+        crate::command::learning::learning_search_path_matches_workspace(
+            &self.paths().repo_root,
+            target_path,
+        )
+    }
+
     pub fn learning_hook_state_file_path(
         &self,
         session_id: Option<&str>,

@@ -343,27 +343,56 @@ fn normalize_learning_search_params(
 }
 
 fn normalize_learning_search_path(repo_root: &Path, path: &str) -> Result<String, OrbitError> {
+    match classify_learning_search_path(repo_root, path)? {
+        LearningSearchPathScope::Relative => Ok(path.to_string()),
+        LearningSearchPathScope::WorkspaceRelative(relative) => Ok(relative),
+        LearningSearchPathScope::OutsideWorkspace => Err(OrbitError::InvalidInput(format!(
+            "filesystem path `{path}` must stay inside the workspace root"
+        ))),
+    }
+}
+
+pub(crate) fn learning_search_path_matches_workspace(
+    repo_root: &Path,
+    path: &str,
+) -> Result<bool, OrbitError> {
+    Ok(!matches!(
+        classify_learning_search_path(repo_root, path)?,
+        LearningSearchPathScope::OutsideWorkspace
+    ))
+}
+
+enum LearningSearchPathScope {
+    Relative,
+    WorkspaceRelative(String),
+    OutsideWorkspace,
+}
+
+fn classify_learning_search_path(
+    repo_root: &Path,
+    path: &str,
+) -> Result<LearningSearchPathScope, OrbitError> {
     let trimmed = path.trim();
     let candidate = Path::new(trimmed);
     if !candidate.is_absolute() {
-        return Ok(path.to_string());
+        return Ok(LearningSearchPathScope::Relative);
     }
 
     let canonical_repo_root = canonicalize_with_missing_tail(repo_root)?;
     let canonical_candidate = canonicalize_with_missing_tail(candidate)?;
     if let Ok(relative) = canonical_candidate.strip_prefix(&canonical_repo_root) {
-        return Ok(workspace_relative_path_string(relative));
+        return Ok(LearningSearchPathScope::WorkspaceRelative(
+            workspace_relative_path_string(relative),
+        ));
     }
 
     if let Some(relative) =
         linked_worktree_relative_path(&canonical_repo_root, candidate, &canonical_candidate)
     {
-        return Ok(relative);
+        return Ok(LearningSearchPathScope::WorkspaceRelative(relative));
     }
 
-    Err(OrbitError::InvalidInput(format!(
-        "filesystem path `{path}` must stay inside the workspace root"
-    )))
+    Ok(LearningSearchPathScope::OutsideWorkspace)
 }
 
 fn normalize_learning_voter_model(raw: &str) -> Result<String, OrbitError> {
