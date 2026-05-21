@@ -27,7 +27,7 @@ pub(super) fn execute(
         OrbitBuiltinAction::DocsList => super::docs_tools::list(runtime, input),
         OrbitBuiltinAction::DocsShow => super::docs_tools::show(runtime, input),
         OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),
-        OrbitBuiltinAction::DocsReindex => super::docs_tools::reindex(runtime, input),
+        OrbitBuiltinAction::DocsIndex => super::docs_tools::index(runtime, input),
         OrbitBuiltinAction::DocsMigrate => super::docs_tools::migrate(runtime, input),
         OrbitBuiltinAction::FrictionAdd => super::friction_tools::add(runtime, input, model),
         OrbitBuiltinAction::FrictionList => super::friction_tools::list(runtime, input),

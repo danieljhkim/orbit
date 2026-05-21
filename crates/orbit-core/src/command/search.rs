@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use orbit_common::types::{AdrStatus, LearningStatus, OrbitError, TaskStatus};
 use orbit_common::utility::glob::compile_glob_regex;
-use orbit_search::{SemanticRelatedParams, SemanticSearchParams};
+use orbit_search::{
+    DocSemanticHit, DocSemanticSearchParams, SemanticRelatedParams, SemanticSearchParams,
+};
 use orbit_store::LearningSearchParams;
 use serde::Serialize;
 
@@ -10,6 +13,14 @@ use crate::{OrbitRuntime, SearchResult};
 
 const DEFAULT_LIMIT: usize = 10;
 const DOC_SEARCH_OVERFETCH: usize = 4;
+const DOC_HYBRID_FALLBACK_NOTE: &str = "falling back to lexical doc search";
+
+#[cfg(test)]
+thread_local! {
+    static DOC_SEMANTIC_SEARCH_OVERRIDE:
+        std::cell::RefCell<Option<Result<Vec<DocSemanticHit>, String>>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -210,11 +221,9 @@ impl OrbitRuntime {
             GlobalSearchMode::Lexical
         };
 
-        if params.hybrid && !matches!(params.kind, GlobalSearchKind::Task) {
-            notes.push(
-                "hybrid vector search currently runs against tasks only; docs, learnings, and ADRs use lexical matching"
-                    .to_string(),
-            );
+        if params.hybrid && (params.kind.includes_learnings() || params.kind.includes_adrs()) {
+            notes
+                .push("learnings and ADRs use lexical matching regardless of --hybrid".to_string());
         }
 
         if params.kind.includes_tasks() {
@@ -237,6 +246,7 @@ impl OrbitRuntime {
                     query_owned.as_deref(),
                     &tag_filter,
                     limit,
+                    &mut notes,
                 )?);
             }
         }
@@ -339,11 +349,12 @@ impl OrbitRuntime {
 
     fn doc_branch(
         &self,
-        _params: &GlobalSearchParams,
+        params: &GlobalSearchParams,
         status_filters: &SearchStatusFilters,
         query: Option<&str>,
         tag_filter: &[String],
         limit: usize,
+        notes: &mut Vec<String>,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let _doc_status_active = status_filters.doc_active.unwrap_or(true);
         let Some(query) = query else {
@@ -377,6 +388,11 @@ impl OrbitRuntime {
 
         let docs_limit = limit.saturating_mul(DOC_SEARCH_OVERFETCH).max(limit);
         let docs = self.search_docs(query, Some(docs_limit), true)?;
+        if params.hybrid {
+            // ADR-0180: doc vectors are opt-in and fall back to lexical rather than failing user search.
+            return self.hybrid_doc_hits(query, docs, tag_filter, docs_limit, limit, notes);
+        }
+
         let mut out = Vec::new();
         for result in docs {
             if let SearchResult::Doc(result) = result {
@@ -390,23 +406,145 @@ impl OrbitRuntime {
                         continue;
                     }
                 }
-                out.push(GlobalSearchHit {
-                    kind: "doc".to_string(),
-                    source: "lexical".to_string(),
-                    id: None,
-                    path: Some(result.record.path),
-                    title: None,
-                    summary: Some(result.record.summary),
-                    status: Some(result.record.doc_type),
-                    best_field: None,
-                    snippet: None,
-                    score: Some(result.score as f32),
-                    matched_by: Some(result.matched_by),
-                });
+                let score = result.score as f32;
+                out.push(doc_result_to_global(result, "lexical", Some(score)));
             }
         }
         out.truncate(limit);
         Ok(out)
+    }
+
+    fn hybrid_doc_hits(
+        &self,
+        query: &str,
+        lexical_results: Vec<SearchResult>,
+        tag_filter: &[String],
+        docs_limit: usize,
+        limit: usize,
+        notes: &mut Vec<String>,
+    ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
+        let mut lexical_docs = BTreeMap::<String, orbit_search::DocSearchResult>::new();
+        let mut lexical_adrs = Vec::new();
+        for result in lexical_results {
+            match result {
+                SearchResult::Doc(result) => {
+                    if !tag_filter.is_empty()
+                        && !tag_filter.iter().all(|tag| {
+                            result
+                                .record
+                                .tags
+                                .iter()
+                                .any(|candidate| candidate.eq_ignore_ascii_case(tag))
+                        })
+                    {
+                        continue;
+                    }
+                    lexical_docs.insert(result.record.path.clone(), result);
+                }
+                SearchResult::Adr(result) => {
+                    if tag_filter.is_empty() || adr_result_has_all_tags(&result, tag_filter) {
+                        lexical_adrs.push(adr_result_to_global(result));
+                    }
+                }
+            }
+        }
+
+        let semantic = match self.doc_semantic_hits(query, docs_limit) {
+            Ok(result) if result.is_empty() => {
+                warn_doc_hybrid_fallback(notes, "no doc embeddings found");
+                return Ok(lexical_doc_hits_with_adrs(
+                    lexical_docs,
+                    lexical_adrs,
+                    limit,
+                ));
+            }
+            Ok(result) => result,
+            Err(error) => {
+                warn_doc_hybrid_fallback(notes, &error.to_string());
+                return Ok(lexical_doc_hits_with_adrs(
+                    lexical_docs,
+                    lexical_adrs,
+                    limit,
+                ));
+            }
+        };
+
+        let records = self
+            .list_docs(None, None)?
+            .into_iter()
+            .map(|record| (record.path.clone(), record))
+            .collect::<BTreeMap<_, _>>();
+        let mut candidates = BTreeMap::<String, DocHybridCandidate>::new();
+        for (path, result) in lexical_docs {
+            candidates.insert(
+                path,
+                DocHybridCandidate {
+                    hit: doc_result_to_global(result.clone(), "hybrid", None),
+                    lexical_score: Some(result.score as f32),
+                    semantic_score: None,
+                    semantic: None,
+                },
+            );
+        }
+        for hit in semantic {
+            let Some(record) = records.get(&hit.source_id) else {
+                continue;
+            };
+            if !tag_filter.is_empty() && !doc_has_all_tags(record, tag_filter) {
+                continue;
+            }
+            candidates
+                .entry(hit.source_id.clone())
+                .and_modify(|candidate| {
+                    candidate.semantic_score = Some(hit.score);
+                    candidate.semantic = Some(hit.clone());
+                })
+                .or_insert_with(|| DocHybridCandidate {
+                    hit: GlobalSearchHit {
+                        kind: "doc".to_string(),
+                        source: "hybrid".to_string(),
+                        id: None,
+                        path: Some(record.path.clone()),
+                        title: None,
+                        summary: Some(record.frontmatter.summary.clone()),
+                        status: Some(record.frontmatter.doc_type.as_str().to_string()),
+                        best_field: None,
+                        snippet: None,
+                        score: None,
+                        matched_by: None,
+                    },
+                    lexical_score: None,
+                    semantic_score: Some(hit.score),
+                    semantic: Some(hit),
+                });
+        }
+
+        let weight = self.docs_search_config()?.semantic_weight;
+        let mut ranked = blend_doc_hybrid_candidates(candidates.into_values().collect(), weight);
+        ranked.extend(lexical_adrs);
+        ranked.truncate(limit);
+        Ok(ranked)
+    }
+
+    fn doc_semantic_hits(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<DocSemanticHit>, OrbitError> {
+        #[cfg(test)]
+        if let Some(result) = DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
+            return result.map_err(OrbitError::Execution);
+        }
+
+        Ok(orbit_search::doc_semantic_search(
+            &self.stores().semantic_vector,
+            DocSemanticSearchParams {
+                query: query.to_string(),
+                limit,
+                model: None,
+            },
+        )?
+        .results)
     }
 
     fn adr_branch(
@@ -598,6 +736,156 @@ fn semantic_hit_to_global(hit: orbit_search::SemanticHit) -> GlobalSearchHit {
         snippet: Some(hit.snippet),
         score: Some(hit.score),
         matched_by: None,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DocHybridCandidate {
+    hit: GlobalSearchHit,
+    lexical_score: Option<f32>,
+    semantic_score: Option<f32>,
+    semantic: Option<DocSemanticHit>,
+}
+
+fn lexical_doc_hits_with_adrs(
+    lexical_docs: BTreeMap<String, orbit_search::DocSearchResult>,
+    lexical_adrs: Vec<GlobalSearchHit>,
+    limit: usize,
+) -> Vec<GlobalSearchHit> {
+    let mut out = lexical_docs
+        .into_values()
+        .map(|result| doc_result_to_global(result.clone(), "lexical", Some(result.score as f32)))
+        .collect::<Vec<_>>();
+    out.extend(lexical_adrs);
+    out.truncate(limit);
+    out
+}
+
+fn blend_doc_hybrid_candidates(
+    candidates: Vec<DocHybridCandidate>,
+    semantic_weight: f32,
+) -> Vec<GlobalSearchHit> {
+    let lexical_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
+        candidate
+            .hit
+            .path
+            .as_ref()
+            .zip(candidate.lexical_score)
+            .map(|(path, score)| (path.clone(), score))
+    }));
+    let semantic_scores = normalized_doc_scores(candidates.iter().filter_map(|candidate| {
+        candidate
+            .hit
+            .path
+            .as_ref()
+            .zip(candidate.semantic_score)
+            .map(|(path, score)| (path.clone(), score))
+    }));
+    let lexical_weight = 1.0 - semantic_weight;
+    let mut out = candidates
+        .into_iter()
+        .map(|mut candidate| {
+            let path = candidate.hit.path.as_deref().unwrap_or_default();
+            let lexical = lexical_scores.get(path).copied().unwrap_or(0.0);
+            let semantic = semantic_scores.get(path).copied().unwrap_or(0.0);
+            let score = semantic_weight.mul_add(semantic, lexical_weight * lexical);
+            candidate.hit.score = Some(score);
+            if let Some(semantic_hit) = candidate.semantic {
+                candidate.hit.best_field = Some(semantic_hit.best_field);
+                candidate.hit.snippet = Some(semantic_hit.snippet);
+            }
+            candidate.hit
+        })
+        .collect::<Vec<_>>();
+    out.sort_by(compare_global_hits_by_score);
+    out
+}
+
+fn normalized_doc_scores(scores: impl IntoIterator<Item = (String, f32)>) -> BTreeMap<String, f32> {
+    let raw = scores.into_iter().collect::<Vec<_>>();
+    if raw.len() < 2 {
+        return raw.into_iter().collect();
+    }
+    let min = raw
+        .iter()
+        .map(|(_, score)| *score)
+        .fold(f32::INFINITY, f32::min);
+    let max = raw
+        .iter()
+        .map(|(_, score)| *score)
+        .fold(f32::NEG_INFINITY, f32::max);
+    if (max - min).abs() <= f32::EPSILON {
+        return raw.into_iter().map(|(path, _score)| (path, 1.0)).collect();
+    }
+    raw.into_iter()
+        .map(|(path, score)| (path, (score - min) / (max - min)))
+        .collect()
+}
+
+fn compare_global_hits_by_score(
+    left: &GlobalSearchHit,
+    right: &GlobalSearchHit,
+) -> std::cmp::Ordering {
+    right
+        .score
+        .unwrap_or(0.0)
+        .total_cmp(&left.score.unwrap_or(0.0))
+        .then_with(|| {
+            left.path
+                .as_deref()
+                .unwrap_or_default()
+                .cmp(right.path.as_deref().unwrap_or_default())
+        })
+        .then_with(|| {
+            left.id
+                .as_deref()
+                .unwrap_or_default()
+                .cmp(right.id.as_deref().unwrap_or_default())
+        })
+}
+
+fn warn_doc_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
+    orbit_common::tracing::warn!(
+        target: "orbit.search.docs",
+        reason,
+        "falling back to lexical doc search"
+    );
+    notes.push(format!("{DOC_HYBRID_FALLBACK_NOTE}: {reason}"));
+}
+
+fn doc_result_to_global(
+    result: orbit_search::DocSearchResult,
+    source: &str,
+    score: Option<f32>,
+) -> GlobalSearchHit {
+    GlobalSearchHit {
+        kind: "doc".to_string(),
+        source: source.to_string(),
+        id: None,
+        path: Some(result.record.path),
+        title: None,
+        summary: Some(result.record.summary),
+        status: Some(result.record.doc_type),
+        best_field: None,
+        snippet: None,
+        score,
+        matched_by: Some(result.matched_by),
+    }
+}
+
+fn adr_result_to_global(result: orbit_search::AdrSearchResult) -> GlobalSearchHit {
+    GlobalSearchHit {
+        kind: "adr".to_string(),
+        source: "lexical".to_string(),
+        id: Some(result.id),
+        path: Some(result.path.to_string_lossy().into_owned()),
+        title: Some(result.title),
+        summary: None,
+        status: Some(result.status.to_string()),
+        best_field: None,
+        snippet: None,
+        score: Some(result.score as f32),
+        matched_by: Some(result.matched_by),
     }
 }
 
@@ -997,13 +1285,45 @@ mod tests {
     }
 
     fn add_doc(runtime: &OrbitRuntime, path: &str, summary: &str) {
+        add_doc_with_tags(runtime, path, summary, &[]);
+    }
+
+    fn add_doc_with_tags(runtime: &OrbitRuntime, path: &str, summary: &str, tags: &[&str]) {
         let doc_path = runtime.paths().repo_root.join(path);
         fs::create_dir_all(doc_path.parent().expect("doc parent")).expect("create doc parent");
+        let tags_line = if tags.is_empty() {
+            String::new()
+        } else {
+            format!("tags: [{}]\n", tags.join(", "))
+        };
         fs::write(
             doc_path,
-            format!("---\ntype: context\nsummary: {summary}\n---\n\nneedle doc body\n"),
+            format!("---\ntype: context\nsummary: {summary}\n{tags_line}---\n\nneedle doc body\n"),
         )
         .expect("write doc");
+    }
+
+    fn doc_semantic_hit(path: &str, score: f32) -> DocSemanticHit {
+        DocSemanticHit {
+            source_id: path.to_string(),
+            best_field: "body".to_string(),
+            snippet: "semantic snippet".to_string(),
+            score,
+        }
+    }
+
+    fn with_doc_semantic_override<T>(
+        result: Result<Vec<DocSemanticHit>, String>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
+            *cell.borrow_mut() = Some(result);
+        });
+        let out = f();
+        DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
+        out
     }
 
     #[test]
@@ -1178,6 +1498,146 @@ mod tests {
         assert!(!ids.contains(&accepted_adr.as_str()));
         assert!(paths.contains(&"docs/status-active.md"));
         assert!(!paths.contains(&"docs/status-other.md"));
+    }
+
+    #[test]
+    fn global_search_doc_hybrid_uses_docs_semantic_weight() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        add_doc_with_tags(&runtime, "docs/z-lexical.md", "Literal primary", &["foo"]);
+        add_doc(&runtime, "docs/y-lexical.md", "foo secondary");
+        add_doc(&runtime, "docs/a-semantic.md", "Conceptual match");
+        let semantic = vec![
+            doc_semantic_hit("docs/a-semantic.md", 1.0),
+            doc_semantic_hit("docs/y-lexical.md", 0.2),
+        ];
+
+        let top_path = |weight: f32| {
+            fs::write(
+                runtime.config_path(),
+                format!("[docs.search]\nsemantic_weight = {weight:.1}\n"),
+            )
+            .expect("write config");
+            with_doc_semantic_override(Ok(semantic.clone()), || {
+                runtime
+                    .global_search(GlobalSearchParams {
+                        query: Some("foo".to_string()),
+                        hybrid: true,
+                        kind: GlobalSearchKind::Doc,
+                        limit: 3,
+                        ..Default::default()
+                    })
+                    .expect("doc hybrid search")
+                    .results
+                    .into_iter()
+                    .next()
+                    .expect("top result")
+                    .path
+                    .expect("doc path")
+            })
+        };
+
+        assert_eq!(top_path(0.0), "docs/z-lexical.md");
+        assert_eq!(top_path(1.0), "docs/a-semantic.md");
+        assert_eq!(top_path(0.5), "docs/a-semantic.md");
+    }
+
+    #[test]
+    fn global_search_doc_hybrid_falls_back_to_lexical_on_semantic_error() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        add_doc_with_tags(
+            &runtime,
+            "docs/fallback-z-lexical.md",
+            "Fallback primary",
+            &["fallbackneedle"],
+        );
+
+        let response = with_doc_semantic_override(Err("companion missing".to_string()), || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    query: Some("fallbackneedle".to_string()),
+                    hybrid: true,
+                    kind: GlobalSearchKind::Doc,
+                    limit: 3,
+                    ..Default::default()
+                })
+                .expect("fallback search")
+        });
+
+        assert!(
+            response
+                .notes
+                .iter()
+                .any(|note| note.contains("falling back to lexical"))
+        );
+        assert_eq!(response.results[0].source, "lexical");
+        assert_eq!(
+            response.results[0].path.as_deref(),
+            Some("docs/fallback-z-lexical.md")
+        );
+    }
+
+    #[test]
+    fn global_search_doc_hybrid_preserves_adr_lexical_hits() {
+        let runtime = OrbitRuntime::in_memory().expect("runtime");
+        let adr_id = add_adr(&runtime, "foo ADR", "## Context\n\nBody.\n");
+        let lexical_adr = runtime
+            .search_docs("foo", Some(5), true)
+            .expect("direct docs search")
+            .into_iter()
+            .find_map(|result| match result {
+                SearchResult::Adr(result) => Some(result),
+                SearchResult::Doc(_) => None,
+            })
+            .expect("lexical adr");
+
+        let response = with_doc_semantic_override(Ok(Vec::new()), || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    query: Some("foo".to_string()),
+                    hybrid: true,
+                    kind: GlobalSearchKind::Doc,
+                    limit: 5,
+                    ..Default::default()
+                })
+                .expect("hybrid doc search")
+        });
+        let adr_hit = response
+            .results
+            .iter()
+            .find(|hit| hit.kind == "adr")
+            .expect("adr hit");
+
+        assert_eq!(adr_hit.id.as_deref(), Some(adr_id.as_str()));
+        assert_eq!(adr_hit.source, "lexical");
+        assert_eq!(adr_hit.score, Some(lexical_adr.score as f32));
+    }
+
+    #[test]
+    fn hybrid_handles_single_candidate_side() {
+        let hit = GlobalSearchHit {
+            kind: "doc".to_string(),
+            source: "hybrid".to_string(),
+            id: None,
+            path: Some("docs/only.md".to_string()),
+            title: None,
+            summary: None,
+            status: None,
+            best_field: None,
+            snippet: None,
+            score: None,
+            matched_by: None,
+        };
+        let out = blend_doc_hybrid_candidates(
+            vec![DocHybridCandidate {
+                hit,
+                lexical_score: Some(0.42),
+                semantic_score: None,
+                semantic: None,
+            }],
+            0.5,
+        );
+
+        assert!((out[0].score.expect("score") - 0.21).abs() < 0.0001);
     }
 
     #[test]

@@ -46,6 +46,12 @@ fn unused_tools_are_not_registered_in_public_surface() {
             "removed tool still registered: {name}"
         );
     }
+
+    let removed_docs_reindex = ["orbit.docs", "reindex"].join(".");
+    assert!(
+        !names.contains(removed_docs_reindex.as_str()),
+        "removed docs reindex tool still registered"
+    );
 }
 
 #[test]
@@ -76,6 +82,7 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.groundhog.checkpoint_failure",
         "orbit.groundhog.checkpoint_success",
         "orbit.groundhog.side_effect",
+        "orbit.docs.index",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",

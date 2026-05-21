@@ -76,7 +76,7 @@ pub enum OrbitBuiltinAction {
     DocsList,
     DocsShow,
     DocsAdd,
-    DocsReindex,
+    DocsIndex,
     DocsMigrate,
     FrictionAdd,
     FrictionList,

@@ -160,6 +160,7 @@ mod tests {
 
     use super::{
         Cli, Commands,
+        docs::DocsSubcommand,
         hook::HookSubcommand,
         mcp::McpSubcommand,
         search::{SearchKindArg, SearchSubcommand},
@@ -247,6 +248,26 @@ mod tests {
             },
             _ => panic!("expected top-level semantic command"),
         }
+    }
+
+    #[test]
+    fn cli_parses_docs_index() {
+        let cli = Cli::parse_from(["orbit", "docs", "index", "--force", "--model", "minilm-l6"]);
+        match cli.command {
+            Commands::Docs(command) => match command.command {
+                DocsSubcommand::Index(args) => {
+                    assert!(args.force);
+                    assert_eq!(args.model.as_deref(), Some("minilm-l6"));
+                }
+                _ => panic!("expected docs index"),
+            },
+            _ => panic!("expected top-level docs command"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_docs_reindex() {
+        assert!(Cli::try_parse_from(["orbit", "docs", "reindex"]).is_err());
     }
 
     #[test]

@@ -255,6 +255,7 @@ orbit search <query> [--hybrid] [--kind task|doc|learning|adr|all] [--limit N]
 orbit search similar <task-id> [--limit N]
 orbit search path <path> [--kind task|doc|learning|adr|all] [--limit N]
 orbit semantic index     [--force] [--model MODEL]
+orbit docs index         [--force] [--model MODEL]
 orbit semantic stats
 ```
 
@@ -262,16 +263,17 @@ orbit semantic stats
 
 `uninstall` removes the companion binary and (by default) the currently active model. `--model M` removes only model M. `--all` removes the companion plus every installed model.
 
-`orbit search` defaults to lexical matching across tasks, docs, learnings, and ADRs. `--hybrid --kind task` runs the hybrid pipeline over task vectors; non-task kinds remain lexical even when `--hybrid` is set. `orbit search similar <task-id>` embeds the target task's `purpose + summary` and runs cosine-only against other tasks (lexical fusion adds noise here). `orbit search path <path>` performs applicability lookup over path-scoped artifacts. `orbit semantic index` rebuilds the `embeddings` rows; `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status.
+`orbit search` defaults to lexical matching across tasks, docs, learnings, and ADRs. `--hybrid --kind task` runs the hybrid pipeline over task vectors; `--hybrid --kind doc` blends docs lexical scoring with cosine over rows built by `orbit docs index`; learnings and ADRs remain lexical. `orbit search similar <task-id>` embeds the target task's `purpose + summary` and runs cosine-only against other tasks (lexical fusion adds noise here). `orbit search path <path>` performs applicability lookup over path-scoped artifacts. `orbit semantic index` rebuilds task `embeddings` rows; `orbit docs index` rebuilds doc rows and sweeps stale doc paths. `--force` ignores `content_hash` and re-embeds everything. `stats` reports row counts, model distribution, stale-row count, and companion-install status.
 
-If the companion is not installed, `orbit search --hybrid`, `orbit search similar <task-id>`, and `orbit semantic index` exit non-zero with: `"Semantic search not enabled. Run \`orbit semantic install\` to download the inference companion."`
+If the companion is not installed, task-hybrid search, `orbit search similar <task-id>`, `orbit semantic index`, and `orbit docs index` exit non-zero with: `"Semantic search not enabled. Run \`orbit semantic install\` to download the inference companion."` Doc-hybrid search is softer: it emits a warning/note and falls back to lexical doc results.
 
 ### 6.2 MCP tools
 
 - `orbit.search` — `(query?, hybrid?, semantic?, kind?, limit?, tag?, all?, status?, path?)` → ranked results with snippets.
 - `orbit.semantic.install`, `orbit.semantic.uninstall`, `orbit.semantic.stats`, `orbit.semantic.index` — companion lifecycle.
+- `orbit.docs.index` — docs-corpus embedding build and stale-source sweep.
 
-`orbit.search` is read-only. Indexing is implicit (on task mutation) or explicit (`orbit semantic index` / `orbit.semantic.index`).
+`orbit.search` is read-only. Task indexing is implicit (on task mutation) or explicit (`orbit semantic index` / `orbit.semantic.index`); docs indexing is explicit (`orbit docs index` / `orbit.docs.index`).
 
 ### 6.3 Result shape
 

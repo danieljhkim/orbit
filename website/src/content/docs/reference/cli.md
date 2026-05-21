@@ -25,8 +25,8 @@ sidebar:
 | `orbit run duel-plan <task_id> --wait` | Submit a planning duel and wait for its terminal status before returning. |
 | `orbit task` | Create, update, and manage tasks. |
 | `orbit task artifact put <task_id> <source_path>` | Store a UTF-8 file under a task's artifacts directory. |
-| `orbit search <query>` | Search tasks, docs, learnings, and ADRs; add `--hybrid` for task-vector ranking, use `orbit search similar <id>` for task neighbors, or `orbit search path <path>` for applicability lookup. |
-| `orbit docs` | Search and manage the indexed docs corpus. |
+| `orbit search <query>` | Search tasks, docs, learnings, and ADRs; add `--hybrid` for task/doc vector ranking, use `orbit search similar <id>` for task neighbors, or `orbit search path <path>` for applicability lookup. |
+| `orbit docs` | List, show, add, index, and migrate the docs corpus. |
 | `orbit learning` | Create, search, and curate project learnings. |
 
 ## Observe

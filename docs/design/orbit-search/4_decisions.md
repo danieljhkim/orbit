@@ -212,7 +212,7 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 - Establishes a precedent that lifecycle namespaces manage local subsystems while query namespaces describe what users are trying to do.
 - `orbit semantic search`, `orbit semantic related`, and `orbit semantic reindex` are hard breaks with no shim because there are no known external consumers yet.
 - Per-domain search commands stay untouched for phase 1; a later task decides whether they thin-wrap `orbit search`, demote to filters, or retire.
-- Vector index coverage remains task-only today; docs, learnings, and ADRs continue to use lexical matching even when `--hybrid` is set.
+- At this phase, docs, learnings, and ADRs used lexical matching even when `--hybrid` was set; ADR-0180 later adds opt-in doc vectors while keeping learnings and ADRs lexical.
 
 ---
 
@@ -270,6 +270,22 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 
 ---
 
+## ADR-0180 — Doc corpus embeddings use `docs index` and opt-in hybrid search
+
+**Status:** Accepted · 2026-05-21 · [ORB-00206]
+
+**Context.** Doc search was lexical-only after [ORB-00202] unified the query surface, while the orbit-search store already had a `source_kind` discriminator that could hold docs. The alternatives were to keep semantic ranking deferred, add a separate docs search verb, or reuse the existing vector store behind the unified `orbit search --kind doc --hybrid` path.
+
+**Decision.** Use `orbit docs index` as the explicit admin verb that embeds configured docs roots into `source_kind = "doc"` rows, and keep retrieval opt-in through `orbit search <query> --kind doc --hybrid`. Lexical doc search remains the default, ADRs stay lifecycle-owned and lexical-only, and `[docs.search].semantic_weight` tunes the blend without adding another CLI flag.
+
+**Consequences.**
+- `orbit docs index` shares the semantic companion, model catalog, and `embeddings` table with task vectors rather than creating a doc-specific store.
+- The search crate owns doc field extraction and stale-source sweeping, but does not depend on orbit-core; core passes a small `DocEmbeddingSource`.
+- Hybrid doc search falls back to lexical when the companion or doc rows are unavailable, preserving read-path ergonomics while making the admin indexing verb fail clearly.
+- Cost: docs now have a manual freshness loop separate from task mutation indexing. Background docs indexing remains a future task.
+
+---
+
 ## Task References
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
@@ -281,5 +297,6 @@ Compare to the analogous knowledge-graph crate: `orbit-knowledge` owns its data 
 - [ORB-00202] — Consolidate per-domain search subcommands and add cross-kind `--path` / `--tag` filters. The task that proposed and implemented ADR-0176.
 - [ORB-00203] — Add ADR envelope `tags` and `paths` so ADRs participate in cross-kind `--tag` / `--path` search filters.
 - [ORB-00205] — Split `orbit search` into query / similar / path forms and require per-kind `--status` syntax. The task that accepted and implemented ADR-0179.
+- [ORB-00206] — Add doc-corpus embeddings through `orbit docs index` and `orbit search --kind doc --hybrid`. The task that accepted and implemented ADR-0180.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

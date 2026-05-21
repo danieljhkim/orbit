@@ -82,7 +82,7 @@ pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[
     "orbit.docs.list",
     "orbit.docs.show",
     "orbit.docs.add",
-    "orbit.docs.reindex",
+    "orbit.docs.index",
     "orbit.docs.migrate",
 ];
 

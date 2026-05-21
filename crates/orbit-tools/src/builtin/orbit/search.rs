@@ -19,7 +19,7 @@ impl Tool for OrbitSearchTool {
                 // ADR-0179: expose the free-text vector ranker as hybrid, not semantic.
                 name: "hybrid".to_string(),
                 description:
-                    "Opt into hybrid BM25 + cosine ranking for task vectors; other kinds remain lexical."
+                    "Opt into hybrid lexical + cosine ranking for indexed task and doc vectors; learnings and ADRs remain lexical."
                         .to_string(),
                 param_type: "boolean".to_string(),
                 required: false,
@@ -83,7 +83,7 @@ impl Tool for OrbitSearchTool {
         ToolSchema {
             name: "orbit.search".to_string(),
             description:
-                "Search tasks, docs, learnings, and ADRs. Semantic vector search currently applies to tasks only."
+                "Search tasks, docs, learnings, and ADRs. Hybrid vector ranking applies to indexed tasks and docs."
                     .to_string(),
             parameters,
             builtin: true,

@@ -61,12 +61,12 @@ CLI and MCP forms are equivalent:
 | Show | `orbit docs show <path> --json` | `orbit.docs.show` |
 | Search | `orbit search --kind doc <query> --json --limit 20` (or `--kind all` / `--kind adr`) | `orbit.search` |
 | Add root | `orbit docs add <path>` | `orbit.docs.add` |
-| Reindex | `orbit docs reindex` | `orbit.docs.reindex` |
+| Index | `orbit docs index` | `orbit.docs.index` |
 | Migrate | `orbit docs migrate --dry-run` | `orbit.docs.migrate` |
 
 `orbit search <query> --kind all` federates doc and ADR hits in one call. Use `--kind doc` for doc-only matches, `--kind adr` for ADR-only matches, and `--kind adr --all` (or `--status adr:accepted,adr:superseded`) to include superseded ADRs for archaeology. See `orbit-search` for the full flag matrix (`--tag`, `orbit search path <path>`, `--status kind:value`).
 
-`reindex` is a v1 no-op because the indexer walks on demand. `migrate` backfills locked frontmatter for `docs/design/<feature>/*.md` and `docs/design-patterns/*.md`; it never touches `.orbit/`.
+`index` embeds the configured docs roots for `orbit search <query> --kind doc --hybrid`; reruns are idempotent through content hashes. `migrate` backfills locked frontmatter for `docs/design/<feature>/*.md` and `docs/design-patterns/*.md`; it never touches `.orbit/`.
 
 ## Workflow
 
@@ -74,4 +74,5 @@ CLI and MCP forms are equivalent:
 2. Use `orbit docs show <path> --json` for the full Markdown body.
 3. Use `orbit docs list --json --type <type>` or `--tag <tag>` when browsing.
 4. Use `orbit docs add <path>` only for existing non-`.orbit/` roots that should be searched going forward.
-5. Use `orbit docs migrate --dry-run` before writing frontmatter backfills, then rerun without `--dry-run` when the diff is expected.
+5. Use `orbit docs index --json` after substantial docs edits or moves when hybrid doc search needs fresh embeddings.
+6. Use `orbit docs migrate --dry-run` before writing frontmatter backfills, then rerun without `--dry-run` when the diff is expected.

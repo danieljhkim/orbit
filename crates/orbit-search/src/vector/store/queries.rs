@@ -14,6 +14,24 @@ use super::VectorStore;
 use crate::vector::{SemanticStats, SourceModelCount};
 
 impl VectorStore {
+    pub fn source_ids(&self, source_kind: &str) -> Result<BTreeSet<String>, OrbitError> {
+        let conn = self.connection();
+        let conn = conn
+            .lock()
+            .map_err(|error| OrbitError::Store(format!("mutex poisoned: {error}")))?;
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT source_id FROM embeddings WHERE source_kind = ?1")
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let rows = stmt
+            .query_map(params![source_kind], |row| row.get::<_, String>(0))
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let mut source_ids = BTreeSet::new();
+        for row in rows {
+            source_ids.insert(row.map_err(|error| OrbitError::Store(error.to_string()))?);
+        }
+        Ok(source_ids)
+    }
+
     pub fn delete_source(&self, source_kind: &str, source_id: &str) -> Result<(), OrbitError> {
         let conn = self.connection();
         let conn = conn
