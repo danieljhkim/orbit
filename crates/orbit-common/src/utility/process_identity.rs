@@ -100,6 +100,3 @@ pub fn legacy_lstart_matches(pid: u32, persisted: &str) -> bool {
 pub fn legacy_lstart_matches(_pid: u32, _persisted: &str) -> bool {
     false
 }
-
-#[cfg(all(test, unix))]
-mod tests;

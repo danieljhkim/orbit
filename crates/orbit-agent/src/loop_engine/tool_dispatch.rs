@@ -178,6 +178,3 @@ fn tool_error_value(err: &OrbitError) -> Value {
         "error": err.to_string(),
     })
 }
-
-#[cfg(test)]
-mod tests;

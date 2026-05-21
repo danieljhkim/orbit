@@ -143,6 +143,3 @@ fn activity_tool_allowlist(activity: &ActivityV2) -> Option<&[String]> {
 fn wildcard_prefix(entry: &str) -> Option<&str> {
     entry.strip_suffix('*')
 }
-
-#[cfg(test)]
-mod tests;

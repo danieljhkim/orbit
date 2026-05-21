@@ -417,6 +417,3 @@ pub fn normalize_learning_paths(raw_paths: Vec<String>) -> Vec<String> {
     }
     normalized
 }
-
-#[cfg(test)]
-mod tests;

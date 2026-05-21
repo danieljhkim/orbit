@@ -355,6 +355,3 @@ const fn default_backoff_cap_ms() -> u64 {
 const fn default_max_workers() -> u32 {
     4
 }
-
-#[cfg(test)]
-mod tests;

@@ -30,6 +30,3 @@ impl GrokCliTransport {
         self.model.as_deref()
     }
 }
-
-#[cfg(test)]
-mod tests;

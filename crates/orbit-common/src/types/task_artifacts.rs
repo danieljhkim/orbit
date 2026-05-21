@@ -504,6 +504,3 @@ fn reaches(graph: &BTreeMap<OrbitId, BTreeSet<OrbitId>>, start: &str, target: &s
     }
     false
 }
-
-#[cfg(test)]
-mod tests;

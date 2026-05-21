@@ -383,7 +383,9 @@ pub fn redact_event_text(message: &str) -> String {
     redaction::redact_all(message)
 }
 
-fn env_filter(default_filter: &str) -> EnvFilter {
+// Visible to sibling-layout logging tests; the filter construction is a
+// focused seam for subscriber behavior.
+pub(super) fn env_filter(default_filter: &str) -> EnvFilter {
     EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
 }
 
@@ -412,7 +414,9 @@ pub fn global_jsonl_log_path() -> io::Result<PathBuf> {
         .join("orbit.jsonl"))
 }
 
-fn jsonl_layer_at_path<S>(
+// Visible to sibling-layout logging tests so file-layer behavior can be
+// exercised without nesting tests under this source file.
+pub(super) fn jsonl_layer_at_path<S>(
     path: &Path,
 ) -> io::Result<(impl Layer<S> + Send + Sync + 'static + use<S>, WorkerGuard)>
 where
@@ -450,13 +454,11 @@ where
     Ok((layer, guard))
 }
 
-fn emit_log_init_warning(warning: &str) {
+// Visible to sibling-layout logging tests that verify stderr fallback behavior.
+pub(super) fn emit_log_init_warning(warning: &str) {
     tracing::warn!(
         target: "orbit_common::utility::logging",
         error = warning,
         "failed to initialize JSONL tracing log"
     );
 }
-
-#[cfg(test)]
-mod tests;

@@ -120,6 +120,3 @@ impl From<std::io::Error> for OrbitError {
         OrbitError::Io(err.to_string())
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -280,6 +280,3 @@ impl<'de> Deserialize<'de> for ActorIdentity {
         deserializer.deserialize_any(ActorVisitor)
     }
 }
-
-#[cfg(test)]
-mod tests;

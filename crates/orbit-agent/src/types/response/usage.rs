@@ -18,7 +18,9 @@ enum UsageKeyMode {
     TokenBlock,
 }
 
-pub(super) fn sum_usage(documents: &[Value]) -> TokenUsage {
+// Visible through `response.rs` to sibling-layout tests for the file-rooted
+// response module.
+pub(in crate::types) fn sum_usage(documents: &[Value]) -> TokenUsage {
     let mut usage = TokenUsage::default();
     for document in documents {
         collect_usage(document, &mut usage, true, UsageKeyMode::Standard);
@@ -219,7 +221,3 @@ pub(super) fn value_as_u64(value: &Value) -> Option<u64> {
         _ => None,
     }
 }
-
-#[cfg(test)]
-#[path = "usage/tests/mod.rs"]
-mod tests;

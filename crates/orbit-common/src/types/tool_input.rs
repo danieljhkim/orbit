@@ -198,6 +198,3 @@ fn decode_json_string_array(raw: &str) -> Option<Vec<String>> {
     }
     Some(values)
 }
-
-#[cfg(test)]
-mod tests;

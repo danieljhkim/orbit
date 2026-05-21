@@ -52,6 +52,3 @@ impl FromStr for AgentFamily {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

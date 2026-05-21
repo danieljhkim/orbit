@@ -230,6 +230,3 @@ pub fn parse_policy_resource(yaml: &str, label: &str) -> Result<PolicyResource, 
     serde_yaml::from_str(yaml)
         .map_err(|error| OrbitError::InvalidInput(format!("failed to parse {label}: {error}")))
 }
-
-#[cfg(test)]
-mod tests;

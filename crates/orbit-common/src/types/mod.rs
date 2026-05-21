@@ -147,3 +147,6 @@ pub use tool_input::{
     optional_string_list_alias, optional_u32_alias, required_string, split_csv,
 };
 pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};
+
+#[cfg(test)]
+mod tests;

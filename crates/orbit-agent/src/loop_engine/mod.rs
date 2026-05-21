@@ -40,3 +40,6 @@ pub use transport::{
     CacheHint, ContentBlock, LoopTransport, Message, MessageRole, StopReason, ToolSpec,
     TransportError, TurnRequest, TurnResponse, TurnUsage,
 };
+
+#[cfg(test)]
+mod tests;
