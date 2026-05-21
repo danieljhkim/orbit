@@ -612,6 +612,14 @@ spec:
             "gate results must be collected before the success guard runs"
         );
 
+        let dispatch = &asset.spec.steps[dispatch_index];
+        match &dispatch.body {
+            JobV2StepBody::FanOut { fan_out, .. } => {
+                assert_eq!(fan_out.max_workers, 5);
+            }
+            other => panic!("expected dispatch fan-out, got {other:?}"),
+        }
+
         let guard = &asset.spec.steps[guard_index];
         assert_eq!(
             guard.when.as_deref(),
