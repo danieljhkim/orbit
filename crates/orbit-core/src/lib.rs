@@ -35,7 +35,6 @@
 pub mod command;
 pub mod config;
 pub mod context;
-pub mod knowledge_stats;
 mod paths;
 pub mod runtime;
 pub mod workspace_registry;

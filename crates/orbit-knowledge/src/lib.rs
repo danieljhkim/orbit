@@ -48,6 +48,7 @@ pub mod graph;
 pub mod graph_bench;
 mod io;
 pub mod lock;
+pub mod metrics;
 pub mod pipeline;
 mod selector;
 pub mod service;

@@ -28,12 +28,12 @@ use orbit_common::types::{
 };
 use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
+use orbit_knowledge::metrics::merge_invocation_trace;
 use orbit_store::{InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::knowledge_stats::merge_invocation_knowledge_metrics;
 use crate::runtime::build_orbit_tool_host;
 
 impl V2RuntimeHost for OrbitRuntime {
@@ -169,7 +169,7 @@ impl V2RuntimeHost for OrbitRuntime {
                 DispatchError::JobExecution(format!("read job run for knowledge metrics: {error}"))
             })?
             .and_then(|run| run.knowledge_metrics);
-        if let Some(metrics) = merge_invocation_knowledge_metrics(existing.as_ref(), trace) {
+        if let Some(metrics) = merge_invocation_trace(existing.as_ref(), trace) {
             self.stores()
                 .jobs()
                 .record_run_knowledge_metrics(job_run_id, metrics)
