@@ -83,6 +83,8 @@ mod tests {
                     last_updated: ts,
                     related_features: vec![],
                     related_tasks: vec![],
+                    tags: vec![],
+                    paths: vec![],
                     supersedes: vec![],
                     superseded_by: None,
                     legacy_ids: vec![],

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0155
 title: Scope duel-plan candidate and model overrides to `[duel]`
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - agent-families
 related_tasks:
 - ORB-00072
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - agent-families/ADR-0153

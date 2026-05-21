@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0064
 title: Hunk-to-symbol attribution by line-range overlap only
 status: superseded
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260421-0528
+tags: []
+paths: []
 supersedes: []
 superseded_by: ADR-0083
 legacy_ids:

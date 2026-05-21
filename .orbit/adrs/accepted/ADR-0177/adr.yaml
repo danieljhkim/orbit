@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0177
 title: Worktree-local ADR and learning bodies with shared ID allocation
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - worktree-artifacts
 related_tasks:
 - ORB-00201
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []

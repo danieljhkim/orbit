@@ -23,6 +23,7 @@
 //!
 //! See [`AdrStatus::validate_transition`] for the implementation.
 
+use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
@@ -167,6 +168,10 @@ pub struct Adr {
     #[serde(default)]
     pub related_tasks: Vec<String>,
     #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default)]
     pub supersedes: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<String>,
@@ -225,6 +230,35 @@ pub fn validate_adr_id(id: &str) -> Result<(), OrbitError> {
 /// natural width.
 pub fn legacy_id_for(feature: &str, local_number: u32) -> String {
     format!("{feature}/ADR-{local_number:03}")
+}
+
+/// Lowercase + trim + dedupe ADR tag strings.
+///
+/// ADR tags share the task/learning free-form label semantics, while
+/// `related_features` remains the constrained structural feature reference.
+pub fn normalize_adr_tags(raw_tags: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::with_capacity(raw_tags.len());
+    let mut seen = BTreeSet::new();
+    for raw in raw_tags {
+        let tag = raw.trim().to_lowercase();
+        if !tag.is_empty() && seen.insert(tag.clone()) {
+            normalized.push(tag);
+        }
+    }
+    normalized
+}
+
+/// Trim + dedupe ADR applicability path globs, preserving case.
+pub fn normalize_adr_paths(raw_paths: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::with_capacity(raw_paths.len());
+    let mut seen = BTreeSet::new();
+    for raw in raw_paths {
+        let path = raw.trim().to_string();
+        if !path.is_empty() && seen.insert(path.clone()) {
+            normalized.push(path);
+        }
+    }
+    normalized
 }
 
 #[cfg(test)]
@@ -355,6 +389,8 @@ mod tests {
             last_updated: ts(2026, 5, 12),
             related_features: vec!["knowledge-graph".to_string()],
             related_tasks: vec!["T20260511-1".to_string()],
+            tags: vec!["schema".to_string(), "cross-cutting".to_string()],
+            paths: vec!["crates/orbit-store/**".to_string()],
             supersedes: vec!["ADR-0001".to_string()],
             superseded_by: None,
             legacy_ids: vec![
@@ -386,6 +422,8 @@ last_updated: 2026-05-11T00:00:00Z
         assert!(adr.superseded_by.is_none());
         assert!(adr.related_features.is_empty());
         assert!(adr.related_tasks.is_empty());
+        assert!(adr.tags.is_empty());
+        assert!(adr.paths.is_empty());
         assert!(adr.supersedes.is_empty());
         assert!(adr.legacy_ids.is_empty());
         assert!(adr.validation_warnings.is_empty());

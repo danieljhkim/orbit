@@ -871,6 +871,8 @@ fn adr_search_source(adr: Adr) -> AdrSearchSource {
         id: adr.id,
         title: adr.title,
         status: adr.status,
+        tags: adr.tags,
+        paths: adr.paths,
         related_features: adr.related_features,
     }
 }

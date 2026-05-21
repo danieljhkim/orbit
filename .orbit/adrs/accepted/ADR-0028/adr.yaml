@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0028
 title: V2 run structure and loop transcript detail are separate audit layers
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260419-0002
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-003

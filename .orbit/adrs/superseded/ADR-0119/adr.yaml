@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0119
 title: Semantic-search ownership relocated to `orbit-embed`
 status: superseded
@@ -10,6 +10,8 @@ related_features:
 - semantic-search
 related_tasks:
 - T20260510-20
+tags: []
+paths: []
 supersedes: []
 superseded_by: ADR-0172
 legacy_ids:

@@ -65,7 +65,10 @@ pub use actor::{
     ActorIdentity, agent_from_model, normalize_attribution_label,
     normalize_optional_attribution_label, provider_from_model,
 };
-pub use adr::{Adr, AdrStatus, LegacyValidation, legacy_id_for, validate_adr_id};
+pub use adr::{
+    Adr, AdrStatus, LegacyValidation, legacy_id_for, normalize_adr_paths, normalize_adr_tags,
+    validate_adr_id,
+};
 pub use agent_family::AgentFamily;
 pub use agent_pair::{
     AgentModelPair, Crew, CrewRoleAssignment, agent_family_from_cli, all_agent_families,

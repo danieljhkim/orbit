@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0076
 title: Retain agent-facing `orbit_graph_*` MCP surface; provider-dependent value
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260423-0524
 - T20260426-0402
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-018

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0085
 title: Refresh freshness by checkout identity
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260509-34
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-031

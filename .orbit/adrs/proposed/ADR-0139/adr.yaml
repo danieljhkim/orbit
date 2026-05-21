@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0139
 title: Canon Refined Aesthetic
 status: proposed
@@ -9,6 +9,8 @@ related_features:
 - user-interface
 related_tasks:
 - T20260427-29
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - user-interface/ADR-001

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0003
 title: Run state, audit, and operator inspection are durable layers
 status: accepted
@@ -23,6 +23,8 @@ related_tasks:
 - T20260430-31
 - T20260505-8
 - T20260506-18
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-007

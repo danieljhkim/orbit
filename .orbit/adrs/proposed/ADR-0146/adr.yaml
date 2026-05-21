@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0146
 title: Append-heavy task data leaves `task.yaml`
 status: proposed
@@ -8,6 +8,8 @@ last_updated: 2026-05-11T04:36:09.226467Z
 related_features:
 - task-artifacts
 related_tasks: []
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - task-artifacts/ADR-004

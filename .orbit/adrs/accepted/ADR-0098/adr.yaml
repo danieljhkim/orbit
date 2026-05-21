@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0098
 title: Tool layer is the policy enforcement point for HTTP-backed activities
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260419-0503
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-006

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0094
 title: Policy schema is v2-only with named profiles plus global denies
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260416-0728
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-002

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0100
 title: SIGTERM with 5-second grace, then SIGKILL for the whole group
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260417-0558-4
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-008

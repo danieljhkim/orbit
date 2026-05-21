@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0109
 title: Native Orbit primitive (`learning` resource) over a flat markdown directory
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - project-learnings
 related_tasks:
 - T20260510-11
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - project-learnings/ADR-002

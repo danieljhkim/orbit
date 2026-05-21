@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0114
 title: Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260510-3
 - T20260510-9
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - semantic-search/ADR-002

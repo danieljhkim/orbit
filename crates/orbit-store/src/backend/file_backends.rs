@@ -330,6 +330,8 @@ impl AdrStoreBackend for AdrFileStore {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
     ) -> Result<Vec<Adr>, OrbitError> {
         self.list_adrs_filtered(
@@ -338,6 +340,8 @@ impl AdrStoreBackend for AdrFileStore {
             feature,
             task_id,
             legacy_id,
+            tag,
+            path,
             validation_warned,
         )
     }
@@ -349,6 +353,8 @@ impl AdrStoreBackend for AdrFileStore {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError> {
@@ -359,6 +365,8 @@ impl AdrStoreBackend for AdrFileStore {
             feature,
             task_id,
             legacy_id,
+            tag,
+            path,
             validation_warned,
             include_remote,
         )

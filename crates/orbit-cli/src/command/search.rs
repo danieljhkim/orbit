@@ -6,7 +6,7 @@ use crate::command::Execute;
 #[derive(Args)]
 #[command(
     about = "Search tasks, docs, learnings, and ADRs",
-    after_help = "Index coverage note: vector search runs against tasks only today; docs, learnings, and ADRs use lexical matching regardless of --hybrid.\n\nADR support for --tag and --path is deferred to phase 3 (ORB-00203); for --kind adr those filters return empty."
+    after_help = "Index coverage note: vector search runs against tasks only today; docs, learnings, and ADRs use lexical matching regardless of --hybrid."
 )]
 #[command(group(
     ArgGroup::new("query_mode")
@@ -15,7 +15,7 @@ use crate::command::Execute;
 ))]
 #[command(group(
     ArgGroup::new("search_input")
-        .args(["query", "semantic", "path"])
+        .args(["query", "semantic", "path", "tags"])
         .required(true)
         .multiple(true)
 ))]
@@ -43,8 +43,7 @@ pub struct SearchCommand {
     /// Optional semantic embedding model alias, such as bge-small.
     #[arg(long)]
     pub model: Option<String>,
-    /// Filter by tag (AND semantics). Applies to task, doc, learning; ADR
-    /// is deferred to phase 3 and returns empty when this is set.
+    /// Filter by tag (AND semantics). Applies to task, doc, learning, and ADR.
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
     pub tags: Vec<String>,
     /// Include normally-hidden statuses for the queried kind. Task adds
@@ -58,8 +57,8 @@ pub struct SearchCommand {
     pub status: Vec<String>,
     /// Filter to artifacts applicable to this filesystem path. Task: selector
     /// containment over `context_files`. Learning: glob-containment over
-    /// `scope.paths`. ADR: deferred to phase 3 (returns empty). Doc: out of
-    /// scope (returns empty).
+    /// `scope.paths`. ADR: glob-containment over `paths`. Doc: out of scope
+    /// (returns empty).
     #[arg(long)]
     pub path: Option<String>,
     /// Output as JSON.

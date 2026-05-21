@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0018
 title: Markdown body, structured envelope
 status: proposed
@@ -8,6 +8,8 @@ last_updated: 2026-05-11T02:06:39.300899Z
 related_features:
 - adr-artifact
 related_tasks: []
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - adr-artifact/ADR-004

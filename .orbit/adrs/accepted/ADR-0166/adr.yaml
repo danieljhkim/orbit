@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0166
 title: Grouped Scoreboard Sections
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - user-interface
 related_tasks:
 - ORB-00144
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []

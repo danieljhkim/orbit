@@ -3,7 +3,7 @@ summary: "ADR Artifact — Design"
 type: design
 title: "ADR Artifact — Design"
 owner: claude
-last_updated: 2026-05-20
+last_updated: 2026-05-21
 status: Draft
 feature: adr-artifact
 doc_role: design
@@ -29,6 +29,7 @@ An ADR is a per-ADR directory containing a YAML envelope and a markdown body. Th
 `adr.yaml`:
 
 ```yaml
+schema_version: 2
 id: ADR-0042
 title: Resolve sandbox-exec wrapper from a trusted absolute path
 status: accepted
@@ -38,11 +39,15 @@ accepted_at: 2026-05-09T18:01:00Z
 last_updated: 2026-05-09T18:01:00Z
 related_features: [activity-job, policy-sandbox]
 related_tasks: [T20260509-30]
+tags: [sandbox, policy]
+paths: [crates/orbit-exec/**, crates/orbit-policy/**]
 supersedes: []
 superseded_by: null
 legacy_ids:
   - activity-job/ADR-039
 ```
+
+`schema_version: 2` adds the two free-form retrieval axes: `tags` and `paths`. `tags` are label vocabulary for cross-artifact search and are distinct from `related_features`, which remains a structural reference to feature folder names. `paths` are repo-relative glob patterns for areas constrained by the decision. Readers accept v1 envelopes that omit both fields for one compatibility window, treating absence as empty lists; writers emit v2.
 
 `legacy_ids` is an array, not a scalar. A normal ADR migrates with one entry; a CONVENTIONS §4a **rollup** carries one entry per folded source heading. This is what lets `activity-job/ADR-003` (a folded heading with body removed) and `activity-job/ADR-005` (the rollup that absorbed it) both resolve through `orbit.adr.list --legacy-id=...` without producing body-less artifacts. See [ADR-0016](./4_decisions.md#adr-002--global-adr-numbering-not-per-feature).
 
@@ -106,7 +111,7 @@ Six tools, contracts below. All return structured JSON; CLI surfaces are thin wr
 
 ### 4.1 `orbit.adr.add`
 
-Creates a `proposed` ADR. Input: `title`, `owner`, `related_features`, optional `related_tasks`, optional initial body sections. Output: assigned `id`. Errors: invalid feature name, missing required field.
+Creates a `proposed` ADR. Input: `title`, `owner`, `related_features`, optional `related_tasks`, optional `tags`, optional `paths`, optional initial body sections. Omitted `tags` and `paths` default to empty lists. Output: assigned `id`. Errors: invalid feature name, missing required field.
 
 ### 4.2 `orbit.adr.show`
 
@@ -114,11 +119,11 @@ Input: `id`. Output: full envelope + body. Errors: not found.
 
 ### 4.3 `orbit.adr.list`
 
-Input: optional filters (`feature`, `status`, `owner`, `task_id`, `since`). Output: array of envelopes (no body). Sort: by `id` descending by default.
+Input: optional filters (`feature`, `status`, `owner`, `task_id`, `tag`, `path`, `since`). `tag` is case-insensitive equality against any element of `tags`; `path` is glob-containment against `paths`. Output: array of envelopes (no body). Sort: by `id` descending by default.
 
 ### 4.4 `orbit.adr.update`
 
-Input: `id`, plus any subset of (`status`, body sections, `related_tasks`, `related_features`, `owner`). Status transitions enforced:
+Input: `id`, plus any subset of (`status`, body sections, `related_tasks`, `related_features`, `tags`, `paths`, `owner`). Empty `tags` or `paths` clears the field; absence leaves it unchanged. Status transitions enforced:
 
 - `proposed → accepted` requires non-empty `related_tasks` on the update payload (the task that shipped it).
 - `proposed → superseded` and `accepted → superseded` go through `adr.supersede` instead — direct status writes to `superseded` are rejected.

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0153
 title: Allocate ADR IDs globally via orbit.adr.add before authoring feature decision entries
 status: accepted
@@ -12,6 +12,8 @@ related_features:
 related_tasks:
 - ORB-00098
 - ORB-00019
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0115
 title: Per-field embeddings with chunked overflow, not whole-bundle concatenation
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260510-3
 - T20260510-9
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - semantic-search/ADR-003

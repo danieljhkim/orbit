@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0101
 title: Signal handler installation is process-global and serialized
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260417-0558-5
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-009

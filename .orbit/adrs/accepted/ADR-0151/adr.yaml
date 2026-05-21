@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0151
 title: Add Grok (xAI) as a fourth peer agent family
 status: accepted
@@ -19,6 +19,8 @@ related_tasks:
 - ORB-00049
 - ORB-00050
 - ORB-00052
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - agent-families/ADR-0151

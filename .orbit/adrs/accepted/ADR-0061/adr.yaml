@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0061
 title: Tree-sitter extractors over an LSP backend
 status: accepted
@@ -17,6 +17,8 @@ related_tasks:
 - T20260505-14
 - T20260505-15
 - T20260505-16
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-003

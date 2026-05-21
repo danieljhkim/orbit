@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0141
 title: Compact Scoreboard Ratio Columns
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - user-interface
 related_tasks:
 - T20260428-15
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - user-interface/ADR-003

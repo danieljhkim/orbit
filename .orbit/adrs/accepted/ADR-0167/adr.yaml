@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0167
 title: Extract Dashboard + JSON API to orbit-dashboard Crate
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - user-interface
 related_tasks:
 - ORB-00146
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []

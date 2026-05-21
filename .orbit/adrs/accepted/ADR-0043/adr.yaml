@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0043
 title: Scoreboard tool-call totals project from command audit
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260428-11
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-018

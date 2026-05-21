@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0001
 title: Canonical v2 assets normalize into one execution contract
 status: accepted
@@ -19,6 +19,8 @@ related_tasks:
 - T20260426-0047
 - T20260428-8
 - T20260506-18
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-001

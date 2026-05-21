@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0152
 title: Unify task shipment under async ship dispatch
 status: proposed
@@ -9,6 +9,8 @@ related_features:
 - activity-job
 related_tasks:
 - ORB-00075
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-052

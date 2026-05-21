@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0041
 title: Tool-invocation audit is owned by the runtime, with MCP preflight bracketing
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260428-4
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-016

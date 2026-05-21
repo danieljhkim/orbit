@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0089
 title: Search exact-name and path-prefix fast paths use SQLite
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260509-73
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-035

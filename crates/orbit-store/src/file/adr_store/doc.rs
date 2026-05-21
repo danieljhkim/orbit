@@ -40,6 +40,8 @@ mod tests {
                 last_updated: ts,
                 related_features: vec![],
                 related_tasks: vec![],
+                tags: vec![],
+                paths: vec![],
                 supersedes: vec![],
                 superseded_by: None,
                 legacy_ids: vec![],
@@ -51,13 +53,33 @@ mod tests {
 
     #[test]
     fn round_trip_through_yaml_preserves_schema_version() {
-        let doc = sample_doc();
+        let mut doc = sample_doc();
+        doc.adr.tags = vec!["adr-schema".to_string(), "cross-cutting".to_string()];
+        doc.adr.paths = vec!["crates/orbit-store/**".to_string()];
         let yaml = serialize_adr_doc_yaml(&doc).expect("serialize");
         assert!(
-            yaml.contains("schema_version: 1"),
-            "yaml should contain schema_version: 1; got:\n{yaml}"
+            yaml.contains("schema_version: 2"),
+            "yaml should contain schema_version: 2; got:\n{yaml}"
         );
         let back: AdrFileDocument = serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn v1_yaml_without_tags_or_paths_defaults_to_empty_lists() {
+        let yaml = r#"schema_version: 1
+id: ADR-0001
+title: Test decision
+status: proposed
+owner: claude
+created_at: 2026-05-11T00:00:00Z
+last_updated: 2026-05-11T00:00:00Z
+"#;
+
+        let doc: AdrFileDocument = serde_yaml::from_str(yaml).expect("deserialize v1");
+
+        assert_eq!(doc.schema_version, 1);
+        assert!(doc.adr.tags.is_empty());
+        assert!(doc.adr.paths.is_empty());
     }
 }

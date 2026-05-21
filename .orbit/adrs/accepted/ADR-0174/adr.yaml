@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0174
 title: Split lifecycle and query search namespaces
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - orbit-search
 related_tasks:
 - ORB-00196
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []
