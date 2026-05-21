@@ -14,6 +14,7 @@ use serde_yaml::{Mapping, Value};
 
 const KIND_ADR: &str = "adr";
 const KIND_LEARNING: &str = "learning";
+const STATUS_ABANDONED: &str = "abandoned";
 const STATUS_MERGED: &str = "merged";
 const STATUS_RESERVED: &str = "reserved";
 
@@ -194,6 +195,10 @@ impl IdAllocator {
         self.record_body_path(IdAllocationKind::Learning, id, body_path)
     }
 
+    pub fn abandon_learning(&self, id: &str) -> Result<(), OrbitError> {
+        self.abandon(IdAllocationKind::Learning, id)
+    }
+
     pub fn adr_allocation(&self, id: &str) -> Result<Option<IdAllocationRecord>, OrbitError> {
         self.allocation(IdAllocationKind::Adr, id)
     }
@@ -297,6 +302,7 @@ impl IdAllocator {
                     &self.inner.shared_root,
                     None,
                     &body_path,
+                    STATUS_MERGED,
                 )?;
             }
         }
@@ -335,6 +341,7 @@ impl IdAllocator {
                 &self.inner.shared_root,
                 None,
                 &body_path,
+                STATUS_MERGED,
             )?;
         }
         Ok(())
@@ -466,6 +473,34 @@ impl IdAllocator {
         Ok(())
     }
 
+    fn abandon(&self, kind: IdAllocationKind, id: &str) -> Result<(), OrbitError> {
+        let _lock = self.acquire_lock()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let updated = tx
+            .execute(
+                "UPDATE id_allocations
+                 SET status = ?3
+                 WHERE kind = ?1
+                   AND id = ?2
+                   AND status = ?4
+                   AND (body_path IS NULL OR body_path = '')",
+                params![kind.as_str(), id, STATUS_ABANDONED, STATUS_RESERVED],
+            )
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        if updated == 0 {
+            return Err(OrbitError::Store(format!(
+                "cannot abandon {} {id}: allocation is missing or already has a body path",
+                kind.as_str()
+            )));
+        }
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(())
+    }
+
     fn allocation(
         &self,
         kind: IdAllocationKind,
@@ -476,11 +511,14 @@ impl IdAllocator {
             .prepare(
                 "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
                  FROM id_allocations
-                 WHERE kind = ?1 AND id = ?2",
+                 WHERE kind = ?1 AND id = ?2 AND status != ?3",
             )
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         let mut rows = stmt
-            .query_map(params![kind.as_str(), id], allocation_record_from_row)
+            .query_map(
+                params![kind.as_str(), id, STATUS_ABANDONED],
+                allocation_record_from_row,
+            )
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         match rows.next() {
             Some(row) => row
@@ -496,12 +534,15 @@ impl IdAllocator {
             .prepare(
                 "SELECT kind, id, allocated_at, worktree_root, branch, status, body_path
                  FROM id_allocations
-                 WHERE kind = ?1
+                 WHERE kind = ?1 AND status != ?2
                  ORDER BY id DESC",
             )
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         let rows = stmt
-            .query_map([kind.as_str()], allocation_record_from_row)
+            .query_map(
+                params![kind.as_str(), STATUS_ABANDONED],
+                allocation_record_from_row,
+            )
             .map_err(|error| OrbitError::Store(error.to_string()))?;
         let mut records = Vec::new();
         for row in rows {
@@ -646,17 +687,28 @@ fn update_body_metadata_if_missing(
     worktree_root: &Path,
     branch: Option<String>,
     body_path: &Path,
+    status_if_missing: &str,
 ) -> Result<(), OrbitError> {
     tx.execute(
         "UPDATE id_allocations
-         SET worktree_root = ?3, branch = COALESCE(branch, ?4), body_path = ?5
-         WHERE kind = ?1 AND id = ?2 AND (body_path IS NULL OR body_path = '')",
+         SET worktree_root = ?3,
+             branch = COALESCE(branch, ?4),
+             body_path = ?5,
+             status = CASE
+                 WHEN status = ?6 THEN ?7
+                 ELSE status
+             END
+         WHERE kind = ?1
+           AND id = ?2
+           AND (body_path IS NULL OR body_path = '' OR status = ?6)",
         params![
             kind.as_str(),
             id,
             worktree_root.to_string_lossy(),
             branch,
             body_path.to_string_lossy(),
+            STATUS_ABANDONED,
+            status_if_missing,
         ],
     )
     .map_err(|error| OrbitError::Store(error.to_string()))?;

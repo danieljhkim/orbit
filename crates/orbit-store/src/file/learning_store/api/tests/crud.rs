@@ -1,5 +1,8 @@
 //! CRUD-focused tests for LearningFileStore (split from monolithic api.rs per ORB-00116).
 
+use std::collections::BTreeSet;
+use std::sync::{Arc, Barrier};
+
 use chrono::{TimeZone as _, Utc};
 use orbit_common::types::{EvidenceKind, LearningEvidence, LearningScope, LearningStatus};
 use tempfile::tempdir;
@@ -8,6 +11,7 @@ use super::super::store::LearningFileStore;
 use super::test_support::{create_params, store_with_index};
 use crate::Store;
 use crate::backend::{LearningCreateParams, LearningSearchParams, LearningUpdateParams};
+use crate::{IdAllocator, IdAllocatorConfig, LearningListEntry};
 
 #[test]
 fn round_trip_persistence_preserves_all_fields_including_phase_two_reservations() {
@@ -132,6 +136,108 @@ fn id_format_increments_within_a_day() {
 }
 
 #[test]
+fn create_learning_retries_after_adopting_existing_local_path_collision() {
+    let dir = tempdir().expect("tempdir");
+    let store = LearningFileStore::new(dir.path().to_path_buf());
+    let path = dir.path().join("L-0001").join("learning.yaml");
+    std::fs::create_dir_all(path.parent().expect("learning parent")).expect("learning dir");
+    std::fs::write(
+        &path,
+        super::test_support::legacy_learning_yaml("L-0001", "active", "Existing", 1),
+    )
+    .expect("preexisting learning");
+
+    let created = store
+        .create_learning(create_params("New", vec![], vec![]))
+        .expect("create");
+
+    assert_eq!(created.id, "L-0002");
+    let existing = store
+        .get_learning("L-0001")
+        .expect("get existing")
+        .expect("existing");
+    assert_eq!(existing.summary, "Existing");
+    let allocation = store
+        .id_allocator
+        .learning_allocation("L-0001")
+        .expect("allocation")
+        .expect("adopted allocation");
+    assert_eq!(
+        allocation.body_path.as_deref(),
+        Some(std::path::Path::new("L-0001/learning.yaml"))
+    );
+}
+
+#[test]
+fn shared_allocator_assigns_distinct_learning_ids_across_divergent_worktrees() {
+    let dir = tempdir().expect("tempdir");
+    let shared_orbit = dir.path().join("shared/.orbit");
+    let worktree_a = dir.path().join("worktree-a");
+    let worktree_b = dir.path().join("worktree-b");
+    std::fs::create_dir_all(shared_orbit.join("learnings")).expect("shared learnings");
+    std::fs::create_dir_all(worktree_a.join(".orbit/learnings")).expect("worktree a");
+    std::fs::create_dir_all(worktree_b.join(".orbit/learnings")).expect("worktree b");
+
+    let barrier = Arc::new(Barrier::new(2));
+    let child_a = spawn_learning_add(
+        shared_orbit.clone(),
+        worktree_a.clone(),
+        "from worktree a",
+        barrier.clone(),
+    );
+    let child_b = spawn_learning_add(
+        shared_orbit.clone(),
+        worktree_b.clone(),
+        "from worktree b",
+        barrier,
+    );
+    let learning_a = child_a.join().expect("join a");
+    let learning_b = child_b.join().expect("join b");
+
+    assert_ne!(learning_a.id, learning_b.id);
+    let ids: BTreeSet<_> = [learning_a.id.clone(), learning_b.id.clone()]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        ids,
+        BTreeSet::from(["L-0001".to_string(), "L-0002".to_string()])
+    );
+    assert!(
+        worktree_a
+            .join(".orbit/learnings")
+            .join(&learning_a.id)
+            .join("learning.yaml")
+            .is_file()
+    );
+    assert!(
+        worktree_b
+            .join(".orbit/learnings")
+            .join(&learning_b.id)
+            .join("learning.yaml")
+            .is_file()
+    );
+
+    let store_a = learning_store_for_worktree(&shared_orbit, &worktree_a);
+    let entries = store_a
+        .list_learning_entries(None, true)
+        .expect("entries while both worktrees are present");
+    assert!(entry_is_local(&entries, &learning_a.id));
+    assert!(entry_is_local(&entries, &learning_b.id));
+
+    std::fs::remove_dir_all(&worktree_b).expect("remove remote worktree");
+    let entries = store_a
+        .list_learning_entries(None, true)
+        .expect("entries with remote stub");
+    assert!(entry_is_local(&entries, &learning_a.id));
+    assert!(entry_is_remote(&entries, &learning_b.id));
+    let default_entries = store_a
+        .list_learning_entries(None, false)
+        .expect("default entries");
+    assert!(entry_is_local(&default_entries, &learning_a.id));
+    assert!(!entry_has_id(&default_entries, &learning_b.id));
+}
+
+#[test]
 fn learnings_index_partial_index_present_after_apply_schema() {
     let store = Store::open_in_memory().expect("open in-memory store");
     let conn_arc = store.connection();
@@ -169,6 +275,60 @@ fn learnings_index_partial_index_present_after_apply_schema() {
         }
     }
     assert!(found_partial, "expected learnings_active partial index");
+}
+
+fn spawn_learning_add(
+    shared_orbit: std::path::PathBuf,
+    worktree_root: std::path::PathBuf,
+    summary: &'static str,
+    barrier: Arc<Barrier>,
+) -> std::thread::JoinHandle<orbit_common::types::Learning> {
+    std::thread::spawn(move || {
+        barrier.wait();
+        let store = learning_store_for_worktree(&shared_orbit, &worktree_root);
+        store
+            .create_learning(create_params(summary, vec![], vec![]))
+            .expect("create learning")
+    })
+}
+
+fn learning_store_for_worktree(
+    shared_orbit: &std::path::Path,
+    worktree_root: &std::path::Path,
+) -> LearningFileStore {
+    let allocator = IdAllocator::open(IdAllocatorConfig::new(
+        shared_orbit.join("state/semantic.db"),
+        shared_orbit.join("state/.id_alloc.lock"),
+        shared_orbit.to_path_buf(),
+        worktree_root.to_path_buf(),
+        shared_orbit.join("adrs"),
+        shared_orbit.join("learnings"),
+    ))
+    .expect("allocator");
+    LearningFileStore::new_with_index_and_allocator(
+        worktree_root.join(".orbit/learnings"),
+        Store::open_in_memory().expect("index"),
+        allocator,
+    )
+}
+
+fn entry_is_local(entries: &[LearningListEntry], id: &str) -> bool {
+    entries
+        .iter()
+        .any(|entry| matches!(entry, LearningListEntry::Local(learning) if learning.id == id))
+}
+
+fn entry_is_remote(entries: &[LearningListEntry], id: &str) -> bool {
+    entries
+        .iter()
+        .any(|entry| matches!(entry, LearningListEntry::Remote(stub) if stub.id == id))
+}
+
+fn entry_has_id(entries: &[LearningListEntry], id: &str) -> bool {
+    entries.iter().any(|entry| match entry {
+        LearningListEntry::Local(learning) => learning.id == id,
+        LearningListEntry::Remote(stub) => stub.id == id,
+    })
 }
 
 #[test]

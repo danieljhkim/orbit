@@ -10,7 +10,9 @@ use orbit_common::types::{
 use super::super::layout::{
     comments_jsonl_path, learning_doc_path, locate_learning, validate_learning_id, votes_jsonl_path,
 };
-use super::super::record::{read_learning_file, write_learning_file};
+use super::super::record::{
+    create_learning_file_exclusive, read_learning_file, write_learning_file,
+};
 use super::store::LearningFileStore;
 use crate::backend::{LearningCreateParams, LearningUpdateParams};
 use crate::{IdAllocationRecord, LearningListEntry, RemoteArtifactStub};
@@ -42,36 +44,41 @@ impl LearningFileStore {
             )));
         }
 
-        let id = self.id_allocator.allocate_learning()?.id;
-
         let mut scope = params.scope;
         scope.paths = normalize_learning_paths(scope.paths);
         scope.tags = normalize_learning_tags(scope.tags);
 
-        let learning = Learning {
-            id: id.clone(),
-            status: LearningStatus::Active,
-            scope,
-            summary: params.summary,
-            body: params.body,
-            evidence: params.evidence,
-            supersedes: None,
-            superseded_by: None,
-            legacy_ids: Vec::new(),
-            created_at: now,
-            updated_at: now,
-            created_by: params.created_by,
-            priority: params.priority,
-        };
+        loop {
+            let id = self.id_allocator.allocate_learning()?.id;
+            let learning = Learning {
+                id: id.clone(),
+                status: LearningStatus::Active,
+                scope: scope.clone(),
+                summary: params.summary.clone(),
+                body: params.body.clone(),
+                evidence: params.evidence.clone(),
+                supersedes: None,
+                superseded_by: None,
+                legacy_ids: Vec::new(),
+                created_at: now,
+                updated_at: now,
+                created_by: params.created_by.clone(),
+                priority: params.priority,
+            };
 
-        let path = learning_doc_path(&self.root, &id);
-        write_learning_file(&path, &learning, LearningStatus::Active)?;
-        ensure_empty_sidecar(&votes_jsonl_path(&self.root, &id))?;
-        ensure_empty_sidecar(&comments_jsonl_path(&self.root, &id))?;
-        self.id_allocator.record_learning_body_path(&id, &path)?;
-        self.upsert_index_row(&learning);
-        self.invalidate_envelope_cache();
-        Ok(learning)
+            let path = learning_doc_path(&self.root, &id);
+            if !create_learning_file_exclusive(&path, &learning, LearningStatus::Active)? {
+                self.adopt_or_reject_existing_learning_path(&id, &path)?;
+                continue;
+            }
+
+            ensure_empty_sidecar(&votes_jsonl_path(&self.root, &id))?;
+            ensure_empty_sidecar(&comments_jsonl_path(&self.root, &id))?;
+            self.id_allocator.record_learning_body_path(&id, &path)?;
+            self.upsert_index_row(&learning);
+            self.invalidate_envelope_cache();
+            return Ok(learning);
+        }
     }
 
     pub(crate) fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
@@ -234,6 +241,35 @@ impl LearningFileStore {
             return Ok(None);
         }
         Ok(Some(read_learning_file(&path)?))
+    }
+
+    fn adopt_or_reject_existing_learning_path(
+        &self,
+        id: &str,
+        path: &std::path::Path,
+    ) -> Result<(), OrbitError> {
+        let existing = match read_learning_file(path) {
+            Ok(existing) => existing,
+            Err(error) => {
+                self.id_allocator.abandon_learning(id)?;
+                return Err(OrbitError::Store(format!(
+                    "allocated learning id {id} conflicts with unreadable existing path '{}': {error}",
+                    path.display()
+                )));
+            }
+        };
+        if existing.id != id {
+            self.id_allocator.abandon_learning(id)?;
+            return Err(OrbitError::Store(format!(
+                "allocated learning id {id} conflicts with existing path '{}' containing learning '{}'",
+                path.display(),
+                existing.id
+            )));
+        }
+        self.id_allocator.record_learning_body_path(id, path)?;
+        self.upsert_index_row(&existing);
+        self.invalidate_envelope_cache();
+        Ok(())
     }
 }
 
