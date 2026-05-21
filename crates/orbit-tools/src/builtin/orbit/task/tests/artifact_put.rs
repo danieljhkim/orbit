@@ -1,4 +1,8 @@
 //! Execution and source path resolution tests for task.artifact_put.
+//
+// Migrated from nested `task/artifact_put/tests/` (anti-pattern child of source)
+// to sibling layout under `task/tests/` per ORB-00243 and
+// docs/design-patterns/test_layout.md.
 
 use std::sync::{Arc, Mutex};
 
@@ -6,8 +10,8 @@ use serde_json::{Value, json};
 
 use orbit_common::types::OrbitError;
 
-use super::super::*;
-use crate::{OrbitTaskScope, OrbitToolHost};
+use super::super::artifact_put::*;
+use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};
 
 #[derive(Clone, Default)]
 struct RecordingHost {

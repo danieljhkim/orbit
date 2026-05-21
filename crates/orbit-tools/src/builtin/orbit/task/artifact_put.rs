@@ -88,5 +88,3 @@ fn resolve_source_path(ctx: &ToolContext, source_path: &str) -> PathBuf {
         .unwrap_or(path)
 }
 
-#[cfg(test)]
-mod tests;

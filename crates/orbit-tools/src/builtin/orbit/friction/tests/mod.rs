@@ -1,3 +1,3 @@
 #![allow(missing_docs)]
 
-mod diagnostics;
+mod add;

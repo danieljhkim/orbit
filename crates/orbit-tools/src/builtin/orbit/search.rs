@@ -95,5 +95,3 @@ impl Tool for OrbitSearchTool {
     }
 }
 
-#[cfg(test)]
-mod tests;

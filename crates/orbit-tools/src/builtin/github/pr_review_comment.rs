@@ -77,7 +77,9 @@ fn resolve_pr_head_sha(repo: &str, pr: &str) -> Result<String, OrbitError> {
     Ok(sha)
 }
 
-fn parse_review_comment_response(stdout: &str) -> Result<Value, OrbitError> {
+// pub(super) visibility widened from private so that github::tests::pr_review_comment (sibling test after nested collapse)
+// can invoke the helper. See ORB-00243 and docs/design-patterns/test_layout.md.
+pub(super) fn parse_review_comment_response(stdout: &str) -> Result<Value, OrbitError> {
     let id = super::parse_gh_api_id(stdout, "gh api (pr review comment)")?;
     Ok(json!({
         "id": id,
@@ -121,5 +123,3 @@ super::gh_tool! {
     }
 }
 
-#[cfg(test)]
-mod tests;

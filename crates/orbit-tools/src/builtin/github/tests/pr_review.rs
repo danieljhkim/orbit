@@ -1,8 +1,13 @@
 //! Tests for parse_review_response helper.
+//
+// Migrated from nested `pr_review/tests/` to sibling under `github/tests/`
+// per ORB-00243 / docs/design-patterns/test_layout.md.
 
 use serde_json::json;
 
-use super::super::*;
+use orbit_common::types::OrbitError;
+
+use super::super::pr_review::*;
 
 #[test]
 fn parse_review_response_returns_id_from_valid_stdout() {

@@ -148,7 +148,9 @@ fn parse_refresh(input: &Value) -> Result<bool, OrbitError> {
         .ok_or_else(|| OrbitError::InvalidInput("`refresh` must be a boolean".to_string()))
 }
 
-fn add_refresh_diagnostics(
+// pub(super) visibility widened from private so that knowledge::tests::pack (sibling test after nested collapse)
+// can invoke the helper. See ORB-00243 and docs/design-patterns/test_layout.md.
+pub(super) fn add_refresh_diagnostics(
     pack: &mut KnowledgePackResult,
     auto_refresh_skipped: bool,
     explicit_ref: Option<&str>,
@@ -190,5 +192,3 @@ fn summarize_pack_entry(entry: &mut orbit_knowledge::KnowledgePackEntry) {
     entry.file = Some(file_path);
 }
 
-#[cfg(test)]
-mod tests;
