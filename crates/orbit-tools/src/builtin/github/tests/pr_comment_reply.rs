@@ -1,8 +1,13 @@
 //! Tests for parse_reply_response helper.
+//
+// Migrated from nested `pr_comment_reply/tests/` to sibling under `github/tests/`
+// per ORB-00243 / docs/design-patterns/test_layout.md.
 
 use serde_json::json;
 
-use super::super::*;
+use orbit_common::types::OrbitError;
+
+use super::super::pr_comment_reply::*;
 
 #[test]
 fn parse_reply_response_returns_id_from_valid_stdout() {

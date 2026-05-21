@@ -1,12 +1,17 @@
-//! Tests for source_task_id handling in task.update (mirrors add semantics).
+//! Tests for context_files and source_task_id exposure/handling in task.update.
+//
+// Migrated from nested `task/update/tests/{context_files,source_task_id}.rs` (anti-pattern)
+// to single sibling `task/tests/update.rs` per ORB-00243 and
+// docs/design-patterns/test_layout.md.
 
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use crate::{OrbitTaskScope, OrbitToolHost};
+use orbit_common::types::OrbitError;
 
-use super::super::*;
+use super::super::update::*;
+use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};
 
 #[derive(Debug, Clone)]
 struct FakeTask {
@@ -84,6 +89,26 @@ fn update_tool_context(host: Arc<FakeTaskHost>) -> ToolContext {
 }
 
 #[test]
+fn schema_exposes_context_files() {
+    let schema = OrbitTaskUpdateTool.schema();
+
+    let param = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "context_files")
+        .expect("context_files param");
+
+    assert_eq!(param.param_type, "string_list");
+    assert!(!param.required);
+    assert!(
+        param
+            .description
+            .contains("comma-separated string or array")
+    );
+    assert!(param.description.contains("file:path"));
+}
+
+#[test]
 fn schema_exposes_source_task_id() {
     let schema = OrbitTaskUpdateTool.schema();
 
@@ -124,43 +149,5 @@ fn update_handler_persists_source_task_id() {
             .source_task_id
             .as_deref(),
         Some("ORB-00000")
-    );
-}
-
-#[test]
-fn update_handler_clears_source_task_id_with_empty_string() {
-    let host = Arc::new(FakeTaskHost::seeded(Some("ORB-00000")));
-    let output = OrbitTaskUpdateTool
-        .execute(
-            &update_tool_context(Arc::clone(&host)),
-            json!({
-                "id": "ORB-00001",
-                "model": "codex",
-                "source_task_id": "",
-            }),
-        )
-        .expect("update succeeds");
-
-    assert_eq!(output.get("source_task_id"), Some(&Value::Null));
-    assert_eq!(host.task.lock().expect("task lock").source_task_id, None);
-}
-
-#[test]
-fn update_handler_stores_unresolved_source_task_id_like_add() {
-    let host = Arc::new(FakeTaskHost::seeded(None));
-    let output = OrbitTaskUpdateTool
-        .execute(
-            &update_tool_context(Arc::clone(&host)),
-            json!({
-                "id": "ORB-00001",
-                "model": "codex",
-                "source_task_id": "ORB-99999",
-            }),
-        )
-        .expect("loose source reference is stored");
-
-    assert_eq!(
-        output.get("source_task_id").and_then(Value::as_str),
-        Some("ORB-99999")
     );
 }

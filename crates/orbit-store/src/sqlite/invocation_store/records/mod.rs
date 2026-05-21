@@ -391,7 +391,3 @@ impl Store {
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))
     }
 }
-
-#[cfg(test)]
-#[cfg(test)]
-mod tests;

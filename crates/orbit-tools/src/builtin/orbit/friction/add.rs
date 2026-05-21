@@ -55,5 +55,3 @@ impl Tool for OrbitFrictionAddTool {
     }
 }
 
-#[cfg(test)]
-mod tests;

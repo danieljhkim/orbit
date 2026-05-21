@@ -5,3 +5,6 @@ pub mod show;
 pub mod stats;
 pub mod tags;
 pub mod update;
+
+#[cfg(test)]
+mod tests;

@@ -54,7 +54,9 @@ pub(super) fn build_exec_request(
     Ok(super::gh_exec_request(args, None, TIMEOUT_DEFAULT_MS))
 }
 
-fn parse_review_response(stdout: &str) -> Result<Value, OrbitError> {
+// pub(super) visibility widened from private so that github::tests::pr_review (sibling test after nested collapse)
+// can invoke the helper. See ORB-00243 and docs/design-patterns/test_layout.md.
+pub(super) fn parse_review_response(stdout: &str) -> Result<Value, OrbitError> {
     let id = super::parse_gh_api_id(stdout, "gh api (pr review)")?;
     Ok(json!({
         "id": id,
@@ -91,5 +93,3 @@ super::gh_tool! {
     }
 }
 
-#[cfg(test)]
-mod tests;

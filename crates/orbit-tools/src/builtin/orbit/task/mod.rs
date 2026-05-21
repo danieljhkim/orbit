@@ -11,3 +11,6 @@ pub mod reject;
 pub mod show;
 pub mod start;
 pub mod update;
+
+#[cfg(test)]
+mod tests;
