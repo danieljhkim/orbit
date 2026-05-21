@@ -148,7 +148,3 @@ fn learning_stats_to_json(learnings: &[Learning]) -> Value {
         "last_indexed": last_indexed,
     })
 }
-
-#[cfg(test)]
-#[path = "learnings_tests.rs"]
-mod tests;

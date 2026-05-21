@@ -305,7 +305,3 @@ fn canonical_v2_loop_path(
     }
     Ok(Some(canonical_path))
 }
-
-#[cfg(test)]
-#[path = "runs_tests.rs"]
-mod tests;

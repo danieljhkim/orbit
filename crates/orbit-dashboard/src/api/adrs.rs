@@ -260,7 +260,3 @@ fn adr_matches_query(adr: &Value, query: &str) -> bool {
                 })
         })
 }
-
-#[cfg(test)]
-#[path = "adrs_tests.rs"]
-mod tests;

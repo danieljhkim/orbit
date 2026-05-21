@@ -64,7 +64,9 @@ fn diagnostics_metrics_from_invocations(
     Ok(diagnostics_metrics_values(records))
 }
 
-fn diagnostics_metrics_values(records: Vec<InvocationRecord>) -> Vec<Value> {
+// Widened to pub(super) so tests under api/tests/ (per-module layout ORB-00224) can
+// cover the metrics/friction row logic extracted from the old diagnostics_tests.rs sibling.
+pub(super) fn diagnostics_metrics_values(records: Vec<InvocationRecord>) -> Vec<Value> {
     records
         .into_iter()
         .map(|record| {
@@ -161,7 +163,8 @@ fn diagnostics_friction_from_v2_audit(
     Ok(rows)
 }
 
-fn diagnostics_friction_row(
+// Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
+pub(super) fn diagnostics_friction_row(
     blob_store: &BlobStore,
     events_by_id: &HashMap<String, Value>,
     event: &Value,
@@ -326,7 +329,8 @@ fn global_error_rows(limit: usize) -> Result<Vec<Value>, orbit_core::OrbitError>
     global_error_rows_from_path(&path, limit)
 }
 
-fn global_error_rows_from_path(
+// Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
+pub(super) fn global_error_rows_from_path(
     path: &std::path::Path,
     limit: usize,
 ) -> Result<Vec<Value>, orbit_core::OrbitError> {
@@ -442,10 +446,11 @@ fn agent_stderr_error_rows(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ParsedErrorLine {
-    ts: String,
-    target: String,
-    message: String,
+// Widened to pub(super) to match the pub(super) on parse_structured_error_line (for api/tests/ layout migration ORB-00224).
+pub(super) struct ParsedErrorLine {
+    pub ts: String,
+    pub target: String,
+    pub message: String,
 }
 
 fn parse_structured_error_lines(stderr: &str, fallback_ts: &str) -> Vec<ParsedErrorLine> {
@@ -455,7 +460,11 @@ fn parse_structured_error_lines(stderr: &str, fallback_ts: &str) -> Vec<ParsedEr
         .collect()
 }
 
-fn parse_structured_error_line(line: &str, fallback_ts: &str) -> Option<ParsedErrorLine> {
+// Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
+pub(super) fn parse_structured_error_line(
+    line: &str,
+    fallback_ts: &str,
+) -> Option<ParsedErrorLine> {
     let trimmed = line.trim();
     let (ts, rest) = if let Some((head, tail)) = trimmed.split_once(" ERROR ") {
         if DateTime::parse_from_rfc3339(head).is_ok() {
@@ -621,7 +630,3 @@ fn compute_implement_one_by_actor(
 
     Ok(actor_vec)
 }
-
-#[cfg(test)]
-#[path = "diagnostics_tests.rs"]
-mod tests;
