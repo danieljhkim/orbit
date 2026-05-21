@@ -33,6 +33,7 @@ use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::knowledge_stats::merge_invocation_knowledge_metrics;
 use crate::runtime::build_orbit_tool_host;
 
 impl V2RuntimeHost for OrbitRuntime {
@@ -162,6 +163,23 @@ impl V2RuntimeHost for OrbitRuntime {
             );
         }
 
+        let existing = self
+            .get_job_run_backend(job_run_id)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("read job run for knowledge metrics: {error}"))
+            })?
+            .and_then(|run| run.knowledge_metrics);
+        if let Some(metrics) = merge_invocation_knowledge_metrics(existing.as_ref(), trace) {
+            self.stores()
+                .jobs()
+                .record_run_knowledge_metrics(job_run_id, metrics)
+                .map_err(|error| {
+                    DispatchError::JobExecution(format!(
+                        "record job-run knowledge metrics: {error}"
+                    ))
+                })?;
+        }
+
         Ok(())
     }
 
@@ -230,7 +248,9 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
-    use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
+    use orbit_common::types::{
+        InvocationTrace, JobRunState, TaskPriority, TaskStatus, TaskType, TokenUsage, ToolCallTrace,
+    };
     use orbit_engine::{V2AuditWriter, drive_agent_loop, reset_replay_transport};
     use tempfile::NamedTempFile;
 
@@ -281,6 +301,167 @@ mod tests {
         )
         .expect("write replay fixture");
         file
+    }
+
+    fn seed_running_job_run(runtime: &OrbitRuntime, job_id: &str) -> String {
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run(job_id, 1, chrono::Utc::now(), None, None)
+            .expect("insert job run");
+        runtime
+            .stores()
+            .jobs()
+            .mark_run_running(&run.run_id, chrono::Utc::now(), std::process::id())
+            .expect("mark run running");
+        run.run_id
+    }
+
+    fn payload_tool_call(seq: u32, tool_name: &str, payload: Value) -> ToolCallTrace {
+        ToolCallTrace {
+            seq,
+            tool_name: tool_name.to_string(),
+            result_bytes: serde_json::to_vec(&payload)
+                .expect("serialize payload")
+                .len() as u64,
+            result_payload: Some(payload),
+        }
+    }
+
+    fn byte_count_tool_call(seq: u32, tool_name: &str, result_bytes: u64) -> ToolCallTrace {
+        ToolCallTrace {
+            seq,
+            tool_name: tool_name.to_string(),
+            result_bytes,
+            result_payload: None,
+        }
+    }
+
+    fn trace_with_tool_calls(input_tokens: u64, tool_calls: Vec<ToolCallTrace>) -> InvocationTrace {
+        InvocationTrace {
+            usage: TokenUsage {
+                input: input_tokens,
+                cache_read: 0,
+                cache_create: 0,
+                output: 0,
+            },
+            tool_calls,
+            duration_ms: 10,
+        }
+    }
+
+    fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTrace) {
+        V2RuntimeHost::persist_invocation_trace(
+            runtime,
+            run_id,
+            "knowledge_step",
+            "codex",
+            Some("gpt-test"),
+            &serde_json::json!({ "task_id": "ORB-KNOWLEDGE-TEST" }),
+            trace,
+        )
+        .expect("persist invocation trace");
+    }
+
+    #[test]
+    fn persist_invocation_trace_records_pack_metrics_before_terminal_state() {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
+        let trace = trace_with_tool_calls(
+            155,
+            vec![payload_tool_call(
+                1,
+                "orbit.graph.pack",
+                serde_json::json!({
+                    "raw_read_token_baseline": 400,
+                    "knowledge_pack_tokens": 100,
+                    "entries": [{ "selector": "file:src/lib.rs", "source": "pub fn demo() {}" }],
+                    "unresolved_selectors": [],
+                }),
+            )],
+        );
+
+        persist_test_trace(&runtime, &run_id, &trace);
+
+        let run = runtime.show_job_run(&run_id).expect("show job run");
+        assert_eq!(run.state, JobRunState::Running);
+        let metrics = run.knowledge_metrics.expect("knowledge metrics recorded");
+        assert!(metrics.knowledge_pack_used);
+        assert_eq!(metrics.raw_read_token_baseline, 400);
+        assert_eq!(metrics.knowledge_pack_tokens, Some(100));
+        assert_eq!(metrics.compression_ratio, Some(4.0));
+        assert_eq!(metrics.actual_fs_read_tokens_during_run, 0);
+        assert_eq!(metrics.double_read_rate, Some(0.0));
+        assert_eq!(metrics.knowledge_pack_unresolved_count, 0);
+        assert_eq!(metrics.total_llm_input_tokens, 155);
+
+        let jrun = repo_root
+            .join(".orbit/state/job-runs/knowledge_pack_job")
+            .join(&run_id)
+            .join("jrun.yaml");
+        let stored = std::fs::read_to_string(jrun).expect("read jrun yaml");
+        assert!(stored.contains("knowledge_metrics:"));
+    }
+
+    #[test]
+    fn persist_invocation_trace_records_fallback_and_double_read_metrics() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+        let double_read_run_id = seed_running_job_run(&runtime, "knowledge_double_read_job");
+        let double_read_trace = trace_with_tool_calls(
+            90,
+            vec![
+                payload_tool_call(
+                    1,
+                    "orbit.graph.pack",
+                    serde_json::json!({
+                        "raw_read_token_baseline": 100,
+                        "knowledge_pack_tokens": 25,
+                        "entries": [{ "selector": "file:src/main.rs" }],
+                        "unresolved_selectors": ["file:src/missing.rs"],
+                    }),
+                ),
+                byte_count_tool_call(2, "fs.read", 80),
+            ],
+        );
+
+        persist_test_trace(&runtime, &double_read_run_id, &double_read_trace);
+
+        let double_read_run = runtime
+            .show_job_run(&double_read_run_id)
+            .expect("show double-read job run");
+        let metrics = double_read_run
+            .knowledge_metrics
+            .expect("double-read metrics recorded");
+        assert!(metrics.knowledge_pack_used);
+        assert_eq!(metrics.raw_read_token_baseline, 120);
+        assert_eq!(metrics.knowledge_pack_tokens, Some(25));
+        assert_eq!(metrics.knowledge_pack_unresolved_count, 1);
+        assert_eq!(metrics.actual_fs_read_tokens_during_run, 20);
+        assert!(
+            metrics
+                .double_read_rate
+                .is_some_and(|rate| (rate - (20.0 / 120.0)).abs() < f64::EPSILON)
+        );
+
+        let fallback_run_id = seed_running_job_run(&runtime, "knowledge_fallback_job");
+        let fallback_trace =
+            trace_with_tool_calls(50, vec![byte_count_tool_call(1, "fs.read", 120)]);
+
+        persist_test_trace(&runtime, &fallback_run_id, &fallback_trace);
+
+        let fallback_run = runtime
+            .show_job_run(&fallback_run_id)
+            .expect("show fallback job run");
+        let metrics = fallback_run
+            .knowledge_metrics
+            .expect("fallback metrics recorded");
+        assert!(!metrics.knowledge_pack_used);
+        assert_eq!(metrics.raw_read_token_baseline, 30);
+        assert_eq!(metrics.knowledge_pack_tokens, None);
+        assert_eq!(metrics.actual_fs_read_tokens_during_run, 30);
+        assert_eq!(metrics.double_read_rate, Some(1.0));
+        assert_eq!(metrics.total_llm_input_tokens, 50);
     }
 
     #[test]
