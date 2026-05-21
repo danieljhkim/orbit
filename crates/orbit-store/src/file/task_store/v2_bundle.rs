@@ -35,9 +35,7 @@ pub(crate) use task_bundle_types::{
 };
 
 #[cfg(test)]
-mod store_tests;
-#[cfg(test)]
-mod test_support;
+pub(crate) mod tests;
 
 pub(crate) struct TaskBundleStoreV2 {
     registry: TaskRegistryStore,

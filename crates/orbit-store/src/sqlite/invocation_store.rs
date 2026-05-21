@@ -1,6 +1,6 @@
 #[path = "invocation_store/metrics.rs"]
 mod metrics;
-#[path = "invocation_store/records.rs"]
+#[path = "invocation_store/records/mod.rs"]
 mod records;
 #[path = "invocation_store/types.rs"]
 mod types;

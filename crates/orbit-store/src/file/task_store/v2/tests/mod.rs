@@ -76,5 +76,5 @@ pub(super) fn create_params(title: &str, status: TaskStatus) -> TaskCreateParams
     }
 }
 
-mod crud_tests;
-mod update_tests;
+mod crud;
+mod update;
