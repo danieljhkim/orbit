@@ -1,7 +1,7 @@
 use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
 use serde_json::json;
 
-use super::merge_invocation_trace;
+use super::super::merge_invocation_trace;
 
 #[test]
 fn merge_invocation_trace_records_graph_pack_and_fs_read_metrics() {

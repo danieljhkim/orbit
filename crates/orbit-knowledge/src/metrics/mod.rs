@@ -1,7 +1,8 @@
 mod ingest;
-#[cfg(test)]
-mod ingest_tests;
 mod summary;
+
+#[cfg(test)]
+mod tests;
 
 pub use ingest::merge_invocation_trace;
 pub use summary::{
