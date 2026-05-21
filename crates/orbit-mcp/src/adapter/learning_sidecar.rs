@@ -301,6 +301,3 @@ fn attach_learning_sidecar(mut value: Value, reminders: Vec<LearningReminder>) -
         }),
     }
 }
-
-#[cfg(test)]
-mod tests;

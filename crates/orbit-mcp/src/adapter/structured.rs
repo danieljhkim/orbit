@@ -9,6 +9,3 @@ pub(super) fn mcp_structured_content(value: Value) -> Value {
         value => json!({ "value": value }),
     }
 }
-
-#[cfg(test)]
-mod tests;

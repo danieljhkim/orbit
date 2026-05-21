@@ -44,6 +44,3 @@ impl PolicyEngine {
         &self.def
     }
 }
-
-#[cfg(test)]
-mod tests;

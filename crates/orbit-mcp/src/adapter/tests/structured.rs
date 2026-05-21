@@ -1,4 +1,4 @@
-use super::*;
+use super::super::structured::mcp_structured_content;
 use serde_json::json;
 
 #[test]
