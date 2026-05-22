@@ -59,17 +59,6 @@ pub(super) fn build_input_schema(tool_name: &str, params: &[ToolParam]) -> JsonO
 
 const TASK_TYPE_ENUM: &[&str] = &["feature", "bug", "refactor", "chore"];
 
-const TASK_ADD_STATUS_ENUM: &[&str] = &[
-    "proposed",
-    "backlog",
-    "someday",
-    "in-progress",
-    "review",
-    "done",
-    "blocked",
-    "rejected",
-];
-
 const TASK_UPDATE_STATUS_ENUM: &[&str] = &[
     "proposed",
     "friction",
@@ -92,7 +81,6 @@ pub(super) fn enum_values_for(
     match (tool_name, param_name) {
         ("orbit.task.add", "type") => Some(TASK_TYPE_ENUM),
         ("orbit.task.update", "type") => Some(TASK_TYPE_ENUM),
-        ("orbit.task.add", "status") => Some(TASK_ADD_STATUS_ENUM),
         ("orbit.task.update", "status") => Some(TASK_UPDATE_STATUS_ENUM),
         ("orbit.task.add", "complexity") => Some(TASK_COMPLEXITY_ENUM),
         (_, "model") => Some(AGENT_FAMILY_ENUM),

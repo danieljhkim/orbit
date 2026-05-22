@@ -143,8 +143,9 @@ pub use task_artifacts::{
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
 pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema};
 pub use tool_input::{
-    optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
-    optional_string_list_alias, optional_u32_alias, required_string, split_csv,
+    RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,
+    optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
+    required_string, split_csv, strip_retired_task_add_input_fields,
 };
 pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};
 

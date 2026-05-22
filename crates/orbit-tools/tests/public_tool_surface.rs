@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 
+use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
 use orbit_tools::ToolRegistry;
 
 #[test]
@@ -146,27 +147,63 @@ fn friction_surface_supports_artifact_triage() {
 }
 
 #[test]
-fn task_dependency_params_remain_in_agent_tool_schemas() {
+fn task_add_schema_uses_trimmed_authoring_surface() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
-    for tool_name in ["orbit.task.add", "orbit.task.update"] {
-        let schema = registry
-            .get_schema(tool_name)
-            .unwrap_or_else(|| panic!("{tool_name} schema"));
-        let dependency_param = schema
-            .parameters
-            .iter()
-            .find(|param| param.name == "dependencies")
-            .unwrap_or_else(|| panic!("{tool_name} dependencies param"));
+    let schema = registry
+        .get_schema("orbit.task.add")
+        .expect("orbit.task.add schema");
+    let names = schema
+        .parameters
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
 
-        assert_eq!(dependency_param.param_type, "string_list");
-        assert!(!dependency_param.required);
+    assert_eq!(
+        names,
+        vec![
+            "title",
+            "description",
+            "workspace",
+            "acceptance_criteria",
+            "tags",
+            "context_files",
+            "priority",
+            "complexity",
+            "type",
+            "relations",
+            "model",
+        ]
+    );
+    for removed in RETIRED_TASK_ADD_INPUT_FIELDS {
         assert!(
-            schema.parameters.iter().any(|param| param.name == "crew"),
-            "{tool_name} should expose crew"
+            !names.contains(removed),
+            "orbit.task.add schema must not expose retired param {removed}"
         );
     }
+}
+
+#[test]
+fn task_update_dependency_params_remain_in_agent_tool_schema() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.task.update")
+        .expect("orbit.task.update schema");
+    let dependency_param = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "dependencies")
+        .expect("orbit.task.update dependencies param");
+
+    assert_eq!(dependency_param.param_type, "string_list");
+    assert!(!dependency_param.required);
+    assert!(
+        schema.parameters.iter().any(|param| param.name == "crew"),
+        "orbit.task.update should expose crew"
+    );
 }
 
 #[test]

@@ -2,6 +2,32 @@ use serde_json::Value;
 
 use crate::types::OrbitError;
 
+pub const RETIRED_TASK_ADD_INPUT_FIELDS: &[&str] = &[
+    "plan",
+    "status",
+    "crew",
+    "parent_id",
+    "source_task_id",
+    "external_refs",
+    "context",
+    "comment",
+    "dependencies",
+];
+
+pub fn strip_retired_task_add_input_fields(input: &mut Value) -> Vec<&'static str> {
+    let Some(object) = input.as_object_mut() else {
+        return Vec::new();
+    };
+
+    let mut ignored = Vec::new();
+    for field in RETIRED_TASK_ADD_INPUT_FIELDS {
+        if object.remove(*field).is_some() {
+            ignored.push(*field);
+        }
+    }
+    ignored
+}
+
 pub fn required_string(
     input: &Value,
     keys: &[&str],
