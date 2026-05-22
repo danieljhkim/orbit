@@ -1,7 +1,7 @@
 // Orbit dashboard task-domain rendering and actions.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, priorityCell, statusPill, patchJson, syncNodes } from './common.js';
+import { el, statusPill, patchJson, syncNodes } from './common.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -111,8 +111,18 @@ function crewOptionTitle(crew) {
 }
 
 function applyUpdatedTask(updatedTask, context) {
+  if (!updatedTask || !updatedTask.id) return;
   if (context && typeof context.replaceTask === "function") {
     context.replaceTask(updatedTask);
+  }
+  if (pinnedExternalTask && pinnedExternalTask.task && pinnedExternalTask.task.id === updatedTask.id) {
+    pinnedExternalTask.task = updatedTask;
+  }
+}
+
+function stopRowInteraction(node) {
+  for (const eventName of ["pointerdown", "mousedown", "click", "keydown"]) {
+    node.addEventListener(eventName, (event) => event.stopPropagation());
   }
 }
 
@@ -505,9 +515,7 @@ function buildTaskDetail(task, context) {
     rightCol.appendChild(buildTagRow(task.tags));
   }
 
-  // Details before Assignment (per task: read-only meta first, mutating control second).
-  // Assignment contains *only* the crew dropdown (complexityCell removed; it lives in
-  // TASK_META_FIELDS inside Details).
+  // Routine status/crew controls live inline on the task row; details remain read-only.
   const meta = el("div", { class: "meta-list" });
   let metaCount = 0;
   for (const [key, label] of TASK_META_FIELDS) {
@@ -530,10 +538,6 @@ function buildTaskDetail(task, context) {
     metaCount++;
   }
   if (metaCount > 0) addField(rightCol, "details", meta);
-
-  const assignment = el("div", { class: "assignment" });
-  assignment.appendChild(buildCrewUpdateControl(task, context));
-  addField(rightCol, "assignment", assignment);
 
   if (Array.isArray(task.external_refs) && task.external_refs.length > 0) {
     addField(rightCol, "external refs", buildExternalRefs(task.external_refs));
@@ -618,23 +622,26 @@ function buildActionsRow(task, detail, context) {
     });
     actions.appendChild(btn);
   }
-  const statusSelect = buildStatusUpdateControl(task, detail, context);
-  if (statusSelect) actions.appendChild(statusSelect);
   return actions;
 }
 
-function buildStatusUpdateControl(task, detail, context) {
+function buildStatusUpdateControl(task, context) {
+  const cell = el("span", { class: "status-cell" });
   const targets = statusUpdateTargets(context).filter((status) => status !== task.status);
-  if (targets.length === 0) return null;
-
+  const color = `var(--status-${task.status}, var(--fg))`;
   const select = el("select", {
-    class: "action status-update",
+    class: "task-status-select mono",
     title: `Update status for ${task.id}`,
+    style: {
+      color,
+      borderLeftColor: color,
+    },
   });
-  const placeholder = el("option", { text: "set status" });
+  const placeholder = el("option", { text: task.status || "status" });
   placeholder.value = "";
   placeholder.disabled = true;
   placeholder.selected = true;
+  placeholder.hidden = true;
   select.appendChild(placeholder);
 
   for (const status of targets) {
@@ -643,32 +650,20 @@ function buildStatusUpdateControl(task, detail, context) {
     select.appendChild(option);
   }
 
-  select.addEventListener("click", (e) => e.stopPropagation());
-  select.addEventListener("change", (e) => {
-    e.stopPropagation();
+  if (targets.length === 0) {
+    select.disabled = true;
+  }
+
+  stopRowInteraction(cell);
+  stopRowInteraction(select);
+  select.addEventListener("change", (event) => {
+    event.stopPropagation();
     const targetStatus = select.value;
     if (!targetStatus) return;
-    runAction(
-      task,
-      "status",
-      detail,
-      { status: targetStatus },
-      select,
-      context,
-      {
-        method: "PATCH",
-        path: `/api/tasks/${encodeURIComponent(task.id)}`,
-        collapseOnSuccess: targetStatus === "done",
-        successNotice: targetStatus === "done"
-          ? `Task ${task.id} marked done; it is no longer shown in the default dashboard list.`
-          : null,
-        onFailure: () => {
-          select.value = "";
-        },
-      },
-    );
+    updateTaskStatus(task, select, context);
   });
-  return select;
+  cell.appendChild(select);
+  return cell;
 }
 
 function buildCrewUpdateControl(task, context) {
@@ -711,9 +706,8 @@ function buildCrewUpdateControl(task, context) {
   }
 
   select.value = currentValue;
-  for (const eventName of ["pointerdown", "mousedown", "click", "keydown"]) {
-    select.addEventListener(eventName, (event) => event.stopPropagation());
-  }
+  stopRowInteraction(cell);
+  stopRowInteraction(select);
   select.addEventListener("change", (event) => {
     event.stopPropagation();
     updateTaskCrew(task, select, context);
@@ -725,6 +719,24 @@ function buildCrewUpdateControl(task, context) {
     cell.appendChild(el("span", { class: "crew-error", text: error }));
   }
   return cell;
+}
+
+async function updateTaskStatus(task, select, context) {
+  const nextStatus = select.value || "";
+  if (!nextStatus || nextStatus === task.status) return;
+
+  select.disabled = true;
+  try {
+    const updatedTask = await patchJson(`/api/tasks/${encodeURIComponent(task.id)}`, {
+      status: nextStatus,
+    });
+    applyUpdatedTask(updatedTask, context);
+    renderTasks(taskList(context), context);
+  } catch (error) {
+    select.value = "";
+    select.disabled = false;
+    console.error(error);
+  }
 }
 
 async function updateTaskCrew(task, select, context) {
@@ -859,12 +871,14 @@ export function renderTasks(tasks, context) {
     }, [
       el("span", { class: "id mono", text: ptask.id }),
       el("span", { class: "title", text: ptask.title }),
-      statusPill(ptask.status),
+      buildStatusUpdateControl(ptask, context),
+      buildCrewUpdateControl(ptask, context),
     ]);
     pRow.addEventListener("click", (e) => {
       e.stopPropagation();
       if (navigator.clipboard) navigator.clipboard.writeText(ptask.id).catch(() => {});
     });
+    pRow.dataset.hash = `${ptask.id}-${ptask.title}-${ptask.status}-${ptask.crew || ""}-${ptask.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(ptask.id) || ""}`;
     const pDetail = buildTaskDetail(ptask, context);
     // Dismiss button to close the global detail without affecting chips
     const dismiss = el("button", { class: "action", text: "Close" });
@@ -882,6 +896,7 @@ export function renderTasks(tasks, context) {
     acts.appendChild(dismiss);
     const pWrap = el("div", { class: "pinned-task-wrap" }, [pRow, pDetail]);
     pWrap.dataset.key = `pinned-${ptask.id}`;
+    pWrap.dataset.hash = `${pRow.dataset.hash}-${JSON.stringify(ptask)}`;
     frag.appendChild(pWrap);
   }
 
@@ -903,12 +918,12 @@ export function renderTasks(tasks, context) {
   if (notice) frag.appendChild(notice);
 
   // Column header strip (once, before first group-header). Uses .row.header so grid
-  // (and all @media overrides) are identical to data rows; labels sit over ID/Title/Priority/Type.
+  // (and all @media overrides) are identical to data rows; labels sit over ID/Title/Status/Crew.
   const colHeader = el("div", { class: "row header" }, [
     el("span", { class: "id", text: "ID" }),
     el("span", { class: "title", text: "Title" }),
-    el("span", { class: "priority", text: "Priority" }),
-    el("span", { class: "type", text: "Type" }),
+    el("span", { class: "status-cell", text: "Status" }),
+    el("span", { class: "crew-cell", text: "Crew" }),
   ]);
   colHeader.dataset.key = "task-col-header";
   frag.appendChild(colHeader);
@@ -946,12 +961,12 @@ export function renderTasks(tasks, context) {
       const row = el("div", { class: "row", title: t.title }, [
         idSpan,
         el("span", { class: "title", text: t.title }),
-        priorityCell(t.priority),
-        el("span", { class: "type mono", text: t.type }),
+        buildStatusUpdateControl(t, context),
+        buildCrewUpdateControl(t, context),
       ]);
       row.dataset.key = `task-${t.id}`;
       // Basic hash based on row presentation parameters + expanded state
-      row.dataset.hash = `${t.id}-${t.title}-${t.priority}-${t.type}-${t.complexity || ""}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
+      row.dataset.hash = `${t.id}-${t.title}-${t.status}-${t.crew || ""}-${t.resolved_crew || ""}-${crewOptionsSignature()}-${crewUpdateErrors.get(t.id) || ""}-${expandedTaskIds.has(t.id)}`;
       row.addEventListener("click", () => {
         const toggle = () => {
           if (expandedTaskIds.has(t.id)) expandedTaskIds.delete(t.id);
@@ -980,4 +995,3 @@ export function renderTasks(tasks, context) {
   }
   syncNodes(body, Array.from(frag.children));
 }
-
