@@ -75,7 +75,7 @@ fn reindex_rebuilds_index_from_yaml() {
         .expect("list");
     assert!(active.is_empty());
 
-    store.reindex_learnings().expect("reindex");
+    store.sync_learnings().expect("sync");
     let active = store
         .index
         .as_ref()
@@ -122,7 +122,7 @@ fn migrate_layout_preserves_list_parity_and_reindex_projection() {
 
     super::super::super::migration::migrate_learning_layout(&root, dir.path()).expect("migrate");
     let store = LearningFileStore::new_with_index(root.clone(), index.clone());
-    store.reindex_learnings().expect("reindex");
+    store.sync_learnings().expect("sync");
 
     let active = store
         .list_learnings(Some(LearningStatus::Active))

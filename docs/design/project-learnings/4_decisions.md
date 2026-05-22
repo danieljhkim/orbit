@@ -167,7 +167,7 @@ Alternatives considered:
 
 **Decision.** Each learning may have `.orbit/learnings/<id>/votes.jsonl`, created lazily on first vote. Each row records `learning_id`, `voter_model`, `voted_at`, and `task_id`. V1 rejects votes without `task_id`; idempotency key is `(learning_id, voter_model, task_id)`. Search ranking filters by scope first, then sorts by decay-weighted vote score, `priority`, `updated_at`, and `id`. Default half-life is 180 days; `ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay for raw-count behavior.
 
-Votes are derived from per-learning JSONL on read. `orbit learning reindex` validates vote files but does not rewrite them or mirror them into SQLite.
+Votes are derived from per-learning JSONL on read. `orbit learning sync` validates vote files but does not rewrite them or mirror them into SQLite.
 
 **Consequences.**
 - Load-bearing learnings accrue a ranking signal without mutating the YAML body or bumping `updated_at`.

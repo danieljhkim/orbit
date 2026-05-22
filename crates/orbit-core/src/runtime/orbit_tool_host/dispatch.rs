@@ -48,7 +48,7 @@ pub(super) fn execute(
         }
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
-        OrbitBuiltinAction::LearningReindex => super::learning_tools::reindex(runtime, input),
+        OrbitBuiltinAction::LearningSync => super::learning_tools::sync(runtime, input),
         OrbitBuiltinAction::LearningShow => super::learning_tools::show(runtime, input),
         OrbitBuiltinAction::LearningSupersede => {
             super::learning_tools::supersede(runtime, input, agent, model)

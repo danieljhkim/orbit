@@ -909,7 +909,7 @@ impl LearningRecords<'_> {
         self.store.delete_learning(id)
     }
 
-    pub(crate) fn reindex(&self) -> Result<(), OrbitError> {
-        self.store.reindex_learnings()
+    pub(crate) fn sync(&self) -> Result<(), OrbitError> {
+        self.store.sync_learnings()
     }
 }

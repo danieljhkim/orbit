@@ -8,9 +8,9 @@ use super::comment::LearningCommentCommand;
 use super::list::LearningListArgs;
 use super::migrate_layout::LearningMigrateLayoutArgs;
 use super::prune::LearningPruneArgs;
-use super::reindex::LearningReindexArgs;
 use super::show::LearningShowArgs;
 use super::supersede::LearningSupersedeArgs;
+use super::sync::LearningSyncArgs;
 use super::update::LearningUpdateArgs;
 use super::upvote::LearningUpvoteArgs;
 
@@ -43,8 +43,8 @@ pub enum LearningSubcommand {
     Upvote(LearningUpvoteArgs),
     /// Mark a learning as superseded by another
     Supersede(LearningSupersedeArgs),
-    /// Rebuild the SQLite envelope index from YAML
-    Reindex(LearningReindexArgs),
+    /// Reconcile the SQLite envelope index from YAML
+    Sync(LearningSyncArgs),
     /// Migrate legacy flat learning YAML files to per-entity directories
     MigrateLayout(LearningMigrateLayoutArgs),
     /// Report or archive stale learnings
@@ -61,7 +61,7 @@ impl Execute for LearningSubcommand {
             LearningSubcommand::Update(args) => args.execute(runtime),
             LearningSubcommand::Upvote(args) => args.execute(runtime),
             LearningSubcommand::Supersede(args) => args.execute(runtime),
-            LearningSubcommand::Reindex(args) => args.execute(runtime),
+            LearningSubcommand::Sync(args) => args.execute(runtime),
             LearningSubcommand::MigrateLayout(args) => args.execute(runtime),
             LearningSubcommand::Prune(args) => args.execute(runtime),
         }

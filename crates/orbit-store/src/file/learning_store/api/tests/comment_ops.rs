@@ -269,7 +269,7 @@ fn reindex_validates_comments_and_external_valid_lines_are_visible() {
     )
     .expect("append external");
 
-    store.reindex_learnings().expect("reindex");
+    store.sync_learnings().expect("sync");
     assert_eq!(
         store
             .list_learning_comments(&learning.id, false)
@@ -279,6 +279,6 @@ fn reindex_validates_comments_and_external_valid_lines_are_visible() {
     );
 
     std::fs::write(&path, b"{not-json}\n").expect("write invalid");
-    let error = store.reindex_learnings().expect_err("invalid comment line");
+    let error = store.sync_learnings().expect_err("invalid comment line");
     assert!(matches!(error, OrbitError::Store(message) if message.contains("line 1")));
 }

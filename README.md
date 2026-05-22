@@ -245,7 +245,7 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 | | `orbit.learning.list` | List learnings by tag / scope / `path` (glob-containment) |
 | | `orbit.learning.supersede` | Mark a learning superseded |
 | | `orbit.learning.prune` | Report or archive stale learnings |
-| | `orbit.learning.reindex` | Rebuild the SQLite envelope index from YAML |
+| | `orbit.learning.sync` | Reconcile the SQLite envelope index from YAML |
 | **friction** | `orbit.friction.add` | Record an operational friction |
 | | `orbit.friction.update` | Edit a friction |
 | | `orbit.friction.show` | Fetch a friction |

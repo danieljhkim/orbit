@@ -2,7 +2,7 @@
 //!
 //! Covers the 13 ACs from T20260511-6:
 //! 1. All learning tools surface in the registry with documented field names.
-//! 2. Reindex + prune tools live in the registry alongside the six design-doc tools.
+//! 2. Sync + prune tools live in the registry alongside the six design-doc tools.
 //! 3. Round-trip persistence (add → show preserves every field).
 //! 4. Scope-OR matching with dedup on combined queries.
 //! 5. `matched_by` annotation present on every result.
@@ -11,7 +11,7 @@
 //! 8. Supersession excludes from default search; surfaces under `list status=superseded`.
 //! 9. CLI parity is covered in `crates/orbit-cli/tests/learning.rs`.
 //! 10. `prune --stale-only` reports without modifying; `prune --delete` archives.
-//! 11. `reindex` rebuilds the index from YAML.
+//! 11. `sync` rebuilds the index from YAML.
 //! 12. Input validation (summary > 280, self-supersede, immutable superseded).
 //! 13. ADR-004 status flipped on the design-doc tree (covered in 4_decisions.md).
 
@@ -73,7 +73,7 @@ fn registry_exposes_learning_tools_with_documented_schema_fields() {
         "orbit.learning.comment.list",
         "orbit.learning.list",
         "orbit.learning.prune",
-        "orbit.learning.reindex",
+        "orbit.learning.sync",
         "orbit.learning.show",
         "orbit.learning.supersede",
         "orbit.learning.update",
@@ -314,14 +314,14 @@ fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
     assert!(ids.contains(&old.id));
 }
 
-// --- AC #11: reindex rebuilds the index from YAML --------------------
+// --- AC #11: sync rebuilds the index from YAML -----------------------
 
 #[test]
-fn reindex_rebuilds_index_after_truncation() {
+fn sync_rebuilds_index_after_truncation() {
     let (_guard, runtime, _repo_root) = test_runtime();
     let learning = create_minimal(&runtime, "a", &["foo/**"], &["alpha"]);
 
-    let response = super::learning_tools::reindex(&runtime, Value::Null).expect("reindex");
+    let response = super::learning_tools::sync(&runtime, Value::Null).expect("sync");
     assert!(response["rebuilt_count"].as_u64().unwrap() >= 1);
 
     // Pre-condition holds: list still finds the learning by tag.

@@ -83,7 +83,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::comment_list::OrbitLearningCommentListTool);
     registry.register(learning::list::OrbitLearningListTool);
     registry.register(learning::prune::OrbitLearningPruneTool);
-    registry.register(learning::reindex::OrbitLearningReindexTool);
+    registry.register(learning::sync::OrbitLearningSyncTool);
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);

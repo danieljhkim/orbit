@@ -117,9 +117,9 @@ CREATE INDEX learnings_active ON learnings_index(status) WHERE status = 'active'
 
 Query path: filter to `status = 'active'`, load the small set of `(paths, tags)` rows, run the in-memory glob match. At expected scale (low hundreds of active learnings), this is sub-millisecond; the index exists to avoid YAML I/O on every tool call.
 
-The YAML files are the source of truth. The index is rebuildable from them via `orbit learning reindex`.
+The YAML files are the source of truth. The index is rebuildable from them via `orbit learning sync`.
 
-Vote rows are source-of-truth sidecars, not SQLite projections in v1. `orbit learning reindex` still walks every per-learning `votes.jsonl` and fails on invalid JSONL, so cache rebuilds do not silently ignore corrupted vote files.
+Vote rows are source-of-truth sidecars, not SQLite projections in v1. `orbit learning sync` still walks every per-learning `votes.jsonl` and fails on invalid JSONL, so cache rebuilds do not silently ignore corrupted vote files.
 
 ### 2.3 ID format
 
@@ -251,7 +251,7 @@ orbit learning show <id>
 orbit learning update <id> [--summary ...] [--body-file ...] [--scope ...]
 orbit learning supersede <id> --with <new-id>
 orbit learning upvote --id <id> --model <agent-family> --task <task-id>
-orbit learning reindex                    # rebuild SQLite index from YAML
+orbit learning sync                       # reconcile SQLite index from YAML
 orbit learning prune [--stale-only]       # report or delete stale learnings
 
 # Free-text content match (formerly the per-domain `learning` subcommand of `orbit search`) lives on the unified search surface:

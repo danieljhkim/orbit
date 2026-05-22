@@ -181,8 +181,8 @@ impl OrbitRuntime {
         self.stores().learnings().archive(id)
     }
 
-    pub fn reindex_learnings(&self) -> Result<(), OrbitError> {
-        self.stores().learnings().reindex()
+    pub fn sync_learnings(&self) -> Result<(), OrbitError> {
+        self.stores().learnings().sync()
     }
 
     pub fn migrate_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {

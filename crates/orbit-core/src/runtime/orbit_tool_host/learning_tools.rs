@@ -256,8 +256,8 @@ pub(super) fn supersede(
     }))
 }
 
-pub(super) fn reindex(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
-    runtime.stores().learnings().reindex()?;
+pub(super) fn sync(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
+    runtime.stores().learnings().sync()?;
     let active = runtime
         .stores()
         .learnings()

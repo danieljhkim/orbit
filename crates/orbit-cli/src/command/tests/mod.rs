@@ -193,6 +193,11 @@ fn cli_rejects_docs_reindex() {
 }
 
 #[test]
+fn cli_rejects_learning_reindex() {
+    assert!(Cli::try_parse_from(["orbit", "learning", "reindex"]).is_err());
+}
+
+#[test]
 fn cli_parses_top_level_search() {
     let cli = Cli::parse_from([
         "orbit",

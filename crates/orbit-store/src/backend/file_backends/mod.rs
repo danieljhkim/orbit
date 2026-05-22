@@ -495,8 +495,8 @@ impl LearningStoreBackend for LearningFileStore {
         self.delete_learning(id)
     }
 
-    fn reindex_learnings(&self) -> Result<(), OrbitError> {
-        self.reindex_learnings()
+    fn sync_learnings(&self) -> Result<(), OrbitError> {
+        self.sync_learnings()
     }
 }
 

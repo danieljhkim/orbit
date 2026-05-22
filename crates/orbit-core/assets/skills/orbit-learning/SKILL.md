@@ -35,7 +35,7 @@ Both surfaces accept the same JSON. Use the CLI examples when shell access is av
 | `orbit.learning.update` | `orbit_learning_update({...})` | `orbit learning update --id L-0001 --priority 200` |
 | `orbit.learning.supersede` | `orbit_learning_supersede({...})` | `orbit learning supersede --id L-0001 --with L-0007` |
 | `orbit.learning.prune` | `orbit_learning_prune({...})` | `orbit learning prune --stale-only` |
-| `orbit.learning.reindex` | `orbit_learning_reindex({...})` | `orbit learning reindex` |
+| `orbit.learning.sync` | `orbit_learning_sync({...})` | `orbit learning sync` |
 
 Mapping rule: `orbit.learning.<verb>` ↔ `orbit_learning_<verb>`. Always include `model` in JSON inputs when the tool accepts it; pass your agent family (`codex`, `claude`, `gemini`, or `grok`). Prefer `--body-file` for `add` and body-changing `update` calls so multi-line markdown is not mangled by shell quoting.
 
@@ -71,7 +71,7 @@ Run `orbit tool list | grep orbit.learning` if you suspect the local tool surfac
 
 6. **Prune for stale.** Run `orbit learning prune --stale-only` periodically to surface learnings whose `scope.paths` no longer resolve to any tracked file (per the `§7.3` staleness rules in the design doc). Combine with `--delete` to archive flagged records by flipping their status to `superseded` with `superseded_by: null` — only do this after reading the candidates and deciding none are still load-bearing.
 
-7. **Reindex when YAML is touched out-of-band.** YAML under `.orbit/learnings/` is the source of truth; SQLite is a rebuildable envelope index. If a merge, branch switch, or external script edits the YAML directly, run `orbit learning reindex` to re-sync the index — otherwise `list` and `search` will return stale results.
+7. **Sync when YAML is touched out-of-band.** YAML under `.orbit/learnings/` is the source of truth; SQLite is a rebuildable envelope index. If a merge, branch switch, or external script edits the YAML directly, run `orbit learning sync` to re-sync the index — otherwise `list` and `search` will return stale results.
 
 ## Operating Rules
 

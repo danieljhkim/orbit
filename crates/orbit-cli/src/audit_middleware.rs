@@ -379,7 +379,7 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 LearningSubcommand::Update(_) => "update",
                 LearningSubcommand::Upvote(_) => "upvote",
                 LearningSubcommand::Supersede(_) => "supersede",
-                LearningSubcommand::Reindex(_) => "reindex",
+                LearningSubcommand::Sync(_) => "sync",
                 LearningSubcommand::MigrateLayout(_) => "migrate-layout",
                 LearningSubcommand::Prune(_) => "prune",
             };

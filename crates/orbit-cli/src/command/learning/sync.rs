@@ -5,15 +5,15 @@ use serde_json::json;
 use crate::command::Execute;
 
 #[derive(Args)]
-pub struct LearningReindexArgs {
+pub struct LearningSyncArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
-impl Execute for LearningReindexArgs {
+impl Execute for LearningSyncArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        runtime.reindex_learnings()?;
+        runtime.sync_learnings()?;
         let active = runtime.list_learnings(Some(LearningStatus::Active))?.len();
         let superseded = runtime
             .list_learnings(Some(LearningStatus::Superseded))?
@@ -22,7 +22,7 @@ impl Execute for LearningReindexArgs {
         if self.json {
             crate::output::json::print_pretty(&json!({ "rebuilt_count": rebuilt }))
         } else {
-            println!("Reindexed {rebuilt} learnings ({active} active, {superseded} superseded)");
+            println!("Synced {rebuilt} learnings ({active} active, {superseded} superseded)");
             Ok(())
         }
     }

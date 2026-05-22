@@ -25,7 +25,7 @@ impl LearningMigrateLayoutArgs {
                 &roots.shared_root,
                 &roots.local_root,
             )?;
-            runtime.reindex_learnings()?;
+            runtime.sync_learnings()?;
         }
         print_report(&report, self.json)
     }
@@ -35,7 +35,7 @@ impl Execute for LearningMigrateLayoutArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let report = runtime.migrate_learning_layout()?;
         if !report.already_migrated {
-            runtime.reindex_learnings()?;
+            runtime.sync_learnings()?;
         }
         print_report(&report, self.json)
     }

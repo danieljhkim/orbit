@@ -760,5 +760,5 @@ pub trait LearningStoreBackend: Send + Sync {
     /// exist. Used by `prune --delete` (§7.3).
     fn archive_learning(&self, id: &str) -> Result<bool, OrbitError>;
     fn delete_learning(&self, id: &str) -> Result<bool, OrbitError>;
-    fn reindex_learnings(&self) -> Result<(), OrbitError>;
+    fn sync_learnings(&self) -> Result<(), OrbitError>;
 }

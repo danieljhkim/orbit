@@ -286,7 +286,7 @@ fn reindex_validates_votes_and_external_valid_lines_are_visible() {
     );
     append_vote_row(&votes_path, &row).expect("append external");
 
-    store.reindex_learnings().expect("reindex");
+    store.sync_learnings().expect("sync");
     assert_eq!(
         store
             .learning_vote_summary(&learning.id)
@@ -296,6 +296,6 @@ fn reindex_validates_votes_and_external_valid_lines_are_visible() {
     );
 
     std::fs::write(&votes_path, b"{not-json}\n").expect("write invalid");
-    let error = store.reindex_learnings().expect_err("invalid vote line");
+    let error = store.sync_learnings().expect_err("invalid vote line");
     assert!(matches!(error, OrbitError::Store(message) if message.contains("line 1")));
 }

@@ -27,11 +27,11 @@ pub(crate) struct EnvelopeSnapshot {
 }
 
 impl LearningFileStore {
-    /// Rebuild the SQLite index from the YAML source of truth.
+    /// Reconcile the SQLite envelope index from the YAML source of truth.
     ///
     /// No-op when no index is attached; otherwise wipes
     /// `learnings_index` and reinserts every record found on disk.
-    pub(crate) fn reindex_learnings(&self) -> Result<(), OrbitError> {
+    pub(crate) fn sync_learnings(&self) -> Result<(), OrbitError> {
         validate_vote_files(&self.root)?;
         super::validation::validate_comment_files(&self.root)?;
         let Some(index) = &self.index else {

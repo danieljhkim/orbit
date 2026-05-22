@@ -98,7 +98,7 @@ pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.supersede",
     "orbit.learning.upvote",
     "orbit.learning.prune",
-    "orbit.learning.reindex",
+    "orbit.learning.sync",
 ];
 
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {

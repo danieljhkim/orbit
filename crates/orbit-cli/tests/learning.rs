@@ -401,11 +401,11 @@ fn cli_update_then_show_reflects_changes() {
 }
 
 #[test]
-fn cli_reindex_returns_rebuilt_count() {
+fn cli_sync_returns_rebuilt_count() {
     let workspace = TestWorkspace::new();
     workspace.add_learning("a", &[], &[]);
     workspace.add_learning("b", &[], &[]);
-    let result = workspace.run_json(&["learning", "reindex", "--json"], "reindex");
+    let result = workspace.run_json(&["learning", "sync", "--json"], "sync");
     assert!(result["rebuilt_count"].as_u64().unwrap() >= 2);
 }
 
