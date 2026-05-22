@@ -11,4 +11,5 @@ pub use types::{
 };
 
 #[cfg(test)]
+#[path = "invocation_store/tests/mod.rs"]
 mod tests;

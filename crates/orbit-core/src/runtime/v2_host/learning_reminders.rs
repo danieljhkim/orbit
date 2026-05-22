@@ -56,22 +56,28 @@ fn learning_reminders_for_task_snapshot(
     }
 
     let comment_cap = read_comment_render_cap_env();
-    merge_ranked_results(batches, caps.per_call)
-        .into_iter()
-        .map(|result| {
-            let id = result.learning.id;
-            let comments = runtime
-                .list_learning_comments(&id, false)?
-                .into_iter()
-                .take(comment_cap)
-                .collect();
-            Ok(LearningReminder {
-                id,
-                summary: result.learning.summary,
-                comments,
-            })
-        })
-        .collect::<Result<Vec<_>, OrbitError>>()
+    let mut reminders = Vec::new();
+    for result in merge_ranked_results(batches, caps.per_call) {
+        let id = result.learning.id;
+        let comments = match runtime.list_learning_comments(&id, false) {
+            Ok(comments) => comments.into_iter().take(comment_cap).collect(),
+            Err(err) => {
+                orbit_common::tracing::warn!(
+                    target: "orbit.core.learning_reminders",
+                    learning_id = id.as_str(),
+                    error = %err,
+                    "skipping learning reminder after comment hydration failed",
+                );
+                continue;
+            }
+        };
+        reminders.push(LearningReminder {
+            id,
+            summary: result.learning.summary,
+            comments,
+        });
+    }
+    Ok(reminders)
 }
 
 fn task_context_paths(runtime: &OrbitRuntime, task: &Task, input: &Value) -> Vec<String> {
@@ -287,6 +293,63 @@ mod tests {
 
         assert_eq!(reminders.len(), 5);
         assert_eq!(reminders[0].summary, "Learning 6");
+    }
+
+    #[test]
+    fn reminders_skip_indexed_learning_when_yaml_is_missing() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let missing = create_learning(
+            &runtime,
+            "Missing YAML reminder.",
+            &["crates/orbit-engine/**"],
+            &[],
+            Some(2),
+        );
+        create_learning(
+            &runtime,
+            "Available reminder.",
+            &["crates/orbit-engine/**"],
+            &[],
+            Some(1),
+        );
+        let task = task_with_context(
+            &runtime,
+            vec!["dir:crates/orbit-engine/src".to_string()],
+            Vec::new(),
+        );
+        std::fs::remove_file(
+            runtime
+                .paths()
+                .learnings_dir
+                .join(&missing.id)
+                .join("learning.yaml"),
+        )
+        .expect("remove learning yaml");
+
+        let search_results = runtime
+            .search_learnings(LearningSearchParams {
+                path: Some("crates/orbit-engine/src".to_string()),
+                tag: None,
+                query: None,
+                limit: None,
+            })
+            .expect("search indexed learnings");
+        assert!(
+            search_results
+                .iter()
+                .any(|result| result.learning.id == missing.id)
+        );
+
+        let reminders = runtime
+            .learning_reminders_for_task(
+                &json!({"task_id": task.id}),
+                LearningInjectionCaps::default(),
+            )
+            .expect("learning reminders");
+
+        assert_eq!(reminders.len(), 1);
+        assert_eq!(reminders[0].summary, "Available reminder.");
+        assert!(!reminders.iter().any(|reminder| reminder.id == missing.id));
     }
 
     #[test]

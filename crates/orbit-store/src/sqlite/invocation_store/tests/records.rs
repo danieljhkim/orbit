@@ -4,7 +4,7 @@
 
 use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
 
-use super::super::records::*;
+use crate::{InvocationInsertParams, InvocationQuery, Store};
 
 #[test]
 fn invocation_records_persist_planning_duel_slot() {
