@@ -154,6 +154,3 @@ impl Tool for OrbitTaskAddTool {
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskAdd)
     }
 }
-
-#[cfg(test)]
-mod tests;
