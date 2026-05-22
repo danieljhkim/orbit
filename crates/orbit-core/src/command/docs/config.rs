@@ -153,7 +153,12 @@ pub(super) fn read_task_context_docs_roots_from_config_path(
     parse_task_context_docs_roots_from_config_toml(&raw)
 }
 
-fn parse_task_context_docs_roots_from_config_toml(raw: &str) -> Result<Vec<String>, OrbitError> {
+/// Parse the task-context docs roots (used by related_docs_for_task and its tests).
+/// Visibility widened to pub(super) for ORB-00250 sibling tests/config.rs
+/// (and the read_ wrapper in mod.rs calls it).
+pub(super) fn parse_task_context_docs_roots_from_config_toml(
+    raw: &str,
+) -> Result<Vec<String>, OrbitError> {
     if raw.trim().is_empty() {
         return Ok(default_doc_roots());
     }
