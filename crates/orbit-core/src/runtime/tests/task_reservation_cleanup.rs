@@ -1,14 +1,12 @@
 //! Sibling tests for `task_reservation_cleanup.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
+use crate::OrbitRuntime;
 use chrono::Utc;
 use orbit_common::types::JobRunState;
 use orbit_store::TaskReservationReleaseReason;
 use serde_json::json;
-use crate::OrbitRuntime;
 
-use super::super::orbit_tool_host::{
-    workspace_orbit_dir, workspace_task_reservation_id,
-};
+use super::super::orbit_tool_host::{workspace_orbit_dir, workspace_task_reservation_id};
 
 use chrono::Duration;
 use orbit_common::types::{AuditEventStatus, Role, TaskPriority, TaskStatus, TaskType};
@@ -91,11 +89,7 @@ fn insert_running_run(
         .expect("run exists")
 }
 
-fn reserve_via_tool_for_owner(
-    runtime: &OrbitRuntime,
-    owner_run_id: &str,
-    task_id: &str,
-) -> String {
+fn reserve_via_tool_for_owner(runtime: &OrbitRuntime, owner_run_id: &str, task_id: &str) -> String {
     let output = runtime
         .run_tool_with_context_and_role(
             "orbit.task.locks.reserve",

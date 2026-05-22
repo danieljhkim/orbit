@@ -188,7 +188,7 @@ context_files: []
 status: backlog
 priority: medium
 task_type: chore
-crew: opus-codex
+crew: codex
 created_at: 2026-01-01T00:00:00Z
 updated_at: 2026-01-01T00:00:00Z
 "#,
@@ -199,7 +199,7 @@ updated_at: 2026-01-01T00:00:00Z
         let reparsed = serde_yaml::from_str::<Task>(&serialized).expect("reparse task");
 
         assert_eq!(reparsed, task);
-        assert_eq!(reparsed.crew.as_deref(), Some("opus-codex"));
+        assert_eq!(reparsed.crew.as_deref(), Some("codex"));
     }
 
     #[test]

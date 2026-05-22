@@ -325,4 +325,3 @@ fn read_blob_text(blob_store: &BlobStore, blob_ref: &str) -> Result<String, Orbi
 fn read_blob_text_best_effort(blob_store: &BlobStore, blob_ref: &str) -> String {
     read_blob_text(blob_store, blob_ref).unwrap_or_default()
 }
-

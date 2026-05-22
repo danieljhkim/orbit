@@ -598,12 +598,12 @@ fn run_cli_backend_keeps_success_when_envelope_reports_success() {
     );
 }
 
-/// Crew-driven regression test for ORB-00080 AC #15: `opus-codex` crew must
+/// Crew-driven regression test for ORB-00080 AC #15: a mixed fixture crew must
 /// produce `--model claude-opus-4-7` for planner and `--model gpt-5.5` for
 /// implementer (identity attribution stays family; no leakage of family name
 /// into the --model flag that reaches the CLI).
 #[test]
-fn crew_opus_codex_drives_exact_models_to_planner_and_implementer() {
+fn mixed_crew_drives_exact_models_to_planner_and_implementer() {
     let temp = tempdir().expect("tempdir");
     let claude_script = temp.path().join("claude");
     let codex_script = temp.path().join("codex");
@@ -616,7 +616,7 @@ fn crew_opus_codex_drives_exact_models_to_planner_and_implementer() {
         "#!/bin/sh\nprintf '{\"schemaVersion\":1,\"status\":\"success\"}\\n'\n",
     );
 
-    // planner leg via opus-codex crew
+    // planner leg via mixed fixture crew
     let sink_for_writer_p: Arc<dyn AuditSink> = Arc::new(RecordingSink::default());
     let audit_p = Arc::new(V2AuditWriter::new(
         "job-crew-planner",
@@ -628,7 +628,7 @@ fn crew_opus_codex_drives_exact_models_to_planner_and_implementer() {
     spec_p.role = Some(AgentRole::Planner);
     let input_p = serde_json::json!({
         "prompt": "draft plan",
-        "crew": "opus-codex",
+        "crew": "mixed-fixture",
         "task_id": "T-crew"
     });
     let resolved_p = resolve_agent_settings(AgentRole::Planner, &host_p, &spec_p, &input_p);
@@ -685,7 +685,7 @@ fn crew_opus_codex_drives_exact_models_to_planner_and_implementer() {
     spec_i.role = Some(AgentRole::Implementer);
     let input_i = serde_json::json!({
         "prompt": "implement",
-        "crew": "opus-codex",
+        "crew": "mixed-fixture",
         "task_id": "T-crew"
     });
     let resolved_i = resolve_agent_settings(AgentRole::Implementer, &host_i, &spec_i, &input_i);

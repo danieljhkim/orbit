@@ -217,4 +217,3 @@ fn render_agent_pair_placeholders(
         .replace("{{orchestrator_model}}", &orchestrator_value)
         .replace("{{helper_model}}", &helper_value)
 }
-

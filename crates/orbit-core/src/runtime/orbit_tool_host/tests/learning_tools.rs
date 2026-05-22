@@ -165,7 +165,8 @@ fn round_trip_add_show_preserves_every_field() {
         })
         .expect("create");
 
-    let response = super::super::learning_tools::show(&runtime, json!({"id": learning.id})).expect("show");
+    let response =
+        super::super::learning_tools::show(&runtime, json!({"id": learning.id})).expect("show");
     assert_eq!(response["id"], learning.id);
     assert_eq!(response["summary"], "Verify perf parity before swapping");
     assert_eq!(response["scope"]["paths"], json!(["foo/**"]));
@@ -204,11 +205,13 @@ fn upvote_records_vote_stats_on_show_but_not_list() {
     .expect("duplicate");
     assert_eq!(duplicate["vote_count"], 1);
 
-    let shown = super::super::learning_tools::show(&runtime, json!({"id": learning.id})).expect("show");
+    let shown =
+        super::super::learning_tools::show(&runtime, json!({"id": learning.id})).expect("show");
     assert_eq!(shown["vote_count"], 1);
     assert!(shown["last_voted_at"].as_str().is_some());
 
-    let listed = super::super::learning_tools::list(&runtime, json!({"status": "active"})).expect("list");
+    let listed =
+        super::super::learning_tools::list(&runtime, json!({"status": "active"})).expect("list");
     let row = find_id(&listed, &learning.id).expect("listed row");
     assert!(row.get("vote_count").is_none());
     assert!(row.get("last_voted_at").is_none());
@@ -232,9 +235,11 @@ fn comment_tools_add_list_and_delete() {
     .expect("comment add");
     let comment_id = added["id"].as_str().expect("comment id").to_string();
 
-    let listed =
-        super::super::learning_tools::comment_list(&runtime, json!({"learning_id": learning.id.clone()}))
-            .expect("comment list");
+    let listed = super::super::learning_tools::comment_list(
+        &runtime,
+        json!({"learning_id": learning.id.clone()}),
+    )
+    .expect("comment list");
     assert_eq!(listed.as_array().expect("array").len(), 1);
     assert_eq!(listed[0]["id"], comment_id);
     assert_eq!(listed[0]["body"], "note from tool");
@@ -246,9 +251,11 @@ fn comment_tools_add_list_and_delete() {
         Some("codex".to_string()),
     )
     .expect("comment delete");
-    let active =
-        super::super::learning_tools::comment_list(&runtime, json!({"learning_id": learning.id.clone()}))
-            .expect("active comments");
+    let active = super::super::learning_tools::comment_list(
+        &runtime,
+        json!({"learning_id": learning.id.clone()}),
+    )
+    .expect("active comments");
     assert!(active.as_array().expect("array").is_empty());
     let deleted = super::super::learning_tools::comment_list(
         &runtime,
@@ -266,8 +273,8 @@ fn list_path_filter_uses_glob_containment() {
     let scoped = create_minimal(&runtime, "scoped", &["foo/**"], &[]);
     let unscoped = create_minimal(&runtime, "unscoped", &["bar/**"], &[]);
 
-    let results =
-        super::super::learning_tools::list(&runtime, json!({"path": "foo/bar.rs"})).expect("by path");
+    let results = super::super::learning_tools::list(&runtime, json!({"path": "foo/bar.rs"}))
+        .expect("by path");
     let ids = ids_from_array(&results);
     assert!(
         ids.contains(&scoped.id),
@@ -285,7 +292,8 @@ fn list_tag_filter_uses_case_insensitive_equality() {
     let tagged = create_minimal(&runtime, "tagged", &[], &["perf"]);
     let untagged = create_minimal(&runtime, "untagged", &[], &["other"]);
 
-    let results = super::super::learning_tools::list(&runtime, json!({"tag": "perf"})).expect("by tag");
+    let results =
+        super::super::learning_tools::list(&runtime, json!({"tag": "perf"})).expect("by tag");
     let ids = ids_from_array(&results);
     assert!(ids.contains(&tagged.id));
     assert!(!ids.contains(&untagged.id));
@@ -299,17 +307,22 @@ fn supersede_excludes_from_default_list_but_surfaces_under_status_superseded() {
     let old = create_minimal(&runtime, "old", &["foo/**"], &[]);
     let new = create_minimal(&runtime, "new", &["foo/**"], &[]);
 
-    super::super::learning_tools::supersede(&runtime, json!({"id": old.id, "with": new.id}), None, None)
-        .expect("supersede");
+    super::super::learning_tools::supersede(
+        &runtime,
+        json!({"id": old.id, "with": new.id}),
+        None,
+        None,
+    )
+    .expect("supersede");
 
-    let active =
-        super::super::learning_tools::list(&runtime, json!({"status": "active"})).expect("active list");
+    let active = super::super::learning_tools::list(&runtime, json!({"status": "active"}))
+        .expect("active list");
     let ids = ids_from_array(&active);
     assert!(!ids.contains(&old.id));
     assert!(ids.contains(&new.id));
 
-    let superseded =
-        super::super::learning_tools::list(&runtime, json!({"status": "superseded"})).expect("list");
+    let superseded = super::super::learning_tools::list(&runtime, json!({"status": "superseded"}))
+        .expect("list");
     let ids = ids_from_array(&superseded);
     assert!(ids.contains(&old.id));
 }
@@ -325,7 +338,8 @@ fn sync_rebuilds_index_after_truncation() {
     assert!(response["rebuilt_count"].as_u64().unwrap() >= 1);
 
     // Pre-condition holds: list still finds the learning by tag.
-    let results = super::super::learning_tools::list(&runtime, json!({"tag": "alpha"})).expect("list");
+    let results =
+        super::super::learning_tools::list(&runtime, json!({"tag": "alpha"})).expect("list");
     let ids = ids_from_array(&results);
     assert!(ids.contains(&learning.id));
 }
@@ -448,7 +462,8 @@ fn prune_stale_only_reports_without_modifying_and_delete_archives_via_supersede_
     assert!(report["deleted"].as_array().unwrap().is_empty());
 
     // delete: true archives the stale ones.
-    let result = super::super::learning_tools::prune(&runtime, json!({"delete": true})).expect("delete");
+    let result =
+        super::super::learning_tools::prune(&runtime, json!({"delete": true})).expect("delete");
     let deleted_ids: Vec<String> = result["deleted"]
         .as_array()
         .unwrap()

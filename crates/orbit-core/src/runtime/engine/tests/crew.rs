@@ -17,28 +17,27 @@ fn runtime_with_named_crews() -> (TempDir, OrbitRuntime) {
     std::fs::write(
         workspace_root.join("config.toml"),
         r#"
-[crews.opus-codex]
+[crews.primary]
 planner = { model = "default-planner", provider = "codex", backend = "cli" }
 implementer = { model = "default-implementer", provider = "codex", backend = "cli" }
 reviewer = { model = "default-reviewer", provider = "codex", backend = "cli" }
 
-[crews.silver]
-planner = { model = "silver-planner", provider = "codex", backend = "cli" }
-implementer = { model = "silver-implementer", provider = "codex", backend = "cli" }
-reviewer = { model = "silver-reviewer", provider = "codex", backend = "cli" }
+[crews.beta]
+planner = { model = "beta-planner", provider = "codex", backend = "cli" }
+implementer = { model = "beta-implementer", provider = "codex", backend = "cli" }
+reviewer = { model = "beta-reviewer", provider = "codex", backend = "cli" }
 
-[crews.bronze]
-planner = { model = "bronze-planner", provider = "codex", backend = "cli" }
-implementer = { model = "bronze-implementer", provider = "codex", backend = "cli" }
-reviewer = { model = "bronze-reviewer", provider = "codex", backend = "cli" }
+[crews.gamma]
+planner = { model = "gamma-planner", provider = "codex", backend = "cli" }
+implementer = { model = "gamma-implementer", provider = "codex", backend = "cli" }
+reviewer = { model = "gamma-reviewer", provider = "codex", backend = "cli" }
 
 [workflow]
-default_crew = "opus-codex"
+default_crew = "primary"
 "#,
     )
     .expect("write test config");
-    let runtime =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
     (root, runtime)
 }
 
@@ -57,22 +56,22 @@ fn add_task_with_crew(runtime: &OrbitRuntime, crew: &str) -> String {
 #[test]
 fn run_input_task_ids_singleton_resolves_task_crew() {
     let (_root, runtime) = runtime_with_named_crews();
-    let task_id = add_task_with_crew(&runtime, "silver");
+    let task_id = add_task_with_crew(&runtime, "beta");
 
     let crew = runtime
         .resolve_crew_for_run_input(&json!({ "task_ids": [task_id] }))
         .expect("resolve crew");
 
-    assert_eq!(crew.name, "silver");
-    assert_eq!(crew.planner.model, "silver-planner");
-    assert_eq!(crew.implementer.model, "silver-implementer");
-    assert_eq!(crew.reviewer.model, "silver-reviewer");
+    assert_eq!(crew.name, "beta");
+    assert_eq!(crew.planner.model, "beta-planner");
+    assert_eq!(crew.implementer.model, "beta-implementer");
+    assert_eq!(crew.reviewer.model, "beta-reviewer");
 }
 
 #[test]
 fn record_run_crew_persists_singleton_task_ids_task_crew_models() {
     let (_root, runtime) = runtime_with_named_crews();
-    let task_id = add_task_with_crew(&runtime, "silver");
+    let task_id = add_task_with_crew(&runtime, "beta");
     let input = json!({ "task_ids": [task_id] });
     let run = runtime
         .stores()
@@ -85,44 +84,44 @@ fn record_run_crew_persists_singleton_task_ids_task_crew_models() {
         .expect("record crew");
     let stored = runtime.show_job_run(&run.run_id).expect("show stored run");
 
-    assert_eq!(crew.name, "silver");
-    assert_eq!(stored.resolved_crew.as_deref(), Some("silver"));
-    assert_eq!(stored.planner_model.as_deref(), Some("silver-planner"));
+    assert_eq!(crew.name, "beta");
+    assert_eq!(stored.resolved_crew.as_deref(), Some("beta"));
+    assert_eq!(stored.planner_model.as_deref(), Some("beta-planner"));
     assert_eq!(
         stored.implementer_model.as_deref(),
-        Some("silver-implementer")
+        Some("beta-implementer")
     );
-    assert_eq!(stored.reviewer_model.as_deref(), Some("silver-reviewer"));
+    assert_eq!(stored.reviewer_model.as_deref(), Some("beta-reviewer"));
 }
 
 #[test]
 fn explicit_crew_override_wins_over_singleton_task_ids_task_crew() {
     let (_root, runtime) = runtime_with_named_crews();
-    let task_id = add_task_with_crew(&runtime, "silver");
+    let task_id = add_task_with_crew(&runtime, "beta");
 
     let crew = runtime
         .resolve_crew_for_run_input(&json!({
-            "crew": "bronze",
+            "crew": "gamma",
             "task_ids": [task_id]
         }))
         .expect("resolve crew");
 
-    assert_eq!(crew.name, "bronze");
-    assert_eq!(crew.implementer.model, "bronze-implementer");
+    assert_eq!(crew.name, "gamma");
+    assert_eq!(crew.implementer.model, "gamma-implementer");
 }
 
 #[test]
 fn multi_task_ids_without_override_falls_back_to_default_crew() {
     let (_root, runtime) = runtime_with_named_crews();
-    let silver_task_id = add_task_with_crew(&runtime, "silver");
-    let bronze_task_id = add_task_with_crew(&runtime, "bronze");
+    let beta_task_id = add_task_with_crew(&runtime, "beta");
+    let gamma_task_id = add_task_with_crew(&runtime, "gamma");
 
     let crew = runtime
         .resolve_crew_for_run_input(&json!({
-            "task_ids": [silver_task_id, bronze_task_id]
+            "task_ids": [beta_task_id, gamma_task_id]
         }))
         .expect("resolve crew");
 
-    assert_eq!(crew.name, "opus-codex");
+    assert_eq!(crew.name, "primary");
     assert_eq!(crew.implementer.model, "default-implementer");
 }

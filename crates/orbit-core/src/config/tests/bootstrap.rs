@@ -41,9 +41,11 @@ fn seed_with_no_role_settings_matches_template() {
     let contents = std::fs::read_to_string(&path).expect("read");
     assert_eq!(contents, DEFAULT_CONFIG_TEMPLATE);
     assert!(no_active_role_section(&contents));
-    assert!(contents.contains("[crews.opus-codex]"));
-    assert!(contents.contains("[crews.all-claude]"));
-    assert!(contents.contains("default_crew = \"opus-codex\""));
+    assert!(contents.contains("[crews.claude]"));
+    assert!(contents.contains("[crews.codex]"));
+    assert!(contents.contains("[crews.gemini]"));
+    assert!(contents.contains("[crews.grok]"));
+    assert!(contents.contains("default_crew = \"codex\""));
 }
 
 fn no_active_role_section(contents: &str) -> bool {

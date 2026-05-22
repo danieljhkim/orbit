@@ -25,6 +25,7 @@ const DEFAULT_TASK_APPROVAL_DELEGATE_APPROVAL: bool = false;
 const DEFAULT_SCORING_ENABLED: bool = true;
 const DEFAULT_GRAPH_EDITING: bool = false;
 const DEFAULT_WORKFLOW_BASE_BRANCH: &str = "main";
+const DEFAULT_WORKFLOW_CREW: &str = "codex";
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -86,7 +87,7 @@ impl RuntimeConfig {
             v2_backend: None,
             workflow_base_branch: DEFAULT_WORKFLOW_BASE_BRANCH.to_string(),
             crews: default_crews(),
-            default_crew: Some("opus-codex".to_string()),
+            default_crew: Some(DEFAULT_WORKFLOW_CREW.to_string()),
             duel: DuelConfig::default(),
         }
     }
@@ -217,21 +218,39 @@ impl RuntimeConfig {
 pub(crate) fn default_crews() -> BTreeMap<String, Crew> {
     let mut crews = BTreeMap::new();
     crews.insert(
-        "opus-codex".to_string(),
+        "claude".to_string(),
         Crew {
-            name: "opus-codex".to_string(),
+            name: "claude".to_string(),
             planner: crew_role("claude-opus-4-7", "claude", "cli"),
+            implementer: crew_role("claude-opus-4-7", "claude", "cli"),
+            reviewer: crew_role("claude-opus-4-7", "claude", "cli"),
+        },
+    );
+    crews.insert(
+        "codex".to_string(),
+        Crew {
+            name: "codex".to_string(),
+            planner: crew_role("gpt-5.5", "codex", "cli"),
             implementer: crew_role("gpt-5.5", "codex", "cli"),
             reviewer: crew_role("gpt-5.5", "codex", "cli"),
         },
     );
     crews.insert(
-        "all-claude".to_string(),
+        "gemini".to_string(),
         Crew {
-            name: "all-claude".to_string(),
-            planner: crew_role("claude-opus-4-7", "claude", "cli"),
-            implementer: crew_role("claude-sonnet-4-6", "claude", "cli"),
-            reviewer: crew_role("claude-opus-4-7", "claude", "cli"),
+            name: "gemini".to_string(),
+            planner: crew_role("pro", "gemini", "cli"),
+            implementer: crew_role("pro", "gemini", "cli"),
+            reviewer: crew_role("pro", "gemini", "cli"),
+        },
+    );
+    crews.insert(
+        "grok".to_string(),
+        Crew {
+            name: "grok".to_string(),
+            planner: crew_role("grok-build", "grok", "cli"),
+            implementer: crew_role("grok-build", "grok", "cli"),
+            reviewer: crew_role("grok-build", "grok", "cli"),
         },
     );
     crews
@@ -411,7 +430,7 @@ fn required_role_field(
     })
 }
 
-fn workflow_default_crew_from_raw(
+pub(super) fn workflow_default_crew_from_raw(
     raw: Option<&RawWorkflowConfig>,
     crews: &BTreeMap<String, Crew>,
 ) -> Result<Option<String>, OrbitError> {
@@ -421,8 +440,8 @@ fn workflow_default_crew_from_raw(
         // when its crew is still present; otherwise demand the user pick one
         // explicitly so downstream `start`/`show` calls don't surprise them
         // with a generic "no crew selected" error.
-        if crews.contains_key("opus-codex") {
-            return Ok(Some("opus-codex".to_string()));
+        if crews.contains_key(DEFAULT_WORKFLOW_CREW) {
+            return Ok(Some(DEFAULT_WORKFLOW_CREW.to_string()));
         }
         if crews.is_empty() {
             return Ok(None);

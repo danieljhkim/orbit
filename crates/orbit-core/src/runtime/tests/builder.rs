@@ -19,8 +19,7 @@ fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {
     let workspace_root = repo_root.join(".orbit");
     std::fs::create_dir_all(&global_root).expect("create global root");
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-    let runtime =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
     (root, global_root, workspace_root, runtime)
 }
 
@@ -106,8 +105,7 @@ fn v2_task_backend_persists_workspace_binding_across_runtime_rebuild() {
     assert!(workspace_id.starts_with("repo-"), "{workspace_id}");
     assert_eq!(workspace_id.len(), "repo-000000".len());
 
-    let rebuilt =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
+    let rebuilt = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
     let fetched = rebuilt.get_task(&task.id).expect("get task after rebuild");
     assert_eq!(fetched.title, "Persistent v2 task");
     assert_eq!(
@@ -133,8 +131,7 @@ fn v2_task_backend_rebinds_when_workspace_config_is_missing() {
         read_workspace_config_optional(&workspace_root).expect("read workspace config");
     std::fs::remove_file(workspace_root.join("config.yaml")).expect("remove workspace config");
 
-    let rebuilt =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
+    let rebuilt = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
     let fetched = rebuilt.get_task(&task.id).expect("get task after rebind");
 
     assert_eq!(fetched.title, "Rebind v2 task");

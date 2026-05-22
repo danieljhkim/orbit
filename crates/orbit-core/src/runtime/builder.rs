@@ -321,4 +321,3 @@ fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(),
     }
     Ok(())
 }
-

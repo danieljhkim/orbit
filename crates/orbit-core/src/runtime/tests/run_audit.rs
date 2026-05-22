@@ -1,7 +1,7 @@
 //! Sibling tests for `run_audit.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
-use orbit_common::utility::blob_store::BlobStore;
 use crate::OrbitRuntime;
+use orbit_common::utility::blob_store::BlobStore;
 
 use serde_json::json;
 

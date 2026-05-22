@@ -402,4 +402,3 @@ pub(crate) fn try_resolve_initialized_roots(
 
     Ok(None)
 }
-

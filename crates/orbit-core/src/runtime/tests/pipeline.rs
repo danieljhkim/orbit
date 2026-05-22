@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::OrbitRuntime;
 use orbit_common::types::Role;
 use orbit_tools::ToolContext;
-use crate::OrbitRuntime;
 
 use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_store::TaskCreateParams;
@@ -68,8 +68,8 @@ fn run_tool_context_allowlist_honors_task_wildcard() {
 #[test]
 fn graph_tool_refresh_from_linked_worktree_attributes_to_worktree_branch() {
     let fixture = GitWorktreeFixture::new();
-    let runtime = OrbitRuntime::from_roots(&fixture.global_root, &fixture.main_orbit)
-        .expect("build runtime");
+    let runtime =
+        OrbitRuntime::from_roots(&fixture.global_root, &fixture.main_orbit).expect("build runtime");
 
     runtime
         .run_tool_with_context_and_role(
