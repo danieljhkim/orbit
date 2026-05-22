@@ -247,24 +247,24 @@ fn crews_load_when_present_and_well_formed() {
     write_config(
         workspace.path(),
         r#"
-[crews.opus-codex]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+[crews.codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 
 [workflow]
-default_crew = "opus-codex"
+default_crew = "codex"
 "#,
     );
 
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
 
-    assert_eq!(config.default_crew.as_deref(), Some("opus-codex"));
+    assert_eq!(config.default_crew.as_deref(), Some("codex"));
     assert_eq!(
         config
             .crews
-            .get("opus-codex")
+            .get("codex")
             .expect("crew exists")
             .implementer
             .model,
@@ -279,8 +279,8 @@ fn default_crew_must_reference_defined_crew() {
     write_config(
         workspace.path(),
         r#"
-[crews.opus-codex]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+[crews.codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 
@@ -293,14 +293,14 @@ default_crew = "missing"
         .expect_err("unknown default crew fails");
 
     assert!(matches!(error, OrbitError::InvalidInputDiagnostic { .. }));
-    assert_eq!(error.did_you_mean(), Some(&["opus-codex".to_string()][..]));
+    assert_eq!(error.did_you_mean(), Some(&["codex".to_string()][..]));
 }
 
 #[test]
 fn default_crew_unset_with_custom_crews_fails_load() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
-    // Only a non-"opus-codex" crew defined; no [workflow] table at all.
+    // Only a non-seeded crew defined; no [workflow] table at all.
     write_config(
         workspace.path(),
         r#"
@@ -324,12 +324,12 @@ reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 fn default_crew_unset_with_seeded_crew_still_loads() {
     let global = tempdir().expect("global tempdir");
     let workspace = tempdir().expect("workspace tempdir");
-    // opus-codex is still present, so the historical fallback applies.
+    // The seeded codex crew is present, so the default-crew fallback applies.
     write_config(
         workspace.path(),
         r#"
-[crews.opus-codex]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+[crews.codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 "#,
@@ -337,7 +337,17 @@ reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 
     let config =
         RuntimeConfig::load_layered(global.path(), workspace.path()).expect("config loads");
-    assert_eq!(config.default_crew.as_deref(), Some("opus-codex"));
+    assert_eq!(config.default_crew.as_deref(), Some("codex"));
+}
+
+#[test]
+fn workflow_default_crew_no_crews_defined_is_noop() {
+    let crews = BTreeMap::new();
+
+    let default_crew =
+        workflow_default_crew_from_raw(None, &crews).expect("empty registry is allowed");
+
+    assert_eq!(default_crew, None);
 }
 
 #[test]
@@ -347,8 +357,8 @@ fn crews_with_incomplete_role_fail_load() {
     write_config(
         workspace.path(),
         r#"
-[crews.opus-codex]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+[crews.codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 "#,
     );
@@ -357,7 +367,7 @@ implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
         .expect_err("incomplete crew fails");
 
     assert!(matches!(error, OrbitError::InvalidInput(_)));
-    assert!(error.to_string().contains("[crews.opus-codex]"));
+    assert!(error.to_string().contains("[crews.codex]"));
     assert!(error.to_string().contains("reviewer"));
 }
 

@@ -15,18 +15,18 @@ mod resolution {
     fn registry() -> BTreeMap<String, Crew> {
         let mut registry = BTreeMap::new();
         registry.insert(
-            "opus-codex".to_string(),
+            "codex".to_string(),
             Crew {
-                name: "opus-codex".to_string(),
-                planner: assignment("claude-opus-4-7", "claude"),
+                name: "codex".to_string(),
+                planner: assignment("gpt-5.5", "codex"),
                 implementer: assignment("gpt-5.5", "codex"),
-                reviewer: assignment("claude-opus-4-7", "claude"),
+                reviewer: assignment("gpt-5.5", "codex"),
             },
         );
         registry.insert(
-            "all-claude".to_string(),
+            "claude".to_string(),
             Crew {
-                name: "all-claude".to_string(),
+                name: "claude".to_string(),
                 planner: assignment("claude-opus-4-7", "claude"),
                 implementer: assignment("claude-sonnet-4-6", "claude"),
                 reviewer: assignment("claude-opus-4-7", "claude"),
@@ -37,10 +37,10 @@ mod resolution {
 
     #[test]
     fn resolve_crew_returns_assignments_for_known_name() {
-        let crew = resolve_crew("opus-codex", &registry()).expect("crew resolves");
+        let crew = resolve_crew("codex", &registry()).expect("crew resolves");
 
-        assert_eq!(crew.name, "opus-codex");
-        assert_eq!(crew.planner.model, "claude-opus-4-7");
+        assert_eq!(crew.name, "codex");
+        assert_eq!(crew.planner.model, "gpt-5.5");
         assert_eq!(crew.implementer.provider, "codex");
         assert_eq!(crew.reviewer.backend, "cli");
     }
@@ -51,7 +51,7 @@ mod resolution {
 
         match error {
             OrbitError::InvalidInputDiagnostic { did_you_mean, .. } => {
-                assert_eq!(did_you_mean, vec!["all-claude", "opus-codex"]);
+                assert_eq!(did_you_mean, vec!["claude", "codex"]);
             }
             other => panic!("expected InvalidInputDiagnostic, got {other:?}"),
         }

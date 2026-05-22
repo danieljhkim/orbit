@@ -278,4 +278,3 @@ fn family_from_assignment(assignment: &CrewRoleAssignment) -> Option<String> {
 
     infer_agent_family_from_model(&assignment.model)
 }
-

@@ -10,7 +10,8 @@ use tempfile::tempdir;
 use orbit_common::types::OrbitError;
 
 use super::super::resolve::{
-    resolve_bootstrap_roots, resolve_initialize_roots, try_resolve_initialized_roots, ResolvedOrbitRoots,
+    ResolvedOrbitRoots, resolve_bootstrap_roots, resolve_initialize_roots,
+    try_resolve_initialized_roots,
 };
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -21,8 +22,7 @@ fn explicit_root_with_initialized_child_orbit_resolves_to_child() {
     let orbit_root = repo.path().join(".orbit");
     seed_initialized_workspace_root(&orbit_root);
 
-    let resolved =
-        resolve_initialize_roots(repo.path(), Some(repo.path())).expect("resolve root");
+    let resolved = resolve_initialize_roots(repo.path(), Some(repo.path())).expect("resolve root");
 
     assert_pinned_roots(&resolved, &orbit_root);
 }
@@ -32,11 +32,9 @@ fn explicit_root_prefers_initialized_child_orbit_over_polluted_repo_root() {
     let repo = tempdir().expect("repo tempdir");
     let orbit_root = repo.path().join(".orbit");
     seed_initialized_workspace_root(&orbit_root);
-    fs::write(repo.path().join("config.toml"), "polluted = true\n")
-        .expect("write root pollution");
+    fs::write(repo.path().join("config.toml"), "polluted = true\n").expect("write root pollution");
 
-    let resolved =
-        resolve_initialize_roots(repo.path(), Some(repo.path())).expect("resolve root");
+    let resolved = resolve_initialize_roots(repo.path(), Some(repo.path())).expect("resolve root");
 
     assert_pinned_roots(&resolved, &orbit_root);
 }
@@ -66,8 +64,7 @@ fn explicit_root_with_initialized_orbit_root_resolves_as_is() {
     let orbit_root = repo.path().join(".orbit");
     seed_initialized_workspace_root(&orbit_root);
 
-    let resolved =
-        resolve_initialize_roots(repo.path(), Some(&orbit_root)).expect("resolve root");
+    let resolved = resolve_initialize_roots(repo.path(), Some(&orbit_root)).expect("resolve root");
 
     assert_pinned_roots(&resolved, &orbit_root);
 }
@@ -130,8 +127,7 @@ fn worktree_main_orbit_precedes_worktree_local_orbit() {
     seed_initialized_workspace_root(&main_orbit);
     seed_initialized_workspace_root(&worktree_orbit);
 
-    let resolved =
-        resolve_initialize_roots(worktree.path(), None).expect("resolve worktree root");
+    let resolved = resolve_initialize_roots(worktree.path(), None).expect("resolve worktree root");
 
     assert_roots(&resolved, &main_orbit, &worktree_orbit);
 }
@@ -144,8 +140,7 @@ fn worktree_without_orbit_uses_main_repo_legacy_orbit_path() {
     let worktree = tempdir().expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
 
-    let resolved =
-        resolve_bootstrap_roots(worktree.path(), None).expect("resolve worktree root");
+    let resolved = resolve_bootstrap_roots(worktree.path(), None).expect("resolve worktree root");
 
     assert_roots(
         &resolved,
@@ -248,8 +243,8 @@ fn try_resolve_finds_initialized_workspace_via_walk_up() {
     let orbit_root = repo.path().join(".orbit");
     seed_initialized_workspace_root(&orbit_root);
 
-    let resolved = try_resolve_initialized_roots(&nested, None)
-        .expect("try_resolve completes without error");
+    let resolved =
+        try_resolve_initialized_roots(&nested, None).expect("try_resolve completes without error");
 
     assert_optional_pinned_roots(&resolved, &orbit_root);
 }

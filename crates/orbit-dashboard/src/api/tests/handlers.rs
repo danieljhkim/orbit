@@ -62,10 +62,10 @@ fn runtime_with_custom_crews() -> (tempfile::TempDir, OrbitRuntime) {
     std::fs::write(
         workspace_root.join("config.toml"),
         r#"
-[crews.silver]
-planner = { model = "claude-silver-plan", provider = "claude", backend = "cli" }
-implementer = { model = "codex-silver-impl", provider = "codex", backend = "cli" }
-reviewer = { model = "codex-silver-review", provider = "codex", backend = "cli" }
+[crews.beta]
+planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
+implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
+reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
 
 [crews.alpha]
 planner = { model = "alpha-plan-model", provider = "claude", backend = "cli" }
@@ -73,7 +73,7 @@ implementer = { model = "alpha-impl-model", provider = "codex", backend = "cli" 
 reviewer = { model = "alpha-review-model", provider = "codex", backend = "cli" }
 
 [workflow]
-default_crew = "silver"
+default_crew = "beta"
 "#,
     )
     .expect("write config");
@@ -108,7 +108,7 @@ async fn crews_endpoint_returns_sorted_runtime_registry() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["default_crew"], json!("silver"));
+    assert_eq!(body["default_crew"], json!("beta"));
     let crews = body["crews"].as_array().expect("crews array");
     assert_eq!(crews.len(), 2);
     assert_eq!(crews[0]["name"], json!("alpha"));
@@ -116,11 +116,11 @@ async fn crews_endpoint_returns_sorted_runtime_registry() {
     assert_eq!(crews[0]["planner_model"], json!("alpha-plan-model"));
     assert_eq!(crews[0]["implementer_model"], json!("alpha-impl-model"));
     assert_eq!(crews[0]["reviewer_model"], json!("alpha-review-model"));
-    assert_eq!(crews[1]["name"], json!("silver"));
+    assert_eq!(crews[1]["name"], json!("beta"));
     assert_eq!(crews[1]["is_default"], json!(true));
-    assert_eq!(crews[1]["planner_model"], json!("claude-silver-plan"));
-    assert_eq!(crews[1]["implementer_model"], json!("codex-silver-impl"));
-    assert_eq!(crews[1]["reviewer_model"], json!("codex-silver-review"));
+    assert_eq!(crews[1]["planner_model"], json!("claude-beta-plan"));
+    assert_eq!(crews[1]["implementer_model"], json!("codex-beta-impl"));
+    assert_eq!(crews[1]["reviewer_model"], json!("codex-beta-review"));
 }
 
 #[tokio::test]

@@ -881,9 +881,11 @@ mod tests {
                 "unexpected uncommented agent section: {line}",
             );
         }
-        assert!(contents.contains("[crews.opus-codex]"));
-        assert!(contents.contains("[crews.all-claude]"));
-        assert!(contents.contains("default_crew = \"opus-codex\""));
+        assert!(contents.contains("[crews.claude]"));
+        assert!(contents.contains("[crews.codex]"));
+        assert!(contents.contains("[crews.gemini]"));
+        assert!(contents.contains("[crews.grok]"));
+        assert!(contents.contains("default_crew = \"codex\""));
     }
 
     fn assert_skill_link_exists(path: PathBuf) {

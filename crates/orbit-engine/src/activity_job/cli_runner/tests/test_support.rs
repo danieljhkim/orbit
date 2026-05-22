@@ -298,7 +298,7 @@ impl V2RuntimeHost for TestHost {
         input: &Value,
     ) -> Option<AgentRoleConfig> {
         let crew = input.get("crew").and_then(|v| v.as_str()).unwrap_or("");
-        if crew != "opus-codex" {
+        if crew != "mixed-fixture" {
             return None;
         }
         match role {

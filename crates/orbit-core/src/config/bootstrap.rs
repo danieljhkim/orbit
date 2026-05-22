@@ -48,7 +48,7 @@ fn render_with_role_settings(
     );
     let custom_crew = toml::to_string(&CrewConfig { crews })
         .map_err(|err| OrbitError::Io(format!("serialize [crews.<name>] sections: {err}")))?;
-    let mut body = template.replace("default_crew = \"opus-codex\"", "default_crew = \"custom\"");
+    let mut body = template.replace("default_crew = \"codex\"", "default_crew = \"custom\"");
     if !body.ends_with('\n') {
         body.push('\n');
     }

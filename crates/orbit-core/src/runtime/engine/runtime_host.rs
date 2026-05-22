@@ -250,4 +250,3 @@ fn retired_invoke_activity_error(activity_id: &str) -> OrbitError {
         "v1 invoke_activity is retired; activity '{activity_id}' cannot be dispatched via RuntimeHost"
     ))
 }
-

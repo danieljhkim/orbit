@@ -6,9 +6,11 @@ use std::path::Path;
 use std::process::Command;
 
 use chrono::Utc;
-use orbit_common::types::{Task, TaskStatus};
 use orbit_common::types::activity_job::{ActivityV2Spec, DeterministicSpec};
-use orbit_engine::{TaskActivityUpdate, TaskAutomationUpdate, TaskWriteHost, V2AuditWriter, V2DispatchInput};
+use orbit_common::types::{Task, TaskStatus};
+use orbit_engine::{
+    TaskActivityUpdate, TaskAutomationUpdate, TaskWriteHost, V2AuditWriter, V2DispatchInput,
+};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
@@ -43,14 +45,14 @@ fn test_runtime_with_config(config: &str) -> (tempfile::TempDir, OrbitRuntime) {
 fn attribution_test_config() -> &'static str {
     r#"
 [workflow]
-default_crew = "all-claude"
+default_crew = "claude-team"
 
-[crews.all-claude]
+[crews.claude-team]
 planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
 implementer = { model = "claude-sonnet-4-6", provider = "claude", backend = "cli" }
 reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
 
-[crews.all-codex]
+[crews.codex-team]
 planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
@@ -202,8 +204,7 @@ fn apply_task_automation_update_replaces_context_files_when_set() {
     let task = runtime
         .add_task(TaskAddParams {
             title: "Replace context_files".to_string(),
-            description: "Exercise context_files replacement via automation update."
-                .to_string(),
+            description: "Exercise context_files replacement via automation update.".to_string(),
             workspace_path: Some(".".to_string()),
             context_files: vec!["Cargo.toml".to_string()],
             ..Default::default()
@@ -457,7 +458,7 @@ fn v2_update_task_activity_uses_resolved_crew_implementer_identity() {
             title: "Review attributed update".to_string(),
             description: "Exercise update_task activity implementer attribution.".to_string(),
             workspace_path: Some(".".to_string()),
-            crew: Some("all-claude".to_string()),
+            crew: Some("claude-team".to_string()),
             ..Default::default()
         })
         .expect("add task");
@@ -513,7 +514,7 @@ fn v2_update_task_activity_preserves_existing_implemented_by() {
             title: "Preserve existing implementer".to_string(),
             description: "Exercise review to done automation attribution.".to_string(),
             workspace_path: Some(".".to_string()),
-            crew: Some("all-codex".to_string()),
+            crew: Some("codex-team".to_string()),
             ..Default::default()
         })
         .expect("add task");

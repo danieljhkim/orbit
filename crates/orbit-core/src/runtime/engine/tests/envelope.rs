@@ -69,8 +69,7 @@ fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
     let workspace_root = repo_root.join(".orbit");
     fs::create_dir_all(&global_root).expect("create global root");
     fs::create_dir_all(&workspace_root).expect("create workspace root");
-    let runtime =
-        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
+    let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
     (root, runtime, global_root, workspace_root)
 }
 
