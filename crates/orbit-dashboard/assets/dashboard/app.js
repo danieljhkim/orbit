@@ -5,7 +5,6 @@ import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson,
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
-import { fetchAndRenderMetrics, initMetrics, renderMetrics } from './metrics.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
 import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
@@ -71,7 +70,6 @@ let lastAdrPayload = { stats: {}, items: [] };
 let lastFrictionPayload = { stats: {}, tags: [], items: [] };
 let activeTab = "tasks";
 let activeDiagSubtab = "runs";
-let activeMetricsSubtab = "knowledge";
 let activeKnowledgeSubtab = "learnings";
 let isRefreshing = false;
 let activeLearningId = null;
@@ -129,14 +127,6 @@ function diagnosticsContext() {
   };
 }
 
-function metricsContext() {
-  return {
-    getActiveMetricsSubtab: () => activeMetricsSubtab,
-    setActiveMetricsSubtab: (v) => { activeMetricsSubtab = v; },
-    fmtAbsTime,
-  };
-}
-
 function routerContext() {
   return {
     // getters/setters for router-owned state (kept in app.js per extraction contract)
@@ -144,8 +134,6 @@ function routerContext() {
     setTab: (v) => { activeTab = v; },
     getDiagSubtab: () => activeDiagSubtab,
     setDiagSubtab: (v) => { activeDiagSubtab = v; },
-    getMetricsSubtab: () => activeMetricsSubtab,
-    setMetricsSubtab: (v) => { activeMetricsSubtab = v; },
     getKnowledgeSubtab: () => activeKnowledgeSubtab,
     setKnowledgeSubtab: (v) => { activeKnowledgeSubtab = v; },
     getRunId: getActiveRunId,
@@ -167,7 +155,6 @@ function routerContext() {
     // callbacks (close over app.js scope)
     refreshDashboard,
     renderDiagnostics: () => renderDiagnostics(diagnosticsContext()),
-    renderMetrics: () => renderMetrics(metricsContext()),
     fitLogPanelToViewport,
 
     // audit pass-throughs (re-exported here for router; imported at top of this file)
@@ -1097,11 +1084,6 @@ function activeRefreshJobs() {
     return jobs;
   }
 
-  if (activeTab === "metrics") {
-    jobs.push(fetchAndRenderMetrics(metricsContext()));
-    return jobs;
-  }
-
   if (activeTab === "audit") {
     if (getActiveAuditSubtab() === "policy") {
       jobs.push(fetchAndRenderPolicy(auditContext()));
@@ -1315,7 +1297,6 @@ function renderSparkline(buckets) {
 
 function refreshLabel() {
   if (activeTab === "diagnostics") return `diagnostics/${activeDiagSubtab}`;
-  if (activeTab === "metrics") return `metrics/${activeMetricsSubtab}`;
   if (activeTab === "run-detail") return `run/${getActiveRunId() || "?"}`;
   return activeTab;
 }
@@ -1368,7 +1349,6 @@ $("refresh-btn").addEventListener("click", refreshDashboard);
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());
-initMetrics(metricsContext());
 const rctx = routerContext();
 initRouter(rctx);
 iT();

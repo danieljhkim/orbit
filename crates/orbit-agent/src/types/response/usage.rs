@@ -127,7 +127,23 @@ fn usage_from_map(map: &JsonMap, key_mode: UsageKeyMode) -> Option<TokenUsage> {
     };
     let output = match key_mode {
         UsageKeyMode::Standard => first_u64(map, STANDARD_OUTPUT_KEYS),
-        UsageKeyMode::TokenBlock => first_u64(map, TOKEN_BLOCK_OUTPUT_KEYS),
+        // Gemini reports visible output and reasoning ("thoughts") as separate
+        // counters in the same token block; both consume the output budget, so
+        // sum them rather than first-wins. `tool` is the small tool-call channel
+        // and is also part of the output side.
+        UsageKeyMode::TokenBlock => {
+            let visible = first_u64(map, TOKEN_BLOCK_OUTPUT_KEYS);
+            let thoughts = first_u64(map, TOKEN_BLOCK_THOUGHT_KEYS);
+            let tool = first_u64(map, TOKEN_BLOCK_TOOL_KEYS);
+            match (visible, thoughts, tool) {
+                (None, None, None) => None,
+                (v, t, tl) => Some(
+                    v.unwrap_or(0)
+                        .saturating_add(t.unwrap_or(0))
+                        .saturating_add(tl.unwrap_or(0)),
+                ),
+            }
+        }
     };
 
     input.or(cache_read).or(cache_create).or(output)?;
@@ -209,6 +225,11 @@ const TOKEN_BLOCK_OUTPUT_KEYS: &[&str] = &[
     "candidates",
     "output",
 ];
+
+const TOKEN_BLOCK_THOUGHT_KEYS: &[&str] =
+    &["thoughts", "thoughtsTokenCount", "thoughts_token_count"];
+
+const TOKEN_BLOCK_TOOL_KEYS: &[&str] = &["tool", "toolTokenCount", "tool_token_count"];
 
 fn first_u64(map: &JsonMap, keys: &[&str]) -> Option<u64> {
     keys.iter().find_map(|key| value_as_u64(map.get(*key)?))

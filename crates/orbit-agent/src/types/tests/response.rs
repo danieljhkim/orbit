@@ -229,7 +229,7 @@ mod sum {
                 input: 30,
                 cache_read: 5,
                 cache_create: 0,
-                output: 9,
+                output: 109,
             }
         );
     }
@@ -270,7 +270,7 @@ mod sum {
     }
 
     #[test]
-    fn gemini_cli_total_thoughts_and_tool_are_not_folded_into_usage() {
+    fn gemini_cli_thoughts_and_tool_are_folded_into_output() {
         let documents = vec![json!({
             "stats": {
                 "models": {
@@ -285,8 +285,45 @@ mod sum {
             }
         })];
 
-        // TokenUsage has no thoughts/tool fields yet, so these Gemini-only
-        // counts are intentionally ignored rather than mixed into I/O totals.
-        assert_eq!(sum_usage(&documents), TokenUsage::default());
+        // Gemini's `thoughts` and `tool` counters both consume the output
+        // budget, so they sum into TokenUsage.output. `total` is a Gemini-side
+        // rollup and is intentionally ignored to avoid double-counting.
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                output: 100,
+                ..TokenUsage::default()
+            }
+        );
+    }
+
+    #[test]
+    fn gemini_cli_live_turn_shape_sums_thoughts_into_output() {
+        let documents = vec![json!({
+            "stats": {
+                "models": {
+                    "gemini-3.1-pro": {
+                        "tokens": {
+                            "input": 40919,
+                            "output": 70,
+                            "cached": 40101,
+                            "thoughts": 396,
+                            "tool": 0,
+                            "total": 41385
+                        }
+                    }
+                }
+            }
+        })];
+
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                input: 40919,
+                cache_read: 40101,
+                cache_create: 0,
+                output: 466,
+            }
+        );
     }
 }
