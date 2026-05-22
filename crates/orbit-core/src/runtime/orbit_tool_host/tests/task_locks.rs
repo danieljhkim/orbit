@@ -5,11 +5,11 @@ use tempfile::TempDir;
 
 use crate::OrbitRuntime;
 
-use super::task_locks::{
+use super::super::task_locks::{
     TaskLockReservationScope, parse_task_lock_reservation_scope, requested_task_files,
     task_lock_conflicts,
 };
-use super::test_support::{
+use super::super::test_support::{
     create_context_task, invalid_input_message, test_runtime, unmanaged_tool_env_guard,
 };
 

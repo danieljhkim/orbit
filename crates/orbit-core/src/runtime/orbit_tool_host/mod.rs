@@ -16,13 +16,8 @@ mod task_locks;
 mod task_tools;
 
 #[cfg(test)]
-mod learning_tools_tests;
-#[cfg(test)]
-mod review_threads_tests;
-#[cfg(test)]
-mod task_locks_tests;
-#[cfg(test)]
-mod task_tools_tests;
+mod tests;
+
 #[cfg(test)]
 pub(crate) mod test_support;
 
