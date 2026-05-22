@@ -38,6 +38,22 @@ async fn request_tasks(runtime: OrbitRuntime) -> Response {
         .expect("response")
 }
 
+async fn patch_task_crew(runtime: OrbitRuntime, task_id: &str, crew: &str) -> Response {
+    router()
+        .with_state(Arc::new(runtime))
+        .oneshot(
+            Request::builder()
+                .method(Method::PATCH)
+                .uri(format!("/tasks/{task_id}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ORIGIN, "http://localhost:7878")
+                .body(Body::from(format!(r#"{{"crew":"{crew}"}}"#)))
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
 async fn request_crews(runtime: OrbitRuntime) -> Response {
     router()
         .with_state(Arc::new(runtime))
@@ -82,6 +98,62 @@ default_crew = "beta"
     (root, runtime)
 }
 
+fn runtime_with_stale_task_crew() -> (tempfile::TempDir, OrbitRuntime, String) {
+    let root = tempfile::tempdir().expect("create tempdir");
+    let global_root = root.path().join("global");
+    let repo_root = root.path().join("repo");
+    let workspace_root = repo_root.join(".orbit");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    std::fs::create_dir_all(&workspace_root).expect("create workspace root");
+    std::fs::write(
+        workspace_root.join("config.toml"),
+        r#"
+[crews.beta]
+planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
+implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
+reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+
+[crews.all-codex]
+planner = { model = "legacy-plan-model", provider = "codex", backend = "cli" }
+implementer = { model = "legacy-impl-model", provider = "codex", backend = "cli" }
+reviewer = { model = "legacy-review-model", provider = "codex", backend = "cli" }
+
+[workflow]
+default_crew = "beta"
+"#,
+    )
+    .expect("write initial config");
+    let initial_runtime =
+        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build initial runtime");
+    let task = initial_runtime
+        .add_task(TaskAddParams {
+            title: "Stale crew task".to_string(),
+            description: "Fixture with an explicit crew removed from config.".to_string(),
+            status: Some(TaskStatus::Backlog),
+            crew: Some("all-codex".to_string()),
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("create stale crew task");
+
+    std::fs::write(
+        workspace_root.join("config.toml"),
+        r#"
+[crews.beta]
+planner = { model = "claude-beta-plan", provider = "claude", backend = "cli" }
+implementer = { model = "codex-beta-impl", provider = "codex", backend = "cli" }
+reviewer = { model = "codex-beta-review", provider = "codex", backend = "cli" }
+
+[workflow]
+default_crew = "beta"
+"#,
+    )
+    .expect("write reduced config");
+    let runtime =
+        OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build reduced runtime");
+    (root, runtime, task.id)
+}
+
 fn seed_task(
     runtime: &OrbitRuntime,
     title: &str,
@@ -98,6 +170,30 @@ fn seed_task(
             ..Default::default()
         })
         .expect("create task")
+}
+
+#[tokio::test]
+async fn tasks_with_stale_explicit_crew_fall_back_to_default_projection() {
+    let (_root, runtime, task_id) = runtime_with_stale_task_crew();
+
+    let response = request_tasks(runtime.clone()).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("tasks response array");
+    let task = rows
+        .iter()
+        .find(|task| task["id"].as_str() == Some(task_id.as_str()))
+        .expect("stale crew task is listed");
+    assert_eq!(task["crew"], json!("all-codex"));
+    assert_eq!(task["resolved_crew"], json!("beta"));
+    assert_eq!(task["planner_model"], json!("claude-beta-plan"));
+    assert_eq!(task["implementer_model"], json!("codex-beta-impl"));
+    assert_eq!(task["reviewer_model"], json!("codex-beta-review"));
+
+    let response = patch_task_crew(runtime, &task_id, "all-codex").await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

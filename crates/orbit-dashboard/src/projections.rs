@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use orbit_common::types::{ArtifactManifestFileV2, JobV2Step, JobV2StepBody, PipelineState};
 use orbit_core::command::job::JobCatalogEntry;
 use orbit_core::{
-    AuditEvent, EvidenceKind, JobRun, Learning, OrbitError, OrbitRuntime, Task, TaskStatus,
-    resolve_task_dependencies,
+    AuditEvent, EvidenceKind, JobRun, Learning, OrbitError, OrbitRuntime, ResolvedCrewProjection,
+    Task, TaskStatus, resolve_task_dependencies,
 };
 use serde_json::{Value, json};
 
@@ -228,7 +228,7 @@ pub(crate) fn task_to_json_with_sidecars(
         "artifacts".to_string(),
         task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
     );
-    if let Some(projection) = runtime.resolved_crew_projection(task)? {
+    if let Some(projection) = dashboard_resolved_crew_projection(runtime, task)? {
         object.insert("resolved_crew".to_string(), Value::String(projection.name));
         object.insert(
             "planner_model".to_string(),
@@ -244,6 +244,38 @@ pub(crate) fn task_to_json_with_sidecars(
         );
     }
     Ok(value)
+}
+
+fn dashboard_resolved_crew_projection(
+    runtime: &OrbitRuntime,
+    task: &Task,
+) -> Result<Option<ResolvedCrewProjection>, OrbitError> {
+    if task_has_stale_explicit_crew(runtime, task) {
+        let crew = runtime.resolve_crew_for_task(None, None)?;
+        return Ok(Some(ResolvedCrewProjection {
+            name: crew.name,
+            planner_model: crew.planner.model,
+            implementer_model: crew.implementer.model,
+            reviewer_model: crew.reviewer.model,
+        }));
+    }
+    runtime.resolved_crew_projection(task)
+}
+
+fn task_has_stale_explicit_crew(runtime: &OrbitRuntime, task: &Task) -> bool {
+    let Some(stored_crew) = task
+        .crew
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    !runtime
+        .configured_crew_registry_projection()
+        .crews
+        .iter()
+        .any(|crew| crew.name == stored_crew)
 }
 
 pub(crate) fn task_artifact_manifest_to_json(files: &[ArtifactManifestFileV2]) -> Value {
