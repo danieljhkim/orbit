@@ -17,7 +17,7 @@ use super::constants::ADR_SCHEMA_VERSION;
 use super::doc::AdrFileDocument;
 use super::layout::{AdrStateDir, adr_dir, state_dir_path, validate_adr_id};
 use super::lock::acquire_adr_lock;
-use crate::backend::{AdrCreateParams, AdrDocumentUpdateParams};
+use crate::backend::{AdrCreateParams, AdrDocumentUpdateParams, AdrListFilter};
 use crate::file::layout::read_child_dirs;
 use crate::{AdrListEntry, IdAllocationRecord, IdAllocator, RemoteArtifactStub, Store};
 
@@ -165,60 +165,24 @@ impl AdrFileStore {
     /// descending given the `ADR-NNNN` zero-padded format.
     pub(crate) fn list_adrs_filtered(
         &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        tag: Option<&str>,
-        path: Option<&str>,
-        validation_warned: Option<bool>,
+        filter: AdrListFilter<'_>,
     ) -> Result<Vec<Adr>, OrbitError> {
-        let normalized_path = normalized_filter_path(path)?;
+        let normalized_path = normalized_filter_path(filter.path)?;
         if self.index.is_none() {
             // Fall back to filesystem walk + in-memory filter. Preserves
             // test ergonomics where `AdrFileStore::new` skips the index.
             let mut adrs = self.list_adrs()?;
-            adrs.retain(|adr| {
-                matches_filter(
-                    adr,
-                    status,
-                    owner,
-                    feature,
-                    task_id,
-                    legacy_id,
-                    tag,
-                    normalized_path.as_deref(),
-                    validation_warned,
-                )
-            });
+            adrs.retain(|adr| matches_filter(adr, filter, normalized_path.as_deref()));
             sort_by_id_desc(&mut adrs);
             return Ok(adrs);
         }
 
-        let ids = self.query_filtered_ids(
-            status,
-            owner,
-            feature,
-            task_id,
-            legacy_id,
-            validation_warned,
-        )?;
+        let ids = self.query_filtered_ids(filter)?;
 
         let mut adrs = Vec::with_capacity(ids.len());
         for id in ids {
             if let Some(adr) = self.get_adr(&id)?
-                && matches_filter(
-                    &adr,
-                    status,
-                    owner,
-                    feature,
-                    task_id,
-                    legacy_id,
-                    tag,
-                    normalized_path.as_deref(),
-                    validation_warned,
-                )
+                && matches_filter(&adr, filter, normalized_path.as_deref())
             {
                 adrs.push(adr);
             }
@@ -227,51 +191,23 @@ impl AdrFileStore {
         Ok(adrs)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn list_adr_entries_filtered(
         &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        tag: Option<&str>,
-        path: Option<&str>,
-        validation_warned: Option<bool>,
+        filter: AdrListFilter<'_>,
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError> {
-        let normalized_path = normalized_filter_path(path)?;
+        let normalized_path = normalized_filter_path(filter.path)?;
         let mut entries = Vec::new();
         for record in self.id_allocator.adr_allocations()? {
             if let Some(adr) = self.read_adr_allocation(&record)? {
-                if matches_filter(
-                    &adr,
-                    status,
-                    owner,
-                    feature,
-                    task_id,
-                    legacy_id,
-                    tag,
-                    normalized_path.as_deref(),
-                    validation_warned,
-                ) {
+                if matches_filter(&adr, filter, normalized_path.as_deref()) {
                     entries.push(AdrListEntry::Local(adr));
                 }
                 continue;
             }
 
             if include_remote
-                && remote_adr_matches_filter(
-                    &record,
-                    status,
-                    owner,
-                    feature,
-                    task_id,
-                    legacy_id,
-                    tag,
-                    normalized_path.as_deref(),
-                    validation_warned,
-                )
+                && remote_adr_matches_filter(&record, filter, normalized_path.as_deref())
             {
                 entries.push(AdrListEntry::Remote(remote_stub_from_allocation(&record)));
             }
@@ -589,15 +525,7 @@ impl AdrFileStore {
         }
     }
 
-    fn query_filtered_ids(
-        &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        validation_warned: Option<bool>,
-    ) -> Result<Vec<String>, OrbitError> {
+    fn query_filtered_ids(&self, filter: AdrListFilter<'_>) -> Result<Vec<String>, OrbitError> {
         let index = self
             .index
             .as_ref()
@@ -606,29 +534,29 @@ impl AdrFileStore {
         let mut sql = String::from("SELECT id FROM adrs WHERE 1=1");
         let mut bound: Vec<String> = Vec::new();
 
-        if let Some(status) = status {
+        if let Some(status) = filter.status {
             sql.push_str(" AND status = ?");
             bound.push(status.cli_name().to_string());
         }
-        if let Some(owner) = owner {
+        if let Some(owner) = filter.owner {
             sql.push_str(" AND owner = ?");
             bound.push(owner.to_string());
         }
-        if let Some(feature) = feature {
+        if let Some(feature) = filter.feature {
             // JSON-encoded substring match so partial values (e.g. "feature-a"
             // vs "feature-ab") don't collide.
             sql.push_str(" AND related_features LIKE ?");
             bound.push(format!("%\"{feature}\"%"));
         }
-        if let Some(task_id) = task_id {
+        if let Some(task_id) = filter.task_id {
             sql.push_str(" AND related_tasks LIKE ?");
             bound.push(format!("%\"{task_id}\"%"));
         }
-        if let Some(legacy_id) = legacy_id {
+        if let Some(legacy_id) = filter.legacy_id {
             sql.push_str(" AND legacy_ids LIKE ?");
             bound.push(format!("%\"{legacy_id}\"%"));
         }
-        if let Some(warned) = validation_warned {
+        if let Some(warned) = filter.validation_warned {
             sql.push_str(" AND legacy_validation = ?");
             bound.push(
                 if warned {
@@ -663,43 +591,33 @@ impl AdrFileStore {
     }
 }
 
-fn matches_filter(
-    adr: &Adr,
-    status: Option<AdrStatus>,
-    owner: Option<&str>,
-    feature: Option<&str>,
-    task_id: Option<&str>,
-    legacy_id: Option<&str>,
-    tag: Option<&str>,
-    normalized_path: Option<&str>,
-    validation_warned: Option<bool>,
-) -> bool {
-    if let Some(status) = status
+fn matches_filter(adr: &Adr, filter: AdrListFilter<'_>, normalized_path: Option<&str>) -> bool {
+    if let Some(status) = filter.status
         && adr.status != status
     {
         return false;
     }
-    if let Some(owner) = owner
+    if let Some(owner) = filter.owner
         && adr.owner != owner
     {
         return false;
     }
-    if let Some(feature) = feature
+    if let Some(feature) = filter.feature
         && !adr.related_features.iter().any(|f| f == feature)
     {
         return false;
     }
-    if let Some(task_id) = task_id
+    if let Some(task_id) = filter.task_id
         && !adr.related_tasks.iter().any(|t| t == task_id)
     {
         return false;
     }
-    if let Some(legacy_id) = legacy_id
+    if let Some(legacy_id) = filter.legacy_id
         && !adr.legacy_ids.iter().any(|l| l == legacy_id)
     {
         return false;
     }
-    if let Some(tag) = tag
+    if let Some(tag) = filter.tag
         && !tag.trim().is_empty()
         && !adr
             .tags
@@ -713,7 +631,7 @@ fn matches_filter(
     {
         return false;
     }
-    if let Some(warned) = validation_warned {
+    if let Some(warned) = filter.validation_warned {
         let is_warned = matches!(adr.legacy_validation, LegacyValidation::Warned);
         if warned != is_warned {
             return false;
@@ -756,29 +674,22 @@ fn adr_entry_id(entry: &AdrListEntry) -> &str {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn remote_adr_matches_filter(
     record: &IdAllocationRecord,
-    status: Option<AdrStatus>,
-    owner: Option<&str>,
-    feature: Option<&str>,
-    task_id: Option<&str>,
-    legacy_id: Option<&str>,
-    tag: Option<&str>,
+    filter: AdrListFilter<'_>,
     normalized_path: Option<&str>,
-    validation_warned: Option<bool>,
 ) -> bool {
-    if owner.is_some()
-        || feature.is_some()
-        || task_id.is_some()
-        || legacy_id.is_some()
-        || tag.is_some()
+    if filter.owner.is_some()
+        || filter.feature.is_some()
+        || filter.task_id.is_some()
+        || filter.legacy_id.is_some()
+        || filter.tag.is_some()
         || normalized_path.is_some()
-        || validation_warned.is_some()
+        || filter.validation_warned.is_some()
     {
         return false;
     }
-    if let Some(status) = status
+    if let Some(status) = filter.status
         && remote_adr_status(record.body_path.as_deref()) != Some(status)
     {
         return false;
@@ -843,6 +754,5 @@ fn insert_adr_row(conn: &rusqlite::Connection, adr: &Adr) -> Result<(), OrbitErr
     Ok(())
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests;

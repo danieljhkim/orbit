@@ -62,7 +62,7 @@ pub struct ProviderSelectionArgs {
     pub auto: bool,
     /// Target a supported MCP client integration. Can be repeated.
     #[arg(long = "client", value_enum, value_name = "CLIENT")]
-    clients: Vec<McpProvider>,
+    pub(super) clients: Vec<McpProvider>,
     /// Target Claude Code integration only.
     #[arg(long)]
     pub claude: bool,
@@ -101,7 +101,7 @@ impl ProviderSelectionArgs {
             || self.windsurf
     }
 
-    fn resolve_mode(&self) -> Result<ProviderSelectionMode, OrbitError> {
+    pub(super) fn resolve_mode(&self) -> Result<ProviderSelectionMode, OrbitError> {
         if self.auto && (self.any_explicit_provider() || self.all) {
             return Err(OrbitError::InvalidInput(
                 "--auto cannot be combined with --client, --claude, --codex, --gemini, --grok, --cursor, --vscode, --windsurf, or --all".to_string(),

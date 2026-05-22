@@ -1,4 +1,3 @@
-use super::*;
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;

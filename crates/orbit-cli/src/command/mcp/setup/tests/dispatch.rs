@@ -1,8 +1,8 @@
 use tempfile::tempdir;
 
 use super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
+use super::super::dispatch::{auto_detected_providers, run_action, vscode_home_user_dir};
 use super::super::test_support::ENV_LOCK;
-use super::*;
 
 #[test]
 fn auto_detects_expected_providers() {

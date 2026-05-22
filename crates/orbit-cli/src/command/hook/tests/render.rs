@@ -1,5 +1,6 @@
-use super::*;
-use crate::command::hook::render::{HookOutputFormat, render_codex, render_reminders};
+use crate::command::hook::render::{
+    HookOutputFormat, render_codex, render_gemini, render_reminders,
+};
 use orbit_common::types::LearningReminder;
 
 fn reminders() -> Vec<LearningReminder> {

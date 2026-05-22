@@ -6,7 +6,6 @@ use tempfile::tempdir;
 
 use super::super::search::related_docs_for_context;
 use super::super::types::DocType;
-use super::*;
 
 use orbit_search::{DocSearchResult, DocSearchSource, SearchResult};
 use serde_json::json;

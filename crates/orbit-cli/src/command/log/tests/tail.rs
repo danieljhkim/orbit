@@ -1,6 +1,6 @@
 use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -8,9 +8,8 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use tempfile::tempdir;
 
-use crate::command::log::format::format_message;
-
-use super::*;
+use crate::command::log::format::{LevelFilter, format_message};
+use crate::command::log::tail::{TailArgs, build_filters, run_tail};
 
 fn fixture_lines() -> Vec<String> {
     vec![

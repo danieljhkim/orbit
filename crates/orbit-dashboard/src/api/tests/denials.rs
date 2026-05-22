@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use orbit_core::{AuditEventStatus, OrbitRuntime};
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::super::denials::{SQLITE_FS_BOUNDARY_PROFILE, collect_denial_rows, denials_payload};
 use super::test_support::write_lines;

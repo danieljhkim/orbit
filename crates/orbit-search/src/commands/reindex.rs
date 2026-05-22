@@ -9,20 +9,15 @@ use crate::commands::parse_model;
 use crate::vector::{UpsertReport, VectorStore};
 use crate::{Embedder, SubprocessEmbedder};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IndexKind {
+    #[default]
     Tasks,
     Docs,
     Adrs,
     Learnings,
     All,
-}
-
-impl Default for IndexKind {
-    fn default() -> Self {
-        Self::Tasks
-    }
 }
 
 impl FromStr for IndexKind {
@@ -42,22 +37,12 @@ impl FromStr for IndexKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SemanticIndexParams {
     pub model: Option<String>,
     pub force: bool,
     pub kind: Option<IndexKind>,
-}
-
-impl Default for SemanticIndexParams {
-    fn default() -> Self {
-        Self {
-            model: None,
-            force: false,
-            kind: None,
-        }
-    }
 }
 
 impl SemanticIndexParams {

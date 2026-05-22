@@ -352,7 +352,7 @@ impl RuntimeHost for ParallelTimeoutTestHost {
     }
 
     fn scoreboard_dir(&self) -> &std::path::Path {
-        &self.data_root
+        &self.scoreboard_dir
     }
 }
 

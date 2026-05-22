@@ -1,17 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use orbit_common::types::{Adr, AdrStatus, OrbitError, Task};
+use orbit_common::types::{Adr, AdrStatus, OrbitError};
 use orbit_common::utility::glob::{match_glob, normalize_glob_path};
 use orbit_common::utility::selector::anchor_path;
-use orbit_search::{
-    AdrEmbeddingSource, AdrSearchSource, DocEmbeddingSource, DocSearchSource, score_adr_record,
-    score_doc_record, sort_search_results,
-};
+use orbit_search::{AdrEmbeddingSource, AdrSearchSource, DocEmbeddingSource, DocSearchSource};
 
 use super::frontmatter::parse_doc_tolerant;
 use super::path_util::{path_to_slash_string, repo_relative_path};
-use super::types::{DocRecord, DocShow, DocType, TaskRelatedDoc};
+use super::types::{DocRecord, DocShow, TaskRelatedDoc};
 use super::walk::{expand_root, walk_docs_roots};
 
 const DEFAULT_RELATED_DOC_LIMIT: usize = 5;

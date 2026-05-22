@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::*;
+use crate::command::log::format::{format_message_html, render_log_event_for_web};
 
 #[test]
 fn format_message_html_escapes_dynamic_field_values() {

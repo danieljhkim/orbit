@@ -7,7 +7,6 @@ use tempfile::tempdir;
 use super::super::walk::{
     git_check_ignore_invocations, reset_git_check_ignore_invocations, walk_docs_roots,
 };
-use super::*;
 
 #[test]
 fn walker_skips_dot_orbit_even_when_root_points_above_it() {

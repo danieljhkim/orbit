@@ -25,7 +25,7 @@ pub(super) fn resolve_workspace_layout(
     resolve_workspace_layout_for_cwd(&cwd)
 }
 
-fn resolve_workspace_layout_for_cwd(cwd: &Path) -> Result<WorkspaceLayout, OrbitError> {
+pub(super) fn resolve_workspace_layout_for_cwd(cwd: &Path) -> Result<WorkspaceLayout, OrbitError> {
     if cwd.file_name().is_some_and(|name| name == ".orbit") && cwd.is_dir() {
         return Ok(WorkspaceLayout {
             repo_root: cwd.parent().unwrap_or(cwd).to_path_buf(),

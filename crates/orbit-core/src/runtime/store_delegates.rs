@@ -6,13 +6,13 @@ use orbit_common::types::{
 };
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrStoreBackend, AuditEventFilter,
-    AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
-    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
-    RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
-    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
+    AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
+    LearningCommentDeleteParams, LearningCreateParams, LearningListEntry, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
     TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
     TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
@@ -742,7 +742,7 @@ impl AdrRecords<'_> {
         path: Option<&str>,
         validation_warned: Option<bool>,
     ) -> Result<Vec<Adr>, OrbitError> {
-        self.store.list_adrs_filtered(
+        self.store.list_adrs_filtered(AdrListFilter {
             status,
             owner,
             feature,
@@ -751,7 +751,7 @@ impl AdrRecords<'_> {
             tag,
             path,
             validation_warned,
-        )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -768,14 +768,16 @@ impl AdrRecords<'_> {
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError> {
         self.store.list_adr_entries_filtered(
-            status,
-            owner,
-            feature,
-            task_id,
-            legacy_id,
-            tag,
-            path,
-            validation_warned,
+            AdrListFilter {
+                status,
+                owner,
+                feature,
+                task_id,
+                legacy_id,
+                tag,
+                path,
+                validation_warned,
+            },
             include_remote,
         )
     }

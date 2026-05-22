@@ -42,6 +42,18 @@ pub enum AdrListEntry {
     Remote(RemoteArtifactStub),
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdrListFilter<'a> {
+    pub status: Option<AdrStatus>,
+    pub owner: Option<&'a str>,
+    pub feature: Option<&'a str>,
+    pub task_id: Option<&'a str>,
+    pub legacy_id: Option<&'a str>,
+    pub tag: Option<&'a str>,
+    pub path: Option<&'a str>,
+    pub validation_warned: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LearningListEntry {
     Local(Learning),
@@ -365,28 +377,10 @@ pub trait AdrStoreBackend: Send + Sync {
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
-    fn list_adrs_filtered(
-        &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        tag: Option<&str>,
-        path: Option<&str>,
-        validation_warned: Option<bool>,
-    ) -> Result<Vec<Adr>, OrbitError>;
-    #[allow(clippy::too_many_arguments)]
+    fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError>;
     fn list_adr_entries_filtered(
         &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        tag: Option<&str>,
-        path: Option<&str>,
-        validation_warned: Option<bool>,
+        filter: AdrListFilter<'_>,
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError>;
     fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;

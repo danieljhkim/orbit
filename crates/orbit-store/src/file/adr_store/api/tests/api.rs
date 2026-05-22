@@ -254,7 +254,7 @@ fn add_adr_with_index_populates_index_row() {
     assert_eq!(count_index_rows(&store), 1);
 
     let listed = store
-        .list_adrs_filtered(None, None, None, None, None, None, None, None)
+        .list_adrs_filtered(AdrListFilter::default())
         .expect("list filtered");
     let ids: Vec<String> = listed.iter().map(|a| a.id.clone()).collect();
     assert_eq!(ids, vec![adr.id]);
@@ -271,31 +271,19 @@ fn update_adr_status_with_index_reflects_in_filter() {
         .expect("accept");
 
     let accepted = store
-        .list_adrs_filtered(
-            Some(AdrStatus::Accepted),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .list_adrs_filtered(AdrListFilter {
+            status: Some(AdrStatus::Accepted),
+            ..Default::default()
+        })
         .expect("list accepted");
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].id, adr.id);
 
     let proposed = store
-        .list_adrs_filtered(
-            Some(AdrStatus::Proposed),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .list_adrs_filtered(AdrListFilter {
+            status: Some(AdrStatus::Proposed),
+            ..Default::default()
+        })
         .expect("list proposed");
     assert!(proposed.is_empty(), "no proposed ADRs after promotion");
 }
@@ -311,7 +299,7 @@ fn delete_adr_with_index_removes_row() {
     assert_eq!(count_index_rows(&store), 0);
 
     let listed = store
-        .list_adrs_filtered(None, None, None, None, None, None, None, None)
+        .list_adrs_filtered(AdrListFilter::default())
         .expect("list filtered");
     assert!(listed.is_empty());
 }
@@ -343,7 +331,10 @@ fn list_adrs_filtered_by_owner() {
         .expect("add codex");
 
     let filtered = store
-        .list_adrs_filtered(None, Some("claude"), None, None, None, None, None, None)
+        .list_adrs_filtered(AdrListFilter {
+            owner: Some("claude"),
+            ..Default::default()
+        })
         .expect("filter by owner");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].id, claude.id);
@@ -371,16 +362,10 @@ fn list_adrs_filtered_by_legacy_id() {
         .expect("set legacy id");
 
     let filtered = store
-        .list_adrs_filtered(
-            None,
-            None,
-            None,
-            None,
-            Some("activity-job/ADR-039"),
-            None,
-            None,
-            None,
-        )
+        .list_adrs_filtered(AdrListFilter {
+            legacy_id: Some("activity-job/ADR-039"),
+            ..Default::default()
+        })
         .expect("filter by legacy id");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].id, target.id);
@@ -406,7 +391,7 @@ fn rebuild_index_after_index_clear_recovers() {
     assert_eq!(count_index_rows(&store), 3);
 
     let listed = store
-        .list_adrs_filtered(None, None, None, None, None, None, None, None)
+        .list_adrs_filtered(AdrListFilter::default())
         .expect("list rebuilt");
     let mut ids: Vec<String> = listed.iter().map(|a| a.id.clone()).collect();
     ids.sort();
@@ -430,22 +415,16 @@ fn list_adrs_filtered_without_index_falls_back_to_filesystem() {
         .expect("accept b");
 
     let accepted = store
-        .list_adrs_filtered(
-            Some(AdrStatus::Accepted),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        .list_adrs_filtered(AdrListFilter {
+            status: Some(AdrStatus::Accepted),
+            ..Default::default()
+        })
         .expect("fallback filter");
     assert_eq!(accepted.len(), 1);
     assert_eq!(accepted[0].id, b.id);
 
     let all = store
-        .list_adrs_filtered(None, None, None, None, None, None, None, None)
+        .list_adrs_filtered(AdrListFilter::default())
         .expect("fallback list");
     // ID-desc sort: b was allocated after a.
     let ids: Vec<String> = all.iter().map(|adr| adr.id.clone()).collect();

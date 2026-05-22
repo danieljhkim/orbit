@@ -566,13 +566,3 @@ fn find_id<'a>(value: &'a Value, id: &str) -> Option<&'a Value> {
         .iter()
         .find(|item| item["id"].as_str() == Some(id))
 }
-
-fn seed_fake_git_worktree(main_repo: &std::path::Path, worktree: &std::path::Path) {
-    let worktree_git_dir = main_repo.join(".git").join("worktrees").join("orbit-test");
-    std::fs::create_dir_all(&worktree_git_dir).expect("create fake worktree git dir");
-    std::fs::write(
-        worktree.join(".git"),
-        format!("gitdir: {}\n", worktree_git_dir.display()),
-    )
-    .expect("write worktree gitfile");
-}

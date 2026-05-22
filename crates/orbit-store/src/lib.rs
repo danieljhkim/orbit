@@ -112,12 +112,12 @@ pub mod learning_layout {
 use chrono::{DateTime, Utc};
 
 pub use backend::{
-    ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrStoreBackend,
-    AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
-    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
-    ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
+    ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
+    AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
+    LearningCommentDeleteParams, LearningCreateParams, LearningListEntry, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
     TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
     TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
     TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,

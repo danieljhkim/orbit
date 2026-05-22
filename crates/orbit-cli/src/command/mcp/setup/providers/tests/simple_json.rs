@@ -4,7 +4,7 @@ use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, S
 use super::super::super::dispatch::{auto_detected_providers, run_action, vscode_home_user_dir};
 use super::super::claude::claude_mcp_server_value;
 use super::super::codex::codex_mcp_server_table;
-use super::*;
+use super::super::simple_json::simple_mcp_server_value;
 
 #[test]
 fn server_value_builders_emit_mcp_serve_only() {

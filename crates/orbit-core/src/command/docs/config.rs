@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use serde_json::json;
 
 use orbit_common::types::OrbitError;
 

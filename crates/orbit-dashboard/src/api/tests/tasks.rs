@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::super::router;
-use super::super::tasks::*;
 use super::test_support::body_json;
 
 fn seed_task_with_artifact(runtime: &OrbitRuntime) -> orbit_core::Task {

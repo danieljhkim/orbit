@@ -4,8 +4,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use orbit_core::InvocationRecord;
-
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};

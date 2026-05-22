@@ -7,7 +7,7 @@ use crate::command::Cli;
 
 use super::super::audit_middleware::*;
 use orbit_common::types::AuditEventStatus;
-use orbit_core::OrbitError;
+use orbit_core::{OrbitError, OrbitRuntime};
 
 fn meta_for(args: &[&str]) -> CommandMeta {
     let cli = Cli::parse_from(args);
@@ -307,7 +307,7 @@ fn normalize_audit_event_json(value: &mut Value) {
 /// (guard records its own row). All four must produce exactly one
 /// audit row.
 mod cli_dedup_invariant {
-    use super::super::*;
+    use super::*;
     use orbit_core::command::tool::take_tool_audit_recorded;
     use serde_json::json;
 

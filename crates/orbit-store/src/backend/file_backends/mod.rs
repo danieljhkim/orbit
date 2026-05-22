@@ -6,7 +6,7 @@ use orbit_common::types::{
 };
 
 use super::contracts::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrStoreBackend,
+    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
     ExecutorDefStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend,
     LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
     LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
@@ -323,53 +323,16 @@ impl AdrStoreBackend for AdrFileStore {
         self.list_adrs()
     }
 
-    fn list_adrs_filtered(
-        &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        tag: Option<&str>,
-        path: Option<&str>,
-        validation_warned: Option<bool>,
-    ) -> Result<Vec<Adr>, OrbitError> {
-        self.list_adrs_filtered(
-            status,
-            owner,
-            feature,
-            task_id,
-            legacy_id,
-            tag,
-            path,
-            validation_warned,
-        )
+    fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError> {
+        AdrFileStore::list_adrs_filtered(self, filter)
     }
 
     fn list_adr_entries_filtered(
         &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        tag: Option<&str>,
-        path: Option<&str>,
-        validation_warned: Option<bool>,
+        filter: AdrListFilter<'_>,
         include_remote: bool,
     ) -> Result<Vec<AdrListEntry>, OrbitError> {
-        AdrFileStore::list_adr_entries_filtered(
-            self,
-            status,
-            owner,
-            feature,
-            task_id,
-            legacy_id,
-            tag,
-            path,
-            validation_warned,
-            include_remote,
-        )
+        AdrFileStore::list_adr_entries_filtered(self, filter, include_remote)
     }
 
     fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {

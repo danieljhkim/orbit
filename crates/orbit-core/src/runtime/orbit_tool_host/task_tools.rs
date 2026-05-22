@@ -78,10 +78,10 @@ pub(super) fn add(
     )?;
     let mut response = serialize_task(runtime, &task)?;
     let warnings = compute_task_add_warnings(&raw_context_files, task.task_type);
-    if !warnings.is_empty() {
-        if let Some(obj) = response.as_object_mut() {
-            obj.insert("warnings".to_string(), json!(warnings));
-        }
+    if !warnings.is_empty()
+        && let Some(obj) = response.as_object_mut()
+    {
+        obj.insert("warnings".to_string(), json!(warnings));
     }
     Ok(response)
 }

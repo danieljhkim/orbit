@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use orbit_core::{JobRun, JobRunState, JobRunStep, OrbitError, OrbitRuntime, find_workflow};
 use serde_json::{Value, json};
 
-const TASK_AUTO_PIPELINE_JOB: &str = "task_auto_pipeline";
+pub(super) const TASK_AUTO_PIPELINE_JOB: &str = "task_auto_pipeline";
 
 #[derive(Clone)]
 pub(crate) struct WorkflowDispatchResult {
@@ -222,7 +222,7 @@ fn summary_step(run: &JobRun) -> Option<&JobRunStep> {
         .or_else(|| run.steps.last())
 }
 
-fn workflow_dispatch_result_to_json(run: &WorkflowDispatchResult) -> Value {
+pub(super) fn workflow_dispatch_result_to_json(run: &WorkflowDispatchResult) -> Value {
     let mut value = json!({
         "workflow": run.workflow_alias,
         "job_id": run.job_id,
@@ -260,7 +260,7 @@ fn workflow_dispatch_result_to_json(run: &WorkflowDispatchResult) -> Value {
     value
 }
 
-fn workflow_dispatch_result_lines(run: &WorkflowDispatchResult) -> Vec<String> {
+pub(super) fn workflow_dispatch_result_lines(run: &WorkflowDispatchResult) -> Vec<String> {
     if let Some(summary) = &run.ship_auto {
         return ship_auto_dispatch_result_lines(run, summary);
     }
@@ -397,7 +397,7 @@ fn derive_ship_auto_summary(
     summarize_ship_auto_pipeline(pipeline, child_gate_runs)
 }
 
-fn summarize_ship_auto_pipeline(
+pub(super) fn summarize_ship_auto_pipeline(
     pipeline: Option<&Value>,
     child_gate_runs: Vec<ShipAutoGateRun>,
 ) -> ShipAutoDispatchSummary {

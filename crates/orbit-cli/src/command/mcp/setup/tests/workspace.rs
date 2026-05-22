@@ -1,7 +1,8 @@
 use tempfile::tempdir;
 
 use super::super::test_support::{ENV_LOCK, EnvVarGuard};
-use super::*;
+use super::super::workspace::resolve_workspace_layout_for_cwd;
+use orbit_core::OrbitError;
 
 #[test]
 fn resolve_workspace_layout_skips_global_home_orbit_during_walk_up() {

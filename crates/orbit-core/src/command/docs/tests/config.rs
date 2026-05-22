@@ -5,7 +5,6 @@ use super::super::{
     parse_adr_search_config_from_config_toml, parse_docs_roots_from_config_toml,
     parse_docs_search_config_from_config_toml,
 };
-use super::*;
 
 #[test]
 fn config_roots_default_and_parse_explicit_values() {

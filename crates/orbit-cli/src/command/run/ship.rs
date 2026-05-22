@@ -10,7 +10,7 @@ use crate::command::Execute;
 
 use super::support::{dispatch_workflow, print_workflow_dispatch_results};
 
-const SHIP_WORKFLOW: &str = "ship";
+pub(super) const SHIP_WORKFLOW: &str = "ship";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum ShipMode {

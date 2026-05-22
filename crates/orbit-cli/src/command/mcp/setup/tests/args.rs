@@ -1,4 +1,4 @@
-use super::*;
+use super::super::args::{McpProvider, ProviderSelectionArgs, ProviderSelectionMode};
 
 #[test]
 fn provider_selection_defaults_to_auto() {
