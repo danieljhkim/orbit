@@ -93,12 +93,26 @@ function explicitCrewValue(task) {
   return task && task.crew ? String(task.crew) : "";
 }
 
+function isConfiguredCrewValue(value) {
+  const name = value ? String(value) : "";
+  return Boolean(name) && lastCrewPayload.crews.some((crew) => crew.name === name);
+}
+
+function hasStaleExplicitCrew(task) {
+  const currentValue = explicitCrewValue(task);
+  return Boolean(currentValue) && !isConfiguredCrewValue(currentValue);
+}
+
 function resolvedCrewName(task) {
   if (lastCrewPayload.default_crew) return lastCrewPayload.default_crew;
   if (!explicitCrewValue(task) && task && task.resolved_crew) {
     return String(task.resolved_crew);
   }
   return "workspace";
+}
+
+function defaultCrewOptionText(task) {
+  return `default: ${resolvedCrewName(task)}`;
 }
 
 function crewOptionTitle(crew) {
@@ -673,10 +687,12 @@ function buildCrewUpdateControl(task, context) {
     title: `Update crew for ${task.id}`,
   });
   const currentValue = explicitCrewValue(task);
+  const staleCurrentValue = hasStaleExplicitCrew(task);
   select.dataset.currentValue = currentValue;
+  select.dataset.staleCurrentValue = staleCurrentValue ? currentValue : "";
 
   const defaultOption = el("option", {
-    text: resolvedCrewName(task),
+    text: defaultCrewOptionText(task),
   });
   defaultOption.value = "";
   select.appendChild(defaultOption);
@@ -691,9 +707,9 @@ function buildCrewUpdateControl(task, context) {
     select.appendChild(option);
   }
 
-  if (currentValue && !crews.some((crew) => crew.name === currentValue)) {
+  if (staleCurrentValue) {
     const option = el("option", {
-      text: currentValue,
+      text: `${currentValue} (missing)`,
       title: "Configured crew no longer found",
     });
     option.value = currentValue;

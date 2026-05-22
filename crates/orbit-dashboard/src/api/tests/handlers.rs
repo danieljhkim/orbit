@@ -39,6 +39,10 @@ async fn request_tasks(runtime: OrbitRuntime) -> Response {
 }
 
 async fn patch_task_crew(runtime: OrbitRuntime, task_id: &str, crew: &str) -> Response {
+    patch_task_body(runtime, task_id, format!(r#"{{"crew":"{crew}"}}"#)).await
+}
+
+async fn patch_task_body(runtime: OrbitRuntime, task_id: &str, body: String) -> Response {
     router()
         .with_state(Arc::new(runtime))
         .oneshot(
@@ -47,7 +51,7 @@ async fn patch_task_crew(runtime: OrbitRuntime, task_id: &str, crew: &str) -> Re
                 .uri(format!("/tasks/{task_id}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::ORIGIN, "http://localhost:7878")
-                .body(Body::from(format!(r#"{{"crew":"{crew}"}}"#)))
+                .body(Body::from(body))
                 .expect("request"),
         )
         .await
@@ -194,6 +198,21 @@ async fn tasks_with_stale_explicit_crew_fall_back_to_default_projection() {
     let response = patch_task_crew(runtime, &task_id, "all-codex").await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_task_crew_null_clears_stale_explicit_crew_to_default() {
+    let (_root, runtime, task_id) = runtime_with_stale_task_crew();
+
+    let response = patch_task_body(runtime, &task_id, r#"{"crew":null}"#.to_string()).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let task = body_json(response).await;
+    assert_eq!(task["crew"], json!(null));
+    assert_eq!(task["resolved_crew"], json!("beta"));
+    assert_eq!(task["planner_model"], json!("claude-beta-plan"));
+    assert_eq!(task["implementer_model"], json!("codex-beta-impl"));
+    assert_eq!(task["reviewer_model"], json!("codex-beta-review"));
 }
 
 #[tokio::test]

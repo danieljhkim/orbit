@@ -11,7 +11,7 @@ use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use orbit_core::{
     ExternalRef, OrbitRuntime, Task, TaskComplexity, TaskPriority, TaskStatus, TaskType,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
 use super::{bad_request, map_runtime_error, server_error, validate_id};
@@ -114,8 +114,17 @@ pub(super) struct UpdateTaskBody {
     task_type: Option<TaskType>,
     #[serde(default)]
     context_files: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_string_patch_field")]
     crew: Option<Option<String>>,
+}
+
+fn deserialize_nullable_string_patch_field<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 pub(super) async fn list_tasks(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
