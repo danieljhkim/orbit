@@ -2,7 +2,9 @@ use orbit_common::types::{OrbitError, TASK_REVIEW_THREADS_DIR_NAME};
 use orbit_common::utility::fs::atomic_write_text;
 use tempfile::TempDir;
 
-use super::super::tests::test_support::{bundle_store, sample_bundle, sample_review_threads};
+use super::super::super::tests::test_support::{
+    bundle_store, sample_bundle, sample_review_threads,
+};
 use super::REVIEW_THREAD_TOMBSTONES_FILE;
 
 #[test]

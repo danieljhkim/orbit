@@ -1,10 +1,11 @@
-// Migrated from sqlite/invocation_store/records/tests/records.rs (anti-pattern child of source)
-// to sibling under `invocation_store/tests/` per ORB-00243 and
-// docs/design-patterns/test_layout.md. (Consolidated; single original file.)
+// Migrated from sqlite/invocation_store/tests/records.rs (nested anti-pattern under
+// invocation_store.rs) to sibling under `sqlite/tests/` per ORB-00247 and
+// docs/design-patterns/test_layout.md.
 
 use orbit_common::types::{InvocationTrace, RoleSlot, TokenUsage, ToolCallTrace};
 
-use crate::{InvocationInsertParams, InvocationQuery, Store};
+use super::super::invocation_store::{InvocationInsertParams, InvocationQuery};
+use crate::Store;
 
 #[test]
 fn invocation_records_persist_planning_duel_slot() {

@@ -9,7 +9,3 @@ pub use types::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
     InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
-
-#[cfg(test)]
-#[path = "invocation_store/tests/mod.rs"]
-mod tests;
