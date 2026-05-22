@@ -1299,11 +1299,20 @@
 
       table.sb-leaderboard th,
       table.sb-leaderboard td {
-        padding: 3px 8px;
-        border-bottom: 1px solid var(--border);
+        padding: 6px 8px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        border-bottom: none;
+      }
+
+      table.sb-leaderboard td:not(:first-child),
+      table.sb-leaderboard th:not(:first-child) {
+        border-left: 1px solid rgba(255, 255, 255, 0.02);
+      }
+
+      table.sb-leaderboard tbody tr:not(.sb-section-divider):nth-child(even) {
+        background: rgba(255, 255, 255, 0.015);
       }
 
       table.sb-leaderboard th {
@@ -1345,7 +1354,7 @@
       }
 
       table.sb-leaderboard tbody tr:not(.sb-section-divider):hover {
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(255, 255, 255, 0.04) !important;
       }
 
       .sb-metric-label {
@@ -1388,14 +1397,18 @@
         display: inline-block;
       }
 
-      .sb-section-divider td {
+      table.sb-leaderboard .sb-section-divider td {
         padding: 4px 8px;
+        padding-bottom: 4px;
         background: #050505;
         color: var(--fg-dim);
         font-size: 10px;
         font-weight: 600;
         letter-spacing: 0;
         text-transform: uppercase;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-left: 1px solid rgba(255, 255, 255, 0.05) !important;
+        box-shadow: none;
       }
       
       .subtabs {
