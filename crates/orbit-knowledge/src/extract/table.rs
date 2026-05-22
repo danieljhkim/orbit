@@ -27,6 +27,3 @@ impl FileExtractor for TableExtractor {
         ExtractionResult::default()
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -6,7 +6,9 @@ use crate::graph::{GraphIndexSearchRow, GraphReadOptions};
 use crate::service::{GraphContextService, MatchedLine, SearchHit};
 use crate::{KnowledgeError, graph::nodes::CodebaseGraphV1};
 
-const DEFAULT_RANKING_HEADROOM: usize = 10;
+// pub(crate) widened for access from commands/tests/search.rs during sibling test
+// layout migration (see docs/design-patterns/test_layout.md and ORB-00249).
+pub(crate) const DEFAULT_RANKING_HEADROOM: usize = 10;
 pub(crate) const DEFAULT_RANKING_HARD_CAP: usize = 5_000;
 pub const SOURCE_REGEX_UNBOUNDED_LIMIT_MAX: usize = 200;
 
@@ -296,7 +298,9 @@ fn search_item_for_row(row: GraphIndexSearchRow) -> SearchResultItem {
     }
 }
 
-fn rank_sql_default_search_results(
+// pub(crate) widened for access from commands/tests/search.rs (sql helpers)
+// during sibling test layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn rank_sql_default_search_results(
     rows: Vec<GraphIndexSearchRow>,
     include_non_code: bool,
     query: &str,
@@ -337,7 +341,9 @@ fn default_search_rank_for_row(row: &GraphIndexSearchRow) -> usize {
     }
 }
 
-fn selector_for_search_row(row: &GraphIndexSearchRow) -> String {
+// pub(crate) widened for access from commands/tests/search.rs (sql helpers)
+// during sibling test layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn selector_for_search_row(row: &GraphIndexSearchRow) -> String {
     row.selector
         .clone()
         .unwrap_or_else(|| match row.node_type.as_str() {
@@ -372,7 +378,10 @@ fn file_for_search_row(row: &GraphIndexSearchRow) -> Option<String> {
     }
 }
 
-fn default_ranking_search_limit(limit: usize) -> usize {
+// pub(crate) widened for access from commands/tests/search.rs (and helpers in
+// commands/tests/search.rs) during sibling test layout migration per
+// docs/design-patterns/test_layout.md (ORB-00249).
+pub(crate) fn default_ranking_search_limit(limit: usize) -> usize {
     limit
         .saturating_mul(DEFAULT_RANKING_HEADROOM)
         .min(DEFAULT_RANKING_HARD_CAP)
@@ -390,7 +399,9 @@ fn should_rank_exact_symbol_definitions(
         && node_type.is_none_or(|node_type| node_type == "symbol")
 }
 
-fn rank_exact_symbol_definition_hits<'a>(
+// pub(crate) widened for access from commands/tests/search.rs (ranking tests)
+// during sibling test layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn rank_exact_symbol_definition_hits<'a>(
     hits: Vec<SearchHit<'a>>,
     query: &str,
 ) -> Vec<SearchHit<'a>> {

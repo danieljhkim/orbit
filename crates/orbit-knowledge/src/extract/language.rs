@@ -130,6 +130,3 @@ impl FileKind {
         !matches!(self, Self::Unknown)
     }
 }
-
-#[cfg(test)]
-mod tests;

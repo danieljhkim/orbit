@@ -27,6 +27,3 @@ impl FileExtractor for ConfigExtractor {
         ExtractionResult::default()
     }
 }
-
-#[cfg(test)]
-mod tests;

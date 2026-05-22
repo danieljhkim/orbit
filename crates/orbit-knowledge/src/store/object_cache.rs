@@ -103,7 +103,3 @@ impl fmt::Debug for GraphObjectCache {
             .finish()
     }
 }
-
-#[cfg(test)]
-#[path = "object_cache/tests/mod.rs"]
-mod tests;

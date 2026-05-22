@@ -72,3 +72,6 @@ pub use store::{
 pub use working_graph::{
     LeafEdit, LeafVersionChain, MoveResult, WorkingGraph, WorkingLeaf, WriteError, WriteResult,
 };
+
+#[cfg(test)]
+mod tests;

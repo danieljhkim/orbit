@@ -125,3 +125,6 @@ pub fn knowledge_error_to_orbit(error: KnowledgeError) -> OrbitError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

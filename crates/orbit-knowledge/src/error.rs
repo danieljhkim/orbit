@@ -67,6 +67,3 @@ impl KnowledgeError {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

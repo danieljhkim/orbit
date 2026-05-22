@@ -416,6 +416,3 @@ fn extract_const_static(node: Node, source: &str, leaves: &mut Vec<ExtractedLeaf
         depth: None,
     });
 }
-
-#[cfg(test)]
-mod tests;

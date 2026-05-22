@@ -15,12 +15,15 @@ const SKIP_EXTENSIONS: &[&str] = &[
     "pdf", "zip", "tar", "gz", "lock",
 ];
 
-struct OrbitIgnoreMatcher {
+/// Internal .orbitignore matcher used by the scan pipeline.
+/// pub(crate) so that sibling tests/scan.rs can exercise it directly (per
+/// docs/design-patterns/test_layout.md — tests only see public seams).
+pub(crate) struct OrbitIgnoreMatcher {
     gitignore: Gitignore,
 }
 
 impl OrbitIgnoreMatcher {
-    fn load(repo_path: &Path) -> Result<Self, KnowledgeError> {
+    pub(crate) fn load(repo_path: &Path) -> Result<Self, KnowledgeError> {
         let mut builder = GitignoreBuilder::new(repo_path);
         for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
             builder.add_line(None, pattern).map_err(|error| {
@@ -57,7 +60,7 @@ impl OrbitIgnoreMatcher {
         Ok(Self { gitignore })
     }
 
-    fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
+    pub(crate) fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
         self.gitignore
             .matched_path_or_any_parents(rel_path, is_dir)
             .is_ignore()

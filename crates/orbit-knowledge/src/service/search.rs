@@ -315,6 +315,3 @@ fn line_snippet(line: &str) -> String {
     }
     snippet
 }
-
-#[cfg(test)]
-mod tests;
