@@ -16,8 +16,10 @@ use super::writer::{
 use crate::error::KnowledgeError;
 
 pub struct GraphIndexReader {
-    conn: Connection,
-    path: PathBuf,
+    /// pub(crate) to support white-box read-only assertion in sibling
+    /// tests/reader.rs (see docs/design-patterns/test_layout.md).
+    pub(crate) conn: Connection,
+    pub(crate) path: PathBuf,
 }
 
 impl GraphIndexReader {

@@ -6,7 +6,9 @@ use crate::service::{GraphContextService, TopFileEntry, compact_from_overview};
 pub use crate::service::{GraphOverview, GraphOverviewSummary};
 
 const AUTO_SUMMARY_FILE_THRESHOLD: usize = 20;
-const FILE_THRESHOLD: usize = 50;
+// pub(crate) widened for commands/tests/overview.rs access during test layout
+// migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) const FILE_THRESHOLD: usize = 50;
 pub const SUMMARY_HINT: &str =
     "Use `prefix` to narrow the overview and get per-file symbol listings.";
 
@@ -94,7 +96,9 @@ pub fn run(input: OverviewInput) -> Result<OverviewResult, KnowledgeError> {
     ))
 }
 
-fn result_from_overview(
+// pub(crate) widened for commands/tests/overview.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn result_from_overview(
     overview: GraphOverview,
     prefix: Option<&str>,
     input_format: Option<OverviewFormat>,
@@ -124,7 +128,9 @@ fn result_from_overview(
     }
 }
 
-fn requested_format(format: Option<OverviewFormat>) -> RequestedOverviewFormat {
+// pub(crate) widened for commands/tests/overview.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn requested_format(format: Option<OverviewFormat>) -> RequestedOverviewFormat {
     match format {
         Some(OverviewFormat::Full) => RequestedOverviewFormat::Full,
         Some(OverviewFormat::Summary) => RequestedOverviewFormat::Summary,
@@ -132,7 +138,9 @@ fn requested_format(format: Option<OverviewFormat>) -> RequestedOverviewFormat {
     }
 }
 
-fn default_format_for_scope(prefix: Option<&str>, file_count: usize) -> OverviewFormat {
+// pub(crate) widened for commands/tests/overview.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn default_format_for_scope(prefix: Option<&str>, file_count: usize) -> OverviewFormat {
     if prefix.is_none() || file_count > AUTO_SUMMARY_FILE_THRESHOLD {
         OverviewFormat::Summary
     } else {

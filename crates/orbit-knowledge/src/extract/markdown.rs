@@ -186,6 +186,3 @@ fn slice_lines(lines: &[&str], start_line: usize, end_line: usize) -> String {
     let hi = end_line.min(lines.len());
     lines[lo..hi].join("\n")
 }
-
-#[cfg(test)]
-mod tests;

@@ -10,7 +10,9 @@ use super::fuzzy::levenshtein_distance;
 
 /// Diagnostic suggestions are intentionally capped so failed lookups stay cheap
 /// and payloads remain small for agent callers.
-const DID_YOU_MEAN_LIMIT: usize = 5;
+// pub(crate) widened for commands/tests/show.rs during test layout migration
+// (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) const DID_YOU_MEAN_LIMIT: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct ShowInput {
@@ -86,7 +88,9 @@ pub fn run(input: ShowInput) -> Result<ShowResult, KnowledgeError> {
     Ok(result_from_context(&svc, &context))
 }
 
-fn invalid_selector_resolution_error(
+// pub(crate) widened for commands/tests/show.rs during test layout migration
+// (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn invalid_selector_resolution_error(
     graph: &CodebaseGraphV1,
     selector: &Selector,
     error: KnowledgeError,

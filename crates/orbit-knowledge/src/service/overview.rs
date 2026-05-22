@@ -161,7 +161,9 @@ pub fn compact_from_overview(
 }
 
 impl FileOverview {
-    fn top_file_entry(&self) -> TopFileEntry {
+    // pub(crate) widened for service/tests/overview.rs during test layout migration
+    // (docs/design-patterns/test_layout.md, ORB-00249).
+    pub(crate) fn top_file_entry(&self) -> TopFileEntry {
         TopFileEntry {
             selector: self.selector.clone(),
             name: self.name.clone(),
@@ -192,6 +194,3 @@ fn top_level_dir_key(path: &str, location_prefix: Option<&str>) -> String {
         .unwrap_or(".")
         .to_string()
 }
-
-#[cfg(test)]
-mod tests;

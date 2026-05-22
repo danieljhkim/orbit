@@ -246,7 +246,9 @@ pub fn append_scoreboard(
     Ok(previous)
 }
 
-fn load_scoreboard(path: &Path) -> Result<Vec<GraphBenchRecord>, KnowledgeError> {
+/// pub(crate) for direct use by sibling test in tests/graph_bench.rs
+/// (follows per-module sibling tests layout; previously visible only via nested child).
+pub(crate) fn load_scoreboard(path: &Path) -> Result<Vec<GraphBenchRecord>, KnowledgeError> {
     if !path.is_file() {
         return Ok(Vec::new());
     }
@@ -425,6 +427,3 @@ fn temporary_child_dir(scoreboard_path: &Path) -> PathBuf {
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
     ))
 }
-
-#[cfg(test)]
-mod tests;

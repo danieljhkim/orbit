@@ -628,7 +628,3 @@ fn file_exports(exports: &[extract::ExtractedExport]) -> (Vec<String>, Vec<ReExp
 
     (names.into_iter().collect(), re_exports)
 }
-
-// L-0032: Keep this inline because src/pipeline/build/tests/ is hidden by the repo-wide build/ ignore rule.
-#[cfg(test)]
-mod tests {}

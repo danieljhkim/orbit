@@ -247,6 +247,3 @@ fn push_leaf(
         depth: None,
     });
 }
-
-#[cfg(test)]
-mod tests;

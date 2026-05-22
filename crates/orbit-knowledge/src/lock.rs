@@ -402,6 +402,3 @@ fn contention_error(selector: &str, store: &LockStore) -> LockError {
         locked_at,
     }
 }
-
-#[cfg(test)]
-mod tests;

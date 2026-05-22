@@ -84,7 +84,9 @@ impl RefInclude {
         Ok(include)
     }
 
-    fn includes(self, kind: RefKind) -> bool {
+    // pub(crate) widened for commands/tests/refs.rs during test layout migration
+    // (docs/design-patterns/test_layout.md, ORB-00249).
+    pub(crate) fn includes(self, kind: RefKind) -> bool {
         match kind {
             RefKind::Code => self.code,
             RefKind::Doc => self.doc,
@@ -173,7 +175,9 @@ fn symbol_search_terms(symbol: &str, include_simple_name: bool) -> Vec<String> {
     terms
 }
 
-fn simple_selector_symbol_name(symbol: &str) -> String {
+// pub(crate) widened for commands/tests/refs.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn simple_selector_symbol_name(symbol: &str) -> String {
     let scoped = symbol
         .rsplit("::")
         .next()
@@ -194,7 +198,9 @@ fn strip_numeric_selector_suffixes(mut symbol: &str) -> &str {
     symbol
 }
 
-fn classify_ref_kind(path: &str) -> RefKind {
+// pub(crate) widened for commands/tests/refs.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn classify_ref_kind(path: &str) -> RefKind {
     let extension = Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())

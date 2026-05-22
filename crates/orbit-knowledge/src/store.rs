@@ -43,6 +43,8 @@ pub struct KnowledgeStore {
     graph_object_cache: GraphObjectCache,
 }
 
+#[cfg(test)]
+mod tests;
 impl KnowledgeStore {
     pub fn graph_object_cache(&self) -> &GraphObjectCache {
         &self.graph_object_cache
