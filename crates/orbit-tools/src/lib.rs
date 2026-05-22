@@ -193,6 +193,8 @@ pub struct ReservationOwnerContext {
 #[derive(Clone, Default)]
 pub struct ToolContext {
     pub cwd: Option<String>,
+    /// Ambient metadata asserted by the transport/session, not by tool input.
+    pub session_context: orbit_common::types::ToolSessionContext,
     /// If non-empty, only tools in this list may be called. Empty means unrestricted.
     pub allowed_tools: Vec<String>,
     /// When set, fs tools enforce that all paths resolve inside this directory.
@@ -232,6 +234,7 @@ impl std::fmt::Debug for ToolContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolContext")
             .field("cwd", &self.cwd)
+            .field("session_context", &self.session_context)
             .field("allowed_tools", &self.allowed_tools)
             .field("workspace_root", &self.workspace_root)
             .field("agent_name", &self.agent_name)

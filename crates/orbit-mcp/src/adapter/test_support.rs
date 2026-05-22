@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::types::{OrbitError, ToolParam, ToolSchema, ToolSessionContext};
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 
@@ -48,7 +48,12 @@ impl crate::McpHost for StubHost {
         self.schemas.clone()
     }
 
-    fn call_tool(&self, _name: &str, _input: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &self,
+        _name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         Ok(Value::Null)
     }
 }
@@ -62,7 +67,12 @@ impl crate::McpHost for EchoArrayHost {
         self.schemas.clone()
     }
 
-    fn call_tool(&self, name: &str, _input: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &self,
+        name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         Ok(json!([{ "tool": name }]))
     }
 }
@@ -93,7 +103,12 @@ impl crate::McpHost for LearningSidecarHost {
         ]
     }
 
-    fn call_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         self.calls
             .lock()
             .expect("calls lock")
@@ -133,6 +148,50 @@ impl LearningPersistenceHost {
     }
 }
 
+#[derive(Default)]
+pub(super) struct SessionContextHost {
+    calls: StdMutex<Vec<(String, Value, ToolSessionContext)>>,
+}
+
+impl SessionContextHost {
+    pub(super) fn calls(&self) -> Vec<(String, Value, ToolSessionContext)> {
+        self.calls.lock().expect("calls lock").clone()
+    }
+}
+
+impl crate::McpHost for SessionContextHost {
+    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+        vec![
+            tool_schema("orbit.task.list"),
+            tool_schema("orbit.task.add"),
+        ]
+    }
+
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let effective_workspace = input
+            .get("workspace")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| session_context.workspace.clone());
+        self.calls.lock().expect("calls lock").push((
+            name.to_string(),
+            input.clone(),
+            session_context.clone(),
+        ));
+        Ok(json!({
+            "tool": name,
+            "effective_workspace": effective_workspace,
+        }))
+    }
+}
+
 impl crate::McpHost for LearningPersistenceHost {
     fn list_tool_schemas(&self) -> Vec<ToolSchema> {
         vec![
@@ -142,7 +201,12 @@ impl crate::McpHost for LearningPersistenceHost {
         ]
     }
 
-    fn call_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         let canonical = if name.contains("learning.add") {
             "orbit.learning.add"
         } else if name.contains("learning.update") {

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError,
+    LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError, ToolSessionContext,
 };
 use orbit_common::utility::learning_session::{
     learning_session_state_path, read_learning_session_state, update_learning_session_state,
@@ -31,9 +31,11 @@ impl OrbitToolServer {
 
         let host = Arc::clone(&self.host);
         let caps = self.learning_caps;
-        let join =
-            tokio::task::spawn_blocking(move || search_learning_reminders(&*host, &paths, caps))
-                .await;
+        let session_context = self.session_context();
+        let join = tokio::task::spawn_blocking(move || {
+            search_learning_reminders(&*host, &paths, caps, session_context)
+        })
+        .await;
         let reminders = match join {
             Ok(Ok(reminders)) => reminders,
             Ok(Err(error)) => {
@@ -207,6 +209,7 @@ fn search_learning_reminders(
     host: &dyn McpHost,
     paths: &[String],
     caps: LearningInjectionCaps,
+    session_context: ToolSessionContext,
 ) -> Result<Vec<LearningReminder>, OrbitError> {
     // ORB-00202: per-domain `orbit.learning.search` was retired; the
     // applicability lookup re-homed onto `orbit.learning.list` with glob-
@@ -218,6 +221,7 @@ fn search_learning_reminders(
             json!({
                 "path": path,
             }),
+            session_context.clone(),
         )?;
         for candidate in parse_learning_list_candidates(&value) {
             by_id

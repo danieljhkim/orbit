@@ -38,7 +38,7 @@ mod error;
 
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
 use serde_json::Value;
@@ -54,7 +54,12 @@ pub use adapter::OrbitToolServer;
 /// wants applied; the adapter will never bypass it.
 pub trait McpHost: Send + Sync + 'static {
     fn list_tool_schemas(&self) -> Vec<ToolSchema>;
-    fn call_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError>;
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError>;
 }
 
 /// Serve the given [`McpHost`] over an MCP stdio transport.

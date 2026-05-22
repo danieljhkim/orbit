@@ -238,6 +238,7 @@ mod audited_mcp_call_tests {
             .call_tool(
                 "orbit.search",
                 json!({ "query": "anything", "kind": "task" }),
+                Default::default(),
             )
             .expect("dispatch ok");
         assert!(
@@ -305,6 +306,7 @@ mod audited_mcp_call_tests {
         let result = host.call_tool(
             "orbit.task.delete",
             json!({ "id": task_id, "model": "gpt-5.5" }),
+            Default::default(),
         );
 
         let error = result.expect_err("unforced protected delete fails");
@@ -345,6 +347,7 @@ mod audited_mcp_call_tests {
                 .call_tool(
                     "orbit.task.delete",
                     json!({ "id": task_id, "model": "gpt-5.5" }),
+                    Default::default(),
                 )
                 .expect("unprotected delete succeeds");
             assert_eq!(value, json!({ "id": task_id, "deleted": true }));
@@ -372,6 +375,7 @@ mod audited_mcp_call_tests {
             .call_tool(
                 "orbit.task.delete",
                 json!({ "id": task_id, "force": true, "model": "gpt-5.5" }),
+                Default::default(),
             )
             .expect("forced protected delete succeeds");
 

@@ -23,13 +23,13 @@ impl Tool for OrbitTaskAddTool {
                 required: true,
             },
             // ADR-0149: `workspace` is the binding key for ~/.orbit/tasks/workspaces/<id>/
-            // home-store projection; defaulting to cwd would silently misroute tasks under
-            // worktrees, subdirectories, or non-default `workspace_id` in .orbit/config.yaml.
+            // home-store projection; ambient MCP session context may supply this field,
+            // but process cwd must never be used as the fallback.
             ToolParam {
                 name: "workspace".to_string(),
                 description: "Workspace path for the task".to_string(),
                 param_type: "string".to_string(),
-                required: true,
+                required: false,
             },
             ToolParam {
                 name: "acceptance_criteria".to_string(),
@@ -93,7 +93,7 @@ impl Tool for OrbitTaskAddTool {
         super::super::reject_agent_field(&input, "orbit.task.add")?;
         required_string(&input, &["title"], "title")?;
         required_string(&input, &["description"], "description")?;
-        required_string(&input, &["workspace"], "workspace")?;
+        super::super::resolve_workspace_argument(ctx, &mut input, "orbit.task.add")?;
 
         let ignored_fields = strip_retired_task_add_input_fields(&mut input);
         if !ignored_fields.is_empty() {

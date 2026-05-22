@@ -240,6 +240,63 @@ pub(super) fn execute_host_action(
     )
 }
 
+pub(super) fn resolve_workspace_argument(
+    ctx: &ToolContext,
+    input: &mut Value,
+    tool_name: &str,
+) -> Result<String, OrbitError> {
+    // ADR-0181: MCP workspace defaults come from explicit session context, never process cwd.
+    let explicit = optional_string_alias(input, &["workspace"])?;
+    let session = ctx
+        .session_context
+        .workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    match (explicit, session) {
+        (Some(workspace), Some(session_workspace)) => {
+            if workspace != session_workspace {
+                tracing::info!(
+                    target: "orbit.tools.workspace",
+                    tool_name,
+                    explicit_workspace = %workspace,
+                    session_workspace = %session_workspace,
+                    "explicit workspace overrides MCP session context"
+                );
+            }
+            set_input_workspace(input, &workspace)?;
+            Ok(workspace)
+        }
+        (Some(workspace), None) => {
+            set_input_workspace(input, &workspace)?;
+            Ok(workspace)
+        }
+        (None, Some(workspace)) => {
+            set_input_workspace(input, &workspace)?;
+            Ok(workspace)
+        }
+        (None, None) => Err(OrbitError::InvalidInput(
+            "missing `workspace`; provide it explicitly or initialize the MCP session with `_meta.orbit.workspace`"
+                .to_string(),
+        )),
+    }
+}
+
+fn set_input_workspace(input: &mut Value, workspace: &str) -> Result<(), OrbitError> {
+    let Some(object) = input.as_object_mut() else {
+        return Err(OrbitError::InvalidInput(
+            "tool input must be a JSON object".to_string(),
+        ));
+    };
+    object.insert(
+        "workspace".to_string(),
+        Value::String(workspace.to_string()),
+    );
+    Ok(())
+}
+
 pub(super) fn task_scope(ctx: &ToolContext) -> OrbitTaskScope {
     ctx.orbit_host
         .as_ref()

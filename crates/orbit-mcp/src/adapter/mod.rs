@@ -19,7 +19,7 @@ mod tests;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use orbit_common::types::{LearningInjectionCaps, LearningInjectionState};
+use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, ToolSessionContext};
 
 use self::learning_sidecar::load_learning_state_for_session;
 use crate::McpHost;
@@ -44,6 +44,7 @@ use crate::McpHost;
 pub struct OrbitToolServer {
     host: Arc<dyn McpHost>,
     name_map: RwLock<HashMap<String, String>>,
+    session_context: RwLock<ToolSessionContext>,
     learning_session_id: Option<String>,
     learning_caps: LearningInjectionCaps,
     learning_states: tokio::sync::Mutex<HashMap<String, LearningInjectionState>>,
@@ -68,6 +69,7 @@ impl OrbitToolServer {
         Self {
             host,
             name_map: RwLock::new(HashMap::new()),
+            session_context: RwLock::new(ToolSessionContext::default()),
             learning_session_id,
             learning_caps,
             learning_states: tokio::sync::Mutex::new(learning_states),
@@ -89,6 +91,7 @@ impl OrbitToolServer {
         Self {
             host,
             name_map: RwLock::new(HashMap::new()),
+            session_context: RwLock::new(ToolSessionContext::default()),
             learning_session_id,
             learning_caps,
             learning_states: tokio::sync::Mutex::new(learning_states),

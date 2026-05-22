@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 
-use orbit_common::types::{OrbitError, RETIRED_TASK_ADD_INPUT_FIELDS};
+use orbit_common::types::{OrbitError, RETIRED_TASK_ADD_INPUT_FIELDS, ToolSessionContext};
 
 use super::super::add::OrbitTaskAddTool;
 use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};
@@ -101,6 +101,51 @@ where
     (result, logs)
 }
 
+fn capture_info<F, T>(f: F) -> (T, String)
+where
+    F: FnOnce() -> T,
+{
+    use std::io::{self, Write};
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone)]
+    struct CaptureMakeWriter(Arc<Mutex<Vec<u8>>>);
+    struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl<'a> MakeWriter<'a> for CaptureMakeWriter {
+        type Writer = CaptureWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            CaptureWriter(Arc::clone(&self.0))
+        }
+    }
+
+    impl Write for CaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().expect("capture lock").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(CaptureMakeWriter(Arc::clone(&buffer)))
+        .with_max_level(LevelFilter::INFO)
+        .with_target(true)
+        .with_ansi(false)
+        .without_time()
+        .finish();
+    let result = tracing::subscriber::with_default(subscriber, f);
+    let logs =
+        String::from_utf8(buffer.lock().expect("capture buffer lock").clone()).expect("utf8 logs");
+    (result, logs)
+}
+
 #[test]
 fn schema_exposes_only_trimmed_create_task_fields() {
     let schema = OrbitTaskAddTool.schema();
@@ -129,7 +174,13 @@ fn schema_exposes_only_trimmed_create_task_fields() {
         .filter(|param| param.required)
         .map(|param| param.name.as_str())
         .collect();
-    assert_eq!(required, vec!["title", "description", "workspace"]);
+    assert_eq!(required, vec!["title", "description"]);
+    let workspace = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "workspace")
+        .expect("workspace param");
+    assert!(!workspace.required);
 
     for removed in RETIRED_TASK_ADD_INPUT_FIELDS {
         assert!(
@@ -249,6 +300,65 @@ fn add_call_with_retired_fields_warns_once_and_ignores_them() {
 }
 
 #[test]
+fn add_call_uses_session_workspace_when_input_omits_workspace() {
+    let host = RecordingHost::default();
+    let mut ctx = mk_ctx(host.clone());
+    ctx.session_context = ToolSessionContext::with_workspace("/tmp/canonical-ws");
+    let tool = OrbitTaskAddTool;
+
+    tool.execute(
+        &ctx,
+        json!({
+            "title": "Ambient workspace test",
+            "description": "MCP session context supplies workspace",
+            "model": "codex"
+        }),
+    )
+    .expect("session workspace should satisfy workspace");
+
+    let recorded = host
+        .call
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("host was called");
+    assert_eq!(recorded.input["workspace"], "/tmp/canonical-ws");
+}
+
+#[test]
+fn explicit_workspace_overrides_mismatched_session_workspace() {
+    let host = RecordingHost::default();
+    let mut ctx = mk_ctx(host.clone());
+    ctx.session_context = ToolSessionContext::with_workspace("/tmp/session-ws");
+    let tool = OrbitTaskAddTool;
+
+    let (_res, logs) = capture_info(|| {
+        tool.execute(
+            &ctx,
+            json!({
+                "title": "Explicit workspace wins",
+                "description": "The caller can override session context",
+                "workspace": "/tmp/explicit-ws",
+                "model": "codex"
+            }),
+        )
+        .expect("explicit workspace should win")
+    });
+
+    let recorded = host
+        .call
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("host was called");
+    assert_eq!(recorded.input["workspace"], "/tmp/explicit-ws");
+    assert!(
+        logs.contains("explicit workspace overrides MCP session context"),
+        "mismatch should be logged at info level: {logs}"
+    );
+}
+
+#[test]
 fn add_call_missing_required_fields_returns_required_field_error() {
     let cases = [
         (
@@ -263,13 +373,6 @@ fn add_call_missing_required_fields_returns_required_field_error() {
             json!({
                 "title": "missing description",
                 "workspace": "/tmp/test-ws"
-            }),
-        ),
-        (
-            "workspace",
-            json!({
-                "title": "missing workspace",
-                "description": "missing workspace"
             }),
         ),
     ];
@@ -291,4 +394,30 @@ fn add_call_missing_required_fields_returns_required_field_error() {
             "host must not be called when {missing} is missing"
         );
     }
+}
+
+#[test]
+fn add_call_missing_workspace_without_session_context_returns_clear_error() {
+    let host = RecordingHost::default();
+    let ctx = mk_ctx(host.clone());
+    let err = OrbitTaskAddTool
+        .execute(
+            &ctx,
+            json!({
+                "title": "missing workspace",
+                "description": "missing workspace"
+            }),
+        )
+        .expect_err("missing workspace and session context should fail");
+    match err {
+        OrbitError::InvalidInput(message) => {
+            assert!(message.contains("missing `workspace`"), "{message}");
+            assert!(message.contains("MCP session"), "{message}");
+        }
+        other => panic!("unexpected error for missing workspace: {other}"),
+    }
+    assert!(
+        host.call.lock().expect("lock").is_none(),
+        "host must not be called when workspace cannot be resolved"
+    );
 }

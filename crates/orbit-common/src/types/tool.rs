@@ -1,6 +1,20 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolSessionContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+impl ToolSessionContext {
+    pub fn with_workspace(workspace: impl Into<String>) -> Self {
+        Self {
+            workspace: Some(workspace.into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolParam {
     pub name: String,
