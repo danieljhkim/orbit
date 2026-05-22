@@ -21,6 +21,21 @@ pub(super) fn record_git_check_ignore_invocation() {
     GIT_CHECK_IGNORE_INVOCATIONS.with(|calls| calls.set(calls.get() + 1));
 }
 
+/// Reset the git-check-ignore invocation counter (test helper).
+/// Visibility widened for ORB-00250 sibling tests (tests/walk.rs + shared
+/// helpers in tests/mod.rs) per docs/design-patterns/test_layout.md.
+#[cfg(test)]
+pub(super) fn reset_git_check_ignore_invocations() {
+    GIT_CHECK_IGNORE_INVOCATIONS.with(|calls| calls.set(0));
+}
+
+/// Return the current git-check-ignore invocation count (test helper).
+/// Visibility widened for ORB-00250 sibling tests.
+#[cfg(test)]
+pub(super) fn git_check_ignore_invocations() -> usize {
+    GIT_CHECK_IGNORE_INVOCATIONS.with(std::cell::Cell::get)
+}
+
 pub fn walk_docs_roots(repo_root: &Path, roots: &[String]) -> Result<Vec<DocRecord>, OrbitError> {
     let mut candidates = Vec::new();
     for root in roots {

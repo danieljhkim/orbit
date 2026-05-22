@@ -84,7 +84,8 @@ fn collect_migration_candidates(
     rec(root, root, relative_depth, out)
 }
 
-fn migrate_doc_content(
+/// Visibility widened to pub(super) for ORB-00250 tests/migrate.rs.
+pub(super) fn migrate_doc_content(
     relative: &Path,
     path: &Path,
     raw: &str,
@@ -207,7 +208,8 @@ fn yaml_inline_string(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
-fn migration_diff(path: &str, before: &str, after: &str) -> String {
+/// Visibility widened to pub(super) for ORB-00250 tests/migrate.rs.
+pub(super) fn migration_diff(path: &str, before: &str, after: &str) -> String {
     let before_lines = diff_lines(before);
     let after_lines = diff_lines(after);
     let old_start = if before_lines.is_empty() { 0 } else { 1 };

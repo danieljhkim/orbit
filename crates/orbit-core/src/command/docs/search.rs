@@ -5,8 +5,8 @@ use orbit_common::types::{Adr, AdrStatus, OrbitError, Task};
 use orbit_common::utility::glob::{match_glob, normalize_glob_path};
 use orbit_common::utility::selector::anchor_path;
 use orbit_search::{
-    score_adr_record, score_doc_record, sort_search_results, AdrEmbeddingSource, AdrSearchSource,
-    DocEmbeddingSource, DocSearchSource,
+    AdrEmbeddingSource, AdrSearchSource, DocEmbeddingSource, DocSearchSource, score_adr_record,
+    score_doc_record, sort_search_results,
 };
 
 use super::frontmatter::parse_doc_tolerant;
