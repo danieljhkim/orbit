@@ -48,5 +48,3 @@ pub(super) fn codex_mcp_server_table() -> TomlTable {
         ("enabled".to_string(), TomlValue::Boolean(true)),
     ])
 }
-
-

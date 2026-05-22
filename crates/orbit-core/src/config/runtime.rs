@@ -767,4 +767,3 @@ fn is_valid_env_var_name(value: &str) -> bool {
     }
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
-

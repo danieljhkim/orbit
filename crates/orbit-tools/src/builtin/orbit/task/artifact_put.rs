@@ -87,4 +87,3 @@ fn resolve_source_path(ctx: &ToolContext, source_path: &str) -> PathBuf {
         .map(|cwd| cwd.join(&path))
         .unwrap_or(path)
 }
-

@@ -191,4 +191,3 @@ fn summarize_pack_entry(entry: &mut orbit_knowledge::KnowledgePackEntry) {
     };
     entry.file = Some(file_path);
 }
-

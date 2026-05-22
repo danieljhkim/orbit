@@ -8,9 +8,8 @@ use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
 
 use super::{
-    DOCS_TOOL_NAMES, GRAPH_READ_TOOL_NAMES, LEARNING_TOOL_NAMES, RuntimeMcpHost,
-    SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed,
-    safe_mcp_tool_names,
+    DOCS_TOOL_NAMES, GRAPH_READ_TOOL_NAMES, LEARNING_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES,
+    SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed, safe_mcp_tool_names,
 };
 
 #[test]
@@ -287,9 +286,7 @@ mod audited_mcp_call_tests {
             Err(e) => {
                 let msg = e.to_string().to_lowercase();
                 assert!(
-                    !msg.contains("not found")
-                        && !msg.contains("unknown")
-                        && !msg.contains("tool"),
+                    !msg.contains("not found") && !msg.contains("unknown") && !msg.contains("tool"),
                     "preflight must accept orbit.graph.search (MCP-exposed); execution err ok in empty fixture: {}",
                     e
                 );
@@ -311,9 +308,11 @@ mod audited_mcp_call_tests {
         );
 
         let error = result.expect_err("unforced protected delete fails");
-        assert!(error.to_string().contains(
-            "use --force to delete tasks not in proposed, friction, or rejected status"
-        ));
+        assert!(
+            error.to_string().contains(
+                "use --force to delete tasks not in proposed, friction, or rejected status"
+            )
+        );
         runtime
             .get_task(&task_id)
             .expect("unforced protected task remains");

@@ -638,4 +638,3 @@ fn colorize_code(target: &str, level: &str, code: &str) -> ColoredString {
         _ => code.normal(),
     }
 }
-

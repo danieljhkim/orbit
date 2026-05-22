@@ -1,7 +1,7 @@
 use super::super::bootstrap::*;
 use super::super::raw::RawAgentRoleConfig;
-use tempfile::tempdir;
 use std::collections::BTreeMap;
+use tempfile::tempdir;
 
 fn sample_roles() -> BTreeMap<String, RawAgentRoleConfig> {
     let mut roles = BTreeMap::new();

@@ -92,4 +92,3 @@ super::gh_tool! {
         parse_review_response(&result.stdout)
     }
 }
-

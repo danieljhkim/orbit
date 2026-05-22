@@ -268,4 +268,3 @@ pub(super) fn print_action_summary(action: McpAction, providers: &[McpProvider])
         .join(", ");
     println!("mcp {}: {}", action.label(), labels);
 }
-

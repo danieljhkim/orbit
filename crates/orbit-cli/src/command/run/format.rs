@@ -55,5 +55,3 @@ pub(crate) fn format_waiting_line(
     }
     (!parts.is_empty()).then(|| format!("Waiting on {}", parts.join("; ")))
 }
-
-

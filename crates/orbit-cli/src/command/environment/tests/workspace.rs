@@ -1,4 +1,3 @@
-
 use std::sync::Mutex;
 
 use tempfile::tempdir;
@@ -420,8 +419,7 @@ fn workspace_init_seeds_default_orbitignore_when_missing() {
 
     result.expect("workspace init");
     assert_eq!(
-        std::fs::read_to_string(workspace.path().join(".orbitignore"))
-            .expect("read .orbitignore"),
+        std::fs::read_to_string(workspace.path().join(".orbitignore")).expect("read .orbitignore"),
         default_orbitignore_template()
     );
 }
@@ -467,8 +465,7 @@ fn workspace_init_preserves_existing_orbitignore() {
 
     result.expect("workspace init");
     assert_eq!(
-        std::fs::read_to_string(workspace.path().join(".orbitignore"))
-            .expect("read .orbitignore"),
+        std::fs::read_to_string(workspace.path().join(".orbitignore")).expect("read .orbitignore"),
         "custom-output/\n!custom-output/keep.txt\n"
     );
 }

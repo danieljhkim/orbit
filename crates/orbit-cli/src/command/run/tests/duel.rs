@@ -177,8 +177,8 @@ fn duel_plan_explicit_all_three_populates_family_overrides_in_input() {
     args.planner_b = Some("codex".to_string());
     args.arbiter = Some("grok".to_string());
 
-    let plan = build_duel_plan_run_plan(&args, "main", &full_candidates())
-        .expect("explicit roles build");
+    let plan =
+        build_duel_plan_run_plan(&args, "main", &full_candidates()).expect("explicit roles build");
 
     assert_eq!(plan.input["planner_a_family"], "gemini");
     assert_eq!(plan.input["planner_b_family"], "codex");
@@ -244,9 +244,8 @@ fn duel_plan_explicit_duplicate_family_errors_with_duplicated_name() {
 
 #[test]
 fn duel_plan_no_explicit_flags_omits_family_keys_from_input() {
-    let plan =
-        build_duel_plan_run_plan(&duel_plan_args(None, false), "main", &full_candidates())
-            .expect("no-override");
+    let plan = build_duel_plan_run_plan(&duel_plan_args(None, false), "main", &full_candidates())
+        .expect("no-override");
 
     let obj = plan.input.as_object().unwrap();
     assert!(!obj.contains_key("planner_a_family"));

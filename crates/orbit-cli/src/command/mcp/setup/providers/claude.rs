@@ -92,5 +92,3 @@ pub(super) fn claude_permission_name(tool_name: &str) -> String {
     // pub(super) widened so providers/tests/claude.rs can call it (sibling under providers per ORB-00221 layout)
     format!("mcp__plugin_orbit_orbit__{}", tool_name.replace('.', "_"))
 }
-
-

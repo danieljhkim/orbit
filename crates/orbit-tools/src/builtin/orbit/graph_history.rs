@@ -48,4 +48,3 @@ impl Tool for OrbitGraphHistoryTool {
         ))
     }
 }
-

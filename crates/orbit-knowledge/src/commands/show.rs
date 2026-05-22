@@ -406,4 +406,3 @@ fn selector_for_index_row(row: &GraphIndexNodeRow) -> String {
             _ => row.id.clone(),
         })
 }
-

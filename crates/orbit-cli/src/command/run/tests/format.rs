@@ -3,8 +3,7 @@ use orbit_common::types::{JobRunState, PipelineState};
 use serde_json::json;
 
 fn state_with_waiting(deps: Option<Vec<&str>>, locks: Option<Vec<&str>>) -> PipelineState {
-    let mut state =
-        PipelineState::new("jrun-test".to_string(), "job-test".to_string(), json!({}));
+    let mut state = PipelineState::new("jrun-test".to_string(), "job-test".to_string(), json!({}));
     state.set_waiting_reasons(
         deps.map(|values| values.into_iter().map(str::to_string).collect()),
         locks.map(|values| values.into_iter().map(str::to_string).collect()),

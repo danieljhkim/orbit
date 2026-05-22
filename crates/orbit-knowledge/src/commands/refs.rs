@@ -206,4 +206,3 @@ fn classify_ref_kind(path: &str) -> RefKind {
         _ => RefKind::Code,
     }
 }
-

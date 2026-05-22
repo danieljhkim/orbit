@@ -188,4 +188,3 @@ fn emit_line<W: Write>(raw: &str, json: bool, use_color: bool, writer: &mut W) -
 fn io_to_orbit(err: io::Error) -> OrbitError {
     OrbitError::InvalidInput(err.to_string())
 }
-

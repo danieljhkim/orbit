@@ -1,4 +1,3 @@
-
 use clap::{Parser, error::ErrorKind};
 
 use crate::command::Cli;
@@ -14,9 +13,7 @@ fn task_help_describes_reject_transition_to_rejected() {
 
     let help = err.to_string();
     assert!(
-        help.contains(
-            "Reject a task (proposed/friction/review/backlog/in-progress -> rejected)"
-        ),
+        help.contains("Reject a task (proposed/friction/review/backlog/in-progress -> rejected)"),
         "{help}"
     );
     assert!(!help.contains("proposed → archived"), "{help}");

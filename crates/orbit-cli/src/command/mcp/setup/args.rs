@@ -237,4 +237,3 @@ pub(crate) fn init_auto_for_workspace(
             .collect()
     })
 }
-

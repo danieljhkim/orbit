@@ -368,7 +368,6 @@ fn should_project_minimal_task_output(tool_name: &str, input: &Value) -> bool {
     true
 }
 
-
 fn filter_top_level_fields(value: Value, fields: &[String]) -> Value {
     match value {
         Value::Object(map) => Value::Object(select_fields(map, fields)),

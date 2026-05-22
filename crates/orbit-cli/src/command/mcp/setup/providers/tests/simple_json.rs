@@ -1,10 +1,7 @@
-
 use tempfile::tempdir;
 
 use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
-use super::super::super::dispatch::{
-    auto_detected_providers, run_action, vscode_home_user_dir,
-};
+use super::super::super::dispatch::{auto_detected_providers, run_action, vscode_home_user_dir};
 use super::super::claude::claude_mcp_server_value;
 use super::super::codex::codex_mcp_server_table;
 use super::*;
@@ -104,10 +101,9 @@ fn cursor_home_scope_init_writes_resolved_home_path() {
     .expect("init cursor home");
 
     let cursor_path = home.path().join(".cursor").join("mcp.json");
-    let mcp: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&cursor_path).expect("read cursor home mcp"),
-    )
-    .expect("parse cursor home mcp");
+    let mcp: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&cursor_path).expect("read cursor home mcp"))
+            .expect("parse cursor home mcp");
     let args = mcp["mcpServers"]["orbit"]["args"]
         .as_array()
         .expect("cursor args");
@@ -434,8 +430,7 @@ fn auto_detects_windsurf_from_home_marker() {
     let home = tempdir().expect("home tempdir");
     let windsurf_dir = home.path().join(".codeium").join("windsurf");
     std::fs::create_dir_all(&windsurf_dir).expect("create windsurf home dir");
-    std::fs::write(windsurf_dir.join("mcp_config.json"), "{}\n")
-        .expect("write windsurf home file");
+    std::fs::write(windsurf_dir.join("mcp_config.json"), "{}\n").expect("write windsurf home file");
 
     let providers = auto_detected_providers(repo.path(), Some(home.path()));
     assert!(providers.contains(&McpProvider::Windsurf));

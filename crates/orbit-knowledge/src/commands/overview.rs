@@ -234,4 +234,3 @@ fn try_summary_via_sql_index(
         downgrade_reason,
     }))
 }
-

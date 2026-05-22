@@ -13,8 +13,8 @@ fn ship_args(task_ids: &[&str], mode: ShipMode, base: Option<&str>) -> ShipComma
 
 #[test]
 fn ship_auto_mode_omits_task_ids_and_uses_pr_mode_by_default() {
-    let plan = build_ship_run_plan(&ship_args(&[], ShipMode::Pr, None), "agent-main")
-        .expect("build plan");
+    let plan =
+        build_ship_run_plan(&ship_args(&[], ShipMode::Pr, None), "agent-main").expect("build plan");
 
     assert_eq!(plan.workflow_alias, SHIP_WORKFLOW);
     assert_eq!(
@@ -28,9 +28,8 @@ fn ship_auto_mode_omits_task_ids_and_uses_pr_mode_by_default() {
 
 #[test]
 fn ship_auto_mode_preserves_local_mode_and_base_override() {
-    let plan =
-        build_ship_run_plan(&ship_args(&[], ShipMode::Local, Some("main")), "agent-main")
-            .expect("build plan");
+    let plan = build_ship_run_plan(&ship_args(&[], ShipMode::Local, Some("main")), "agent-main")
+        .expect("build plan");
 
     assert_eq!(plan.workflow_alias, SHIP_WORKFLOW);
     assert_eq!(

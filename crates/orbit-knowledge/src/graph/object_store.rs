@@ -1040,4 +1040,3 @@ pub(crate) fn dir_depth(location: &str) -> usize {
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .count()
 }
-

@@ -78,4 +78,3 @@ fn load_hash_cache(ctx: &PipelineContext) -> HashMap<String, String> {
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
-

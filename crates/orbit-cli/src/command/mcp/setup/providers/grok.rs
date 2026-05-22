@@ -48,5 +48,3 @@ pub(super) fn grok_mcp_server_table() -> TomlTable {
         ("enabled".to_string(), TomlValue::Boolean(true)),
     ])
 }
-
-

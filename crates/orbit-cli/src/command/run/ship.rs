@@ -158,4 +158,3 @@ fn ensure_workflow_exists(workflow_alias: &'static str) -> Result<(), OrbitError
         .map(|_| ())
         .ok_or_else(|| OrbitError::InvalidInput(format!("unknown workflow '{workflow_alias}'")))
 }
-

@@ -513,4 +513,3 @@ fn is_non_code_path(path: &str) -> bool {
         "md" | "txt" | "rst" | "adoc" | "yaml" | "yml" | "toml" | "json" | "jsonc" | "csv" | "tsv"
     ) || lower.starts_with("docs/")
 }
-

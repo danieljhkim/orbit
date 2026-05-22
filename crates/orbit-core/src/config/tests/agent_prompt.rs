@@ -1,6 +1,6 @@
+use super::super::agent_detect::DetectedAgents;
 use super::super::agent_prompt::testing::CannedPrompter;
 use super::super::agent_prompt::*;
-use super::super::agent_detect::DetectedAgents;
 
 #[test]
 fn empty_answer_accepts_role_aware_recommended_setup() {

@@ -675,4 +675,3 @@ impl ShipAutoConflict {
         })
     }
 }
-

@@ -94,4 +94,3 @@ impl Tool for OrbitSearchTool {
         super::execute_host_action(ctx, input, OrbitBuiltinAction::Search)
     }
 }
-

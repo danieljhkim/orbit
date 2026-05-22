@@ -1,8 +1,8 @@
 use super::super::runtime::*;
-use tempfile::tempdir;
-use std::path::Path;
-use orbit_common::types::{all_agent_families, OrbitError};
+use orbit_common::types::{OrbitError, all_agent_families};
 use std::collections::BTreeMap;
+use std::path::Path;
+use tempfile::tempdir;
 
 fn write_config(dir: &Path, body: &str) {
     std::fs::write(dir.join("config.toml"), body).expect("write config");

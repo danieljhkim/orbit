@@ -160,4 +160,3 @@ impl Tool for OrbitTaskUpdateTool {
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskUpdate)
     }
 }
-

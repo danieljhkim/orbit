@@ -50,4 +50,3 @@ fn render_json_context(
     }))
     .map_err(|error| OrbitError::Execution(format!("serialize hook output: {error}")))
 }
-

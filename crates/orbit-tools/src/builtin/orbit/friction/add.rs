@@ -54,4 +54,3 @@ impl Tool for OrbitFrictionAddTool {
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::FrictionAdd)
     }
 }
-

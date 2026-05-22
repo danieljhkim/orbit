@@ -77,4 +77,3 @@ pub(super) fn env_home_dir() -> Option<PathBuf> {
                 .map(PathBuf::from)
         })
 }
-

@@ -280,4 +280,3 @@ fn build_job_run_input(pairs: &[String]) -> Result<Value, OrbitError> {
     }
     Ok(Value::Object(map))
 }
-

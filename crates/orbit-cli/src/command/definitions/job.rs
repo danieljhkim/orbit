@@ -374,4 +374,3 @@ fn v2_step_target_summary(step: &JobV2Step) -> (String, String) {
         JobV2StepBody::Loop { .. } => ("loop".to_string(), step.id.clone()),
     }
 }
-

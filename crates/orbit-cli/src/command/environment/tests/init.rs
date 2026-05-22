@@ -3,8 +3,8 @@ use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
 
-use crate::command::init::collect_role_settings_for_init;
 use crate::InitCommand;
+use crate::command::init::collect_role_settings_for_init;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 

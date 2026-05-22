@@ -122,4 +122,3 @@ super::gh_tool! {
         parse_review_comment_response(&result.stdout)
     }
 }
-

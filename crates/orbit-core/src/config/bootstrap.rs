@@ -8,7 +8,8 @@ use orbit_common::utility::fs::write_text_with_parent;
 
 use super::raw::{RawAgentRoleConfig, RawCrewEntry};
 
-pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str = include_str!("../../assets/config/default-config.toml"); // pub(crate) for sibling tests/bootstrap.rs per ORB-00223; no prod behavior change.
+pub(crate) const DEFAULT_CONFIG_TEMPLATE: &str =
+    include_str!("../../assets/config/default-config.toml"); // pub(crate) for sibling tests/bootstrap.rs per ORB-00223; no prod behavior change.
 
 pub(crate) fn seed_default_config(
     config_path: &Path,
@@ -79,4 +80,3 @@ fn validate_complete_role_settings(
     }
     Ok(())
 }
-

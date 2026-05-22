@@ -226,8 +226,8 @@ fn home_scope_remove_strips_only_orbit_entries() {
     assert!(gemini_settings["mcpServers"]["orbit"].is_null());
     assert!(gemini_settings["mcpServers"]["other"].is_object());
 
-    let grok_config = std::fs::read_to_string(home.path().join(".grok").join("config.toml"))
-        .expect("read grok");
+    let grok_config =
+        std::fs::read_to_string(home.path().join(".grok").join("config.toml")).expect("read grok");
     let grok_parsed: toml::Value = toml::from_str(&grok_config).expect("parse grok");
     assert_eq!(grok_parsed["model"].as_str(), Some("grok-4"));
     assert_eq!(

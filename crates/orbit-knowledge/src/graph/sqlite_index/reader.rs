@@ -438,4 +438,3 @@ impl GraphIndexReader {
         Ok(counts)
     }
 }
-

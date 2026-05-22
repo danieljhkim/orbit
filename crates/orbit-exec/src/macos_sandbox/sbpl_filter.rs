@@ -107,4 +107,3 @@ fn subpath_root(rule: &str) -> String {
         trimmed.to_string()
     }
 }
-

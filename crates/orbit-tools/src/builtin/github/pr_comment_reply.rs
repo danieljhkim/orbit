@@ -55,4 +55,3 @@ super::gh_tool! {
         parse_reply_response(&result.stdout)
     }
 }
-

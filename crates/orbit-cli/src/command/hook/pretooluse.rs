@@ -258,4 +258,3 @@ fn parent_process_id() -> u32 {
 fn parent_process_id() -> u32 {
     std::process::id()
 }
-
