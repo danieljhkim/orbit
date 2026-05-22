@@ -8,7 +8,7 @@ use orbit_common::types::{
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::{TaskAddParams, TaskUpdateParams};
+use crate::command::task::{TaskAddParams, TaskUpdateParams, compute_task_add_warnings};
 
 use super::input::{
     empty_string_to_none, optional_bool_alias, parse_artifacts, parse_external_refs,
@@ -35,6 +35,9 @@ pub(super) fn add(
             ));
         }
     };
+    let raw_context_files =
+        optional_csv_or_string_list_alias(&input, &["context_files", "context"])?
+            .unwrap_or_default();
     let task = runtime.add_task_with_identity(
         TaskAddParams {
             parent_id: optional_string_alias(&input, &["parent_id", "parent", "parentId"])?,
@@ -55,11 +58,7 @@ pub(super) fn add(
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
             plan,
             comment: optional_string(&input, "comment")?,
-            context_files: optional_csv_or_string_list_alias(
-                &input,
-                &["context_files", "context"],
-            )?
-            .unwrap_or_default(),
+            context_files: raw_context_files.clone(),
             workspace_path: Some(workspace),
             priority: optional_string(&input, "priority")?
                 .map(|value| parse_task_priority("priority", &value))
@@ -85,7 +84,14 @@ pub(super) fn add(
         agent,
         model,
     )?;
-    serialize_task(runtime, &task)
+    let mut response = serialize_task(runtime, &task)?;
+    let warnings = compute_task_add_warnings(&raw_context_files, task.task_type);
+    if !warnings.is_empty() {
+        if let Some(obj) = response.as_object_mut() {
+            obj.insert("warnings".to_string(), json!(warnings));
+        }
+    }
+    Ok(response)
 }
 
 pub(super) fn approve(
