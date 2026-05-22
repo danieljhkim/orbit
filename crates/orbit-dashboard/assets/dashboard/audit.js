@@ -224,6 +224,53 @@ function fetchAndRenderAudit(ctx) {
   });
 }
 
+function renderFailuresByToolCard(rateRows, failuresRows, onCardClick) {
+  const failByTool = new Map();
+  for (const f of failuresRows) failByTool.set(f.tool, f);
+
+  const container = el("div", { class: "audit-summary-container" });
+  container.appendChild(el("h3", { class: "summary-title", text: "Failures by Tool (24H)" }));
+  const grid = el("div", { class: "tool-health-grid" });
+
+  for (const row of rateRows) {
+    const rate = row.rate || 0;
+    const severity = rate >= 0.14 ? "critical" : rate >= 0.05 ? "warning" : "normal";
+    const card = el("div", { class: `health-card ${severity}` });
+
+    const header = el("div", { class: "card-header" });
+    header.appendChild(el("span", { class: "tool-name", text: row.tool }));
+    header.appendChild(el("span", {
+      class: "status-badge",
+      text: `${(rate * 100).toFixed(1)}% Fail Rate`,
+    }));
+    card.appendChild(header);
+
+    const body = el("div", { class: "card-body" });
+    const breakdown = failByTool.get(row.tool);
+    const mcp = breakdown ? (breakdown.mcp || 0) : 0;
+    const cli = breakdown ? (breakdown.cli || 0) : 0;
+    const failures = row.failures != null ? row.failures : (breakdown ? (breakdown.count || 0) : 0);
+    const total = row.total || 0;
+    const failureWord = failures === 1 ? "failure" : "failures";
+
+    let trendText = `${failures} ${failureWord} / ${total} total runs`;
+    if (mcp > 0 && cli > 0) {
+      trendText = `${failures} ${failureWord} (${mcp} MCP, ${cli} CLI) / ${total} total runs`;
+    }
+    body.appendChild(el("span", { class: "metric-trend", text: trendText }));
+    card.appendChild(body);
+
+    if (onCardClick) {
+      card.classList.add("clickable");
+      card.addEventListener("click", () => onCardClick(row));
+    }
+    grid.appendChild(card);
+  }
+
+  container.appendChild(grid);
+  return container;
+}
+
 function renderAuditSummary(data, ctx) {
   const container = $("audit-summary-body");
   if (!container) return;
@@ -275,7 +322,13 @@ function renderAuditSummary(data, ctx) {
     window.location.hash = buildAuditHash();
   };
 
-  if (data.failures_by_tool) {
+  if (data.failure_rate_by_tool && data.failure_rate_by_tool.length) {
+    container.appendChild(renderFailuresByToolCard(
+      data.failure_rate_by_tool,
+      data.failures_by_tool || [],
+      filterByTool,
+    ));
+  } else if (data.failures_by_tool) {
     container.appendChild(createCard("Failures by tool", renderTable(
       data.failures_by_tool,
       [{ key: "tool", label: "tool" }, { key: "count", label: "fails", num: true }, { key: "mcp", label: "mcp", num: true }, { key: "cli", label: "cli", num: true }],
@@ -291,19 +344,6 @@ function renderAuditSummary(data, ctx) {
         { key: "count", label: "count", num: true },
         { key: "avg", label: "avg", num: true, format: (v) => fmtDurationValue(ctx, v) },
         { key: "p95", label: "p95", num: true, format: (v) => fmtDurationValue(ctx, v) }
-      ],
-      filterByTool
-    )));
-  }
-
-  if (data.failure_rate_by_tool) {
-    container.appendChild(createCard("Failure rate %", renderTable(
-      data.failure_rate_by_tool,
-      [
-        { key: "tool", label: "tool" },
-        { key: "rate", label: "rate", num: true, format: (r) => (r * 100).toFixed(1) + "%" },
-        { key: "mcp_rate", label: "mcp", num: true, format: (r) => (r * 100).toFixed(1) + "%" },
-        { key: "cli_rate", label: "cli", num: true, format: (r) => (r * 100).toFixed(1) + "%" }
       ],
       filterByTool
     )));

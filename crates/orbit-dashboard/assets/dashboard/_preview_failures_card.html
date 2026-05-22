@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Preview — Failures by Tool card</title>
+  <link rel="stylesheet" href="dashboard.css" />
+  <style>
+    body { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    h1 { font-family: var(--font-sans, sans-serif); color: var(--fg, #dcdcdc); font-size: 14px; margin: 0 0 18px 0; text-transform: uppercase; letter-spacing: 0.08em; }
+  </style>
+</head>
+<body>
+  <h1>Audit tab · Failures by Tool (preview)</h1>
+  <div id="mount"></div>
+
+  <script type="module">
+    import { el } from './common.js';
+
+    const rateRows = [
+      { tool: "orbit.graph.pack", rate: 0.143, failures: 1, total: 7 },
+      { tool: "orbit.task.add",   rate: 0.118, failures: 2, total: 17 },
+      { tool: "orbit.task.show",  rate: 0.114, failures: 4, total: 35 },
+      { tool: "orbit.search",     rate: 0.042, failures: 1, total: 24 },
+    ];
+    const failuresRows = [
+      { tool: "orbit.graph.pack", count: 1, mcp: 1, cli: 0 },
+      { tool: "orbit.task.add",   count: 2, mcp: 1, cli: 1 },
+      { tool: "orbit.task.show",  count: 4, mcp: 3, cli: 1 },
+      { tool: "orbit.search",     count: 1, mcp: 0, cli: 1 },
+    ];
+
+    function renderFailuresByToolCard(rateRows, failuresRows, onCardClick) {
+      const failByTool = new Map();
+      for (const f of failuresRows) failByTool.set(f.tool, f);
+
+      const container = el("div", { class: "audit-summary-container" });
+      container.appendChild(el("h3", { class: "summary-title", text: "Failures by Tool (24H)" }));
+      const grid = el("div", { class: "tool-health-grid" });
+
+      for (const row of rateRows) {
+        const rate = row.rate || 0;
+        const severity = rate >= 0.14 ? "critical" : rate >= 0.05 ? "warning" : "normal";
+        const card = el("div", { class: `health-card ${severity}` });
+
+        const header = el("div", { class: "card-header" });
+        header.appendChild(el("span", { class: "tool-name", text: row.tool }));
+        header.appendChild(el("span", {
+          class: "status-badge",
+          text: `${(rate * 100).toFixed(1)}% Fail Rate`,
+        }));
+        card.appendChild(header);
+
+        const body = el("div", { class: "card-body" });
+        const breakdown = failByTool.get(row.tool);
+        const mcp = breakdown ? (breakdown.mcp || 0) : 0;
+        const cli = breakdown ? (breakdown.cli || 0) : 0;
+        const failures = row.failures != null ? row.failures : (breakdown ? (breakdown.count || 0) : 0);
+        const total = row.total || 0;
+        const failureWord = failures === 1 ? "failure" : "failures";
+
+        let trendText = `${failures} ${failureWord} / ${total} total runs`;
+        if (mcp > 0 && cli > 0) {
+          trendText = `${failures} ${failureWord} (${mcp} MCP, ${cli} CLI) / ${total} total runs`;
+        }
+        body.appendChild(el("span", { class: "metric-trend", text: trendText }));
+        card.appendChild(body);
+
+        if (onCardClick) {
+          card.classList.add("clickable");
+          card.addEventListener("click", () => onCardClick(row));
+        }
+        grid.appendChild(card);
+      }
+
+      container.appendChild(grid);
+      return container;
+    }
+
+    document.getElementById('mount').appendChild(
+      renderFailuresByToolCard(rateRows, failuresRows, (row) => console.log('clicked', row.tool))
+    );
+  </script>
+</body>
+</html>
