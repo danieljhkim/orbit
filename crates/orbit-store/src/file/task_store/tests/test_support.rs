@@ -1,3 +1,7 @@
+// Test support helpers extracted from the old nested v2_bundle/tests/test_support.rs
+// and shared by v2_bundle sibling tests + the internal bundle_io/review_threads tests.
+// Promoted here per docs/design-patterns/test_layout.md guidance for shared test helpers.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,7 +13,7 @@ use orbit_common::types::{
 };
 use tempfile::TempDir;
 
-use super::super::{TaskBundleStoreV2, TaskBundleV2, TaskReviewThreadV2};
+use super::super::v2_bundle::*;
 use crate::sqlite::task_registry::{BindWorkspaceParams, TaskRegistryStore, task_registry_path};
 
 pub(crate) fn sample_bundle(id: &str) -> TaskBundleV2 {

@@ -13,7 +13,9 @@ use orbit_common::utility::fs::atomic_write_text;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-use super::super::tests::test_support::{bundle_store, sample_bundle, sample_review_threads};
+use super::super::super::tests::test_support::{
+    bundle_store, sample_bundle, sample_review_threads,
+};
 use super::super::*;
 use super::read_task_events;
 

@@ -35,8 +35,6 @@
 
 pub(crate) mod backend;
 mod file;
-#[path = "sqlite/invocation_store.rs"]
-mod invocation_store_impl;
 pub(crate) mod json_schema;
 pub(crate) mod scope;
 pub mod sqlite;
@@ -133,10 +131,6 @@ pub use backend::{
     tool_store_sqlite, workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
-pub use invocation_store_impl::{
-    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
-    InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
-};
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
 pub use sqlite::audit_event_store::{
     AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
@@ -146,6 +140,10 @@ pub use sqlite::connection::{Store, StoreTx};
 pub use sqlite::id_allocator::{
     IdAllocation, IdAllocationKind, IdAllocationRecord, IdAllocator, IdAllocatorConfig,
     LearningIdMigrationReport, LearningIdRename, ensure_id_allocation_schema,
+};
+pub use sqlite::invocation_store::{
+    ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
+    InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {

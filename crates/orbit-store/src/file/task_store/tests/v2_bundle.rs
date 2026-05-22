@@ -1,3 +1,6 @@
+// Test bodies migrated from v2_bundle/tests/store.rs (and using shared helpers
+// now in sibling test_support.rs under task_store/tests/) per ORB-00247.
+
 use std::fs;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -8,10 +11,17 @@ use orbit_common::types::{
 };
 use tempfile::TempDir;
 
-use super::super::*;
+use super::super::v2_bundle::*;
 use super::test_support::{
     bundle_store, legacy_double_dot_lock_path, lock_entries_for_task, sample_bundle, task_lock_path,
 };
+
+#[derive(Debug, PartialEq, Eq)]
+enum CreateOutcome {
+    Created,
+    AlreadyExists,
+    Unexpected(String),
+}
 
 #[test]
 fn create_bundle_removes_lock_sentinel_after_success() {
@@ -32,13 +42,6 @@ fn create_bundle_removes_lock_sentinel_after_success() {
     );
     assert!(!task_lock_path(&bundle_dir).exists());
     assert!(!legacy_double_dot_lock_path(&bundle_dir, "ORB-00000").exists());
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum CreateOutcome {
-    Created,
-    AlreadyExists,
-    Unexpected(String),
 }
 
 #[test]

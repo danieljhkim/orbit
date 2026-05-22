@@ -34,13 +34,14 @@ pub(crate) use task_bundle_types::{
     TaskBundleCreateResult, TaskBundleV2, TaskDocumentV2, TaskReviewThreadV2,
 };
 
-#[cfg(test)]
-pub(crate) mod tests;
-
 pub(crate) struct TaskBundleStoreV2 {
-    registry: TaskRegistryStore,
-    workspace_id: String,
-    workspace_orbit_dir: PathBuf,
+    // pub(crate) fields widened to allow sibling `tests/v2_bundle.rs` (and promoted
+    // `tests/test_support.rs`) to access internal state for durability and projection
+    // assertions. See ORB-00247 and docs/design-patterns/test_layout.md (widen
+    // deliberately rather than keep nested anti-pattern).
+    pub(crate) registry: TaskRegistryStore,
+    pub(crate) workspace_id: String,
+    pub(crate) workspace_orbit_dir: PathBuf,
 }
 
 impl TaskBundleStoreV2 {
