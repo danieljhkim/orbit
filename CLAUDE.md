@@ -7,7 +7,6 @@ Project instructions for agents working on Orbit.
 - **Don't commit** until the Orbit task has been explicitly approved by the human.
 - **Don't invent task IDs** — get them from `orbit.task.add`. Don't edit task files directly — use `orbit.task.update`.
 - **Don't add cross-crate dependencies** without checking [`ARCHITECTURE.md`](ARCHITECTURE.md). If a new edge is genuinely needed, file a task and an ADR before adding it.
-- **Use subagents** for large tasks to keep your context window clean.
 
 ## Branching
 
