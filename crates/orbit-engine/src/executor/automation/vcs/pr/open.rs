@@ -82,13 +82,15 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
                 record_failed_handoff(
                     host,
                     &completed_tasks,
-                    batch_id,
-                    &workspace_path,
-                    &head,
-                    &base,
-                    None,
-                    FailedHandoffOp::Rebase,
-                    &error,
+                    FailedHandoff {
+                        batch_id,
+                        workspace_path: &workspace_path,
+                        head: &head,
+                        base: &base,
+                        base_ref: None,
+                        op: FailedHandoffOp::Rebase,
+                        error: &error,
+                    },
                 )?;
                 return Err(error);
             }
@@ -175,13 +177,15 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         record_failed_handoff(
             host,
             &completed_tasks,
-            batch_id,
-            &workspace_path,
-            &head,
-            &base,
-            Some(&freshness.base_ref),
-            FailedHandoffOp::Push,
-            &error,
+            FailedHandoff {
+                batch_id,
+                workspace_path: &workspace_path,
+                head: &head,
+                base: &base,
+                base_ref: Some(&freshness.base_ref),
+                op: FailedHandoffOp::Push,
+                error: &error,
+            },
         )?;
         return Err(error);
     }
@@ -202,13 +206,15 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
             record_failed_handoff(
                 host,
                 &completed_tasks,
-                batch_id,
-                &workspace_path,
-                &head,
-                &base,
-                Some(&freshness.base_ref),
-                FailedHandoffOp::PrCreate,
-                &error,
+                FailedHandoff {
+                    batch_id,
+                    workspace_path: &workspace_path,
+                    head: &head,
+                    base: &base,
+                    base_ref: Some(&freshness.base_ref),
+                    op: FailedHandoffOp::PrCreate,
+                    error: &error,
+                },
             )?;
             return Err(error);
         }
@@ -225,13 +231,15 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
             record_failed_handoff(
                 host,
                 &completed_tasks,
-                batch_id,
-                &workspace_path,
-                &head,
-                &base,
-                Some(&freshness.base_ref),
-                FailedHandoffOp::PrCreate,
-                &error,
+                FailedHandoff {
+                    batch_id,
+                    workspace_path: &workspace_path,
+                    head: &head,
+                    base: &base,
+                    base_ref: Some(&freshness.base_ref),
+                    op: FailedHandoffOp::PrCreate,
+                    error: &error,
+                },
             )?;
             return Err(error);
         }
@@ -247,13 +255,15 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
             record_failed_handoff(
                 host,
                 &completed_tasks,
-                batch_id,
-                &workspace_path,
-                &head,
-                &base,
-                Some(&freshness.base_ref),
-                FailedHandoffOp::PrView,
-                &error,
+                FailedHandoff {
+                    batch_id,
+                    workspace_path: &workspace_path,
+                    head: &head,
+                    base: &base,
+                    base_ref: Some(&freshness.base_ref),
+                    op: FailedHandoffOp::PrView,
+                    error: &error,
+                },
             )?;
             return Err(error);
         }
@@ -270,13 +280,15 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
             record_failed_handoff(
                 host,
                 &completed_tasks,
-                batch_id,
-                &workspace_path,
-                &head,
-                &base,
-                Some(&freshness.base_ref),
-                FailedHandoffOp::PrView,
-                &error,
+                FailedHandoff {
+                    batch_id,
+                    workspace_path: &workspace_path,
+                    head: &head,
+                    base: &base,
+                    base_ref: Some(&freshness.base_ref),
+                    op: FailedHandoffOp::PrView,
+                    error: &error,
+                },
             )?;
             return Err(error);
         }
@@ -367,6 +379,16 @@ impl FailedHandoffOp {
     }
 }
 
+struct FailedHandoff<'a> {
+    batch_id: &'a str,
+    workspace_path: &'a Path,
+    head: &'a str,
+    base: &'a str,
+    base_ref: Option<&'a str>,
+    op: FailedHandoffOp,
+    error: &'a OrbitError,
+}
+
 /// Stable header used as the idempotency key for failed-handoff comments.
 /// Repeated failures with the same `(batch_id, op)` are collapsed; a distinct
 /// later failure still appends a fresh note because its `op` differs.
@@ -396,40 +418,35 @@ fn failed_handoff_recovery(
     }
 }
 
-fn failed_handoff_message(
-    batch_id: &str,
-    op: FailedHandoffOp,
-    workspace_path: &Path,
-    head: &str,
-    base: &str,
-    base_ref: Option<&str>,
-    error: &OrbitError,
-) -> String {
-    let header = failed_handoff_comment_header(batch_id, op);
-    let base_ref_line = base_ref
+fn failed_handoff_message(handoff: FailedHandoff<'_>) -> String {
+    let header = failed_handoff_comment_header(handoff.batch_id, handoff.op);
+    let base_ref_line = handoff
+        .base_ref
         .map(|value| format!("Base ref: {value}\n"))
         .unwrap_or_default();
-    let recovery = failed_handoff_recovery(op, workspace_path, head, base);
+    let recovery = failed_handoff_recovery(
+        handoff.op,
+        handoff.workspace_path,
+        handoff.head,
+        handoff.base,
+    );
     format!(
         "{header}\n\nHead branch: {head}\nWorktree: {worktree}\nBase branch: {base}\n{base_ref_line}Failing step: {op}\nError: {error}\n\nRecovery:\n  {recovery}",
-        worktree = workspace_path.display(),
-        op = op.label(),
+        head = handoff.head,
+        worktree = handoff.workspace_path.display(),
+        base = handoff.base,
+        op = handoff.op.label(),
+        error = handoff.error,
     )
 }
 
 fn record_failed_handoff<H: TaskHost + ?Sized>(
     host: &H,
     completed_tasks: &[Task],
-    batch_id: &str,
-    workspace_path: &Path,
-    head: &str,
-    base: &str,
-    base_ref: Option<&str>,
-    op: FailedHandoffOp,
-    error: &OrbitError,
+    handoff: FailedHandoff<'_>,
 ) -> Result<(), OrbitError> {
-    let header = failed_handoff_comment_header(batch_id, op);
-    let message = failed_handoff_message(batch_id, op, workspace_path, head, base, base_ref, error);
+    let header = failed_handoff_comment_header(handoff.batch_id, handoff.op);
+    let message = failed_handoff_message(handoff);
 
     for task in completed_tasks {
         let existing = host.get_task_comments(&task.id)?;
