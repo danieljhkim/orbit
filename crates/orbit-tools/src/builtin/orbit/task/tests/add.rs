@@ -2,6 +2,10 @@
 //! `orbit.task.add` (complexity enum, model, dependencies, relations, parent_id,
 //! source_task_id, tags, and strict context wording). Mirrors the style of
 //! sibling tests under `update/tests/`.
+//
+// Migrated from nested `task/add/tests/fields.rs` (anti-pattern)
+// to single sibling `task/tests/add.rs` per ORB-00248 and
+// docs/design-patterns/test_layout.md.
 
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +13,7 @@ use serde_json::{Value, json};
 
 use orbit_common::types::OrbitError;
 
-use super::super::OrbitTaskAddTool;
+use super::super::add::OrbitTaskAddTool;
 use crate::{OrbitBuiltinAction, OrbitTaskScope, OrbitToolHost, Tool, ToolContext};
 
 #[derive(Clone, Default)]
