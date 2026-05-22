@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -6,7 +7,7 @@ use std::sync::Mutex;
 use chrono::Utc;
 use orbit_common::types::{
     Activity, ExternalRef, Job, JobTargetType, NotFoundKind, OrbitError, OrbitEvent, Role, Task,
-    TaskArtifact, TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
+    TaskArtifact, TaskComment, TaskPriority, TaskStatus, TaskType, push_external_ref_if_missing,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
@@ -28,6 +29,7 @@ pub struct ToolCall {
 
 pub struct PrOpenTestHost {
     tasks: Mutex<Vec<Task>>,
+    comments: Mutex<HashMap<String, Vec<TaskComment>>>,
     tool_calls: Mutex<Vec<ToolCall>>,
     automation_updates: Mutex<Vec<(String, TaskAutomationUpdate)>>,
     activity_implementer: Option<(String, String)>,
@@ -35,6 +37,7 @@ pub struct PrOpenTestHost {
     data_root: PathBuf,
     scoreboard_dir: PathBuf,
     registry: ActivityExecutorRegistry,
+    tool_errors: Mutex<HashMap<String, String>>,
 }
 
 impl PrOpenTestHost {
@@ -43,6 +46,7 @@ impl PrOpenTestHost {
         let scoreboard_dir = data_root.join("scoreboard");
         Self {
             tasks: Mutex::new(tasks),
+            comments: Mutex::new(HashMap::new()),
             tool_calls: Mutex::new(Vec::new()),
             automation_updates: Mutex::new(Vec::new()),
             activity_implementer: None,
@@ -50,12 +54,29 @@ impl PrOpenTestHost {
             data_root,
             scoreboard_dir,
             registry: ActivityExecutorRegistry::default(),
+            tool_errors: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn with_activity_implementer(mut self, agent: &str, model: &str) -> Self {
         self.activity_implementer = Some((agent.to_string(), model.to_string()));
         self
+    }
+
+    pub fn fail_tool(&self, name: &str, message: &str) {
+        self.tool_errors
+            .lock()
+            .expect("tool errors lock")
+            .insert(name.to_string(), message.to_string());
+    }
+
+    pub fn comments_for(&self, task_id: &str) -> Vec<TaskComment> {
+        self.comments
+            .lock()
+            .expect("comments lock")
+            .get(task_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn tool_calls(&self) -> Vec<ToolCall> {
@@ -96,6 +117,16 @@ impl TaskReadHost for PrOpenTestHost {
 
     fn get_task_artifacts(&self, _task_id: &str) -> Result<Vec<TaskArtifact>, OrbitError> {
         Ok(Vec::new())
+    }
+
+    fn get_task_comments(&self, task_id: &str) -> Result<Vec<TaskComment>, OrbitError> {
+        Ok(self
+            .comments
+            .lock()
+            .expect("comments lock")
+            .get(task_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn list_tasks_filtered(
@@ -174,6 +205,15 @@ impl TaskWriteHost for PrOpenTestHost {
             .lock()
             .expect("automation updates lock")
             .push((task_id.to_string(), update.clone()));
+
+        if !update.append_comments.is_empty() {
+            self.comments
+                .lock()
+                .expect("comments lock")
+                .entry(task_id.to_string())
+                .or_default()
+                .extend(update.append_comments.iter().cloned());
+        }
 
         let mut tasks = self.tasks.lock().expect("tasks lock");
         let task = tasks
@@ -275,6 +315,16 @@ impl RuntimeHost for PrOpenTestHost {
                 name: name.to_string(),
                 input: input.clone(),
             });
+
+        if let Some(message) = self
+            .tool_errors
+            .lock()
+            .expect("tool errors lock")
+            .get(name)
+            .cloned()
+        {
+            return Err(OrbitError::Execution(message));
+        }
 
         match name {
             "git.push" => Ok(json!({})),
@@ -440,6 +490,36 @@ pub fn no_diff_pr_workspace() -> PrWorkspace {
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "-m", "base"]);
     git(&repo, &["checkout", "-b", "orbit/test-batch"]);
+
+    PrWorkspace { _temp: temp, repo }
+}
+
+/// Workspace where rebasing `orbit/test-batch` onto `agent-main` conflicts:
+/// both branches edited the same file with incompatible content, so
+/// `git rebase agent-main` fails and `ensure_branch_rebased_onto_base`
+/// returns the original "behind" error.
+pub fn rebase_conflict_pr_workspace() -> PrWorkspace {
+    let temp = tempdir().expect("tempdir");
+    let repo = temp.path().join("repo");
+    fs::create_dir_all(&repo).expect("create repo dir");
+    git(&repo, &["init"]);
+    git(&repo, &["checkout", "-b", "agent-main"]);
+    git(&repo, &["config", "user.name", "Orbit Test"]);
+    git(&repo, &["config", "user.email", "orbit-test@example.com"]);
+    fs::write(repo.join("README.md"), "base\n").expect("write readme");
+    fs::create_dir_all(repo.join("src")).expect("create src dir");
+    fs::write(repo.join("src/lib.rs"), "pub fn base() {}\n").expect("write lib");
+    git(&repo, &["add", "README.md", "src/lib.rs"]);
+    git(&repo, &["commit", "-m", "base"]);
+    git(&repo, &["checkout", "-b", "orbit/test-batch"]);
+    fs::write(repo.join("src/lib.rs"), "pub fn branch() {}\n").expect("write branch lib");
+    git(&repo, &["add", "src/lib.rs"]);
+    git(&repo, &["commit", "-m", "branch change"]);
+    git(&repo, &["checkout", "agent-main"]);
+    fs::write(repo.join("src/lib.rs"), "pub fn diverged() {}\n").expect("write base lib");
+    git(&repo, &["add", "src/lib.rs"]);
+    git(&repo, &["commit", "-m", "diverged base"]);
+    git(&repo, &["checkout", "orbit/test-batch"]);
 
     PrWorkspace { _temp: temp, repo }
 }
