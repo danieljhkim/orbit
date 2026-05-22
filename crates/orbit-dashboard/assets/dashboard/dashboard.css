@@ -322,7 +322,7 @@
       
       .row {
         display: grid;
-        grid-template-columns: minmax(80px, max-content) minmax(140px, 1fr) 72px 82px;
+        grid-template-columns: minmax(80px, max-content) minmax(140px, 1fr) minmax(108px, max-content) minmax(132px, max-content);
         gap: 12px;
         padding: 8px 16px;
         margin: 0;
@@ -362,14 +362,47 @@
         font-size: 13px;
         min-width: 0;
       }
-      .row .priority, .row .type { font-size: 12px; color: var(--fg-dim); text-align: right; }
+      .status-cell {
+        display: grid;
+        min-width: 0;
+      }
       .crew-cell {
         display: grid;
         gap: 4px;
         min-width: 0;
       }
+      .task-status-select {
+        width: 100%;
+        min-width: 104px;
+        max-width: 160px;
+        height: 28px;
+        border: 1px solid var(--border);
+        border-left-width: 2px;
+        border-radius: 2px;
+        background: var(--border);
+        font-size: 11px;
+        padding: 4px 24px 4px 8px;
+        outline: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .task-status-select:hover:not(:disabled),
+      .task-status-select:focus {
+        border-color: var(--accent);
+        border-left-color: currentColor;
+        outline: none;
+      }
+      .task-status-select:disabled {
+        color: var(--fg-dim);
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+      .task-status-select option {
+        color: var(--fg);
+        background: var(--bg);
+      }
       .task-crew-select {
-        width: auto;
+        width: 100%;
         min-width: 110px;
         max-width: 200px;
         height: 28px;
@@ -406,12 +439,6 @@
         white-space: nowrap;
       }
 
-      .assignment {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-      }
       .detail-side .complexity {
         flex-shrink: 0;
         font-size: 12px;
@@ -419,23 +446,27 @@
 
       @media (max-width: 760px) {
         .row {
-          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr) auto auto;
+          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr) minmax(104px, max-content) minmax(120px, max-content);
           gap: 4px 8px;
         }
-        .row .priority { text-align: left; }
-        .row .type { text-align: left; }
         #task-filter { max-width: none; }
       }
 
       @media (max-width: 520px) {
         .row {
-          grid-template-columns: minmax(min-content, max-content) minmax(0, 1fr);
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           grid-template-areas:
             "id title"
-            "priority type";
+            "status crew";
         }
-        .row .priority { grid-area: priority; text-align: left; }
-        .row .type { grid-area: type; text-align: left; }
+        .row .id { grid-area: id; }
+        .row .title { grid-area: title; }
+        .row .status-cell { grid-area: status; }
+        .row .crew-cell { grid-area: crew; }
+        .task-status-select,
+        .task-crew-select {
+          max-width: none;
+        }
       }
 
       .row.header {
@@ -456,8 +487,8 @@
       }
       .row.header .id,
       .row.header .title,
-      .row.header .priority,
-      .row.header .type {
+      .row.header .status-cell,
+      .row.header .crew-cell {
         font-size: inherit;
         color: inherit;
         font-family: var(--font-sans);
@@ -854,23 +885,6 @@
         color: var(--fg); 
       }
 
-      .action.status-update {
-        border: 1px solid var(--accent);
-        color: var(--accent-hi);
-        background: var(--bg);
-        min-width: 128px;
-      }
-      .action.status-update:hover:not(:disabled),
-      .action.status-update:focus {
-        border-color: var(--accent-hover);
-        color: var(--fg);
-        outline: none;
-      }
-      .action.status-update option {
-        color: var(--fg);
-        background: var(--bg);
-      }
-      
       .action.cancel { 
         border: 1px solid transparent; 
         color: var(--fg-dim); 
