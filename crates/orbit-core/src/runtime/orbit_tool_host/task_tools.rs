@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use orbit_common::types::{
     OrbitError, TaskPriority, build_task_status_index, optional_csv_or_string_list_alias,
     optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
-    required_string, task_dependencies_ready,
+    required_string, strip_retired_task_add_input_fields, task_dependencies_ready,
 };
 use serde_json::{Value, json};
 
@@ -11,36 +11,34 @@ use crate::OrbitRuntime;
 use crate::command::task::{TaskAddParams, TaskUpdateParams, compute_task_add_warnings};
 
 use super::input::{
-    empty_string_to_none, optional_bool_alias, parse_artifacts, parse_external_refs,
-    parse_relations, parse_task_complexity, parse_task_priority, parse_task_status,
-    parse_task_type,
+    empty_string_to_none, optional_bool_alias, parse_artifacts, parse_relations,
+    parse_task_complexity, parse_task_priority, parse_task_status, parse_task_type,
 };
 use super::json::{serialize_task, serialize_task_lint_report, task_fields_to_json, task_to_json};
 
 pub(super) fn add(
     runtime: &OrbitRuntime,
-    input: Value,
+    mut input: Value,
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
+    let ignored_fields = strip_retired_task_add_input_fields(&mut input);
+    if !ignored_fields.is_empty() {
+        tracing::warn!(
+            target: "orbit.core.task.add",
+            ignored_fields = ?ignored_fields,
+            "ignored retired orbit.task.add fields"
+        );
+    }
+
     let title = required_string(&input, &["title"], "title")?;
     let description = required_string(&input, &["description"], "description")?;
     let workspace = required_string(&input, &["workspace"], "workspace")?;
-    let plan = match input.get("plan") {
-        Some(Value::String(value)) => value.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(_) => {
-            return Err(OrbitError::InvalidInput(
-                "`plan` must be a string".to_string(),
-            ));
-        }
-    };
     let raw_context_files =
-        optional_csv_or_string_list_alias(&input, &["context_files", "context"])?
-            .unwrap_or_default();
+        optional_csv_or_string_list_alias(&input, &["context_files"])?.unwrap_or_default();
     let task = runtime.add_task_with_identity(
         TaskAddParams {
-            parent_id: optional_string_alias(&input, &["parent_id", "parent", "parentId"])?,
+            parent_id: None,
             title,
             description,
             acceptance_criteria: optional_string_list_alias(
@@ -52,12 +50,11 @@ pub(super) fn add(
                 ],
             )?
             .unwrap_or_default(),
-            dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?
-                .unwrap_or_default(),
+            dependencies: Vec::new(),
             relations: parse_relations(&input)?.unwrap_or_default(),
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
-            plan,
-            comment: optional_string(&input, "comment")?,
+            plan: String::new(),
+            comment: None,
             context_files: raw_context_files.clone(),
             workspace_path: Some(workspace),
             priority: optional_string(&input, "priority")?
@@ -70,16 +67,11 @@ pub(super) fn add(
             task_type: optional_string_alias(&input, &["type", "task_type", "taskType"])?
                 .map(|value| parse_task_type("type", &value))
                 .transpose()?,
-            status: optional_string(&input, "status")?
-                .map(|value| parse_task_status("status", &value))
-                .transpose()?,
+            status: None,
             system_created: false,
-            external_refs: parse_external_refs(&input)?,
-            source_task_id: optional_string_alias(
-                &input,
-                &["source_task_id", "source_task", "sourceTaskId"],
-            )?,
-            crew: optional_string(&input, "crew")?,
+            external_refs: Vec::new(),
+            source_task_id: None,
+            crew: None,
         },
         agent,
         model,

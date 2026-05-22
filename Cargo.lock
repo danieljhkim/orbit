@@ -2312,6 +2312,8 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

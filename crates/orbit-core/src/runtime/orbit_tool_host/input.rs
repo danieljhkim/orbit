@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use orbit_common::types::{
-    ExternalRef, NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority,
-    TaskRelation, TaskStatus, TaskType, media_type_for_artifact_path, optional_string,
-    optional_string_alias, optional_u32_alias,
+    NotFoundKind, OrbitError, TaskArtifact, TaskComplexity, TaskPriority, TaskRelation, TaskStatus,
+    TaskType, media_type_for_artifact_path, optional_string, optional_string_alias,
+    optional_u32_alias,
 };
 use orbit_store::state_io;
 use orbit_tools::OrbitTaskScope;
@@ -185,25 +185,6 @@ fn parse_artifact_content(value: &Value) -> Result<Vec<u8>, OrbitError> {
             .collect(),
         _ => Err(OrbitError::InvalidInput(
             "`artifacts` entries must include string or byte-array `content` values".to_string(),
-        )),
-    }
-}
-
-pub(super) fn parse_external_refs(input: &Value) -> Result<Vec<ExternalRef>, OrbitError> {
-    let Some(value) = input
-        .get("external_refs")
-        .or_else(|| input.get("externalRefs"))
-        .or_else(|| input.get("external-refs"))
-    else {
-        return Ok(Vec::new());
-    };
-
-    match value {
-        Value::Null => Ok(Vec::new()),
-        Value::Array(_) => serde_json::from_value::<Vec<ExternalRef>>(value.clone())
-            .map_err(|error| OrbitError::InvalidInput(format!("invalid `external_refs`: {error}"))),
-        _ => Err(OrbitError::InvalidInput(
-            "`external_refs` must be an array of {system, id, url?} objects".to_string(),
         )),
     }
 }
