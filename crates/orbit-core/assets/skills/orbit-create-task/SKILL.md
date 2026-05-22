@@ -23,17 +23,29 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 1. Confirm objective, constraints, and done criteria.
 2. Inspect codebase context before creating the task. If you want background on prior related work, `orbit.search` is available; use `hybrid: true` with `kind: "task"` when the proposed work might overlap with a task whose title uses different vocabulary. Optional, not required. See `orbit-search`.
 3. Write clear acceptance criteria that define observable success.
-4. Choose task metadata while the scope is fresh: set `complexity` to `low`, `medium`, or `hard` whenever you can make a reasonable call. Leave it unset only when the current context is too thin to classify.
-5. Add assumptions, risks, and rollback notes to the description when they matter.
-6. Call the task-add tool (`orbit_task_add` over MCP, or `orbit tool run orbit.task.add` from the shell) with the description, acceptance criteria, workspace, complexity when known, and canonical `model` family in the JSON input. Use `codex`, `claude`, `gemini`, or `grok`; full model strings are accepted and auto-normalized. Leave `plan` blank unless you have a compelling reason to pre-seed it.
-7. Use the result as the default confirmation. If you need to re-fetch the canonical stored record, call `orbit_task_show({"id": "<returned-id>"})` (MCP) or `orbit tool run orbit.task.show --input '{"id": "<returned-id>"}'` (CLI).
+4. Enumerate the existing files, directories, or symbols this task will modify or delete. List each as a canonical selector in `context_files` (`file:`, `dir:`, `symbol:path#name:kind`). Skip only for true chores with no scope target.
+5. Choose task metadata while the scope is fresh: set `complexity` to `low`, `medium`, or `hard` whenever you can make a reasonable call. Leave it unset only when the current context is too thin to classify.
+6. Add assumptions, risks, and rollback notes to the description when they matter.
+7. Call the task-add tool (`orbit_task_add` over MCP, or `orbit tool run orbit.task.add` from the shell) with the description, acceptance criteria, `context_files` (when the task has modification targets), workspace, complexity when known, and canonical `model` family in the JSON input. Use `codex`, `claude`, `gemini`, or `grok`; full model strings are accepted and auto-normalized. Leave `plan` blank unless you have a compelling reason to pre-seed it.
+8. Use the result as the default confirmation. If you need to re-fetch the canonical stored record, call `orbit_task_show({"id": "<returned-id>"})` (MCP) or `orbit tool run orbit.task.show --input '{"id": "<returned-id>"}'` (CLI).
 
 ## Selector-First Context
 
-- Prefer canonical task context selectors in `context_files`: `file:path`, `dir:path`, and `symbol:path#name:kind`.
+- Prefer canonical task context selectors in `context_files`: `file:`, `dir:`, or `symbol:path#name:kind`.
 - Raw legacy paths are still accepted, but Orbit silently upgrades them to canonical selector form on write.
 - Add `context_files` entries only for existing files, directories, or symbols expected to be modified or deleted by the task.
-- Do not add entries solely for files that will be created later, or for files that are only relevant background context.
+
+Do not add `context_files` entries for:
+
+- **Conventions or patterns the task must follow** — e.g. `docs/design-patterns/*.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `RELEASING.md`. Cite these in the description prose with markdown links, not in `context_files`.
+- Files cited in the description for reasoning context but not edited.
+- Sibling/precedent directories included as "see how this is structured."
+- Files that will be created from scratch (they don't exist yet to scope).
+
+`context_files` is exclusively the modification target. If you'd answer "to read it" rather than "to change it," it belongs in the description, not here.
+
+Feature design docs under `docs/design/<feature>/` are the exception — those co-change with implementation per CLAUDE.md "Same-PR updates" and belong in `context_files` when the task will edit them.
+
 - Prefer `file:` selectors over `dir:` selectors whenever the expected changes can be named at file level; use `dir:` only when the directory itself is the smallest honest scope.
 - When a task needs precise code context, prefer `symbol:` selectors over whole-file scopes.
 
@@ -117,8 +129,8 @@ orbit tool run orbit.task.add --input '{
     "<observable outcome 1>",
     "<observable outcome 2>"
   ],
-  "plan": "",
   "context_files": ["file:src/lib.rs", "dir:src/command", "symbol:src/lib.rs#run:function"],
+  "plan": "",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
   "complexity": "<low|medium|hard>",
@@ -136,6 +148,7 @@ orbit_task_add({
   "description": "<multi-line markdown>",
   "acceptance_criteria": ["<observable outcome 1>", "<observable outcome 2>"],
   "context_files": ["file:src/lib.rs", "symbol:src/lib.rs#run:function"],
+  "plan": "",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
   "complexity": "<low|medium|hard>",
@@ -161,4 +174,5 @@ orbit_task_add({
 
 ## Exit Criteria
 
-The task exists with a strong description, clear acceptance criteria, and enough context for a later planning phase to succeed.
+- The task exists with a strong description, clear acceptance criteria, and enough context for a later planning phase to succeed.
+- `context_files` (when applicable) enumerates only the files/directories/symbols the task will modify or delete, using canonical selectors.
