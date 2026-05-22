@@ -1,4 +1,7 @@
-use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskStatus};
+use std::path::Path;
+
+use chrono::Utc;
+use orbit_common::types::{ExternalRef, OrbitError, Role, Task, TaskComment, TaskStatus};
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
 
@@ -12,6 +15,8 @@ use super::super::freshness::ensure_branch_rebased_onto_base;
 use super::super::git::git_output;
 use super::attribution::pr_review_attribution;
 use super::body::{build_batch_pr_body, default_pr_title, meaningful_execution_summary};
+
+const FAILED_HANDOFF_ACTOR: &str = "system";
 
 pub(in crate::executor::automation) fn pr_open<H: RuntimeHost + TaskHost + Sync + ?Sized>(
     host: &H,
@@ -71,7 +76,23 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
     let base_sync_mode = super::super::git::base_sync_mode_from_input(input)?;
 
     let rebase_outcome =
-        ensure_branch_rebased_onto_base(&workspace_path, &head, &base, base_sync_mode)?;
+        match ensure_branch_rebased_onto_base(&workspace_path, &head, &base, base_sync_mode) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                record_failed_handoff(
+                    host,
+                    &completed_tasks,
+                    batch_id,
+                    &workspace_path,
+                    &head,
+                    &base,
+                    None,
+                    FailedHandoffOp::Rebase,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
     let freshness = rebase_outcome.freshness;
     let branch_was_rebased = rebase_outcome.rebased;
 
@@ -141,7 +162,7 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         ..Default::default()
     };
 
-    host.run_tool_with_context_and_role(
+    if let Err(error) = host.run_tool_with_context_and_role(
         "git.push",
         json!({
             "repo_root": workspace_path.to_string_lossy().to_string(),
@@ -150,9 +171,22 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         }),
         Role::Admin,
         tool_context.clone(),
-    )?;
+    ) {
+        record_failed_handoff(
+            host,
+            &completed_tasks,
+            batch_id,
+            &workspace_path,
+            &head,
+            &base,
+            Some(&freshness.base_ref),
+            FailedHandoffOp::Push,
+            &error,
+        )?;
+        return Err(error);
+    }
 
-    let pr_create = host.run_tool_with_context_and_role(
+    let pr_create = match host.run_tool_with_context_and_role(
         "github.pr.create",
         json!({
             "title": title,
@@ -162,28 +196,91 @@ pub(crate) fn open_batch_pr<H: RuntimeHost + TaskHost + ?Sized>(
         }),
         Role::Admin,
         tool_context.clone(),
-    )?;
-    let pr_url = pr_create
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            record_failed_handoff(
+                host,
+                &completed_tasks,
+                batch_id,
+                &workspace_path,
+                &head,
+                &base,
+                Some(&freshness.base_ref),
+                FailedHandoffOp::PrCreate,
+                &error,
+            )?;
+            return Err(error);
+        }
+    };
+    let pr_url = match pr_create
         .get("url")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            OrbitError::Execution("github.pr.create did not return a PR url".to_string())
-        })?
-        .to_string();
-    let pr_view = host.run_tool_with_context_and_role(
+    {
+        Some(url) => url.to_string(),
+        None => {
+            let error =
+                OrbitError::Execution("github.pr.create did not return a PR url".to_string());
+            record_failed_handoff(
+                host,
+                &completed_tasks,
+                batch_id,
+                &workspace_path,
+                &head,
+                &base,
+                Some(&freshness.base_ref),
+                FailedHandoffOp::PrCreate,
+                &error,
+            )?;
+            return Err(error);
+        }
+    };
+    let pr_view = match host.run_tool_with_context_and_role(
         "github.pr.view",
         json!({ "pr": pr_url }),
         orbit_common::types::Role::Admin,
         tool_context,
-    )?;
-    let pr_number = pr_view
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            record_failed_handoff(
+                host,
+                &completed_tasks,
+                batch_id,
+                &workspace_path,
+                &head,
+                &base,
+                Some(&freshness.base_ref),
+                FailedHandoffOp::PrView,
+                &error,
+            )?;
+            return Err(error);
+        }
+    };
+    let pr_number = match pr_view
         .get("pull_request")
         .and_then(|value| value.get("number"))
         .and_then(json_number_to_string)
-        .ok_or_else(|| {
-            OrbitError::Execution("github.pr.view did not return a PR number".to_string())
-        })?;
+    {
+        Some(num) => num,
+        None => {
+            let error =
+                OrbitError::Execution("github.pr.view did not return a PR number".to_string());
+            record_failed_handoff(
+                host,
+                &completed_tasks,
+                batch_id,
+                &workspace_path,
+                &head,
+                &base,
+                Some(&freshness.base_ref),
+                FailedHandoffOp::PrView,
+                &error,
+            )?;
+            return Err(error);
+        }
+    };
 
     for task in &completed_tasks {
         let model = pr_review_attribution(host, task, batch_id)?;
@@ -247,6 +344,112 @@ fn ensure_completed_tasks_have_meaningful_execution_summaries(
                 task.id
             )));
         }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum FailedHandoffOp {
+    Rebase,
+    Push,
+    PrCreate,
+    PrView,
+}
+
+impl FailedHandoffOp {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Rebase => "rebase",
+            Self::Push => "push",
+            Self::PrCreate => "github.pr.create",
+            Self::PrView => "github.pr.view",
+        }
+    }
+}
+
+/// Stable header used as the idempotency key for failed-handoff comments.
+/// Repeated failures with the same `(batch_id, op)` are collapsed; a distinct
+/// later failure still appends a fresh note because its `op` differs.
+fn failed_handoff_comment_header(batch_id: &str, op: FailedHandoffOp) -> String {
+    format!(
+        "pr_open handoff failed [run={batch_id}] [op={}]",
+        op.label()
+    )
+}
+
+fn failed_handoff_recovery(
+    op: FailedHandoffOp,
+    workspace_path: &Path,
+    head: &str,
+    base: &str,
+) -> String {
+    let cd = format!("cd {}", workspace_path.display());
+    match op {
+        FailedHandoffOp::Rebase => format!(
+            "{cd}\n  git fetch origin {base}\n  git rebase origin/{base}\n  git push --force-with-lease origin {head}\n  gh pr create --base {base} --head {head}"
+        ),
+        FailedHandoffOp::Push => format!(
+            "{cd}\n  git push --force-with-lease origin {head}\n  gh pr create --base {base} --head {head}"
+        ),
+        FailedHandoffOp::PrCreate => format!("{cd}\n  gh pr create --base {base} --head {head}"),
+        FailedHandoffOp::PrView => format!("{cd}\n  gh pr view {head} --json url,number"),
+    }
+}
+
+fn failed_handoff_message(
+    batch_id: &str,
+    op: FailedHandoffOp,
+    workspace_path: &Path,
+    head: &str,
+    base: &str,
+    base_ref: Option<&str>,
+    error: &OrbitError,
+) -> String {
+    let header = failed_handoff_comment_header(batch_id, op);
+    let base_ref_line = base_ref
+        .map(|value| format!("Base ref: {value}\n"))
+        .unwrap_or_default();
+    let recovery = failed_handoff_recovery(op, workspace_path, head, base);
+    format!(
+        "{header}\n\nHead branch: {head}\nWorktree: {worktree}\nBase branch: {base}\n{base_ref_line}Failing step: {op}\nError: {error}\n\nRecovery:\n  {recovery}",
+        worktree = workspace_path.display(),
+        op = op.label(),
+    )
+}
+
+fn record_failed_handoff<H: TaskHost + ?Sized>(
+    host: &H,
+    completed_tasks: &[Task],
+    batch_id: &str,
+    workspace_path: &Path,
+    head: &str,
+    base: &str,
+    base_ref: Option<&str>,
+    op: FailedHandoffOp,
+    error: &OrbitError,
+) -> Result<(), OrbitError> {
+    let header = failed_handoff_comment_header(batch_id, op);
+    let message = failed_handoff_message(batch_id, op, workspace_path, head, base, base_ref, error);
+
+    for task in completed_tasks {
+        let existing = host.get_task_comments(&task.id)?;
+        if existing
+            .iter()
+            .any(|comment| comment.message.starts_with(&header))
+        {
+            continue;
+        }
+        host.apply_task_automation_update(
+            &task.id,
+            TaskAutomationUpdate {
+                append_comments: vec![TaskComment {
+                    at: Utc::now(),
+                    by: FAILED_HANDOFF_ACTOR.to_string(),
+                    message: message.clone(),
+                }],
+                ..TaskAutomationUpdate::default()
+            },
+        )?;
     }
     Ok(())
 }
