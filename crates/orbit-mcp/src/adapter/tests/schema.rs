@@ -9,7 +9,7 @@ use super::super::test_support::{
 };
 
 #[test]
-fn task_add_schema_excludes_legacy_friction_enums() {
+fn task_add_schema_excludes_legacy_friction_and_status_enums() {
     let schema = build_input_schema("orbit.task.add", &[param("type"), param("status")]);
     let properties = schema
         .get("properties")
@@ -19,10 +19,10 @@ fn task_add_schema_excludes_legacy_friction_enums() {
     let type_enum = properties["type"]["enum"].as_array().expect("type enum");
     assert!(!type_enum.iter().any(|value| value == "friction"));
 
-    let status_enum = properties["status"]["enum"]
-        .as_array()
-        .expect("status enum");
-    assert!(!status_enum.iter().any(|value| value == "friction"));
+    assert!(
+        properties["status"].get("enum").is_none(),
+        "orbit.task.add no longer advertises status at all"
+    );
 }
 
 #[test]
@@ -46,40 +46,40 @@ fn schema_to_tool_keeps_dotted_orbit_tools_advertised_with_underscores() {
 
 #[test]
 fn task_dependency_schemas_accept_string_or_string_array() {
-    for tool_name in ["orbit.task.add", "orbit.task.update"] {
-        let schema =
-            build_input_schema(tool_name, &[param_with_type("dependencies", "string_list")]);
-        let properties = schema
-            .get("properties")
-            .and_then(Value::as_object)
-            .expect("properties");
-        let dependencies = properties
-            .get("dependencies")
-            .and_then(Value::as_object)
-            .expect("dependencies property");
-        let any_of = dependencies
-            .get("anyOf")
-            .and_then(Value::as_array)
-            .expect("string-list union");
+    let schema = build_input_schema(
+        "orbit.task.update",
+        &[param_with_type("dependencies", "string_list")],
+    );
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("properties");
+    let dependencies = properties
+        .get("dependencies")
+        .and_then(Value::as_object)
+        .expect("dependencies property");
+    let any_of = dependencies
+        .get("anyOf")
+        .and_then(Value::as_array)
+        .expect("string-list union");
 
-        assert!(
-            any_of.iter().any(|schema| {
-                schema.get("type").and_then(Value::as_str) == Some("array")
-                    && schema
-                        .get("items")
-                        .and_then(|items| items.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("string")
-            }),
-            "{tool_name} dependencies must accept an array of strings"
-        );
-        assert!(
-            any_of
-                .iter()
-                .any(|schema| schema.get("type").and_then(Value::as_str) == Some("string")),
-            "{tool_name} dependencies must accept a string"
-        );
-    }
+    assert!(
+        any_of.iter().any(|schema| {
+            schema.get("type").and_then(Value::as_str) == Some("array")
+                && schema
+                    .get("items")
+                    .and_then(|items| items.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("string")
+        }),
+        "orbit.task.update dependencies must accept an array of strings"
+    );
+    assert!(
+        any_of
+            .iter()
+            .any(|schema| schema.get("type").and_then(Value::as_str) == Some("string")),
+        "orbit.task.update dependencies must accept a string"
+    );
 }
 
 // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---
@@ -302,34 +302,49 @@ async fn orbit_learning_update_via_mcp_adapter_accepts_evidence_array_live_repro
     assert_eq!(ev[0]["kind"], "task");
 }
 
-/// ORB-00234: MCP schema for orbit_task_add now advertises the documented
-/// create-task fields with correct enums (verifiable via claude debug surface
-/// or this direct build).
+/// ORB-00234/ORB-00255: MCP schema for orbit_task_add advertises the trimmed
+/// create-task fields with correct enums (verifiable via debug surfaces or this
+/// direct build).
 #[test]
-fn task_add_mcp_schema_exposes_complexity_enum_and_model_and_other_fields() {
+fn task_add_mcp_schema_exposes_trimmed_fields_with_complexity_and_model_enums() {
     // Use representative params that the real add schema includes (the
     // build_input_schema only cares about the ones passed for enum injection).
     let params = vec![
         param_with_type("title", "string"),
         param_with_type("description", "string"),
         param_with_type("workspace", "string"),
-        param_with_type("complexity", "string"),
-        param_with_type("model", "string"),
-        param_with_type("dependencies", "string_list"),
-        param_with_type("relations", "array"),
-        param_with_type("parent_id", "string"),
-        param_with_type("source_task_id", "string"),
+        param_with_type("acceptance_criteria", "string_list"),
         param_with_type("tags", "string_list"),
         param_with_type("context_files", "string_list"),
-        param_with_type("context", "string"),
+        param_with_type("priority", "string"),
+        param_with_type("complexity", "string"),
         param_with_type("type", "string"),
-        param_with_type("status", "string"),
+        param_with_type("relations", "array"),
+        param_with_type("model", "string"),
     ];
     let schema = build_input_schema("orbit.task.add", &params);
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
         .expect("properties object");
+
+    let property_names = properties.keys().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(
+        property_names,
+        vec![
+            "acceptance_criteria",
+            "complexity",
+            "context_files",
+            "description",
+            "model",
+            "priority",
+            "relations",
+            "tags",
+            "title",
+            "type",
+            "workspace",
+        ]
+    );
 
     // complexity must have the low/medium/hard enum
     let comp = properties.get("complexity").expect("complexity in schema");
@@ -355,21 +370,20 @@ fn task_add_mcp_schema_exposes_complexity_enum_and_model_and_other_fields() {
     assert!(model_enum.iter().any(|v| v == "codex"));
     assert!(model_enum.iter().any(|v| v == "grok"));
 
-    // other required fields for AC1 are present (real registry ToolParams carry
-    // descriptions; the partial synthetic list here proves the keys reach the
-    // MCP schema builder).
-    for key in [
-        "dependencies",
-        "relations",
+    for removed in [
+        "plan",
+        "status",
+        "crew",
         "parent_id",
         "source_task_id",
-        "tags",
+        "external_refs",
+        "context",
+        "comment",
+        "dependencies",
     ] {
-        properties.get(key).expect(&format!(
-            "{key} must appear in MCP schema properties for orbit.task.add"
-        ));
+        assert!(
+            !properties.contains_key(removed),
+            "{removed} must not appear in MCP schema properties for orbit.task.add"
+        );
     }
-
-    // (context desc rewrite verified via grep on the orbit-tools source per AC2;
-    // the MCP builder faithfully copies non-empty descriptions from ToolParam)
 }

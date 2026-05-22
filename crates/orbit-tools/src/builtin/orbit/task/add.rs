@@ -1,4 +1,6 @@
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema};
+use orbit_common::types::{
+    OrbitError, ToolParam, ToolSchema, required_string, strip_retired_task_add_input_fields,
+};
 use serde_json::Value;
 
 use crate::{OrbitBuiltinAction, Tool, ToolContext};
@@ -20,42 +22,6 @@ impl Tool for OrbitTaskAddTool {
                 param_type: "string".to_string(),
                 required: true,
             },
-            ToolParam {
-                name: "acceptance_criteria".to_string(),
-                description: "Optional acceptance criteria as a string or array of strings"
-                    .to_string(),
-                param_type: "string_list".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "dependencies".to_string(),
-                description: "Optional dependency task IDs as a string or array of strings"
-                    .to_string(),
-                param_type: "string_list".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "relations".to_string(),
-                description:
-                    "Optional typed task relations as an array of {type, target} objects"
-                        .to_string(),
-                param_type: "array".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "tags".to_string(),
-                description: "Optional tags as a string or array of strings".to_string(),
-                param_type: "string_list".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "plan".to_string(),
-                description:
-                    "Optional task plan markdown. Leave blank for the executing agent to author."
-                        .to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
             // ADR-0149: `workspace` is the binding key for ~/.orbit/tasks/workspaces/<id>/
             // home-store projection; defaulting to cwd would silently misroute tasks under
             // worktrees, subdirectories, or non-default `workspace_id` in .orbit/config.yaml.
@@ -66,17 +32,16 @@ impl Tool for OrbitTaskAddTool {
                 required: true,
             },
             ToolParam {
-                name: "comment".to_string(),
-                description: "Optional initial task comment".to_string(),
-                param_type: "string".to_string(),
+                name: "acceptance_criteria".to_string(),
+                description: "Optional acceptance criteria as a string or array of strings"
+                    .to_string(),
+                param_type: "string_list".to_string(),
                 required: false,
             },
             ToolParam {
-                name: "external_refs".to_string(),
-                description:
-                    "Optional external tracker refs as an array of {system, id, url?} objects"
-                        .to_string(),
-                param_type: "array".to_string(),
+                name: "tags".to_string(),
+                description: "Optional tags as a string or array of strings".to_string(),
+                param_type: "string_list".to_string(),
                 required: false,
             },
             ToolParam {
@@ -85,14 +50,6 @@ impl Tool for OrbitTaskAddTool {
                     "Optional task context selectors as a comma-separated string or array of strings. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files referenced only for context. Prefer canonical selectors: `file:`, `dir:`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically."
                         .to_string(),
                 param_type: "string_list".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "context".to_string(),
-                description:
-                    "Deprecated legacy alias for `context_files`. Prefer `context_files`. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files that are only relevant background context. Prefer canonical selectors: `file:`, `dir:`, or `symbol:path#name:kind`."
-                        .to_string(),
-                param_type: "string".to_string(),
                 required: false,
             },
             ToolParam {
@@ -114,28 +71,11 @@ impl Tool for OrbitTaskAddTool {
                 required: false,
             },
             ToolParam {
-                name: "status".to_string(),
-                description: "Optional initial task status".to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "source_task_id".to_string(),
-                description: "For bug tasks: originating task ID that introduced the defect"
-                    .to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "parent_id".to_string(),
-                description: "Optional parent task ID for a subtask relationship".to_string(),
-                param_type: "string".to_string(),
-                required: false,
-            },
-            ToolParam {
-                name: "crew".to_string(),
-                description: "Optional named crew to use when running this task".to_string(),
-                param_type: "string".to_string(),
+                name: "relations".to_string(),
+                description:
+                    "Optional typed task relations as an array of {type, target} objects"
+                        .to_string(),
+                param_type: "array".to_string(),
                 required: false,
             },
         ];
@@ -149,8 +89,21 @@ impl Tool for OrbitTaskAddTool {
         }
     }
 
-    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+    fn execute(&self, ctx: &ToolContext, mut input: Value) -> Result<Value, OrbitError> {
         super::super::reject_agent_field(&input, "orbit.task.add")?;
+        required_string(&input, &["title"], "title")?;
+        required_string(&input, &["description"], "description")?;
+        required_string(&input, &["workspace"], "workspace")?;
+
+        let ignored_fields = strip_retired_task_add_input_fields(&mut input);
+        if !ignored_fields.is_empty() {
+            tracing::warn!(
+                target: "orbit.tools.task.add",
+                ignored_fields = ?ignored_fields,
+                "ignored retired orbit.task.add fields"
+            );
+        }
+
         super::super::execute_host_action(ctx, input, OrbitBuiltinAction::TaskAdd)
     }
 }
