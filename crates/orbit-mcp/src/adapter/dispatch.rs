@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, ToolSchema};
+use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Implementation, InitializeResult, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo,
+    CallToolRequestParams, CallToolResult, Implementation, InitializeRequestParams,
+    InitializeResult, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerInfo,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use serde_json::{Map, Value};
@@ -46,6 +46,19 @@ impl OrbitToolServer {
         }
     }
 
+    pub(super) fn replace_session_context(&self, session_context: ToolSessionContext) {
+        if let Ok(mut guard) = self.session_context.write() {
+            *guard = session_context;
+        }
+    }
+
+    pub(super) fn session_context(&self) -> ToolSessionContext {
+        self.session_context
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
     pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, ToolNameCollision> {
         let schemas = self.host.list_tool_schemas();
         let map = match build_name_map(&schemas) {
@@ -75,8 +88,11 @@ impl OrbitToolServer {
 
         let host = Arc::clone(&self.host);
         let exec_name = canonical.clone();
+        let session_context = self.session_context();
         let input_for_learning = input.clone();
-        let join = tokio::task::spawn_blocking(move || host.call_tool(&exec_name, input)).await;
+        let join =
+            tokio::task::spawn_blocking(move || host.call_tool(&exec_name, input, session_context))
+                .await;
 
         match join {
             Ok(Ok(value)) => {
@@ -97,6 +113,18 @@ impl OrbitToolServer {
 }
 
 impl ServerHandler for OrbitToolServer {
+    fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<InitializeResult, McpError>> + Send + '_ {
+        self.replace_session_context(session_context_from_initialize(&request));
+        if context.peer.peer_info().is_none() {
+            context.peer.set_peer_info(request);
+        }
+        std::future::ready(Ok(self.get_info()))
+    }
+
     fn get_info(&self) -> ServerInfo {
         let implementation = Implementation::new("orbit-mcp", env!("CARGO_PKG_VERSION"));
         let capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -129,4 +157,25 @@ impl ServerHandler for OrbitToolServer {
     ) -> Result<CallToolResult, McpError> {
         self.call_tool_request(req).await
     }
+}
+
+pub(super) fn session_context_from_initialize(
+    request: &InitializeRequestParams,
+) -> ToolSessionContext {
+    // ADR-0181: clients deliberately announce workspace through initialize `_meta`.
+    let workspace = request
+        .meta
+        .as_ref()
+        .and_then(|meta| {
+            meta.0
+                .get("orbit")
+                .and_then(|orbit| orbit.get("workspace"))
+                .or_else(|| meta.0.get("orbit.workspace"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    ToolSessionContext { workspace }
 }

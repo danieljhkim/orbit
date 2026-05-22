@@ -1,11 +1,16 @@
 use std::sync::Arc;
 
+use orbit_common::types::ToolSessionContext;
+use rmcp::model::{ClientCapabilities, Implementation, InitializeRequestParams, Meta};
+
+use super::super::dispatch::session_context_from_initialize;
 use super::super::schema::{build_input_schema, property_for, schema_to_tool};
 use serde_json::{Value, json};
 
 use super::super::OrbitToolServer;
 use super::super::test_support::{
-    LearningPersistenceHost, param, param_with_type, request_with_args, tool_schema,
+    LearningPersistenceHost, SessionContextHost, param, param_with_type, request_with_args,
+    tool_schema,
 };
 
 #[test]
@@ -80,6 +85,60 @@ fn task_dependency_schemas_accept_string_or_string_array() {
             .any(|schema| schema.get("type").and_then(Value::as_str) == Some("string")),
         "orbit.task.update dependencies must accept a string"
     );
+}
+
+fn initialize_params_with_meta(meta: Value) -> InitializeRequestParams {
+    let mut params = InitializeRequestParams::new(
+        ClientCapabilities::default(),
+        Implementation::new("orbit-test-client", "0"),
+    );
+    let Value::Object(object) = meta else {
+        panic!("test meta must be an object");
+    };
+    params.meta = Some(Meta(object));
+    params
+}
+
+#[test]
+fn initialize_meta_extracts_orbit_workspace_session_context() {
+    let params = initialize_params_with_meta(json!({
+        "orbit": {
+            "workspace": " /repo/main "
+        }
+    }));
+
+    let session_context = session_context_from_initialize(&params);
+
+    assert_eq!(session_context.workspace.as_deref(), Some("/repo/main"));
+}
+
+#[tokio::test]
+async fn mcp_session_context_reaches_tool_calls_without_workspace_input() {
+    let host = Arc::new(SessionContextHost::default());
+    let server = OrbitToolServer::new(host.clone());
+    server.replace_session_context(ToolSessionContext::with_workspace("/repo/main"));
+
+    let explicit = server
+        .call_tool_request(request_with_args(
+            "orbit.task.list",
+            json!({ "workspace": "/repo/main" }),
+        ))
+        .await
+        .expect("explicit workspace call succeeds")
+        .structured_content
+        .expect("explicit structured content");
+    let ambient = server
+        .call_tool_request(request_with_args("orbit.task.list", json!({})))
+        .await
+        .expect("ambient workspace call succeeds")
+        .structured_content
+        .expect("ambient structured content");
+
+    assert_eq!(ambient, explicit);
+    let calls = host.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].2.workspace.as_deref(), Some("/repo/main"));
+    assert!(calls[1].1.get("workspace").is_none());
 }
 
 // --- ORB-00102 tests: object_list schema + loud fallback + e2e via MCP adapter ---

@@ -1,9 +1,40 @@
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use orbit_common::types::TaskStatus;
+use orbit_common::types::{TaskStatus, ToolSessionContext};
+use orbit_store::sqlite::task_registry::read_workspace_config;
 use serde_json::{Value, json};
 
 use super::super::test_support::{create_task, invalid_input_message, test_runtime};
+use crate::command::tool::ToolEntryPoint;
+
+struct CurrentDirGuard {
+    _guard: MutexGuard<'static, ()>,
+    previous: PathBuf,
+}
+
+impl CurrentDirGuard {
+    fn enter(path: &Path) -> Self {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let guard = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::current_dir().expect("capture cwd");
+        std::env::set_current_dir(path).expect("enter test cwd");
+        Self {
+            _guard: guard,
+            previous,
+        }
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        std::env::set_current_dir(&self.previous).expect("restore cwd");
+    }
+}
 
 fn assert_task_titles(output: &Value, expected: &[&str]) {
     let mut titles = output
@@ -98,6 +129,50 @@ fn task_add_tool_creates_proposed_tasks_for_agents() {
     assert_eq!(
         output.get("status").and_then(Value::as_str),
         Some("proposed")
+    );
+}
+
+#[test]
+fn mcp_task_add_uses_session_workspace_from_worktree_cwd() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let worktree_cwd = repo_root
+        .join(".orbit")
+        .join("state")
+        .join("worktrees")
+        .join("orbit-jrun-test")
+        .join("nested");
+    fs::create_dir_all(&worktree_cwd).expect("create worktree cwd");
+    let _cwd = CurrentDirGuard::enter(&worktree_cwd);
+    let workspace_config =
+        read_workspace_config(&repo_root.join(".orbit")).expect("read canonical workspace config");
+    let repo_root_string = repo_root.to_string_lossy().into_owned();
+
+    let output = runtime
+        .execute_tool_command_dispatch_with_session_context(
+            "orbit.task.add",
+            json!({
+                "title": "Ambient worktree task",
+                "description": "Session workspace must beat process cwd."
+            }),
+            Some("codex".to_string()),
+            Some("gpt-5.5".to_string()),
+            ToolEntryPoint::Mcp,
+            ToolSessionContext::with_workspace(repo_root_string.clone()),
+        )
+        .expect("task add tool succeeds")
+        .value;
+
+    let task_id = output["id"].as_str().expect("task id");
+    assert!(
+        runtime
+            .global_root()
+            .join("tasks")
+            .join("workspaces")
+            .join(workspace_config.workspace_id)
+            .join(task_id)
+            .join("task.yaml")
+            .exists(),
+        "task bundle must be under the canonical workspace id"
     );
 }
 

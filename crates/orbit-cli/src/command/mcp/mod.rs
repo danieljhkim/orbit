@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{Args, Subcommand};
-use orbit_common::types::{AuditEventStatus, ToolSchema, audit_execution_id};
+use orbit_common::types::{AuditEventStatus, ToolSchema, ToolSessionContext, audit_execution_id};
 use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
 use orbit_core::{
     AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, redact_sensitive_env_text,
@@ -237,8 +237,13 @@ impl McpHost for RuntimeMcpHost {
             .collect()
     }
 
-    fn call_tool(&self, name: &str, input: Value) -> Result<Value, OrbitError> {
-        audited_mcp_call(&self.runtime, name, input)
+    fn call_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        audited_mcp_call_with_session_context(&self.runtime, name, input, session_context)
     }
 }
 
@@ -252,14 +257,31 @@ impl McpHost for RuntimeMcpHost {
 /// then short-circuits. On the success path it delegates to the runtime,
 /// which owns the audit row (no dedup needed because `orbit mcp serve` is
 /// invoked outside any CLI [`crate::audit_middleware::AuditGuard`]).
+#[cfg(test)]
 fn audited_mcp_call(runtime: &OrbitRuntime, name: &str, input: Value) -> Result<Value, OrbitError> {
+    audited_mcp_call_with_session_context(runtime, name, input, ToolSessionContext::default())
+}
+
+fn audited_mcp_call_with_session_context(
+    runtime: &OrbitRuntime,
+    name: &str,
+    input: Value,
+    session_context: ToolSessionContext,
+) -> Result<Value, OrbitError> {
     if let Err(err) = ensure_mcp_tool_exposed(name) {
         record_mcp_preflight_failure(runtime, name, &input, &err);
         return Err(err);
     }
 
     runtime
-        .execute_tool_command_dispatch(name, input, None, None, ToolEntryPoint::Mcp)
+        .execute_tool_command_dispatch_with_session_context(
+            name,
+            input,
+            None,
+            None,
+            ToolEntryPoint::Mcp,
+            session_context,
+        )
         .map(|outcome| outcome.value)
 }
 
@@ -335,7 +357,12 @@ impl McpHost for EmptyMcpHost {
         Vec::new()
     }
 
-    fn call_tool(&self, name: &str, _input: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &self,
+        name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
     }
 }

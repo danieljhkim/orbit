@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use orbit_common::types::{
     AuditEventStatus, NotFoundKind, OrbitError, OrbitEvent, Role, StoredTool, ToolParam,
-    audit_execution_id, normalize_agent_family_for_model, normalize_optional_attribution_label,
+    ToolSessionContext, audit_execution_id, normalize_agent_family_for_model,
+    normalize_optional_attribution_label,
 };
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::{ReservationOwnerContext, ToolContext};
@@ -121,6 +122,25 @@ impl OrbitRuntime {
         model_override: Option<String>,
         entry_point: ToolEntryPoint,
     ) -> Result<ToolDispatchOutcome, OrbitError> {
+        self.execute_tool_command_dispatch_with_session_context(
+            name,
+            input,
+            agent_override,
+            model_override,
+            entry_point,
+            ToolSessionContext::default(),
+        )
+    }
+
+    pub fn execute_tool_command_dispatch_with_session_context(
+        &self,
+        name: &str,
+        input: Value,
+        agent_override: Option<String>,
+        model_override: Option<String>,
+        entry_point: ToolEntryPoint,
+        session_context: ToolSessionContext,
+    ) -> Result<ToolDispatchOutcome, OrbitError> {
         let start = Instant::now();
         let role_label =
             audit_role_label(&input, agent_override.as_deref(), model_override.as_deref());
@@ -144,6 +164,7 @@ impl OrbitRuntime {
                 .map(|path| path.to_string_lossy().into_owned());
             let tool_context = ToolContext {
                 cwd,
+                session_context,
                 allowed_tools,
                 agent_name,
                 model_name,

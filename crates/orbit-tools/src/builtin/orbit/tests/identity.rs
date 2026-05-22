@@ -19,6 +19,7 @@ fn runtime_identity_overwrites_self_reported_model_at_tool_boundary() {
 fn tool_context(agent: &str, model: &str) -> ToolContext {
     ToolContext {
         cwd: None,
+        session_context: Default::default(),
         allowed_tools: Vec::new(),
         workspace_root: None,
         agent_name: Some(agent.to_string()),
