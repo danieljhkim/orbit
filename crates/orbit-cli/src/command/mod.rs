@@ -50,12 +50,12 @@ Environment:
 Operate:
   run         Run a workflow (ship, duel-plan, job)
   task        Create, update, and manage tasks
-  search      Search tasks, docs, learnings, and ADRs
   docs        Search and manage the indexed docs corpus
   learning    Create, search, and curate project learnings
 
 Observe:
   graph       Query the knowledge graph
+  search      Search tasks, docs, learnings, and ADRs
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
 
