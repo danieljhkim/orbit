@@ -512,12 +512,14 @@ mod tests {
             run_id: Option<&str>,
             fs_profile: Option<&str>,
             fs_audit: Option<Arc<dyn FsAuditLogger>>,
+            proc_allowed_programs: Option<&[String]>,
         ) -> ToolContext {
             <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
                 self.runtime,
                 run_id,
                 fs_profile,
                 fs_audit,
+                proc_allowed_programs,
             )
         }
     }
@@ -601,12 +603,14 @@ mod tests {
             run_id: Option<&str>,
             fs_profile: Option<&str>,
             fs_audit: Option<Arc<dyn FsAuditLogger>>,
+            proc_allowed_programs: Option<&[String]>,
         ) -> ToolContext {
             <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
                 self.runtime,
                 run_id,
                 fs_profile,
                 fs_audit,
+                proc_allowed_programs,
             )
         }
     }

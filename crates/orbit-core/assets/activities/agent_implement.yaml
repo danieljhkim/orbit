@@ -113,6 +113,11 @@ spec:
     - fs.read
     - fs.delete
     - proc.spawn
+  proc_allowed_programs:
+    - git
+    - make
+    - cargo
+    - rg
   on_denial: terminate
   max_iterations: 25
   role: implementer

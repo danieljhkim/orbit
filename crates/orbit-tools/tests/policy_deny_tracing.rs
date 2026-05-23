@@ -85,7 +85,7 @@ fn policy_denials_emit_redacted_jsonl_tracing_events() {
 
     let proc_event = events
         .iter()
-        .find(|event| event["fields"]["tool"] == "shell.spawn")
+        .find(|event| event["fields"]["tool"] == "proc.spawn")
         .expect("proc deny tracing event");
     assert_eq!(proc_event["fields"]["path"], "sh");
     assert_eq!(proc_event["fields"]["profile"], "proc.allowed_programs");

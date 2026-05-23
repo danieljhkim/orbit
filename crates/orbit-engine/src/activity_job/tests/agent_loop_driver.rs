@@ -85,6 +85,7 @@ impl V2RuntimeHost for ReplayHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
         ToolContext::default()
     }
@@ -135,6 +136,7 @@ impl V2RuntimeHost for LearningReplayHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
         ToolContext::default()
     }
@@ -151,6 +153,7 @@ fn replay_spec(on_denial: OnDenial) -> AgentLoopSpec {
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
         role: None,
+        proc_allowed_programs: None,
     }
 }
 

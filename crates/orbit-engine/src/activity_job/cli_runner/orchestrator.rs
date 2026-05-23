@@ -54,7 +54,12 @@ pub fn run_cli_backend(
     });
 
     let task_ctx = host.task_context_for_agent_input(input)?;
-    let mut tool_ctx = host.tool_context_for_activity(Some(run_id), fs_profile, None);
+    let mut tool_ctx = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        None,
+        spec.proc_allowed_programs.as_deref(),
+    );
     tool_ctx.agent_name = Some(provider.clone());
     tool_ctx.model_name = spec.model.as_deref().map(str::to_string);
     // Resolve the subprocess cwd before sandbox compilation so the host can

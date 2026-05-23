@@ -134,6 +134,7 @@ pub trait V2RuntimeHost: Send + Sync {
         run_id: Option<&str>,
         fs_profile: Option<&str>,
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
+        proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext;
 
     fn persist_invocation_trace(
@@ -409,6 +410,7 @@ fn run_deterministic(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
+        None,
     );
     let output = host.run_deterministic(&spec.action, &spec.config, input, tool_context)?;
     Ok(DispatchOutcome {

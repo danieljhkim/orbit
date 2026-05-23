@@ -72,6 +72,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         provider: Provider::Grok,
         wall_clock_timeout_seconds: 120,
         role: None,
+        proc_allowed_programs: None,
     };
 
     let outcome = dispatch_v2_activity(V2DispatchInput {

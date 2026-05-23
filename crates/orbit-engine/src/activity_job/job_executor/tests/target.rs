@@ -66,6 +66,7 @@ impl V2RuntimeHost for RoleHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }
@@ -87,6 +88,7 @@ fn inline_agent_loop_spec() -> AgentLoopSpec {
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 30,
         role: None,
+        proc_allowed_programs: None,
     }
 }
 

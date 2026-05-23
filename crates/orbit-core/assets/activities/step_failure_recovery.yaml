@@ -86,6 +86,9 @@ spec:
     - fs.read
     - fs.delete
     - proc.spawn
+  proc_allowed_programs:
+    - git
+    - rg
   on_denial: terminate
   max_iterations: 8
   role: reviewer

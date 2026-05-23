@@ -80,6 +80,7 @@ impl V2RuntimeHost for AttemptHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
         ToolContext::default()
     }
@@ -111,6 +112,7 @@ fn groundhog_spec(on_denial: OnDenial) -> GroundhogSpec {
         wall_clock_timeout_seconds: 30,
         attempt_budget_default: 1,
         role: None,
+        proc_allowed_programs: None,
     }
 }
 
