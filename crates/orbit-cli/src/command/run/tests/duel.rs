@@ -116,12 +116,12 @@ spec:
   state: enabled
   kind: workflow
   steps:
-- id: marker
-  spec:
-    type: deterministic
-    action: sleep
-    config:
-      seconds: 0
+    - id: marker
+      spec:
+        type: deterministic
+        action: sleep
+        config:
+          seconds: 0
 "#,
     )
     .expect("write job_duel_plan_pipeline fixture");

@@ -49,11 +49,11 @@ spec:
   state: enabled
   kind: workflow
   steps:
-- id: nap
-  spec:
-    type: deterministic
-    action: sleep
-    config: {{}}
+    - id: nap
+      spec:
+        type: deterministic
+        action: sleep
+        config: {{}}
 "#
         ),
     )

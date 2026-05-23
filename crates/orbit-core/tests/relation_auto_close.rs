@@ -51,9 +51,7 @@ fn add_task_with_resolves(
                 "title": format!("Resolve {target}"),
                 "description": "Fixture task with a resolves relation.",
                 "acceptance_criteria": ["Relation is visible."],
-                "plan": "1. Exercise the relation transition.",
                 "workspace": repo_root.to_string_lossy(),
-                "status": status,
                 "type": "feature",
                 "relations": [
                     { "type": "resolves", "target": target }
@@ -62,7 +60,28 @@ fn add_task_with_resolves(
             }),
         )
         .expect("add task");
-    task["id"].as_str().expect("task id").to_string()
+    let task_id = task["id"].as_str().expect("task id").to_string();
+    // ORB-00255 retired `plan` and `status` from the orbit.task.add schema,
+    // so seed the plan via update and approve into the desired status here.
+    runtime
+        .run_tool(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "plan": "1. Exercise the relation transition.",
+                "model": "codex",
+            }),
+        )
+        .expect("set plan via update");
+    if status == "backlog" {
+        runtime
+            .run_tool(
+                "orbit.task.approve",
+                json!({ "id": task_id, "model": "codex" }),
+            )
+            .expect("approve task into backlog");
+    }
+    task_id
 }
 
 fn move_backlog_task_to_review(runtime: &OrbitRuntime, task_id: &str) {

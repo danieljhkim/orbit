@@ -22,12 +22,12 @@ spec:
   state: enabled
   kind: workflow
   steps:
-- id: marker
-  spec:
-    type: deterministic
-    action: sleep
-    config:
-      seconds: 0
+    - id: marker
+      spec:
+        type: deterministic
+        action: sleep
+        config:
+          seconds: 0
 "#,
     )
     .expect("write task_auto_pipeline fixture");

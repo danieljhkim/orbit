@@ -167,26 +167,29 @@ fn tool_run_audit_meta_uses_agent_role_without_identity() {
 #[test]
 fn search_audit_meta_preserves_kind_discriminator() {
     // ORB-00202: `orbit search --kind X` collapsed three per-domain
-    // `<command> search` rows into one. Ensure the `--kind` value is
-    // surfaced via `subcommand` so downstream audit queries can still
-    // distinguish task / doc / learning / adr searches.
+    // `<command> search` rows into one. ORB-00205 then prefixed the
+    // subcommand with the search mode (`query` / `similar` / `path`),
+    // so a query-mode search of kind `task` emits `query:task`. The
+    // `--kind` value is still preserved on the right side of the colon
+    // so downstream audit queries can distinguish task / doc /
+    // learning / adr searches.
     let task = meta_for(&["orbit", "search", "foo", "--kind", "task"]);
     assert_eq!(task.command, "search");
-    assert_eq!(task.subcommand.as_deref(), Some("task"));
+    assert_eq!(task.subcommand.as_deref(), Some("query:task"));
     assert_eq!(task.target_type.as_deref(), Some("search"));
 
     let learning = meta_for(&["orbit", "search", "foo", "--kind", "learning"]);
-    assert_eq!(learning.subcommand.as_deref(), Some("learning"));
+    assert_eq!(learning.subcommand.as_deref(), Some("query:learning"));
 
     let doc = meta_for(&["orbit", "search", "foo", "--kind", "doc"]);
-    assert_eq!(doc.subcommand.as_deref(), Some("doc"));
+    assert_eq!(doc.subcommand.as_deref(), Some("query:doc"));
 
     let adr = meta_for(&["orbit", "search", "foo", "--kind", "adr"]);
-    assert_eq!(adr.subcommand.as_deref(), Some("adr"));
+    assert_eq!(adr.subcommand.as_deref(), Some("query:adr"));
 
     // Default `--kind all` is captured explicitly rather than left blank.
     let all = meta_for(&["orbit", "search", "foo"]);
-    assert_eq!(all.subcommand.as_deref(), Some("all"));
+    assert_eq!(all.subcommand.as_deref(), Some("query:all"));
 }
 
 #[test]
