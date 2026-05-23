@@ -3,7 +3,7 @@
 //! The loop emits a fixed set of structured events — session lifecycle, HTTP
 //! request/response, tool-call request/result, iteration boundaries, policy
 //! denials — to any [`AuditSink`] implementation. Events carry sha256
-//! pointers to verbatim payloads stored in a [`BlobStore`]; full bodies live
+//! pointers to redacted payloads stored in a [`BlobStore`]; full bodies live
 //! in a separate content-addressed store so events stay small and queryable.
 //!
 //! [`JsonlFileSink`] writes one JSON object per line to
@@ -160,10 +160,11 @@ impl AuditSink for InMemorySink {
             .blob_store
             .write(content)
             .unwrap_or_else(|err| format!("error:{err}"));
+        let stored = self.blob_store.redact_for_storage(content);
         self.blobs
             .lock()
             .expect("blob mutex")
-            .push((hash.clone(), content.to_vec()));
+            .push((hash.clone(), stored));
         hash
     }
 }

@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 use orbit_common::types::{ExecutorSandboxKind, OrbitError};
+use orbit_common::utility::redaction::non_sensitive_env_vars;
 use orbit_exec::{
     MacosSandboxSpawnRequest, compile_macos_sandbox_profile, sandbox_exec_available,
     sandbox_exec_unavailable_message, spawn_under_macos_sandbox,
@@ -43,6 +44,8 @@ pub(crate) fn spawn_bare(
     let mut command = Command::new(program);
     command
         .args(args)
+        .env_clear()
+        .envs(non_sensitive_env_vars())
         .envs(env.iter().map(|(key, value)| (key, value)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -1,3 +1,4 @@
+mod blob_store;
 mod glob;
 mod logging;
 #[cfg(unix)]
