@@ -1,6 +1,6 @@
 ---
 name: orbit-docs
-description: Use when searching, listing, showing, registering, reindexing, or migrating the human-authored docs corpus via `orbit.docs.*`. Covers the locked frontmatter schema, recommended docs layout, learning-vs-doc boundaries, and ADR routing.
+description: Use when searching, listing, showing, registering, reindexing, or migrating the human-authored docs corpus. Agents discover docs with `orbit.search --kind doc`; admin/setup workflows use the `orbit docs ...` CLI. Covers the locked frontmatter schema, recommended docs layout, learning-vs-doc boundaries, and ADR routing.
 ---
 
 # Orbit Docs
@@ -40,9 +40,9 @@ Orbit-docs indexes any configured Markdown root with valid frontmatter; it does 
 
 ## Learning vs Doc
 
-Learning = a load-bearing rule with a known failure mode. It is managed through `orbit.learning.*`, has scope-glob push injection, and can be updated, superseded, or pruned.
+Learning = a load-bearing rule with a known failure mode. It is managed through the active `orbit.learning.add/show/update/upvote/supersede/prune/comment.*` tools plus CLI-only audit/list workflows, has scope-glob push injection, and can be updated, superseded, or pruned.
 
-Doc = explanatory context. It is PR-reviewed Markdown, retrieved through `orbit.docs.*`, and has no supersede flow. Link to load-bearing learnings with `related_artifacts: [L-NNNN]` when useful.
+Doc = explanatory context. It is PR-reviewed Markdown, retrieved by agents through `orbit.search --kind doc`, and has no supersede flow. Link to load-bearing learnings with `related_artifacts: [L-NNNN]` when useful.
 
 ## Routing Notes
 
@@ -53,16 +53,16 @@ Doc = explanatory context. It is PR-reviewed Markdown, retrieved through `orbit.
 
 ## Tool Invocation
 
-CLI and MCP forms are equivalent:
+Agents use `orbit.search` for retrieval. The `orbit docs ...` commands below are CLI-only human/admin workflows.
 
-| Verb | CLI | MCP |
+| Verb | Surface | Form |
 | --- | --- | --- |
-| List | `orbit docs list --json` | `orbit.docs.list` |
-| Show | `orbit docs show <path> --json` | `orbit.docs.show` |
-| Search | `orbit search --kind doc <query> --json --limit 20` (or `--kind all` / `--kind adr`) | `orbit.search` |
-| Add root | `orbit docs add <path>` | `orbit.docs.add` |
-| Index | `orbit docs index` | `orbit.docs.index` |
-| Migrate | `orbit docs migrate --dry-run` | `orbit.docs.migrate` |
+| Search | Agent tool / CLI | `orbit.search` or `orbit search --kind doc <query> --json --limit 20` (also `--kind all` / `--kind adr`) |
+| List | CLI-only | `orbit docs list --json` |
+| Show | CLI-only | `orbit docs show <path> --json` |
+| Add root | CLI-only | `orbit docs add <path>` |
+| Index | CLI-only | `orbit docs index` |
+| Migrate | CLI-only | `orbit docs migrate --dry-run` |
 
 `orbit search <query> --kind all` federates doc and ADR hits in one call. Use `--kind doc` for doc-only matches, `--kind adr` for ADR-only matches, and `--kind adr --all` (or `--status adr:accepted,adr:superseded`) to include superseded ADRs for archaeology. See `orbit-search` for the full flag matrix (`--tag`, `orbit search path <path>`, `--status kind:value`).
 

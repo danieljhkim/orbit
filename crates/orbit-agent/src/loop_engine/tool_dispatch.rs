@@ -28,7 +28,7 @@ pub fn build_tool_specs(registry: &ToolRegistry, allowlist: &[String]) -> Vec<To
     let mut seen = HashSet::new();
     let mut specs = Vec::new();
     for entry in allowlist {
-        if let Some(schema) = registry.get_schema(entry) {
+        if let Some(schema) = registry.get_active_schema(entry) {
             push_tool_spec(&mut specs, &mut seen, &schema);
         }
         if entry.ends_with('*') && validate_tool_allowlist(std::slice::from_ref(entry)).is_ok() {

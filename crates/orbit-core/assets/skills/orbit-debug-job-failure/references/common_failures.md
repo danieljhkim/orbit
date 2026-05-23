@@ -10,13 +10,13 @@ Symptoms:
 
 - A gate, auto, or task run repeatedly emits `task.locks.reserve.denied`.
 - Conflicts name `held_by: "reservation"` with the same `held_by_id` on each retry.
-- `orbit.task.locks` shows the blocking reservation belongs to a different task that is already `done`, `failed`, or otherwise no longer active.
+- CLI-only `orbit task locks` or reservation-store inspection shows the blocking reservation belongs to a different task that is already `done`, `failed`, or otherwise no longer active.
 - The reservation has `owner_run_id: null`, so terminal run cleanup cannot release it by owner.
 
 Confirm:
 
 ```bash
-orbit tool run orbit.task.locks --input '{"model":"codex"}'
+orbit task locks --json
 orbit tool run orbit.task.show --full --input '{"id":"<blocking_task_id>","model":"codex"}'
 rg -n '<reservation_id>|task.locks.reserve.denied|<blocked_task_id>' .orbit/state/audit/v2_loop
 ```
@@ -33,10 +33,10 @@ sqlite3 -header -column ~/.orbit/orbit.db \
 Solution:
 
 1. Verify the blocking task is not actively running and the reservation is stale.
-2. Release through the tool surface, not by editing SQLite:
+2. Release through the CLI-only lock admin surface, not by editing SQLite:
 
    ```bash
-   orbit tool run orbit.task.locks.release --input '{"reservation_id":"<reservation_id>","model":"codex"}'
+   orbit task locks release <reservation_id>
    ```
 
 3. Re-run or re-check the blocked run. The next reserve attempt should either acquire a fresh reservation with `owner_run_id` set or reveal a different conflict.
@@ -122,7 +122,7 @@ Confirm:
 ```bash
 orbit run show <run_id> --json
 rg -n 'step_failure_recovery|semantic.db|orbit.db|invalid L-|learning' .orbit/state/audit/v2_loop/<run_id>.jsonl
-orbit tool run orbit.learning.list --input '{"model":"codex"}'
+orbit learning list --json
 ```
 
 Solution:

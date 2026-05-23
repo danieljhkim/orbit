@@ -8,12 +8,12 @@ use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
 
 use super::{
-    DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES, LEARNING_TOOL_NAMES,
-    MCP_HIDDEN_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES,
+    ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES,
+    LEARNING_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES,
     is_mcp_tool_exposed, safe_mcp_tool_names,
 };
 
-const EXPECTED_MCP_HIDDEN_TOOL_NAMES: &[&str] = &[
+const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
     "orbit.docs.migrate",
     "orbit.docs.add",
@@ -31,17 +31,14 @@ const EXPECTED_MCP_HIDDEN_TOOL_NAMES: &[&str] = &[
     "orbit.friction.stats",
 ];
 
-const REEXPOSED_FRICTION_TOOL_NAMES: &[&str] = &[
-    "orbit.friction.list",
-    "orbit.friction.resolve",
-    "orbit.friction.show",
-    "orbit.friction.tags",
-    "orbit.friction.update",
-];
-
 const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.search",
     "orbit.task.add",
+    "orbit.task.approve",
+    "orbit.task.artifact.put",
+    "orbit.task.delete",
+    "orbit.task.lint",
+    "orbit.task.reject",
     "orbit.task.show",
     "orbit.task.update",
     "orbit.task.list",
@@ -51,15 +48,26 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.review_thread.resolve",
     "orbit.task.start",
     "orbit.graph.search",
+    "orbit.graph.show",
+    "orbit.graph.pack",
+    "orbit.graph.overview",
     "orbit.graph.refs",
     "orbit.graph.callers",
+    "orbit.graph.deps",
     "orbit.graph.implementors",
+    "orbit.adr.add",
+    "orbit.adr.list",
+    "orbit.adr.show",
+    "orbit.adr.supersede",
+    "orbit.adr.update",
     "orbit.learning.add",
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.upvote",
     "orbit.learning.comment.add",
     "orbit.learning.comment.list",
+    "orbit.learning.comment.delete",
+    "orbit.learning.prune",
     "orbit.friction.add",
     "orbit.friction.list",
     "orbit.friction.resolve",
@@ -73,26 +81,27 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
         || name.starts_with("orbit.task.")
         || name.starts_with("orbit.friction.")
         || name.starts_with("orbit.graph.")
+        || name.starts_with("orbit.adr.")
         || name.starts_with("orbit.semantic.")
         || name.starts_with("orbit.docs.")
         || name.starts_with("orbit.learning.")
 }
 
 #[test]
-fn mcp_hidden_denylist_matches_intended_ops_surface() {
-    assert_eq!(MCP_HIDDEN_TOOL_NAMES.len(), 15);
-    assert_eq!(MCP_HIDDEN_TOOL_NAMES, EXPECTED_MCP_HIDDEN_TOOL_NAMES);
+fn inactive_tools_are_not_in_the_mcp_safe_surface() {
+    let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 15);
 
-    for name in REEXPOSED_FRICTION_TOOL_NAMES {
+    for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
-            !MCP_HIDDEN_TOOL_NAMES.contains(name),
-            "agent-facing friction workflow should be visible over MCP: {name}"
+            !safe_names.contains(name),
+            "inactive tool leaked into safe MCP names: {name}"
+        );
+        assert!(
+            !is_mcp_tool_exposed(name),
+            "inactive tool exposed by MCP preflight: {name}"
         );
     }
-    assert!(
-        MCP_HIDDEN_TOOL_NAMES.contains(&"orbit.learning.list"),
-        "orbit.learning.list remains hidden; use orbit.search --kind learning for agent discovery"
-    );
 }
 
 #[test]
@@ -104,8 +113,14 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
         .into_iter()
         .map(|tool| tool.name)
         .collect();
+    let all_names: BTreeSet<String> = runtime
+        .list_all_tools()
+        .expect("list all tools")
+        .into_iter()
+        .map(|tool| tool.name)
+        .collect();
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
-    let hidden_names: BTreeSet<&str> = MCP_HIDDEN_TOOL_NAMES.iter().copied().collect();
+    let inactive_names: BTreeSet<&str> = EXPECTED_INACTIVE_TOOL_NAMES.iter().copied().collect();
 
     for name in TASK_TOOL_NAMES
         .iter()
@@ -113,6 +128,7 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
         .chain(GRAPH_READ_TOOL_NAMES)
         .chain(SEARCH_TOOL_NAMES)
         .chain(SEMANTIC_TOOL_NAMES)
+        .chain(ADR_TOOL_NAMES)
         .chain(DOCS_TOOL_NAMES)
         .chain(LEARNING_TOOL_NAMES)
     {
@@ -122,18 +138,18 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
         );
     }
 
-    for name in MCP_HIDDEN_TOOL_NAMES {
+    for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
-            names.contains(*name),
-            "MCP-hidden tool should remain registered for CLI use: {name}"
+            !names.contains(*name),
+            "inactive tool leaked into default runtime list: {name}"
         );
         assert!(
-            !safe_names.contains(*name),
-            "MCP-hidden tool leaked into safe MCP names: {name}"
+            all_names.contains(*name),
+            "inactive tool should remain registered for inspection: {name}"
         );
         assert!(
             !is_mcp_tool_exposed(name),
-            "MCP-hidden tool exposed by preflight: {name}"
+            "inactive tool exposed by MCP preflight: {name}"
         );
     }
 
@@ -156,7 +172,7 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
         .iter()
         .filter(|name| is_runtime_mcp_category_tool(name))
     {
-        let should_expose = !hidden_names.contains(name.as_str());
+        let should_expose = !inactive_names.contains(name.as_str());
         assert!(
             safe_names.contains(name.as_str()) == should_expose,
             "runtime tool MCP exposure mismatch for {name}"
@@ -208,10 +224,10 @@ fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
         );
     }
 
-    for name in MCP_HIDDEN_TOOL_NAMES {
+    for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
             !listed.contains(*name),
-            "client-visible MCP tool list exposes hidden ops tool: {name}"
+            "client-visible MCP tool list exposes inactive ops tool: {name}"
         );
     }
 
@@ -339,6 +355,27 @@ mod audited_mcp_call_tests {
             value.get("results").is_some(),
             "orbit.search returns wrapped results"
         );
+    }
+
+    #[test]
+    fn inactive_tool_is_rejected_over_mcp_dispatch() {
+        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+        let error = audited_mcp_call(&runtime, "orbit.learning.list", json!({ "model": "codex" }))
+            .expect_err("inactive tool is not callable over MCP");
+        assert!(error.to_string().contains("tool"));
+
+        let events = runtime
+            .list_audit_events(
+                None,
+                Some("orbit.learning.list".to_string()),
+                None,
+                None,
+                16,
+            )
+            .expect("list audit events");
+        assert_eq!(events.len(), 1, "preflight failure produced one audit row");
+        assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
+        assert_eq!(events[0].status, AuditEventStatus::Failure);
     }
 
     #[test]

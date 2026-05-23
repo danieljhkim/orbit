@@ -26,9 +26,9 @@ Orbit tools are reachable via two surfaces. Both accept identical JSON arguments
 
 - Task lifecycle (`orbit.task.*`): both surfaces.
 - ADR artifacts (`orbit.adr.*`): both surfaces.
-- Graph read tools (`search`, `show`, `pack`, `callers`, `refs`, `implementors`, `deps`, `overview`, `history`): both surfaces.
+- Graph read tools (`search`, `show`, `pack`, `callers`, `refs`, `implementors`, `deps`, `overview`): both surfaces. Task-to-commit lookup is not a graph tool; use `git log --grep '[T<task-id>]'`.
 - Unified search (`orbit.search`): both surfaces. Lexical search works without setup; `hybrid: true` and `semantic: "<task-id>"` require the search companion (`orbit semantic install`).
-- Semantic lifecycle tools (`orbit.semantic.install`, `orbit.semantic.uninstall`, `orbit.semantic.stats`, `orbit.semantic.index`): registered tool surface for managing the local embedding companion.
+- Semantic lifecycle is CLI-only (`orbit semantic install|stats|index|uninstall`); agents discover via `orbit.search --hybrid`.
 - State handoff (`orbit.state.*`), graph writes, and duel/scoreboard tools: **CLI only** — used inside activity steps where the agent has shell access.
 
 **Always include `model` in the JSON** so Orbit can attribute the call to the right agent family. Here `model` means the canonical agent family: pass `codex`, `claude`, `gemini`, or `grok`. Full model strings are accepted and auto-normalized, but the family is the persisted identity.
@@ -107,7 +107,7 @@ Command surface determines provenance by default:
 
 - `orbit-create-task`: Create a new task with description, acceptance criteria, and context.
 - `orbit-adr`: Create, update, inspect, accept, or supersede ADR artifacts through `orbit.adr.*`.
-- `orbit-docs`: Search, show, register, reindex, or migrate the human-authored docs corpus through `orbit.docs.*`. Use for docs retrieval over `docs/`; ADRs remain owned by `orbit-adr`.
+- `orbit-docs`: Search the human-authored docs corpus through `orbit.search --kind doc`; use `orbit docs ...` CLI for human/admin list, show, root registration, indexing, or migration workflows. ADRs remain owned by `orbit-adr`.
 - `orbit-debug-job-failure`: Diagnose failed, stuck, cancelled, or suspicious Orbit job runs.
 - `orbit-execute-task`: Carry a change through implementation, validation, and review.
 - `orbit-review-task`: Review someone else's work and file findings as review threads, without transitioning the task.

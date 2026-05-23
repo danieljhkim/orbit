@@ -35,9 +35,6 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
     "orbit.task.delete",
     "orbit.task.lint",
     "orbit.task.list",
-    "orbit.task.locks",
-    "orbit.task.locks.release",
-    "orbit.task.locks.reserve",
     "orbit.task.reject",
     "orbit.task.review_thread.add",
     "orbit.task.review_thread.list",
@@ -53,7 +50,6 @@ pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
     "orbit.friction.list",
     "orbit.friction.resolve",
     "orbit.friction.show",
-    "orbit.friction.stats",
     "orbit.friction.tags",
     "orbit.friction.update",
 ];
@@ -61,7 +57,6 @@ pub(crate) const FRICTION_TOOL_NAMES: &[&str] = &[
 pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
     "orbit.graph.callers",
     "orbit.graph.deps",
-    "orbit.graph.history",
     "orbit.graph.implementors",
     "orbit.graph.overview",
     "orbit.graph.pack",
@@ -72,51 +67,28 @@ pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
 
 pub(crate) const SEARCH_TOOL_NAMES: &[&str] = &["orbit.search"];
 
-pub(crate) const SEMANTIC_TOOL_NAMES: &[&str] = &[
-    "orbit.semantic.index",
-    "orbit.semantic.install",
-    "orbit.semantic.stats",
-    "orbit.semantic.uninstall",
+pub(crate) const SEMANTIC_TOOL_NAMES: &[&str] = &["orbit.semantic.uninstall"];
+
+pub(crate) const ADR_TOOL_NAMES: &[&str] = &[
+    "orbit.adr.add",
+    "orbit.adr.list",
+    "orbit.adr.show",
+    "orbit.adr.supersede",
+    "orbit.adr.update",
 ];
 
-pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[
-    "orbit.docs.list",
-    "orbit.docs.show",
-    "orbit.docs.add",
-    "orbit.docs.index",
-    "orbit.docs.migrate",
-];
+pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[];
 
 pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
     "orbit.learning.comment.add",
     "orbit.learning.comment.delete",
     "orbit.learning.comment.list",
-    "orbit.learning.list",
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.supersede",
     "orbit.learning.upvote",
     "orbit.learning.prune",
-    "orbit.learning.sync",
-];
-
-pub(crate) const MCP_HIDDEN_TOOL_NAMES: &[&str] = &[
-    "orbit.docs.index",
-    "orbit.docs.migrate",
-    "orbit.docs.add",
-    "orbit.docs.list",
-    "orbit.docs.show",
-    "orbit.task.locks",
-    "orbit.task.locks.release",
-    "orbit.task.locks.reserve",
-    "orbit.semantic.index",
-    "orbit.semantic.install",
-    "orbit.semantic.stats",
-    "orbit.graph.history",
-    "orbit.learning.sync",
-    "orbit.learning.list",
-    "orbit.friction.stats",
 ];
 
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
@@ -126,6 +98,7 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
             + GRAPH_READ_TOOL_NAMES.len()
             + SEARCH_TOOL_NAMES.len()
             + SEMANTIC_TOOL_NAMES.len()
+            + ADR_TOOL_NAMES.len()
             + DOCS_TOOL_NAMES.len()
             + LEARNING_TOOL_NAMES.len(),
     );
@@ -134,21 +107,21 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     names.extend_from_slice(GRAPH_READ_TOOL_NAMES);
     names.extend_from_slice(SEARCH_TOOL_NAMES);
     names.extend_from_slice(SEMANTIC_TOOL_NAMES);
+    names.extend_from_slice(ADR_TOOL_NAMES);
     names.extend_from_slice(DOCS_TOOL_NAMES);
     names.extend_from_slice(LEARNING_TOOL_NAMES);
-    names.retain(|name| !MCP_HIDDEN_TOOL_NAMES.contains(name));
     names
 }
 
 pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
-    !MCP_HIDDEN_TOOL_NAMES.contains(&name)
-        && (TASK_TOOL_NAMES.contains(&name)
-            || FRICTION_TOOL_NAMES.contains(&name)
-            || GRAPH_READ_TOOL_NAMES.contains(&name)
-            || SEARCH_TOOL_NAMES.contains(&name)
-            || SEMANTIC_TOOL_NAMES.contains(&name)
-            || DOCS_TOOL_NAMES.contains(&name)
-            || LEARNING_TOOL_NAMES.contains(&name))
+    TASK_TOOL_NAMES.contains(&name)
+        || FRICTION_TOOL_NAMES.contains(&name)
+        || GRAPH_READ_TOOL_NAMES.contains(&name)
+        || SEARCH_TOOL_NAMES.contains(&name)
+        || SEMANTIC_TOOL_NAMES.contains(&name)
+        || ADR_TOOL_NAMES.contains(&name)
+        || DOCS_TOOL_NAMES.contains(&name)
+        || LEARNING_TOOL_NAMES.contains(&name)
 }
 
 fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {

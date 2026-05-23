@@ -60,7 +60,7 @@ fn create_minimal(
 #[test]
 fn registry_exposes_learning_tools_with_documented_schema_fields() {
     let registry = registry_with_builtins();
-    let schemas = registry.schemas();
+    let schemas = registry.all_schemas();
     let names: Vec<&str> = schemas
         .iter()
         .map(|s| s.name.as_str())

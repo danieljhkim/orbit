@@ -38,11 +38,11 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(adr::show::OrbitAdrShowTool);
     registry.register(adr::supersede::OrbitAdrSupersedeTool);
     registry.register(adr::update::OrbitAdrUpdateTool);
-    registry.register(docs::OrbitDocsListTool);
-    registry.register(docs::OrbitDocsShowTool);
-    registry.register(docs::OrbitDocsAddTool);
-    registry.register(docs::OrbitDocsIndexTool);
-    registry.register(docs::OrbitDocsMigrateTool);
+    registry.register_inactive(docs::OrbitDocsListTool);
+    registry.register_inactive(docs::OrbitDocsShowTool);
+    registry.register_inactive(docs::OrbitDocsAddTool);
+    registry.register_inactive(docs::OrbitDocsIndexTool);
+    registry.register_inactive(docs::OrbitDocsMigrateTool);
     registry.register(groundhog::checkpoint_success::OrbitGroundhogCheckpointSuccessTool);
     registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
     registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
@@ -50,7 +50,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(friction::list::OrbitFrictionListTool);
     registry.register(friction::resolve::OrbitFrictionResolveTool);
     registry.register(friction::show::OrbitFrictionShowTool);
-    registry.register(friction::stats::OrbitFrictionStatsTool);
+    registry.register_inactive(friction::stats::OrbitFrictionStatsTool);
     registry.register(friction::tags::OrbitFrictionTagsTool);
     registry.register(friction::update::OrbitFrictionUpdateTool);
     registry.register(task::add::OrbitTaskAddTool);
@@ -58,9 +58,9 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task::approve::OrbitTaskApproveTool);
     registry.register(task::delete::OrbitTaskDeleteTool);
     registry.register(task::lint::OrbitTaskLintTool);
-    registry.register(task::locks::OrbitTaskLocksTool);
-    registry.register(task::locks_reserve::OrbitTaskLocksReserveTool);
-    registry.register(task::locks_release::OrbitTaskLocksReleaseTool);
+    registry.register_inactive(task::locks::OrbitTaskLocksTool);
+    registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
+    registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
     registry.register(task::start::OrbitTaskStartTool);
     registry.register(task::reject::OrbitTaskRejectTool);
     registry.register(task::show::OrbitTaskShowTool);
@@ -68,7 +68,7 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task::update::OrbitTaskUpdateTool);
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    registry.register(graph_history::OrbitGraphHistoryTool);
+    registry.register_inactive(graph_history::OrbitGraphHistoryTool);
     registry.register(knowledge::callers::OrbitKnowledgeCallersTool);
     registry.register(knowledge::deps::OrbitKnowledgeDepsTool);
     registry.register(knowledge::implementors::OrbitKnowledgeImplementorsTool);
@@ -81,9 +81,9 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(learning::comment_add::OrbitLearningCommentAddTool);
     registry.register(learning::comment_delete::OrbitLearningCommentDeleteTool);
     registry.register(learning::comment_list::OrbitLearningCommentListTool);
-    registry.register(learning::list::OrbitLearningListTool);
+    registry.register_inactive(learning::list::OrbitLearningListTool);
     registry.register(learning::prune::OrbitLearningPruneTool);
-    registry.register(learning::sync::OrbitLearningSyncTool);
+    registry.register_inactive(learning::sync::OrbitLearningSyncTool);
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);
@@ -99,10 +99,10 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(review_thread::resolve::OrbitReviewThreadResolveTool);
     registry.register(review_thread::resolve::OrbitReviewThreadResolveAliasTool);
     registry.register(search::OrbitSearchTool);
-    registry.register(semantic::install::OrbitSemanticInstallTool);
+    registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
     registry.register(semantic::uninstall::OrbitSemanticUninstallTool);
-    registry.register(semantic::stats::OrbitSemanticStatsTool);
-    registry.register(semantic::index::OrbitSemanticIndexTool);
+    registry.register_inactive(semantic::stats::OrbitSemanticStatsTool);
+    registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
     registry.register(state::get::OrbitStateGetTool);
     registry.register(state::set::OrbitStateSetTool);
 }

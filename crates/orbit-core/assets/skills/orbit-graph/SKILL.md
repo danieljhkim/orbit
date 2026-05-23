@@ -27,7 +27,7 @@ Graph **write** tools (build/update) are CLI-only — not exposed over MCP.
    - `orbit.graph.callers` for transitive caller-chain questions
    - `orbit.graph.refs` for usages or cross-file symbol references; it returns `code_refs` by default and fills `doc_refs` / `config_refs` only when you pass `include`
    - `orbit.graph.deps` for crate-level dependency direction
-   - `orbit.graph.history` is a compatibility stub for removed task attribution; for task-to-commit lookup use `git log --grep '[T<task-id>]'`
+   - `orbit.graph.history` has been removed from the agent tool surface; for task-to-commit lookup use `git log --grep '[T<task-id>]'`
 4. **Gather only when needed** — Use `orbit.graph.pack` only for a small set of exact selectors when you need multi-symbol context for synthesis, editing, or review. `file:` selectors return metadata and symbol summaries, not full file source, and leaf bodies stay hidden unless you pass `summary: false`.
 5. **Orient only when scope is unclear** — Use `orbit.graph.overview` when the subtree is unfamiliar or the task is architectural. Broad scopes default to `summary`; ask for `format: "full"` only when you need per-file symbol lists.
 
@@ -122,7 +122,7 @@ Common symbol kinds: `function`, `method`, `struct`, `trait`, `impl`, `field`, `
 - Using `orbit.graph.refs` for trait-implementation questions instead of `orbit.graph.implementors`
 - Using `orbit.graph.refs` for caller-chain questions instead of `orbit.graph.callers`
 - Using `orbit.graph.refs` for crate dependency questions instead of `orbit.graph.deps`
-- Expecting `orbit.graph.history` or `orbit.graph.search` to answer task attribution questions; use `git log --grep '[T<task-id>]'` for local task-to-commit lookup
+- Expecting `orbit.graph.history` or `orbit.graph.search` to answer task attribution questions; `orbit.graph.history` is not agent-callable, and local task-to-commit lookup belongs to `git log --grep '[T<task-id>]'`
 - Packing broad directories or many selectors just to explore
 - Reading full files after `show` or `pack` already gave the needed context
 - Falling back to `fs.read` globally when only some selectors failed

@@ -562,7 +562,7 @@ fn cli_task_show_with_context_returns_empty_docs_when_roots_are_empty() {
 }
 
 #[test]
-fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
+fn docs_tools_are_cli_only_and_visible_in_tool_list_all() {
     let workspace = TestWorkspace::new();
     workspace.write(
         "docs/context.md",
@@ -570,12 +570,14 @@ fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
     );
 
     let tools = workspace.run_json(&["tool", "list", "--json"], "tool list");
-    let names = tools
+    let default_names = tools
         .as_array()
         .expect("tools")
         .iter()
         .map(|tool| tool["name"].as_str().expect("name"))
         .collect::<Vec<_>>();
+    let all_tools = workspace.run_json(&["tool", "list", "--json", "--all"], "tool list --all");
+    let all_tools = all_tools.as_array().expect("all tools");
     for name in [
         "orbit.docs.list",
         "orbit.docs.show",
@@ -583,18 +585,34 @@ fn mcp_docs_tools_are_listed_and_callable_through_tool_run() {
         "orbit.docs.index",
         "orbit.docs.migrate",
     ] {
-        assert!(names.contains(&name), "missing docs tool {name}");
+        assert!(
+            !default_names.contains(&name),
+            "docs tool must be hidden from default tool list: {name}"
+        );
+        let tool = all_tools
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap_or_else(|| panic!("missing docs tool from --all: {name}"));
+        assert_eq!(tool["status"], "inactive");
     }
     // ORB-00202: `orbit.docs.search` deleted in phase 2.
     assert!(
-        !names.contains(&"orbit.docs.search"),
+        !default_names.contains(&"orbit.docs.search"),
         "orbit.docs.search must be deleted in phase 2"
     );
 
-    let output = workspace.run_json(
+    let output = run_orbit(
+        &workspace.work,
+        &workspace.home,
         &["tool", "run", "orbit.docs.list", "--input", "{}"],
-        "tool run docs list",
     );
+    assert!(
+        !output.status.success(),
+        "inactive docs tool unexpectedly succeeded through tool run"
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("inactive"));
+
+    let output = workspace.run_json(&["docs", "list", "--json"], "docs list");
     assert!(!output.as_array().expect("array").is_empty());
 }
 

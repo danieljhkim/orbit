@@ -23,6 +23,7 @@ pub struct ToolInfo {
     pub name: String,
     pub description: String,
     pub enabled: bool,
+    pub active: bool,
     pub builtin: bool,
     pub parameters: Vec<orbit_common::types::ToolParam>,
 }
@@ -156,6 +157,7 @@ impl OrbitRuntime {
         // surrounding `AuditGuard` to fall back on — would fail without any
         // audit row at all when identity setup is the cause.
         let result: Result<Value, OrbitError> = (|| {
+            self.ensure_tool_agent_facing(name)?;
             let allowed_tools = read_activity_tools_from_env();
             let (agent_name, model_name) = resolve_agent_identity(agent_override, model_override)?;
             let proc_allowed_programs = read_proc_allowed_programs_from_env();
@@ -443,7 +445,22 @@ fn read_input_identity(input: &Value) -> (Option<String>, Option<String>) {
 
 impl OrbitRuntime {
     pub fn list_tools(&self) -> Result<Vec<ToolInfo>, OrbitError> {
-        let registry_schemas = self.tool_registry().schemas();
+        self.list_tools_with_inactive(false)
+    }
+
+    pub fn list_all_tools(&self) -> Result<Vec<ToolInfo>, OrbitError> {
+        self.list_tools_with_inactive(true)
+    }
+
+    fn list_tools_with_inactive(
+        &self,
+        include_inactive: bool,
+    ) -> Result<Vec<ToolInfo>, OrbitError> {
+        let registry_schemas = if include_inactive {
+            self.tool_registry().all_schemas()
+        } else {
+            self.tool_registry().schemas()
+        };
         let stored_tools = self.stores().tools().list()?;
 
         let mut tools: Vec<ToolInfo> = registry_schemas
@@ -451,10 +468,12 @@ impl OrbitRuntime {
             .map(|schema| {
                 let stored = stored_tools.iter().find(|s| s.name == schema.name);
                 let enabled = stored.is_none_or(|s| s.enabled);
+                let active = self.tool_registry().is_active(&schema.name);
                 ToolInfo {
                     name: schema.name.clone(),
                     description: schema.description.clone(),
                     enabled,
+                    active,
                     builtin: schema.builtin,
                     parameters: schema.parameters,
                 }
@@ -468,6 +487,7 @@ impl OrbitRuntime {
                     name: stored.name.clone(),
                     description: stored.description.clone(),
                     enabled: stored.enabled,
+                    active: true,
                     builtin: false,
                     parameters: stored.parameters.clone(),
                 });
@@ -486,11 +506,13 @@ impl OrbitRuntime {
 
         let stored = self.stores().tools().get(name)?;
         let enabled = stored.is_none_or(|s| s.enabled);
+        let active = self.tool_registry().is_active(&schema.name);
 
         Ok(ToolInfo {
             name: schema.name,
             description: schema.description,
             enabled,
+            active,
             builtin: schema.builtin,
             parameters: schema.parameters,
         })
@@ -615,6 +637,18 @@ impl OrbitRuntime {
 
     pub fn disable_tool(&self, name: &str) -> Result<(), OrbitError> {
         self.set_tool_enabled_state(name, false)
+    }
+
+    pub fn ensure_tool_agent_facing(&self, name: &str) -> Result<(), OrbitError> {
+        if self.tool_registry().is_active(name) {
+            return Ok(());
+        }
+        if self.tool_registry().has(name) {
+            return Err(OrbitError::Execution(format!(
+                "tool '{name}' is inactive on the agent tool surface; use the corresponding `orbit <subcommand>` CLI path for human/admin workflows"
+            )));
+        }
+        Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
     }
 
     fn set_tool_enabled_state(&self, name: &str, enabled: bool) -> Result<(), OrbitError> {

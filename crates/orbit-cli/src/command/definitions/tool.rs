@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use orbit_common::types::ToolParam;
+use orbit_core::command::tool::ToolInfo;
 use orbit_core::{OrbitError, OrbitRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -81,11 +82,18 @@ pub struct ToolListArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+    /// Include inactive tools that are hidden from the default agent surface
+    #[arg(long, alias = "include-hidden")]
+    pub all: bool,
 }
 
 impl Execute for ToolListArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let tools = runtime.list_tools()?;
+        let tools = if self.all {
+            runtime.list_all_tools()?
+        } else {
+            runtime.list_tools()?
+        };
 
         if self.json {
             let json_tools: Vec<Value> = tools
@@ -95,6 +103,8 @@ impl Execute for ToolListArgs {
                         "name": t.name,
                         "description": t.description,
                         "enabled": t.enabled,
+                        "active": t.active,
+                        "status": tool_status(t),
                         "builtin": t.builtin,
                         "parameters": &t.parameters,
                     })
@@ -104,7 +114,7 @@ impl Execute for ToolListArgs {
         } else {
             let mut table = crate::output::table::build_table(&[
                 "NAME",
-                "ENABLED",
+                "STATUS",
                 "BUILTIN",
                 "REQUIRED INPUT",
                 "DESCRIPTION",
@@ -113,11 +123,7 @@ impl Execute for ToolListArgs {
                 use comfy_table::Cell;
                 table.add_row(vec![
                     Cell::new(&tool.name),
-                    crate::output::color::job_state_color_cell(if tool.enabled {
-                        "active"
-                    } else {
-                        "disabled"
-                    }),
+                    crate::output::color::job_state_color_cell(tool_status(tool)),
                     Cell::new(if tool.builtin { "yes" } else { "no" }),
                     Cell::new(format_required_tool_input_summary(&tool.parameters)),
                     Cell::new(&tool.description),
@@ -126,6 +132,16 @@ impl Execute for ToolListArgs {
             println!("{table}");
             Ok(())
         }
+    }
+}
+
+fn tool_status(tool: &ToolInfo) -> &'static str {
+    if !tool.active {
+        "inactive"
+    } else if !tool.enabled {
+        "disabled"
+    } else {
+        "active"
     }
 }
 
@@ -180,8 +196,8 @@ impl Execute for ToolShowArgs {
         );
         println!(
             "{} {}",
-            bold("Enabled:"),
-            job_state_color(if tool.enabled { "active" } else { "disabled" })
+            bold("Status:"),
+            job_state_color(tool_status(&tool))
         );
 
         if tool.parameters.is_empty() {
