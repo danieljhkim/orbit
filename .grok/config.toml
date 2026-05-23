@@ -6,6 +6,13 @@ command = ".grok/hooks/orbit-learning-reminder"
 statusMessage = "Loading Orbit learnings"
 type = "command"
 
+[[hooks.PreToolUse]]
+matcher = "Edit|Write"
+
+[[hooks.PreToolUse.hooks]]
+command = "scripts/orbit-file-lock"
+type = "command"
+
 [[hooks.PostToolUse]]
 matcher = "Edit|Write"
 

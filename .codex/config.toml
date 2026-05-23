@@ -6,6 +6,13 @@ command = '"$(git rev-parse --show-toplevel)/.codex/hooks/orbit-learning-reminde
 statusMessage = "Loading Orbit learnings"
 type = "command"
 
+[[hooks.PreToolUse]]
+matcher = '^(Edit|Write|apply_patch)$'
+
+[[hooks.PreToolUse.hooks]]
+command = '"$(git rev-parse --show-toplevel)/scripts/orbit-file-lock"'
+type = "command"
+
 [[hooks.PostToolUse]]
 matcher = '^(Edit|Write)$'
 

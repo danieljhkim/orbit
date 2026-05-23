@@ -10,6 +10,16 @@
           }
         ],
         "matcher": "*"
+      },
+      {
+        "hooks": [
+          {
+            "command": "scripts/orbit-file-lock",
+            "name": "orbit-file-lock",
+            "type": "command"
+          }
+        ],
+        "matcher": "replace|write_file"
       }
     ],
     "AfterTool": [
