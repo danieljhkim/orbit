@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use clap::{ArgAction, Args};
+use clap::{ArgAction, Args, Subcommand};
 use orbit_core::{
     ExternalRef, OrbitError, OrbitRuntime, TaskPriority, TaskStatus, TaskType,
     build_task_status_index, task_dependencies_ready, task_selectors_contain_path,
@@ -167,6 +167,23 @@ fn default_task_list_status_filter<'a>(
 
 #[derive(Args)]
 pub struct TaskLocksArgs {
+    #[command(subcommand)]
+    pub command: Option<TaskLocksSubcommand>,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand)]
+pub enum TaskLocksSubcommand {
+    /// Release an active reservation by id
+    Release(TaskLocksReleaseArgs),
+}
+
+#[derive(Args)]
+pub struct TaskLocksReleaseArgs {
+    /// Reservation id to release
+    pub reservation_id: String,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -174,11 +191,45 @@ pub struct TaskLocksArgs {
 
 impl Execute for TaskLocksArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        if let Some(command) = self.command {
+            return command.execute(runtime);
+        }
         if self.json {
             crate::output::json::print_pretty(&task_locks_json(runtime)?)
         } else {
             let (tasks, locked_files) = task_locks(runtime)?;
             print_task_locks(&tasks, &locked_files);
+            Ok(())
+        }
+    }
+}
+
+impl Execute for TaskLocksSubcommand {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        match self {
+            Self::Release(args) => args.execute(runtime),
+        }
+    }
+}
+
+impl Execute for TaskLocksReleaseArgs {
+    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
+        let value = runtime.run_tool(
+            "orbit.task.locks.release",
+            json!({ "reservation_id": self.reservation_id }),
+        )?;
+        if self.json {
+            crate::output::json::print_pretty(&value)
+        } else {
+            let released = value
+                .get("released")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if released {
+                println!("Released reservation {}", self.reservation_id);
+            } else {
+                println!("No active reservation found for {}", self.reservation_id);
+            }
             Ok(())
         }
     }

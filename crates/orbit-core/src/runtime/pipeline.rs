@@ -116,6 +116,7 @@ impl OrbitRuntime {
     }
 
     pub fn run_tool_dry_run(&self, name: &str, input: &Value) -> Result<DryRunResult, OrbitError> {
+        self.ensure_tool_agent_facing(name)?;
         self.check_tool_enabled(name)?;
 
         let schema = self

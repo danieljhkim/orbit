@@ -69,12 +69,12 @@ Do not use search for "find every symbol matching pattern X"; use `orbit.graph.s
 
 `orbit semantic` manages the local embedding companion. It is not the query namespace.
 
-| Purpose | CLI | MCP |
-|---------|-----|-----|
-| Install companion/model | `orbit semantic install [--model MODEL] [--force]` | `orbit.semantic.install` |
-| Remove companion/model | `orbit semantic uninstall [--model MODEL] [--all]` | `orbit.semantic.uninstall` |
-| Show status | `orbit semantic stats` | `orbit.semantic.stats` |
-| Rebuild embeddings | `orbit semantic index --kind tasks|docs|learnings|adrs|all [--model MODEL] [--force]` | `orbit.semantic.index` |
+| Purpose | Surface | Form |
+|---------|---------|------|
+| Install companion/model | CLI-only | `orbit semantic install [--model MODEL] [--force]` |
+| Remove companion/model | CLI-only | `orbit semantic uninstall [--model MODEL] [--all]` |
+| Show status | CLI-only | `orbit semantic stats` |
+| Rebuild embeddings | CLI-only | `orbit semantic index --kind tasks|docs|learnings|adrs|all [--model MODEL] [--force]` |
 
 Do not run `install` without operator consent. If a semantic query fails because the companion is missing, fall back to plain `orbit search --kind <kind> <query>` (lexical) and continue unless the user explicitly asked to enable embeddings.
 

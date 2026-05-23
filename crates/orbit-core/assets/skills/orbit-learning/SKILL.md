@@ -1,6 +1,6 @@
 ---
 name: orbit-learning
-description: Use this when creating, searching, updating, superseding, or pruning Orbit project learnings via `orbit.learning.*`. Covers scope-OR matching (path globs / tags), evidence shape, the `update` vs `supersede` boundary, the YAML-source-of-truth + SQLite-index model, and why never to edit `.orbit/learnings/` files directly.
+description: Use this when creating, searching, updating, superseding, pruning, or auditing Orbit project learnings. Agent tools cover `orbit.learning.add/show/update/upvote/supersede/prune/comment.*` plus `orbit.search`; list/sync are CLI-only operator workflows. Covers scope-OR matching (path globs / tags), evidence shape, the `update` vs `supersede` boundary, the YAML-source-of-truth + SQLite-index model, and why never to edit `.orbit/learnings/` files directly.
 ---
 
 # Orbit Learning
@@ -23,11 +23,10 @@ migrated by ORB-00200 and should only appear in `legacy_ids`.
 
 Both surfaces accept the same JSON. Use the CLI examples when shell access is available; use the MCP names when the Orbit plugin exposes them.
 
-| Tool | MCP | CLI |
+| Tool / workflow | MCP | CLI |
 |------|-----|-----|
 | `orbit.learning.add` | `orbit_learning_add({...})` | `orbit learning add --summary "..." --path "crates/orbit-core/**/*.rs" --tag rust --body-file note.md` |
-| `orbit.learning.list` | `orbit_learning_list({...})` | `orbit learning list --status active --tag rust` (also `--path <glob-or-file>`) |
-| `orbit.search` | `orbit_search({...})` | `orbit search --kind learning <text>` (lexical free-text match; add `--hybrid` after `orbit semantic index --kind learnings` for lexical + semantic ranking) |
+| Search learnings | `orbit_search({...})` | `orbit search --kind learning <text>` (lexical free-text match; add `--hybrid` after `orbit semantic index --kind learnings` for lexical + semantic ranking) |
 | `orbit.learning.show` | `orbit_learning_show({...})` | `orbit learning show --id L-0001` |
 | `orbit.learning.comment.add` | `orbit_learning_comment_add({...})` | `orbit learning comment add --learning-id L-0001 --body "Narrow note" --model codex` |
 | `orbit.learning.comment.list` | `orbit_learning_comment_list({...})` | `orbit learning comment list --learning-id L-0001` |
@@ -35,11 +34,12 @@ Both surfaces accept the same JSON. Use the CLI examples when shell access is av
 | `orbit.learning.update` | `orbit_learning_update({...})` | `orbit learning update --id L-0001 --priority 200` |
 | `orbit.learning.supersede` | `orbit_learning_supersede({...})` | `orbit learning supersede --id L-0001 --with L-0007` |
 | `orbit.learning.prune` | `orbit_learning_prune({...})` | `orbit learning prune --stale-only` |
-| `orbit.learning.sync` | `orbit_learning_sync({...})` | `orbit learning sync` |
+| List/audit learnings | CLI-only | `orbit learning list --status active --tag rust` (also `--path <glob-or-file>`) |
+| Sync YAML envelope index | CLI-only | `orbit learning sync` |
 
 Mapping rule: `orbit.learning.<verb>` ↔ `orbit_learning_<verb>`. Always include `model` in JSON inputs when the tool accepts it; pass your agent family (`codex`, `claude`, `gemini`, or `grok`). Prefer `--body-file` for `add` and body-changing `update` calls so multi-line markdown is not mangled by shell quoting.
 
-Run `orbit tool list | grep orbit.learning` if you suspect the local tool surface has drifted; do not assume tools beyond the commands above unless the registry shows them.
+Run `orbit tool list | grep orbit.learning` if you suspect the local active tool surface has drifted; use `orbit tool list --all` when auditing CLI-only inactive tools.
 
 ## Workflow
 
@@ -71,7 +71,7 @@ Run `orbit tool list | grep orbit.learning` if you suspect the local tool surfac
 
 6. **Prune for stale.** Run `orbit learning prune --stale-only` periodically to surface learnings whose `scope.paths` no longer resolve to any tracked file (per the `§7.3` staleness rules in the design doc). Combine with `--delete` to archive flagged records by flipping their status to `superseded` with `superseded_by: null` — only do this after reading the candidates and deciding none are still load-bearing.
 
-7. **Sync when YAML is touched out-of-band.** YAML under `.orbit/learnings/` is the source of truth; SQLite is a rebuildable envelope index. If a merge, branch switch, or external script edits the YAML directly, run `orbit learning sync` to re-sync the index — otherwise `list` and `search` will return stale results.
+7. **Sync when YAML is touched out-of-band.** YAML under `.orbit/learnings/` is the source of truth; SQLite is a rebuildable envelope index. If a merge, branch switch, or external script edits the YAML directly, a human/operator can run the CLI-only `orbit learning sync` to re-sync the index — otherwise `list` and `search` will return stale results.
 
 ## Operating Rules
 
@@ -150,7 +150,7 @@ orbit learning prune --stale-only
 | `update` to "fix" a fundamental change in advice | Loses the supersede chain; readers cannot see the old guidance was reversed | `orbit learning supersede --id <old> --with <new>` |
 | Calling `update` on a superseded record | Tool rejects with a typed error | `supersede` from the head of the chain instead |
 | `scope` with no `paths` and no `tags` | Never injects — record is invisible to push | Include at least one `path` glob or one `tag` |
-| Editing YAML directly to "quickly tweak wording" | Index goes stale; next `search` returns old envelope | Use `update`; if YAML must be touched, run `reindex` after |
+| Editing YAML directly to "quickly tweak wording" | Index goes stale; next `search` returns old envelope | Use `update`; if YAML must be touched, run CLI-only `orbit learning sync` after |
 | Treating `priority` as importance | It is the secondary search-ranking key, not a tier | Leave unset unless tuning ranking |
 
 ## Exit Criteria

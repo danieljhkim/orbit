@@ -101,9 +101,7 @@ spec:
     - orbit.friction.*
     - orbit.graph.*
     - orbit.search
-    - orbit.semantic.*
     - orbit.learning.show
-    - orbit.learning.list
     - orbit.learning.add
     - orbit.learning.comment.add
     - orbit.learning.comment.list

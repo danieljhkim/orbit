@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
 use orbit_tools::ToolRegistry;
 
-const MCP_HIDDEN_CLI_TOOL_NAMES: &[&str] = &[
+const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.docs.index",
     "orbit.docs.migrate",
     "orbit.docs.add",
@@ -23,11 +23,6 @@ const MCP_HIDDEN_CLI_TOOL_NAMES: &[&str] = &[
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
-    "orbit.friction.resolve",
-    "orbit.friction.show",
-    "orbit.friction.tags",
-    "orbit.friction.update",
-    "orbit.friction.list",
 ];
 
 #[test]
@@ -120,13 +115,35 @@ fn workflow_critical_tools_remain_registered() {
 }
 
 #[test]
-fn mcp_hidden_ops_tools_remain_registered_for_cli_surface() {
+fn inactive_ops_tools_are_hidden_from_default_registry_surface() {
     let names = registered_tool_names();
 
-    for retained in MCP_HIDDEN_CLI_TOOL_NAMES {
+    for inactive in INACTIVE_TOOL_NAMES {
         assert!(
-            names.contains(*retained),
-            "MCP-hidden tool must remain registered for CLI use: {retained}"
+            !names.contains(*inactive),
+            "inactive tool must be hidden from default registry schemas: {inactive}"
+        );
+    }
+}
+
+#[test]
+fn inactive_ops_tools_remain_auditable_in_full_registry_surface() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let all_names = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<BTreeSet<_>>();
+
+    for inactive in INACTIVE_TOOL_NAMES {
+        assert!(
+            all_names.contains(*inactive),
+            "inactive tool must remain registered for inspection: {inactive}"
+        );
+        assert!(
+            !registry.is_active(inactive),
+            "inactive tool must be marked inactive in the registry: {inactive}"
         );
     }
 }
@@ -158,7 +175,6 @@ fn friction_surface_supports_artifact_triage() {
         "orbit.friction.list",
         "orbit.friction.resolve",
         "orbit.friction.show",
-        "orbit.friction.stats",
         "orbit.friction.tags",
         "orbit.friction.update",
     ] {
@@ -174,6 +190,10 @@ fn friction_surface_supports_artifact_triage() {
             "destructive friction tool registered: {removed}"
         );
     }
+    assert!(
+        !names.contains("orbit.friction.stats"),
+        "friction stats is CLI-only and must stay hidden from the default registry surface"
+    );
 }
 
 #[test]
