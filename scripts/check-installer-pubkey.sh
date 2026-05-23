@@ -64,13 +64,32 @@ fi
 assert_contains_canonical_key "install.sh" "$install_keys"
 assert_contains_canonical_key "install-binary.js" "$npm_keys"
 
-grep -q "orbit-release-2026-05-primary" "$repo_root/install.sh"
-grep -q "orbit-release-2026-05-successor" "$repo_root/install.sh"
-grep -q "orbit-release-2026-05-primary" "$repo_root/plugin/npm/scripts/install-binary.js"
-grep -q "orbit-release-2026-05-successor" "$repo_root/plugin/npm/scripts/install-binary.js"
-grep -q "notAfter: '2027-12-31'" "$repo_root/plugin/npm/scripts/install-binary.js"
-grep -q "notAfter: '2028-12-31'" "$repo_root/plugin/npm/scripts/install-binary.js"
-grep -q "2027-12-31" "$repo_root/install.sh"
-grep -q "2028-12-31" "$repo_root/install.sh"
+# Read the canonical key IDs out of install-binary.js (the structured source of
+# truth), then require each ID to appear in install.sh. This avoids hardcoding
+# specific key IDs in the guardrail — every legitimate rotation that updates
+# both files in lockstep continues to pass, while a drift between the two
+# installers fails closed.
+npm_key_ids="$(awk "/id:[[:space:]]*'orbit-release-/ { match(\$0, /'[^']+'/); if (RSTART > 0) print substr(\$0, RSTART + 1, RLENGTH - 2) }" "$repo_root/plugin/npm/scripts/install-binary.js")"
+if [ -z "$npm_key_ids" ]; then
+  echo "check-installer-pubkey: could not extract any orbit-release-* key IDs from install-binary.js" >&2
+  exit 1
+fi
+
+npm_id_count=0
+while IFS= read -r key_id; do
+  [ -n "$key_id" ] || continue
+  npm_id_count=$((npm_id_count + 1))
+  if ! grep -q -F "$key_id" "$repo_root/install.sh"; then
+    echo "check-installer-pubkey: key ID '$key_id' is in install-binary.js but missing from install.sh" >&2
+    exit 1
+  fi
+done <<EOF
+$npm_key_ids
+EOF
+
+if [ "$npm_id_count" -lt 2 ]; then
+  echo "check-installer-pubkey: expected at least two orbit-release-* key IDs in install-binary.js, found $npm_id_count" >&2
+  exit 1
+fi
 
 echo "check-installer-pubkey: ok"

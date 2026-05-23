@@ -58,13 +58,13 @@ release source the installer trusts, so use them only for pinned releases,
 forks, or controlled test mirrors. `ORBIT_INSTALL_BASE_URL` may use any
 downloader-supported scheme, including `file://` for tests; the signature check
 protects artifact integrity, not transport confidentiality.
-`ORBIT_RELEASE_PUBLIC_KEY_FILE` replaces the trusted checksum-signing key,
-requires `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1`, and should
+`ORBIT_RELEASE_TRUSTED_KEYS_FILE` is the preferred override for the full
+trusted signing-key set, including key IDs, `not_after`, and `revoked_at`; it
+requires `ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` and should
 be limited to tests or emergency operations.
-`ORBIT_RELEASE_TRUSTED_KEYS_FILE` replaces the full trusted signing-key set,
-including key IDs, `not_after`, and `revoked_at`; it requires
-`ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` and should be
-limited to tests or emergency operations.
+`ORBIT_RELEASE_PUBLIC_KEY_FILE` is **deprecated** in favor of the trusted-keys
+file (which is a strict superset); it still works for the single-key case and
+requires `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1`.
 
 ## Initialize State
 

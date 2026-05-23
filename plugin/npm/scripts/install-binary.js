@@ -28,7 +28,7 @@ const TRUSTED_PUBLIC_KEY_PATH = PUBLIC_KEY_OVERRIDE
 const TRUSTED_KEYS_OVERRIDE_PATH = TRUSTED_KEYS_OVERRIDE ? path.resolve(TRUSTED_KEYS_OVERRIDE) : null;
 const TRUSTED_RELEASE_KEYS = Object.freeze([
   Object.freeze({
-    id: 'orbit-release-2026-05-primary',
+    id: 'orbit-release-key-1',
     notAfter: '2027-12-31',
     revokedAt: null,
     publicKeyPem: `-----BEGIN PUBLIC KEY-----
@@ -45,7 +45,7 @@ pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
 `,
   }),
   Object.freeze({
-    id: 'orbit-release-2026-05-successor',
+    id: 'orbit-release-key-2',
     notAfter: '2028-12-31',
     revokedAt: null,
     publicKeyPem: `-----BEGIN PUBLIC KEY-----
@@ -138,6 +138,7 @@ function acknowledgeTrustedPublicKeyOverride() {
   }
   if (!publicKeyOverrideLogged) {
     log(`ORBIT_RELEASE_PUBLIC_KEY_FILE=${TRUSTED_PUBLIC_KEY_PATH} set; trusting replacement release signing key`);
+    log('ORBIT_RELEASE_PUBLIC_KEY_FILE is deprecated; prefer ORBIT_RELEASE_TRUSTED_KEYS_FILE for the full trust set (key IDs, notAfter, revokedAt)');
     publicKeyOverrideLogged = true;
   }
 }
@@ -202,10 +203,21 @@ function normalizeTrustedReleaseKeys(trustedKeys) {
     if (!key || !key.id || !key.publicKeyPem) {
       throw new Error('trusted release signing keys require id and publicKeyPem');
     }
+    const notAfter = key.notAfter || null;
+    const revokedAt = key.revokedAt || null;
+    // Mirror the shell-side awk regex (release_date_number) so a malformed
+    // override like notAfter: "next month" fails closed instead of silently
+    // becoming "never expires" under lexicographic comparison.
+    if (notAfter !== null && !/^\d{4}-\d{2}-\d{2}$/.test(notAfter)) {
+      throw new Error(`trusted release signing key ${key.id} has invalid notAfter: ${notAfter} (expected YYYY-MM-DD)`);
+    }
+    if (revokedAt !== null && !/^\d{4}-\d{2}-\d{2}$/.test(revokedAt)) {
+      throw new Error(`trusted release signing key ${key.id} has invalid revokedAt: ${revokedAt} (expected YYYY-MM-DD)`);
+    }
     return {
       id: key.id,
-      notAfter: key.notAfter || null,
-      revokedAt: key.revokedAt || null,
+      notAfter,
+      revokedAt,
       publicKeyPem: key.publicKeyPem,
     };
   });
