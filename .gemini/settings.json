@@ -11,6 +11,29 @@
         ],
         "matcher": "*"
       }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "replace|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codegraph mark-dirty",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codegraph sync-if-dirty"
+          }
+        ]
+      }
     ]
   },
   "mcpServers": {
@@ -20,6 +43,10 @@
         "serve"
       ],
       "command": "orbit"
+    },
+    "codegraph": {
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
     }
   }
 }

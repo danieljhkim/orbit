@@ -6,10 +6,30 @@ command = '"$(git rev-parse --show-toplevel)/.codex/hooks/orbit-learning-reminde
 statusMessage = "Loading Orbit learnings"
 type = "command"
 
+[[hooks.PostToolUse]]
+matcher = '^(Edit|Write)$'
+
+[[hooks.PostToolUse.hooks]]
+command = "codegraph mark-dirty"
+type = "command"
+async = true
+
+[[hooks.Stop]]
+matcher = '.*'
+
+[[hooks.Stop.hooks]]
+command = "codegraph sync-if-dirty"
+type = "command"
+
 [mcp_servers.orbit]
 args = [
     "mcp",
     "serve",
 ]
 command = "orbit"
+enabled = true
+
+[mcp_servers.codegraph]
+args = ["serve", "--mcp"]
+command = "codegraph"
 enabled = true
