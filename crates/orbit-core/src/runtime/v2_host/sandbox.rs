@@ -186,7 +186,6 @@ fn append_orbit_child_runtime_write_roots(
         format!("{workspace}/frictions/**"),
         format!("{workspace}/state/audit/**"),
         format!("{workspace}/state/.id_alloc.lock"),
-        format!("{workspace}/state/job-runs/**"),
         format!("{workspace}/state/logs/**"),
         format!("{workspace}/state/semantic.db*"),
     ] {
@@ -439,7 +438,6 @@ mod tests {
             format!("{workspace_orbit}/frictions/**"),
             format!("{workspace_orbit}/state/audit/**"),
             format!("{workspace_orbit}/state/.id_alloc.lock"),
-            format!("{workspace_orbit}/state/job-runs/**"),
             format!("{workspace_orbit}/state/logs/**"),
             format!("{workspace_orbit}/state/semantic.db*"),
         ];

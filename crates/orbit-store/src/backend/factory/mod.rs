@@ -3,20 +3,22 @@ use std::sync::Arc;
 
 use super::contracts::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
-    LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskDocumentStoreBackend, TaskHistoryStoreBackend, TaskReservationStoreBackend,
-    TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    LearningStoreBackend, PolicyDefStoreBackend, SessionLearningStateStoreBackend,
+    TaskArtifactStoreBackend, TaskDocumentStoreBackend, TaskHistoryStoreBackend,
+    TaskReservationStoreBackend, TaskReviewStoreBackend, TaskStoreBackend, ToolStoreBackend,
+    V2AuditEnvelopeStoreBackend,
 };
 use super::layered_policy_def::LayeredPolicyDefStore;
 use super::sqlite_backends::{
-    SqliteAuditEventStoreBackend, SqliteTaskReservationStoreBackend, SqliteToolStoreBackend,
+    SqliteAuditEventStoreBackend, SqliteSessionLearningStateStoreBackend,
+    SqliteTaskReservationStoreBackend, SqliteToolStoreBackend, SqliteV2AuditEnvelopeStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
-use crate::file::job_store::JobFileStore;
 use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskV2Store;
+use crate::sqlite::job_run_store::SqliteJobRunStore;
 use crate::sqlite::task_registry::TaskRegistryStore;
 use crate::{IdAllocator, Store};
 
@@ -51,8 +53,11 @@ pub fn workspace_task_backends(
     }
 }
 
-pub fn workspace_job_run_store(root: PathBuf) -> Arc<dyn JobRunStoreBackend> {
-    Arc::new(JobFileStore::new(root))
+pub fn workspace_job_run_store(
+    store: Store,
+    workspace_id: impl Into<String>,
+) -> Arc<dyn JobRunStoreBackend> {
+    Arc::new(SqliteJobRunStore::new(store, workspace_id))
 }
 
 /// Constructs the workspace-scoped ADR store backed by `adr_dir` on disk and
@@ -98,6 +103,16 @@ pub fn tool_store_sqlite(store: Store) -> Arc<dyn ToolStoreBackend> {
 
 pub fn audit_event_store_sqlite(store: Store) -> Arc<dyn AuditEventStoreBackend> {
     Arc::new(SqliteAuditEventStoreBackend { store })
+}
+
+pub fn v2_audit_event_store_sqlite(store: Store) -> Arc<dyn V2AuditEnvelopeStoreBackend> {
+    Arc::new(SqliteV2AuditEnvelopeStoreBackend { store })
+}
+
+pub fn session_learning_state_store_sqlite(
+    store: Store,
+) -> Arc<dyn SessionLearningStateStoreBackend> {
+    Arc::new(SqliteSessionLearningStateStoreBackend { store })
 }
 
 pub fn task_reservation_store_sqlite(store: Store) -> Arc<dyn TaskReservationStoreBackend> {

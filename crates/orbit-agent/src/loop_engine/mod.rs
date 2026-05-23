@@ -32,8 +32,8 @@ pub use agent_loop::{
     AgentLoop, AgentLoopConfig, AgentLoopError, IterationTrace, LoopOutcome, TerminateReason,
 };
 pub use audit::{
-    AuditSink, BlobStore, InMemorySink, JsonlFileSink, LoopAuditEvent, NullSink,
-    RedactionMiddleware, UsageSnapshot,
+    AuditSink, BlobStore, InMemorySink, LoopAuditEvent, NullSink, RedactionMiddleware,
+    UsageSnapshot,
 };
 pub use session::Session;
 pub use transport::{

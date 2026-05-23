@@ -1,9 +1,71 @@
 //! Sibling tests for `run_audit.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
-use crate::OrbitRuntime;
+use crate::{OrbitRuntime, V2AuditEventInsertParams};
 use orbit_common::utility::blob_store::BlobStore;
 
 use serde_json::json;
+
+fn seed_v2_audit_events(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+    events: impl IntoIterator<Item = serde_json::Value>,
+) {
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    for (index, mut event) in events.into_iter().enumerate() {
+        let object = event.as_object_mut().expect("event object");
+        object
+            .entry("schemaVersion".to_string())
+            .or_insert_with(|| json!(1));
+        object
+            .entry("event_type".to_string())
+            .or_insert_with(|| json!("test.event"));
+        object
+            .entry("run_id".to_string())
+            .or_insert_with(|| json!(run_id));
+        object
+            .entry("agent_identity".to_string())
+            .or_insert_with(|| json!("codex"));
+        object.entry("ts".to_string()).or_insert_with(|| {
+            json!(format!(
+                "2026-04-26T07:{:02}:{:02}Z",
+                (index / 60) % 60,
+                index % 60
+            ))
+        });
+        let ts = event["ts"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc))
+            .expect("event ts");
+        runtime
+            .insert_v2_audit_event(&V2AuditEventInsertParams {
+                workspace_id: workspace_id.clone(),
+                event_id: event["event_id"].as_str().expect("event id").to_string(),
+                source: "v2_envelope".to_string(),
+                schema_version: event["schemaVersion"]
+                    .as_u64()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(1),
+                event_type: event["event_type"]
+                    .as_str()
+                    .expect("event type")
+                    .to_string(),
+                ts,
+                run_id: event["run_id"].as_str().expect("run id").to_string(),
+                agent_identity: event["agent_identity"]
+                    .as_str()
+                    .expect("agent identity")
+                    .to_string(),
+                parent_event_id: event
+                    .get("parent_event_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                workspace_path: None,
+                payload_json: event.to_string(),
+            })
+            .expect("insert v2 audit event");
+    }
+}
 
 #[test]
 fn collect_run_cli_invocations_derives_step_ids_from_parent_chain() {
@@ -15,8 +77,6 @@ fn collect_run_cli_invocations_derives_step_ids_from_parent_chain() {
     let stderr_one = blob_store.write(b"one stderr\n").expect("write stderr one");
     let stdout_two = blob_store.write(b"two stdout\n").expect("write stdout two");
 
-    let jsonl_dir = audit_root.join("v2_loop");
-    std::fs::create_dir_all(&jsonl_dir).expect("create jsonl dir");
     let run_id = "jrun-test";
     let events = [
         json!({
@@ -110,16 +170,7 @@ fn collect_run_cli_invocations_derives_step_ids_from_parent_chain() {
             "timed_out": false
         }),
     ];
-    let jsonl = events
-        .iter()
-        .map(|event| serde_json::to_string(event).expect("serialize event"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    std::fs::write(
-        jsonl_dir.join(format!("{run_id}.jsonl")),
-        format!("{jsonl}\n"),
-    )
-    .expect("write jsonl");
+    seed_v2_audit_events(&runtime, run_id, events);
 
     let records = runtime
         .collect_run_cli_invocations(run_id)
@@ -154,9 +205,6 @@ fn missing_run_audit_file_returns_no_cli_invocations() {
 #[test]
 fn collect_run_audit_steps_reads_step_finished_error_message_and_tolerates_absence() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    let audit_root = runtime.data_root().join("state").join("audit");
-    let jsonl_dir = audit_root.join("v2_loop");
-    std::fs::create_dir_all(&jsonl_dir).expect("create jsonl dir");
     let run_id = "jrun-step-errors";
     let events = [
         json!({
@@ -191,16 +239,7 @@ fn collect_run_audit_steps_reads_step_finished_error_message_and_tolerates_absen
             "outcome": "success"
         }),
     ];
-    let jsonl = events
-        .iter()
-        .map(|event| serde_json::to_string(event).expect("serialize event"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    std::fs::write(
-        jsonl_dir.join(format!("{run_id}.jsonl")),
-        format!("{jsonl}\n"),
-    )
-    .expect("write jsonl");
+    seed_v2_audit_events(&runtime, run_id, events);
 
     let steps = runtime
         .collect_run_audit_steps(run_id)
@@ -221,14 +260,11 @@ fn collect_run_audit_steps_reads_step_finished_error_message_and_tolerates_absen
 #[test]
 fn malformed_jsonl_and_missing_blobs_are_tolerated() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    let audit_root = runtime.data_root().join("state").join("audit");
-    let jsonl_dir = audit_root.join("v2_loop");
-    std::fs::create_dir_all(&jsonl_dir).expect("create jsonl dir");
     let run_id = "jrun-tolerant";
-    std::fs::write(
-        jsonl_dir.join(format!("{run_id}.jsonl")),
-        format!(
-            "{}\nnot-json\n{}\n",
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        [
             json!({
                 "event_id": "evt-step",
                 "ts": "2026-04-26T07:00:01Z",
@@ -248,10 +284,9 @@ fn malformed_jsonl_and_missing_blobs_are_tolerated() {
                 "stdout_blob_ref": "aa/missing",
                 "stderr_blob_ref": "error:writer-failed",
                 "timed_out": true
-            })
-        ),
-    )
-    .expect("write jsonl");
+            }),
+        ],
+    );
 
     let events = runtime
         .collect_run_audit_events(run_id)

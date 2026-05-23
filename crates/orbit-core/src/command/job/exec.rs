@@ -234,6 +234,8 @@ impl OrbitRuntime {
         let workspace_path = self.paths().repo_root.clone();
         let writer = V2AuditWriter::with_disk_sinks(
             &audit_root,
+            self.sqlite_store()?,
+            self.workspace_id()?,
             &run_id,
             SYSTEM_AUDIT_IDENTITY,
             Some(workspace_path.as_path()),
@@ -347,7 +349,7 @@ fn load_job_name(yaml_path: &Path) -> Result<String, OrbitError> {
 mod tests {
     use super::*;
 
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -356,7 +358,7 @@ mod tests {
         AuditEventStatus, ExecutorDef, ExecutorType, TaskPriority, TaskStatus, TaskType,
     };
     use orbit_engine::{ResolvedCliExecutor, V2RuntimeHost};
-    use orbit_store::InvocationQuery;
+    use orbit_store::{InvocationQuery, V2AuditEventFilter};
     use orbit_tools::{FsAuditLogger, ToolContext};
     use serde_json::json;
     use tempfile::tempdir;
@@ -440,6 +442,12 @@ mod tests {
         let job = resolved_gate_job(runtime);
         let writer = V2AuditWriter::with_disk_sinks(
             &runtime.paths().audit_dir,
+            runtime
+                .sqlite_store()
+                .map_err(|err| DispatchError::JobExecution(format!("open audit store: {err}")))?,
+            runtime.workspace_id().map_err(|err| {
+                DispatchError::JobExecution(format!("resolve workspace id: {err}"))
+            })?,
             run_id,
             SYSTEM_AUDIT_IDENTITY,
             Some(repo_root),
@@ -661,48 +669,19 @@ spec:
         std::fs::write(path, yaml).expect("write cli metrics job yaml");
     }
 
-    fn source_bundle_bytes(
-        repo_root: &Path,
-        job_id: &str,
+    fn v2_events(
+        runtime: &OrbitRuntime,
         run_id: &str,
-    ) -> BTreeMap<String, Vec<u8>> {
-        let mut bytes = BTreeMap::new();
-        let run_dir = repo_root
-            .join(".orbit/state/job-runs")
-            .join(job_id)
-            .join(run_id);
-        let jrun = run_dir.join("jrun.yaml");
-        bytes.insert(
-            "jrun.yaml".to_string(),
-            std::fs::read(&jrun).expect("read source jrun"),
-        );
-        let steps_dir = run_dir.join("steps");
-        if steps_dir.is_dir() {
-            let mut paths = std::fs::read_dir(&steps_dir)
-                .expect("read steps dir")
-                .map(|entry| entry.expect("step entry").path())
-                .collect::<Vec<_>>();
-            paths.sort();
-            for path in paths {
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .expect("step file name")
-                    .to_string();
-                bytes.insert(
-                    format!("steps/{name}"),
-                    std::fs::read(&path).expect("read step file"),
-                );
-            }
-        }
-        let audit = repo_root
-            .join(".orbit/state/audit/v2_loop")
-            .join(format!("{run_id}.jsonl"));
-        bytes.insert(
-            "audit/v2_loop.jsonl".to_string(),
-            std::fs::read(&audit).expect("read source audit"),
-        );
-        bytes
+        event_type: &str,
+    ) -> Vec<orbit_store::V2AuditEventRow> {
+        runtime
+            .list_v2_audit_events(V2AuditEventFilter {
+                workspace_id: String::new(),
+                run_id: Some(run_id.to_string()),
+                event_type: Some(event_type.to_string()),
+                ..Default::default()
+            })
+            .expect("list v2 audit events")
     }
 
     #[test]
@@ -906,38 +885,26 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
         assert!(state.pipeline.get("nap").is_some());
         assert!(state.step_outputs.contains_key(&0));
 
-        let audit_jsonl = result.audit_jsonl.as_ref().expect("audit jsonl path");
-        let expected_audit_jsonl = repo_root
-            .join(".orbit/state/audit/v2_loop")
-            .join(format!("{}.jsonl", result.run_id));
-        assert_eq!(audit_jsonl, &expected_audit_jsonl);
-        assert!(expected_audit_jsonl.exists());
-        let first_line = std::fs::read_to_string(&expected_audit_jsonl)
-            .expect("read audit jsonl")
-            .lines()
-            .next()
-            .expect("audit jsonl has a first event")
-            .to_string();
-        let first_event: serde_json::Value =
-            serde_json::from_str(&first_line).expect("parse first audit event");
+        assert!(result.audit_jsonl.is_none());
+        let first_event: serde_json::Value = serde_json::from_str(
+            &v2_events(&runtime, &result.run_id, "run.started")
+                .first()
+                .expect("run.started audit event")
+                .payload_json,
+        )
+        .expect("parse first audit event");
         assert_eq!(
             first_event
                 .get("agent_identity")
                 .and_then(serde_json::Value::as_str),
             Some(SYSTEM_AUDIT_IDENTITY)
         );
-        assert!(
-            !repo_root
-                .join(".orbit/state/audit/loop")
-                .join(format!("{}.jsonl", result.run_id))
-                .exists()
-        );
         assert!(!repo_root.join(".orbit/audit").exists());
     }
 
     #[test]
     fn direct_catalog_run_is_visible_in_history() {
-        let (_root, runtime, repo_root, global_root) = test_runtime();
+        let (_root, runtime, _repo_root, global_root) = test_runtime();
         let jobs_dir = global_root.join("resources/jobs");
         std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
         let yaml_path = jobs_dir.join("qa_catalog_sleep.yaml");
@@ -954,12 +921,18 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
             .job_history("qa_catalog_sleep")
             .expect("catalog history");
         assert!(history.iter().any(|run| run.run_id == result.run_id));
-        assert!(repo_root.join(".orbit/state/job-runs").exists());
+        assert!(
+            runtime
+                .show_job_run(&result.run_id)
+                .expect("stored run")
+                .run_id
+                == result.run_id
+        );
     }
 
     #[test]
     fn replay_job_run_records_lineage_and_preserves_source_bundle() {
-        let (_root, runtime, repo_root, global_root) = test_runtime();
+        let (_root, runtime, _repo_root, global_root) = test_runtime();
         let jobs_dir = global_root.join("resources/jobs");
         std::fs::create_dir_all(&jobs_dir).expect("create jobs dir");
         let yaml_path = jobs_dir.join("qa_replay_sleep.yaml");
@@ -975,7 +948,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
         let source_run = runtime
             .show_job_run(&source_result.run_id)
             .expect("show source");
-        let before = source_bundle_bytes(&repo_root, &source_run.job_id, &source_run.run_id);
+        let before = source_run.clone();
 
         let replay_result = runtime
             .replay_job_run(&source_result.run_id)
@@ -992,34 +965,20 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
             replay_run.retry_source_run_id.as_deref(),
             Some(source_result.run_id.as_str())
         );
-        let replay_jrun = repo_root
-            .join(".orbit/state/job-runs")
-            .join(&replay_run.job_id)
-            .join(&replay_run.run_id)
-            .join("jrun.yaml");
-        let replay_doc: serde_yaml::Value =
-            serde_yaml::from_str(&std::fs::read_to_string(&replay_jrun).expect("read replay jrun"))
-                .expect("parse replay jrun");
         assert_eq!(
-            replay_doc["run"]["retry_source_run_id"].as_str(),
-            Some(source_result.run_id.as_str())
-        );
-        assert_eq!(
-            source_bundle_bytes(&repo_root, &source_run.job_id, &source_run.run_id),
+            runtime
+                .show_job_run(&source_run.run_id)
+                .expect("show source after replay"),
             before
         );
 
-        let audit_jsonl = repo_root
-            .join(".orbit/state/audit/v2_loop")
-            .join(format!("{}.jsonl", replay_result.run_id));
-        let run_started = std::fs::read_to_string(&audit_jsonl)
-            .expect("read replay audit")
-            .lines()
-            .find(|line| line.contains(r#""body_kind":"run_started""#))
-            .expect("run_started audit event")
-            .to_string();
-        let event: serde_json::Value =
-            serde_json::from_str(&run_started).expect("parse run_started");
+        let event: serde_json::Value = serde_json::from_str(
+            &v2_events(&runtime, &replay_result.run_id, "run.started")
+                .first()
+                .expect("run_started audit event")
+                .payload_json,
+        )
+        .expect("parse run_started");
         assert_eq!(
             event
                 .get("retry_source_run_id")
@@ -1134,17 +1093,13 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
                 .as_deref()
                 .is_some_and(|message| message.contains("deterministic action not registered"))
         }));
-        let audit_jsonl = repo_root
-            .join(".orbit/state/audit/v2_loop")
-            .join(format!("{}.jsonl", run.run_id));
-        let run_finished = std::fs::read_to_string(&audit_jsonl)
-            .expect("read audit jsonl")
-            .lines()
-            .find(|line| line.contains(r#""body_kind":"run_finished""#))
-            .expect("run_finished audit event")
-            .to_string();
-        let event: serde_json::Value =
-            serde_json::from_str(&run_finished).expect("parse run_finished");
+        let event: serde_json::Value = serde_json::from_str(
+            &v2_events(&runtime, &run.run_id, "run.finished")
+                .first()
+                .expect("run_finished audit event")
+                .payload_json,
+        )
+        .expect("parse run_finished");
         assert_eq!(
             event.get("outcome").and_then(serde_json::Value::as_str),
             Some("error")

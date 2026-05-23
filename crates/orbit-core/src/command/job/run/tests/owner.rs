@@ -191,26 +191,7 @@ fn legacy_unversioned_token_does_not_falsely_finalize_live_run() {
 
     // Rewrite the stored token to look like a pre-fix unversioned value
     // that does not match the live process under either env.
-    let yaml_path = runtime
-        .data_root()
-        .join("state")
-        .join("job-runs")
-        .join(&run.job_id)
-        .join(&run.run_id)
-        .join("jrun.yaml");
-    let raw = std::fs::read_to_string(&yaml_path).expect("read run yaml");
-    let edited = raw
-        .lines()
-        .map(|line| {
-            if line.trim_start().starts_with("pid_start_time:") {
-                "  pid_start_time: legacy-token-that-cannot-be-rederived".to_string()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    std::fs::write(&yaml_path, format!("{edited}\n")).expect("write legacy token");
+    set_run_pid_start_time(&runtime, &run, "legacy-token-that-cannot-be-rederived");
 
     let shown = runtime.show_job_run(&run.run_id).expect("show legacy run");
     assert_eq!(shown.state, JobRunState::Running);

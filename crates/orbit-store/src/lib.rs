@@ -117,18 +117,20 @@ pub use backend::{
     JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
     LearningCommentDeleteParams, LearningCreateParams, LearningListEntry, LearningSearchParams,
     LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
-    PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder,
-    TaskReservationCheckParams, TaskReservationCheckResult, TaskReservationListResult,
-    TaskReservationOwnedConflictsParams, TaskReservationOwnedConflictsResult,
-    TaskReservationReleaseByOwnerParams, TaskReservationReleaseByOwnerResult,
-    TaskReservationReleaseParams, TaskReservationReleaseReason, TaskReservationReleaseResult,
-    TaskReservationReserveParams, TaskReservationReserveResult, TaskReservationStoreBackend,
-    TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend,
+    PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub,
+    SessionLearningStateStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
+    TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
+    TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
+    TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
+    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
     WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
-    global_policy_def_store, layered_policy_def_store, task_reservation_store_sqlite,
-    tool_store_sqlite, workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
+    global_policy_def_store, layered_policy_def_store, session_learning_state_store_sqlite,
+    task_reservation_store_sqlite, tool_store_sqlite, v2_audit_event_store_sqlite,
+    workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
 pub use json_schema::{validate_instance_against_schema, validate_schema_document};
@@ -145,6 +147,8 @@ pub use sqlite::invocation_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
     InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
+pub use sqlite::task_registry::workspace_id_for_orbit_dir;
+pub use sqlite::v2_audit_store::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow};
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)

@@ -5,14 +5,15 @@ use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_agent::loop_engine::JsonlFileSink;
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::types::activity_job::{AgentRole, V2AuditEventKind};
+use orbit_store::Store;
 use tempfile::tempdir;
 
 use super::super::super::agent_role::{apply_resolved_settings, resolve_agent_settings};
 use super::super::super::audit_writer::V2AuditWriter;
 use super::super::super::dispatcher::DispatchError;
+use super::super::super::sqlite_sink::V2SqliteSink;
 use super::super::run_cli_backend;
 use super::test_support::{
     RecordingSink, TestHost, test_agent_loop_spec, test_agent_loop_spec_for, write_executable,
@@ -210,10 +211,14 @@ fn run_cli_backend_redacts_live_env_values_in_stored_blobs() {
         ),
     );
 
-    let loop_sink = Arc::new(
-        JsonlFileSink::open(temp.path().join("audit"), "job-cli-blob-redaction")
-            .expect("open loop sink"),
-    );
+    let loop_sink = Arc::new(V2SqliteSink::new(
+        Store::open_in_memory().expect("open sqlite store"),
+        "ws-test",
+        "job-cli-blob-redaction",
+        "codex:gpt-5.5",
+        None,
+        temp.path().join("audit").join("blobs"),
+    ));
     let sink_for_writer: Arc<dyn AuditSink> = loop_sink.clone();
     let audit = Arc::new(V2AuditWriter::new(
         "job-cli-blob-redaction",

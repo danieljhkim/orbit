@@ -24,7 +24,8 @@ use std::sync::Arc;
 
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    InvocationTrace, LearningInjectionCaps, LearningReminder, RoleSlot, UNRESTRICTED_FS_PROFILE,
+    InvocationTrace, LearningInjectionCaps, LearningInjectionState, LearningReminder, RoleSlot,
+    UNRESTRICTED_FS_PROFILE,
 };
 use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
@@ -87,6 +88,24 @@ impl V2RuntimeHost for OrbitRuntime {
         caps: LearningInjectionCaps,
     ) -> Result<Vec<LearningReminder>, DispatchError> {
         learning_reminders::learning_reminders_for_task(self, input, caps)
+    }
+
+    fn persist_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), DispatchError> {
+        let store = Store::open(&self.context.persistence().audit_db).map_err(|error| {
+            DispatchError::JobExecution(format!("open session learning store: {error}"))
+        })?;
+        let workspace_id = self.workspace_id().map_err(|error| {
+            DispatchError::JobExecution(format!("resolve workspace id: {error}"))
+        })?;
+        store
+            .upsert_session_learning_state(&workspace_id, session_id, state)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("persist session learning state: {error}"))
+            })
     }
 
     fn tool_context_for_activity(
@@ -380,7 +399,7 @@ mod tests {
 
     #[test]
     fn persist_invocation_trace_records_pack_metrics_before_terminal_state() {
-        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
         let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
         let trace = trace_with_tool_calls(
             155,
@@ -410,12 +429,7 @@ mod tests {
         assert_eq!(metrics.knowledge_pack_unresolved_count, 0);
         assert_eq!(metrics.total_llm_input_tokens, 155);
 
-        let jrun = repo_root
-            .join(".orbit/state/job-runs/knowledge_pack_job")
-            .join(&run_id)
-            .join("jrun.yaml");
-        let stored = std::fs::read_to_string(jrun).expect("read jrun yaml");
-        assert!(stored.contains("knowledge_metrics:"));
+        assert_eq!(run.job_id, "knowledge_pack_job");
     }
 
     #[test]
@@ -518,6 +532,8 @@ mod tests {
         let audit_dir = tempfile::tempdir().expect("audit tempdir");
         let audit = V2AuditWriter::with_disk_sinks(
             audit_dir.path(),
+            Store::open_in_memory().expect("audit store"),
+            "ws_test",
             "http-identity-regression",
             "claude:claude-opus-4-7".to_string(),
             None,

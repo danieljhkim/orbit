@@ -8,7 +8,6 @@
 // `*_tests` modules are the documented exception for test harness code.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -42,11 +41,6 @@ pub(super) const HISTORY_DEFAULT_LIMIT: usize = 50;
 pub(super) const HISTORY_MAX_LIMIT: usize = 200;
 /// Default time window for header tile counts when `?since=` is omitted.
 pub(super) const DEFAULT_SUMMARY_WINDOW: &str = "24h";
-/// Cap on how many `state/audit/v2_loop/*.jsonl` run files we read in one
-/// request when aggregating denials. Each file is small (KB-scale) but reads
-/// are sync, so we bound iteration to keep the endpoint within budget on
-/// long-lived workspaces.
-pub(super) const V2_LOOP_FILE_SCAN_CAP: usize = 1500;
 
 #[derive(Deserialize, Default)]
 pub(super) struct LimitQuery {
@@ -218,14 +212,6 @@ pub(super) fn validate_id(id: &str) -> Result<&str, String> {
 pub(super) fn non_empty_string(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-pub(super) fn v2_loop_dir(runtime: &OrbitRuntime) -> PathBuf {
-    runtime
-        .data_root()
-        .join("state")
-        .join("audit")
-        .join("v2_loop")
 }
 
 pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {

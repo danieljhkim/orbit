@@ -146,6 +146,7 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
     ensure_task_reservations_schema(conn)?;
     ensure_learning_index_schema(conn)?;
     ensure_invocation_schema(conn)?;
+    ensure_v2_state_consolidation_schema(conn)?;
 
     Ok(())
 }
@@ -422,6 +423,105 @@ fn ensure_invocation_schema(conn: &Connection) -> Result<(), OrbitError> {
 
             CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_name
             ON tool_calls(tool_name);
+        "#,
+    )
+    .map_err(|e| OrbitError::Store(e.to_string()))
+}
+
+fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE TABLE IF NOT EXISTS v2_audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                agent_identity TEXT NOT NULL,
+                parent_event_id TEXT,
+                workspace_path TEXT,
+                payload_json TEXT NOT NULL,
+                UNIQUE(workspace_id, event_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_v2_audit_events_ws_ts
+            ON v2_audit_events(workspace_id, ts);
+
+            CREATE INDEX IF NOT EXISTS idx_v2_audit_events_ws_run
+            ON v2_audit_events(workspace_id, run_id, ts);
+
+            CREATE INDEX IF NOT EXISTS idx_v2_audit_events_ws_event_type
+            ON v2_audit_events(workspace_id, event_type);
+
+            CREATE TABLE IF NOT EXISTS job_runs (
+                run_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                scheduled_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_ms INTEGER,
+                created_at TEXT NOT NULL,
+                pid INTEGER,
+                pid_start_time TEXT,
+                input_json TEXT,
+                retry_source_run_id TEXT,
+                knowledge_metrics_json TEXT,
+                resolved_crew TEXT,
+                planner_model TEXT,
+                implementer_model TEXT,
+                reviewer_model TEXT,
+                pipeline_state_json TEXT,
+                PRIMARY KEY(workspace_id, run_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_job_runs_ws_job_sched
+            ON job_runs(workspace_id, job_id, scheduled_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_job_runs_ws_state
+            ON job_runs(workspace_id, state);
+
+            CREATE TABLE IF NOT EXISTS job_run_steps (
+                workspace_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_index INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                duration_ms INTEGER,
+                exit_code INTEGER,
+                error_code TEXT,
+                error_message TEXT,
+                agent_response_json TEXT,
+                PRIMARY KEY(workspace_id, run_id, step_index),
+                FOREIGN KEY(workspace_id, run_id)
+                    REFERENCES job_runs(workspace_id, run_id)
+                    ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS session_learning_state (
+                workspace_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                learning_injection_state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(workspace_id, session_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_session_learning_state_ws
+            ON session_learning_state(workspace_id, updated_at);
+
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         "#,
     )
     .map_err(|e| OrbitError::Store(e.to_string()))

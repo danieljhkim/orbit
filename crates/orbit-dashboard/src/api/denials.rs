@@ -2,19 +2,15 @@
 //! SQLite audit-events table.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_core::{AuditEventStatus, OrbitRuntime};
+use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
-use super::{
-    DEFAULT_SUMMARY_WINDOW, DenialsQuery, V2_LOOP_FILE_SCAN_CAP, bad_request, map_runtime_error,
-    server_error, v2_loop_dir,
-};
+use super::{DEFAULT_SUMMARY_WINDOW, DenialsQuery, bad_request, map_runtime_error, server_error};
 use crate::parse::parse_since;
 
 const SQLITE_DENIAL_SCAN_LIMIT: usize = 1000;
@@ -64,79 +60,33 @@ impl DenialRow {
     }
 }
 
-/// Walks `state/audit/v2_loop/*.jsonl` and returns FsCallDenied / ToolDenied
-/// rows matching the supplied filters. Bounded by `V2_LOOP_FILE_SCAN_CAP` files.
+/// Reads SQLite v2 audit rows and returns FsCallDenied / ToolDenied rows
+/// matching the supplied filters.
 pub(super) fn scan_v2_loop_denials(
     runtime: &OrbitRuntime,
     since: Option<DateTime<Utc>>,
     profile_filter: Option<&str>,
     agent_filter: Option<&str>,
 ) -> Result<Vec<DenialRow>, orbit_core::OrbitError> {
-    let dir = v2_loop_dir(runtime);
-    let mut out: Vec<DenialRow> = Vec::new();
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(it) => it,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => {
-            return Err(orbit_core::OrbitError::Io(format!(
-                "read {}: {e}",
-                dir.display()
-            )));
-        }
-    };
-
-    let mut paths: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("jsonl"))
-        .collect();
-    paths.sort();
-    if paths.len() > V2_LOOP_FILE_SCAN_CAP {
-        let drop = paths.len() - V2_LOOP_FILE_SCAN_CAP;
-        paths.drain(0..drop);
-    }
-
-    for path in paths {
-        let raw = match std::fs::read_to_string(&path) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        for line in raw.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let value: Value = match serde_json::from_str(line) {
-                Ok(v) => v,
+    let mut rows = Vec::new();
+    for event_type in ["fs.call.denied", "tool.denied"] {
+        let events = runtime.list_v2_audit_events(V2AuditEventFilter {
+            workspace_id: String::new(),
+            since,
+            event_type: Some(event_type.to_string()),
+            limit: Some(SQLITE_DENIAL_SCAN_LIMIT),
+            ..Default::default()
+        })?;
+        for event in events {
+            let value: Value = match serde_json::from_str(&event.payload_json) {
+                Ok(value) => value,
                 Err(_) => continue,
             };
-            let kind_raw = value.get("body_kind").and_then(Value::as_str).unwrap_or("");
-            let kind = match kind_raw {
-                "fs_call_denied" => "fs",
-                "tool_denied" => "tool",
-                _ => continue,
+            let kind = if event.event_type == "fs.call.denied" {
+                "fs"
+            } else {
+                "tool"
             };
-            let ts = value
-                .get("ts")
-                .and_then(Value::as_str)
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|d| d.with_timezone(&Utc));
-            if let Some(since) = since
-                && let Some(ts) = ts
-                && ts < since
-            {
-                continue;
-            }
-            let run_id = value
-                .get("run_id")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-                .map(ToOwned::to_owned);
-            let agent = value
-                .get("agent_identity")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
             let (profile, target) = match kind {
                 "fs" => (
                     value
@@ -167,23 +117,23 @@ pub(super) fn scan_v2_loop_denials(
             }
             if let Some(want) = agent_filter
                 && !want.is_empty()
-                && agent != want
+                && event.agent_identity != want
             {
                 continue;
             }
-            out.push(DenialRow {
+            rows.push(DenialRow {
                 kind,
                 diagnostics: v2_denial_diagnostics(kind, &profile, &target),
                 profile,
                 target,
-                job_run_id: run_id,
+                job_run_id: Some(event.run_id).filter(|value| !value.is_empty()),
                 execution_id: None,
-                agent,
-                timestamp: ts,
+                agent: event.agent_identity,
+                timestamp: Some(event.ts),
             });
         }
     }
-    Ok(out)
+    Ok(rows)
 }
 
 pub(super) fn collect_denial_rows(

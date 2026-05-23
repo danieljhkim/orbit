@@ -3,8 +3,6 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{JobRun, JobRunState, OrbitError, OrbitEvent};
 use orbit_store::TaskReservationReleaseReason;
-use serde_json::Value;
-use std::path::Path;
 
 use crate::OrbitRuntime;
 
@@ -127,56 +125,15 @@ impl OrbitRuntime {
         &self,
         run_id: &str,
     ) -> Result<Option<DateTime<Utc>>, OrbitError> {
-        for stream in ["v2_loop", "loop"] {
-            let path = self
-                .data_root_path()
-                .join("state")
-                .join("audit")
-                .join(stream)
-                .join(format!("{run_id}.jsonl"));
-            if !path.exists() {
-                continue;
-            }
-            let raw = std::fs::read_to_string(&path).map_err(|error| {
-                OrbitError::Io(format!("read run audit '{}': {error}", path.display()))
-            })?;
-            let mut finished_at = None;
-            for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-                let event: Value = serde_json::from_str(line).map_err(|error| {
-                    OrbitError::Store(format!(
-                        "invalid run audit event '{}': {error}",
-                        path.display()
-                    ))
-                })?;
-                let event_type = event.get("event_type").and_then(Value::as_str);
-                let body_kind = event.get("body_kind").and_then(Value::as_str);
-                if matches!(event_type, Some("run.finished"))
-                    || matches!(body_kind, Some("run_finished"))
-                {
-                    finished_at = parse_audit_timestamp(&event, &path)?;
-                }
-            }
-            if finished_at.is_some() {
-                return Ok(finished_at);
+        for event in self.collect_run_audit_events(run_id)? {
+            if matches!(event.event_type.as_deref(), Some("run.finished"))
+                || matches!(event.body_kind.as_deref(), Some("run_finished"))
+            {
+                return Ok(event.timestamp);
             }
         }
         Ok(None)
     }
-}
-
-fn parse_audit_timestamp(event: &Value, path: &Path) -> Result<Option<DateTime<Utc>>, OrbitError> {
-    let Some(raw) = event.get("ts").and_then(Value::as_str) else {
-        return Ok(None);
-    };
-    DateTime::parse_from_rfc3339(raw)
-        .map(|value| Some(value.with_timezone(&Utc)))
-        .map_err(|error| {
-            OrbitError::Store(format!(
-                "invalid run audit timestamp '{}' in '{}': {error}",
-                raw,
-                path.display()
-            ))
-        })
 }
 
 fn terminal_run_timing_is_incomplete(run: &JobRun) -> bool {

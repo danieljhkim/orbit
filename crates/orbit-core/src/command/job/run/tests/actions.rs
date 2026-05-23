@@ -166,44 +166,13 @@ fn cancel_job_run_does_not_signal_reused_pid_identity_mismatch() {
         .jobs()
         .mark_run_running(&run.run_id, started_at, sentinel_pid)
         .expect("mark running");
-    let path = runtime
-        .data_root()
-        .join("state")
-        .join("job-runs")
-        .join(&run.job_id)
-        .join(&run.run_id)
-        .join("jrun.yaml");
     // Versioned token guarantees we exercise the strict `Mismatch`
     // classification path; legacy unversioned tokens may flow through the
     // softer LegacyLiveUnverified branch but must still produce
     // owner_identity_mismatch from `signal_run_owner_process`.
     let mismatched_versioned =
         format!("{STABLE_TOKEN_PREFIX}definitely-not-the-sentinel-start-token");
-    let raw = std::fs::read_to_string(&path).expect("read run yaml");
-    let edited = if raw.contains("pid_start_time:") {
-        raw.lines()
-            .map(|line| {
-                if line.trim_start().starts_with("pid_start_time:") {
-                    format!("  pid_start_time: {mismatched_versioned}")
-                } else {
-                    line.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        raw.lines()
-            .map(|line| {
-                if line.trim_start().starts_with("pid:") {
-                    format!("{line}\n  pid_start_time: {mismatched_versioned}")
-                } else {
-                    line.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    std::fs::write(&path, format!("{edited}\n")).expect("write mismatched pid token");
+    set_run_pid_start_time(&runtime, &run, &mismatched_versioned);
 
     let result = runtime.cancel_job_run(&run.run_id).expect("cancel run");
 

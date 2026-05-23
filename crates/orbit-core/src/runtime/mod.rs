@@ -34,6 +34,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use orbit_common::types::{Audit, OrbitError, OrbitEvent, WorkspacePaths};
 use orbit_engine::ActivityExecutorRegistry;
+use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
 
 use crate::OrbitContext;
@@ -244,6 +245,31 @@ impl OrbitRuntime {
 
     pub fn persistence_config_json(&self) -> Value {
         self.context.persistence().as_json_value()
+    }
+
+    pub(crate) fn sqlite_store(&self) -> Result<Store, OrbitError> {
+        Store::open(&self.context.persistence().audit_db)
+    }
+
+    pub fn workspace_id(&self) -> Result<String, OrbitError> {
+        workspace_id_for_orbit_dir(&self.context.paths().orbit_dir)
+    }
+
+    pub fn list_v2_audit_events(
+        &self,
+        mut filter: V2AuditEventFilter,
+    ) -> Result<Vec<V2AuditEventRow>, OrbitError> {
+        if filter.workspace_id.trim().is_empty() {
+            filter.workspace_id = self.workspace_id()?;
+        }
+        self.sqlite_store()?.list_v2_audit_events(&filter)
+    }
+
+    pub fn insert_v2_audit_event(
+        &self,
+        params: &orbit_store::V2AuditEventInsertParams,
+    ) -> Result<(), OrbitError> {
+        self.sqlite_store()?.insert_v2_audit_event(params)
     }
 
     pub fn task_approval_required_for_agent(&self) -> bool {

@@ -1,23 +1,20 @@
-use chrono::{DateTime, Utc};
 use orbit_common::types::{
-    Adr, AdrStatus, ArtifactManifestFileV2, Crew, ExecutorDef, ExternalRef, JobRun,
-    KnowledgeRunMetrics, Learning, LearningStatus, OrbitError, PipelineState, PolicyDef,
-    ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskPriority, TaskStatus,
+    Adr, AdrStatus, ArtifactManifestFileV2, ExecutorDef, ExternalRef, Learning, LearningStatus,
+    OrbitError, PolicyDef, ReviewThread, Task, TaskArtifact, TaskComment, TaskHistoryEntry,
+    TaskPriority, TaskStatus,
 };
 
 use super::contracts::{
     AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
-    ExecutorDefStoreBackend, JobRunQuery, JobRunStepParams, JobRunStoreBackend,
-    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
-    LearningSearchParams, LearningSearchResult, LearningStoreBackend, LearningUpdateParams,
-    LearningUpvoteParams, PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend,
+    ExecutorDefStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
+    LearningCreateParams, LearningListEntry, LearningSearchParams, LearningSearchResult,
+    LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend,
+    RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams,
+    TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReviewStoreBackend, TaskReviewUpdateParams, TaskStoreBackend,
 };
 use crate::file::adr_store::AdrFileStore;
 use crate::file::executor_def_store::ExecutorDefFileStore;
-use crate::file::job_store::JobFileStore;
 use crate::file::learning_store::LearningFileStore;
 use crate::file::policy_def_store::PolicyDefFileStore;
 use crate::file::task_store::TaskV2Store;
@@ -152,128 +149,6 @@ impl TaskArtifactStoreBackend for TaskV2Store {
         params: TaskArtifactUpdateParams,
     ) -> Result<(), OrbitError> {
         self.upsert_task_artifacts(id, &params)
-    }
-}
-
-impl JobRunStoreBackend for JobFileStore {
-    fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_job_runs(job_id)
-    }
-
-    fn list_job_runs_filtered(&self, query: &JobRunQuery) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_job_runs_filtered(query)
-    }
-
-    fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
-        self.get_job_run(run_id)
-    }
-
-    fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_pending_or_running_job_runs(job_id)
-    }
-
-    fn insert_job_run(
-        &self,
-        job_id: &str,
-        attempt: u32,
-        scheduled_at: DateTime<Utc>,
-        input: Option<serde_json::Value>,
-        retry_source_run_id: Option<String>,
-    ) -> Result<JobRun, OrbitError> {
-        self.insert_job_run(job_id, attempt, scheduled_at, input, retry_source_run_id)
-    }
-
-    fn mark_job_run_running(
-        &self,
-        run_id: &str,
-        started_at: DateTime<Utc>,
-        pid: u32,
-    ) -> Result<bool, OrbitError> {
-        self.mark_job_run_running(run_id, started_at, pid)
-    }
-
-    fn take_over_running_job_run(
-        &self,
-        run_id: &str,
-        expected_pid: Option<u32>,
-        expected_pid_start_time: Option<String>,
-        started_at: DateTime<Utc>,
-        pid: u32,
-    ) -> Result<bool, OrbitError> {
-        self.take_over_running_job_run(
-            run_id,
-            expected_pid,
-            expected_pid_start_time,
-            started_at,
-            pid,
-        )
-    }
-
-    fn abandon_job_run(
-        &self,
-        run_id: &str,
-        finished_at: DateTime<Utc>,
-    ) -> Result<bool, OrbitError> {
-        self.abandon_job_run(run_id, finished_at)
-    }
-
-    fn complete_job_run_step(
-        &self,
-        run_id: &str,
-        params: &JobRunStepParams,
-    ) -> Result<bool, OrbitError> {
-        self.complete_job_run_step(run_id, params)
-    }
-
-    fn record_job_run_knowledge_metrics(
-        &self,
-        run_id: &str,
-        metrics: KnowledgeRunMetrics,
-    ) -> Result<bool, OrbitError> {
-        self.record_job_run_knowledge_metrics(run_id, metrics)
-    }
-
-    fn record_job_run_crew(&self, run_id: &str, crew: &Crew) -> Result<bool, OrbitError> {
-        self.record_job_run_crew(run_id, crew)
-    }
-
-    fn finalize_job_run(
-        &self,
-        run_id: &str,
-        state: orbit_common::types::JobRunState,
-        finished_at: chrono::DateTime<chrono::Utc>,
-        duration_ms: Option<u64>,
-    ) -> Result<bool, OrbitError> {
-        self.finalize_job_run(run_id, state, finished_at, duration_ms)
-    }
-
-    fn repair_terminal_job_run_timing(
-        &self,
-        run_id: &str,
-        finished_at: DateTime<Utc>,
-        duration_ms: Option<u64>,
-    ) -> Result<bool, OrbitError> {
-        self.repair_terminal_job_run_timing(run_id, finished_at, duration_ms)
-    }
-
-    fn archive_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
-        self.archive_run(run_id)
-    }
-
-    fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError> {
-        self.delete_run(run_id)
-    }
-
-    fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError> {
-        self.read_run_state(run_id)
-    }
-
-    fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError> {
-        self.write_run_state(run_id, state)
-    }
-
-    fn list_all_pending_or_running_runs(&self) -> Result<Vec<JobRun>, OrbitError> {
-        self.list_all_pending_or_running_runs()
     }
 }
 

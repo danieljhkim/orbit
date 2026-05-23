@@ -4,14 +4,15 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use chrono::Utc;
-use orbit_agent::loop_engine::JsonlFileSink;
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::types::activity_job::{
     AUDIT_ENVELOPE_SCHEMA_VERSION, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
 use thiserror::Error;
 
-use super::jsonl_sink::V2JsonlSink;
+use orbit_store::Store;
+
+use super::sqlite_sink::V2SqliteSink;
 
 /// Writes §7 v2 audit envelope events. Nests the existing loop-engine events
 /// underneath an Activity event via `parent_event_id` so the whole tree
@@ -26,7 +27,7 @@ pub struct V2AuditWriter {
     agent_identity: String,
     workspace_path: Option<String>,
     inner: Arc<dyn AuditSink>,
-    envelope_sink: Option<Arc<V2JsonlSink>>,
+    envelope_sink: Option<Arc<V2SqliteSink>>,
     events: Mutex<Vec<V2AuditEvent>>,
     event_counter: Mutex<u64>,
     parent_stacks: Mutex<HashMap<ThreadId, Vec<String>>>,
@@ -63,10 +64,9 @@ impl V2AuditWriter {
         }
     }
 
-    /// Attach a JSONL sink for §7 envelope events. When set, every emitted
-    /// envelope event is persisted to disk alongside the in-memory snapshot
-    /// (resolves Phase 2a design-risk #2).
-    pub fn with_envelope_sink(mut self, sink: Arc<V2JsonlSink>) -> Self {
+    /// Attach a SQLite sink for §7 envelope events. When set, every emitted
+    /// envelope event is persisted alongside the in-memory snapshot.
+    pub fn with_envelope_sink(mut self, sink: Arc<V2SqliteSink>) -> Self {
         self.envelope_sink = Some(sink);
         self
     }
@@ -81,36 +81,43 @@ impl V2AuditWriter {
 
     /// High-level constructor for CLI / library callers that don't want to
     /// name the loop-level sink types directly (orbit-core's primary use
-    /// case). Creates a lazy `JsonlFileSink` for loop events under
-    /// `audit_root/loop/{run_id}.jsonl`, configures blobs under
-    /// `audit_root/blobs/`, and creates a `V2JsonlSink` at
-    /// `audit_root/v2_loop/{run_id}.jsonl`, wires them together, and returns a
-    /// ready-to-dispatch writer.
+    /// case). Creates one SQLite-backed sink for both loop events and v2
+    /// envelopes, while preserving content-addressed audit blobs under
+    /// `audit_root/blobs/`.
     ///
     /// Callers that need a custom sink configuration use `new` +
     /// `with_envelope_sink` directly.
     pub fn with_disk_sinks(
         audit_root: &Path,
+        store: Store,
+        workspace_id: impl Into<String>,
         run_id: impl Into<String>,
         agent_identity: impl Into<String>,
         workspace_path: Option<&Path>,
     ) -> std::io::Result<Arc<Self>> {
         let run_id = run_id.into();
-        let inner: Arc<dyn AuditSink> = Arc::new(JsonlFileSink::open(audit_root, &run_id)?);
-        let envelope_sink = Arc::new(V2JsonlSink::open(audit_root, &run_id)?);
-        let mut writer = Self::new(run_id, agent_identity, inner).with_envelope_sink(envelope_sink);
+        let agent_identity = agent_identity.into();
+        let workspace_path_string = workspace_path.map(|path| path.display().to_string());
+        let sqlite_sink = Arc::new(V2SqliteSink::for_audit_root(
+            store,
+            workspace_id,
+            run_id.clone(),
+            agent_identity.clone(),
+            workspace_path_string.clone(),
+            audit_root,
+        ));
+        let inner: Arc<dyn AuditSink> = sqlite_sink.clone();
+        let mut writer = Self::new(run_id, agent_identity, inner).with_envelope_sink(sqlite_sink);
         if let Some(path) = workspace_path {
             writer = writer.with_workspace_path(path.display().to_string());
         }
         Ok(Arc::new(writer))
     }
 
-    /// Path to the JSONL sink's log file, if one is attached. Used by CLI
-    /// callers to report where envelope events were persisted.
+    /// Legacy JSONL path hook. SQLite-backed audit persistence has no envelope
+    /// log path, so callers should treat `None` as the expected production value.
     pub fn envelope_log_path(&self) -> Option<std::path::PathBuf> {
-        self.envelope_sink
-            .as_ref()
-            .map(|s| s.log_path().to_path_buf())
+        None
     }
 
     /// Run identifier carried in every emitted envelope. Exposed so dual-write
@@ -138,10 +145,10 @@ impl V2AuditWriter {
         };
         let event = V2AuditEvent { envelope, kind };
         if let Some(sink) = &self.envelope_sink {
-            // Disk persistence failures should not crash the run. Emitting
+            // SQLite persistence failures should not crash the run. Emitting
             // the event to the in-memory snapshot is the load-bearing path;
-            // JSONL is for review-time inspection.
-            let _ = sink.write(&event);
+            // the run-level result owns the user-visible failure state.
+            let _ = sink.write_envelope(&event);
         }
         self.events
             .lock()

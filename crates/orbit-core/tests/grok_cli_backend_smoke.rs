@@ -57,6 +57,8 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
     let audit_dir = tempfile::tempdir().expect("audit tempdir");
     let audit = V2AuditWriter::with_disk_sinks(
         audit_dir.path(),
+        orbit_store::Store::open_in_memory().expect("audit store"),
+        "ws_test",
         "grok-installed-smoke",
         "grok:grok-build".to_string(),
         None,

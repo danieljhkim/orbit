@@ -80,7 +80,10 @@ pub use orbit_common::utility::redaction::{
     redact_sensitive_env_text,
 };
 pub use orbit_store::learning_layout::LearningLayoutMigrationReport;
-pub use orbit_store::{AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate};
+pub use orbit_store::{
+    AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate, V2AuditEventFilter,
+    V2AuditEventInsertParams, V2AuditEventRow,
+};
 pub use orbit_store::{
     LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
     LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,

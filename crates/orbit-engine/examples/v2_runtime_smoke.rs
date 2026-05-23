@@ -28,8 +28,8 @@ use orbit_common::types::activity_job::{
     ActivityV2, ActivityV2Spec, V2AuditEventKind, load_activity_asset,
 };
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2JsonlSink, V2RuntimeHost,
-    dispatch_v2_activity, drive_agent_loop,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2DispatchInput, V2RuntimeHost,
+    V2SqliteSink, dispatch_v2_activity, drive_agent_loop,
 };
 use serde_json::Value;
 use std::env;
@@ -117,7 +117,7 @@ fn smoke_dispatch_shell(
     if !outcome.success {
         return Err(format!("shell returned non-success: {outcome:?}"));
     }
-    assert_jsonl_nonempty(envelope.log_path())?;
+    assert_sqlite_nonempty(&envelope)?;
     Ok(())
 }
 
@@ -146,7 +146,7 @@ fn smoke_dispatch_deterministic(
     if !outcome.success {
         return Err(format!("deterministic returned non-success: {outcome:?}"));
     }
-    assert_jsonl_nonempty(envelope.log_path())?;
+    assert_sqlite_nonempty(&envelope)?;
     Ok(())
 }
 
@@ -234,7 +234,7 @@ fn smoke_dispatch_agent_loop(
         None => return Err("no loop-level PolicyDenial emitted".into()),
     }
 
-    assert_jsonl_nonempty(envelope.log_path())?;
+    assert_sqlite_nonempty(&envelope)?;
     Ok(())
 }
 
@@ -282,11 +282,18 @@ impl V2RuntimeHost for EchoHost {
 fn build_writer_and_sinks(
     audit_root: &std::path::Path,
     run_id: &str,
-) -> (Arc<V2AuditWriter>, Arc<V2JsonlSink>, Arc<InMemorySink>) {
+) -> (Arc<V2AuditWriter>, Arc<V2SqliteSink>, Arc<InMemorySink>) {
     let blob_dir = audit_root.join("blobs");
     let _ = std::fs::create_dir_all(&blob_dir);
     let inner = Arc::new(InMemorySink::new(blob_dir));
-    let envelope = Arc::new(V2JsonlSink::open(audit_root, run_id).expect("open v2 jsonl sink"));
+    let envelope = Arc::new(V2SqliteSink::for_audit_root(
+        orbit_store::Store::open_in_memory().expect("open sqlite sink"),
+        "ws_smoke",
+        run_id,
+        "smoke-agent",
+        None,
+        audit_root,
+    ));
     let writer = Arc::new(
         V2AuditWriter::new(run_id, "smoke-agent", inner.clone())
             .with_envelope_sink(envelope.clone()),
@@ -309,10 +316,12 @@ struct V2ReferenceAsset {
     spec: ActivityV2,
 }
 
-fn assert_jsonl_nonempty(path: &std::path::Path) -> Result<(), String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read jsonl: {e}"))?;
-    if bytes.is_empty() {
-        return Err(format!("jsonl at {} is empty", path.display()));
+fn assert_sqlite_nonempty(sink: &V2SqliteSink) -> Result<(), String> {
+    let count = sink
+        .persisted_event_count()
+        .map_err(|e| format!("read audit sqlite rows: {e}"))?;
+    if count == 0 {
+        return Err("audit sqlite rows are empty".to_string());
     }
     Ok(())
 }

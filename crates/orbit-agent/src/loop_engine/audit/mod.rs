@@ -6,19 +6,14 @@
 //! pointers to redacted payloads stored in a [`BlobStore`]; full bodies live
 //! in a separate content-addressed store so events stay small and queryable.
 //!
-//! [`JsonlFileSink`] writes one JSON object per line to
-//! `{audit_root}/loop/{run_id}.jsonl` once the first loop event is emitted and
-//! fans blob writes to `{audit_root}/blobs/`. Orbit runtime callers pass
-//! `.orbit/state/audit` as that root; tests use [`InMemorySink`], callers with
-//! no need for persistence use [`NullSink`].
+//! Persistent audit storage is owned by the runtime layer. Tests use
+//! [`InMemorySink`], callers with no need for persistence use [`NullSink`].
 
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -166,90 +161,6 @@ impl AuditSink for InMemorySink {
             .expect("blob mutex")
             .push((hash.clone(), stored));
         hash
-    }
-}
-
-pub struct JsonlFileSink {
-    run_id: String,
-    writer: Mutex<Option<BufWriter<File>>>,
-    blob_store: Arc<BlobStore>,
-    log_path: PathBuf,
-}
-
-impl JsonlFileSink {
-    pub fn open(audit_root: impl AsRef<Path>, run_id: impl Into<String>) -> std::io::Result<Self> {
-        let run_id = run_id.into();
-        let root = audit_root.as_ref();
-        let loop_dir = root.join("loop");
-        let log_path = loop_dir.join(format!("{run_id}.jsonl"));
-        let blob_root = root.join("blobs");
-        let blob_store = Arc::new(BlobStore::new(blob_root));
-        Ok(Self {
-            run_id,
-            writer: Mutex::new(None),
-            blob_store,
-            log_path,
-        })
-    }
-
-    pub fn run_id(&self) -> &str {
-        &self.run_id
-    }
-
-    pub fn log_path(&self) -> &Path {
-        &self.log_path
-    }
-
-    pub fn blob_store(&self) -> &BlobStore {
-        &self.blob_store
-    }
-
-    fn ensure_writer<'a>(
-        &self,
-        writer: &'a mut Option<BufWriter<File>>,
-    ) -> io::Result<&'a mut BufWriter<File>> {
-        if writer.is_none() {
-            if let Some(parent) = self.log_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&self.log_path)?;
-            writer.replace(BufWriter::new(file));
-        }
-        Ok(writer.as_mut().expect("writer initialized"))
-    }
-}
-
-impl AuditSink for JsonlFileSink {
-    fn emit(&self, event: &LoopAuditEvent) {
-        let line = match serde_json::to_string(event) {
-            Ok(l) => l,
-            Err(err) => {
-                tracing::warn!("failed to serialize loop audit event: {err}");
-                return;
-            }
-        };
-        let mut writer = self.writer.lock().expect("audit writer");
-        let writer = match self.ensure_writer(&mut writer) {
-            Ok(writer) => writer,
-            Err(err) => {
-                tracing::warn!("failed to open loop audit file: {err}");
-                return;
-            }
-        };
-        if let Err(err) = writeln!(writer, "{line}") {
-            tracing::warn!("failed to write loop audit event: {err}");
-            return;
-        }
-        let _ = writer.flush();
-    }
-
-    fn write_blob(&self, content: &[u8]) -> String {
-        self.blob_store
-            .write(content)
-            .unwrap_or_else(|err| format!("error:{err}"))
     }
 }
 
