@@ -1,6 +1,20 @@
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+use std::ffi::{CString, OsStr};
 use std::fs;
-use std::io::Write;
-use std::path::Path;
+use std::io::{Read, Seek, Write};
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use orbit_common::types::OrbitError;
@@ -58,11 +72,16 @@ pub fn run(params: SemanticInstallParams) -> Result<SemanticInstallResult, Orbit
     emit_stale_companion_hint(&paths);
 
     let companion_path = paths.companion_path();
-    let companion_changed = if params.force || companion_needs_install(&companion_path) {
-        install_companion(&companion_path)?;
-        true
+    let current_companion = if params.force {
+        None
     } else {
-        false
+        ManagedCompanion::open_current(&companion_path).ok()
+    };
+    let (companion_changed, companion) = if let Some(companion) = current_companion {
+        (false, companion)
+    } else {
+        install_companion(&companion_path)?;
+        (true, ManagedCompanion::open_current(&companion_path)?)
     };
 
     let model_dir = paths.model_dir(spec.alias);
@@ -71,7 +90,7 @@ pub fn run(params: SemanticInstallParams) -> Result<SemanticInstallResult, Orbit
         false
     } else {
         fs::create_dir_all(&model_dir).map_err(|error| OrbitError::Io(error.to_string()))?;
-        download_model_with_companion(&companion_path, spec.alias, &model_dir)?;
+        companion.download_model(spec.alias, &model_dir)?;
         true
     };
     fs::write(&paths.active_model_path, spec.alias)
@@ -400,13 +419,102 @@ fn legacy_platform_companion_filename() -> String {
     }
 }
 
-fn companion_needs_install(path: &Path) -> bool {
-    if !path.exists() || validate_managed_companion_path(path).is_err() {
-        return true;
+#[derive(Debug)]
+pub(crate) struct ManagedCompanion {
+    path: PathBuf,
+    file: fs::File,
+}
+
+impl ManagedCompanion {
+    pub(crate) fn open_current(path: &Path) -> Result<Self, OrbitError> {
+        validate_managed_companion_path(path)?;
+        let file = fs::File::open(path).map_err(|error| OrbitError::Io(error.to_string()))?;
+        let companion = Self {
+            path: path.to_path_buf(),
+            file,
+        };
+        // L-0036: Avoid native version probes; the sidecar lets us decide "install needed"
+        // without executing an untrusted binary, but is not a tamper-detection mechanism.
+        if !installed_companion_integrity_matches(&companion)? {
+            return Err(OrbitError::Execution(format!(
+                "installed search companion integrity metadata is stale for {}",
+                path.display()
+            )));
+        }
+        Ok(companion)
     }
-    // L-0036: Avoid native version probes; the sidecar lets us decide "install needed"
-    // without executing an untrusted binary, but is not a tamper-detection mechanism.
-    !installed_companion_integrity_matches(path).unwrap_or(false)
+
+    pub(crate) fn descriptor_checksum(&self) -> Result<String, OrbitError> {
+        sha256_file(&self.file)
+    }
+
+    fn download_model(&self, model: &str, model_dir: &Path) -> Result<(), OrbitError> {
+        match companion_launch_mode() {
+            CompanionLaunchMode::FileDescriptor => {
+                #[cfg(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "freebsd",
+                    target_os = "dragonfly"
+                ))]
+                {
+                    download_model_with_companion_fd(self, model, model_dir)
+                }
+                #[cfg(not(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "freebsd",
+                    target_os = "dragonfly"
+                )))]
+                {
+                    unreachable!("file-descriptor launch mode is unavailable on this target")
+                }
+            }
+            CompanionLaunchMode::Path => {
+                #[cfg(not(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "freebsd",
+                    target_os = "dragonfly"
+                )))]
+                tracing::debug!(
+                    companion_path = %self.path.display(),
+                    reason = path_execution_fallback_rationale(),
+                    "executing managed search companion by path"
+                );
+                download_model_with_companion_path(&self.path, model, model_dir)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompanionLaunchMode {
+    FileDescriptor,
+    Path,
+}
+
+pub(crate) fn companion_launch_mode() -> CompanionLaunchMode {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "dragonfly"
+    )) {
+        CompanionLaunchMode::FileDescriptor
+    } else {
+        CompanionLaunchMode::Path
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+)))]
+pub(crate) fn path_execution_fallback_rationale() -> &'static str {
+    "this platform does not expose fexecve through libc, so the managed companion keeps the pre-existing path execution behavior after descriptor-based freshness validation"
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -415,11 +523,11 @@ struct CompanionIntegrityManifest {
     sha256: String,
 }
 
-fn installed_companion_integrity_matches(path: &Path) -> Result<bool, OrbitError> {
-    let manifest_path = companion_integrity_path(path).ok_or_else(|| {
+fn installed_companion_integrity_matches(companion: &ManagedCompanion) -> Result<bool, OrbitError> {
+    let manifest_path = companion_integrity_path(&companion.path).ok_or_else(|| {
         OrbitError::InvalidInput(format!(
             "companion destination has no file name: {}",
-            path.display()
+            companion.path.display()
         ))
     })?;
     let manifest =
@@ -430,10 +538,30 @@ fn installed_companion_integrity_matches(path: &Path) -> Result<bool, OrbitError
                 "companion integrity manifest is not valid JSON: {error}"
             ))
         })?;
-    let bytes = fs::read(path).map_err(|error| OrbitError::Io(error.to_string()))?;
-    let checksum = sha256_hex(&bytes);
+    let checksum = companion.descriptor_checksum()?;
     Ok(manifest.version == env!("CARGO_PKG_VERSION")
         && normalize_sha256(&manifest.sha256)? == checksum)
+}
+
+fn sha256_file(file: &fs::File) -> Result<String, OrbitError> {
+    let mut reader = file
+        .try_clone()
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    reader
+        .seek(std::io::SeekFrom::Start(0))
+        .map_err(|error| OrbitError::Io(error.to_string()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 8192];
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| OrbitError::Io(error.to_string()))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 pub(crate) fn write_companion_integrity(path: &Path, checksum: &str) -> Result<(), OrbitError> {
@@ -487,7 +615,7 @@ fn replace_companion(temp_path: &Path, destination: &Path) -> Result<(), OrbitEr
     fs::rename(temp_path, destination).map_err(|error| OrbitError::Io(error.to_string()))
 }
 
-fn download_model_with_companion(
+fn download_model_with_companion_path(
     companion_path: &Path,
     model: &str,
     model_dir: &Path,
@@ -510,6 +638,154 @@ fn download_model_with_companion(
         )));
     }
     Ok(())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn download_model_with_companion_fd(
+    companion: &ManagedCompanion,
+    model: &str,
+    model_dir: &Path,
+) -> Result<(), OrbitError> {
+    if !run_companion_fd_for_model_download(&companion.file, &companion.path, model, model_dir)? {
+        return Err(OrbitError::Execution(format!(
+            "search companion failed to download model `{model}`"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn run_companion_fd_for_model_download(
+    file: &fs::File,
+    companion_path: &Path,
+    model: &str,
+    model_dir: &Path,
+) -> Result<bool, OrbitError> {
+    use std::os::fd::AsRawFd;
+
+    let argv = companion_argv(companion_path, model, model_dir)?;
+    let mut argv_ptrs = argv.iter().map(|arg| arg.as_ptr()).collect::<Vec<_>>();
+    argv_ptrs.push(std::ptr::null());
+    let env = companion_env()?;
+    let mut env_ptrs = env.iter().map(|value| value.as_ptr()).collect::<Vec<_>>();
+    env_ptrs.push(std::ptr::null());
+    let fd = file.as_raw_fd();
+
+    let pid = {
+        // SAFETY: fork has no Rust-side preconditions. The child path only calls
+        // async-signal-safe fexecve/_exit with argv/env buffers prepared before fork.
+        unsafe { libc::fork() }
+    };
+    if pid < 0 {
+        return Err(OrbitError::Execution(format!(
+            "failed to start search companion for model download: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    if pid == 0 {
+        // SAFETY: fd references the opened companion file, argv/envp are
+        // null-terminated pointer arrays whose CString storage is alive across fork.
+        unsafe {
+            libc::fexecve(fd, argv_ptrs.as_ptr(), env_ptrs.as_ptr());
+            libc::_exit(127);
+        }
+    }
+    wait_for_companion(pid)
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn companion_argv(
+    companion_path: &Path,
+    model: &str,
+    model_dir: &Path,
+) -> Result<Vec<CString>, OrbitError> {
+    Ok(vec![
+        cstring_from_os(companion_path.as_os_str(), "companion path")?,
+        CString::new("--model").map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
+        CString::new(model).map_err(|error| {
+            OrbitError::InvalidInput(format!("model identifier contains a NUL byte: {error}"))
+        })?,
+        CString::new("--model-path")
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
+        cstring_from_os(model_dir.as_os_str(), "model path")?,
+        CString::new("--download-model")
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?,
+    ])
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn companion_env() -> Result<Vec<CString>, OrbitError> {
+    std::env::vars_os()
+        .map(|(name, value)| {
+            let mut entry = name.as_os_str().as_bytes().to_vec();
+            entry.push(b'=');
+            entry.extend(value.as_os_str().as_bytes());
+            CString::new(entry).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "environment contains a NUL byte and cannot be passed to the companion: {error}"
+                ))
+            })
+        })
+        .collect()
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn cstring_from_os(value: &OsStr, label: &str) -> Result<CString, OrbitError> {
+    CString::new(value.as_bytes())
+        .map_err(|error| OrbitError::InvalidInput(format!("{label} contains a NUL byte: {error}")))
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn wait_for_companion(pid: libc::pid_t) -> Result<bool, OrbitError> {
+    let mut status = 0;
+    loop {
+        let waited = {
+            // SAFETY: waitpid is called for the child pid returned by fork with a valid
+            // pointer to collect its status.
+            unsafe { libc::waitpid(pid, &mut status, 0) }
+        };
+        if waited == pid {
+            break;
+        }
+        let error = std::io::Error::last_os_error();
+        if waited == -1 && error.raw_os_error() == Some(libc::EINTR) {
+            continue;
+        }
+        return Err(OrbitError::Execution(format!(
+            "failed to wait for search companion: {error}"
+        )));
+    }
+    Ok(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0)
 }
 
 #[cfg(unix)]

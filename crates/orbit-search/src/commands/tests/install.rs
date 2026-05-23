@@ -1,8 +1,16 @@
 //! Unit tests for `install` — sibling layout under commands/tests/.
 
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+)))]
+use super::super::install::path_execution_fallback_rationale;
 use super::super::install::{
-    CompanionIntegrity, SemanticInstallParams, checksum_from_manifest, resolve_download_source,
-    run, sha256_hex, verify_release_checksum_signature_with_key,
+    CompanionIntegrity, CompanionLaunchMode, ManagedCompanion, SemanticInstallParams,
+    checksum_from_manifest, companion_launch_mode, resolve_download_source, run, sha256_hex,
+    verify_release_checksum_signature_with_key,
 };
 
 use crate::companion::unsafe_companion_overrides_enabled;
@@ -80,6 +88,57 @@ fn current_companion_is_left_in_place_without_force() {
             .expect("read kept companion")
             .contains("replacement-marker: kept-current")
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn current_companion_freshness_hash_uses_open_descriptor() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    fixture.write_installed_companion(env!("CARGO_PKG_VERSION"), "descriptor-held");
+
+    let companion = ManagedCompanion::open_current(&fixture.paths.companion_path())
+        .expect("current install should verify");
+    let original_checksum = companion
+        .descriptor_checksum()
+        .expect("hash opened descriptor");
+    fixture.replace_installed_companion(env!("CARGO_PKG_VERSION"), "path-swapped");
+    let path_checksum = sha256_hex(
+        &std::fs::read(fixture.paths.companion_path()).expect("read swapped companion path"),
+    );
+
+    assert_ne!(original_checksum, path_checksum);
+    assert_eq!(
+        companion
+            .descriptor_checksum()
+            .expect("hash retained descriptor"),
+        original_checksum
+    );
+}
+
+#[test]
+fn companion_launch_mode_matches_platform_support() {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "dragonfly"
+    ))]
+    assert_eq!(companion_launch_mode(), CompanionLaunchMode::FileDescriptor);
+
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd",
+        target_os = "dragonfly"
+    )))]
+    {
+        assert_eq!(companion_launch_mode(), CompanionLaunchMode::Path);
+        assert!(
+            path_execution_fallback_rationale().contains("fexecve"),
+            "fallback rationale should name the missing fd-exec primitive"
+        );
+    }
 }
 
 #[test]
@@ -322,6 +381,15 @@ impl InstallFixture {
     #[cfg(unix)]
     fn write_installed_companion(&self, version: &str, marker: &str) {
         write_mock_companion(&self.paths.companion_path(), version, marker);
+        write_test_companion_integrity(&self.paths.companion_path(), version);
+    }
+
+    #[cfg(unix)]
+    fn replace_installed_companion(&self, version: &str, marker: &str) {
+        let replacement_path = self.paths.bin_dir.join("replacement-companion");
+        write_mock_companion(&replacement_path, version, marker);
+        std::fs::rename(&replacement_path, self.paths.companion_path())
+            .expect("replace installed companion");
         write_test_companion_integrity(&self.paths.companion_path(), version);
     }
 
