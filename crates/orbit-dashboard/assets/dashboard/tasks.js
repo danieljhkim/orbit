@@ -338,9 +338,9 @@ function buildReviewThreads(threads, context) {
   const wrap = el("div", { class: "review-threads" });
   for (const thread of threads) {
     const messages = Array.isArray(thread.messages) ? thread.messages : [];
-    const location = thread.path
-      ? `${thread.path}${thread.line == null ? "" : `:${thread.line}`}`
-      : "general";
+    const location = thread.path && thread.line != null
+      ? `${thread.path}:${thread.line}`
+      : "task-level";
     const block = el("div", { class: "review-thread" });
     block.appendChild(el("div", {
       class: "review-thread-header",

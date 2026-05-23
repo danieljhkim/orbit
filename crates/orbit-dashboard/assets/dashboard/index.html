@@ -34,6 +34,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab" data-tab="tasks" type="button">Tasks</button>
       <button class="tab" data-tab="scoreboard" type="button">Scoreboard</button>
+      <button class="tab" data-tab="threads" type="button">Threads<span class="tab-badge" id="threads-unread-badge" style="display: none;">0</span></button>
       <button class="tab" data-tab="audit" type="button">Audit</button>
       <button class="tab" data-tab="diagnostics" type="button">Diagnostics</button>
       <button class="tab" data-tab="knowledge" type="button">Knowledge</button>
@@ -114,6 +115,21 @@
           <div class="body scoreboard-table-wrap" id="scoreboard-body">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="threads">
+      <main style="grid-template-columns: 1fr;">
+        <section class="panel" id="threads-panel">
+          <header><span>Review threads</span><span class="count" id="threads-count">-</span></header>
+          <div class="controls" id="threads-filters"></div>
+          <div class="body" id="threads-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 85%"></div>
               <div class="skeleton skeleton-row" style="width: 70%"></div>
             </div>
           </div>

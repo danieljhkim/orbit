@@ -22,7 +22,7 @@ import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
 
-const TABS = ["tasks", "scoreboard", "audit", "diagnostics", "knowledge", "run-detail"];
+const TABS = ["tasks", "scoreboard", "threads", "audit", "diagnostics", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors"];
 const RUN_DETAIL_SUBTABS = ["steps", "events"];
 const KNOWLEDGE_SUBTABS = ["learnings", "adrs", "frictions"];
