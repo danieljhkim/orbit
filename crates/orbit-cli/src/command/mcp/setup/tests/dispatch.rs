@@ -2,7 +2,6 @@ use tempfile::tempdir;
 
 use super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::super::dispatch::{auto_detected_providers, run_action, vscode_home_user_dir};
-use super::super::test_support::ENV_LOCK;
 
 #[test]
 fn auto_detects_expected_providers() {
@@ -269,11 +268,6 @@ fn home_scope_without_home_dir_errors() {
         err,
         orbit_core::OrbitError::InvalidInput(message) if message.contains("HOME")
     ));
-}
-
-#[test]
-fn env_lock_smoke() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
 }
 
 #[test]
