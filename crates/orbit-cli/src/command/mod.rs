@@ -1,6 +1,7 @@
 pub mod definitions;
 pub mod docs;
 pub mod environment;
+pub mod friction;
 pub mod hook;
 pub mod learning;
 pub mod log;
@@ -51,6 +52,7 @@ Operate:
   run         Run a workflow (ship, duel-plan, job)
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
+  friction    Report, list, and triage friction records
   learning    Create, search, and curate project learnings
 
 Observe:
@@ -96,6 +98,7 @@ pub enum Commands {
     Task(Box<task::TaskCommand>),
     Search(search::SearchCommand),
     Docs(docs::DocsCommand),
+    Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
 
     // ── Observe ──
@@ -135,6 +138,7 @@ impl Execute for Commands {
             Commands::Task(cmd) => (*cmd).execute(runtime),
             Commands::Search(cmd) => cmd.execute(runtime),
             Commands::Docs(cmd) => cmd.execute(runtime),
+            Commands::Friction(cmd) => cmd.execute(runtime),
             Commands::Learning(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),

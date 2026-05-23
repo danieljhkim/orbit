@@ -369,6 +369,28 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        Commands::Friction(cmd) => {
+            use crate::command::friction::FrictionSubcommand;
+            let (sub, target_id) = match &cmd.command {
+                FrictionSubcommand::Add(_) => ("add", None),
+                FrictionSubcommand::List(_) => ("list", None),
+                FrictionSubcommand::Show(args) => ("show", Some(args.id.as_str())),
+                FrictionSubcommand::Stats(_) => ("stats", None),
+                FrictionSubcommand::Tags(_) => ("tags", None),
+                FrictionSubcommand::Update(args) => ("update", Some(args.id.as_str())),
+                FrictionSubcommand::Resolve(args) => ("resolve", Some(args.id.as_str())),
+            };
+            CommandMeta {
+                command: "friction".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("friction".to_string()),
+                target_id: target_id.map(String::from),
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Learning(cmd) => {
             use crate::command::learning::LearningSubcommand;
             let sub = match &cmd.command {

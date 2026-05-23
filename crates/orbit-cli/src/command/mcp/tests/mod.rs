@@ -8,9 +8,44 @@ use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
 
 use super::{
-    DOCS_TOOL_NAMES, GRAPH_READ_TOOL_NAMES, LEARNING_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES,
-    SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES, is_mcp_tool_exposed, safe_mcp_tool_names,
+    DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES, LEARNING_TOOL_NAMES,
+    MCP_HIDDEN_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES,
+    is_mcp_tool_exposed, safe_mcp_tool_names,
 };
+
+const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
+    "orbit.search",
+    "orbit.task.add",
+    "orbit.task.show",
+    "orbit.task.update",
+    "orbit.task.list",
+    "orbit.task.review_thread.add",
+    "orbit.task.review_thread.list",
+    "orbit.task.review_thread.reply",
+    "orbit.task.review_thread.resolve",
+    "orbit.task.start",
+    "orbit.graph.search",
+    "orbit.graph.refs",
+    "orbit.graph.callers",
+    "orbit.graph.implementors",
+    "orbit.learning.add",
+    "orbit.learning.show",
+    "orbit.learning.update",
+    "orbit.learning.upvote",
+    "orbit.learning.comment.add",
+    "orbit.learning.comment.list",
+    "orbit.friction.add",
+];
+
+fn is_runtime_mcp_category_tool(name: &str) -> bool {
+    name == "orbit.search"
+        || name.starts_with("orbit.task.")
+        || name.starts_with("orbit.friction.")
+        || name.starts_with("orbit.graph.")
+        || name.starts_with("orbit.semantic.")
+        || name.starts_with("orbit.docs.")
+        || name.starts_with("orbit.learning.")
+}
 
 #[test]
 fn safe_surface_matches_runtime_graph_and_task_tools() {
@@ -22,60 +57,65 @@ fn safe_surface_matches_runtime_graph_and_task_tools() {
         .map(|tool| tool.name)
         .collect();
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
+    let hidden_names: BTreeSet<&str> = MCP_HIDDEN_TOOL_NAMES.iter().copied().collect();
 
-    for name in TASK_TOOL_NAMES {
-        assert!(names.contains(*name), "missing runtime task tool: {name}");
-        assert!(is_mcp_tool_exposed(name));
-    }
-
-    for name in names.iter().filter(|name| name.starts_with("orbit.task.")) {
-        assert!(
-            safe_names.contains(name.as_str()),
-            "runtime task tool missing from safe MCP surface: {name}"
-        );
-    }
-
-    for name in GRAPH_READ_TOOL_NAMES {
+    for name in TASK_TOOL_NAMES
+        .iter()
+        .chain(FRICTION_TOOL_NAMES)
+        .chain(GRAPH_READ_TOOL_NAMES)
+        .chain(SEARCH_TOOL_NAMES)
+        .chain(SEMANTIC_TOOL_NAMES)
+        .chain(DOCS_TOOL_NAMES)
+        .chain(LEARNING_TOOL_NAMES)
+    {
         assert!(
             names.contains(*name),
-            "missing runtime graph read tool: {name}"
+            "MCP-candidate tool missing from runtime registry: {name}"
         );
-        assert!(is_mcp_tool_exposed(name));
     }
 
-    for name in SEMANTIC_TOOL_NAMES {
+    for name in MCP_HIDDEN_TOOL_NAMES {
         assert!(
             names.contains(*name),
-            "missing runtime semantic read tool: {name}"
+            "MCP-hidden tool should remain registered for CLI use: {name}"
         );
-        assert!(is_mcp_tool_exposed(name));
+        assert!(
+            !safe_names.contains(*name),
+            "MCP-hidden tool leaked into safe MCP names: {name}"
+        );
+        assert!(
+            !is_mcp_tool_exposed(name),
+            "MCP-hidden tool exposed by preflight: {name}"
+        );
     }
 
-    for name in SEARCH_TOOL_NAMES {
-        assert!(names.contains(*name), "missing runtime search tool: {name}");
-        assert!(is_mcp_tool_exposed(name));
-    }
-
-    for name in DOCS_TOOL_NAMES {
-        assert!(names.contains(*name), "missing runtime docs tool: {name}");
-        assert!(is_mcp_tool_exposed(name));
-    }
-
-    for name in LEARNING_TOOL_NAMES {
+    for name in REQUIRED_AGENT_FACING_TOOL_NAMES {
         assert!(
             names.contains(*name),
-            "missing runtime learning tool: {name}"
+            "required agent-facing tool missing from runtime registry: {name}"
         );
-        assert!(is_mcp_tool_exposed(name));
+        assert!(
+            safe_names.contains(*name),
+            "required agent-facing tool missing from safe MCP names: {name}"
+        );
+        assert!(
+            is_mcp_tool_exposed(name),
+            "required agent-facing tool rejected by MCP preflight: {name}"
+        );
     }
 
     for name in names
         .iter()
-        .filter(|name| name.starts_with("orbit.learning."))
+        .filter(|name| is_runtime_mcp_category_tool(name))
     {
+        let should_expose = !hidden_names.contains(name.as_str());
         assert!(
-            safe_names.contains(name.as_str()),
-            "runtime learning tool missing from safe MCP surface: {name}"
+            safe_names.contains(name.as_str()) == should_expose,
+            "runtime tool MCP exposure mismatch for {name}"
+        );
+        assert!(
+            is_mcp_tool_exposed(name) == should_expose,
+            "runtime tool MCP preflight mismatch for {name}"
         );
     }
 
@@ -106,38 +146,24 @@ fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
         .map(|schema| schema.name)
         .collect();
 
-    for name in GRAPH_READ_TOOL_NAMES {
+    for name in safe_mcp_tool_names() {
         assert!(
-            listed.contains(*name),
-            "client-visible MCP tool list missing graph read tool: {name}"
+            listed.contains(name),
+            "client-visible MCP tool list missing safe tool: {name}"
         );
     }
 
-    for name in SEMANTIC_TOOL_NAMES {
+    for name in REQUIRED_AGENT_FACING_TOOL_NAMES {
         assert!(
             listed.contains(*name),
-            "client-visible MCP tool list missing semantic read tool: {name}"
+            "client-visible MCP tool list missing required agent-facing tool: {name}"
         );
     }
 
-    for name in SEARCH_TOOL_NAMES {
+    for name in MCP_HIDDEN_TOOL_NAMES {
         assert!(
-            listed.contains(*name),
-            "client-visible MCP tool list missing search tool: {name}"
-        );
-    }
-
-    for name in DOCS_TOOL_NAMES {
-        assert!(
-            listed.contains(*name),
-            "client-visible MCP tool list missing docs tool: {name}"
-        );
-    }
-
-    for name in LEARNING_TOOL_NAMES {
-        assert!(
-            listed.contains(*name),
-            "client-visible MCP tool list missing learning tool: {name}"
+            !listed.contains(*name),
+            "client-visible MCP tool list exposes hidden ops tool: {name}"
         );
     }
 
