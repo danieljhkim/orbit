@@ -11,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
 use orbit_common::types::{ReviewMessage, ReviewThread, ReviewThreadStatus, all_agent_families};
-use orbit_core::OrbitRuntime;
+use orbit_core::{OrbitRuntime, TaskStatus};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -66,12 +66,15 @@ pub(super) async fn list_review_threads(
     let mut human_count: usize = 0;
     let mut agent_count: usize = 0;
     for task in &tasks {
+        if !is_workable_task_status(task.status) {
+            continue;
+        }
         let threads = match runtime.get_task_review_threads(&task.id) {
             Ok(t) => t,
             Err(e) => return server_error(e),
         };
         for thread in threads {
-            let projection = project_thread(&task.id, task.title.as_str(), &thread);
+            let projection = project_thread(&task.id, task.title.as_str(), task.status, &thread);
             match thread.status {
                 ReviewThreadStatus::Open => open_count += 1,
                 ReviewThreadStatus::Resolved => resolved_count += 1,
@@ -122,7 +125,7 @@ pub(super) async fn reply_review_thread_action(
     Path((task_id, thread_id)): Path<(String, String)>,
     Json(body): Json<ReplyBody>,
 ) -> Response {
-    let task_id = match validate_id(&task_id) {
+    let validated_id = match validate_id(&task_id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
@@ -133,8 +136,14 @@ pub(super) async fn reply_review_thread_action(
     if reply_body.is_empty() {
         return bad_request("reply body must not be empty".to_string());
     }
-    match runtime.reply_review_thread(task_id, &thread_id, reply_body, None, None) {
-        Ok(thread) => Json(project_thread(task_id, "", &thread).value).into_response(),
+    let task_status = match runtime.get_task(&validated_id) {
+        Ok(t) => t.status,
+        Err(e) => return map_runtime_error(e),
+    };
+    match runtime.reply_review_thread(validated_id, &thread_id, reply_body, None, None) {
+        Ok(thread) => {
+            Json(project_thread(validated_id, "", task_status, &thread).value).into_response()
+        }
         Err(e) => map_runtime_error(e),
     }
 }
@@ -143,15 +152,21 @@ pub(super) async fn resolve_review_thread_action(
     State(runtime): State<Arc<OrbitRuntime>>,
     Path((task_id, thread_id)): Path<(String, String)>,
 ) -> Response {
-    let task_id = match validate_id(&task_id) {
+    let validated_id = match validate_id(&task_id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
     if thread_id.trim().is_empty() {
         return bad_request("thread_id must not be empty".to_string());
     }
-    match runtime.resolve_review_thread(task_id, &thread_id, None, None) {
-        Ok(thread) => Json(project_thread(task_id, "", &thread).value).into_response(),
+    let task_status = match runtime.get_task(&validated_id) {
+        Ok(t) => t.status,
+        Err(e) => return map_runtime_error(e),
+    };
+    match runtime.resolve_review_thread(validated_id, &thread_id, None, None) {
+        Ok(thread) => {
+            Json(project_thread(validated_id, "", task_status, &thread).value).into_response()
+        }
         Err(e) => map_runtime_error(e),
     }
 }
@@ -160,15 +175,21 @@ pub(super) async fn reopen_review_thread_action(
     State(runtime): State<Arc<OrbitRuntime>>,
     Path((task_id, thread_id)): Path<(String, String)>,
 ) -> Response {
-    let task_id = match validate_id(&task_id) {
+    let validated_id = match validate_id(&task_id) {
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
     if thread_id.trim().is_empty() {
         return bad_request("thread_id must not be empty".to_string());
     }
-    match runtime.reopen_review_thread(task_id, &thread_id, None, None) {
-        Ok(thread) => Json(project_thread(task_id, "", &thread).value).into_response(),
+    let task_status = match runtime.get_task(&validated_id) {
+        Ok(t) => t.status,
+        Err(e) => return map_runtime_error(e),
+    };
+    match runtime.reopen_review_thread(validated_id, &thread_id, None, None) {
+        Ok(thread) => {
+            Json(project_thread(validated_id, "", task_status, &thread).value).into_response()
+        }
         Err(e) => map_runtime_error(e),
     }
 }
@@ -204,6 +225,15 @@ fn parse_author_kind(raw: Option<&str>) -> AuthorKindFilter {
     }
 }
 
+/// Returns true for task statuses whose review threads are actionable in the
+/// dashboard (the only ones surfaced by the cross-task list endpoint).
+fn is_workable_task_status(status: TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Backlog | TaskStatus::InProgress | TaskStatus::Review
+    )
+}
+
 struct ThreadProjection {
     value: Value,
     has_agent_message: bool,
@@ -218,7 +248,12 @@ fn matches_author_kind(projection: &ThreadProjection, filter: AuthorKindFilter) 
     }
 }
 
-fn project_thread(task_id: &str, task_title: &str, thread: &ReviewThread) -> ThreadProjection {
+fn project_thread(
+    task_id: &str,
+    task_title: &str,
+    task_status: TaskStatus,
+    thread: &ReviewThread,
+) -> ThreadProjection {
     let messages_json: Vec<Value> = thread
         .messages
         .iter()
@@ -266,6 +301,7 @@ fn project_thread(task_id: &str, task_title: &str, thread: &ReviewThread) -> Thr
     let value = json!({
         "task_id": task_id,
         "task_title": task_title,
+        "task_status": task_status.cli_name(),
         "thread_id": thread.thread_id,
         "status": thread.status.to_string(),
         "path": thread.path,

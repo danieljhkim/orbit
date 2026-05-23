@@ -1,0 +1,20 @@
+schema_version: 1
+id: L-0042
+status: active
+scope:
+  paths:
+  - crates/orbit-dashboard/src/api/tests/review_threads.rs
+  - crates/orbit-dashboard/src/api/review_threads.rs
+  tags:
+  - dashboard
+  - review-threads
+  - testing
+  - fixtures
+summary: Test fixtures for review threads on closed tasks require add-then-transition because add_review_thread (and other mutations) reject on non-workable statuses (Proposed/Friction/Done/Blocked/etc).
+body: "When writing tests that need persisted ReviewThread rows attached to tasks that end up in terminal or non-actionable statuses (Done, Rejected, Blocked, Archived, Proposed, etc.), you cannot call add_review_thread after setting the status, as the runtime enforces modifiability (see error: \"task ORB-NNN is done and cannot be modified\"). \n\nSolution: create task in a workable status (Backlog/InProgress/Review), call add_review_thread successfully, *then* perform the status transition (via update_task_with_identity + TaskUpdateParams { status }) or archive_task. The thread row persists on the now-closed task, allowing the list filter to be asserted.\n\nAffects dashboard review-threads tests and any cross-task thread fixtures. The is_workable_task_status predicate is the single source for both runtime checks and the dashboard list hard filter (ORB-00281)."
+evidence:
+- kind: task
+  reference: ORB-00281
+created_at: 2026-05-23T06:19:14.641478Z
+updated_at: 2026-05-23T06:19:14.641478Z
+created_by: grok

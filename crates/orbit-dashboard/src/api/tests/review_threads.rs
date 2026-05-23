@@ -7,7 +7,8 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
 use orbit_core::ActorIdentity;
 use orbit_core::OrbitRuntime;
-use orbit_core::command::task::TaskAddParams;
+use orbit_core::TaskStatus;
+use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -29,6 +30,7 @@ fn seed_task(runtime: &OrbitRuntime) -> String {
             title: "Threads panel".to_string(),
             description: "Surface review threads in the dashboard.".to_string(),
             workspace_path: Some(".".to_string()),
+            status: Some(TaskStatus::InProgress),
             ..Default::default()
         })
         .expect("add task")
@@ -259,4 +261,126 @@ async fn cross_origin_post_is_forbidden() {
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn list_review_threads_excludes_threads_on_closed_tasks() {
+    let runtime = human_runtime();
+
+    // Workable (included) statuses -- threads added and tasks remain workable
+    let t_backlog = runtime
+        .add_task(TaskAddParams {
+            title: "backlog task".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("add backlog")
+        .id;
+    let t_inprog = runtime
+        .add_task(TaskAddParams {
+            title: "in-progress task".to_string(),
+            status: Some(TaskStatus::InProgress),
+            ..Default::default()
+        })
+        .expect("add inprog")
+        .id;
+    let t_review = runtime
+        .add_task(TaskAddParams {
+            title: "review task".to_string(),
+            status: Some(TaskStatus::Review),
+            ..Default::default()
+        })
+        .expect("add review")
+        .id;
+
+    // For excluded: create as workable, add thread while modifiable, then
+    // transition to closed status so the persisted thread is on a now-closed task.
+    // This exercises the hard filter in list_review_threads.
+    // Friction/Archived omitted (special creation/archive paths); Proposed
+    // transition may be restricted so omitted here ("if applicable").
+    for (target_status, title) in [
+        (TaskStatus::Done, "done task"),
+        (TaskStatus::Blocked, "blocked/paused task"),
+        (TaskStatus::Rejected, "rejected task"),
+    ] {
+        let tid = runtime
+            .add_task(TaskAddParams {
+                title: title.to_string(),
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            })
+            .expect("add pre-closed")
+            .id;
+        let th = runtime
+            .add_review_thread(
+                &tid,
+                format!("thread on {title} (pre)"),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("add thread while open");
+        let _ = th.thread_id; // thread exists on now-closed task; filter tested by absence in list
+        runtime
+            .update_task_with_identity(
+                &tid,
+                TaskUpdateParams {
+                    status: Some(target_status),
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+            .expect("transition to excluded status");
+    }
+
+    // Add one thread per workable task (use simple human threads)
+    let mut good_ids: Vec<String> = Vec::new();
+    for (tid, label) in [
+        (&t_backlog, "backlog"),
+        (&t_inprog, "inprog"),
+        (&t_review, "review"),
+    ] {
+        let th = runtime
+            .add_review_thread(tid, format!("thread on {label}"), None, None, None, None)
+            .expect("add thread");
+        good_ids.push(th.thread_id);
+    }
+
+    let runtime = Arc::new(runtime);
+    let response = get(runtime, "/review-threads").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let items = body["items"].as_array().expect("items array");
+
+    // Only the 3 workable threads
+    assert_eq!(items.len(), 3, "should exclude closed-task threads");
+
+    let mut returned_ids: Vec<String> = items
+        .iter()
+        .map(|it| it["thread_id"].as_str().unwrap().to_string())
+        .collect();
+    let mut expected_ids = good_ids.clone();
+    returned_ids.sort();
+    expected_ids.sort();
+    assert_eq!(
+        returned_ids, expected_ids,
+        "exact thread-ID set for workable tasks"
+    );
+
+    // Each row has task_status in the allowed set
+    for item in items {
+        let ts = item["task_status"].as_str().expect("task_status present");
+        assert!(
+            matches!(ts, "backlog" | "in-progress" | "review"),
+            "unexpected task_status: {}",
+            ts
+        );
+    }
+
+    // Stats reflect only workable (3 open)
+    let stats = &body["stats"];
+    assert_eq!(stats["open"].as_u64(), Some(3));
+    assert_eq!(stats["total"].as_u64(), Some(3));
 }
