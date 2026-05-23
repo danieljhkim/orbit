@@ -158,6 +158,120 @@ fn repeated_payload_with_same_session_dedups_and_skips_second_audit() {
 }
 
 #[test]
+fn review_threads_surface_once_replies_reopen_and_resolve_suppresses() {
+    let workspace = TestWorkspace::new();
+    let task_id = workspace.add_task("Review hook task");
+    workspace.add_review_thread(&task_id, "Human steering note.", "human");
+    let thread_id = workspace.review_thread_id(&task_id);
+    let payload = r#"{"tool_name":"Edit","file_path":"src/lib.rs"}"#;
+
+    let first = workspace.run_hook(
+        payload,
+        &[
+            ("ORBIT_SESSION_ID", "review-thread-session"),
+            ("ORBIT_ACTIVE_TASK_ID", &task_id),
+        ],
+        "review thread first",
+    );
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(stdout.contains("Review threads awaiting agent attention"));
+    assert!(stdout.contains("Human steering note."));
+    assert!(stdout.contains("human [human]"));
+
+    let second = workspace.run_hook(
+        payload,
+        &[
+            ("ORBIT_SESSION_ID", "review-thread-session"),
+            ("ORBIT_ACTIVE_TASK_ID", &task_id),
+        ],
+        "review thread second",
+    );
+    assert!(second.stdout.is_empty());
+
+    workspace.reply_review_thread(&task_id, &thread_id, "Agent folded it in.", "codex");
+    workspace.resolve_review_thread(&task_id, &thread_id);
+    let resolved = workspace.run_hook(
+        payload,
+        &[
+            ("ORBIT_SESSION_ID", "review-thread-session"),
+            ("ORBIT_ACTIVE_TASK_ID", &task_id),
+        ],
+        "review thread resolved",
+    );
+    assert!(resolved.stdout.is_empty());
+
+    workspace.reply_review_thread(&task_id, &thread_id, "Please revisit this.", "human");
+    let reopened = workspace.run_hook(
+        payload,
+        &[
+            ("ORBIT_SESSION_ID", "review-thread-session"),
+            ("ORBIT_ACTIVE_TASK_ID", &task_id),
+        ],
+        "review thread reopened",
+    );
+    let stdout = String::from_utf8_lossy(&reopened.stdout);
+    assert!(stdout.contains("Please revisit this."));
+
+    let final_pass = workspace.run_hook(
+        payload,
+        &[
+            ("ORBIT_SESSION_ID", "review-thread-session"),
+            ("ORBIT_ACTIVE_TASK_ID", &task_id),
+        ],
+        "review thread reopened dedup",
+    );
+    assert!(final_pass.stdout.is_empty());
+
+    let events = workspace.run_json(
+        &[
+            "audit",
+            "list",
+            "--kind",
+            "review_thread_surfaced",
+            "--json",
+        ],
+        "audit list",
+    );
+    let rows = events.as_array().expect("audit rows");
+    assert_eq!(rows.len(), 2, "audit rows: {events}");
+    let mut seqs = rows
+        .iter()
+        .map(|row| {
+            let arguments: Value =
+                serde_json::from_str(row["arguments_json"].as_str().expect("arguments_json"))
+                    .expect("audit arguments JSON");
+            assert_eq!(arguments["task_id"], json!(task_id));
+            assert_eq!(arguments["thread_id"], json!(thread_id));
+            arguments["last_seen_message_seq"].as_u64().expect("seq")
+        })
+        .collect::<Vec<_>>();
+    seqs.sort_unstable();
+    assert_eq!(seqs, [1, 3]);
+}
+
+#[test]
+fn combined_learning_and_review_thread_output_renders_both_paths() {
+    let workspace = TestWorkspace::new();
+    workspace.add_learning("Combined learning reminder", &["src/**"]);
+    let task_id = workspace.add_task("Combined hook task");
+    workspace.add_review_thread(&task_id, "Combined review note.", "human");
+
+    let output = workspace.run_hook(
+        r#"{"tool_name":"Read","path":"src/lib.rs"}"#,
+        &[
+            ("ORBIT_SESSION_ID", "combined-session"),
+            ("ORBIT_ACTIVE_TASK_ID", &task_id),
+        ],
+        "combined hook",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Project learnings relevant to this task"));
+    assert!(stdout.contains("Combined learning reminder"));
+    assert!(stdout.contains("Review threads awaiting agent attention"));
+    assert!(stdout.contains("Combined review note."));
+}
+
+#[test]
 fn per_call_cap_limits_rendered_learning_count() {
     let workspace = TestWorkspace::new();
     for idx in 0..6 {
@@ -309,6 +423,71 @@ impl TestWorkspace {
         self.run_json(&args, "add learning")
     }
 
+    fn add_task(&self, title: &str) -> String {
+        let input = json!({
+            "title": title,
+            "description": "Hook review thread fixture task.",
+            "workspace": self.work.to_string_lossy(),
+            "model": "codex"
+        })
+        .to_string();
+        let task = self.run_json(
+            &["tool", "run", "orbit.task.add", "--input", &input],
+            "add task",
+        );
+        task["id"].as_str().expect("task id").to_string()
+    }
+
+    fn add_review_thread(&self, task_id: &str, body: &str, model: &str) {
+        let input = json!({ "task_id": task_id, "body": body, "model": model }).to_string();
+        self.run_json(
+            &["tool", "run", "orbit.review-thread.add", "--input", &input],
+            "add review thread",
+        );
+    }
+
+    fn reply_review_thread(&self, task_id: &str, thread_id: &str, body: &str, model: &str) {
+        let input =
+            json!({ "task_id": task_id, "thread_id": thread_id, "body": body, "model": model })
+                .to_string();
+        self.run_json(
+            &[
+                "tool",
+                "run",
+                "orbit.review-thread.reply",
+                "--input",
+                &input,
+            ],
+            "reply review thread",
+        );
+    }
+
+    fn resolve_review_thread(&self, task_id: &str, thread_id: &str) {
+        let input = json!({ "task_id": task_id, "thread_id": thread_id }).to_string();
+        self.run_json(
+            &[
+                "tool",
+                "run",
+                "orbit.review-thread.resolve",
+                "--input",
+                &input,
+            ],
+            "resolve review thread",
+        );
+    }
+
+    fn review_thread_id(&self, task_id: &str) -> String {
+        let input = json!({ "task_id": task_id }).to_string();
+        let threads = self.run_json(
+            &["tool", "run", "orbit.review-thread.list", "--input", &input],
+            "list review threads",
+        );
+        threads[0]["thread_id"]
+            .as_str()
+            .expect("thread id")
+            .to_string()
+    }
+
     fn run_hook(&self, stdin: &str, envs: &[(&str, &str)], label: &str) -> Output {
         self.run(&["hook", "pretooluse"], Some(stdin), envs, label)
     }
@@ -367,6 +546,13 @@ fn run_orbit(
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_TASK_ID")
+        .env_remove("ORBIT_ACTIVE_TASK_ID")
+        .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_ACTIVITY_ID")
+        .env_remove("ORBIT_STEP_INDEX")
+        .env_remove("ORBIT_AGENT_NAME")
+        .env_remove("ORBIT_AGENT_MODEL")
         .env_remove("ORBIT_SESSION_ID")
         .env_remove("ORBIT_LEARNING_PER_CALL_CAP")
         .env_remove("ORBIT_LEARNING_SESSION_CAP")

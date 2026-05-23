@@ -91,9 +91,13 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
     registry.register(review_thread::add::OrbitReviewThreadAddTool);
+    registry.register(review_thread::add::OrbitReviewThreadAddAliasTool);
     registry.register(review_thread::list::OrbitReviewThreadListTool);
+    registry.register(review_thread::list::OrbitReviewThreadListAliasTool);
     registry.register(review_thread::reply::OrbitReviewThreadReplyTool);
+    registry.register(review_thread::reply::OrbitReviewThreadReplyAliasTool);
     registry.register(review_thread::resolve::OrbitReviewThreadResolveTool);
+    registry.register(review_thread::resolve::OrbitReviewThreadResolveAliasTool);
     registry.register(search::OrbitSearchTool);
     registry.register(semantic::install::OrbitSemanticInstallTool);
     registry.register(semantic::uninstall::OrbitSemanticUninstallTool);
