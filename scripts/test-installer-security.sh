@@ -129,6 +129,7 @@ run_shell_install() {
   ORBIT_INSTALL_BASE_URL="file://$release_dir" \
     ORBIT_INSTALL_DIR="$install_dir" \
     ORBIT_RELEASE_PUBLIC_KEY_FILE="$PUBLIC_KEY" \
+    ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1 \
     ORBIT_TEST_EXEC_MARKER="$marker" \
     sh "$ROOT/install.sh"
 }
@@ -180,6 +181,7 @@ printf '%s  %s\n' "$(sha256_file "$good_archive")" "orbit-${TARGET}.tar.gz" > "$
 sign_checksums "$npm_checksums" "$npm_signature"
 
 ROOT="$ROOT" \
+  TMP_ROOT="$TMP_ROOT" \
   PUBLIC_KEY="$PUBLIC_KEY" \
   CHECKSUMS="$npm_checksums" \
   SIGNATURE="$npm_signature" \
@@ -204,6 +206,26 @@ function expectThrow(fn, pattern, label) {
   throw new Error(`${label}: expected failure`);
 }
 
+function withTempDir(label, fn) {
+  const safeLabel = label.replace(/[^a-z0-9_-]/gi, '-');
+  const dir = fs.mkdtempSync(path.join(process.env.TMP_ROOT, `${safeLabel}-`));
+  try {
+    return fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function expectExtractFailure(archivePath, pattern, label) {
+  withTempDir(label, (dir) => {
+    expectThrow(
+      () => installer.extractTarGz(archivePath, dir),
+      pattern,
+      label
+    );
+  });
+}
+
 const publicKey = fs.readFileSync(process.env.PUBLIC_KEY, 'utf8');
 const checksumText = fs.readFileSync(process.env.CHECKSUMS, 'utf8');
 const signature = fs.readFileSync(process.env.SIGNATURE);
@@ -213,6 +235,13 @@ const asset = `orbit-${process.env.TARGET}.tar.gz`;
 installer.verifyChecksumSignature(checksumText, signature, publicKey);
 installer.verifyArchiveChecksum(asset, goodArchive, checksumText);
 installer.validateArchiveMembers(process.env.GOOD_ARCHIVE);
+withTempDir('npm-good-archive-extract', (dir) => {
+  installer.extractTarGz(process.env.GOOD_ARCHIVE, dir);
+  const extracted = path.join(dir, 'orbit');
+  if (!fs.statSync(extracted).isFile()) {
+    throw new Error('npm good archive extraction did not create a regular orbit file');
+  }
+});
 
 const tamperedSignature = Buffer.from(signature);
 tamperedSignature[0] = tamperedSignature[0] ^ 0xff;
@@ -226,16 +255,31 @@ expectThrow(
   /checksum mismatch/,
   'npm checksum failure'
 );
-expectThrow(
-  () => installer.validateArchiveMembers(process.env.SYMLINK_ARCHIVE),
-  /regular file/,
+expectExtractFailure(
+  process.env.SYMLINK_ARCHIVE,
+  /symlink/,
   'npm symlink archive rejection'
 );
 expectThrow(
-  () => installer.validateArchiveMembers(process.env.TRAVERSAL_ARCHIVE),
+  () => installer.extractTarGz(process.env.TRAVERSAL_ARCHIVE, process.env.TMP_ROOT),
   /unsafe release archive member/,
   'npm traversal archive rejection'
 );
 NODE
+
+if ORBIT_RELEASE_PUBLIC_KEY_FILE="$PUBLIC_KEY" \
+  ROOT="$ROOT" \
+  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "plugin/npm/scripts/install-binary.js")); installer.acknowledgeTrustedPublicKeyOverride();' \
+  > "$TMP_ROOT/npm-key-override-missing-ack.log" 2>&1; then
+  echo "FAIL: npm installer accepted ORBIT_RELEASE_PUBLIC_KEY_FILE without acknowledgement" >&2
+  exit 1
+fi
+
+ORBIT_RELEASE_PUBLIC_KEY_FILE="$PUBLIC_KEY" \
+  ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1 \
+  ROOT="$ROOT" \
+  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "plugin/npm/scripts/install-binary.js")); installer.acknowledgeTrustedPublicKeyOverride();' \
+  > "$TMP_ROOT/npm-key-override-ack.log" 2>&1
+grep -q "trusting replacement release signing key" "$TMP_ROOT/npm-key-override-ack.log"
 
 echo "test-installer-security: ok"

@@ -55,9 +55,12 @@ curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | 
 
 `ORBIT_VERSION`, `ORBIT_INSTALL_REPO`, and `ORBIT_INSTALL_BASE_URL` change the
 release source the installer trusts, so use them only for pinned releases,
-forks, or controlled test mirrors. `ORBIT_RELEASE_PUBLIC_KEY_FILE` replaces the
-trusted checksum-signing key and should be limited to tests or emergency
-operations.
+forks, or controlled test mirrors. `ORBIT_INSTALL_BASE_URL` may use any
+downloader-supported scheme, including `file://` for tests; the signature check
+protects artifact integrity, not transport confidentiality.
+`ORBIT_RELEASE_PUBLIC_KEY_FILE` replaces the trusted checksum-signing key,
+requires `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1`, and should
+be limited to tests or emergency operations.
 
 ## Initialize State
 

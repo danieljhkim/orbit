@@ -17,6 +17,10 @@ fail() {
   exit 1
 }
 
+warn() {
+  printf 'orbit installer: %s\n' "$*" >&2
+}
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
@@ -42,7 +46,10 @@ write_trusted_public_key() {
   destination="$1"
 
   if [ -n "${ORBIT_RELEASE_PUBLIC_KEY_FILE:-}" ]; then
+    [ "${ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE:-}" = "1" ] \
+      || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE requires ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1"
     [ -f "$ORBIT_RELEASE_PUBLIC_KEY_FILE" ] || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE does not exist: $ORBIT_RELEASE_PUBLIC_KEY_FILE"
+    warn "ORBIT_RELEASE_PUBLIC_KEY_FILE=$ORBIT_RELEASE_PUBLIC_KEY_FILE set; trusting replacement release signing key"
     cat "$ORBIT_RELEASE_PUBLIC_KEY_FILE" > "$destination"
     return
   fi
@@ -95,13 +102,18 @@ compute_sha256() {
 validate_archive_members() {
   archive_path="$1"
   member_list="${TMP_DIR}/archive-members.txt"
-  verbose_list="${TMP_DIR}/archive-members.verbose.txt"
+  member=""
+  member_count=0
 
   tar -tzf "$archive_path" > "$member_list" || fail "could not inspect release archive"
-  member_count="$(wc -l < "$member_list" | awk '{print $1}')"
+  while IFS= read -r archive_member; do
+    member_count=$((member_count + 1))
+    if [ "$member_count" -eq 1 ]; then
+      member="$archive_member"
+    fi
+  done < "$member_list"
   [ "$member_count" = "1" ] || fail "release archive must contain only ${BINARY_NAME}"
 
-  member="$(sed -n '1p' "$member_list")"
   case "$member" in
     "$BINARY_NAME")
       ;;
@@ -110,19 +122,6 @@ validate_archive_members() {
       ;;
     *)
       fail "unexpected release archive member: $member"
-      ;;
-  esac
-
-  tar -tvzf "$archive_path" > "$verbose_list" || fail "could not inspect release archive member metadata"
-  verbose_count="$(wc -l < "$verbose_list" | awk '{print $1}')"
-  [ "$verbose_count" = "1" ] || fail "release archive must contain exactly one member"
-
-  mode="$(sed -n '1s/ .*//p' "$verbose_list")"
-  case "$mode" in
-    -*)
-      ;;
-    *)
-      fail "release archive member must be a regular file: $member"
       ;;
   esac
 }
@@ -167,9 +166,7 @@ need_cmd awk
 need_cmd install
 need_cmd mktemp
 need_cmd openssl
-need_cmd sed
 need_cmd tar
-need_cmd wc
 
 TARGET="$(resolve_target)"
 ARCHIVE_NAME="orbit-${TARGET}.tar.gz"
@@ -217,6 +214,7 @@ fi
 mkdir -p "$INSTALL_DIR"
 validate_archive_members "$ARCHIVE_PATH"
 tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR" "$BINARY_NAME"
+[ ! -L "${TMP_DIR}/${BINARY_NAME}" ] || fail "release archive member is a symlink: ${BINARY_NAME}"
 [ -f "${TMP_DIR}/${BINARY_NAME}" ] || fail "release archive did not contain ${BINARY_NAME}"
 
 install -m 755 "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"

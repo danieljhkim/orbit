@@ -18,9 +18,12 @@ const BINARY_VERSION = process.env.ORBIT_BINARY_VERSION || `v${PKG.version}`;
 const PKG_ROOT = path.resolve(__dirname, '..');
 const BIN_DIR = path.join(PKG_ROOT, 'binaries');
 const BIN_PATH = path.join(BIN_DIR, process.platform === 'win32' ? 'orbit.exe' : 'orbit');
-const TRUSTED_PUBLIC_KEY_PATH = process.env.ORBIT_RELEASE_PUBLIC_KEY_FILE
-  ? path.resolve(process.env.ORBIT_RELEASE_PUBLIC_KEY_FILE)
+const PUBLIC_KEY_OVERRIDE = process.env.ORBIT_RELEASE_PUBLIC_KEY_FILE;
+const PUBLIC_KEY_OVERRIDE_ACK_ENV = 'ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE';
+const TRUSTED_PUBLIC_KEY_PATH = PUBLIC_KEY_OVERRIDE
+  ? path.resolve(PUBLIC_KEY_OVERRIDE)
   : path.join(PKG_ROOT, 'release-signing.pub');
+let publicKeyOverrideLogged = false;
 
 function log(msg) {
   process.stderr.write(`@orbit-tools/cli: ${msg}\n`);
@@ -83,7 +86,21 @@ function parseChecksums(text) {
   return out;
 }
 
+function acknowledgeTrustedPublicKeyOverride() {
+  if (!PUBLIC_KEY_OVERRIDE) {
+    return;
+  }
+  if (process.env[PUBLIC_KEY_OVERRIDE_ACK_ENV] !== '1') {
+    throw new Error(`ORBIT_RELEASE_PUBLIC_KEY_FILE requires ${PUBLIC_KEY_OVERRIDE_ACK_ENV}=1`);
+  }
+  if (!publicKeyOverrideLogged) {
+    log(`ORBIT_RELEASE_PUBLIC_KEY_FILE=${TRUSTED_PUBLIC_KEY_PATH} set; trusting replacement release signing key`);
+    publicKeyOverrideLogged = true;
+  }
+}
+
 function readTrustedPublicKey() {
+  acknowledgeTrustedPublicKeyOverride();
   return fs.readFileSync(TRUSTED_PUBLIC_KEY_PATH, 'utf8');
 }
 
@@ -138,22 +155,25 @@ function validateArchiveMembers(archivePath) {
     throw new Error("release archive must contain only the 'orbit' binary");
   }
   validateArchiveMemberName(members[0]);
+}
 
-  const verbose = runTar(['-tvzf', archivePath])
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (verbose.length !== 1) {
-    throw new Error("release archive must contain exactly one 'orbit' member");
+function validateExtractedBinary(extractedBinary) {
+  const stat = fs.lstatSync(extractedBinary);
+  if (stat.isSymbolicLink()) {
+    throw new Error('release archive member is a symlink: orbit');
   }
-  if (!verbose[0].startsWith('-')) {
-    throw new Error(`release archive member must be a regular file: ${members[0]}`);
+  if (!stat.isFile()) {
+    throw new Error('release archive member must be a regular file: orbit');
+  }
+  if (stat.nlink !== 1) {
+    throw new Error('release archive member must not be a hard link: orbit');
   }
 }
 
 function extractTarGz(archivePath, destDir) {
   validateArchiveMembers(archivePath);
   runTar(['-xzf', archivePath, '-C', destDir, 'orbit'], { stdio: 'inherit' });
+  validateExtractedBinary(path.join(destDir, 'orbit'));
 }
 
 async function main() {
@@ -226,7 +246,10 @@ if (require.main === module) {
 module.exports = {
   parseChecksums,
   sha256,
+  acknowledgeTrustedPublicKeyOverride,
+  extractTarGz,
   validateArchiveMembers,
+  validateExtractedBinary,
   verifyArchiveChecksum,
   verifyChecksumSignature,
 };
