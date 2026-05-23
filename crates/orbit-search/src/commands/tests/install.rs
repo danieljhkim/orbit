@@ -116,6 +116,55 @@ fn current_companion_freshness_hash_uses_open_descriptor() {
     );
 }
 
+/// End-to-end coverage for the fexecve launch path on platforms that
+/// actually use it. Writes a mock companion that records its own marker on
+/// `--download-model`, opens it as a `ManagedCompanion`, swaps the binary at
+/// the install path, then drives the model download. The marker file proves
+/// the fd-held binary ran, not the path-swapped one.
+#[test]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn fd_launch_executes_descriptor_not_path_after_swap() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    let model_dir = fixture.paths.models_dir.join("test-model");
+    std::fs::create_dir_all(&model_dir).expect("create model dir");
+
+    write_marker_companion(
+        &fixture.paths.companion_path(),
+        env!("CARGO_PKG_VERSION"),
+        "original",
+    );
+    write_test_companion_integrity(&fixture.paths.companion_path(), env!("CARGO_PKG_VERSION"));
+
+    let companion = ManagedCompanion::open_current(&fixture.paths.companion_path())
+        .expect("current install should verify");
+
+    // Swap the binary at the install path. A path-based exec would now pick
+    // up the "swapped" variant; an fd-based exec must still run "original".
+    let replacement_path = fixture.paths.bin_dir.join("replacement-companion");
+    write_marker_companion(&replacement_path, env!("CARGO_PKG_VERSION"), "swapped");
+    std::fs::rename(&replacement_path, fixture.paths.companion_path())
+        .expect("rename replacement into place");
+    write_test_companion_integrity(&fixture.paths.companion_path(), env!("CARGO_PKG_VERSION"));
+
+    companion
+        .download_model("test-model", &model_dir)
+        .expect("fd-based model download succeeds");
+
+    let marker = std::fs::read_to_string(model_dir.join("companion-identity.txt"))
+        .expect("mock companion should have written its identity marker");
+    assert_eq!(
+        marker.trim(),
+        "original",
+        "fexecve must run the descriptor held by ManagedCompanion, not the path-swapped binary"
+    );
+}
+
 #[test]
 fn companion_launch_mode_matches_platform_support() {
     #[cfg(any(
@@ -457,6 +506,51 @@ exit 0
     let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(path, permissions).expect("chmod companion");
+}
+
+/// A companion variant that records its identity to `<model_dir>/companion-identity.txt`
+/// on `--download-model`, used by the fd-launch end-to-end test. Argument parsing
+/// is minimal because the real companion accepts `--model X --model-path Y --download-model`.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd",
+    target_os = "dragonfly"
+))]
+fn write_marker_companion(path: &std::path::Path, version: &str, marker: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = format!(
+        r#"#!/bin/sh
+# marker-companion: {marker}
+model_path=""
+download=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model-path)
+      shift
+      model_path="$1"
+      ;;
+    --download-model)
+      download=1
+      ;;
+  esac
+  shift
+done
+if [ "$1" = "--version-info" ] || [ "$2" = "--version-info" ]; then
+  printf '%s\n' '{{"id":0,"result":{{"model_id":"bge-small-en-v1.5","dim":0,"max_input_tokens":0,"version":"{version}"}}}}'
+  exit 0
+fi
+if [ "$download" = "1" ] && [ -n "$model_path" ]; then
+  printf '%s\n' '{marker}' > "$model_path/companion-identity.txt"
+fi
+exit 0
+"#
+    );
+    std::fs::write(path, script).expect("write marker companion");
+    let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).expect("chmod marker companion");
 }
 
 #[cfg(unix)]
