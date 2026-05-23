@@ -5,7 +5,11 @@ use std::process::Command;
 
 use orbit_common::types::OrbitError;
 use reqwest::Url;
-use serde::Serialize;
+use rsa::RsaPublicKey;
+use rsa::pkcs1v15::{Signature as RsaSignature, VerifyingKey};
+use rsa::pkcs8::DecodePublicKey;
+use rsa::signature::Verifier;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::commands::{DEFAULT_RELEASE_BASE_URL, parse_model};
@@ -18,6 +22,19 @@ use crate::{CompanionPaths, platform_companion_filename};
 const COMPANION_URL_ENV: &str = "ORBIT_SEARCH_COMPANION_URL";
 const COMPANION_SHA256_ENV: &str = "ORBIT_SEARCH_COMPANION_SHA256";
 const RELEASE_CHECKSUMS_FILENAME: &str = "orbit-checksums.txt";
+const RELEASE_CHECKSUMS_SIGNATURE_FILENAME: &str = "orbit-checksums.txt.sig";
+// Matches the release checksum signing key shipped by install.sh / npm installers.
+const RELEASE_CHECKSUM_PUBLIC_KEY_PEM: &str = r#"-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAuZ8vNa+DusYhrFBXNhBh
+RSqn81AYe7tYEtCKImWGuy/6ziMHqDzDKHSku0sBMwcdLXBzI0RjNBacLCbbYr4H
+icmYrsKqqfLGf+CWfrqDqY9d3hwUPtVMRp/ynVNW6nwKAmNl5dTgUc6ZBAZTtQtt
+qwMD1JIOsrJ3vVDL9o3alcXcg/RyL0pGUo+vep2QZOjXnCGoJN3NeytQHag3zJyd
+Wq4psc7j2H1Nb5EoyY/I/7vpdwME3Mrv2ffwtDmr0/+73q1yWUDf4btY9Ba7sOhE
+Ir2UHm3bEboo1ErAYjjiDDuF/NjzZcZpJtuNbdj0vI7pHDyDZ7sKiEX7RkUO+e2c
+IouiSfRJRrwnjpuergrq3ehNjkxcn5dFST1l23FOXGsy4F7ilrF6P9cgaAsE8dc7
+CS9YgUE1ErfGJLZtfDDGKs6+E+7JiC1C3z7xwmfzOgv9gEvSlfrx2BbGl8esypKm
+pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
+-----END PUBLIC KEY-----"#;
 
 #[derive(Debug, Clone)]
 pub struct SemanticInstallParams {
@@ -117,8 +134,9 @@ pub(crate) struct CompanionDownloadSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompanionIntegrity {
-    ReleaseChecksum {
+    ReleaseSignedChecksum {
         checksums_url: String,
+        signature_url: String,
         asset_name: String,
     },
     Sha256(String),
@@ -135,6 +153,11 @@ pub(crate) fn resolve_download_source() -> Result<CompanionDownloadSource, Orbit
             });
         }
         if unsafe_companion_overrides_enabled() {
+            tracing::warn!(
+                env_var = UNSAFE_COMPANION_OVERRIDE_ENV,
+                url = %url,
+                "unsafe companion download bypasses checksum verification"
+            );
             return Ok(CompanionDownloadSource {
                 url,
                 integrity: CompanionIntegrity::UnsafeDeveloperOverride,
@@ -150,24 +173,38 @@ pub(crate) fn resolve_download_source() -> Result<CompanionDownloadSource, Orbit
     validate_download_url(&url)?;
     Ok(CompanionDownloadSource {
         url,
-        integrity: CompanionIntegrity::ReleaseChecksum {
-            checksums_url: format!(
-                "{}/{}",
-                DEFAULT_RELEASE_BASE_URL.trim_end_matches('/'),
-                RELEASE_CHECKSUMS_FILENAME
-            ),
+        integrity: CompanionIntegrity::ReleaseSignedChecksum {
+            checksums_url: release_metadata_url(RELEASE_CHECKSUMS_FILENAME),
+            signature_url: release_metadata_url(RELEASE_CHECKSUMS_SIGNATURE_FILENAME),
             asset_name,
         },
     })
 }
 
+fn release_metadata_url(filename: &str) -> String {
+    format!(
+        "{}/{}",
+        DEFAULT_RELEASE_BASE_URL.trim_end_matches('/'),
+        filename
+    )
+}
+
 fn validate_download_url(url: &str) -> Result<(), OrbitError> {
     let parsed = Url::parse(url)
         .map_err(|error| OrbitError::InvalidInput(format!("invalid companion URL: {error}")))?;
-    if parsed.scheme() != "https" && !unsafe_companion_overrides_enabled() {
-        return Err(OrbitError::InvalidInput(format!(
-            "companion downloads must use https; set {UNSAFE_COMPANION_OVERRIDE_ENV}=1 only for developer-only testing"
-        )));
+    if parsed.scheme() != "https" {
+        if unsafe_companion_overrides_enabled() {
+            tracing::warn!(
+                env_var = UNSAFE_COMPANION_OVERRIDE_ENV,
+                url,
+                scheme = parsed.scheme(),
+                "unsafe companion download bypasses HTTPS enforcement"
+            );
+        } else {
+            return Err(OrbitError::InvalidInput(format!(
+                "companion downloads must use https; set {UNSAFE_COMPANION_OVERRIDE_ENV}=1 only for developer-only testing"
+            )));
+        }
     }
     Ok(())
 }
@@ -184,8 +221,8 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, OrbitError> {
         .to_vec())
 }
 
-fn download_text(url: &str) -> Result<String, OrbitError> {
-    reqwest::blocking::get(url)
+fn download_checksum_manifest(url: &str) -> Result<Vec<u8>, OrbitError> {
+    Ok(reqwest::blocking::get(url)
         .map_err(|error| {
             OrbitError::Execution(format!(
                 "failed to download companion checksum manifest: {error}"
@@ -197,12 +234,35 @@ fn download_text(url: &str) -> Result<String, OrbitError> {
                 "failed to download companion checksum manifest: {error}"
             ))
         })?
-        .text()
+        .bytes()
         .map_err(|error| {
             OrbitError::Execution(format!(
                 "failed to read companion checksum manifest: {error}"
             ))
-        })
+        })?
+        .to_vec())
+}
+
+fn download_checksum_signature(url: &str) -> Result<Vec<u8>, OrbitError> {
+    Ok(reqwest::blocking::get(url)
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "failed to download companion checksum signature: {error}"
+            ))
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "failed to download companion checksum signature: {error}"
+            ))
+        })?
+        .bytes()
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "failed to read companion checksum signature: {error}"
+            ))
+        })?
+        .to_vec())
 }
 
 fn verify_download_integrity(
@@ -211,18 +271,53 @@ fn verify_download_integrity(
 ) -> Result<String, OrbitError> {
     let checksum = sha256_hex(bytes);
     match integrity {
-        CompanionIntegrity::ReleaseChecksum {
+        CompanionIntegrity::ReleaseSignedChecksum {
             checksums_url,
+            signature_url,
             asset_name,
         } => {
-            let manifest = download_text(checksums_url)?;
-            let expected = checksum_from_manifest(&manifest, asset_name)?;
+            let manifest = download_checksum_manifest(checksums_url)?;
+            let signature = download_checksum_signature(signature_url)?;
+            verify_release_checksum_signature(&manifest, &signature)?;
+            let manifest = std::str::from_utf8(&manifest).map_err(|error| {
+                OrbitError::Execution(format!("companion checksum manifest is not UTF-8: {error}"))
+            })?;
+            let expected = checksum_from_manifest(manifest, asset_name)?;
             verify_sha256_digest(&checksum, &expected)?;
         }
         CompanionIntegrity::Sha256(expected) => verify_sha256_digest(&checksum, expected)?,
         CompanionIntegrity::UnsafeDeveloperOverride => {}
     }
     Ok(checksum)
+}
+
+fn verify_release_checksum_signature(manifest: &[u8], signature: &[u8]) -> Result<(), OrbitError> {
+    verify_release_checksum_signature_with_key(manifest, signature, RELEASE_CHECKSUM_PUBLIC_KEY_PEM)
+}
+
+pub(crate) fn verify_release_checksum_signature_with_key(
+    manifest: &[u8],
+    signature: &[u8],
+    public_key_pem: &str,
+) -> Result<(), OrbitError> {
+    let public_key = RsaPublicKey::from_public_key_pem(public_key_pem).map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to load trusted companion checksum signing key: {error}"
+        ))
+    })?;
+    let signature = RsaSignature::try_from(signature).map_err(|error| {
+        OrbitError::Execution(format!(
+            "release checksum signature verification failed for {RELEASE_CHECKSUMS_FILENAME}: {error}"
+        ))
+    })?;
+    let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+    verifying_key
+        .verify(manifest, &signature)
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "release checksum signature verification failed for {RELEASE_CHECKSUMS_FILENAME}: {error}"
+            ))
+        })
 }
 
 pub(crate) fn checksum_from_manifest(
@@ -309,8 +404,15 @@ fn companion_needs_install(path: &Path) -> bool {
     if !path.exists() || validate_managed_companion_path(path).is_err() {
         return true;
     }
-    // L-0036: Avoid native version probes until the sidecar checksum proves local integrity.
+    // L-0036: Avoid native version probes; the sidecar lets us decide "install needed"
+    // without executing an untrusted binary, but is not a tamper-detection mechanism.
     !installed_companion_integrity_matches(path).unwrap_or(false)
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CompanionIntegrityManifest {
+    version: String,
+    sha256: String,
 }
 
 fn installed_companion_integrity_matches(path: &Path) -> Result<bool, OrbitError> {
@@ -322,14 +424,16 @@ fn installed_companion_integrity_matches(path: &Path) -> Result<bool, OrbitError
     })?;
     let manifest =
         fs::read_to_string(manifest_path).map_err(|error| OrbitError::Io(error.to_string()))?;
+    let manifest: CompanionIntegrityManifest =
+        serde_json::from_str(&manifest).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "companion integrity manifest is not valid JSON: {error}"
+            ))
+        })?;
     let bytes = fs::read(path).map_err(|error| OrbitError::Io(error.to_string()))?;
     let checksum = sha256_hex(&bytes);
-    let expected_version = format!("version={}", env!("CARGO_PKG_VERSION"));
-    let expected_checksum = format!("sha256={checksum}");
-    Ok(manifest.lines().any(|line| line.trim() == expected_version)
-        && manifest
-            .lines()
-            .any(|line| line.trim() == expected_checksum))
+    Ok(manifest.version == env!("CARGO_PKG_VERSION")
+        && normalize_sha256(&manifest.sha256)? == checksum)
 }
 
 pub(crate) fn write_companion_integrity(path: &Path, checksum: &str) -> Result<(), OrbitError> {
@@ -339,7 +443,16 @@ pub(crate) fn write_companion_integrity(path: &Path, checksum: &str) -> Result<(
             path.display()
         ))
     })?;
-    let content = format!("version={}\nsha256={checksum}\n", env!("CARGO_PKG_VERSION"));
+    let content = serde_json::to_string_pretty(&CompanionIntegrityManifest {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        sha256: checksum.to_string(),
+    })
+    .map(|json| format!("{json}\n"))
+    .map_err(|error| {
+        OrbitError::Execution(format!(
+            "failed to serialize companion integrity manifest: {error}"
+        ))
+    })?;
     fs::write(manifest_path, content).map_err(|error| OrbitError::Io(error.to_string()))
 }
 
