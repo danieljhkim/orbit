@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- **Agent MCP surface trimmed**: six admin/destructive tools moved off the agent-facing MCP surface — `orbit.task.delete`, `orbit.task.lint`, `orbit.semantic.uninstall`, `orbit.adr.list`, `orbit.learning.prune`, `orbit.learning.comment.delete`. They remain registered (`register_inactive`) and reachable via the CLI (`orbit task delete`, `orbit adr list`, etc.) and `runtime.run_tool`; `tools/list` over MCP no longer advertises them and `orbit mcp serve` rejects calls to them. Agents that need ADR enumeration use `orbit.search --kind adr`. A new `orbit adr list` CLI subcommand routes through the tool to preserve filter parity (`--include-remote`, `--status`, `--owner`, etc.). `EXPECTED_INACTIVE_TOOL_NAMES` length canary in `crates/orbit-cli/src/command/mcp/tests/mod.rs` bumps 15 → 21. ([ORB-00289])
 - **Semantic companion lookup no longer searches `$PATH`**: normal runtime lookup uses the managed `~/.orbit/embed/bin/` install only. Dev/CI overrides must set `ORBIT_SEARCH_COMPANION=<absolute path>` plus `ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE=1`; managed downloads now require a release-signed checksum manifest before replacement or execution. ([ORB-00265])
 - **Learning envelope-rebuild verb renamed**: `orbit learning reindex` / `orbit.learning.reindex` is removed. Use `orbit learning sync` / `orbit.learning.sync` to reconcile the SQLite envelope index from the YAML source of truth. The verb-hygiene split mirrors ORB-00206: `orbit semantic index --kind learnings` continues to (re)build vector embeddings for the learning corpus, while `orbit learning sync` reconciles the structural index. No alias; clap's "did you mean" suggests the new name. The internal Rust API `OrbitRuntime::reindex_learnings()` and the underlying store-trait surface rename to `sync_learnings()`. ([ORB-00244])
 - **Docs indexing verb renamed**: `orbit docs reindex` / `orbit.docs.reindex` is removed. Use `orbit docs index [--json] [--force] [--model <alias>]` / `orbit.docs.index` to build doc-corpus embeddings. ([ORB-00206])
@@ -25,6 +26,11 @@
 - **Secret redaction at the artifact write boundary**: tool-host sanitizer covers ADR / learning / task / review-thread / friction writes; whole-token credentials reject via `OrbitError::SensitiveInput`; responses gain `redactions_applied: bool`. ([ORB-00138])
 - **`orbit-guide` first-time-setup skill** with explicit carve-out from the `orbit` router. ([ORB-00126])
 - **Dashboard Audit / Diagnostics side panels** and reworked scoreboard with section grouping, 4×4 head-to-head matrix, and inline-bar leaderboard. ([ORB-00142], [ORB-00144], [ORB-00154])
+
+### Fixes
+
+- **Claude MCP permission names match the server id**: `orbit mcp init --claude` and `orbit workspace init --mcp` now write `mcp__orbit__<tool>` entries to `.claude/settings.json` (derived from the Orbit MCP server id) rather than the stale plugin-style `mcp__plugin_orbit_orbit__<tool>`. `orbit mcp remove --claude` strips both the current and legacy entry shapes so workspaces seeded by an older build clean up on the next remove pass. ([ORB-00286])
+- **`orbit adr list` CLI subcommand**: new direct CLI verb that routes through the (now CLI-only) `orbit.adr.list` tool, preserving the existing filter parity (`--status`, `--owner`, `--feature`, `--task-id`, `--legacy-id`, `--tag`, `--path`, `--validation-warned`, `--include-remote`). Companion to the ORB-00289 surface trim. ([ORB-00289])
 
 ## 0.6.0
 
