@@ -1,6 +1,10 @@
 #![allow(missing_docs)]
 
+mod argv;
+mod envelope;
+mod orchestrator;
 #[cfg(target_os = "macos")]
-mod orchestrator_macos_tests;
-mod orchestrator_tests;
+mod orchestrator_macos;
+mod spawn;
+mod supervisor;
 pub(in crate::activity_job::cli_runner) mod test_support;

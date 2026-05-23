@@ -1,17 +1,22 @@
 use chrono::{DateTime, Utc};
 use orbit_common::types::{
     Adr, AdrStatus, ArtifactManifestFileV2, AuditEvent, Crew, ExecutorDef, ExternalRef, JobRun,
-    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningScope,
-    LearningVoteSummary, LegacyValidation, OrbitError, OrbitId, PipelineState, PolicyDef,
-    ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity, TaskHistoryEntry,
-    TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags, task_matches_tags,
+    JobRunState, KnowledgeRunMetrics, Learning, LearningEvidence, LearningInjectionState,
+    LearningScope, LearningVoteSummary, LegacyValidation, OrbitError, OrbitId, PipelineState,
+    PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
+    TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType, normalize_task_tags,
+    task_matches_tags,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
 
 use crate::sqlite::audit_event_store::{
-    AuditEventFilter, AuditEventInsertParams, AuditToolCallCountsByRole,
-    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
+    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+};
+use crate::sqlite::v2_audit_store::{
+    V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow,
 };
 
 #[derive(Debug, Clone)]
@@ -20,7 +25,43 @@ pub struct AdrCreateParams {
     pub owner: String,
     pub related_features: Vec<String>,
     pub related_tasks: Vec<String>,
+    pub tags: Vec<String>,
+    pub paths: Vec<String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteArtifactStub {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub worktree_root: PathBuf,
+    pub branch: Option<String>,
+    pub body_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdrListEntry {
+    Local(Adr),
+    Remote(RemoteArtifactStub),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdrListFilter<'a> {
+    pub status: Option<AdrStatus>,
+    pub owner: Option<&'a str>,
+    pub feature: Option<&'a str>,
+    pub task_id: Option<&'a str>,
+    pub legacy_id: Option<&'a str>,
+    pub tag: Option<&'a str>,
+    pub path: Option<&'a str>,
+    pub validation_warned: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LearningListEntry {
+    Local(Learning),
+    Remote(RemoteArtifactStub),
 }
 
 /// Parameters for a partial update to an existing ADR document.
@@ -35,6 +76,8 @@ pub struct AdrDocumentUpdateParams {
     pub body: Option<String>,
     pub related_features: Option<Vec<String>>,
     pub related_tasks: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+    pub paths: Option<Vec<String>>,
     pub supersedes: Option<Vec<String>>,
     pub superseded_by: Option<Option<String>>,
     pub legacy_ids: Option<Vec<String>>,
@@ -336,16 +379,15 @@ pub trait TaskStoreBackend: Send + Sync {
 pub trait AdrStoreBackend: Send + Sync {
     fn add_adr(&self, params: AdrCreateParams) -> Result<Adr, OrbitError>;
     fn get_adr(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
+    fn get_adr_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError>;
     fn list_adrs(&self) -> Result<Vec<Adr>, OrbitError>;
-    fn list_adrs_filtered(
+    fn list_adrs_filtered(&self, filter: AdrListFilter<'_>) -> Result<Vec<Adr>, OrbitError>;
+    fn list_adr_entries_filtered(
         &self,
-        status: Option<AdrStatus>,
-        owner: Option<&str>,
-        feature: Option<&str>,
-        task_id: Option<&str>,
-        legacy_id: Option<&str>,
-        validation_warned: Option<bool>,
-    ) -> Result<Vec<Adr>, OrbitError>;
+        filter: AdrListFilter<'_>,
+        include_remote: bool,
+    ) -> Result<Vec<AdrListEntry>, OrbitError>;
+    fn get_adr_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
     fn update_adr_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError>;
     fn update_adr_document(
         &self,
@@ -552,6 +594,10 @@ pub trait AuditEventStoreBackend: Send + Sync {
         since: Option<&DateTime<Utc>>,
         tool: Option<&str>,
     ) -> Result<Vec<i64>, OrbitError>;
+    fn get_audit_event_durations_null_tool(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<i64>, OrbitError>;
     fn get_audit_event_hourly_buckets(
         &self,
         since: &DateTime<Utc>,
@@ -573,7 +619,44 @@ pub trait AuditEventStoreBackend: Send + Sync {
         since: Option<&DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<AuditTopToolCall>, OrbitError>;
+    fn get_audit_event_aggregates_by_tool(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditToolAggregate>, OrbitError>;
+    fn get_audit_event_aggregates_by_role(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditRoleAggregate>, OrbitError>;
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError>;
+}
+
+pub trait V2AuditEnvelopeStoreBackend: Send + Sync {
+    fn insert_v2_audit_event(&self, params: &V2AuditEventInsertParams) -> Result<(), OrbitError>;
+    fn list_v2_audit_events(
+        &self,
+        filter: &V2AuditEventFilter,
+    ) -> Result<Vec<V2AuditEventRow>, OrbitError>;
+    fn count_v2_audit_events(&self, filter: &V2AuditEventFilter) -> Result<i64, OrbitError>;
+    fn prune_v2_audit_events_older_than(
+        &self,
+        workspace_id: &str,
+        ts: &DateTime<Utc>,
+    ) -> Result<usize, OrbitError>;
+}
+
+pub trait SessionLearningStateStoreBackend: Send + Sync {
+    fn upsert_session_learning_state(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError>;
+
+    fn get_session_learning_state(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError>;
 }
 
 pub trait ExecutorDefStoreBackend: Send + Sync {
@@ -660,10 +743,17 @@ pub struct LearningCommentDeleteParams {
 pub trait LearningStoreBackend: Send + Sync {
     fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError>;
     fn get_learning(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
+    fn get_learning_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError>;
     fn list_learnings(
         &self,
         status: Option<orbit_common::types::LearningStatus>,
     ) -> Result<Vec<Learning>, OrbitError>;
+    fn list_learning_entries(
+        &self,
+        status: Option<orbit_common::types::LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError>;
+    fn get_learning_remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError>;
     fn search_learnings(
         &self,
         params: LearningSearchParams,
@@ -697,5 +787,5 @@ pub trait LearningStoreBackend: Send + Sync {
     /// exist. Used by `prune --delete` (§7.3).
     fn archive_learning(&self, id: &str) -> Result<bool, OrbitError>;
     fn delete_learning(&self, id: &str) -> Result<bool, OrbitError>;
-    fn reindex_learnings(&self) -> Result<(), OrbitError>;
+    fn sync_learnings(&self) -> Result<(), OrbitError>;
 }

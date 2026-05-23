@@ -1,6 +1,6 @@
 <!--
 Thanks for sending a pull request. Fill in the sections below so reviewers can
-verify scope, run the same validation locally, and confirm no docs decay.
+verify scope, run the same validation locally, and confirm docs were updated when needed.
 -->
 
 ## Linked Orbit task(s)
@@ -38,7 +38,6 @@ docs in the SAME PR: flip ADR statuses, bump `**Last updated:**`, add new ADRs
 for non-obvious decisions.
 -->
 
-- [ ] `make check-design-docs` passes (no design-doc decay introduced)
 - [ ] N/A — this PR does not touch any code referenced by `docs/design/*`
 
 ## Notes for reviewers

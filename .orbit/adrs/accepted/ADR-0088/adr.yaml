@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0088
 title: SQLite sidecar for secondary graph indexes
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260509-70
 - T20260509-72
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-034

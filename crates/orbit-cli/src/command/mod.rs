@@ -1,19 +1,26 @@
+pub mod activity;
 pub mod adr;
-pub mod definitions;
-pub mod design;
-pub mod environment;
+pub mod audit;
+pub mod config;
+pub mod docs;
+pub mod executor;
+pub mod friction;
+pub mod graph;
+pub mod hook;
+pub mod init;
+pub mod job;
 pub mod learning;
 pub mod log;
 pub mod mcp;
-pub mod observe;
+pub mod policy;
 pub mod run;
+pub mod search;
 pub mod semantic;
+pub mod skill;
 pub mod task;
+pub mod tool;
 pub mod web;
-
-pub use definitions::{activity, executor, job, policy, skill, tool};
-pub use environment::{config, init, workspace};
-pub use observe::{audit, graph, metrics, scoreboard};
+pub mod workspace;
 
 use std::path::PathBuf;
 
@@ -44,21 +51,21 @@ Environment:
   init        Initialize the global Orbit root (~/.orbit)
   workspace   Manage workspaces
   config      Show or update Orbit configuration
+  semantic    Manage local orbit-search indexing
 
 Operate:
   run         Run a workflow (ship, duel-plan, job)
   task        Create, update, and manage tasks
-  adr         Architecture Decision Record operations
-  design      Design doc operations
+  docs        Search and manage the indexed docs corpus
+  adr         List and inspect Architecture Decision Records
+  friction    Report, list, and triage friction records
   learning    Create, search, and curate project learnings
-  semantic    Manage local semantic-search indexing
 
 Observe:
   graph       Query the knowledge graph
+  search      Search tasks, docs, learnings, and ADRs
   audit       Query the audit event log
   log         Tail the unified Orbit log feed
-  metrics     Show metrics
-  scoreboard  Show scoreboards (duel-plan, PR, task review)
 
 Definitions:
   activity    View activity definitions
@@ -69,6 +76,7 @@ Definitions:
 
 Services:
   mcp         Register MCP client integrations and run the MCP server
+  hook        Run Orbit-owned editor hooks
   web         Run the Orbit dashboard
 
 Options:
@@ -89,21 +97,21 @@ pub enum Commands {
     Init(init::InitCommand),
     Workspace(workspace::WorkspaceCommand),
     Config(config::ConfigCommand),
+    Semantic(semantic::SemanticCommand),
 
     // ── Operate ──
     Run(run::RunCommand),
     Task(Box<task::TaskCommand>),
+    Search(search::SearchCommand),
+    Docs(docs::DocsCommand),
     Adr(adr::AdrCommand),
-    Design(design::DesignCommand),
+    Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
-    Semantic(semantic::SemanticCommand),
 
     // ── Observe ──
     Graph(graph::GraphCommand),
     Audit(audit::AuditCommand),
     Log(log::LogCommand),
-    Metrics(metrics::MetricsCommand),
-    Scoreboard(scoreboard::ScoreboardCommand),
 
     // ── Definitions ──
     Activity(activity::ActivityCommand),
@@ -114,6 +122,7 @@ pub enum Commands {
 
     // ── Services ──
     Mcp(mcp::McpCommand),
+    Hook(hook::HookCommand),
     Web(web::WebCommand),
 
     // ── hidden compatibility commands ──
@@ -131,23 +140,24 @@ impl Execute for Commands {
             Commands::Init(cmd) => cmd.execute(runtime),
             Commands::Workspace(cmd) => cmd.execute(runtime),
             Commands::Config(cmd) => cmd.execute(runtime),
+            Commands::Semantic(cmd) => cmd.execute(runtime),
             Commands::Run(cmd) => cmd.execute(runtime),
             Commands::Task(cmd) => (*cmd).execute(runtime),
+            Commands::Search(cmd) => cmd.execute(runtime),
+            Commands::Docs(cmd) => cmd.execute(runtime),
             Commands::Adr(cmd) => cmd.execute(runtime),
-            Commands::Design(cmd) => cmd.execute(runtime),
+            Commands::Friction(cmd) => cmd.execute(runtime),
             Commands::Learning(cmd) => cmd.execute(runtime),
-            Commands::Semantic(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),
             Commands::Audit(cmd) => cmd.execute(runtime),
             Commands::Log(cmd) => cmd.execute(runtime),
-            Commands::Metrics(cmd) => cmd.execute(runtime),
-            Commands::Scoreboard(cmd) => cmd.execute(runtime),
             Commands::Activity(cmd) => cmd.execute(runtime),
             Commands::Job(cmd) => cmd.execute(runtime),
             Commands::Tool(cmd) => cmd.execute(runtime),
             Commands::Policy(cmd) => cmd.execute(runtime),
             Commands::Executor(cmd) => cmd.execute(runtime),
             Commands::Mcp(cmd) => cmd.execute(runtime),
+            Commands::Hook(cmd) => cmd.execute(runtime),
             Commands::Web(cmd) => cmd.execute(runtime),
             Commands::Skill(cmd) => cmd.execute(runtime),
             Commands::Logs(cmd) => cmd.execute(runtime),
@@ -157,117 +167,4 @@ impl Execute for Commands {
 }
 
 #[cfg(test)]
-mod tests {
-    use clap::Parser;
-
-    use super::{
-        Cli, Commands, design::DesignSubcommand, mcp::McpSubcommand, semantic::SemanticSubcommand,
-        web::WebSubcommand,
-    };
-
-    #[test]
-    fn cli_parses_mcp_init() {
-        let cli = Cli::parse_from(["orbit", "mcp", "init"]);
-        match cli.command {
-            Commands::Mcp(command) => match command.command {
-                McpSubcommand::Init(_) => {}
-                _ => panic!("expected mcp init"),
-            },
-            _ => panic!("expected top-level mcp command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_mcp_serve() {
-        let cli = Cli::parse_from(["orbit", "mcp", "serve"]);
-        match cli.command {
-            Commands::Mcp(command) => match command.command {
-                McpSubcommand::Serve(_) => {}
-                _ => panic!("expected mcp serve"),
-            },
-            _ => panic!("expected top-level mcp command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_web_serve() {
-        let cli = Cli::parse_from(["orbit", "web", "serve"]);
-        match cli.command {
-            Commands::Web(command) => match command.command {
-                WebSubcommand::Serve(_) => {}
-            },
-            _ => panic!("expected top-level web command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_semantic_install_force() {
-        let cli = Cli::parse_from(["orbit", "semantic", "install", "--force"]);
-        match cli.command {
-            Commands::Semantic(command) => match command.command {
-                SemanticSubcommand::Install(args) => assert!(args.force),
-                _ => panic!("expected semantic install"),
-            },
-            _ => panic!("expected top-level semantic command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_semantic_stats() {
-        let cli = Cli::parse_from(["orbit", "semantic", "stats"]);
-        match cli.command {
-            Commands::Semantic(command) => match command.command {
-                SemanticSubcommand::Stats(_) => {}
-                _ => panic!("expected semantic stats"),
-            },
-            _ => panic!("expected top-level semantic command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_semantic_search() {
-        let cli = Cli::parse_from(["orbit", "semantic", "search", "semantic search design"]);
-        match cli.command {
-            Commands::Semantic(command) => match command.command {
-                SemanticSubcommand::Search(args) => {
-                    assert_eq!(args.query, "semantic search design")
-                }
-                _ => panic!("expected semantic search"),
-            },
-            _ => panic!("expected top-level semantic command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_semantic_related() {
-        let cli = Cli::parse_from(["orbit", "semantic", "related", "T20260510-3"]);
-        match cli.command {
-            Commands::Semantic(command) => match command.command {
-                SemanticSubcommand::Related(args) => assert_eq!(args.task_id, "T20260510-3"),
-                _ => panic!("expected semantic related"),
-            },
-            _ => panic!("expected top-level semantic command"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_design_check() {
-        let cli = Cli::parse_from(["orbit", "design", "check", "--warn-only"]);
-        match cli.command {
-            Commands::Design(command) => match command.command {
-                DesignSubcommand::Check(args) => assert!(args.warn_only),
-            },
-            _ => panic!("expected top-level design command"),
-        }
-    }
-
-    #[test]
-    fn cli_rejects_top_level_serve() {
-        assert!(Cli::try_parse_from(["orbit", "serve"]).is_err());
-    }
-
-    #[test]
-    fn cli_rejects_down_alias() {
-        assert!(Cli::try_parse_from(["orbit", "mcp", "down"]).is_err());
-    }
-}
+mod tests;

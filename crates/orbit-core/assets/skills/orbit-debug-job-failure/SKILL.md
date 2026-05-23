@@ -128,6 +128,8 @@ Classify the failure before suggesting a fix:
 - **Recovery failure:** the original step failed and `step_failure_recovery` also failed. Report both, but keep the original step as primary unless recovery caused additional damage.
 - **Parent orchestration failure:** a child run failed and a gate/auto/epic parent is still running or waiting. Identify both run ids.
 
+For recurring signatures and known remedies, read [common failures](references/common_failures.md) after the initial classification. Keep `SKILL.md` focused on the investigation flow; add detailed new patterns to that reference.
+
 ## Check Task State
 
 When a run has task ids, inspect the relevant tasks through Orbit tools:

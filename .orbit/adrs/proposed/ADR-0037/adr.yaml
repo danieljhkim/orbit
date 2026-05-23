@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0037
 title: Friction scorekeeping derives from lifecycle history
 status: proposed
@@ -9,6 +9,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260510-13
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-012

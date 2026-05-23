@@ -17,26 +17,13 @@ You receive a precise edit specification from the parent (which files, which sym
 - `Edit` — exact-string replacement inside an existing file.
 - `Write` — full file write (creates or overwrites). Use sparingly; prefer `Edit`.
 
-**Orbit symbol-level edits (via `Bash` → `orbit tool run`):**
-Prefer Orbit's graph-aware edit tools over raw `Edit`/`Write` when changing named symbols — they keep the working graph in sync without a re-parse.
-
-| Purpose | Command |
-|---|---|
-| Add a new symbol to a file (rejects if exists) | `orbit tool run orbit.graph.add --input '{"selector": "<target>", "body": "..."}'` |
-| Edit a symbol body or rewrite a file/region | `orbit tool run orbit.graph.write --input '{"selector": "<sym>", "body": "..."}'` |
-| Move a symbol between files | `orbit tool run orbit.graph.move --input '{"selector": "<sym>", "to": "<path>"}'` |
-| Delete a symbol | `orbit tool run orbit.graph.delete --input '{"selector": "<sym>"}'` |
-
-**Orbit filesystem tools (via `Bash` → `orbit tool run`):**
-- `orbit tool run fs.patch` — first-occurrence string replace (similar to `Edit` but through Orbit's audit path).
-- `orbit tool run fs.write` — full file write.
-- `orbit tool run fs.move`, `fs.copy`, `fs.mkdir`, `fs.delete` — directory operations.
+The knowledge graph is read-only from this agent's perspective — use `Read`/`Grep`/`Glob` (or codegraph/orbit graph *query* tools if available) to orient, but apply all changes through native `Edit`/`Write`. The graph re-syncs on its own indexing pass; do not attempt to mutate it directly.
 
 ## When to use which
 
-- Changing a function body, adding a method, moving a type across files → **Orbit graph tools** (keeps the knowledge graph coherent).
-- Editing comments, docs, YAML/TOML, or non-indexed files → **native `Edit` / `Write`**.
-- Large-scale rewrites of the same file → **`Write`** (one call, one atomic replace).
+- Targeted change inside an existing file → **`Edit`** (exact-string replace).
+- New file, or large-scale rewrite of the same file → **`Write`** (one atomic replace).
+- Read-only orientation before editing → **`Read` / `Grep` / `Glob`**.
 
 ## Constraints
 

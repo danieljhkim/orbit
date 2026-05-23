@@ -1,21 +1,23 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use orbit_embed::{EmbedWorker, VectorStore};
 use orbit_policy::PolicyEngine;
+use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::sqlite::task_registry::{
     BindWorkspaceParams, TaskRegistryStore, WorkspaceConfig, read_workspace_config_optional,
-    task_registry_path, write_workspace_config,
+    task_registry_path, workspace_id_for_orbit_dir, write_workspace_config,
 };
 use orbit_store::{
-    Store, audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
+    AuditEventInsertParams, IdAllocator, IdAllocatorConfig, LearningIdMigrationReport, Store,
+    audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
     layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
     workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
 
-use orbit_common::types::{DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths};
+use orbit_common::types::{
+    AuditEventStatus, DEFAULT_POLICY_NAME, OrbitError, WorkspacePaths, audit_execution_id,
+};
 use orbit_tools::ToolRegistry;
 use orbit_tools::external::ExternalTool;
 
@@ -29,17 +31,13 @@ use crate::context::{
 use crate::skill_catalog::SkillCatalog;
 use crate::workspace_registry;
 
-/// Legacy single-root builder. Treats data_root as both global and workspace root.
-pub(crate) fn build_context_from_data_root(data_root: &Path) -> Result<OrbitContext, OrbitError> {
-    build_context_from_roots(data_root, data_root)
-}
-
-/// Two-root builder. Global root provides activities, jobs, executors, policies,
-/// config, global skills, and SQLite. Workspace root provides tasks,
-/// optional skill overrides, and runtime state.
+/// Runtime builder. Global root provides activities, jobs, executors, policies,
+/// config, global skills, and SQLite. Shared root provides existing workspace
+/// state. Local root is carried for per-worktree artifact phases.
 pub(crate) fn build_context_from_roots(
     global_root: &Path,
     workspace_root: &Path,
+    local_root: &Path,
 ) -> Result<OrbitContext, OrbitError> {
     let runtime_config = RuntimeConfig::load_layered(global_root, workspace_root)?;
     let persistence = &runtime_config.persistence;
@@ -54,19 +52,43 @@ pub(crate) fn build_context_from_roots(
             .unwrap_or(workspace_root)
             .to_path_buf()
     });
-    let paths = WorkspacePaths::new(
+    let paths = WorkspacePaths::new_with_local(
         repo_root,
         workspace_root.to_path_buf(),
+        local_root.to_path_buf(),
         global_root.to_path_buf(),
     );
 
     let task_backends = build_v2_task_backends(global_root, &paths)?;
-    let adr_store = workspace_adr_backends(persistence.adr_dir.clone(), store.clone());
+    let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
+    let import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
+    if import_report.skipped_records() {
+        tracing::warn!(
+            workspace_id = %workspace_id,
+            audit_events_skipped = import_report.audit_events_skipped,
+            "skipped malformed legacy state records during SQLite import",
+        );
+    }
+    let id_allocator = IdAllocator::open(IdAllocatorConfig::new(
+        persistence.semantic_db.clone(),
+        paths.state_dir.join(".id_alloc.lock"),
+        paths.orbit_dir.clone(),
+        worktree_root_from_local_root(local_root),
+        persistence.adr_dir.clone(),
+        persistence.learning_dir.clone(),
+    ))?;
+    let learning_id_migration = id_allocator.migrate_learning_ids()?;
+    if !learning_id_migration.is_empty() {
+        record_learning_id_migration_audit(&store, &paths, &learning_id_migration)?;
+    }
+    let local_adr_dir = paths.local_dir.join("adrs");
+    let local_learning_dir = paths.local_dir.join("learnings");
+    let adr_store = workspace_adr_backends(local_adr_dir, store.clone(), id_allocator.clone());
     let learning_store =
-        workspace_learning_backend(persistence.learning_dir.clone(), store.clone())?;
+        workspace_learning_backend(local_learning_dir, store.clone(), id_allocator)?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
-    let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());
+    let job_run_store = workspace_job_run_store(store.clone(), workspace_id);
 
     // Executors and policies are global-only. Jobs always persist run state
     // under the workspace state directory.
@@ -165,6 +187,55 @@ fn registered_repo_root(global_root: &Path, workspace_root: &Path) -> Option<Pat
     })
 }
 
+fn worktree_root_from_local_root(local_root: &Path) -> PathBuf {
+    local_root
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| local_root.to_path_buf())
+}
+
+fn record_learning_id_migration_audit(
+    store: &Store,
+    paths: &WorkspacePaths,
+    report: &LearningIdMigrationReport,
+) -> Result<(), OrbitError> {
+    let payload = serde_json::json!({
+        "kind": "LearningIdFormatMigration",
+        "rename_map": report.rename_map(),
+        "worktree_root": worktree_root_from_local_root(&paths.local_dir).to_string_lossy(),
+    });
+    let arguments_json = serde_json::to_string(&payload)
+        .map_err(|error| OrbitError::Execution(format!("serialize migration audit: {error}")))?;
+    store.insert_audit_event_record(&AuditEventInsertParams {
+        execution_id: audit_execution_id("audit-learning-id-migration"),
+        command: "learning".to_string(),
+        subcommand: Some("id-format-migration".to_string()),
+        tool_name: Some("orbit.learning.id_migration".to_string()),
+        target_type: Some("LearningIdFormatMigration".to_string()),
+        target_id: None,
+        role: "admin".to_string(),
+        status: AuditEventStatus::Success,
+        exit_code: 0,
+        duration_ms: 0,
+        working_directory: paths.repo_root.to_string_lossy().into_owned(),
+        arguments_json: Some(arguments_json),
+        stdout_truncated: None,
+        stderr_truncated: None,
+        error_message: None,
+        host: std::env::var("HOSTNAME").ok(),
+        pid: std::process::id(),
+        session_id: None,
+        task_id: None,
+        job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
+        activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        step_index: std::env::var("ORBIT_STEP_INDEX")
+            .ok()
+            .and_then(|s| s.parse().ok()),
+    })
+}
+
 fn build_v2_task_backends(
     global_root: &Path,
     paths: &WorkspacePaths,
@@ -232,27 +303,16 @@ fn workspace_slug(repo_root: &Path) -> String {
         .to_string()
 }
 
-pub(super) struct TempDir(PathBuf);
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-static IN_MEMORY_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub(super) type TempDir = tempfile::TempDir;
 
 pub(super) fn build_context_in_memory() -> Result<(OrbitContext, TempDir), OrbitError> {
-    let n = IN_MEMORY_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let data_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("tmp")
-        .join(format!("in-memory-{n}"));
-    std::fs::create_dir_all(&data_root).map_err(|e| OrbitError::Io(e.to_string()))?;
-    let guard = TempDir(data_root.clone());
+    let guard = tempfile::Builder::new()
+        .prefix("orbit-in-memory-")
+        .tempdir()
+        .map_err(|e| OrbitError::Io(e.to_string()))?;
+    let data_root = guard.path().to_path_buf();
 
-    let context = build_context_from_roots(&data_root, &data_root)?;
+    let context = build_context_from_roots(&data_root, &data_root, &data_root)?;
     Ok((context, guard))
 }
 
@@ -269,148 +329,4 @@ fn load_external_tools(store: &Store, registry: &mut ToolRegistry) -> Result<(),
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use orbit_common::types::{NotFoundKind, TaskStatus};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::OrbitRuntime;
-    use crate::command::task::{TaskAddParams, TaskUpdateParams};
-
-    fn v2_runtime() -> (tempfile::TempDir, PathBuf, PathBuf, OrbitRuntime) {
-        let root = tempdir().expect("tempdir");
-        let global_root = root.path().join("global");
-        let repo_root = root.path().join("repo");
-        let workspace_root = repo_root.join(".orbit");
-        std::fs::create_dir_all(&global_root).expect("create global root");
-        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-        let runtime =
-            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build runtime");
-        (root, global_root, workspace_root, runtime)
-    }
-
-    #[test]
-    fn v2_task_backend_wires_through_runtime_add_show_list_and_update() {
-        let (_root, _global_root, workspace_root, runtime) = v2_runtime();
-
-        let task = runtime
-            .add_task(TaskAddParams {
-                title: "Runtime v2 task".to_string(),
-                description: "Created through OrbitRuntime".to_string(),
-                plan: "1. Start it".to_string(),
-                status: Some(TaskStatus::Backlog),
-                ..Default::default()
-            })
-            .expect("create task");
-        assert_eq!(task.id, "ORB-00000");
-        assert!(!workspace_root.join("tasks/backlog").exists());
-        assert!(workspace_root.join("tasks/ORB-00000").exists());
-
-        let started = runtime
-            .start_task(&task.id, Some("start".to_string()), None)
-            .expect("start task");
-        assert_eq!(started.status, TaskStatus::InProgress);
-
-        let updated = runtime
-            .update_task(
-                &task.id,
-                TaskUpdateParams {
-                    comment: Some("Runtime comment".to_string()),
-                    execution_summary: Some("Finished the runtime smoke".to_string()),
-                    status: Some(TaskStatus::Review),
-                    ..Default::default()
-                },
-            )
-            .expect("update task");
-        assert_eq!(updated.status, TaskStatus::Review);
-        assert!(
-            runtime
-                .get_task_comments(&task.id)
-                .expect("read task comments")
-                .iter()
-                .any(|comment| comment.message == "Runtime comment")
-        );
-        assert_eq!(runtime.list_tasks().expect("list tasks").len(), 1);
-        assert_eq!(
-            runtime
-                .search_tasks("runtime smoke")
-                .expect("search tasks")
-                .len(),
-            1
-        );
-
-        runtime
-            .delete_task_guarded(&updated.id, true)
-            .expect("delete v2 task");
-        assert!(matches!(
-            runtime.get_task(&updated.id),
-            Err(OrbitError::NotFound {
-                kind: NotFoundKind::Task,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn v2_task_backend_persists_workspace_binding_across_runtime_rebuild() {
-        let (_root, global_root, workspace_root, runtime) = v2_runtime();
-        let task = runtime
-            .add_task(TaskAddParams {
-                title: "Persistent v2 task".to_string(),
-                description: "Survives runtime reconstruction".to_string(),
-                status: Some(TaskStatus::Backlog),
-                ..Default::default()
-            })
-            .expect("create task");
-        let workspace_config =
-            read_workspace_config_optional(&workspace_root).expect("read workspace config");
-        let workspace_id = workspace_config
-            .as_ref()
-            .map(|config| config.workspace_id.as_str())
-            .expect("workspace id");
-        assert!(workspace_id.starts_with("repo-"), "{workspace_id}");
-        assert_eq!(workspace_id.len(), "repo-000000".len());
-
-        let rebuilt =
-            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
-        let fetched = rebuilt.get_task(&task.id).expect("get task after rebuild");
-        assert_eq!(fetched.title, "Persistent v2 task");
-        assert_eq!(
-            read_workspace_config_optional(&workspace_root)
-                .expect("read workspace config")
-                .map(|config| config.workspace_id),
-            workspace_config.map(|config| config.workspace_id)
-        );
-    }
-
-    #[test]
-    fn v2_task_backend_rebinds_when_workspace_config_is_missing() {
-        let (_root, global_root, workspace_root, runtime) = v2_runtime();
-        let task = runtime
-            .add_task(TaskAddParams {
-                title: "Rebind v2 task".to_string(),
-                description: "Survives missing workspace config".to_string(),
-                status: Some(TaskStatus::Backlog),
-                ..Default::default()
-            })
-            .expect("create task");
-        let original_config =
-            read_workspace_config_optional(&workspace_root).expect("read workspace config");
-        std::fs::remove_file(workspace_root.join("config.yaml")).expect("remove workspace config");
-
-        let rebuilt =
-            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("rebuild runtime");
-        let fetched = rebuilt.get_task(&task.id).expect("get task after rebind");
-
-        assert_eq!(fetched.title, "Rebind v2 task");
-        assert_eq!(
-            read_workspace_config_optional(&workspace_root)
-                .expect("read rewritten workspace config")
-                .map(|config| config.workspace_id),
-            original_config.map(|config| config.workspace_id)
-        );
-    }
 }

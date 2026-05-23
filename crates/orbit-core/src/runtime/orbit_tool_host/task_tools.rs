@@ -3,41 +3,42 @@ use std::collections::BTreeSet;
 use orbit_common::types::{
     OrbitError, TaskPriority, build_task_status_index, optional_csv_or_string_list_alias,
     optional_raw_string, optional_string, optional_string_alias, optional_string_list_alias,
-    required_string, task_dependencies_ready,
+    required_string, strip_retired_task_add_input_fields, task_dependencies_ready,
 };
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::command::task::{TaskAddParams, TaskUpdateParams};
+use crate::command::task::{TaskAddParams, TaskUpdateParams, compute_task_add_warnings};
 
 use super::input::{
-    empty_string_to_none, optional_bool_alias, parse_artifacts, parse_external_refs,
-    parse_relations, parse_task_complexity, parse_task_priority, parse_task_status,
-    parse_task_type,
+    empty_string_to_none, optional_bool_alias, parse_artifacts, parse_relations,
+    parse_task_complexity, parse_task_priority, parse_task_status, parse_task_type,
 };
 use super::json::{serialize_task, serialize_task_lint_report, task_fields_to_json, task_to_json};
 
 pub(super) fn add(
     runtime: &OrbitRuntime,
-    input: Value,
+    mut input: Value,
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
+    let ignored_fields = strip_retired_task_add_input_fields(&mut input);
+    if !ignored_fields.is_empty() {
+        tracing::warn!(
+            target: "orbit.core.task.add",
+            ignored_fields = ?ignored_fields,
+            "ignored retired orbit.task.add fields"
+        );
+    }
+
     let title = required_string(&input, &["title"], "title")?;
     let description = required_string(&input, &["description"], "description")?;
     let workspace = required_string(&input, &["workspace"], "workspace")?;
-    let plan = match input.get("plan") {
-        Some(Value::String(value)) => value.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(_) => {
-            return Err(OrbitError::InvalidInput(
-                "`plan` must be a string".to_string(),
-            ));
-        }
-    };
+    let raw_context_files =
+        optional_csv_or_string_list_alias(&input, &["context_files"])?.unwrap_or_default();
     let task = runtime.add_task_with_identity(
         TaskAddParams {
-            parent_id: optional_string_alias(&input, &["parent_id", "parent", "parentId"])?,
+            parent_id: None,
             title,
             description,
             acceptance_criteria: optional_string_list_alias(
@@ -49,17 +50,12 @@ pub(super) fn add(
                 ],
             )?
             .unwrap_or_default(),
-            dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?
-                .unwrap_or_default(),
+            dependencies: Vec::new(),
             relations: parse_relations(&input)?.unwrap_or_default(),
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
-            plan,
-            comment: optional_string(&input, "comment")?,
-            context_files: optional_csv_or_string_list_alias(
-                &input,
-                &["context_files", "context"],
-            )?
-            .unwrap_or_default(),
+            plan: String::new(),
+            comment: None,
+            context_files: raw_context_files.clone(),
             workspace_path: Some(workspace),
             priority: optional_string(&input, "priority")?
                 .map(|value| parse_task_priority("priority", &value))
@@ -71,21 +67,23 @@ pub(super) fn add(
             task_type: optional_string_alias(&input, &["type", "task_type", "taskType"])?
                 .map(|value| parse_task_type("type", &value))
                 .transpose()?,
-            status: optional_string(&input, "status")?
-                .map(|value| parse_task_status("status", &value))
-                .transpose()?,
+            status: None,
             system_created: false,
-            external_refs: parse_external_refs(&input)?,
-            source_task_id: optional_string_alias(
-                &input,
-                &["source_task_id", "source_task", "sourceTaskId"],
-            )?,
-            crew: optional_string(&input, "crew")?,
+            external_refs: Vec::new(),
+            source_task_id: None,
+            crew: None,
         },
         agent,
         model,
     )?;
-    serialize_task(runtime, &task)
+    let mut response = serialize_task(runtime, &task)?;
+    let warnings = compute_task_add_warnings(&raw_context_files, task.task_type);
+    if !warnings.is_empty()
+        && let Some(obj) = response.as_object_mut()
+    {
+        obj.insert("warnings".to_string(), json!(warnings));
+    }
+    Ok(response)
 }
 
 pub(super) fn approve(
@@ -128,6 +126,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let job_run_id = optional_string(&input, "job_run_id")?;
     let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
     let ready = optional_bool_alias(&input, &["ready"])?;
+    let path = optional_string(&input, "path")?;
     let all_tasks = runtime.list_tasks_filtered(
         status,
         None,
@@ -141,24 +140,15 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .into_iter()
         .filter(|task| orbit_common::types::task_matches_tags(task, &tags))
         .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
+        .filter(|task| {
+            path.as_deref()
+                .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
+        })
         .collect::<Vec<_>>();
     Ok(Value::Array(
         tasks
             .into_iter()
             .filter(|task| task_type.is_none_or(|kind| task.task_type == kind))
-            .map(|task| task_to_json(&task, &status_by_id))
-            .collect::<Vec<_>>(),
-    ))
-}
-
-pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let query = required_string(&input, &["query"], "query")?;
-    let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
-    let status_by_id = build_task_status_index(&runtime.list_tasks()?);
-    let tasks = runtime.search_tasks_filtered(&query, &tags)?;
-    Ok(Value::Array(
-        tasks
-            .into_iter()
             .map(|task| task_to_json(&task, &status_by_id))
             .collect::<Vec<_>>(),
     ))
@@ -186,11 +176,59 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let id = required_string(&input, &["id"], "id")?;
     let task = runtime.get_task(&id)?;
     let fields = optional_csv_or_string_list_alias(&input, &["fields", "field"])?;
+    let with_context =
+        optional_bool_alias(&input, &["with_context", "withContext", "with-context"])?
+            .unwrap_or(false);
+    let max_docs = optional_usize_alias(&input, &["max_docs", "maxDocs", "max-docs"])?;
     if let Some(fields) = fields {
+        if with_context {
+            return Err(OrbitError::InvalidInput(
+                "`with_context` cannot be combined with `fields`".to_string(),
+            ));
+        }
         task_fields_to_json(runtime, &task, &fields)
+    } else if with_context {
+        let mut value = serialize_task(runtime, &task)?;
+        let object = value.as_object_mut().ok_or_else(|| {
+            OrbitError::Execution("task JSON projection did not produce an object".to_string())
+        })?;
+        object.insert(
+            "related_docs".to_string(),
+            serde_json::to_value(runtime.related_docs_for_task(&task, max_docs)?).map_err(
+                |error| OrbitError::Execution(format!("serialize related docs: {error}")),
+            )?,
+        );
+        Ok(value)
     } else {
         serialize_task(runtime, &task)
     }
+}
+
+fn optional_usize_alias(input: &Value, names: &[&str]) -> Result<Option<usize>, OrbitError> {
+    for name in names {
+        let Some(value) = input.get(*name) else {
+            continue;
+        };
+        return match value {
+            Value::Number(number) => number
+                .as_u64()
+                .ok_or_else(|| {
+                    OrbitError::InvalidInput(format!("`{name}` must be an unsigned integer"))
+                })
+                .and_then(|value| {
+                    usize::try_from(value)
+                        .map(Some)
+                        .map_err(|_| OrbitError::InvalidInput(format!("`{name}` is too large")))
+                }),
+            Value::String(raw) => raw.trim().parse::<usize>().map(Some).map_err(|error| {
+                OrbitError::InvalidInput(format!("`{name}` must be an unsigned integer: {error}"))
+            }),
+            _ => Err(OrbitError::InvalidInput(format!(
+                "`{name}` must be an unsigned integer"
+            ))),
+        };
+    }
+    Ok(None)
 }
 
 pub(super) fn start(

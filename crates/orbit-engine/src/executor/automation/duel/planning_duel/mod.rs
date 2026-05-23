@@ -6,3 +6,6 @@ mod runner;
 mod types;
 
 pub(in crate::executor::automation) use runner::run_planning_duel;
+
+#[cfg(test)]
+mod tests;

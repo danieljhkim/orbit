@@ -1,8 +1,16 @@
-# Task Artifacts — Vision
+---
+summary: "Task Artifacts — Vision"
+type: design
+title: "Task Artifacts — Vision"
+owner: codex
+last_updated: 2026-05-11
+status: Draft
+feature: task-artifacts
+doc_role: vision
+tags: ["task-artifacts"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-11
+# Task Artifacts — Vision
 
 This document captures open questions for the task-artifacts reset, prior work that should inform the design, what may be distinctive about Orbit's task model, and references for future implementers. The near-term design is in [2_design.md](./2_design.md); this file is deliberately forward-looking.
 
@@ -126,7 +134,7 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 - [docs/design/task-sync/](../task-sync/) - current sync proposal over the existing task layout.
 - [docs/design/adr-artifact/](../adr-artifact/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
 - [docs/design/task-lineage/](../task-lineage/) - typed task relationships and derivation questions.
-- [docs/design/semantic-search/](../semantic-search/) - per-field indexing of task text.
+- [docs/design/orbit-search/](../orbit-search/) - per-field indexing of task text.
 - [docs/POSITIONING.md](../../POSITIONING.md) - product doctrine that currently treats task IDs as local search keys.
 
 ### 4.2 External

@@ -12,3 +12,6 @@ pub use nodes::{
 };
 pub use object_store::{GraphObjectStore, GraphReadOptions};
 pub use sqlite_index::{GraphIndexNodeRow, GraphIndexReader, GraphIndexSearchRow};
+
+#[cfg(test)]
+mod tests;

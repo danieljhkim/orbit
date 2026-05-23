@@ -15,12 +15,15 @@ const SKIP_EXTENSIONS: &[&str] = &[
     "pdf", "zip", "tar", "gz", "lock",
 ];
 
-struct OrbitIgnoreMatcher {
+/// Internal .orbitignore matcher used by the scan pipeline.
+/// pub(crate) so that sibling tests/scan.rs can exercise it directly (per
+/// docs/design-patterns/test_layout.md — tests only see public seams).
+pub(crate) struct OrbitIgnoreMatcher {
     gitignore: Gitignore,
 }
 
 impl OrbitIgnoreMatcher {
-    fn load(repo_path: &Path) -> Result<Self, KnowledgeError> {
+    pub(crate) fn load(repo_path: &Path) -> Result<Self, KnowledgeError> {
         let mut builder = GitignoreBuilder::new(repo_path);
         for pattern in DEFAULT_ORBITIGNORE_PATTERNS {
             builder.add_line(None, pattern).map_err(|error| {
@@ -57,7 +60,7 @@ impl OrbitIgnoreMatcher {
         Ok(Self { gitignore })
     }
 
-    fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
+    pub(crate) fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
         self.gitignore
             .matched_path_or_any_parents(rel_path, is_dir)
             .is_ignore()
@@ -210,68 +213,4 @@ fn git_ignored_paths(repo_path: &Path, paths: &[PathBuf]) -> HashSet<PathBuf> {
     }
 
     ignored
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::path::Path;
-
-    use tempfile::tempdir;
-
-    use super::OrbitIgnoreMatcher;
-
-    #[test]
-    fn orbitignore_matches_literal_filename() {
-        let repo = tempdir().unwrap();
-        fs::write(repo.path().join(".orbitignore"), "foo.rs\n").unwrap();
-
-        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
-        assert!(matcher.is_ignored(Path::new("foo.rs"), false));
-        assert!(!matcher.is_ignored(Path::new("bar.rs"), false));
-    }
-
-    #[test]
-    fn orbitignore_matches_recursive_glob() {
-        let repo = tempdir().unwrap();
-        fs::write(repo.path().join(".orbitignore"), "**/generated.rs\n").unwrap();
-
-        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
-        assert!(matcher.is_ignored(Path::new("src/generated.rs"), false));
-        assert!(matcher.is_ignored(Path::new("deep/nested/generated.rs"), false));
-    }
-
-    #[test]
-    fn orbitignore_negation_reincludes_prior_exclusion() {
-        let repo = tempdir().unwrap();
-        fs::write(
-            repo.path().join(".orbitignore"),
-            "generated/**\n!generated/keep.rs\n",
-        )
-        .unwrap();
-
-        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
-        assert!(matcher.is_ignored(Path::new("generated/drop.rs"), false));
-        assert!(!matcher.is_ignored(Path::new("generated/keep.rs"), false));
-    }
-
-    #[test]
-    fn orbitignore_directory_only_patterns_match_dirs_but_not_files() {
-        let repo = tempdir().unwrap();
-        fs::write(repo.path().join(".orbitignore"), "foo/\n").unwrap();
-
-        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
-        assert!(matcher.is_ignored(Path::new("foo"), true));
-        assert!(!matcher.is_ignored(Path::new("foo"), false));
-    }
-
-    #[test]
-    fn orbitignore_ignores_comment_lines() {
-        let repo = tempdir().unwrap();
-        fs::write(repo.path().join(".orbitignore"), "# comment\nbar.rs\n").unwrap();
-
-        let matcher = OrbitIgnoreMatcher::load(repo.path()).unwrap();
-        assert!(matcher.is_ignored(Path::new("bar.rs"), false));
-        assert!(!matcher.is_ignored(Path::new("comment"), false));
-    }
 }

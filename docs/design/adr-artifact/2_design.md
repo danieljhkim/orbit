@@ -1,10 +1,18 @@
+---
+summary: "ADR Artifact — Design"
+type: design
+title: "ADR Artifact — Design"
+owner: claude
+last_updated: 2026-05-21
+status: Draft
+feature: adr-artifact
+doc_role: design
+tags: ["adr-artifact"]
+---
+
 # ADR Artifact — Design
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-10 ([T20260510-28] — codex P1/P2 review fixes)
-
-This document specifies the v2 implementation: artifact shape, storage layout, tool contracts, lifecycle transitions, migration mechanics, and the boundaries that keep `orbit-store` and `orbit-tools` cleanly scoped. v1 ships none of this; the design is captured now so the migration and tooling are not invented under deadline pressure. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
+This document specifies the v2 implementation: artifact shape, storage layout, tool contracts, lifecycle transitions, historical migration mechanics, and the boundaries that keep `orbit-store` and `orbit-tools` cleanly scoped. v1 shipped none of this; the design was captured so the migration and tooling were not invented under deadline pressure. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
 ---
 
@@ -21,6 +29,7 @@ An ADR is a per-ADR directory containing a YAML envelope and a markdown body. Th
 `adr.yaml`:
 
 ```yaml
+schema_version: 2
 id: ADR-0042
 title: Resolve sandbox-exec wrapper from a trusted absolute path
 status: accepted
@@ -30,11 +39,15 @@ accepted_at: 2026-05-09T18:01:00Z
 last_updated: 2026-05-09T18:01:00Z
 related_features: [activity-job, policy-sandbox]
 related_tasks: [T20260509-30]
+tags: [sandbox, policy]
+paths: [crates/orbit-exec/**, crates/orbit-policy/**]
 supersedes: []
 superseded_by: null
 legacy_ids:
   - activity-job/ADR-039
 ```
+
+`schema_version: 2` adds the two free-form retrieval axes: `tags` and `paths`. `tags` are label vocabulary for cross-artifact search and are distinct from `related_features`, which remains a structural reference to feature folder names. `paths` are repo-relative glob patterns for areas constrained by the decision. Readers accept v1 envelopes that omit both fields for one compatibility window, treating absence as empty lists; writers emit v2.
 
 `legacy_ids` is an array, not a scalar. A normal ADR migrates with one entry; a CONVENTIONS §4a **rollup** carries one entry per folded source heading. This is what lets `activity-job/ADR-003` (a folded heading with body removed) and `activity-job/ADR-005` (the rollup that absorbed it) both resolve through `orbit.adr.list --legacy-id=...` without producing body-less artifacts. See [ADR-0016](./4_decisions.md#adr-002--global-adr-numbering-not-per-feature).
 
@@ -98,7 +111,7 @@ Six tools, contracts below. All return structured JSON; CLI surfaces are thin wr
 
 ### 4.1 `orbit.adr.add`
 
-Creates a `proposed` ADR. Input: `title`, `owner`, `related_features`, optional `related_tasks`, optional initial body sections. Output: assigned `id`. Errors: invalid feature name, missing required field.
+Creates a `proposed` ADR. Input: `title`, `owner`, `related_features`, optional `related_tasks`, optional `tags`, optional `paths`, optional initial body sections. Omitted `tags` and `paths` default to empty lists. Output: assigned `id`. Errors: invalid feature name, missing required field.
 
 ### 4.2 `orbit.adr.show`
 
@@ -106,11 +119,11 @@ Input: `id`. Output: full envelope + body. Errors: not found.
 
 ### 4.3 `orbit.adr.list`
 
-Input: optional filters (`feature`, `status`, `owner`, `task_id`, `since`). Output: array of envelopes (no body). Sort: by `id` descending by default.
+Input: optional filters (`feature`, `status`, `owner`, `task_id`, `tag`, `path`, `since`). `tag` is case-insensitive equality against any element of `tags`; `path` is glob-containment against `paths`. Output: array of envelopes (no body). Sort: by `id` descending by default.
 
 ### 4.4 `orbit.adr.update`
 
-Input: `id`, plus any subset of (`status`, body sections, `related_tasks`, `related_features`, `owner`). Status transitions enforced:
+Input: `id`, plus any subset of (`status`, body sections, `related_tasks`, `related_features`, `tags`, `paths`, `owner`). Empty `tags` or `paths` clears the field; absence leaves it unchanged. Status transitions enforced:
 
 - `proposed → accepted` requires non-empty `related_tasks` on the update payload (the task that shipped it).
 - `proposed → superseded` and `accepted → superseded` go through `adr.supersede` instead — direct status writes to `superseded` are rejected.
@@ -162,7 +175,7 @@ CONVENTIONS.md is updated in the migration task to reflect this. The lint runs i
 
 ## 7. Migration
 
-A one-shot tool walks every `docs/design/*/4_decisions.md`, parses each ADR entry, builds a feature-aware ID resolution table, writes artifacts, and runs a comprehensive reference sweep. Pass-one parses and allocates; pass-two cross-references and sweeps. The split exists because resolving local references requires the full map to be built first.
+The completed one-shot migration walked every `docs/design/*/4_decisions.md`, parsed each ADR entry, built a feature-aware ID resolution table, wrote artifacts, and ran a comprehensive reference sweep. Pass-one parsed and allocated; pass-two cross-referenced and swept. The split existed because resolving local references required the full map to be built first. The `orbit adr migrate` CLI wrapper and `adr_migration` implementation were retired after corpus import; current ADR work goes through the `orbit.adr.*` tool surface.
 
 ### 7.1 Parse (pass one)
 
@@ -199,11 +212,11 @@ Any reference that cannot be mechanically resolved is left as-is and logged to `
 
 ### 7.5 Regenerate `4_decisions.md`
 
-Per [ADR-0020](./4_decisions.md#adr-006--auto-generate-per-feature-4_decisionsmd-index), each feature's `4_decisions.md` is rebuilt from the store via `orbit.adr.list --feature=<name> --format=md` with canonical ordering (ascending by legacy feature ADR number, then by global ID for legacy-less entries — see [ADR-0020]). The migration tool emits the first generated version; subsequent updates run automatically. Cross-cutting ADRs ([ADR-0021](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index)) populate `docs/design/cross-cutting/4_decisions.md` from the same generator.
+Per [ADR-0020](./4_decisions.md#adr-006--auto-generate-per-feature-4_decisionsmd-index), each feature's `4_decisions.md` is rebuilt from the store via `orbit.adr.list --feature=<name> --format=md` with canonical ordering (ascending by legacy feature ADR number, then by global ID for legacy-less entries — see [ADR-0020]). The retired migration tool emitted the first generated version; subsequent updates run automatically. Cross-cutting ADRs ([ADR-0021](./4_decisions.md#adr-007--cross-cutting-adrs-use-a-dedicated-cross-cutting-index)) populate `docs/design/cross-cutting/4_decisions.md` from the same generator.
 
 ### 7.6 Migration report
 
-The migration tool emits `migration-report.md` at the workspace root containing:
+The retired migration tool emitted `migration-report.md` at the workspace root containing:
 
 - Every entry with `validation_warnings` (which rules failed, what the artifact looks like, the source path).
 - Every reference the sweep refused to resolve (file, line, original text, why it couldn't be resolved).

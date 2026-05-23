@@ -1,8 +1,16 @@
-# Agent Families — Design
+---
+summary: "Agent Families — Design"
+type: design
+title: "Agent Families — Design"
+owner: human
+last_updated: 2026-05-22
+status: Draft
+feature: agent-families
+doc_role: design
+tags: ["agent-families"]
+---
 
-**Status:** Draft
-**Owner:** human
-**Last updated:** 2026-05-16
+# Agent Families — Design
 
 This document describes the current implementation of Orbit agent families, crew-based role assignment, and duel-plan participant configuration. It covers the family registry, workspace config surfaces, task and CLI override surfaces, and where resolved run metadata is persisted.
 
@@ -24,7 +32,7 @@ Workspace config now defines concrete role lineups under `[crews.<name>]`. Each 
 
 `crates/orbit-core/src/config/raw.rs` owns the TOML shape, and `crates/orbit-core/src/config/runtime.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews and rejects `[workflow].default_crew` when it does not name a defined crew.
 
-The repository default template and `.orbit/config.toml` use `[workflow].default_crew = "opus-codex"` and define at least `opus-codex` and `all-claude`.
+The repository default template and `.orbit/config.toml` use `[workflow].default_crew = "codex"` and seed single-family crews named `claude`, `codex`, `gemini`, and `grok`.
 
 ## 3. Task and Tool Surface
 

@@ -13,7 +13,8 @@ use orbit_common::types::{
     optional_string, optional_string_alias, required_string,
 };
 use orbit_store::{
-    LearningCreateParams, LearningSearchParams, LearningUpdateParams, LearningUpvoteParams,
+    LearningCreateParams, LearningListEntry, LearningUpdateParams, LearningUpvoteParams,
+    RemoteArtifactStub,
 };
 use serde_json::{Value, json};
 
@@ -21,8 +22,8 @@ use crate::OrbitRuntime;
 
 use super::input::optional_bool_alias;
 use super::json::{
-    learning_comment_to_json, learning_search_result_to_json, learning_show_to_json,
-    learning_to_json, learning_vote_summary_to_json,
+    learning_comment_to_json, learning_show_to_json, learning_to_json,
+    learning_vote_summary_to_json,
 };
 
 pub(super) fn add(
@@ -42,7 +43,7 @@ pub(super) fn add(
     let priority = parse_optional_priority(&input)?;
     let created_by = optional_string_alias(&input, &["created_by", "createdBy"])?.or(model);
 
-    let learning = runtime.stores().learnings().add(LearningCreateParams {
+    let learning = runtime.create_learning(LearningCreateParams {
         summary,
         scope,
         body,
@@ -55,11 +56,7 @@ pub(super) fn add(
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = required_string(&input, &["id"], "id")?;
-    let learning = runtime
-        .stores()
-        .learnings()
-        .get(&id)?
-        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.clone()))?;
+    let learning = runtime.get_learning(&id)?;
     let vote_summary = runtime.stores().learnings().vote_summary(&id)?;
     Ok(learning_show_to_json(&learning, &vote_summary))
 }
@@ -69,19 +66,31 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         .map(|raw| LearningStatus::from_str(&raw).map_err(OrbitError::InvalidInput))
         .transpose()?;
     let tag = optional_string(&input, "tag")?.map(|t| t.trim().to_lowercase());
-    let path = optional_string(&input, "path")?;
+    let path_normalized = optional_string(&input, "path")?
+        .as_deref()
+        .map(orbit_common::utility::glob::normalize_glob_path)
+        .transpose()?;
+    let include_remote =
+        optional_bool_alias(&input, &["include_remote", "includeRemote"])?.unwrap_or(false);
 
-    let learnings = runtime.stores().learnings().list(status)?;
+    let learnings = runtime.list_learning_entries(status, include_remote)?;
     let filtered: Vec<_> = learnings
         .into_iter()
-        .filter(|l| {
+        .filter(|entry| {
+            let LearningListEntry::Local(l) = entry else {
+                return tag.is_none() && path_normalized.is_none();
+            };
             if let Some(ref tag) = tag
                 && !l.scope.tags.iter().any(|t| t == tag)
             {
                 return false;
             }
-            if let Some(ref path) = path
-                && !l.scope.paths.iter().any(|p| p == path)
+            if let Some(ref path) = path_normalized
+                && !l.scope.paths.iter().any(|rule| {
+                    orbit_common::utility::glob::compile_glob_regex(rule)
+                        .map(|regex| regex.is_match(path))
+                        .unwrap_or(false)
+                })
             {
                 return false;
             }
@@ -89,25 +98,38 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         })
         .collect();
     Ok(Value::Array(
-        filtered.iter().map(learning_to_json).collect(),
+        filtered.iter().map(learning_entry_to_json).collect(),
     ))
 }
 
-pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let path = optional_string(&input, "path")?;
-    let tag = optional_string(&input, "tag")?;
-    let query = optional_string(&input, "query")?;
-    let limit = optional_usize(&input, "limit")?;
+fn learning_entry_to_json(entry: &LearningListEntry) -> Value {
+    match entry {
+        LearningListEntry::Local(learning) => {
+            let mut value = learning_to_json(learning);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("remote".to_string(), Value::Bool(false));
+            }
+            value
+        }
+        LearningListEntry::Remote(stub) => remote_stub_to_json(stub),
+    }
+}
 
-    let results = runtime.search_learnings(LearningSearchParams {
-        path,
-        tag,
-        query,
-        limit,
-    })?;
-    Ok(Value::Array(
-        results.iter().map(learning_search_result_to_json).collect(),
-    ))
+fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
+    json!({
+        "id": stub.id,
+        "kind": stub.kind,
+        "status": stub.status,
+        "remote": true,
+        "remote_marker": format!("[remote: {}]", stub.worktree_root.display()),
+        "worktree_root": stub.worktree_root.to_string_lossy(),
+        "branch": stub.branch,
+        "body_path": stub.body_path.as_ref().map(|path| path.to_string_lossy().to_string()),
+        "summary": Value::Null,
+        "body": Value::Null,
+        "scope": Value::Null,
+        "evidence": Value::Null,
+    })
 }
 
 pub(super) fn upvote(
@@ -234,8 +256,8 @@ pub(super) fn supersede(
     }))
 }
 
-pub(super) fn reindex(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
-    runtime.stores().learnings().reindex()?;
+pub(super) fn sync(runtime: &OrbitRuntime, _input: Value) -> Result<Value, OrbitError> {
+    runtime.stores().learnings().sync()?;
     let active = runtime
         .stores()
         .learnings()
@@ -369,20 +391,4 @@ fn coerce_priority(value: &Value) -> Result<u8, OrbitError> {
     .ok_or_else(|| OrbitError::InvalidInput("`priority` must be an integer 0..=255".to_string()))?;
     u8::try_from(as_u64)
         .map_err(|_| OrbitError::InvalidInput("`priority` must be an integer 0..=255".to_string()))
-}
-
-fn optional_usize(input: &Value, field: &str) -> Result<Option<usize>, OrbitError> {
-    let Some(value) = input.get(field) else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    let n = match value {
-        Value::Number(number) => number.as_u64(),
-        Value::String(raw) => raw.trim().parse::<u64>().ok(),
-        _ => None,
-    }
-    .ok_or_else(|| OrbitError::InvalidInput(format!("`{field}` must be a non-negative integer")))?;
-    Ok(Some(n as usize))
 }

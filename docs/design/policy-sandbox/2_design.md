@@ -1,8 +1,16 @@
-# Policy & Sandboxing — Design
+---
+summary: "Policy & Sandboxing — Design"
+type: design
+title: "Policy & Sandboxing — Design"
+owner: claude
+last_updated: 2026-05-17
+status: Draft
+feature: policy-sandbox
+doc_role: design
+tags: ["policy-sandbox"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-16
+# Policy & Sandboxing — Design
 
 This document describes Orbit's shipped policy and sandboxing implementation: v2 `PolicyDef`, profile resolution, last-match-wins path evaluation, HTTP-tool enforcement, activity/job `fsProfile` binding, macOS CLI sandbox wrapping, and `orbit-exec` supervision. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for forward-looking gaps.
 
@@ -120,11 +128,14 @@ The macOS wrapper resolves `sandbox-exec` from trusted absolute locations only, 
 The compiled macOS profile denies by default, allows broad reads required by agent CLIs and system libraries, allows process/signal/ipc/network/sysctl/iokit operations, and allows writes to:
 
 - scratch/cache roots (`/tmp`, `/private/tmp`, `/private/var/folders`, `/dev`, `$HOME/Library/Caches`)
-- `$HOME/.orbit` for inherited Orbit subprocess audit/state
+- `$HOME/.orbit/state/logs` for early inherited Orbit subprocess logging before runtime root resolution
 - provider state dirs: Codex (`$CODEX_HOME` or `$HOME/.codex`), Claude (`$CLAUDE_CONFIG_DIR` or `$HOME/.claude`), Gemini (`$HOME/.gemini`), and Grok (`$HOME/.grok`)
 - Claude `$HOME/.claude.json` sibling files (`.claude.json`, `.claude.json.lock`, atomic-write `.claude.json.tmp.<pid>.<ms_ts>`) when `CLAUDE_CONFIG_DIR` is unset, since these live at the home root rather than under `$HOME/.claude/` ([T20260508-13])
 - positive `modify` roots from the resolved profile
 - Codex side-write roots from runtime provider config, appended after policy denies so workflow state remains writable under the outer sandbox
+- narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/learnings/**`, workspace `.orbit/frictions/**`, workspace audit/logs, workspace semantic DB sidecars, and workspace `.orbit/state/job-runs/**`
+
+The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact/duel writes under `.orbit/tasks/**`, learning curation under `.orbit/learnings/**`, friction reporting under `.orbit/frictions/**`, `orbit.state.set` writes under `.orbit/state/job-runs/**`, and startup/runtime audit, log, semantic-index, and global database writes. Registered stores that are not exposed by the current activity allowlists, including `.orbit/adrs/**` and graph write roots, remain outside this inventory and must be revisited when those write tools are exposed.
 
 Negated `read` / `modify` rules become explicit SBPL denies after ordinary profile allows to preserve last-match-wins. Simple path and `/**` subtree denials compile to `subpath`; non-subpath globs such as `**/*.env` compile to `regex`. Host-owned provider side roots are the exception because the provider CLI and inherited Orbit subprocesses must write workflow state.
 
@@ -164,7 +175,8 @@ Risk-weighted regression tests sit beside the implementations they guard
   such as `../secret.txt`, `src/../secret.txt`, and their backslash-normalized
   equivalents are rejected as `OrbitError::InvalidInput` for both read and
   modify checks ([T20260509-27]).
-- `crates/orbit-exec/src/macos_sandbox.rs#tests` — trusted wrapper
+- `crates/orbit-exec/src/macos_sandbox/compile.rs#tests` and
+  `crates/orbit-exec/src/macos_sandbox/provider_dirs/tests.rs` — trusted wrapper
   resolution ignores `PATH`, including a macOS runtime test that places a fake
   `sandbox-exec` earlier on `PATH` and verifies the fake wrapper is not
   executed ([T20260509-30]). SBPL compilation tests
@@ -224,5 +236,6 @@ non-empty on Linux CI.
 - **[T20260509-7]** — Add `PolicyEngine::check` boundary tests and macOS sandbox `denyRead` / realistic agent-loop profile tests.
 - **[T20260509-28]** — Validate policy and executor resource names as safe file stems before file-store path construction.
 - **[T20260509-30]** — Resolve `sandbox-exec` from trusted absolute locations and keep availability errors fail-closed and explicit.
+- **[ORB-00129]** — Re-allow narrow workspace child Orbit runtime stores for activity-exposed learning, friction, and job-run state tools without removing the default workspace `.orbit/**` deny.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

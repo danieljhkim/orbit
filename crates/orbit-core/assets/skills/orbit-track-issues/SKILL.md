@@ -21,6 +21,7 @@ Examples of issues worth tracking:
 - unclear error messages
 - unexpected runtime behavior
 - confusing seed instructions
+- insufficient or vague prompts in activity assets (e.g., `agent_implement.yaml`, `agent_review.yaml`) or skill `SKILL.md` files
 
 If Orbit tooling or Orbit-authored guidance slows the agent down, it should be tracked.
 

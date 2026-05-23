@@ -46,6 +46,22 @@ impl Tool for OrbitAdrAddTool {
                 param_type: "string_list".to_string(),
                 required: false,
             },
+            ToolParam {
+                name: "tags".to_string(),
+                description:
+                    "Free-form ADR labels. Defaults to an empty list when omitted."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "paths".to_string(),
+                description:
+                    "Repo-relative glob patterns for code or docs areas constrained by this ADR. Defaults to an empty list when omitted."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::super::model_identity_params());
         ToolSchema {

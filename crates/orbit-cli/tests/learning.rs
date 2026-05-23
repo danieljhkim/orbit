@@ -125,7 +125,8 @@ fn cli_learning_comment_add_list_delete_round_trips_with_tombstone() {
         .join(".orbit/learnings")
         .join(id)
         .join("comments.jsonl");
-    assert!(!comments_path.exists());
+    assert!(comments_path.exists());
+    assert!(fs::read_to_string(&comments_path).unwrap().is_empty());
 
     let comment = workspace.run_json(
         &[
@@ -199,7 +200,7 @@ fn cli_learning_comment_add_list_delete_round_trips_with_tombstone() {
 }
 
 #[test]
-fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_file() {
+fn cli_learning_comment_rejects_missing_and_superseded_parents_without_appending() {
     let workspace = TestWorkspace::new();
     let output = run_orbit(
         &workspace.work,
@@ -209,7 +210,7 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
             "comment",
             "add",
             "--learning-id",
-            "L20260517-404",
+            "L-0404",
             "--body",
             "valid",
             "--model",
@@ -226,7 +227,7 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
     assert!(
         !workspace
             .work
-            .join(".orbit/learnings/L20260517-404/comments.jsonl")
+            .join(".orbit/learnings/L-0404/comments.jsonl")
             .exists()
     );
 
@@ -266,27 +267,38 @@ fn cli_learning_comment_rejects_missing_and_superseded_parents_without_creating_
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        !workspace
-            .work
-            .join(".orbit/learnings")
-            .join(old["id"].as_str().unwrap())
-            .join("comments.jsonl")
-            .exists()
-    );
+    let comments_path = workspace
+        .work
+        .join(".orbit/learnings")
+        .join(old["id"].as_str().unwrap())
+        .join("comments.jsonl");
+    assert!(comments_path.exists());
+    assert!(fs::read_to_string(comments_path).unwrap().is_empty());
 }
 
 #[test]
-fn cli_search_returns_matched_by_annotation_array() {
+fn orbit_search_kind_learning_path_returns_matched_by_annotation_array() {
+    // ORB-00202: the `learning search --path` axis migrated to the
+    // unified search surface. ORB-00205 then converted the `--path`
+    // flag into a `path <path>` subcommand, so the equivalent call is
+    // `orbit search path <path> --kind learning`. The `matched_by`
+    // annotation is preserved for active-only path queries.
     let workspace = TestWorkspace::new();
     workspace.add_learning("path scope", &["foo/**"], &[]);
     workspace.add_learning("tag scope", &[], &["alpha"]);
 
-    let path_hits = workspace.run_json(
-        &["learning", "search", "--path", "foo/bar.rs", "--json"],
-        "search by path",
+    let response = workspace.run_json(
+        &[
+            "search",
+            "path",
+            "foo/bar.rs",
+            "--kind",
+            "learning",
+            "--json",
+        ],
+        "orbit search path --kind learning",
     );
-    let arr = path_hits.as_array().expect("array");
+    let arr = response["results"].as_array().expect("results array");
     assert!(
         !arr.is_empty(),
         "path search should return at least one row"
@@ -303,7 +315,12 @@ fn cli_search_returns_matched_by_annotation_array() {
 }
 
 #[test]
-fn cli_search_accepts_absolute_paths_inside_workspace() {
+fn orbit_search_kind_learning_accepts_absolute_paths_inside_workspace() {
+    // ORB-00202: absolute-path normalization (inside the workspace root)
+    // moved from `learning search --path` to the unified search surface.
+    // ORB-00205 converted the `--path` flag into a `path <path>`
+    // subcommand, so the equivalent call is
+    // `orbit search path <absolute> --kind learning`.
     let workspace = TestWorkspace::new();
     let learning = workspace.add_learning("path scope", &["foo/**"], &[]);
     let target = workspace.work.join("foo/bar.rs");
@@ -311,13 +328,13 @@ fn cli_search_accepts_absolute_paths_inside_workspace() {
     fs::write(&target, "pub fn example() {}\n").expect("write target");
     let absolute = target.to_string_lossy().to_string();
 
-    let path_hits = workspace.run_json(
-        &["learning", "search", "--path", &absolute, "--json"],
-        "search by absolute path",
+    let response = workspace.run_json(
+        &["search", "path", &absolute, "--kind", "learning", "--json"],
+        "orbit search path <absolute> --kind learning",
     );
-    let ids: Vec<&str> = path_hits
+    let ids: Vec<&str> = response["results"]
         .as_array()
-        .expect("array")
+        .expect("results array")
         .iter()
         .map(|row| row["id"].as_str().expect("id"))
         .collect();
@@ -386,11 +403,11 @@ fn cli_update_then_show_reflects_changes() {
 }
 
 #[test]
-fn cli_reindex_returns_rebuilt_count() {
+fn cli_sync_returns_rebuilt_count() {
     let workspace = TestWorkspace::new();
     workspace.add_learning("a", &[], &[]);
     workspace.add_learning("b", &[], &[]);
-    let result = workspace.run_json(&["learning", "reindex", "--json"], "reindex");
+    let result = workspace.run_json(&["learning", "sync", "--json"], "sync");
     assert!(result["rebuilt_count"].as_u64().unwrap() >= 2);
 }
 
@@ -497,7 +514,7 @@ fn guardrail_rejects_flat_learning_root_files() {
     let temp = tempdir().expect("tempdir");
     let learnings = temp.path().join(".orbit/learnings");
     fs::create_dir_all(&learnings).expect("create learnings");
-    fs::write(learnings.join("L20260517-1.yaml"), "").expect("legacy flat file");
+    fs::write(learnings.join("L-0001.yaml"), "").expect("legacy flat file");
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

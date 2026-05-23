@@ -7,9 +7,6 @@ use chrono::Utc;
 use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status};
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
-use orbit_common::utility::learning_session::{
-    learning_session_state_path, write_learning_session_state,
-};
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
 
@@ -54,7 +51,12 @@ pub fn run_cli_backend(
     });
 
     let task_ctx = host.task_context_for_agent_input(input)?;
-    let mut tool_ctx = host.tool_context_for_activity(Some(run_id), fs_profile, None);
+    let mut tool_ctx = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        None,
+        spec.proc_allowed_programs.as_deref(),
+    );
     tool_ctx.agent_name = Some(provider.clone());
     tool_ctx.model_name = spec.model.as_deref().map(str::to_string);
     // Resolve the subprocess cwd before sandbox compilation so the host can
@@ -158,6 +160,12 @@ pub fn run_cli_backend(
     }
     if let Some(session_id) = learning_context.session_id {
         child_env.push(("ORBIT_SESSION_ID".to_string(), session_id));
+    }
+    if let Some(task_id) = task_id_from_input(input) {
+        // ADR-0182: external CLI agents get the same active-task hook binding
+        // as direct-agent executions.
+        child_env.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
+        child_env.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
     }
     let (stdout, stderr, exit_code, duration, timed_out) =
         spawn_with_timeout(SpawnWithTimeoutRequest {
@@ -282,11 +290,11 @@ fn cli_learning_context(
     let base_prompt = super::envelope::user_prompt_from_input(input)?;
     let prompt = prepend_reminder_block(&base_prompt, &admitted);
     let session_id = format!("S{:x}-cli", Utc::now().timestamp_micros());
-    if let Some(root) = workspace_root {
-        let path = learning_session_state_path(root, &session_id);
-        write_learning_session_state(&path, &state).map_err(|err| {
-            DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
-        })?;
+    if workspace_root.is_some() {
+        host.persist_session_learning_state(&session_id, &state)
+            .map_err(|err| {
+                DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
+            })?;
     }
     Ok(CliLearningContext {
         prompt: Some(prompt),

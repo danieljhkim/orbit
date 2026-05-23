@@ -89,7 +89,7 @@ impl OrbitRuntime {
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let threads = self.get_task_review_threads(task_id)?;
-        let existing = threads
+        let _existing = threads
             .iter()
             .find(|t| t.thread_id == thread_id)
             .ok_or_else(|| {
@@ -113,7 +113,7 @@ impl OrbitRuntime {
             thread_id: thread_id.to_string(),
             path: None,
             line: None,
-            status: existing.status,
+            status: ReviewThreadStatus::Open,
             messages: vec![ReviewMessage {
                 message_id,
                 at: now,
@@ -149,6 +149,42 @@ impl OrbitRuntime {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<ReviewThread, OrbitError> {
+        self.set_review_thread_status(
+            task_id,
+            thread_id,
+            ReviewThreadStatus::Resolved,
+            agent,
+            model,
+            "resolve",
+        )
+    }
+
+    pub fn reopen_review_thread(
+        &self,
+        task_id: &str,
+        thread_id: &str,
+        agent: Option<String>,
+        model: Option<String>,
+    ) -> Result<ReviewThread, OrbitError> {
+        self.set_review_thread_status(
+            task_id,
+            thread_id,
+            ReviewThreadStatus::Open,
+            agent,
+            model,
+            "reopen",
+        )
+    }
+
+    fn set_review_thread_status(
+        &self,
+        task_id: &str,
+        thread_id: &str,
+        status: ReviewThreadStatus,
+        agent: Option<String>,
+        model: Option<String>,
+        verb: &'static str,
+    ) -> Result<ReviewThread, OrbitError> {
         let threads = self.get_task_review_threads(task_id)?;
         let _existing = threads
             .iter()
@@ -159,11 +195,11 @@ impl OrbitRuntime {
                 ))
             })?;
 
-        let resolve_thread = ReviewThread {
+        let status_thread = ReviewThread {
             thread_id: thread_id.to_string(),
             path: None,
             line: None,
-            status: ReviewThreadStatus::Resolved,
+            status,
             messages: vec![],
             github_thread_id: None,
         };
@@ -171,7 +207,7 @@ impl OrbitRuntime {
         self.update_task_with_identity(
             task_id,
             TaskUpdateParams {
-                append_review_threads: vec![resolve_thread],
+                append_review_threads: vec![status_thread],
                 ..Default::default()
             },
             agent,
@@ -181,9 +217,7 @@ impl OrbitRuntime {
         self.get_task_review_threads(task_id)?
             .into_iter()
             .find(|t| t.thread_id == thread_id)
-            .ok_or_else(|| {
-                OrbitError::Execution("review thread disappeared after resolve".to_string())
-            })
+            .ok_or_else(|| OrbitError::Execution(format!("review thread disappeared after {verb}")))
     }
 
     fn record_task_review_thread_score(&self, model: Option<&str>) {

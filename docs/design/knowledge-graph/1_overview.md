@@ -1,8 +1,16 @@
-# Knowledge Graph — Overview
+---
+summary: "Knowledge Graph — Overview"
+type: design
+title: "Knowledge Graph — Overview"
+owner: claude
+last_updated: 2026-05-10
+status: Draft
+feature: knowledge-graph
+doc_role: overview
+tags: ["knowledge-graph"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-10 (post-[T20260509-64], [T20260510-7])
+# Knowledge Graph — Overview
 
 The knowledge graph is Orbit's durable, queryable codebase map: a content-addressed, branch-scoped tree of directories, files, and extracted symbols. It sits between raw files and the agent prompt so agents can ask *"where is `AgentRuntime` defined?"* without re-reading the repo from scratch. Task attribution was removed in [T20260506-11]; task IDs now remain local commit-search keys rather than graph fields. This compaction pass [T20260430-22] keeps the overview focused on entry-point concepts and leaves mechanism detail to [2_design.md](./2_design.md).
 

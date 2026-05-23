@@ -35,8 +35,6 @@
 
 pub(crate) mod backend;
 mod file;
-#[path = "sqlite/invocation_store.rs"]
-mod invocation_store_impl;
 pub(crate) mod json_schema;
 pub(crate) mod scope;
 pub mod sqlite;
@@ -67,8 +65,9 @@ pub mod task_review_scoreboard {
 
 pub mod scoreboard_summary {
     pub use crate::file::scoreboard::scoreboard_summary::{
-        AgentSummary, DuelSummary, PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary,
-        TaskReviewSummary, TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
+        AgentSummary, DuelSummary, FrictionSummary, KnowledgeSummary, PlanningDuelSummary,
+        PrSummary, RecentSummary, ScoreboardInputs, ScoreboardSummary, TaskReviewSummary,
+        TokenSummary, TopToolCall, WorkflowRunCount, generate_summary,
         generate_summary_with_audit_tool_calls, generate_summary_with_inputs, summary_path,
         write_summary,
     };
@@ -83,7 +82,8 @@ pub mod duel_scoreboard {
 
 pub mod planning_duel_scoreboard {
     pub use crate::file::scoreboard::planning_duel_scoreboard::{
-        AggregateFilter, AggregateRow, Aggregates, RoleAxis, aggregate, append_run, load_runs,
+        AggregateFilter, AggregateRow, Aggregates, HeadToHeadCell, HeadToHeadMatrix, RoleAxis,
+        aggregate, aggregate_head_to_head, append_run, load_runs,
     };
 }
 
@@ -112,35 +112,43 @@ pub mod learning_layout {
 use chrono::{DateTime, Utc};
 
 pub use backend::{
-    ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend,
-    AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
-    LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend, ReleasedTaskReservation,
-    TaskArtifactStoreBackend, TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend,
-    TaskDocumentUpdateParams, TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskLockConflict,
-    TaskLockHolder, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    ActiveTaskReservation, AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter,
+    AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, ExpiredTaskReservation,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
+    LearningCommentDeleteParams, LearningCreateParams, LearningListEntry, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    PolicyDefStoreBackend, ReleasedTaskReservation, RemoteArtifactStub,
+    SessionLearningStateStoreBackend, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskLockConflict, TaskLockHolder, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseReason, TaskReservationReleaseResult, TaskReservationReserveParams,
     TaskReservationReserveResult, TaskReservationStoreBackend, TaskReviewStoreBackend,
-    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, WorkspaceTaskBackends,
-    audit_event_store_sqlite, global_executor_def_store, global_policy_def_store,
-    layered_policy_def_store, task_reservation_store_sqlite, tool_store_sqlite,
+    TaskReviewUpdateParams, TaskStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
+    WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
+    global_policy_def_store, layered_policy_def_store, session_learning_state_store_sqlite,
+    task_reservation_store_sqlite, tool_store_sqlite, v2_audit_event_store_sqlite,
     workspace_adr_backends, workspace_job_run_store, workspace_learning_backend,
     workspace_policy_def_store, workspace_task_backends,
 };
-pub use invocation_store_impl::{
+pub use json_schema::{validate_instance_against_schema, validate_schema_document};
+pub use sqlite::audit_event_store::{
+    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
+    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+};
+pub use sqlite::connection::{Store, StoreTx};
+pub use sqlite::id_allocator::{
+    IdAllocation, IdAllocationKind, IdAllocationRecord, IdAllocator, IdAllocatorConfig,
+    LearningIdMigrationReport, LearningIdRename, ensure_id_allocation_schema,
+};
+pub use sqlite::invocation_store::{
     ActivityInvocationMetrics, AgentInvocationMetrics, InvocationInsertParams, InvocationQuery,
     InvocationRecord, InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
-pub use json_schema::{validate_instance_against_schema, validate_schema_document};
-pub use sqlite::audit_event_store::{
-    AuditEventFilter, AuditEventInsertParams, AuditToolCallCountsByRole,
-    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
-};
-pub use sqlite::connection::{Store, StoreTx};
+pub use sqlite::task_registry::workspace_id_for_orbit_dir;
+pub use sqlite::v2_audit_store::{V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow};
 
 pub(crate) fn parse_timestamp(raw: &str) -> rusqlite::Result<DateTime<Utc>> {
     let parsed = DateTime::parse_from_rfc3339(raw)

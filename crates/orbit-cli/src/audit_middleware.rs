@@ -195,6 +195,24 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        Commands::Hook(cmd) => {
+            use crate::command::hook::HookSubcommand;
+            let sub = match &cmd.command {
+                HookSubcommand::Install(_) => "install",
+                HookSubcommand::Pretooluse(_) => "pretooluse",
+                HookSubcommand::Uninstall(_) => "uninstall",
+            };
+            CommandMeta {
+                command: "hook".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("hook".to_string()),
+                target_id: None,
+                role: "hook".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Tool(tool_cmd) => {
             use crate::command::tool::ToolSubcommand;
             let (sub, tool_name, target_type, target_id) = match &tool_cmd.command {
@@ -287,7 +305,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                     ("unarchive", Some("task"), Some(args.id.as_str()))
                 }
                 TaskSubcommand::Delete(args) => ("delete", Some("task"), Some(args.id.as_str())),
-                TaskSubcommand::Search(_) => ("search", None, None),
                 TaskSubcommand::Templates(_) => ("templates", None, None),
                 TaskSubcommand::ReviewThread(_) => ("review-thread", Some("task"), None),
                 TaskSubcommand::PruneContext(_) => ("prune-context", None, None),
@@ -308,10 +325,8 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
             let sub = match &cmd.command {
                 SemanticSubcommand::Install(_) => "install",
                 SemanticSubcommand::Uninstall(_) => "uninstall",
-                SemanticSubcommand::Reindex(_) => "reindex",
                 SemanticSubcommand::Stats(_) => "stats",
-                SemanticSubcommand::Search(_) => "search",
-                SemanticSubcommand::Related(_) => "related",
+                SemanticSubcommand::Index(_) => "index",
             };
             CommandMeta {
                 command: "semantic".to_string(),
@@ -324,10 +339,45 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        Commands::Search(cmd) => CommandMeta {
+            command: "search".to_string(),
+            // ORB-00202 preserved `--kind`; ORB-00205 adds mode labels so
+            // query/similar/path searches stay distinguishable in audit rows.
+            subcommand: Some(cmd.audit_subcommand()),
+            tool_name: None,
+            target_type: Some("search".to_string()),
+            target_id: None,
+            role: "admin".to_string(),
+            arguments_json: None,
+            job_run_id: None,
+        },
+        Commands::Docs(cmd) => {
+            use crate::command::docs::DocsSubcommand;
+            let (sub, target_id) = match &cmd.command {
+                DocsSubcommand::List(_) => ("list", None),
+                DocsSubcommand::Show(args) => ("show", Some(args.path.as_str())),
+                DocsSubcommand::Add(args) => ("add", Some(args.path.as_str())),
+                DocsSubcommand::Index(_) => ("index", None),
+                DocsSubcommand::Migrate(_) => ("migrate", None),
+            };
+            CommandMeta {
+                command: "docs".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("docs".to_string()),
+                target_id: target_id.map(String::from),
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
+        // ORB-00289: `orbit adr list` mirrors the `orbit docs list` shape.
+        // Only `list` is on the CLI surface today; extend this match when
+        // more ADR subcommands get promoted.
         Commands::Adr(cmd) => {
             use crate::command::adr::AdrSubcommand;
             let sub = match &cmd.command {
-                AdrSubcommand::Migrate(_) => "migrate",
+                AdrSubcommand::List(_) => "list",
             };
             CommandMeta {
                 command: "adr".to_string(),
@@ -340,17 +390,23 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
-        Commands::Design(cmd) => {
-            use crate::command::design::DesignSubcommand;
-            let sub = match &cmd.command {
-                DesignSubcommand::Check(_) => "check",
+        Commands::Friction(cmd) => {
+            use crate::command::friction::FrictionSubcommand;
+            let (sub, target_id) = match &cmd.command {
+                FrictionSubcommand::Add(_) => ("add", None),
+                FrictionSubcommand::List(_) => ("list", None),
+                FrictionSubcommand::Show(args) => ("show", Some(args.id.as_str())),
+                FrictionSubcommand::Stats(_) => ("stats", None),
+                FrictionSubcommand::Tags(_) => ("tags", None),
+                FrictionSubcommand::Update(args) => ("update", Some(args.id.as_str())),
+                FrictionSubcommand::Resolve(args) => ("resolve", Some(args.id.as_str())),
             };
             CommandMeta {
-                command: "design".to_string(),
+                command: "friction".to_string(),
                 subcommand: Some(sub.to_string()),
                 tool_name: None,
-                target_type: Some("design_docs".to_string()),
-                target_id: None,
+                target_type: Some("friction".to_string()),
+                target_id: target_id.map(String::from),
                 role: "admin".to_string(),
                 arguments_json: None,
                 job_run_id: None,
@@ -362,12 +418,11 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 LearningSubcommand::Add(_) => "add",
                 LearningSubcommand::Comment(_) => "comment",
                 LearningSubcommand::List(_) => "list",
-                LearningSubcommand::Search(_) => "search",
                 LearningSubcommand::Show(_) => "show",
                 LearningSubcommand::Update(_) => "update",
                 LearningSubcommand::Upvote(_) => "upvote",
                 LearningSubcommand::Supersede(_) => "supersede",
-                LearningSubcommand::Reindex(_) => "reindex",
+                LearningSubcommand::Sync(_) => "sync",
                 LearningSubcommand::MigrateLayout(_) => "migrate-layout",
                 LearningSubcommand::Prune(_) => "prune",
             };
@@ -462,44 +517,6 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 tool_name: None,
                 target_type: Some("executor".to_string()),
                 target_id: target_id.map(String::from),
-                role: "admin".to_string(),
-                arguments_json: None,
-                job_run_id: None,
-            }
-        }
-        Commands::Metrics(cmd) => {
-            use crate::command::metrics::MetricsSubcommand;
-            let (sub, target_id) = match &cmd.command {
-                None => ("overview", None),
-                Some(MetricsSubcommand::Overview(_)) => ("overview", None),
-                Some(MetricsSubcommand::Knowledge(_)) => ("graph", None),
-                Some(MetricsSubcommand::Activity(_)) => ("activity", None),
-                Some(MetricsSubcommand::Task(args)) => ("task", Some(args.id.as_str())),
-                Some(MetricsSubcommand::Tools(_)) => ("tools", None),
-                Some(MetricsSubcommand::Invocations(_)) => ("invocations", None),
-            };
-            CommandMeta {
-                command: "metrics".to_string(),
-                subcommand: Some(sub.to_string()),
-                tool_name: None,
-                target_type: Some("metrics".to_string()),
-                target_id: target_id.map(String::from),
-                role: "admin".to_string(),
-                arguments_json: None,
-                job_run_id: None,
-            }
-        }
-        Commands::Scoreboard(cmd) => {
-            use crate::command::scoreboard::ScoreboardSubcommand;
-            let sub = match &cmd.command {
-                ScoreboardSubcommand::Summary(_) => "summary",
-            };
-            CommandMeta {
-                command: "scoreboard".to_string(),
-                subcommand: Some(sub.to_string()),
-                tool_name: None,
-                target_type: Some("scoreboard".to_string()),
-                target_id: None,
                 role: "admin".to_string(),
                 arguments_json: None,
                 job_run_id: None,
@@ -618,7 +635,6 @@ fn run_command_meta(cmd: &crate::command::run::RunCommand) -> CommandMeta {
 
     let (subcommand, target_type, target_id) = match &cmd.command {
         RunSubcommand::Ship(_) => ("ship", Some("workflow"), Some("ship")),
-        RunSubcommand::ShipAuto(_) => ("ship-auto", Some("workflow"), Some("ship-auto")),
         RunSubcommand::ShipLocal(_) => ("ship-local", Some("workflow"), Some("ship-local")),
         RunSubcommand::DuelPlan(args) => ("duel-plan", Some("task"), Some(args.task_id.as_str())),
         RunSubcommand::History(args) => ("history", Some("job_run"), args.job_id.as_deref()),
@@ -696,404 +712,5 @@ fn tool_run_input_identity(
                 .map(ToOwned::to_owned),
         ),
         _ => (None, None),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser;
-    use orbit_common::types::AuditEvent;
-    use serde_json::{Value, json};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-
-    use crate::command::Cli;
-
-    use super::*;
-
-    fn meta_for(args: &[&str]) -> CommandMeta {
-        let cli = Cli::parse_from(args);
-        extract_command_meta(&cli.command)
-    }
-
-    struct OrbitRunEnvGuard {
-        _lock: MutexGuard<'static, ()>,
-        saved: Option<String>,
-    }
-
-    fn unset_orbit_run_id() -> OrbitRunEnvGuard {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let lock = LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let saved = std::env::var("ORBIT_RUN_ID").ok();
-        // SAFETY: the guard serializes this test env mutation and restores the value on drop.
-        unsafe {
-            std::env::remove_var("ORBIT_RUN_ID");
-        }
-        OrbitRunEnvGuard { _lock: lock, saved }
-    }
-
-    impl Drop for OrbitRunEnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: the guard holds the serialization lock for the full mutation window.
-            unsafe {
-                match &self.saved {
-                    Some(value) => std::env::set_var("ORBIT_RUN_ID", value),
-                    None => std::env::remove_var("ORBIT_RUN_ID"),
-                }
-            }
-        }
-    }
-
-    fn audit_event_for_meta_without_orbit_run_id(meta: CommandMeta) -> AuditEvent {
-        let _env = unset_orbit_run_id();
-        let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
-        {
-            let mut guard = AuditGuard::new(&runtime, meta);
-            guard.mark_success();
-        }
-
-        let events = runtime
-            .list_audit_events(None, None, Some(AuditEventStatus::Success), None, 8)
-            .expect("list audit events");
-        assert_eq!(events.len(), 1);
-        events.into_iter().next().expect("single audit event")
-    }
-
-    #[test]
-    fn run_ship_audit_meta_uses_unified_workflow_alias() {
-        let pr = meta_for(&["orbit", "run", "ship", "T1"]);
-        assert_eq!(pr.command, "run");
-        assert_eq!(pr.subcommand.as_deref(), Some("ship"));
-        assert_eq!(pr.target_type.as_deref(), Some("workflow"));
-        assert_eq!(pr.target_id.as_deref(), Some("ship"));
-
-        let local = meta_for(&["orbit", "run", "ship", "-m", "local", "T1"]);
-        assert_eq!(local.subcommand.as_deref(), Some("ship"));
-        assert_eq!(local.target_type.as_deref(), Some("workflow"));
-        assert_eq!(local.target_id.as_deref(), Some("ship"));
-    }
-
-    #[test]
-    fn run_ship_auto_audit_meta_uses_deprecated_top_level_command() {
-        let meta = meta_for(&["orbit", "run", "ship-auto"]);
-        assert_eq!(meta.command, "run");
-        assert_eq!(meta.subcommand.as_deref(), Some("ship-auto"));
-        assert_eq!(meta.target_type.as_deref(), Some("workflow"));
-        assert_eq!(meta.target_id.as_deref(), Some("ship-auto"));
-    }
-
-    #[test]
-    fn run_ship_local_audit_meta_uses_deprecated_top_level_command() {
-        let meta = meta_for(&["orbit", "run", "ship-local", "T1"]);
-        assert_eq!(meta.command, "run");
-        assert_eq!(meta.subcommand.as_deref(), Some("ship-local"));
-        assert_eq!(meta.target_type.as_deref(), Some("workflow"));
-        assert_eq!(meta.target_id.as_deref(), Some("ship-local"));
-    }
-
-    #[test]
-    fn run_duel_plan_audit_meta_targets_task() {
-        let meta = meta_for(&["orbit", "run", "duel-plan", "T1"]);
-        assert_eq!(meta.command, "run");
-        assert_eq!(meta.subcommand.as_deref(), Some("duel-plan"));
-        assert_eq!(meta.target_type.as_deref(), Some("task"));
-        assert_eq!(meta.target_id.as_deref(), Some("T1"));
-    }
-
-    #[test]
-    fn tool_run_audit_meta_uses_agent_flags_for_role() {
-        let meta = meta_for(&[
-            "orbit",
-            "tool",
-            "run",
-            "orbit.graph.search",
-            "--agent",
-            "codex",
-            "--model",
-            "gpt-5.5",
-        ]);
-
-        assert_eq!(meta.command, "tool");
-        assert_eq!(meta.subcommand.as_deref(), Some("run"));
-        assert_eq!(meta.tool_name.as_deref(), Some("orbit.graph.search"));
-        assert_eq!(meta.role, "gpt-5.5");
-    }
-
-    #[test]
-    fn tool_run_audit_meta_uses_input_identity_for_role() {
-        let meta = meta_for(&[
-            "orbit",
-            "tool",
-            "run",
-            "orbit.graph.search",
-            "--input",
-            r#"{"query":"actor","agent":"codex","model":"gpt-5.5"}"#,
-        ]);
-
-        assert_eq!(meta.role, "gpt-5.5");
-    }
-
-    #[test]
-    fn tool_run_audit_meta_uses_model_only_input_for_role() {
-        let meta = meta_for(&[
-            "orbit",
-            "tool",
-            "run",
-            "orbit.graph.search",
-            "--input",
-            r#"{"query":"actor","model":"gpt-5.5"}"#,
-        ]);
-
-        assert_eq!(meta.role, "gpt-5.5");
-    }
-
-    #[test]
-    fn tool_run_audit_meta_prefers_input_identity_over_flags() {
-        let meta = meta_for(&[
-            "orbit",
-            "tool",
-            "run",
-            "orbit.graph.search",
-            "--agent",
-            "codex",
-            "--model",
-            "gpt-5.5",
-            "--input",
-            r#"{"query":"actor","agent":"claude","model":"opus-4.6"}"#,
-        ]);
-
-        assert_eq!(meta.role, "opus-4.6");
-    }
-
-    #[test]
-    fn tool_run_audit_meta_uses_agent_role_without_identity() {
-        let meta = meta_for(&["orbit", "tool", "run", "orbit.graph.search"]);
-
-        assert_eq!(meta.role, "agent");
-    }
-
-    #[test]
-    fn job_run_pipeline_worker_audit_uses_static_run_id_without_env() {
-        let meta = meta_for(&["orbit", "job", "run-pipeline-worker", "jrun-worker"]);
-        assert_eq!(meta.command, "job");
-        assert_eq!(meta.subcommand.as_deref(), Some("run-pipeline-worker"));
-        assert_eq!(meta.target_type.as_deref(), Some("job_run"));
-        assert_eq!(meta.target_id.as_deref(), Some("jrun-worker"));
-        assert_eq!(meta.job_run_id.as_deref(), Some("jrun-worker"));
-
-        let row = audit_event_for_meta_without_orbit_run_id(meta);
-        assert_eq!(row.command, "job");
-        assert_eq!(row.subcommand.as_deref(), Some("run-pipeline-worker"));
-        assert_eq!(row.target_id.as_deref(), Some("jrun-worker"));
-        assert_eq!(row.job_run_id.as_deref(), Some("jrun-worker"));
-    }
-
-    #[test]
-    fn job_replay_audit_uses_static_run_id_without_env() {
-        let meta = meta_for(&["orbit", "job", "replay", "jrun-source"]);
-        assert_eq!(meta.command, "job");
-        assert_eq!(meta.subcommand.as_deref(), Some("replay"));
-        assert_eq!(meta.target_type.as_deref(), Some("job_run"));
-        assert_eq!(meta.target_id.as_deref(), Some("jrun-source"));
-        assert_eq!(meta.job_run_id.as_deref(), Some("jrun-source"));
-
-        let row = audit_event_for_meta_without_orbit_run_id(meta);
-        assert_eq!(row.command, "job");
-        assert_eq!(row.subcommand.as_deref(), Some("replay"));
-        assert_eq!(row.target_id.as_deref(), Some("jrun-source"));
-        assert_eq!(row.job_run_id.as_deref(), Some("jrun-source"));
-    }
-
-    #[test]
-    fn audit_guard_event_json_shapes_are_snapshotted() {
-        let events = vec![
-            audit_guard_event_json(AuditEventStatus::Success),
-            audit_guard_event_json(AuditEventStatus::Failure),
-            audit_guard_event_json(AuditEventStatus::Denied),
-        ];
-
-        let actual = serde_json::to_string_pretty(&events).expect("serialize audit snapshot");
-        assert_eq!(
-            actual,
-            include_str!("snapshots/audit_guard_event_json_shapes.json").trim_end()
-        );
-    }
-
-    fn audit_guard_event_json(status: AuditEventStatus) -> Value {
-        let _ = orbit_core::command::tool::take_tool_audit_recorded();
-        let runtime = OrbitRuntime::in_memory().expect("build in-memory runtime");
-        {
-            let mut guard = AuditGuard::new(&runtime, snapshot_meta());
-            match status {
-                AuditEventStatus::Success => guard.mark_success(),
-                AuditEventStatus::Failure => {
-                    let error = OrbitError::InvalidInput("snapshot failure".to_string());
-                    guard.mark_failure(&error);
-                }
-                AuditEventStatus::Denied => guard.mark_denied("snapshot denied"),
-            }
-        }
-
-        let events = runtime
-            .list_audit_events(
-                None,
-                Some("orbit.task.update".to_string()),
-                Some(status),
-                None,
-                8,
-            )
-            .expect("list audit events");
-        assert_eq!(events.len(), 1);
-        let mut value = serde_json::to_value(&events[0]).expect("serialize audit event");
-        normalize_audit_event_json(&mut value);
-        value
-    }
-
-    fn snapshot_meta() -> CommandMeta {
-        CommandMeta {
-            command: "tool".to_string(),
-            subcommand: Some("run".to_string()),
-            tool_name: Some("orbit.task.update".to_string()),
-            target_type: Some("tool".to_string()),
-            target_id: Some("orbit.task.update".to_string()),
-            role: "gpt-5.5".to_string(),
-            arguments_json: Some(r#"{"id":"ORB-00002","model":"gpt-5.5"}"#.to_string()),
-            job_run_id: None,
-        }
-    }
-
-    fn normalize_audit_event_json(value: &mut Value) {
-        let object = value
-            .as_object_mut()
-            .expect("audit event serializes to object");
-        object.insert("id".to_string(), json!(1));
-        object.insert("execution_id".to_string(), json!("<execution_id>"));
-        object.insert("timestamp".to_string(), json!("<timestamp>"));
-        object.insert("duration_ms".to_string(), json!(0));
-        object.insert(
-            "working_directory".to_string(),
-            json!("<working_directory>"),
-        );
-        object.insert("host".to_string(), json!("<host>"));
-        object.insert("pid".to_string(), json!(0));
-        object.insert("task_id".to_string(), Value::Null);
-        object.insert("job_run_id".to_string(), Value::Null);
-        object.insert("activity_id".to_string(), Value::Null);
-        object.insert("step_index".to_string(), Value::Null);
-    }
-
-    /// Integration tests that exercise the real `AuditGuard::Drop` against an
-    /// in-memory runtime, covering the four CLI `tool run` paths the
-    /// dedup mechanism must handle: success-via-runtime (suppress guard
-    /// emission), failure-via-runtime (suppress guard emission), invalid
-    /// JSON / missing input (guard records its own row), and `--dry-run`
-    /// (guard records its own row). All four must produce exactly one
-    /// audit row.
-    mod cli_dedup_invariant {
-        use super::*;
-        use orbit_core::command::tool::take_tool_audit_recorded;
-        use serde_json::json;
-
-        fn fresh_runtime() -> OrbitRuntime {
-            // Reset the dedup signal so cross-test thread-local leakage
-            // cannot mask a real bug in the per-call set/clear cycle.
-            let _ = take_tool_audit_recorded();
-            OrbitRuntime::in_memory().expect("build in-memory runtime")
-        }
-
-        fn tool_run_meta(tool_name: &str) -> CommandMeta {
-            CommandMeta {
-                command: "tool".to_string(),
-                subcommand: Some("run".to_string()),
-                tool_name: Some(tool_name.to_string()),
-                target_type: Some("tool".to_string()),
-                target_id: Some(tool_name.to_string()),
-                role: "agent".to_string(),
-                arguments_json: None,
-                job_run_id: None,
-            }
-        }
-
-        fn count_rows(runtime: &OrbitRuntime, tool_name: &str) -> usize {
-            runtime
-                .list_audit_events(None, Some(tool_name.to_string()), None, None, 16)
-                .expect("list audit events")
-                .len()
-        }
-
-        #[test]
-        fn success_via_runtime_yields_exactly_one_row() {
-            let runtime = fresh_runtime();
-            {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.search"));
-                let result = runtime.execute_tool_command(
-                    "orbit.task.search",
-                    json!({ "query": "anything" }),
-                    None,
-                    None,
-                );
-                assert!(result.is_ok());
-                guard.mark_success();
-            }
-            assert_eq!(
-                count_rows(&runtime, "orbit.task.search"),
-                1,
-                "runtime owns the row, guard suppressed"
-            );
-        }
-
-        #[test]
-        fn dispatch_failure_via_runtime_yields_exactly_one_row() {
-            let runtime = fresh_runtime();
-            {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.show"));
-                let result = runtime.execute_tool_command("orbit.task.show", json!({}), None, None);
-                match &result {
-                    Ok(_) => panic!("expected dispatch failure"),
-                    Err(err) => guard.mark_failure(err),
-                }
-            }
-            assert_eq!(
-                count_rows(&runtime, "orbit.task.show"),
-                1,
-                "runtime owns the row even on dispatch failure"
-            );
-        }
-
-        #[test]
-        fn invalid_json_bail_before_runtime_yields_exactly_one_row() {
-            let runtime = fresh_runtime();
-            {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.search"));
-                // Simulate a CLI invalid-JSON parse failure that happens
-                // before `execute_tool_command` is reached.
-                let parse_err = OrbitError::InvalidInput("invalid JSON input: ...".to_string());
-                guard.mark_failure(&parse_err);
-                // Guard drops here without the runtime ever recording an
-                // audit row.
-            }
-            assert_eq!(
-                count_rows(&runtime, "orbit.task.search"),
-                1,
-                "guard records its own row when runtime is never reached"
-            );
-        }
-
-        #[test]
-        fn dry_run_bail_before_runtime_yields_exactly_one_row() {
-            let runtime = fresh_runtime();
-            {
-                let mut guard = AuditGuard::new(&runtime, tool_run_meta("orbit.task.search"));
-                // `--dry-run` returns Ok without invoking the runtime.
-                guard.mark_success();
-            }
-            assert_eq!(
-                count_rows(&runtime, "orbit.task.search"),
-                1,
-                "guard records its own row for the dry-run short-circuit"
-            );
-        }
     }
 }

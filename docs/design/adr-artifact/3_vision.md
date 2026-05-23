@@ -1,8 +1,16 @@
-# ADR Artifact — Vision
+---
+summary: "ADR Artifact — Vision"
+type: design
+title: "ADR Artifact — Vision"
+owner: claude
+last_updated: 2026-05-10
+status: Draft
+feature: adr-artifact
+doc_role: vision
+tags: ["adr-artifact"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-10
+# ADR Artifact — Vision
 
 This document captures open questions that the v2 implementation should resolve, prior art that informed the proposal, and what — if anything — is distinctive about doing ADRs this way inside an agent-first system. See [1_overview.md](./1_overview.md) for motivation and [2_design.md](./2_design.md) for the mechanism.
 
@@ -79,7 +87,7 @@ None of this is novel in isolation. The combination — structured ADRs + agent-
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — current ADR template and folder conventions this proposal modifies.
 - [docs/design/task-sync/](../task-sync/) — closest v2-design analog; also docs-only at v1.
 - [crates/orbit-store/src/file/task_store/](../../../crates/orbit-store/src/file/task_store/) — the layered-store pattern this design copies.
-- [crates/orbit-embed/src/vector/](../../../crates/orbit-embed/src/vector/) — semantic-search infrastructure reused by `orbit.adr.search`.
+- [crates/orbit-embed/src/vector/](../../../crates/orbit-embed/src/vector/) — orbit-search infrastructure reused by `orbit.adr.search`.
 
 ### External
 

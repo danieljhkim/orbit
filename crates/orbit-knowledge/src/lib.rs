@@ -48,6 +48,7 @@ pub mod graph;
 pub mod graph_bench;
 mod io;
 pub mod lock;
+pub mod metrics;
 pub mod pipeline;
 mod selector;
 pub mod service;
@@ -62,11 +63,15 @@ pub use selector::{Selector, SelectorParseError};
 pub use service::{TaskGraphScope, TaskGraphService, default_knowledge_dir};
 pub use store::{
     DEFAULT_BLOB_CACHE_CAPACITY, DEFAULT_OBJECT_CACHE_CAPACITY, GraphObjectCache,
-    KnowledgeEntryKind, KnowledgePack, KnowledgePackEntry, KnowledgePackTimeout, KnowledgeStore,
-    LeafData, SymbolSummary, UnresolvedSelectorReason, load_task_working_graph,
-    overlay_pack_with_working_graph, pack_from_working_graph, save_task_working_graph,
-    task_working_graph_state_path,
+    KnowledgeEntryKind, KnowledgePack, KnowledgePackAutoRefreshDiagnostic,
+    KnowledgePackDiagnostics, KnowledgePackEntry, KnowledgePackErrorDiagnostic,
+    KnowledgePackResult, KnowledgePackTimeout, KnowledgeStore, LeafData, SymbolSummary,
+    UnresolvedSelectorReason, load_task_working_graph, overlay_pack_with_working_graph,
+    pack_from_working_graph, save_task_working_graph, task_working_graph_state_path,
 };
 pub use working_graph::{
     LeafEdit, LeafVersionChain, MoveResult, WorkingGraph, WorkingLeaf, WriteError, WriteResult,
 };
+
+#[cfg(test)]
+mod tests;

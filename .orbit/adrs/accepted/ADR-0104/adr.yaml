@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0104
 title: Codex state and side roots are narrow sandbox write allowances
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260428-10
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-012

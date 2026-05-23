@@ -53,14 +53,14 @@ fn tool_run_task_update_with_noisy_background_companion_has_clean_stderr() {
 
 #[test]
 #[cfg(unix)]
-fn direct_semantic_command_surfaces_companion_stderr() {
+fn direct_search_semantic_command_surfaces_companion_stderr() {
     let workspace = TestWorkspace::new();
     workspace.write_failing_companion();
 
     let output = run_orbit(
         &workspace.work,
         &workspace.home,
-        &["semantic", "search", "anything"],
+        &["search", "anything", "--hybrid", "--kind", "task"],
         Some(&workspace.companion),
     );
 
@@ -73,7 +73,7 @@ fn direct_semantic_command_surfaces_companion_stderr() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("direct semantic failure detail"),
-        "direct semantic command should inherit companion stderr\nstderr:\n{stderr}"
+        "direct search command should inherit companion stderr\nstderr:\n{stderr}"
     );
 }
 
@@ -199,10 +199,13 @@ fn run_orbit(cwd: &Path, home: &Path, args: &[&str], companion: Option<&Path>) -
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
-        .env_remove("ORBIT_EMBED_COMPANION")
+        .env_remove("ORBIT_SEARCH_COMPANION")
+        .env_remove("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE")
         .args(args);
     if let Some(path) = companion {
-        command.env("ORBIT_EMBED_COMPANION", path);
+        command
+            .env("ORBIT_SEARCH_COMPANION", path)
+            .env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE", "1");
     }
     command.output().expect("run orbit")
 }

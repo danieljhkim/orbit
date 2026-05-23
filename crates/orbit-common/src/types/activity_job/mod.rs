@@ -37,3 +37,6 @@ pub use tool_allowlist::{
     validate_activity_tool_allowlist_against_registered_tools, validate_tool_allowlist,
     validate_tool_allowlist_against_registered_tools,
 };
+
+#[cfg(test)]
+mod tests;

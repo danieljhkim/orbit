@@ -1,39 +1,45 @@
-use orbit_common::types::{OrbitError, optional_string_alias, optional_u32_alias, required_string};
-use orbit_embed::{SemanticRelatedParams, SemanticSearchParams};
+use std::str::FromStr;
+
+use orbit_common::types::{OrbitError, optional_string_alias};
+use orbit_search::{
+    IndexKind, SemanticIndexParams, SemanticInstallParams, SemanticUninstallParams,
+};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
 
-pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let result = runtime.semantic_search(SemanticSearchParams {
-        query: required_string(&input, &["query"], "query")?,
-        limit: optional_limit(&input)?.unwrap_or(10),
-        field: optional_string_alias(&input, &["field"])?,
-        kind: optional_string_alias(&input, &["kind"])?,
-        model: optional_string_alias(
-            &input,
-            &["embedding_model", "embeddingModel", "embedding-model"],
-        )?,
-    })?;
-    serde_json::to_value(result).map_err(|error| {
-        OrbitError::Execution(format!("serialize semantic search result: {error}"))
-    })
+use super::input::optional_bool_alias;
+
+pub(super) fn install(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    to_json(runtime.semantic_install(SemanticInstallParams {
+        model: optional_string_alias(&input, &["model", "embedding_model", "embeddingModel"])?,
+        force: optional_bool_alias(&input, &["force"])?.unwrap_or(false),
+    })?)
 }
 
-pub(super) fn related(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let result = runtime.semantic_related(SemanticRelatedParams {
-        task_id: required_string(&input, &["id", "task_id", "taskId", "task-id"], "id")?,
-        limit: optional_limit(&input)?.unwrap_or(10),
-        model: optional_string_alias(
-            &input,
-            &["embedding_model", "embeddingModel", "embedding-model"],
-        )?,
-    })?;
-    serde_json::to_value(result).map_err(|error| {
-        OrbitError::Execution(format!("serialize semantic related result: {error}"))
-    })
+pub(super) fn uninstall(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    to_json(runtime.semantic_uninstall(SemanticUninstallParams {
+        model: optional_string_alias(&input, &["model", "embedding_model", "embeddingModel"])?,
+        all: optional_bool_alias(&input, &["all"])?.unwrap_or(false),
+    })?)
 }
 
-fn optional_limit(input: &Value) -> Result<Option<usize>, OrbitError> {
-    optional_u32_alias(input, &["limit"]).map(|value| value.map(|limit| limit as usize))
+pub(super) fn stats(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
+    to_json(runtime.semantic_stats()?)
+}
+
+pub(super) fn index(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
+    let kind = optional_string_alias(&input, &["kind"])?
+        .map(|raw| IndexKind::from_str(&raw))
+        .transpose()?;
+    to_json(runtime.semantic_index(SemanticIndexParams {
+        model: optional_string_alias(&input, &["model", "embedding_model", "embeddingModel"])?,
+        force: optional_bool_alias(&input, &["force"])?.unwrap_or(false),
+        kind,
+    })?)
+}
+
+fn to_json<T: serde::Serialize>(value: T) -> Result<Value, OrbitError> {
+    serde_json::to_value(value)
+        .map_err(|error| OrbitError::Execution(format!("serialize semantic result: {error}")))
 }

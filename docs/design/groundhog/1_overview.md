@@ -1,8 +1,16 @@
-# Groundhog — Overview
+---
+summary: "Groundhog — Overview"
+type: design
+title: "Groundhog — Overview"
+owner: codex
+last_updated: 2026-05-12
+status: Draft
+feature: groundhog
+doc_role: overview
+tags: ["groundhog"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-12
+# Groundhog — Overview
 
 > *"The agent gets to retry each checkpoint like Bill Murray in Groundhog Day — it wakes up fresh but remembers what it learned."*
 

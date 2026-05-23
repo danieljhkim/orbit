@@ -1,3 +1,7 @@
+---
+type: pattern
+summary: "Newtype Wrapper"
+---
 # Newtype Wrapper
 
 Wrap a primitive (typically `String` or a numeric type) in a one-field struct with a private inner value and a *fallible* constructor that validates. Downstream code accepts the newtype and trusts the value is well-formed — invariants are enforced once, at the boundary.

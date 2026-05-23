@@ -1,0 +1,17 @@
+schema_version: 2
+id: ADR-0171
+title: ID-prefix dispatch for orbit-docs `related_artifacts`
+status: proposed
+owner: claude
+created_at: 2026-05-19T06:32:42.377346Z
+last_updated: 2026-05-19T06:32:42.377346Z
+related_features:
+- orbit-docs
+related_tasks:
+- ORB-00163
+tags: []
+paths: []
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

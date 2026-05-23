@@ -60,6 +60,14 @@ impl Tool for OrbitKnowledgeSearchTool {
                     required: false,
                 },
                 ToolParam {
+                    name: "allow_fuzzy".to_string(),
+                    description:
+                        "Enable fuzzy name fallback when the deterministic pass returns zero results."
+                            .to_string(),
+                    param_type: "boolean".to_string(),
+                    required: false,
+                },
+                ToolParam {
                     name: "format".to_string(),
                     description: "structured/selectors.".to_string(),
                     param_type: "string".to_string(),
@@ -97,6 +105,10 @@ impl Tool for OrbitKnowledgeSearchTool {
             .get("include_non_code")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let allow_fuzzy = input
+            .get("allow_fuzzy")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let format = super::super::optional_string(&input, "format")?;
         let use_selectors = format.as_deref() == Some("selectors");
 
@@ -108,6 +120,7 @@ impl Tool for OrbitKnowledgeSearchTool {
             prefix,
             source_regex,
             include_non_code,
+            allow_fuzzy,
             limit,
         })
         .map_err(super::knowledge_error_to_orbit)?;
@@ -131,6 +144,12 @@ impl Tool for OrbitKnowledgeSearchTool {
                     });
                     if let Some(file) = hit.file {
                         obj["file"] = json!(file);
+                    }
+                    if let Some(match_kind) = hit.match_kind {
+                        obj["match_kind"] = json!(match_kind);
+                    }
+                    if let Some(score) = hit.score {
+                        obj["score"] = json!(score);
                     }
                     if has_source_regex {
                         obj["matched_lines"] = json!(

@@ -304,7 +304,14 @@ fn build_writer(
 ) -> Result<Arc<V2AuditWriter>, Box<dyn std::error::Error>> {
     let audit_root = root.join("audit");
     std::fs::create_dir_all(&audit_root)?;
-    let writer = V2AuditWriter::with_disk_sinks(&audit_root, run_id, "smoke".to_string(), None)?;
+    let writer = V2AuditWriter::with_disk_sinks(
+        &audit_root,
+        orbit_store::Store::open_in_memory()?,
+        "ws_smoke",
+        run_id,
+        "smoke".to_string(),
+        None,
+    )?;
     Ok(writer)
 }
 
@@ -371,6 +378,7 @@ impl V2RuntimeHost for PipelineHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }
@@ -500,5 +508,6 @@ fn _type_gate() {
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 60,
         role: None,
+        proc_allowed_programs: None,
     };
 }

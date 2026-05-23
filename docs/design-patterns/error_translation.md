@@ -1,3 +1,7 @@
+---
+type: pattern
+summary: "Crate-Boundary Error Translation"
+---
 # Crate-Boundary Error Translation
 
 Each crate defines its own typed error (`thiserror`-derived) for internal use; `OrbitError` in `orbit-common` is the workspace-public error surface. A single translation function — `*_error_to_orbit` — lives next to the typed error and is called at every cross-crate boundary via `.map_err(...)`.

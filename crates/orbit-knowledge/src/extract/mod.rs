@@ -111,3 +111,6 @@ pub fn extract_file(source: &str, language: Language) -> ExtractionResult {
         .map(|e| e.extract(source))
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests;

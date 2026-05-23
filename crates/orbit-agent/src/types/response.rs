@@ -1,11 +1,15 @@
 #[path = "response/envelope.rs"]
-mod envelope;
+// Visible to sibling-layout tests for this file-rooted module without
+// reintroducing a nested `response/tests` tree.
+pub(in crate::types) mod envelope;
 #[path = "response/tool_calls.rs"]
 mod tool_calls;
 #[path = "response/trace.rs"]
 mod trace;
 #[path = "response/usage.rs"]
-mod usage;
+// Visible to sibling-layout tests for this file-rooted module without
+// reintroducing a nested `response/tests` tree.
+pub(in crate::types) mod usage;
 
 use orbit_common::types::{OrbitError, ToolCallTrace};
 use serde_json::Value;

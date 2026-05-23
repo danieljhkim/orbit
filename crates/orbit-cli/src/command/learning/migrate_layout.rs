@@ -17,12 +17,15 @@ impl LearningMigrateLayoutArgs {
         root_override: Option<&std::path::Path>,
     ) -> Result<(), OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let (global_root, workspace_root) =
-            OrbitRuntime::resolve_roots_for_cwd(&cwd, root_override)?;
-        let report = migrate_learning_layout_at(&workspace_root)?;
+        let roots = OrbitRuntime::resolve_roots_for_cwd(&cwd, root_override)?;
+        let report = migrate_learning_layout_at(&roots.shared_root)?;
         if !report.already_migrated {
-            let runtime = OrbitRuntime::from_roots(&global_root, &workspace_root)?;
-            runtime.reindex_learnings()?;
+            let runtime = OrbitRuntime::from_resolved_roots(
+                &roots.global_root,
+                &roots.shared_root,
+                &roots.local_root,
+            )?;
+            runtime.sync_learnings()?;
         }
         print_report(&report, self.json)
     }
@@ -32,7 +35,7 @@ impl Execute for LearningMigrateLayoutArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let report = runtime.migrate_learning_layout()?;
         if !report.already_migrated {
-            runtime.reindex_learnings()?;
+            runtime.sync_learnings()?;
         }
         print_report(&report, self.json)
     }

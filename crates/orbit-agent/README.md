@@ -118,8 +118,8 @@ first to trip wins.
 ## Audit model
 
 Every operation emits a structured event. Events carry sha256 pointers
-to verbatim payloads; full bodies live in a separate content-addressed
-store. Event kinds:
+to redacted payloads; full bodies live in a separate content-addressed
+store keyed by the post-redaction bytes. Event kinds:
 
 - `session_spawn`, `session_close`
 - `http_request`, `http_response`
@@ -137,7 +137,7 @@ Every event carries `run_id`, `session_id`, optional `task_id`, and
 ```
 {audit_root}/
   loop/{run_id}.jsonl              one JSON object per line, append-only, created on first event
-  blobs/{hash[..2]}/{hash}         content-addressed verbatim payloads
+  blobs/{hash[..2]}/{hash}         content-addressed redacted payloads
 ```
 
 The JSONL file and blob store are designed to be read by a later
@@ -150,18 +150,23 @@ examples use temporary roots under the system temp directory.
 
 ## Redaction
 
-Blob writes run through `RedactionMiddleware::default_redaction()`
-before the bytes reach disk. The default ruleset scrubs:
+Blob writes run through `redact_all()` before the bytes are hashed or reach
+disk. Callers can layer a stronger `PatternRedactor` on top, but cannot weaken
+the default env-value and pattern redaction. The default ruleset scrubs:
 
+- live sensitive environment variable values such as `*_TOKEN`, `*_SECRET`,
+  `*_PASSWORD`, `*_API_KEY`, auth/session/cookie names, and private keys
 - `"authorization": "..."`, `"x-api-key": "..."`, `"api_key": "..."`
   (JSON-shaped)
 - `Authorization: ...`, `x-api-key: ...`, `api_key: ...` (raw header
   lines)
 - `Bearer <token>` anywhere in the payload
+- high-confidence provider token shapes such as `sk-...`, `ghp_...`, and
+  `xox...` values
 
 Redaction runs at **write time**, not read time — the stored bytes are
-already safe, so a future `orbit.audit.loop.blob.get` tool does not need
-to re-apply it.
+already safe, and blob references point to the redacted content hash. A future
+`orbit.audit.loop.blob.get` tool does not need to re-apply redaction.
 
 ## Running the examples
 

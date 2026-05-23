@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0008
 title: CLI subprocess cwd is runtime-owned workspace state
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - activity-job
 related_tasks:
 - T20260508-8
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-045

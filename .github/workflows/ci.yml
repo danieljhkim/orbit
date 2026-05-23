@@ -10,6 +10,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  NEXTEST_VERSION: 0.9.136
+  NEXTEST_LINUX_SHA256: a098eed56f2dd88c7fdca1e554a6b99fa1ffbd2a7a1c41b865700112981f6f52
 
 jobs:
   ci:
@@ -34,6 +36,18 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest
+        run: |
+          set -euo pipefail
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+          archive="$(mktemp)"
+          mkdir -p "$cargo_bin"
+          curl -LsSf "https://get.nexte.st/${NEXTEST_VERSION}/linux" -o "$archive"
+          echo "${NEXTEST_LINUX_SHA256}  ${archive}" | sha256sum -c -
+          tar zxf "$archive" -C "$cargo_bin"
+          rm -f "$archive"
+          cargo nextest --version
 
       - name: Run CI guardrails
         run: ./scripts/ci-guardrails.sh

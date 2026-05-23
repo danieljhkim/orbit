@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0074
 title: Task-id graph search as a scan filter, not a sidecar index
 status: superseded
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260426-0220
+tags: []
+paths: []
 supersedes: []
 superseded_by: ADR-0083
 legacy_ids:

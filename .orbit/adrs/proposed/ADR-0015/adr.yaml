@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0015
 title: Defer implementation to v2; v1 ships docs only
 status: proposed
@@ -8,6 +8,8 @@ last_updated: 2026-05-11T02:06:39.298191Z
 related_features:
 - adr-artifact
 related_tasks: []
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - adr-artifact/ADR-001

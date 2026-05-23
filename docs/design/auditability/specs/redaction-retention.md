@@ -12,7 +12,9 @@ Auditability and secrecy pull in opposite directions. Orbit needs faithful recor
 - Command audit error messages are scrubbed for sensitive live environment values before insertion.
 - Pipeline outputs persisted by runtime helpers are scrubbed for sensitive live environment values.
 - HTTP-shaped payload redaction covers authorization headers, x-api-key headers, JSON API-key fields, and bearer tokens.
+- Shared pattern redaction covers high-confidence provider token shapes embedded in prose; exact whole-token artifact fields are rejected instead of persisted.
 - CLI argv redaction uses HTTP defaults plus bare `sk-...` token scrubbing when argv-shaped data is being persisted.
+- Orbit artifact write tools use the action-keyed field policy in [artifact-redaction.md](./artifact-redaction.md) before YAML/markdown/JSON persistence.
 - Default tracing output redacts string field values, `Debug`-formatted field values, and unstructured `message` fields before writing stderr or `~/.orbit/state/logs/orbit.jsonl`.
 - Readers should not need to apply the standard redactor again for normal stored blobs.
 

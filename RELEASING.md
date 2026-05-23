@@ -41,25 +41,26 @@ git log v<prev>..HEAD --pretty='%s' --no-merges | grep -oE 'T[0-9]{8}-[0-9]+' | 
 
 If the unique task ID count exceeds ~30, delegate the per-task lookups to a subagent. The subagent should call `orbit.task.show` for each ID, group findings by theme, and return a structured outline with breaking-change candidates flagged for human review.
 
-Track unattributed commits (no task ID) separately — they still need to be reflected in the CHANGELOG.
+The survey is for *your* understanding and for breaking-change triage — not a CHANGELOG inventory. Most surveyed items will not make the cut in step 2.
 
 ### 2. Draft the CHANGELOG entry
 
+CHANGELOG is the consumer-facing release note, not a commit log. Keep it short. Anyone wanting the full diff runs `git log v<prev>..HEAD` — don't reproduce it here.
+
 Insert a new `## <X.Y.Z>` section at the top of `CHANGELOG.md`. Section order:
 
-1. **Release scope** (optional) — 2–4 headline bullets. Use only when the release introduces a major subsystem, pivots positioning, or warrants a top-of-page narrative. Skip for routine patch releases.
-2. **Breaking Changes** — only for minor bumps; one bullet per breaking item.
-3. **Features**
-4. **Fixes**
-5. **Chores** — refactors, docs, release metadata.
+1. **Breaking Changes** — only for minor bumps; one bullet per breaking item. Always list every breaking change.
+2. **Highlights** — 3–6 bullets covering user-facing features or behavioral improvements that meaningfully change how Orbit is used. Pick the headlines; drop the rest.
+
+Omit entirely: internal refactors, module / crate splits, dashboard JS reorganization, lint or clippy fixes, dependency bumps, docs / ADR / learning churn, release metadata, unattributed cleanup commits, and small bug fixes with no user-visible impact. If you're unsure whether something is a Highlight, it isn't.
 
 Bullet shape:
 
 ```
-- **Theme name**: one-sentence description that reads in isolation. ([T20260510-13], [T20260510-14])
+- **Theme name**: one-sentence description that reads in isolation. ([ORB-00013])
 ```
 
-Group related task IDs into a single themed bullet rather than emitting one bullet per task. Cite commit SHAs (`[commit abc1234]`) for items with no task ID.
+Group related task IDs into a single themed bullet rather than emitting one bullet per task. Cite the lead task ID only; skip commit SHAs.
 
 ### 3. Confirm breaking changes with the human
 
@@ -123,7 +124,7 @@ Use the agent commit identity that matches the model running the release (`claud
 ```sh
 git tag -a v<X.Y.Z> -m "v<X.Y.Z>
 
-See CHANGELOG.md for the full release notes. Highlights:
+See CHANGELOG.md. Highlights:
 - ...
 - ...
 - N breaking changes (...)"
@@ -150,7 +151,49 @@ gh pr create --base main --head agent-main \
   --body "Promotes v<X.Y.Z>. See CHANGELOG.md."
 ```
 
-Merge with a **merge commit** (not squash) so the release tag remains reachable from `main`'s history. The PR is a fast-forward unless a hotfix landed on `main` since the last release — in that case resolve via merge, not rebase. See [Hotfix flow](#hotfix-flow) for the inverse direction.
+Merge with a **merge commit** (`gh pr merge <N> --merge --admin`), not squash or rebase, so the release tag remains reachable from `main`'s history. The merge always creates a new commit on `main` — even with no hotfix on `main` — because `agent-main` carries the back-merge commit from the prior release (see §10c).
+
+If `gh pr merge --merge` errors with `Merge commits are not allowed on this repository`, the repo's `allow_merge_commit` setting is off. Flip it on, merge, restore:
+
+```sh
+gh api -X PATCH repos/danieljhkim/orbit -f allow_merge_commit=true
+gh pr merge <N> --merge --admin
+gh api -X PATCH repos/danieljhkim/orbit -f allow_merge_commit=false
+```
+
+### 10c. Post-merge: back-merge to `agent-main`
+
+After the release PR merges, `main` carries the merge commit that `agent-main` doesn't have. Back-merge `main` → `agent-main` in the same session — never defer — so the dev branch stays reachability-equivalent with prod:
+
+```sh
+git checkout agent-main
+git pull --ff-only origin agent-main      # safety
+git merge --no-ff origin/main \
+  -m "chore: back-merge main into agent-main after v<X.Y.Z>"
+git push origin agent-main
+```
+
+`agent-main` has GitHub branch protection blocking deletion (`allow_deletions: false`), so the repo-wide `delete_branch_on_merge: true` won't remove it when the PR merges — the branch is always there to back-merge into. If you find `agent-main` missing from origin (protection got dropped), recreate it from `main` and reapply the minimal protection:
+
+```sh
+git push origin origin/main:refs/heads/agent-main
+cat <<'EOF' | gh api -X PUT repos/danieljhkim/orbit/branches/agent-main/protection --input -
+{
+  "required_status_checks": null,
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "allow_deletions": false,
+  "allow_force_pushes": true
+}
+EOF
+```
+
+If a release ever ships without the back-merge, drift compounds (N commits behind `main` after N skipped releases). Recover by either running the same back-merge above (resolves cleanly regardless of N) or, if `agent-main` has no in-flight work, reset it to `main` directly:
+
+```sh
+git push origin origin/main:refs/heads/agent-main --force-with-lease
+```
 
 ### 11. Mark the Orbit task done
 

@@ -32,7 +32,12 @@ pub fn run_groundhog_activity(
     fs_profile: Option<&str>,
 ) -> Result<DispatchOutcome, DispatchError> {
     let task_id = required_input_string(input, "task_id")?;
-    let tool_ctx = host.tool_context_for_activity(Some(run_id), fs_profile, None);
+    let tool_ctx = host.tool_context_for_activity(
+        Some(run_id),
+        fs_profile,
+        None,
+        spec.proc_allowed_programs.as_deref(),
+    );
     let task = load_task(host, &tool_ctx, &task_id)?;
     let plan = parse_groundhog_plan(&task.plan, &task_id)?;
     let workspace_path = resolve_workspace_path(input, &tool_ctx, &None)?;
@@ -285,3 +290,6 @@ fn required_input_string(input: &Value, key: &str) -> Result<String, DispatchErr
             DispatchError::GroundhogFailed(format!("missing `{key}` in groundhog input"))
         })
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,17 +1,20 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{AuditEvent, OrbitError, StoredTool};
+use orbit_common::types::{AuditEvent, LearningInjectionState, OrbitError, StoredTool};
 
 use super::contracts::{
-    AuditEventStoreBackend, TaskReservationCheckParams, TaskReservationCheckResult,
-    TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    AuditEventStoreBackend, SessionLearningStateStoreBackend, TaskReservationCheckParams,
+    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
-    TaskReservationStoreBackend, ToolStoreBackend,
+    TaskReservationStoreBackend, ToolStoreBackend, V2AuditEnvelopeStoreBackend,
 };
 use crate::Store;
 use crate::scope::{ScopeStrategy, ScopedStore, resolve};
 use crate::sqlite::audit_event_store::{AuditEventFilter, AuditEventInsertParams};
+use crate::sqlite::v2_audit_store::{
+    V2AuditEventFilter, V2AuditEventInsertParams, V2AuditEventRow,
+};
 
 #[derive(Clone)]
 pub(crate) struct SqliteToolStoreBackend {
@@ -78,6 +81,13 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
         self.store.get_audit_event_durations(since, tool)
     }
 
+    fn get_audit_event_durations_null_tool(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<i64>, OrbitError> {
+        self.store.get_audit_event_durations_null_tool(since)
+    }
+
     fn get_audit_event_hourly_buckets(
         &self,
         since: &DateTime<Utc>,
@@ -115,6 +125,20 @@ impl AuditEventStoreBackend for SqliteAuditEventStoreBackend {
         self.store.get_audit_top_tool_calls(since, limit)
     }
 
+    fn get_audit_event_aggregates_by_tool(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<crate::AuditToolAggregate>, OrbitError> {
+        self.store.get_audit_event_aggregates_by_tool(since)
+    }
+
+    fn get_audit_event_aggregates_by_role(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<crate::AuditRoleAggregate>, OrbitError> {
+        self.store.get_audit_event_aggregates_by_role(since)
+    }
+
     fn prune_audit_events(&self, older_than: &DateTime<Utc>) -> Result<usize, OrbitError> {
         self.store.prune_audit_events(older_than)
     }
@@ -136,6 +160,63 @@ impl ScopedStore<AuditEvent> for SqliteAuditEventStoreBackend {
             .parse::<i64>()
             .map_err(|e| OrbitError::Store(format!("invalid audit event id '{key}': {e}")))?;
         self.store.get_audit_event(id)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SqliteV2AuditEnvelopeStoreBackend {
+    pub(crate) store: Store,
+}
+
+impl V2AuditEnvelopeStoreBackend for SqliteV2AuditEnvelopeStoreBackend {
+    fn insert_v2_audit_event(&self, params: &V2AuditEventInsertParams) -> Result<(), OrbitError> {
+        self.store.insert_v2_audit_event(params)
+    }
+
+    fn list_v2_audit_events(
+        &self,
+        filter: &V2AuditEventFilter,
+    ) -> Result<Vec<V2AuditEventRow>, OrbitError> {
+        self.store.list_v2_audit_events(filter)
+    }
+
+    fn count_v2_audit_events(&self, filter: &V2AuditEventFilter) -> Result<i64, OrbitError> {
+        self.store.count_v2_audit_events(filter)
+    }
+
+    fn prune_v2_audit_events_older_than(
+        &self,
+        workspace_id: &str,
+        ts: &DateTime<Utc>,
+    ) -> Result<usize, OrbitError> {
+        self.store
+            .prune_v2_audit_events_older_than(workspace_id, ts)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SqliteSessionLearningStateStoreBackend {
+    pub(crate) store: Store,
+}
+
+impl SessionLearningStateStoreBackend for SqliteSessionLearningStateStoreBackend {
+    fn upsert_session_learning_state(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        self.store
+            .upsert_session_learning_state(workspace_id, session_id, state)
+    }
+
+    fn get_session_learning_state(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        self.store
+            .get_session_learning_state(workspace_id, session_id)
     }
 }
 

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0038
 title: Unified log feed exposes shared backend surfaces for dashboard UI
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260427-44
 - T20260427-46
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-013

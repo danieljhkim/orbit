@@ -1,8 +1,16 @@
-# Activity / Job — Overview
+---
+summary: "Activity / Job — Overview"
+type: design
+title: "Activity / Job — Overview"
+owner: codex
+last_updated: 2026-05-17
+status: Draft
+feature: activity-job
+doc_role: overview
+tags: ["activity-job"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-17
+# Activity / Job — Overview
 
 Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions.
 

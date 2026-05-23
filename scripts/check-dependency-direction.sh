@@ -13,11 +13,11 @@ allowed_internal_deps() {
     orbit-registry)
       echo "orbit-common"
       ;;
-    orbit-policy | orbit-exec | orbit-knowledge | orbit-store | orbit-embed)
+    orbit-policy | orbit-exec | orbit-knowledge | orbit-store | orbit-search)
       echo "orbit-common"
       ;;
-    orbit-embed-companion)
-      echo "orbit-common orbit-embed"
+    orbit-search-companion)
+      echo "orbit-common orbit-search"
       ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-knowledge orbit-policy"
@@ -29,13 +29,16 @@ allowed_internal_deps() {
       echo "orbit-agent orbit-common orbit-exec orbit-store orbit-tools"
       ;;
     orbit-core)
-      echo "orbit-common orbit-embed orbit-engine orbit-knowledge orbit-policy orbit-store orbit-tools"
+      echo "orbit-common orbit-search orbit-engine orbit-knowledge orbit-policy orbit-store orbit-tools"
       ;;
     orbit-mcp)
       echo "orbit-common orbit-tools"
       ;;
+    orbit-dashboard)
+      echo "orbit-common orbit-core orbit-knowledge"
+      ;;
     orbit-cli)
-      echo "orbit-common orbit-core orbit-mcp"
+      echo "orbit-common orbit-core orbit-mcp orbit-dashboard"
       ;;
     *)
       return 1

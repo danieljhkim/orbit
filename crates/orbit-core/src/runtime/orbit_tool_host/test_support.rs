@@ -100,6 +100,9 @@ pub(super) fn unmanaged_tool_env_guard() -> UnmanagedToolEnvGuard {
     let names = [
         "ORBIT_MANAGED_RUN_CONTEXT",
         "ORBIT_TASK_ID",
+        "ORBIT_ACTIVE_TASK_ID",
+        "ORBIT_AGENT_NAME",
+        "ORBIT_AGENT_MODEL",
         "ORBIT_RUN_ID",
         "ORBIT_ACTIVITY_ID",
         "ORBIT_STEP_INDEX",

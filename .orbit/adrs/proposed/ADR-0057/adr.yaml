@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0057
 title: Groundhog v1 excludes executor-authored deviation and retry critic
 status: proposed
@@ -10,6 +10,8 @@ related_features:
 related_tasks:
 - T20260420-0510-2
 - T20260426-0603
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - groundhog/ADR-008

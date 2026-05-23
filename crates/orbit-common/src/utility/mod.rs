@@ -8,3 +8,6 @@ pub mod path;
 pub mod process_identity;
 pub mod redaction;
 pub mod selector;
+
+#[cfg(test)]
+mod tests;

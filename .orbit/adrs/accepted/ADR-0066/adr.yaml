@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0066
 title: File-based lock store in `orbit-knowledge`, no standalone `orbit-lock` crate
 status: accepted
@@ -11,6 +11,8 @@ related_features:
 related_tasks:
 - T20260411-0424
 - T20260417-0301-2
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-008

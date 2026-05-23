@@ -1,5 +1,6 @@
 use clap::Args;
-use orbit_core::{OrbitError, OrbitRuntime, build_task_status_index};
+use orbit_core::{OrbitError, OrbitRuntime, TaskRelatedDoc, build_task_status_index};
+use serde_json::Value;
 
 use crate::command::Execute;
 
@@ -19,6 +20,12 @@ pub struct TaskShowArgs {
     /// a single field returns that field as JSON and multiple fields return a JSON object.
     #[arg(long = "fields", alias = "field", value_delimiter = ',', num_args = 1..)]
     pub fields: Vec<String>,
+    /// Include docs matched from task context files and task feature tags
+    #[arg(long)]
+    pub with_context: bool,
+    /// Maximum related docs to include with --with-context (default 5)
+    #[arg(long)]
+    pub max_docs: Option<usize>,
 }
 
 impl Execute for TaskShowArgs {
@@ -28,6 +35,11 @@ impl Execute for TaskShowArgs {
         let fields = normalize_task_show_fields(&self.fields)?;
 
         if !fields.is_empty() {
+            if self.with_context {
+                return Err(OrbitError::InvalidInput(
+                    "`--with-context` cannot be combined with `--fields`".to_string(),
+                ));
+            }
             if self.json {
                 return crate::output::json::print_pretty(&task_fields_to_json(
                     runtime,
@@ -39,8 +51,17 @@ impl Execute for TaskShowArgs {
             return print_task_fields(runtime, &task, &fields, Some(&status_by_id));
         }
 
+        let related_docs = if self.with_context {
+            runtime.related_docs_for_task(&task, self.max_docs)?
+        } else {
+            Vec::new()
+        };
         if self.json {
-            crate::output::json::print_pretty(&task_to_json_for_runtime(runtime, &task)?)
+            let mut value = task_to_json_for_runtime(runtime, &task)?;
+            if self.with_context {
+                insert_related_docs(&mut value, related_docs)?;
+            }
+            crate::output::json::print_pretty(&value)
         } else {
             use crate::output::color::{bold, dimmed, priority_color, status_color};
             println!("{} {}", bold("ID:"), task.id);
@@ -111,6 +132,9 @@ impl Execute for TaskShowArgs {
             if !task.context_files.is_empty() {
                 println!("{} {}", bold("Context:"), task.context_files.join(", "));
             }
+            if self.with_context && !related_docs.is_empty() {
+                print_related_docs(&related_docs);
+            }
             if let Some(ref created_by) = task.created_by {
                 println!("{} {}", bold("Created By:"), created_by);
             }
@@ -161,6 +185,40 @@ impl Execute for TaskShowArgs {
             Ok(())
         }
     }
+}
+
+fn insert_related_docs(
+    value: &mut Value,
+    related_docs: Vec<TaskRelatedDoc>,
+) -> Result<(), OrbitError> {
+    let object = value.as_object_mut().ok_or_else(|| {
+        OrbitError::Execution("task JSON projection did not produce an object".to_string())
+    })?;
+    object.insert(
+        "related_docs".to_string(),
+        serde_json::to_value(related_docs).map_err(|error| {
+            OrbitError::Execution(format!("serialize related docs output: {error}"))
+        })?,
+    );
+    Ok(())
+}
+
+fn print_related_docs(related_docs: &[TaskRelatedDoc]) {
+    use crate::output::color::bold;
+    use comfy_table::Cell;
+
+    println!();
+    println!("{}", bold("Related Docs:"));
+    let mut table = crate::output::table::build_table(&["PATH", "TYPE", "SUMMARY", "EXCERPT"]);
+    for doc in related_docs {
+        table.add_row(vec![
+            Cell::new(&doc.path),
+            Cell::new(doc.doc_type.to_string()),
+            Cell::new(&doc.summary),
+            Cell::new(&doc.excerpt),
+        ]);
+    }
+    println!("{table}");
 }
 
 fn normalize_task_show_fields(fields: &[String]) -> Result<Vec<String>, OrbitError> {

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0105
 title: Per-provider state-dir allowances are emitted unconditionally for every supported CLI
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - policy-sandbox
 related_tasks:
 - T20260428-14
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - policy-sandbox/ADR-013

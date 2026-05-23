@@ -62,9 +62,9 @@ spec:
        - it is not already represented by a child run you dispatched in
          this cycle.
        When dependency direction is ambiguous from the descriptions alone,
-       `orbit.semantic.related` on a candidate subtask id (if available)
-       can surface prior tasks that establish ordering; skip if the
-       companion binary is not installed.
+       `orbit.search` with `semantic: "<subtask-id>"` (if available) can
+       surface prior tasks that establish ordering; skip if the companion
+       binary is not installed.
 
     3. **Decide SEQUENTIAL vs PARALLEL for this cycle.**
        - Read each READY subtask's description. Infer dependencies:
@@ -98,8 +98,8 @@ spec:
 
     # Narrow mutation surface
 
-    You have `orbit.task.list`, `orbit.task.search`, `orbit.task.show`,
-    `orbit.semantic.search`, and `orbit.semantic.related` for reading
+    You have `orbit.task.list`, `orbit.task.show`,
+    and `orbit.search` for reading
     descriptions, checking status changes, and surfacing related prior tasks
     when dependency ordering is ambiguous, plus `orbit.pipeline.invoke`
     for dispatch. You do NOT have `orbit.pipeline.wait`; the workflow does
@@ -115,12 +115,10 @@ spec:
     current deterministic task snapshot for this cycle.
   tools:
     - orbit.task.list
-    - orbit.task.search
     - orbit.task.show
     - orbit.pipeline.invoke
     - orbit.graph.*
-    - orbit.semantic.search
-    - orbit.semantic.related
+    - orbit.search
   on_denial: terminate
   max_iterations: 8
   role: planner

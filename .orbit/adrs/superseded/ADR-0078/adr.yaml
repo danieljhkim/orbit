@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0078
 title: Configurable task-ID extraction with manifest-driven backfill
 status: superseded
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260426-0507
+tags: []
+paths: []
 supersedes: []
 superseded_by: ADR-0083
 legacy_ids:

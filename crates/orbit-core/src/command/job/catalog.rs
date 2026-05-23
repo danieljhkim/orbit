@@ -544,6 +544,14 @@ spec:
                     input["job_name"],
                     Value::String("task_{{ input.mode }}_pipeline".to_string())
                 );
+                assert_eq!(
+                    input["admission_task_ids"],
+                    Value::String("{{ input.task_ids }}".to_string())
+                );
+                assert_eq!(
+                    input["admission_workflow"],
+                    Value::String("worktree_setup".to_string())
+                );
             }
             other => panic!("expected dispatch target ref, got {other:?}"),
         }
@@ -611,6 +619,14 @@ spec:
             dispatch_index < guard_index,
             "gate results must be collected before the success guard runs"
         );
+
+        let dispatch = &asset.spec.steps[dispatch_index];
+        match &dispatch.body {
+            JobV2StepBody::FanOut { fan_out, .. } => {
+                assert_eq!(fan_out.max_workers, 5);
+            }
+            other => panic!("expected dispatch fan-out, got {other:?}"),
+        }
 
         let guard = &asset.spec.steps[guard_index];
         assert_eq!(

@@ -1,3 +1,7 @@
+---
+type: pattern
+summary: "RAII Guard Pattern"
+---
 # RAII Guard Pattern
 
 Bind a side effect to a lexical scope: do something at construction, undo it in `Drop`. Callers write `let _g = Guard::enter(...);` and rely on scope exit — including `?`-return and panic unwind — to clean up. The defining trait: **`Drop` does meaningful work** (restoring state, releasing a lock, persisting a record), not just freeing memory.

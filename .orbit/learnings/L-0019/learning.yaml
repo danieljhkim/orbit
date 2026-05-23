@@ -1,0 +1,18 @@
+schema_version: 1
+id: L-0019
+legacy_ids:
+- L20260519-3
+status: active
+scope:
+  paths:
+  - crates/orbit-dashboard/assets/dashboard/*.js
+  tags:
+  - dashboard-js-split
+  - stray-brace
+summary: 'Dashboard JS extraction (scoreboard round): pre-existing stray "}" in app.js blocks node --check even after clean per-domain split; also navigateToRole(ctx) ctx param was dead/unused allowing 1-arg calls at module boundary.'
+body: 'During ORB-00173 extraction, app.js had stray } at renderSparkline end (line ~1871) causing ESM syntax fail. Task desc explicitly called out dependency on prior stray-} fix sibling. Also discovered navigateToRole(role, ctx) ignores ctx entirely (only 2 call sites in scoreboard, both passed auditContext() unnecessarily). Dropped 2nd arg in moved code (safe, no behavior change). Did not edit non-scoreboard code per scope rules; recorded blocker in task comment instead. Pattern validated for future splits (tasks/audit/scoreboard now clean). '
+evidence:
+- kind: task
+  reference: ORB-00173
+created_at: 2026-05-19T07:04:47.801388Z
+updated_at: 2026-05-19T07:04:47.801388Z

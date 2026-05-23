@@ -18,7 +18,6 @@ fn seed_grok_executor(runtime: &OrbitRuntime) {
     let mut def = ExecutorDef::from_resource_spec(
         resource.metadata.name,
         resource.spec.clone(),
-        "test:assets/executors/grok.yaml",
         resource.spec.created_at,
         resource.spec.updated_at,
     );
@@ -58,6 +57,8 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
     let audit_dir = tempfile::tempdir().expect("audit tempdir");
     let audit = V2AuditWriter::with_disk_sinks(
         audit_dir.path(),
+        orbit_store::Store::open_in_memory().expect("audit store"),
+        "ws_test",
         "grok-installed-smoke",
         "grok:grok-build".to_string(),
         None,
@@ -73,6 +74,7 @@ fn installed_grok_cli_backend_smoke_captures_stdout_artifact() {
         provider: Provider::Grok,
         wall_clock_timeout_seconds: 120,
         role: None,
+        proc_allowed_programs: None,
     };
 
     let outcome = dispatch_v2_activity(V2DispatchInput {

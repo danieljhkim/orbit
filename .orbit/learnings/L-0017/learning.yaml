@@ -1,0 +1,20 @@
+schema_version: 1
+id: L-0017
+legacy_ids:
+- L20260519-1
+status: active
+scope:
+  paths:
+  - .codex/config.toml
+  - .codex/hooks/**
+  tags:
+  - codex
+  - hooks
+  - learning-reminders
+summary: For Codex PreToolUse reminder hooks, return JSON hookSpecificOutput.additionalContext; plaintext stdout is ignored.
+body: Codex CLI hook command output is not Claude-compatible plaintext for PreToolUse. The hook should emit a JSON object with hookSpecificOutput.hookEventName = PreToolUse and additionalContext containing the reminder block. Keep matcher config in repo .codex/config.toml and prefer git-root command paths because Codex can start from subdirectories. Manual validation for ORB-00159 used path-bearing Bash, apply_patch, and MCP-style paths payloads.
+evidence:
+- kind: task
+  reference: ORB-00159
+created_at: 2026-05-19T02:49:42.769233Z
+updated_at: 2026-05-19T02:49:42.769233Z

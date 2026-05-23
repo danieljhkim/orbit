@@ -64,6 +64,7 @@ pub(crate) struct Filters {
     since: Option<DateTime<Utc>>,
 }
 
+#[allow(dead_code)]
 impl Filters {
     pub(crate) fn new(
         target_prefix: Option<String>,
@@ -115,6 +116,10 @@ impl Filters {
     }
 }
 
+// Web-only types retained in the CLI copy after ORB-00146 extraction (the renderers
+// live in orbit-dashboard now). Marked dead_code to keep the file diff minimal and
+// avoid splitting the log module during this refactor.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct RenderedLogEvent {
     pub ts: String,
@@ -124,6 +129,7 @@ pub(crate) struct RenderedLogEvent {
     pub message_html: String,
 }
 
+#[allow(dead_code)]
 pub(crate) fn build_filters(
     target: Option<String>,
     level: Option<LevelFilter>,
@@ -133,6 +139,7 @@ pub(crate) fn build_filters(
     Ok(Filters::new(target, level, since))
 }
 
+#[allow(dead_code)]
 pub(crate) fn resolve_log_path(override_path: Option<&Path>) -> Result<PathBuf, OrbitError> {
     if let Some(path) = override_path {
         return Ok(path.to_path_buf());
@@ -147,6 +154,7 @@ pub(crate) fn resolve_log_path(override_path: Option<&Path>) -> Result<PathBuf, 
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn read_recent_rendered_events(
     path: &Path,
     filters: &Filters,
@@ -171,11 +179,13 @@ pub(crate) fn read_recent_rendered_events(
     Ok(kept)
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_matching_event(raw: &str, filters: &Filters) -> Option<Value> {
     let value = serde_json::from_str::<Value>(raw).ok()?;
     filters.matches(&value).then_some(value)
 }
 
+#[allow(dead_code)]
 pub(crate) fn render_log_event_for_web(event: &Value) -> RenderedLogEvent {
     let ts = event
         .get("timestamp")
@@ -228,6 +238,7 @@ pub(crate) fn format_event_line(event: &Value, use_color: bool) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn normalize_level(level: &str) -> &'static str {
     match level.to_ascii_uppercase().as_str() {
         "TRACE" => "trace",
@@ -442,6 +453,9 @@ pub(crate) fn format_message(target: &str, fields: &Value) -> String {
     }
 }
 
+// Retained for parity after ORB-00146 (web dashboard + its HTML renderers moved to
+// orbit-dashboard). The non-HTML formatters are still used by `orbit log` etc.
+#[allow(dead_code)]
 pub(crate) fn format_message_html(target: &str, fields: &Value) -> String {
     let getf = |k: &str| fields.get(k).and_then(Value::as_str).unwrap_or("");
     let getn = |k: &str| -> String {
@@ -571,6 +585,7 @@ pub(crate) fn format_message_html(target: &str, fields: &Value) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn html_pairs(pairs: &[(&str, String)]) -> String {
     pairs
         .iter()
@@ -580,10 +595,12 @@ fn html_pairs(pairs: &[(&str, String)]) -> String {
         .join(" ")
 }
 
+#[allow(dead_code)]
 fn code_value(value: String) -> String {
     format!("<code>{}</code>", escape_html(&value))
 }
 
+#[allow(dead_code)]
 fn escape_html(raw: &str) -> String {
     let mut escaped = String::with_capacity(raw.len());
     for ch in raw.chars() {
@@ -619,51 +636,5 @@ fn colorize_code(target: &str, level: &str, code: &str) -> ColoredString {
         "INFO" => code.green(),
         "DEBUG" => code.blue(),
         _ => code.normal(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn format_message_html_escapes_dynamic_field_values() {
-        let html = format_message_html(
-            "orbit.friction.reported",
-            &json!({
-                "task_id": "<script>alert(1)</script>",
-                "agent": "codex",
-                "model": "gpt-5.5",
-                "summary": "bad <b>markup</b>"
-            }),
-        );
-
-        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-        assert!(html.contains("bad &lt;b&gt;markup&lt;/b&gt;"));
-        assert!(!html.contains("<script>"));
-    }
-
-    #[test]
-    fn render_log_event_for_web_uses_shared_labels_and_lowercase_level() {
-        let event = json!({
-            "timestamp": "2026-04-27T01:00:03.000000000Z",
-            "level": "WARN",
-            "target": "orbit.policy.deny",
-            "fields": {
-                "tool": "fs.write",
-                "path": "/etc/passwd",
-                "profile": "writer",
-                "matched_rule": "/etc/**"
-            }
-        });
-
-        let rendered = render_log_event_for_web(&event);
-        assert_eq!(rendered.ts, "2026-04-27T01:00:03.000000000Z");
-        assert_eq!(rendered.source, "policy");
-        assert_eq!(rendered.code, "DENY");
-        assert_eq!(rendered.level, "warn");
-        assert!(rendered.message_html.contains("<b>path</b>="));
     }
 }

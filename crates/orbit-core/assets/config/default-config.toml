@@ -33,39 +33,24 @@ editing = false
 # `agent-main` is the dev integration branch where task PRs land — set
 # `base_branch = "agent-main"` for the same layout in your own repo.
 base_branch = "main"
-default_crew = "opus-codex"
+default_crew = "codex"
 
-[crews.opus-codex]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-
-[crews.silver]
-planner = { model = "pro", provider = "gemini", backend = "cli" }
-implementer = { model = "grok-build", provider = "grok", backend = "cli" }
-reviewer = { model = "pro", provider = "gemini", backend = "cli" }
-
-[crews.bronze]
-planner = { model = "sonnet", provider = "claude", backend = "cli" }
-implementer = { model = "sonnet", provider = "claude", backend = "cli" }
-reviewer = { model = "sonnet", provider = "claude", backend = "cli" }
-
-[crews.all-claude]
+[crews.claude]
 planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
 implementer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
 reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
 
-[crews.all-codex]
+[crews.codex]
 planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
 
-[crews.all-gemini]
+[crews.gemini]
 planner = { model = "pro", provider = "gemini", backend = "cli" }
 implementer = { model = "pro", provider = "gemini", backend = "cli" }
 reviewer = { model = "pro", provider = "gemini", backend = "cli" }
 
-[crews.all-grok]
+[crews.grok]
 planner = { model = "grok-build", provider = "grok", backend = "cli" }
 implementer = { model = "grok-build", provider = "grok", backend = "cli" }
 reviewer = { model = "grok-build", provider = "grok", backend = "cli" }

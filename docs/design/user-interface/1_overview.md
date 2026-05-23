@@ -1,8 +1,16 @@
-# User Interface — Overview
+---
+summary: "User Interface — Overview"
+type: design
+title: "User Interface — Overview"
+owner: gemini
+last_updated: 2026-04-30
+status: Draft
+feature: user-interface
+doc_role: overview
+tags: ["user-interface"]
+---
 
-**Status:** Draft
-**Owner:** gemini
-**Last updated:** 2026-04-30
+# User Interface — Overview
 
 Orbit UI covers the local dashboard served by `orbit-cli` and the project-facing web surface. It gives operators a dense, legible way to monitor agents, workflows, telemetry, and audit signals.
 

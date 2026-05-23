@@ -1,6 +1,7 @@
 mod adr_tools;
-mod design_tools;
+mod artifact_redaction;
 mod dispatch;
+mod docs_tools;
 mod friction_tools;
 mod host;
 mod input;
@@ -8,19 +9,15 @@ mod json;
 mod learning_tools;
 mod pipeline_tools;
 mod review_threads;
+mod search_tools;
 mod semantic_tools;
 mod state_tools;
 mod task_locks;
 mod task_tools;
 
 #[cfg(test)]
-mod learning_tools_tests;
-#[cfg(test)]
-mod review_threads_tests;
-#[cfg(test)]
-mod task_locks_tests;
-#[cfg(test)]
-mod task_tools_tests;
+mod tests;
+
 #[cfg(test)]
 pub(crate) mod test_support;
 

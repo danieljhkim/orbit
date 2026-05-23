@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0047
 title: Automated git commits carry implementer authorship
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - T20260508-22
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - auditability/ADR-022

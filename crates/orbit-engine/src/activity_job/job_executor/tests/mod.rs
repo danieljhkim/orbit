@@ -19,15 +19,15 @@ use tracing::{Event, Level, Metadata, Subscriber, span};
 
 use super::*;
 
-mod audit_tests;
-mod fanout_tests;
-mod loop_tests;
-mod parallel_tests;
-mod pipeline_durability_tests;
-mod recovery_tests;
-mod step_tests;
-mod target_tests;
-mod templating_tests;
+mod audit;
+mod fanout;
+mod r#loop;
+mod parallel;
+mod pipeline_durability;
+mod recovery;
+mod step;
+mod target;
+mod templating;
 
 fn test_writer(run_id: &str) -> V2AuditWriter {
     let inner: std::sync::Arc<dyn AuditSink> = std::sync::Arc::new(NullSink);
@@ -276,6 +276,7 @@ impl V2RuntimeHost for ScriptedHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }

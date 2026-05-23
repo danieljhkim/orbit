@@ -24,46 +24,39 @@ editing = false
 
 [workflow]
 base_branch = "agent-main"
-default_crew = "opus-codex"
+default_crew = "codex"
+
+[crews.claude]
+planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+implementer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+
+[crews.codex]
+planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
+
+[crews.gemini]
+planner = { model = "pro", provider = "gemini", backend = "cli" }
+implementer = { model = "pro", provider = "gemini", backend = "cli" }
+reviewer = { model = "pro", provider = "gemini", backend = "cli" }
+
+[crews.grok]
+planner = { model = "grok-build", provider = "grok", backend = "cli" }
+implementer = { model = "grok-build", provider = "grok", backend = "cli" }
+reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
+
 
 [pr]
 task_url_template = "https://orbit-cli.com/tasks/{task_id}"
 
 [duel]
-candidates = ["codex", "claude", "gemini", "grok"]
+candidates = ["codex", "claude", "grok"]
 
 [duel.models]                             
 codex  = "gpt-5.5"
 claude = "claude-opus-4-7"
-gemini = "pro"
 grok = "grok-build"
 
-[crews.opus-codex]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-
-[crews.silver]
-planner = { model = "pro", provider = "gemini", backend = "cli" }
-implementer = { model = "grok-build", provider = "grok", backend = "cli" }
-reviewer = { model = "pro", provider = "gemini", backend = "cli" }
-
-[crews.all-claude]
-planner = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-implementer = { model = "claude-sonnet-4-6", provider = "claude", backend = "cli" }
-reviewer = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
-
-[crews.all-codex]
-planner = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-implementer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-reviewer = { model = "gpt-5.5", provider = "codex", backend = "cli" }
-
-[crews.all-gemini]
-planner = { model = "pro", provider = "gemini", backend = "cli" }
-implementer = { model = "auto", provider = "gemini", backend = "cli" }
-reviewer = { model = "pro", provider = "gemini", backend = "cli" }
-
-[crews.all-grok]
-planner = { model = "grok-build", provider = "grok", backend = "cli" }
-implementer = { model = "grok-build", provider = "grok", backend = "cli" }
-reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
+[docs]
+roots = ["docs/"]

@@ -59,7 +59,7 @@ spec:
        `orbit.task.show` is available if you need a task's full description
        to decide an ambiguous case — use it sparingly. When two tasks share
        no `context_files` but their titles look superficially related,
-       `orbit.semantic.related` on one task id can confirm or refute the
+       `orbit.search` with `semantic: "<task-id>"` can confirm or refute the
        overlap; use only on genuinely ambiguous pairs, and skip if the
        companion binary is not installed.
     2. **Disjoint tasks go in separate bundles.** If two tasks share no
@@ -88,7 +88,7 @@ spec:
     - orbit.task.*
     - orbit.friction.*
     - orbit.graph.*
-    - orbit.semantic.related
+    - orbit.search
   on_denial: terminate
   max_iterations: 8
   role: planner

@@ -1,8 +1,16 @@
-# ADR Artifact — Decisions
+---
+summary: "ADR Artifact — Decisions"
+type: design
+title: "ADR Artifact — Decisions"
+owner: claude
+last_updated: 2026-05-21
+status: Draft
+feature: adr-artifact
+doc_role: decisions
+tags: ["adr-artifact"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-10 ([T20260510-28] — codex P1/P2 review fixes; ADR-002 and ADR-006 amended in place; ADR-010 and ADR-011 added)
+# ADR Artifact — Decisions
 
 Append-only ADR log for the ADR-artifact feature. Each entry follows the template in [CONVENTIONS.md §4](../CONVENTIONS.md). Numbers are append-only; superseded entries stay in place with status updated. Every ADR cites at least one cost.
 
@@ -208,9 +216,28 @@ In-place amendment policy: ADRs in `Proposed` status may be refined directly bef
 
 ---
 
+## ADR-0178 — ADR envelope tags and paths
+
+**Status:** Accepted · 2026-05 · [ORB-00203]
+
+**Context.** Phase 2 left `--tag` and `--path` as no-op filters for ADRs because ADR envelopes had no free-form labels or applicability paths. Reusing `related_features` would collapse constrained feature-folder references into loose tags, and it still would not answer pre-edit path applicability queries.
+
+**Decision.** Add `tags: [string]` and `paths: [string]` to ADR envelope YAML, bump newly written envelopes to `schema_version: 2`, and keep v1 readers compatible by treating missing fields as empty lists. `orbit.adr.list` and `orbit search` filter ADRs through these fields with case-insensitive tag equality and glob-containment path semantics.
+
+**Consequences.**
+
+- Cross-artifact label and path queries can include ADRs alongside tasks, docs, and learnings.
+- Existing ADR envelopes are backfilled with explicit empty defaults; owners populate meaningful tags and paths when they next touch a decision.
+- No automatic inference from title, body, or `related_features` is attempted, keeping false labels out of durable decision metadata.
+- No single code anchor owns this behavior; it is enforced across the ADR store schema, tool schemas, search command, and their focused tests.
+- Cost: the schema bump touches every ADR envelope and adds two author-maintained metadata axes that can drift if reviewers do not keep them current.
+
+---
+
 ## Task References
 
 - [T20260510-27] — Drafted the adr-artifact design folder as a v2 proposal. The original nine ADRs (001–009) are all `Proposed`; each will be flipped to `Accepted` and cite its shipping task ID as v2 implementation work lands.
 - [T20260510-28] — Addressed codex P1/P2 review findings: ADR-002 amended in place to cover `legacy_ids` array and rollup aliasing; ADR-006 amended in place with two named canonical orders; ADR-010 added (search tool placement in `orbit-embed`); ADR-011 added (lenient migration mode as default).
+- [ORB-00203] — Added ADR envelope `tags` and `paths`, v2 schema writing, explicit-empty backfill, and ADR tag/path filters in `orbit.adr.list` and `orbit search`.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

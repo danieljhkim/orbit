@@ -65,7 +65,10 @@ pub use actor::{
     ActorIdentity, agent_from_model, normalize_attribution_label,
     normalize_optional_attribution_label, provider_from_model,
 };
-pub use adr::{Adr, AdrStatus, LegacyValidation, legacy_id_for, validate_adr_id};
+pub use adr::{
+    Adr, AdrStatus, LegacyValidation, legacy_id_for, normalize_adr_paths, normalize_adr_tags,
+    validate_adr_id,
+};
 pub use agent_family::AgentFamily;
 pub use agent_pair::{
     AgentModelPair, Crew, CrewRoleAssignment, agent_family_from_cli, all_agent_families,
@@ -119,8 +122,8 @@ pub use run_state::PipelineState;
 pub use skill::Skill;
 pub use task::{
     ExternalRef, GITHUB_PR_EXTERNAL_REF_SYSTEM, ResolvedTaskDependency, ReviewMessage,
-    ReviewThread, ReviewThreadStatus, Task, TaskArtifact, TaskComment, TaskComplexity,
-    TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, build_task_status_index,
+    ReviewThread, ReviewThreadAnchor, ReviewThreadStatus, Task, TaskArtifact, TaskComment,
+    TaskComplexity, TaskHistoryEntry, TaskPriority, TaskStatus, TaskType, build_task_status_index,
     media_type_for_artifact_path, normalize_task_dependencies, normalize_task_tags,
     prune_missing_context_files, push_external_ref_if_missing, resolve_task_dependencies,
     task_dependencies_ready, task_matches_tags, unmet_task_dependencies,
@@ -138,9 +141,13 @@ pub use task_artifacts::{
     validate_relative_artifact_path, validate_task_relations_for_source,
 };
 pub use task_plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion, parse_task_plan};
-pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema};
+pub use tool::{ExecutionResult, StoredTool, ToolParam, ToolSchema, ToolSessionContext};
 pub use tool_input::{
-    optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
-    optional_string_list_alias, optional_u32_alias, required_string, split_csv,
+    RETIRED_TASK_ADD_INPUT_FIELDS, optional_csv_or_string_list_alias, optional_raw_string,
+    optional_string, optional_string_alias, optional_string_list_alias, optional_u32_alias,
+    required_string, split_csv, strip_retired_task_add_input_fields,
 };
 pub use workspace::{Workspace, WorkspacePaths, WorkspaceRegistry, WorkspaceStatus};
+
+#[cfg(test)]
+mod tests;

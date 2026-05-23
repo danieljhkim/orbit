@@ -15,6 +15,9 @@ spec:
   default_input:
     task_id: null
     base_branch: main
+    planner_a_family: null
+    planner_b_family: null
+    arbiter_family: null
 
   steps:
     - id: run_planning_duel
@@ -22,3 +25,6 @@ spec:
       default_input:
         task_id: "{{ input.task_id }}"
         base_branch: "{{ input.base_branch }}"
+        planner_a_family: "{{ input.planner_a_family }}"
+        planner_b_family: "{{ input.planner_b_family }}"
+        arbiter_family: "{{ input.arbiter_family }}"

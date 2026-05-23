@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0002
 title: Host boundaries and agent dispatch stay explicit
 status: accepted
@@ -24,6 +24,8 @@ related_tasks:
 - T20260506-17
 - T20260505-22
 - T20260506-18
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-002

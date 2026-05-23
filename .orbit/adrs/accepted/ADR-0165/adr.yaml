@@ -1,0 +1,19 @@
+schema_version: 2
+id: ADR-0165
+title: Remove per-PR design-doc decay checks
+status: accepted
+owner: codex
+created_at: 2026-05-17T21:48:57.278591Z
+accepted_at: 2026-05-17T21:49:02.774379Z
+last_updated: 2026-05-17T21:49:02.776011Z
+related_features:
+- design-docs
+related_tasks:
+- ORB-00112
+tags: []
+paths: []
+supersedes:
+- ADR-0162
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

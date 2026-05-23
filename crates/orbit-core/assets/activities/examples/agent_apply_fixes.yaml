@@ -41,6 +41,11 @@ spec:
   tools:
     - fs.read
     - proc.spawn
+  proc_allowed_programs:
+    - git
+    - make
+    - cargo
+    - rg
   on_denial: terminate
   max_iterations: 3
   role: implementer

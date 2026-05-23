@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use orbit_common::types::{
     AgentFamily, OrbitError, OrbitEvent, PlanningRoleAssignment, PlanningRoles, Role, RoleSlot,
-    TaskArtifact, TaskComment,
+    TaskArtifact, TaskComment, infer_agent_family_from_model,
 };
 use orbit_tools::ToolContext;
 use serde_json::{Value, json};
@@ -20,7 +20,8 @@ use super::types::{
 
 const PLANNING_DUEL_ARTIFACT_PREFIX: &str = "planning-duel/";
 const PLANNING_DUEL_PLAN_EXTENSION: &str = ".md";
-const WINNER_ARTIFACT_PATH: &str = "planning-duel/winner.json";
+// pub(crate) widened for sibling tests ORB-00240 because the const was private (module-only) and the test helper winner_marker in the folded planning_duel/tests/artifacts.rs now requires crate-visible access via `use super::super::artifacts::*;` (first logged via orbit.task.update comment on ORB-00240 per rules).
+pub(crate) const WINNER_ARTIFACT_PATH: &str = "planning-duel/winner.json";
 const TASKS_DIR_NAME: &str = "tasks";
 const TASK_ARTIFACTS_DIR_NAME: &str = "artifacts";
 const AUTHOR_SIGNATURE_PREFIX: &str = "*authored by: ";
@@ -32,26 +33,27 @@ pub(super) struct PlanningDuelSignature {
     pub slot: RoleSlot,
 }
 
+fn first_non_empty_line(content: &str) -> Option<&str> {
+    content.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
 pub(super) fn parse_planning_duel_signature(
     content: &str,
 ) -> Result<PlanningDuelSignature, OrbitError> {
-    let first_line = content
-        .lines()
-        .next()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .ok_or_else(|| {
-            OrbitError::InvalidInput(
-                "planning duel artifact must start with an authored-by signature line".to_string(),
-            )
-        })?;
+    let first_line = first_non_empty_line(content).ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "planning duel artifact must start with an authored-by signature line".to_string(),
+        )
+    })?;
     let signature = first_line
         .strip_prefix(AUTHOR_SIGNATURE_PREFIX)
         .and_then(|value| value.strip_suffix('*'))
         .ok_or_else(|| {
-            OrbitError::InvalidInput(format!(
-                "planning duel artifact signature must match `{AUTHOR_SIGNATURE_PREFIX}<family> / <slot>*`"
-            ))
+            OrbitError::InvalidInput(
+                format!(
+                    "planning duel artifact signature must match `{AUTHOR_SIGNATURE_PREFIX}<family> / <slot>*`"
+                ),
+            )
         })?;
     let (family, slot) = signature
         .split_once(AUTHOR_SIGNATURE_SEPARATOR)
@@ -74,16 +76,11 @@ pub(super) fn parse_planning_duel_signature(
 fn parse_legacy_planning_duel_signature(
     content: &str,
 ) -> Result<PlanningRoleAssignment, OrbitError> {
-    let first_line = content
-        .lines()
-        .next()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .ok_or_else(|| {
-            OrbitError::InvalidInput(
-                "planning duel artifact must start with an authored-by signature line".to_string(),
-            )
-        })?;
+    let first_line = first_non_empty_line(content).ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "planning duel artifact must start with an authored-by signature line".to_string(),
+        )
+    })?;
     let signature = first_line
         .strip_prefix(AUTHOR_SIGNATURE_PREFIX)
         .and_then(|value| value.strip_suffix('*'))
@@ -92,13 +89,18 @@ fn parse_legacy_planning_duel_signature(
                 "legacy planning duel artifact signature is malformed".to_string(),
             )
         })?;
-    let (agent, _) = signature
+    let (agent, model) = signature
         .split_once(AUTHOR_SIGNATURE_SEPARATOR)
         .ok_or_else(|| {
             OrbitError::InvalidInput(
                 "legacy planning duel artifact signature must contain agent and model".to_string(),
             )
         })?;
+    if agent.trim().is_empty() || model.trim().is_empty() {
+        return Err(OrbitError::InvalidInput(
+            "legacy planning duel artifact signature must include both agent and model".to_string(),
+        ));
+    }
     Ok(PlanningRoleAssignment {
         family: agent.trim().parse()?,
     })
@@ -109,6 +111,68 @@ fn role_slot_from_artifact_path(path: &str) -> Option<RoleSlot> {
         .strip_prefix(PLANNING_DUEL_ARTIFACT_PREFIX)?
         .strip_suffix(PLANNING_DUEL_PLAN_EXTENSION)?;
     name.parse().ok()
+}
+
+fn artifact_invalid_input(path: &str, message: impl Into<String>) -> OrbitError {
+    OrbitError::InvalidInput(format!(
+        "planning duel artifact '{path}': {}",
+        message.into()
+    ))
+}
+
+fn artifact_parse_error(path: &str, error: OrbitError) -> OrbitError {
+    match error {
+        OrbitError::InvalidInput(message) => artifact_invalid_input(path, message),
+        other => other,
+    }
+}
+
+fn family_from_created_by_metadata(artifact: &TaskArtifact) -> Result<AgentFamily, OrbitError> {
+    let created_by = artifact
+        .created_by
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            artifact_invalid_input(
+                &artifact.path,
+                "missing trusted metadata field `created_by`",
+            )
+        })?;
+
+    if let Ok(family) = created_by.parse() {
+        return Ok(family);
+    }
+
+    if let Some(family) = infer_agent_family_from_model(created_by) {
+        return family
+            .parse()
+            .map_err(|error| artifact_parse_error(&artifact.path, error));
+    }
+
+    if let Some((family, _)) = created_by.split_once(':')
+        && let Ok(family) = family.parse()
+    {
+        return Ok(family);
+    }
+
+    Err(artifact_invalid_input(
+        &artifact.path,
+        format!("unusable trusted metadata field `created_by`: `{created_by}`"),
+    ))
+}
+
+fn planning_duel_identity_from_metadata(
+    artifact: &TaskArtifact,
+) -> Result<(PlanningRoleAssignment, Option<RoleSlot>), OrbitError> {
+    let slot = role_slot_from_artifact_path(&artifact.path).ok_or_else(|| {
+        artifact_invalid_input(
+            &artifact.path,
+            "cannot derive planning duel slot from artifact path",
+        )
+    })?;
+    let family = family_from_created_by_metadata(artifact)?;
+    Ok((PlanningRoleAssignment { family }, Some(slot)))
 }
 
 pub(super) fn planning_duel_plan_artifacts(
@@ -135,10 +199,16 @@ pub(super) fn planning_duel_plan_artifacts(
                     },
                     Some(signature.slot),
                 ),
-                Err(_) => (
-                    parse_legacy_planning_duel_signature(content)?,
-                    role_slot_from_artifact_path(&artifact.path),
-                ),
+                Err(error)
+                    if first_non_empty_line(content)
+                        .is_some_and(|line| line.starts_with(AUTHOR_SIGNATURE_PREFIX)) =>
+                {
+                    match parse_legacy_planning_duel_signature(content) {
+                        Ok(author) => (author, role_slot_from_artifact_path(&artifact.path)),
+                        Err(_) => return Err(artifact_parse_error(&artifact.path, error)),
+                    }
+                }
+                Err(_) => planning_duel_identity_from_metadata(artifact)?,
             };
             Ok(PlanningDuelPlanArtifact {
                 path: artifact.path.clone(),
@@ -589,189 +659,4 @@ pub(super) fn writeback_planning_duel_task<H: TaskHost + RuntimeHost + ?Sized>(
         "winner_family": winner_assignment.family,
         "winner_slot": winner_slot.map(|slot| slot.as_str().to_string()),
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use orbit_common::types::{
-        AgentFamily, PlanningRoleAssignment, PlanningRoles, RoleSlot, TaskArtifact,
-    };
-    use serde_json::{Value, json};
-
-    fn task_artifact(path: &str, content: String) -> TaskArtifact {
-        TaskArtifact::from_text(path, content)
-    }
-
-    fn plan_artifact(path: &str, family: &str, slot: &str) -> TaskArtifact {
-        task_artifact(
-            path,
-            format!("*authored by: {family} / {slot}*\n## Plan\nDo the thing.\n"),
-        )
-    }
-
-    fn winner_marker(payload: Value) -> TaskArtifact {
-        task_artifact(WINNER_ARTIFACT_PATH, payload.to_string())
-    }
-
-    fn planning_roles() -> PlanningRoles {
-        PlanningRoles {
-            planner_a: PlanningRoleAssignment {
-                family: AgentFamily::Codex,
-            },
-            planner_b: PlanningRoleAssignment {
-                family: AgentFamily::Claude,
-            },
-            arbiter: PlanningRoleAssignment {
-                family: AgentFamily::Gemini,
-            },
-        }
-    }
-
-    fn planning_duel_artifacts(winner_payload: Value) -> Vec<TaskArtifact> {
-        vec![
-            plan_artifact("planning-duel/planner_a.md", "codex", "planner_a"),
-            plan_artifact("planning-duel/planner_b.md", "claude", "planner_b"),
-            winner_marker(winner_payload),
-        ]
-    }
-
-    fn invalid_input_message(error: OrbitError) -> String {
-        match error {
-            OrbitError::InvalidInput(message) => message,
-            other => panic!("expected invalid input, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn planning_duel_signature_extracts_family_and_slot() {
-        let signature = parse_planning_duel_signature("*authored by: gemini / planner_a*\n## Plan")
-            .expect("signature parses");
-        assert_eq!(signature.family, AgentFamily::Gemini);
-        assert_eq!(signature.slot, RoleSlot::PlannerA);
-
-        assert!(parse_planning_duel_signature("*authored by: gemini*\n").is_err());
-        assert!(parse_planning_duel_signature("*authored by: / planner_a*\n").is_err());
-        assert!(parse_planning_duel_signature("*authored by: pro / planner_a*\n").is_err());
-    }
-
-    #[test]
-    fn plan_artifact_validation_uses_family_and_slot_not_configured_model() {
-        let artifacts = planning_duel_plan_artifacts(&[
-            plan_artifact("planning-duel/planner_a.md", "gemini", "planner_a"),
-            plan_artifact("planning-duel/planner_b.md", "codex", "planner_b"),
-        ])
-        .expect("plan artifacts parse");
-        let assignment = PlanningRoleAssignment {
-            family: AgentFamily::Gemini,
-        };
-
-        let artifact = plan_artifact_for_assignment(&artifacts, &assignment, RoleSlot::PlannerA)
-            .expect("matching family and slot validate");
-
-        assert_eq!(artifact.path, "planning-duel/planner_a.md");
-    }
-
-    #[test]
-    fn plan_artifact_validation_reports_family_mismatch() {
-        let artifacts = planning_duel_plan_artifacts(&[plan_artifact(
-            "planning-duel/planner_a.md",
-            "claude",
-            "planner_a",
-        )])
-        .expect("plan artifacts parse");
-        let assignment = PlanningRoleAssignment {
-            family: AgentFamily::Gemini,
-        };
-
-        let message = invalid_input_message(
-            plan_artifact_for_assignment(&artifacts, &assignment, RoleSlot::PlannerA)
-                .expect_err("mismatched family fails"),
-        );
-
-        assert!(message.contains("expected gemini"), "{message}");
-        assert!(message.contains("has family claude"), "{message}");
-    }
-
-    #[test]
-    fn planning_duel_winner_marker_omits_derived_fields_when_roles_available() {
-        let roles = planning_roles();
-        let artifacts = planning_duel_artifacts(json!({
-            "id": "T20260427-47",
-            "winner_slot": "planner_b",
-            "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
-        }));
-
-        let winner = winner_artifact_from_artifacts(&artifacts, Some(&roles))
-            .expect("minimal winner marker should normalize");
-
-        assert_eq!(winner.winner_family, AgentFamily::Claude);
-        assert_eq!(winner.winner_slot, Some(RoleSlot::PlannerB));
-        assert_eq!(winner.artifact_path, "planning-duel/planner_b.md");
-        assert_eq!(winner.arbiter_family, AgentFamily::Gemini);
-        assert_eq!(
-            winner.arbiter_rationale,
-            "Claude provided a more comprehensive diagnosis."
-        );
-    }
-
-    #[test]
-    fn planning_duel_winner_marker_rejects_explicit_arbiter_mismatch() {
-        let roles = planning_roles();
-        let artifacts = planning_duel_artifacts(json!({
-            "winner_slot": "planner_b",
-            "arbiter_agent_cli": "codex",
-            "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
-        }));
-
-        let message = invalid_input_message(
-            winner_artifact_from_artifacts(&artifacts, Some(&roles))
-                .expect_err("arbiter mismatch should be rejected"),
-        );
-
-        assert!(
-            message
-                .contains("winner artifact arbiter codex does not match recorded arbiter gemini"),
-            "{message}"
-        );
-    }
-
-    #[test]
-    fn planning_duel_winner_marker_requires_arbiter_identity_without_roles() {
-        let artifacts = planning_duel_artifacts(json!({
-            "winner_slot": "planner_b",
-            "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
-        }));
-
-        let message = invalid_input_message(
-            winner_artifact_from_artifacts(&artifacts, None)
-                .expect_err("arbiter identity cannot be inferred without roles"),
-        );
-
-        assert!(
-            message.contains(
-                "planning duel winner marker requires `arbiter_family` when `planning_duel_roles` are unavailable"
-            ),
-            "{message}"
-        );
-    }
-
-    #[test]
-    fn planning_duel_winner_marker_accepts_legacy_full_payload_without_roles() {
-        let artifacts = planning_duel_artifacts(json!({
-            "winner_agent_cli": "claude",
-            "winner_model": "claude-opus-4-7",
-            "artifact_path": "planning-duel/planner_b.md",
-            "arbiter_agent_cli": "gemini",
-            "arbiter_model": "gemini-3.1-pro",
-            "arbiter_rationale": "Claude provided a more comprehensive diagnosis."
-        }));
-
-        let winner = winner_artifact_from_artifacts(&artifacts, None)
-            .expect("legacy full winner payload should still normalize");
-
-        assert_eq!(winner.winner_family, AgentFamily::Claude);
-        assert_eq!(winner.artifact_path, "planning-duel/planner_b.md");
-        assert_eq!(winner.arbiter_family, AgentFamily::Gemini);
-    }
 }

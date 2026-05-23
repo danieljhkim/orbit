@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0087
 title: Default search ranking uses a bounded candidate pool
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260509-67
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-033

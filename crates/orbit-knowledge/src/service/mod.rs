@@ -36,3 +36,6 @@ pub struct GraphContextService<'a> {
     /// disambiguate struct vs impl at the same qualified name.
     location_index: HashMap<String, &'a str>,
 }
+
+#[cfg(test)]
+mod tests;

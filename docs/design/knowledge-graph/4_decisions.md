@@ -1,8 +1,16 @@
-# Knowledge Graph — Decisions
+---
+summary: "Knowledge Graph — Decisions"
+type: design
+title: "Knowledge Graph — Decisions"
+owner: claude
+last_updated: 2026-05-17
+status: Draft
+feature: knowledge-graph
+doc_role: decisions
+tags: ["knowledge-graph"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-17 ([ORB-00099])
+# Knowledge Graph — Decisions
 
 ADR-style log of non-obvious knowledge-graph decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 

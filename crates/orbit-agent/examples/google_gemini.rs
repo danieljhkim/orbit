@@ -15,7 +15,7 @@
 use std::env;
 use std::time::Duration;
 
-use orbit_agent::loop_engine::{AgentLoop, AgentLoopConfig, JsonlFileSink, Session};
+use orbit_agent::loop_engine::{AgentLoop, AgentLoopConfig, InMemorySink, Session};
 use orbit_agent::providers::gemini_http::GeminiHttpTransport;
 use orbit_tools::{ToolContext, ToolRegistry};
 
@@ -35,14 +35,17 @@ fn main() {
         .with_timeout(Duration::from_secs(120))
         .expect("configure gemini transport timeout");
 
-    let audit_root = env::temp_dir().join("orbit-agent-examples").join("audit");
-    let sink = JsonlFileSink::open(&audit_root, format!("google-gemini-{}", now_ms()))
-        .expect("open audit sink");
+    let run_id = format!("google-gemini-{}", now_ms());
+    let audit_blob_root = env::temp_dir()
+        .join("orbit-agent-examples")
+        .join("audit-blobs")
+        .join(&run_id);
+    let sink = InMemorySink::new(&audit_blob_root);
 
     let registry = ToolRegistry::new();
     let tool_ctx = ToolContext::default();
 
-    let cfg = AgentLoopConfig::new_for_run(sink.run_id())
+    let cfg = AgentLoopConfig::new_for_run(&run_id)
         .with_max_iterations(2)
         .with_max_total_tokens(50_000)
         .with_wall_clock_timeout(Duration::from_secs(120))
@@ -76,8 +79,8 @@ fn main() {
                 outcome.usage.cache_creation_input_tokens,
             );
             println!("terminate: {:?}", outcome.terminate_reason);
-            println!("audit: {}", sink.log_path().display());
-            session.close(sink.run_id(), &sink);
+            println!("audit blobs: {}", sink.blob_store().root().display());
+            session.close(&run_id, &sink);
         }
         Err(err) => panic!("google gemini example failed: {err}"),
     }

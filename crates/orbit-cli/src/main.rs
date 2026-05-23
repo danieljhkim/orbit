@@ -39,8 +39,12 @@ mod parse;
 use clap::Parser;
 use orbit_core::{ActorIdentity, OrbitRuntime};
 
+use crate::command::docs::{DocsCommand, DocsSubcommand};
+use crate::command::friction::{FrictionCommand, FrictionSubcommand};
+use crate::command::hook::{HookCommand, HookSubcommand};
 use crate::command::learning::{LearningCommand, LearningSubcommand};
 use crate::command::mcp::{McpCommand, McpSubcommand};
+use crate::command::search::SearchCommand;
 use crate::command::tool::{OutputFormat, ToolSubcommand};
 use crate::command::workspace::{WorkspaceCommand, WorkspaceSubcommand};
 use crate::command::{Commands, Execute, init::InitCommand};
@@ -50,7 +54,8 @@ fn main() {
 
     let cli = command::Cli::parse();
     let root_override = cli.root.clone();
-    let tool_run_json_output = tool_run_json_output_preference(&cli.command);
+    let tool_run_json_output = json_error_output_preference(&cli.command);
+    let hook_pretooluse = is_hook_pretooluse_command(&cli.command);
 
     // Commands that run without a pre-existing runtime
     match cli.command {
@@ -112,6 +117,9 @@ fn main() {
     let runtime = match OrbitRuntime::initialize_with_root_override(root_override.as_deref()) {
         Ok(runtime) => runtime,
         Err(err) => {
+            if hook_pretooluse {
+                return;
+            }
             print_error(&err, tool_run_json_output);
             std::process::exit(1);
         }
@@ -136,6 +144,9 @@ fn main() {
     };
 
     if let Err(err) = result {
+        if hook_pretooluse {
+            return;
+        }
         print_error(&err, tool_run_json_output);
         std::process::exit(1);
     }
@@ -148,7 +159,7 @@ fn execute_init_command(
     cmd.execute_without_runtime(root_override)
 }
 
-fn tool_run_json_output_preference(command: &Commands) -> Option<bool> {
+fn json_error_output_preference(command: &Commands) -> Option<bool> {
     match command {
         Commands::Tool(command) => match &command.command {
             ToolSubcommand::Run(args) if matches!(args.output, OutputFormat::Json) => {
@@ -156,8 +167,34 @@ fn tool_run_json_output_preference(command: &Commands) -> Option<bool> {
             }
             _ => None,
         },
+        Commands::Docs(DocsCommand { command }) => match command {
+            DocsSubcommand::List(args) => args.json.then_some(true),
+            DocsSubcommand::Show(args) => args.json.then_some(true),
+            DocsSubcommand::Add(args) => args.json.then_some(true),
+            DocsSubcommand::Index(args) => args.json.then_some(true),
+            DocsSubcommand::Migrate(args) => args.json.then_some(true),
+        },
+        Commands::Friction(FrictionCommand { command }) => match command {
+            FrictionSubcommand::Add(args) => args.json.then_some(true),
+            FrictionSubcommand::List(args) => args.json.then_some(true),
+            FrictionSubcommand::Show(args) => args.json.then_some(true),
+            FrictionSubcommand::Stats(args) => args.json.then_some(true),
+            FrictionSubcommand::Tags(args) => args.json.then_some(true),
+            FrictionSubcommand::Update(args) => args.json.then_some(true),
+            FrictionSubcommand::Resolve(args) => args.json.then_some(true),
+        },
+        Commands::Search(SearchCommand { json: true, .. }) => Some(true),
         _ => None,
     }
+}
+
+fn is_hook_pretooluse_command(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::Hook(HookCommand {
+            command: HookSubcommand::Pretooluse(_)
+        })
+    )
 }
 
 fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool>) {
@@ -170,3 +207,6 @@ fn print_error(error: &orbit_core::OrbitError, tool_run_json_output: Option<bool
 
     eprintln!("error: {error}");
 }
+
+#[cfg(test)]
+mod tests;

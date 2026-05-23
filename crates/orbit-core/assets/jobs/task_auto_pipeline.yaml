@@ -59,7 +59,7 @@ spec:
     - id: dispatch
       fan_out:
         items: "{{ steps.validate_bundles.output.bundles }}"
-        max_workers: 3
+        max_workers: 5
         worker:
           id: gate_invoke
           target: activity:invoke_and_wait

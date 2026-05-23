@@ -42,6 +42,8 @@ impl<'de> Deserialize<'de> for LearningFileDocument {
             supersedes: Option<OrbitId>,
             #[serde(default)]
             superseded_by: Option<OrbitId>,
+            #[serde(default)]
+            legacy_ids: Vec<OrbitId>,
             created_at: DateTime<Utc>,
             updated_at: DateTime<Utc>,
             #[serde(default)]
@@ -62,6 +64,7 @@ impl<'de> Deserialize<'de> for LearningFileDocument {
                 evidence: raw.evidence,
                 supersedes: raw.supersedes,
                 superseded_by: raw.superseded_by,
+                legacy_ids: raw.legacy_ids,
                 created_at: raw.created_at,
                 updated_at: raw.updated_at,
                 created_by: raw.created_by,

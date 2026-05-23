@@ -24,10 +24,12 @@ use std::sync::Arc;
 
 use orbit_common::types::activity_job::AgentRole;
 use orbit_common::types::{
-    InvocationTrace, LearningInjectionCaps, LearningReminder, RoleSlot, UNRESTRICTED_FS_PROFILE,
+    InvocationTrace, LearningInjectionCaps, LearningInjectionState, LearningReminder, RoleSlot,
+    UNRESTRICTED_FS_PROFILE,
 };
 use orbit_engine::{AgentRoleConfig, EnvironmentHost};
 use orbit_engine::{DispatchError, ResolvedCliExecutor, ResolvedSandbox, V2RuntimeHost};
+use orbit_knowledge::metrics::merge_invocation_trace;
 use orbit_store::{InvocationInsertParams, Store, token_scoreboard};
 use orbit_tools::{FsAuditLogger, ReservationOwnerContext, ToolContext};
 use serde_json::Value;
@@ -88,17 +90,41 @@ impl V2RuntimeHost for OrbitRuntime {
         learning_reminders::learning_reminders_for_task(self, input, caps)
     }
 
+    fn persist_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), DispatchError> {
+        let store = Store::open(&self.context.persistence().audit_db).map_err(|error| {
+            DispatchError::JobExecution(format!("open session learning store: {error}"))
+        })?;
+        let workspace_id = self.workspace_id().map_err(|error| {
+            DispatchError::JobExecution(format!("resolve workspace id: {error}"))
+        })?;
+        store
+            .upsert_session_learning_state(&workspace_id, session_id, state)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("persist session learning state: {error}"))
+            })
+    }
+
     fn tool_context_for_activity(
         &self,
         run_id: Option<&str>,
         fs_profile: Option<&str>,
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
+        proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
         let workspace_root = self
             .paths()
             .repo_root
             .canonicalize()
             .unwrap_or_else(|_| self.paths().repo_root.clone());
+
+        let proc_spawn_activity_scoped = proc_allowed_programs.is_some();
+        let proc_allowed_programs = proc_allowed_programs
+            .map(|programs| programs.to_vec())
+            .unwrap_or_default();
 
         ToolContext {
             cwd: std::env::current_dir()
@@ -108,6 +134,8 @@ impl V2RuntimeHost for OrbitRuntime {
             policy_engine: Some(Arc::new(self.policy_engine().clone())),
             fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string()),
             fs_audit,
+            proc_allowed_programs,
+            proc_spawn_activity_scoped,
             reservation_owner: run_id.map(str::trim).filter(|value| !value.is_empty()).map(
                 |owner_run_id| ReservationOwnerContext {
                     owner_run_id: owner_run_id.to_string(),
@@ -120,7 +148,14 @@ impl V2RuntimeHost for OrbitRuntime {
                     ),
                 },
             ),
-            orbit_host: Some(build_orbit_tool_host(self, None)),
+            orbit_host: Some(build_orbit_tool_host(
+                self,
+                None,
+                run_id
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+            )),
             ..Default::default()
         }
     }
@@ -160,6 +195,23 @@ impl V2RuntimeHost for OrbitRuntime {
                 error = %error,
                 "failed to refresh tokens scoreboard",
             );
+        }
+
+        let existing = self
+            .get_job_run_backend(job_run_id)
+            .map_err(|error| {
+                DispatchError::JobExecution(format!("read job run for knowledge metrics: {error}"))
+            })?
+            .and_then(|run| run.knowledge_metrics);
+        if let Some(metrics) = merge_invocation_trace(existing.as_ref(), trace) {
+            self.stores()
+                .jobs()
+                .record_run_knowledge_metrics(job_run_id, metrics)
+                .map_err(|error| {
+                    DispatchError::JobExecution(format!(
+                        "record job-run knowledge metrics: {error}"
+                    ))
+                })?;
         }
 
         Ok(())
@@ -230,7 +282,9 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use orbit_common::types::activity_job::{AgentLoopSpec, Backend, OnDenial, Provider};
-    use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
+    use orbit_common::types::{
+        InvocationTrace, JobRunState, TaskPriority, TaskStatus, TaskType, TokenUsage, ToolCallTrace,
+    };
     use orbit_engine::{V2AuditWriter, drive_agent_loop, reset_replay_transport};
     use tempfile::NamedTempFile;
 
@@ -283,6 +337,162 @@ mod tests {
         file
     }
 
+    fn seed_running_job_run(runtime: &OrbitRuntime, job_id: &str) -> String {
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_run(job_id, 1, chrono::Utc::now(), None, None)
+            .expect("insert job run");
+        runtime
+            .stores()
+            .jobs()
+            .mark_run_running(&run.run_id, chrono::Utc::now(), std::process::id())
+            .expect("mark run running");
+        run.run_id
+    }
+
+    fn payload_tool_call(seq: u32, tool_name: &str, payload: Value) -> ToolCallTrace {
+        ToolCallTrace {
+            seq,
+            tool_name: tool_name.to_string(),
+            result_bytes: serde_json::to_vec(&payload)
+                .expect("serialize payload")
+                .len() as u64,
+            result_payload: Some(payload),
+        }
+    }
+
+    fn byte_count_tool_call(seq: u32, tool_name: &str, result_bytes: u64) -> ToolCallTrace {
+        ToolCallTrace {
+            seq,
+            tool_name: tool_name.to_string(),
+            result_bytes,
+            result_payload: None,
+        }
+    }
+
+    fn trace_with_tool_calls(input_tokens: u64, tool_calls: Vec<ToolCallTrace>) -> InvocationTrace {
+        InvocationTrace {
+            usage: TokenUsage {
+                input: input_tokens,
+                cache_read: 0,
+                cache_create: 0,
+                output: 0,
+            },
+            tool_calls,
+            duration_ms: 10,
+        }
+    }
+
+    fn persist_test_trace(runtime: &OrbitRuntime, run_id: &str, trace: &InvocationTrace) {
+        V2RuntimeHost::persist_invocation_trace(
+            runtime,
+            run_id,
+            "knowledge_step",
+            "codex",
+            Some("gpt-test"),
+            &serde_json::json!({ "task_id": "ORB-KNOWLEDGE-TEST" }),
+            trace,
+        )
+        .expect("persist invocation trace");
+    }
+
+    #[test]
+    fn persist_invocation_trace_records_pack_metrics_before_terminal_state() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+        let run_id = seed_running_job_run(&runtime, "knowledge_pack_job");
+        let trace = trace_with_tool_calls(
+            155,
+            vec![payload_tool_call(
+                1,
+                "orbit.graph.pack",
+                serde_json::json!({
+                    "raw_read_token_baseline": 400,
+                    "knowledge_pack_tokens": 100,
+                    "entries": [{ "selector": "file:src/lib.rs", "source": "pub fn demo() {}" }],
+                    "unresolved_selectors": [],
+                }),
+            )],
+        );
+
+        persist_test_trace(&runtime, &run_id, &trace);
+
+        let run = runtime.show_job_run(&run_id).expect("show job run");
+        assert_eq!(run.state, JobRunState::Running);
+        let metrics = run.knowledge_metrics.expect("knowledge metrics recorded");
+        assert!(metrics.knowledge_pack_used);
+        assert_eq!(metrics.raw_read_token_baseline, 400);
+        assert_eq!(metrics.knowledge_pack_tokens, Some(100));
+        assert_eq!(metrics.compression_ratio, Some(4.0));
+        assert_eq!(metrics.actual_fs_read_tokens_during_run, 0);
+        assert_eq!(metrics.double_read_rate, Some(0.0));
+        assert_eq!(metrics.knowledge_pack_unresolved_count, 0);
+        assert_eq!(metrics.total_llm_input_tokens, 155);
+
+        assert_eq!(run.job_id, "knowledge_pack_job");
+    }
+
+    #[test]
+    fn persist_invocation_trace_records_fallback_and_double_read_metrics() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+        let double_read_run_id = seed_running_job_run(&runtime, "knowledge_double_read_job");
+        let double_read_trace = trace_with_tool_calls(
+            90,
+            vec![
+                payload_tool_call(
+                    1,
+                    "orbit.graph.pack",
+                    serde_json::json!({
+                        "raw_read_token_baseline": 100,
+                        "knowledge_pack_tokens": 25,
+                        "entries": [{ "selector": "file:src/main.rs" }],
+                        "unresolved_selectors": ["file:src/missing.rs"],
+                    }),
+                ),
+                byte_count_tool_call(2, "fs.read", 80),
+            ],
+        );
+
+        persist_test_trace(&runtime, &double_read_run_id, &double_read_trace);
+
+        let double_read_run = runtime
+            .show_job_run(&double_read_run_id)
+            .expect("show double-read job run");
+        let metrics = double_read_run
+            .knowledge_metrics
+            .expect("double-read metrics recorded");
+        assert!(metrics.knowledge_pack_used);
+        assert_eq!(metrics.raw_read_token_baseline, 120);
+        assert_eq!(metrics.knowledge_pack_tokens, Some(25));
+        assert_eq!(metrics.knowledge_pack_unresolved_count, 1);
+        assert_eq!(metrics.actual_fs_read_tokens_during_run, 20);
+        assert!(
+            metrics
+                .double_read_rate
+                .is_some_and(|rate| (rate - (20.0 / 120.0)).abs() < f64::EPSILON)
+        );
+
+        let fallback_run_id = seed_running_job_run(&runtime, "knowledge_fallback_job");
+        let fallback_trace =
+            trace_with_tool_calls(50, vec![byte_count_tool_call(1, "fs.read", 120)]);
+
+        persist_test_trace(&runtime, &fallback_run_id, &fallback_trace);
+
+        let fallback_run = runtime
+            .show_job_run(&fallback_run_id)
+            .expect("show fallback job run");
+        let metrics = fallback_run
+            .knowledge_metrics
+            .expect("fallback metrics recorded");
+        assert!(!metrics.knowledge_pack_used);
+        assert_eq!(metrics.raw_read_token_baseline, 30);
+        assert_eq!(metrics.knowledge_pack_tokens, None);
+        assert_eq!(metrics.actual_fs_read_tokens_during_run, 30);
+        assert_eq!(metrics.double_read_rate, Some(1.0));
+        assert_eq!(metrics.total_llm_input_tokens, 50);
+    }
+
     #[test]
     fn http_agent_loop_tool_update_persists_runtime_identity_family() {
         let _lock = replay_env_guard();
@@ -322,6 +532,8 @@ mod tests {
         let audit_dir = tempfile::tempdir().expect("audit tempdir");
         let audit = V2AuditWriter::with_disk_sinks(
             audit_dir.path(),
+            Store::open_in_memory().expect("audit store"),
+            "ws_test",
             "http-identity-regression",
             "claude:claude-opus-4-7".to_string(),
             None,
@@ -337,6 +549,7 @@ mod tests {
             provider: Provider::Claude,
             wall_clock_timeout_seconds: 30,
             role: None,
+            proc_allowed_programs: None,
         };
 
         drive_agent_loop(
@@ -352,5 +565,44 @@ mod tests {
 
         let updated = runtime.get_task(&task.id).expect("updated task");
         assert_eq!(updated.implemented_by.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn tool_context_for_activity_passes_proc_allowlist() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+        // No allowlist -> not activity-scoped (legacy unrestricted path).
+        let unscoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            &runtime,
+            Some("run-allowlist-test"),
+            None,
+            None,
+            None,
+        );
+        assert!(unscoped.proc_allowed_programs.is_empty());
+        assert!(!unscoped.proc_spawn_activity_scoped);
+
+        // Activity-scoped allowlist propagates verbatim and flips the bool.
+        let programs = vec!["git".to_string(), "rg".to_string()];
+        let scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            &runtime,
+            Some("run-allowlist-test"),
+            None,
+            None,
+            Some(programs.as_slice()),
+        );
+        assert_eq!(scoped.proc_allowed_programs, programs);
+        assert!(scoped.proc_spawn_activity_scoped);
+
+        // Empty Some([]) is meaningful: fail-closed when activity-scoped.
+        let empty_scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            &runtime,
+            Some("run-allowlist-test"),
+            None,
+            None,
+            Some(&[]),
+        );
+        assert!(empty_scoped.proc_allowed_programs.is_empty());
+        assert!(empty_scoped.proc_spawn_activity_scoped);
     }
 }

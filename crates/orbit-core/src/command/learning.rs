@@ -5,6 +5,7 @@
 //! dispatch layer. Tool-host and CLI both reach into
 //! `runtime.stores().learnings()`, which is the single source of truth.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::{
@@ -14,23 +15,62 @@ use orbit_common::types::{
     LearningVoteSummary, all_agent_families, normalize_agent_family_for_model,
 };
 use orbit_store::{
-    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams,
+    LearningCommentAddParams, LearningCommentDeleteParams, LearningCreateParams, LearningListEntry,
     LearningSearchParams, LearningSearchResult, LearningUpdateParams, LearningUpvoteParams,
-    learning_layout::LearningLayoutMigrationReport,
+    RemoteArtifactStub, learning_layout::LearningLayoutMigrationReport,
 };
+use serde::Deserialize;
 
 use crate::OrbitRuntime;
 
+#[derive(Debug, Deserialize)]
+struct LearningConfigFile {
+    learning: Option<LearningConfigSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LearningConfigSection {
+    search: Option<LearningSearchConfigSection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LearningSearchConfig {
+    pub semantic_weight: f32,
+}
+
+impl Default for LearningSearchConfig {
+    fn default() -> Self {
+        Self {
+            semantic_weight: 0.5,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LearningSearchConfigSection {
+    semantic_weight: Option<f32>,
+}
+
 impl OrbitRuntime {
     pub fn create_learning(&self, params: LearningCreateParams) -> Result<Learning, OrbitError> {
-        self.stores().learnings().add(params)
+        let learning = self.stores().learnings().add(params)?;
+        self.record_id_allocation_audit("learning", &learning.id)?;
+        Ok(learning)
     }
 
     pub fn get_learning(&self, id: &str) -> Result<Learning, OrbitError> {
-        self.stores()
-            .learnings()
-            .get(id)?
-            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Learning, id.to_string()))
+        match self.stores().learnings().get_federated(id)? {
+            Some(learning) => Ok(learning),
+            None => {
+                if let Some(stub) = self.stores().learnings().remote_stub(id)? {
+                    return Err(remote_artifact_error("learning", &stub));
+                }
+                Err(OrbitError::not_found(
+                    NotFoundKind::Learning,
+                    id.to_string(),
+                ))
+            }
+        }
     }
 
     pub fn list_learnings(
@@ -40,12 +80,26 @@ impl OrbitRuntime {
         self.stores().learnings().list(status)
     }
 
+    pub fn list_learning_entries(
+        &self,
+        status: Option<LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        self.stores()
+            .learnings()
+            .list_entries(status, include_remote)
+    }
+
     pub fn search_learnings(
         &self,
         params: LearningSearchParams,
     ) -> Result<Vec<LearningSearchResult>, OrbitError> {
         let params = normalize_learning_search_params(&self.paths().repo_root, params)?;
         self.stores().learnings().search(params)
+    }
+
+    pub fn learning_search_config(&self) -> Result<LearningSearchConfig, OrbitError> {
+        read_learning_search_config_from_config_path(&self.config_path())
     }
 
     pub fn upvote_learning(
@@ -127,8 +181,8 @@ impl OrbitRuntime {
         self.stores().learnings().archive(id)
     }
 
-    pub fn reindex_learnings(&self) -> Result<(), OrbitError> {
-        self.stores().learnings().reindex()
+    pub fn sync_learnings(&self) -> Result<(), OrbitError> {
+        self.stores().learnings().sync()
     }
 
     pub fn migrate_learning_layout(&self) -> Result<LearningLayoutMigrationReport, OrbitError> {
@@ -166,6 +220,44 @@ impl OrbitRuntime {
         }
         Ok((stale, deleted))
     }
+}
+
+pub fn parse_learning_search_config_from_config_toml(
+    raw: &str,
+) -> Result<LearningSearchConfig, OrbitError> {
+    if raw.trim().is_empty() {
+        return Ok(LearningSearchConfig::default());
+    }
+    let parsed = toml::from_str::<LearningConfigFile>(raw).map_err(|error| {
+        OrbitError::InvalidInput(format!("invalid learning config in config.toml: {error}"))
+    })?;
+    let semantic_weight = parsed
+        .learning
+        .and_then(|section| section.search)
+        .and_then(|section| section.semantic_weight)
+        .unwrap_or_else(|| LearningSearchConfig::default().semantic_weight)
+        .clamp(0.0, 1.0);
+    Ok(LearningSearchConfig { semantic_weight })
+}
+
+fn read_learning_search_config_from_config_path(
+    path: &Path,
+) -> Result<LearningSearchConfig, OrbitError> {
+    if !path.exists() {
+        return Ok(LearningSearchConfig::default());
+    }
+    let raw = fs::read_to_string(path)
+        .map_err(|error| OrbitError::Io(format!("read {}: {error}", path.display())))?;
+    parse_learning_search_config_from_config_toml(&raw)
+}
+
+fn remote_artifact_error(kind: &str, stub: &RemoteArtifactStub) -> OrbitError {
+    OrbitError::Store(format!(
+        "{kind} {} is recorded in another worktree and its body is not locally readable; worktree_root={}, branch={}",
+        stub.id,
+        stub.worktree_root.display(),
+        stub.branch.as_deref().unwrap_or("<none>")
+    ))
 }
 
 pub fn migrate_learning_layout_at(
@@ -251,27 +343,56 @@ fn normalize_learning_search_params(
 }
 
 fn normalize_learning_search_path(repo_root: &Path, path: &str) -> Result<String, OrbitError> {
+    match classify_learning_search_path(repo_root, path)? {
+        LearningSearchPathScope::Relative => Ok(path.to_string()),
+        LearningSearchPathScope::WorkspaceRelative(relative) => Ok(relative),
+        LearningSearchPathScope::OutsideWorkspace => Err(OrbitError::InvalidInput(format!(
+            "filesystem path `{path}` must stay inside the workspace root"
+        ))),
+    }
+}
+
+pub(crate) fn learning_search_path_matches_workspace(
+    repo_root: &Path,
+    path: &str,
+) -> Result<bool, OrbitError> {
+    Ok(!matches!(
+        classify_learning_search_path(repo_root, path)?,
+        LearningSearchPathScope::OutsideWorkspace
+    ))
+}
+
+enum LearningSearchPathScope {
+    Relative,
+    WorkspaceRelative(String),
+    OutsideWorkspace,
+}
+
+fn classify_learning_search_path(
+    repo_root: &Path,
+    path: &str,
+) -> Result<LearningSearchPathScope, OrbitError> {
     let trimmed = path.trim();
     let candidate = Path::new(trimmed);
     if !candidate.is_absolute() {
-        return Ok(path.to_string());
+        return Ok(LearningSearchPathScope::Relative);
     }
 
     let canonical_repo_root = canonicalize_with_missing_tail(repo_root)?;
     let canonical_candidate = canonicalize_with_missing_tail(candidate)?;
     if let Ok(relative) = canonical_candidate.strip_prefix(&canonical_repo_root) {
-        return Ok(workspace_relative_path_string(relative));
+        return Ok(LearningSearchPathScope::WorkspaceRelative(
+            workspace_relative_path_string(relative),
+        ));
     }
 
     if let Some(relative) =
         linked_worktree_relative_path(&canonical_repo_root, candidate, &canonical_candidate)
     {
-        return Ok(relative);
+        return Ok(LearningSearchPathScope::WorkspaceRelative(relative));
     }
 
-    Err(OrbitError::InvalidInput(format!(
-        "filesystem path `{path}` must stay inside the workspace root"
-    )))
+    Ok(LearningSearchPathScope::OutsideWorkspace)
 }
 
 fn normalize_learning_voter_model(raw: &str) -> Result<String, OrbitError> {
@@ -362,4 +483,43 @@ fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, OrbitError> {
         canonical.push(component);
     }
     Ok(canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn learning_search_config_defaults_and_clamps_semantic_weight() {
+        assert_eq!(
+            parse_learning_search_config_from_config_toml("")
+                .unwrap()
+                .semantic_weight,
+            0.5
+        );
+        assert_eq!(
+            parse_learning_search_config_from_config_toml(
+                "[learning.search]\nsemantic_weight = 0.7\n"
+            )
+            .unwrap()
+            .semantic_weight,
+            0.7
+        );
+        assert_eq!(
+            parse_learning_search_config_from_config_toml(
+                "[learning.search]\nsemantic_weight = -1.0\n"
+            )
+            .unwrap()
+            .semantic_weight,
+            0.0
+        );
+        assert_eq!(
+            parse_learning_search_config_from_config_toml(
+                "[learning.search]\nsemantic_weight = 2.0\n"
+            )
+            .unwrap()
+            .semantic_weight,
+            1.0
+        );
+    }
 }

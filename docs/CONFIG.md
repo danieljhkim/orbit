@@ -24,7 +24,7 @@ The workspace identity file `.orbit/config.yaml` is a separate artifact (it stor
 ```toml
 [workflow]
 base_branch = "main"        # default merge-base for ship / duel-plan
-default_crew = "opus-codex" # fallback crew when a task has no `crew` set
+default_crew = "codex"      # fallback crew when a task has no `crew` set
 ```
 
 - **`base_branch`** — the branch `orbit run ship` and `duel-plan` rebase against and target with PRs. Override per-invocation with `--base <branch>`. If your repo uses a two-branch pattern like this repo does (`main` = release, `agent-main` = dev integration), set `base_branch = "agent-main"`.
@@ -42,18 +42,18 @@ A **crew** assigns models to the three roles in the ship pipeline: `planner`, `i
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok` |
 | `backend` | How Orbit dispatches the agent | `cli` (today the only supported value for these roles) |
 
-Example — a mixed crew using Claude for planning and review, Codex for implementation:
+Example — a single-family Codex crew:
 
 ```toml
-[crews.opus-codex]
-planner     = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+[crews.codex]
+planner     = { model = "gpt-5.5",         provider = "codex",  backend = "cli" }
 implementer = { model = "gpt-5.5",         provider = "codex",  backend = "cli" }
-reviewer    = { model = "claude-opus-4-7", provider = "claude", backend = "cli" }
+reviewer    = { model = "gpt-5.5",         provider = "codex",  backend = "cli" }
 ```
 
 You can define any number of crews. Set the workspace-wide fallback with `workflow.default_crew`; assign a specific crew to individual tasks via the [per-task crew override](#per-task-crew-override). Common patterns:
 
-- **Single-vendor crew** (`all-claude`, `all-codex`, `all-gemini`, `all-grok`) — useful when you only have one CLI authenticated, or when you want consistent behaviour end-to-end.
+- **Single-family crew** (`claude`, `codex`, `gemini`, `grok`) — useful when you only have one CLI authenticated, or when you want consistent behaviour end-to-end.
 - **Mixed crew** — different model for each role, e.g. a strong planner with a fast implementer, or a different vendor for review than implementation so the reviewer isn't reviewing its own output.
 
 Crews are validated at load time: each role must have non-empty `model`, `provider`, and `backend`; `workflow.default_crew` must name a defined crew.
@@ -70,7 +70,7 @@ Crews are validated at load time: each role must have non-empty `model`, `provid
 2. `[workflow].default_crew` from `config.toml`, otherwise
 3. error: `no crew selected; set [workflow].default_crew, task.crew, or pass crew`.
 
-This means you can mix-and-match in a single ship run: route a tricky refactor to `all-claude` while routing routine cleanups to `opus-codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time.
+This means you can mix-and-match in a single ship run: route a tricky refactor to `claude` while routing routine cleanups to `codex` — both go through the same `orbit run ship` invocation, each picking its own crew at dispatch time.
 
 ### Setting `task.crew`
 
@@ -82,7 +82,7 @@ Three equivalent surfaces:
 | **CLI** | `orbit task add --crew <name> …` at creation, or `orbit task update <id> --crew <name>` later. Pass `--crew ""` to `task update` to clear the field. (`orbit task start --crew <name>` exists but only validates the name and logs it — it does **not** persist onto `task.crew` or affect later `orbit run ship` dispatch. Use `task update` if you want the choice to stick.) |
 | **MCP / agent** | `orbit.task.add` and `orbit.task.update` accept a `crew` parameter; an empty string on update clears it. Useful when an agent is filing or amending tasks programmatically. |
 
-The dropdown label `default: opus-codex` in the dashboard means *the task has no `crew` set* and will inherit `[workflow].default_crew`. Picking a named crew writes it onto the task and the label updates accordingly.
+The dropdown label `default: codex` in the dashboard means *the task has no `crew` set* and will inherit `[workflow].default_crew`. Picking a named crew writes it onto the task and the label updates accordingly.
 
 ### What "ran" vs what "was selected"
 

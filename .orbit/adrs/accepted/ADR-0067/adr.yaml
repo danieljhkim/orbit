@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0067
 title: Debounced, single-flighted refresh
 status: accepted
@@ -13,6 +13,8 @@ related_tasks:
 - T20260416-0719
 - T20260417-0639
 - T20260505-1
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-009

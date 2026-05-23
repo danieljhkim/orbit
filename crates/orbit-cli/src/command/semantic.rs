@@ -1,6 +1,6 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::command::semantic::{
-    SemanticInstallParams, SemanticReindexParams, SemanticRelatedParams, SemanticSearchParams,
+    IndexKind, SemanticIndexParams, SemanticIndexResult, SemanticInstallParams,
     SemanticUninstallParams,
 };
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -9,7 +9,7 @@ use serde_json::json;
 use crate::command::Execute;
 
 #[derive(Args)]
-#[command(about = "Manage local semantic-search indexing")]
+#[command(about = "Manage local orbit-search indexing")]
 pub struct SemanticCommand {
     #[command(subcommand)]
     pub command: SemanticSubcommand,
@@ -17,18 +17,14 @@ pub struct SemanticCommand {
 
 #[derive(Subcommand)]
 pub enum SemanticSubcommand {
-    /// Download the embedding companion and selected model
+    /// Download the search companion and selected model
     Install(SemanticInstallArgs),
-    /// Remove installed semantic-search companion and/or models
+    /// Remove installed orbit-search companion and/or models
     Uninstall(SemanticUninstallArgs),
-    /// Rebuild task embeddings
-    Reindex(SemanticReindexArgs),
-    /// Show semantic-search index and companion status
+    /// Show orbit-search index and companion status
     Stats(SemanticStatsArgs),
-    /// Hybrid semantic search over indexed task fields
-    Search(SemanticSearchArgs),
-    /// Find semantically related tasks
-    Related(SemanticRelatedArgs),
+    /// Rebuild semantic embeddings
+    Index(SemanticIndexArgs),
 }
 
 #[derive(Args)]
@@ -53,43 +49,46 @@ pub struct SemanticUninstallArgs {
 }
 
 #[derive(Args)]
-pub struct SemanticReindexArgs {
+pub struct SemanticIndexArgs {
     #[arg(long)]
     pub model: Option<String>,
     #[arg(long)]
     pub force: bool,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = SemanticIndexKindArg::Tasks,
+        value_name = "KIND",
+        help = "--kind selects corpus: tasks (default), docs (same as `orbit docs index`), adrs, learnings, all (rebuilds all indexed corpora)."
+    )]
+    pub kind: SemanticIndexKindArg,
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SemanticIndexKindArg {
+    Tasks,
+    Docs,
+    Adrs,
+    Learnings,
+    All,
+}
+
+impl From<SemanticIndexKindArg> for IndexKind {
+    fn from(value: SemanticIndexKindArg) -> Self {
+        match value {
+            SemanticIndexKindArg::Tasks => Self::Tasks,
+            SemanticIndexKindArg::Docs => Self::Docs,
+            SemanticIndexKindArg::Adrs => Self::Adrs,
+            SemanticIndexKindArg::Learnings => Self::Learnings,
+            SemanticIndexKindArg::All => Self::All,
+        }
+    }
 }
 
 #[derive(Args)]
 pub struct SemanticStatsArgs {
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct SemanticSearchArgs {
-    pub query: String,
-    #[arg(long, default_value_t = 10)]
-    pub limit: usize,
-    #[arg(long)]
-    pub field: Option<String>,
-    #[arg(long)]
-    pub kind: Option<String>,
-    #[arg(long)]
-    pub model: Option<String>,
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args)]
-pub struct SemanticRelatedArgs {
-    pub task_id: String,
-    #[arg(long, default_value_t = 10)]
-    pub limit: usize,
-    #[arg(long)]
-    pub model: Option<String>,
     #[arg(long)]
     pub json: bool,
 }
@@ -105,10 +104,8 @@ impl Execute for SemanticSubcommand {
         match self {
             SemanticSubcommand::Install(args) => args.execute(runtime),
             SemanticSubcommand::Uninstall(args) => args.execute(runtime),
-            SemanticSubcommand::Reindex(args) => args.execute(runtime),
             SemanticSubcommand::Stats(args) => args.execute(runtime),
-            SemanticSubcommand::Search(args) => args.execute(runtime),
-            SemanticSubcommand::Related(args) => args.execute(runtime),
+            SemanticSubcommand::Index(args) => args.execute(runtime),
         }
     }
 }
@@ -157,22 +154,104 @@ impl Execute for SemanticUninstallArgs {
     }
 }
 
-impl Execute for SemanticReindexArgs {
+impl Execute for SemanticIndexArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.semantic_reindex(SemanticReindexParams {
+        let result = runtime.semantic_index(SemanticIndexParams {
             model: self.model,
             force: self.force,
+            kind: Some(self.kind.into()),
         })?;
         if self.json {
             crate::output::json::print_pretty(&json!(result))
         } else {
-            println!(
-                "Reindexed semantic search: model={} embedded_chunks={} skipped_fields={}",
-                result.model_id, result.report.embedded_chunks, result.report.skipped_fields
-            );
-            Ok(())
+            print_semantic_index_text(result)
         }
     }
+}
+
+fn print_semantic_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> {
+    match result {
+        SemanticIndexResult::Tasks { model_id, report } => {
+            println!(
+                "Indexed semantic search: model={} embedded_chunks={} skipped_fields={}",
+                model_id, report.embedded_chunks, report.skipped_fields
+            );
+        }
+        SemanticIndexResult::Docs {
+            model_id,
+            report,
+            indexed_sources,
+            stale_sources,
+        } => {
+            println!(
+                "Indexed docs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                model_id,
+                indexed_sources,
+                report.embedded_chunks,
+                report.skipped_fields,
+                stale_sources.len()
+            );
+        }
+        SemanticIndexResult::Adrs {
+            model_id,
+            report,
+            indexed_sources,
+            stale_sources,
+        } => {
+            println!(
+                "Indexed ADRs: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                model_id,
+                indexed_sources,
+                report.embedded_chunks,
+                report.skipped_fields,
+                stale_sources.len()
+            );
+        }
+        SemanticIndexResult::Learnings {
+            model_id,
+            report,
+            indexed_sources,
+            stale_sources,
+        } => {
+            println!(
+                "Indexed learnings: model={} indexed_sources={} embedded_chunks={} skipped_fields={} stale_sources={}",
+                model_id,
+                indexed_sources,
+                report.embedded_chunks,
+                report.skipped_fields,
+                stale_sources.len()
+            );
+        }
+        SemanticIndexResult::All {
+            tasks,
+            docs,
+            adrs,
+            learnings,
+        } => {
+            println!(
+                "Indexed semantic search: tasks_model={} tasks_embedded_chunks={} tasks_skipped_fields={} docs_model={} docs_indexed_sources={} docs_embedded_chunks={} docs_skipped_fields={} docs_stale_sources={} adrs_model={} adrs_indexed_sources={} adrs_embedded_chunks={} adrs_skipped_fields={} adrs_stale_sources={} learnings_model={} learnings_indexed_sources={} learnings_embedded_chunks={} learnings_skipped_fields={} learnings_stale_sources={}",
+                tasks.model_id,
+                tasks.report.embedded_chunks,
+                tasks.report.skipped_fields,
+                docs.model_id,
+                docs.indexed_sources,
+                docs.report.embedded_chunks,
+                docs.report.skipped_fields,
+                docs.stale_sources.len(),
+                adrs.model_id,
+                adrs.indexed_sources,
+                adrs.report.embedded_chunks,
+                adrs.report.skipped_fields,
+                adrs.stale_sources.len(),
+                learnings.model_id,
+                learnings.indexed_sources,
+                learnings.report.embedded_chunks,
+                learnings.report.skipped_fields,
+                learnings.stale_sources.len()
+            );
+        }
+    }
+    Ok(())
 }
 
 impl Execute for SemanticStatsArgs {
@@ -203,53 +282,5 @@ impl Execute for SemanticStatsArgs {
             );
             Ok(())
         }
-    }
-}
-
-impl Execute for SemanticSearchArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.semantic_search(SemanticSearchParams {
-            query: self.query,
-            limit: self.limit,
-            field: self.field,
-            kind: self.kind,
-            model: self.model,
-        })?;
-        if self.json {
-            crate::output::json::print_pretty(&json!(result))
-        } else {
-            print_hits(&result.results);
-            println!("model={}", result.model_id);
-            Ok(())
-        }
-    }
-}
-
-impl Execute for SemanticRelatedArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
-        let result = runtime.semantic_related(SemanticRelatedParams {
-            task_id: self.task_id,
-            limit: self.limit,
-            model: self.model,
-        })?;
-        if self.json {
-            crate::output::json::print_pretty(&json!(result))
-        } else {
-            print_hits(&result.results);
-            println!("model={}", result.model_id);
-            Ok(())
-        }
-    }
-}
-
-fn print_hits(results: &[orbit_core::command::semantic::SemanticHit]) {
-    for hit in results {
-        println!(
-            "{}  score={:.4}  best={}  snippet=\"{}\"",
-            hit.source_id,
-            hit.score,
-            hit.best_field,
-            hit.snippet.replace('"', "\\\"")
-        );
     }
 }

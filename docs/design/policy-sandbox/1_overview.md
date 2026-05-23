@@ -1,8 +1,16 @@
-# Policy & Sandboxing — Overview
+---
+summary: "Policy & Sandboxing — Overview"
+type: design
+title: "Policy & Sandboxing — Overview"
+owner: claude
+last_updated: 2026-05-17
+status: Draft
+feature: policy-sandbox
+doc_role: overview
+tags: ["policy-sandbox"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-16
+# Policy & Sandboxing — Overview
 
 > **Sandbox backend status.** The only OS-level sandbox backend implemented today is `macos-sandbox-exec`. `ExecutorSandboxKind` (`crates/orbit-common/src/types/executor_def.rs`) defines no Linux or Windows variant, and `EnvironmentHost::resolve_executor_sandbox` (`crates/orbit-core/src/runtime/v2_host/sandbox.rs`) rejects `macos-sandbox-exec` on non-macOS platforms. On Linux and Windows the spawned agent subprocess runs without OS-level isolation; HTTP-tool `fs.*` enforcement and process supervision still apply. A Linux backend is named in [3_vision.md](./3_vision.md) as future work but is not in `2_design.md`'s shipped contract. [T20260505-23]
 
@@ -40,6 +48,8 @@ When an activity omits `fsProfile:`, the v2 host uses `UNRESTRICTED_FS_PROFILE`.
 
 HTTP activities enforce policy in the `orbit-tools` `fs.*` builtins before any read or modify. Denials return `OrbitError::PolicyDenied` and emit audit events. CLI activities do not call those builtins; they rely on harness delegation plus the configured executor sandbox, currently macOS `sandbox-exec` for supported CLI agents.
 
+When the default policy denies workspace `.orbit/**`, the v2 host re-allows only the narrow child Orbit runtime stores needed by currently activity-exposed write tools. It does not blanket-allow workspace `.orbit`; newly exposed Orbit write tools must add their store roots intentionally.
+
 ### 2.5 Exec supervision is not default OS isolation
 
 `orbit-exec::run_process` spawns a process-group leader, drains stdout/stderr, installs SIGINT/SIGTERM handlers, and on timeout or signal sends SIGTERM to the group with a 5 second grace before SIGKILL. The default `Sandbox` impl remains `NoSandbox`; OS isolation is added by specific executor wrappers, not the default runner.
@@ -72,5 +82,6 @@ HTTP activities enforce policy in the `orbit-tools` `fs.*` builtins before any r
 - **[T20260426-0605]** — Add the auditability design folder cross-linked from §3.
 - **[T20260426-0622]** — Add this policy & sandboxing design folder under claude ownership.
 - **[T20260430-23]** — Shorten the policy sandbox design docs while preserving the shipped contract and ADR history.
+- **[ORB-00129]** — Keep child Orbit runtime write roots narrow under the macOS sandbox while supporting activity-exposed learning, friction, and job-run state tools.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

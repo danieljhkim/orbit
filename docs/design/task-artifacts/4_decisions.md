@@ -1,8 +1,16 @@
-# Task Artifacts — Decisions
+---
+summary: "Task Artifacts — Decisions"
+type: design
+title: "Task Artifacts — Decisions"
+owner: codex
+last_updated: 2026-05-23
+status: Draft
+feature: task-artifacts
+doc_role: decisions
+tags: ["task-artifacts"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-17 (codex)
+# Task Artifacts — Decisions
 
 ADR log for the task-artifacts feature. Format follows [docs/design/CONVENTIONS.md §4](../CONVENTIONS.md): each entry is `Context · Decision · Consequences`, every entry names at least one Cost, and numbers are append-only.
 
@@ -160,7 +168,7 @@ Each `Plan` is monotonically versioned within a single lineage. Cross-lineage re
 
 **Context.** Task records already carry a typed `relations` array, but every relation type was task-only. Non-task artifact provenance was split across one-way back-pointers: `FrictionRecord.during_task`, ADR `related_tasks`, and learning evidence. That fragmentation made "what did task T touch?" artifact-specific, and made friction closure manual even when a task explicitly fixed the friction.
 
-**Decision.** Add two cross-artifact relation types to the task envelope: `produces` for artifacts created during execution and `resolves` for artifacts closed or superseded by the task. These two relation types accept task, friction, learning, and ADR ID shapes (`ORB-`, `FYYYY-MM-NNN`, `LYYYYMMDD-N`, `ADR-NNNN+`). Existing relation types remain task-only. Friction auto-close is the only v1 side effect: when a task moves from Review to Done, `resolves -> F...` transitions the friction to `resolved` and records `resolved_by_task`.
+**Decision.** Add two cross-artifact relation types to the task envelope: `produces` for artifacts created during execution and `resolves` for artifacts closed or superseded by the task. These two relation types accept task, friction, learning, and ADR ID shapes (`ORB-`, `FYYYY-MM-NNN`, `L-NNNN`, `ADR-NNNN+`). Existing relation types remain task-only. Friction auto-close is the only v1 side effect: when a task moves from Review to Done, `resolves -> F...` transitions the friction to `resolved` and records `resolved_by_task`.
 
 **Consequences.**
 - Agents get one typed provenance surface for task-created and task-closed artifacts without migrating historical ADR, learning, or friction fields.
@@ -171,8 +179,24 @@ Each `Plan` is monotonically versioned within a single lineage. Cross-lineage re
 
 ---
 
+## ADR-0182 — Review-thread hook active task binding
+
+**Status:** Accepted · 2026-05 · [ORB-00273]
+
+**Context.** Review-thread reminders need a cheap way to know which task owns the current agent turn. Inferring from cwd or scanning task files would make every PreToolUse call depend on filesystem heuristics, while the engine already knows the executing task when it seeds `ORBIT_TASK_ID`.
+
+**Decision.** The hook treats `ORBIT_ACTIVE_TASK_ID` as the explicit active-task binding, with `ORBIT_TASK_ID` as a compatibility fallback for existing execution paths. Orbit execution code seeds both values when the activity input contains a task id, and hook state is still scoped by the existing session id plus parent-pid state-file key.
+
+**Consequences.**
+- Review-thread surfacing remains a local task-store read and does not perform network I/O or cwd inference.
+- Existing `ORBIT_TASK_ID`-spawned executions keep working while newer shims can depend on the clearer `ORBIT_ACTIVE_TASK_ID` name.
+- Cost: Orbit now has two task-id environment names during a compatibility window, so documentation and tests must keep their precedence explicit.
+
+---
+
 ## Task References
 
 - ORB-00093
+- ORB-00273
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

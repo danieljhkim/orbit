@@ -24,12 +24,15 @@ Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and t
 
 ## `orbit run duel-plan`
 
-Run a planning duel for a single task: two planner agents draft proposals independently, an arbiter picks the winner, and the winning plan lands on the task.
+Submit a planning duel for a single task: two planner agents draft proposals independently, an arbiter picks the winner, and the winning plan lands on the task. The command returns a run ID immediately by default; pass `--wait` when you want the terminal to block until the duel finishes and report the terminal wait status.
 
 ```bash
 orbit run duel-plan T20260506-1
 orbit run duel-plan T20260506-1 --base main --json
+orbit run duel-plan T20260506-1 --wait
 ```
+
+Default text output includes `Workflow`, `Job ID`, `Run ID`, `State`, and an `Inspect:` command. JSON output returns the submitted dispatch result with `workflow`, `job_id`, `run_id`, `state`, and `attempt` fields.
 
 Underlying job: `job_duel_plan_pipeline`. Outcomes are recorded on the planning-duel scoreboard.
 
@@ -49,6 +52,7 @@ Every workflow run is durable. Inspect with:
 
 ```bash
 orbit run history -j task_auto_pipeline
+orbit run history -j job_duel_plan_pipeline
 orbit run show <RUN_ID>
 orbit run logs <RUN_ID>
 ```

@@ -5,6 +5,7 @@ pub(crate) fn render_prompt_with_embedded_envelope(envelope_json: &[u8]) -> Vec<
         envelope_bytes = envelope_json.len(),
         "constructed embedded Orbit execution prompt"
     );
+    // L-0023: Routine implementer handoffs should use summary/comments, not task artifacts.
     let prompt = "You are Orbit's agent executor.\n\
 Read the execution envelope JSON and perform the requested work.\n\
 Return exactly one JSON object and nothing else.\n\

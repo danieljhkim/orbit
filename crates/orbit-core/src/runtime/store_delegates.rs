@@ -4,16 +4,17 @@ use orbit_common::types::{
     PolicyDef, ReviewThread, StoredTool, Task, TaskArtifact, TaskComment, TaskComplexity,
     TaskHistoryEntry, TaskPriority, TaskRelation, TaskStatus, TaskType,
 };
-use orbit_embed::{EmbedWorker, VectorStore};
+use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
-    AdrCreateParams, AdrDocumentUpdateParams, AdrStoreBackend, AuditEventFilter,
-    AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunQuery,
-    JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams, LearningCommentDeleteParams,
-    LearningCreateParams, LearningSearchParams, LearningSearchResult, LearningStoreBackend,
-    LearningUpdateParams, LearningUpvoteParams, PolicyDefStoreBackend, TaskArtifactStoreBackend,
-    TaskArtifactUpdateParams, TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams,
-    TaskHistoryStoreBackend, TaskHistoryUpdateParams, TaskReservationCheckParams,
-    TaskReservationCheckResult, TaskReservationListResult, TaskReservationOwnedConflictsParams,
+    AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, AdrListFilter, AdrStoreBackend,
+    AuditEventFilter, AuditEventInsertParams, AuditEventStoreBackend, ExecutorDefStoreBackend,
+    JobRunQuery, JobRunStepParams, JobRunStoreBackend, LearningCommentAddParams,
+    LearningCommentDeleteParams, LearningCreateParams, LearningListEntry, LearningSearchParams,
+    LearningSearchResult, LearningStoreBackend, LearningUpdateParams, LearningUpvoteParams,
+    PolicyDefStoreBackend, RemoteArtifactStub, TaskArtifactStoreBackend, TaskArtifactUpdateParams,
+    TaskCreateParams, TaskDocumentStoreBackend, TaskDocumentUpdateParams, TaskHistoryStoreBackend,
+    TaskHistoryUpdateParams, TaskReservationCheckParams, TaskReservationCheckResult,
+    TaskReservationListResult, TaskReservationOwnedConflictsParams,
     TaskReservationOwnedConflictsResult, TaskReservationReleaseByOwnerParams,
     TaskReservationReleaseByOwnerResult, TaskReservationReleaseParams,
     TaskReservationReleaseResult, TaskReservationReserveParams, TaskReservationReserveResult,
@@ -333,7 +334,7 @@ impl TaskRecords<'_> {
         let deleted = self.store.delete_task(id)?;
         if deleted && let Err(error) = self.semantic_vector.delete_source("task", id) {
             orbit_common::tracing::debug!(
-                target: "orbit.semantic.indexer",
+                target: "orbit.search.indexer",
                 task_id = id,
                 error = %error,
                 "semantic delete cascade failed after task deletion",
@@ -606,6 +607,13 @@ impl AuditEventRecords<'_> {
         self.store.get_audit_event_durations(since, tool)
     }
 
+    pub(crate) fn durations_null_tool(
+        &self,
+        since: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<i64>, OrbitError> {
+        self.store.get_audit_event_durations_null_tool(since)
+    }
+
     pub(crate) fn hourly_buckets(
         &self,
         since: &chrono::DateTime<chrono::Utc>,
@@ -641,6 +649,20 @@ impl AuditEventRecords<'_> {
         limit: usize,
     ) -> Result<Vec<orbit_store::AuditTopToolCall>, OrbitError> {
         self.store.get_audit_top_tool_calls(since, limit)
+    }
+
+    pub(crate) fn aggregates_by_tool(
+        &self,
+        since: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<orbit_store::AuditToolAggregate>, OrbitError> {
+        self.store.get_audit_event_aggregates_by_tool(since)
+    }
+
+    pub(crate) fn aggregates_by_role(
+        &self,
+        since: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<orbit_store::AuditRoleAggregate>, OrbitError> {
+        self.store.get_audit_event_aggregates_by_role(since)
     }
 
     pub(crate) fn insert(&self, params: &AuditEventInsertParams) -> Result<(), OrbitError> {
@@ -697,6 +719,10 @@ impl AdrRecords<'_> {
         self.store.get_adr(id)
     }
 
+    pub(crate) fn get_federated(&self, id: &str) -> Result<Option<Adr>, OrbitError> {
+        self.store.get_adr_federated(id)
+    }
+
     /// Unfiltered list. The tool surface uses [`Self::list_filtered`]; this
     /// helper exists for maintenance / CLI tooling layered on top later.
     #[allow(dead_code)]
@@ -712,16 +738,52 @@ impl AdrRecords<'_> {
         feature: Option<&str>,
         task_id: Option<&str>,
         legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
         validation_warned: Option<bool>,
     ) -> Result<Vec<Adr>, OrbitError> {
-        self.store.list_adrs_filtered(
+        self.store.list_adrs_filtered(AdrListFilter {
             status,
             owner,
             feature,
             task_id,
             legacy_id,
+            tag,
+            path,
             validation_warned,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn list_entries_filtered(
+        &self,
+        status: Option<AdrStatus>,
+        owner: Option<&str>,
+        feature: Option<&str>,
+        task_id: Option<&str>,
+        legacy_id: Option<&str>,
+        tag: Option<&str>,
+        path: Option<&str>,
+        validation_warned: Option<bool>,
+        include_remote: bool,
+    ) -> Result<Vec<AdrListEntry>, OrbitError> {
+        self.store.list_adr_entries_filtered(
+            AdrListFilter {
+                status,
+                owner,
+                feature,
+                task_id,
+                legacy_id,
+                tag,
+                path,
+                validation_warned,
+            },
+            include_remote,
         )
+    }
+
+    pub(crate) fn remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        self.store.get_adr_remote_stub(id)
     }
 
     pub(crate) fn update_status(&self, id: &str, new_status: AdrStatus) -> Result<(), OrbitError> {
@@ -761,8 +823,24 @@ impl LearningRecords<'_> {
         self.store.get_learning(id)
     }
 
+    pub(crate) fn get_federated(&self, id: &str) -> Result<Option<Learning>, OrbitError> {
+        self.store.get_learning_federated(id)
+    }
+
     pub(crate) fn list(&self, status: Option<LearningStatus>) -> Result<Vec<Learning>, OrbitError> {
         self.store.list_learnings(status)
+    }
+
+    pub(crate) fn list_entries(
+        &self,
+        status: Option<LearningStatus>,
+        include_remote: bool,
+    ) -> Result<Vec<LearningListEntry>, OrbitError> {
+        self.store.list_learning_entries(status, include_remote)
+    }
+
+    pub(crate) fn remote_stub(&self, id: &str) -> Result<Option<RemoteArtifactStub>, OrbitError> {
+        self.store.get_learning_remote_stub(id)
     }
 
     pub(crate) fn search(
@@ -833,7 +911,7 @@ impl LearningRecords<'_> {
         self.store.delete_learning(id)
     }
 
-    pub(crate) fn reindex(&self) -> Result<(), OrbitError> {
-        self.store.reindex_learnings()
+    pub(crate) fn sync(&self) -> Result<(), OrbitError> {
+        self.store.sync_learnings()
     }
 }

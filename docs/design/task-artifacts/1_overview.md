@@ -1,8 +1,16 @@
-# Task Artifacts — Overview
+---
+summary: "Task Artifacts — Overview"
+type: design
+title: "Task Artifacts — Overview"
+owner: codex
+last_updated: 2026-05-17
+status: Draft
+feature: task-artifacts
+doc_role: overview
+tags: ["task-artifacts"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-17
+# Task Artifacts — Overview
 
 Tasks are Orbit's durable intent records: they explain what an agent or human is trying to change, how the work should be validated, what context is relevant, who acted on the work, and how the work connects to other Orbit artifacts. The v2 task artifact store keeps prose in Markdown sidecars, narrows `task.yaml` to a metadata envelope, allocates authority-scoped `ORB-00000` IDs from `~/.orbit/tasks/index.sqlite`, makes `~/.orbit/tasks/workspaces/<workspace-id>/` the canonical local bundle home, and projects each task into the workspace as a `.orbit/tasks/<task-id>` symlink.
 

@@ -15,6 +15,9 @@ pub mod show;
 #[allow(dead_code)]
 mod write;
 
+#[cfg(test)]
+mod tests;
+
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;

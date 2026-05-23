@@ -52,6 +52,12 @@ pub(in crate::command::mcp::setup) fn apply_claude_remove(
                 .and_then(JsonValue::as_array_mut)
             {
                 remove_known_strings(allow, &claude_safe_permissions());
+                // Migration cleanup: prior `orbit mcp init --claude` runs wrote
+                // plugin-scoped names (`mcp__plugin_orbit_orbit__*`) that the
+                // current init no longer produces. Strip them here so a single
+                // `orbit mcp remove --claude` after upgrade leaves a clean
+                // settings.json instead of orphaning stale entries.
+                remove_known_strings(allow, &claude_legacy_safe_permissions());
                 if allow.is_empty() {
                     permissions.remove("allow");
                 }
@@ -88,92 +94,39 @@ fn claude_safe_permissions() -> Vec<String> {
         .collect()
 }
 
-fn claude_permission_name(tool_name: &str) -> String {
-    format!("mcp__plugin_orbit_orbit__{}", tool_name.replace('.', "_"))
+pub(super) fn claude_permission_name(tool_name: &str) -> String {
+    // pub(super) widened so providers/tests/claude.rs can call it
+    // (sibling under providers per ORB-00221 layout).
+    //
+    // Claude derives MCP permission names from the connected server id in
+    // .mcp.json. The CLI registers under ORBIT_MCP_SERVER_ID = "orbit", so
+    // permission entries written here must be shaped `mcp__orbit__<tool>`.
+    // The plugin-scoped shape `mcp__plugin_<plugin>_<server>__<tool>` is
+    // what Claude itself synthesizes when Orbit is installed as a Claude
+    // Code plugin (see plugin/.claude-plugin/plugin.json) — that install
+    // path does not run this code, so the plugin-scoped prefix is
+    // intentionally not emitted from the CLI registration path.
+    // See `claude_legacy_safe_permissions` for the one-shot cleanup of
+    // stale plugin-prefixed entries left by pre-ORB-00286 CLI runs.
+    format!(
+        "mcp__{}__{}",
+        ORBIT_MCP_SERVER_ID,
+        tool_name.replace('.', "_")
+    )
 }
 
-#[cfg(test)]
-mod tests {
-    use tempfile::tempdir;
-
-    use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
-    use super::super::super::dispatch::run_action;
-    use super::*;
-
-    #[test]
-    fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
-        let repo = tempdir().expect("repo tempdir");
-        let home = tempdir().expect("home tempdir");
-        std::fs::create_dir_all(repo.path().join(".claude")).expect("create .claude");
-        std::fs::write(
-            repo.path().join(".mcp.json"),
-            "{\n  \"mcpServers\": {\n    \"other\": {\"command\": \"demo\"}\n  }\n}\n",
-        )
-        .expect("write mcp file");
-        std::fs::write(
-            repo.path().join(".claude").join("settings.json"),
-            "{\n  \"permissions\": {\n    \"allow\": [\"OtherTool\"]\n  },\n  \"theme\": \"light\"\n}\n",
-        )
-        .expect("write settings");
-
-        let orbit_root = repo.path().join(".orbit");
-        std::fs::create_dir_all(&orbit_root).expect("create orbit root");
-
-        let providers = run_action(
-            McpAction::Init,
-            repo.path(),
-            &orbit_root,
-            ProviderSelectionMode::Explicit(vec![McpProvider::Claude]),
-            Some(home.path().to_path_buf()),
-            ScopeArg::Workspace,
-        )
-        .expect("init claude");
-        assert_eq!(providers, vec![McpProvider::Claude]);
-
-        let mcp: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(repo.path().join(".mcp.json")).expect("read mcp"),
-        )
-        .expect("parse mcp");
-        assert!(mcp["mcpServers"]["orbit"].is_object());
-        assert!(mcp["mcpServers"]["other"].is_object());
-        let args = mcp["mcpServers"]["orbit"]["args"]
-            .as_array()
-            .expect("args array");
-        assert_eq!(args.len(), 2);
-        assert_eq!(args[0].as_str(), Some("mcp"));
-        assert_eq!(args[1].as_str(), Some("serve"));
-
-        let settings: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(repo.path().join(".claude").join("settings.json"))
-                .expect("read settings"),
-        )
-        .expect("parse settings");
-        let allow = settings["permissions"]["allow"]
-            .as_array()
-            .expect("allow array");
-        assert!(allow.iter().any(|item| item == "OtherTool"));
-        assert!(
-            allow
-                .iter()
-                .any(|item| item == &claude_permission_name("orbit.task.show"))
-        );
-        assert_eq!(settings["theme"], "light");
-
-        run_action(
-            McpAction::Remove,
-            repo.path(),
-            &orbit_root,
-            ProviderSelectionMode::Explicit(vec![McpProvider::Claude]),
-            Some(home.path().to_path_buf()),
-            ScopeArg::Workspace,
-        )
-        .expect("remove claude");
-
-        let mcp: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(repo.path().join(".mcp.json")).expect("read mcp"),
-        )
-        .expect("parse mcp");
-        assert!(mcp["mcpServers"]["orbit"].is_null());
-        assert!(mcp["mcpServers"]["other"].is_object());
-    }
+fn claude_legacy_safe_permissions() -> Vec<String> {
+    // Pre-ORB-00286 the CLI emitted `mcp__plugin_orbit_orbit__<tool>`
+    // entries — the plugin-scoped shape that Claude Code synthesizes for
+    // its *plugin* install path, not for bare `.mcp.json` registrations.
+    // Existing users carry these stale entries in their settings.json;
+    // `apply_claude_remove` strips them alongside the current
+    // `claude_safe_permissions()` so an upgrade + `orbit mcp remove
+    // --claude` leaves a clean file. Keep the generator independent from
+    // `claude_permission_name` so a future prefix change doesn't break
+    // this migration.
+    safe_mcp_tool_names()
+        .into_iter()
+        .map(|name| format!("mcp__plugin_orbit_orbit__{}", name.replace('.', "_")))
+        .collect()
 }

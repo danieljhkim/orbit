@@ -1,0 +1,17 @@
+schema_version: 2
+id: ADR-0169
+title: Locked orbit-docs frontmatter schema
+status: proposed
+owner: claude
+created_at: 2026-05-19T06:31:23.139391Z
+last_updated: 2026-05-19T06:33:06.756948Z
+related_features:
+- orbit-docs
+related_tasks:
+- ORB-00163
+tags: []
+paths: []
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

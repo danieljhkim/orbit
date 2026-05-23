@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0137
 title: Sync ships in v2; v1 is per-engineer
 status: proposed
@@ -9,6 +9,8 @@ related_features:
 - task-sync
 related_tasks:
 - T20260505-12
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - task-sync/ADR-007

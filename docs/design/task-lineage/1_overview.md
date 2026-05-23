@@ -1,8 +1,16 @@
-# Task Lineage — Overview
+---
+summary: "Task Lineage — Overview"
+type: design
+title: "Task Lineage — Overview"
+owner: claude
+last_updated: 2026-05-09
+status: Draft
+feature: task-lineage
+doc_role: overview
+tags: ["task-lineage"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-09
+# Task Lineage — Overview
 
 Task lineage is **durable agent memory keyed on code structure**. Every symbol in a codebase has a history — a sequence of decisions, reversions, supersessions, and intent shifts that produced its current shape. Today that history lives partly in commit messages (which fragment under refactors), partly in task records (which agents rarely read transitively), partly in ADRs (which bind to other ADRs but not to symbols), and mostly in the heads of the humans who lived through it. When an agent walks into a fresh session, it has none of it.
 

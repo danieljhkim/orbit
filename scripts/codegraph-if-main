@@ -1,0 +1,28 @@
+#!/bin/sh
+# Run `codegraph <args>` only when invoked from the main worktree.
+# In a linked worktree (`git worktree add`), no-op silently.
+#
+# Rationale: codegraph's index lives at the main checkout's `.codegraph/`.
+# Running mark-dirty / sync-if-dirty from a linked worktree marks the shared
+# index dirty without reflecting the worktree's actual edits — the subsequent
+# sync re-indexes main's files, not the worktree's. This shim gates the hook
+# so codegraph only updates its index from the main worktree.
+
+set -e
+
+# Not in a git repo at all → no-op silently.
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+
+git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+common_dir=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+
+# Canonicalize common_dir to absolute (--git-common-dir may be relative).
+case "$common_dir" in
+  /*) ;;
+  *) common_dir=$(CDPATH= cd -- "$common_dir" 2>/dev/null && pwd) || exit 0 ;;
+esac
+
+# Different paths → we're in a linked worktree → no-op.
+[ "$git_dir" = "$common_dir" ] || exit 0
+
+exec codegraph "$@"

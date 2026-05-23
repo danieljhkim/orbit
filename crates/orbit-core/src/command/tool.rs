@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use orbit_common::types::{
     AuditEventStatus, NotFoundKind, OrbitError, OrbitEvent, Role, StoredTool, ToolParam,
-    audit_execution_id, normalize_agent_family_for_model, normalize_optional_attribution_label,
+    ToolSessionContext, audit_execution_id, normalize_agent_family_for_model,
+    normalize_optional_attribution_label,
 };
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::{ReservationOwnerContext, ToolContext};
@@ -22,6 +23,7 @@ pub struct ToolInfo {
     pub name: String,
     pub description: String,
     pub enabled: bool,
+    pub active: bool,
     pub builtin: bool,
     pub parameters: Vec<orbit_common::types::ToolParam>,
 }
@@ -121,6 +123,25 @@ impl OrbitRuntime {
         model_override: Option<String>,
         entry_point: ToolEntryPoint,
     ) -> Result<ToolDispatchOutcome, OrbitError> {
+        self.execute_tool_command_dispatch_with_session_context(
+            name,
+            input,
+            agent_override,
+            model_override,
+            entry_point,
+            ToolSessionContext::default(),
+        )
+    }
+
+    pub fn execute_tool_command_dispatch_with_session_context(
+        &self,
+        name: &str,
+        input: Value,
+        agent_override: Option<String>,
+        model_override: Option<String>,
+        entry_point: ToolEntryPoint,
+        session_context: ToolSessionContext,
+    ) -> Result<ToolDispatchOutcome, OrbitError> {
         let start = Instant::now();
         let role_label =
             audit_role_label(&input, agent_override.as_deref(), model_override.as_deref());
@@ -136,6 +157,7 @@ impl OrbitRuntime {
         // surrounding `AuditGuard` to fall back on — would fail without any
         // audit row at all when identity setup is the cause.
         let result: Result<Value, OrbitError> = (|| {
+            self.ensure_tool_agent_facing(name)?;
             let allowed_tools = read_activity_tools_from_env();
             let (agent_name, model_name) = resolve_agent_identity(agent_override, model_override)?;
             let proc_allowed_programs = read_proc_allowed_programs_from_env();
@@ -144,6 +166,7 @@ impl OrbitRuntime {
                 .map(|path| path.to_string_lossy().into_owned());
             let tool_context = ToolContext {
                 cwd,
+                session_context,
                 allowed_tools,
                 agent_name,
                 model_name,
@@ -422,7 +445,22 @@ fn read_input_identity(input: &Value) -> (Option<String>, Option<String>) {
 
 impl OrbitRuntime {
     pub fn list_tools(&self) -> Result<Vec<ToolInfo>, OrbitError> {
-        let registry_schemas = self.tool_registry().schemas();
+        self.list_tools_with_inactive(false)
+    }
+
+    pub fn list_all_tools(&self) -> Result<Vec<ToolInfo>, OrbitError> {
+        self.list_tools_with_inactive(true)
+    }
+
+    fn list_tools_with_inactive(
+        &self,
+        include_inactive: bool,
+    ) -> Result<Vec<ToolInfo>, OrbitError> {
+        let registry_schemas = if include_inactive {
+            self.tool_registry().all_schemas()
+        } else {
+            self.tool_registry().schemas()
+        };
         let stored_tools = self.stores().tools().list()?;
 
         let mut tools: Vec<ToolInfo> = registry_schemas
@@ -430,10 +468,12 @@ impl OrbitRuntime {
             .map(|schema| {
                 let stored = stored_tools.iter().find(|s| s.name == schema.name);
                 let enabled = stored.is_none_or(|s| s.enabled);
+                let active = self.tool_registry().is_active(&schema.name);
                 ToolInfo {
                     name: schema.name.clone(),
                     description: schema.description.clone(),
                     enabled,
+                    active,
                     builtin: schema.builtin,
                     parameters: schema.parameters,
                 }
@@ -447,6 +487,7 @@ impl OrbitRuntime {
                     name: stored.name.clone(),
                     description: stored.description.clone(),
                     enabled: stored.enabled,
+                    active: true,
                     builtin: false,
                     parameters: stored.parameters.clone(),
                 });
@@ -465,11 +506,13 @@ impl OrbitRuntime {
 
         let stored = self.stores().tools().get(name)?;
         let enabled = stored.is_none_or(|s| s.enabled);
+        let active = self.tool_registry().is_active(&schema.name);
 
         Ok(ToolInfo {
             name: schema.name,
             description: schema.description,
             enabled,
+            active,
             builtin: schema.builtin,
             parameters: schema.parameters,
         })
@@ -596,6 +639,18 @@ impl OrbitRuntime {
         self.set_tool_enabled_state(name, false)
     }
 
+    pub fn ensure_tool_agent_facing(&self, name: &str) -> Result<(), OrbitError> {
+        if self.tool_registry().is_active(name) {
+            return Ok(());
+        }
+        if self.tool_registry().has(name) {
+            return Err(OrbitError::Execution(format!(
+                "tool '{name}' is inactive on the agent tool surface; use the corresponding `orbit <subcommand>` CLI path for human/admin workflows"
+            )));
+        }
+        Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()))
+    }
+
     fn set_tool_enabled_state(&self, name: &str, enabled: bool) -> Result<(), OrbitError> {
         if !self.tool_registry().has(name) {
             return Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string()));
@@ -697,7 +752,7 @@ mod audit_tests {
 
         let outcome = runtime
             .execute_tool_command_dispatch(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything", "model": "gpt-5.5" }),
                 None,
                 None,
@@ -707,15 +762,15 @@ mod audit_tests {
         assert!(outcome.audit_recorded);
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(events.len(), 1, "exactly one audit row");
         let row = &events[0];
         assert_eq!(row.command, "tool");
         assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
-        assert_eq!(row.tool_name.as_deref(), Some("orbit.task.search"));
+        assert_eq!(row.tool_name.as_deref(), Some("orbit.search"));
         assert_eq!(row.target_type.as_deref(), Some("tool"));
-        assert_eq!(row.target_id.as_deref(), Some("orbit.task.search"));
+        assert_eq!(row.target_id.as_deref(), Some("orbit.search"));
         assert_eq!(row.role, "gpt-5.5");
         assert_eq!(row.status, AuditEventStatus::Success);
         assert_eq!(row.exit_code, 0);
@@ -765,7 +820,7 @@ mod audit_tests {
         // still capture the failure — this is the gap that bypassed audit
         // before the closure-wrapping fix.
         let result = runtime.execute_tool_command_dispatch(
-            "orbit.task.search",
+            "orbit.search",
             json!({ "query": "anything" }),
             Some("claude".to_string()),
             Some("gpt-5.5".to_string()),
@@ -774,7 +829,7 @@ mod audit_tests {
         assert!(result.is_err(), "identity rejection propagates");
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(
             events.len(),
@@ -795,7 +850,7 @@ mod audit_tests {
 
         runtime
             .execute_tool_command(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything", "model": "gpt-5.5" }),
                 None,
                 None,
@@ -803,7 +858,7 @@ mod audit_tests {
             .expect("dispatch ok");
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].subcommand.as_deref(), Some("run"));
@@ -824,7 +879,7 @@ mod audit_tests {
                     barrier.wait();
                     runtime
                         .execute_tool_command_dispatch(
-                            "orbit.task.search",
+                            "orbit.search",
                             json!({ "query": "anything", "model": "gpt-5.5" }),
                             None,
                             None,
@@ -840,13 +895,7 @@ mod audit_tests {
         }
 
         let events = runtime
-            .list_audit_events(
-                None,
-                Some("orbit.task.search".to_string()),
-                None,
-                None,
-                workers,
-            )
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, workers)
             .expect("list audit events");
         let execution_ids: BTreeSet<_> = events.iter().map(|event| &event.execution_id).collect();
 
@@ -863,7 +912,7 @@ mod audit_tests {
 
         runtime
             .execute_tool_command_dispatch(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything" }),
                 None,
                 None,
@@ -1080,7 +1129,7 @@ mod audit_tests {
 
         let outcome = runtime
             .execute_tool_command_dispatch(
-                "orbit.task.search",
+                "orbit.search",
                 json!({ "query": "anything", "model": "gpt-5.5" }),
                 None,
                 None,
@@ -1091,7 +1140,7 @@ mod audit_tests {
         assert!(outcome.audit_recorded);
 
         let events = runtime
-            .list_audit_events(None, Some("orbit.task.search".to_string()), None, None, 16)
+            .list_audit_events(None, Some("orbit.search".to_string()), None, None, 16)
             .expect("list audit events");
         let row = events
             .iter()

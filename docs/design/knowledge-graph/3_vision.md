@@ -1,8 +1,16 @@
-# Knowledge Graph — Vision
+---
+summary: "Knowledge Graph — Vision"
+type: design
+title: "Knowledge Graph — Vision"
+owner: claude
+last_updated: 2026-05-06
+status: Draft
+feature: knowledge-graph
+doc_role: vision
+tags: ["knowledge-graph"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-06
+# Knowledge Graph — Vision
 
 This document captures open questions, prior art, and what may be distinctive about Orbit's knowledge graph. The [T20260430-22] cleanup keeps it forward-looking; current contracts belong in [2_design.md](./2_design.md).
 

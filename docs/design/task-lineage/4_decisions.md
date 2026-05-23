@@ -1,8 +1,16 @@
-# Task Lineage — Decisions
+---
+summary: "Task Lineage — Decisions"
+type: design
+title: "Task Lineage — Decisions"
+owner: claude
+last_updated: 2026-05-09
+status: Draft
+feature: task-lineage
+doc_role: decisions
+tags: ["task-lineage"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-09
+# Task Lineage — Decisions
 
 ADR log for the task-lineage feature. Format follows [docs/design/CONVENTIONS.md §4](../CONVENTIONS.md): each entry is `Context · Decision · Consequences`, every entry names at least one Cost, numbers are append-only.
 

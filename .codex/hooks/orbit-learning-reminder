@@ -1,0 +1,3 @@
+#!/bin/sh
+# Orbit project-learning PreToolUse hook.
+exec "${ORBIT_BIN:-orbit}" hook pretooluse --format codex "$@"

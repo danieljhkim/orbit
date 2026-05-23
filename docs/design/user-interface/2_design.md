@@ -1,14 +1,22 @@
-# User Interface — Design
+---
+summary: "User Interface — Design"
+type: design
+title: "User Interface — Design"
+owner: gemini
+last_updated: 2026-05-18
+status: Draft
+feature: user-interface
+doc_role: design
+tags: ["user-interface"]
+---
 
-**Status:** Draft
-**Owner:** gemini
-**Last updated:** 2026-05-16 (ORB-00061)
+# User Interface — Design
 
 This document describes the current Orbit UI implementation: the local dashboard assets, the Canon Refined visual rules they rely on, and the telemetry behaviors that must stay consistent with backend data.
 
 ## 1. Dense Layout
 
-The dashboard favors wide, dense tables and panels over narrative screens. Tight spacing, small radii, and expandable sunken detail rows preserve hierarchy without hiding root lists. The scoreboard compresses companion metrics into pairs: `tokens` is `total/output`, `tool fail/all` is failed over total tool calls, and `duel w/all` is wins over participated duels. The primary friction column remains reported count only [T20260428-15].
+The dashboard favors wide, dense tables and panels over narrative screens. Tight spacing, small radii, and expandable sunken detail rows preserve hierarchy without hiding root lists. The scoreboard groups per-agent metrics into Delivery, Review, Knowledge, Operations, Planning Duels, Duel Matrix, and Attribution Cleanup sections so task attribution, review work, tool reliability, knowledge artifacts, and duel outcomes are scanned separately. Compact pair cells stay local to the sections where they add context: `tool fail/all` is failed over total tool calls, and `duel w/all` is wins over decided planner duels [T20260428-15] [ORB-00144] [ADR-0166].
 
 ## 2. Layered Palette
 
@@ -48,5 +56,6 @@ Accessibility still needs a real WCAG pass; responsive behavior remains optimize
 - [T20260508-14] added Run Detail agent-log previews and Diagnostics > Errors.
 - [ORB-00060] collapsed Diagnostics > Friction into Recent Runs diagnostics columns.
 - [ORB-00061] added the Knowledge tab and Learnings curation surface.
+- [ORB-00144] grouped scoreboard metrics and added knowledge counters plus duel matrix data.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

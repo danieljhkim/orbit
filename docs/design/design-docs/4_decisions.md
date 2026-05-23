@@ -1,12 +1,20 @@
-# Design Docs — Decisions
+---
+summary: "Design Docs — Decisions"
+type: design
+title: "Design Docs — Decisions"
+owner: claude
+last_updated: 2026-05-17
+status: Draft
+feature: design-docs
+doc_role: decisions
+tags: ["design-docs"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-17 (ORB-00103)
+# Design Docs — Decisions
 
 Append-only ADR log for the design-docs feature. Each entry follows the template in [CONVENTIONS.md §4](../CONVENTIONS.md). Numbers are append-only; superseded entries stay in place with status updated. Every ADR cites at least one cost. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill.
 
-ADR-0158 through ADR-0161 retroactively document load-bearing decisions encoded in [CONVENTIONS.md](../CONVENTIONS.md) before this feature folder existed; the convention crystallized through review of [docs/design/](..) over time rather than a single shipping task, and the global records cite [ORB-00103] (the backfill that put them in the store) on the Status line. ADR-0162 and ADR-0163 document the [ORB-00019] promotion of the decay checker and scaffolder into first-class Orbit tooling.
+ADR-0158 through ADR-0161 retroactively document load-bearing decisions encoded in [CONVENTIONS.md](../CONVENTIONS.md) before this feature folder existed; the convention crystallized through review of [docs/design/](..) over time rather than a single shipping task, and the global records cite [ORB-00103] (the backfill that put them in the store) on the Status line. ADR-0162 and ADR-0163 document the [ORB-00019] promotion of the original tooling; ADR-0165 supersedes the per-PR freshness gate while keeping scaffolding and inspection.
 
 Historical note: entries below were originally numbered ADR-001 through ADR-006 within this folder. They were allocated through `orbit.adr.add` and rewritten to global IDs per [ORB-00103]; the original local IDs survive as `legacy_ids` so prior citations still resolve via `orbit.adr.list --legacy-id=design-docs/ADR-NNN`.
 
@@ -29,19 +37,19 @@ Historical note: entries below were originally numbered ADR-001 through ADR-006 
 
 ---
 
-## ADR-0159 — Decay anchor is the `Last updated:` frontmatter field, not git mtime
+## ADR-0159 — `Last updated:` is the author assertion, not git mtime
 
 **Status:** Accepted · 2026-05 · [ORB-00103] · legacy_id: `design-docs/ADR-002`
 
-**Context.** The decay check needs a per-doc freshness timestamp to compare against `git log` of referenced source files. Two anchors were on the table: (a) parse `Last updated:` from frontmatter, requiring authors to bump it manually; (b) use `git log -1 --format=%cs -- <doc>.md` directly. Option (b) eliminates the manual-discipline failure mode; option (a) carries an explicit author assertion.
+**Context.** The original freshness tooling needed a per-doc timestamp to compare against `git log` of referenced source files. Two anchors were on the table: (a) parse `Last updated:` from frontmatter, requiring authors to bump it manually; (b) use `git log -1 --format=%cs -- <doc>.md` directly. Option (b) eliminates the manual-discipline failure mode; option (a) carries an explicit author assertion.
 
-**Decision.** Use the `Last updated:` field. The author updates it manually whenever the doc body changes substantively; cosmetic edits (typo fixes, link reflows, whitespace) intentionally do *not* bump it. The check parses the field and trusts it.
+**Decision.** Use the `Last updated:` field. The author updates it manually whenever the doc body changes substantively; cosmetic edits (typo fixes, link reflows, whitespace) intentionally do *not* bump it. Tooling and review treat the field as the author's assertion.
 
 **Consequences.**
 
 - The freshness signal carries an explicit semantic: "the author has read this doc end-to-end and asserts it still describes the system." `git log` of the doc cannot carry that semantic.
 - Cosmetic-only PRs do not falsely reset the staleness clock for a six-month-stale doc.
-- The discipline is enforceable by review (and eventually a pre-commit hook, [3_vision.md §1.4](./3_vision.md)) but not by the decay check itself.
+- The discipline is enforceable by review (and eventually a pre-commit hook, [3_vision.md §1.4](./3_vision.md)) but not by automation itself.
 - Cost: an author who forgets to bump the date ships a doc that looks fresh until the next reviewer notices. This is the dominant failure mode of the system today; it is accepted as the price of the explicit-assertion semantic.
 
 ---
@@ -78,20 +86,20 @@ Historical note: entries below were originally numbered ADR-001 through ADR-006 
 
 ---
 
-## ADR-0162 — Promote python decay checker to first-class `orbit design` CLI + MCP
+## ADR-0162 — Promote python freshness checker to first-class `orbit design` CLI + MCP
 
-**Status:** Accepted · 2026-05 · [ORB-00019] · [ORB-00103] · legacy_id: `design-docs/ADR-005`
+**Status:** Superseded by ADR-0165 · 2026-05 · [ORB-00019] · [ORB-00103] · [ORB-00112] · legacy_id: `design-docs/ADR-005`
 
-**Context.** The decay checker shipped as `scripts/check_design_doc_decay.py` (117 lines) wrapped by `make check-design-docs`. Three properties of that placement bothered enough to file ORB-00019: (a) agents driving Orbit through MCP could not invoke the check without shelling out to the make target, (b) the python parser duplicated logic that belonged with the rest of the design-doc tooling (which was about to grow scaffolding and inspection), and (c) the script was not exercised by Orbit's own integration tests, so a parser bug could ship undetected. Three options were on the table: keep python and just expose it through MCP via a shim; rewrite in Rust as a CLI only; rewrite in Rust with both a CLI and an `orbit.design.*` MCP tool surface.
+**Context.** The original freshness checker shipped as a small python script wrapped by a Make target. Three properties of that placement bothered enough to file ORB-00019: (a) agents driving Orbit through MCP could not invoke the checker without shelling out, (b) the parser duplicated logic that belonged with the rest of the design-doc tooling (which was about to grow scaffolding and inspection), and (c) the script was not exercised by Orbit's own integration tests, so a parser bug could ship undetected. Three options were on the table: keep python and just expose it through MCP via a shim; rewrite in Rust as a CLI only; rewrite in Rust with both a CLI and an MCP tool surface.
 
-**Decision.** Rewrite in Rust as `orbit-core::command::design` with both an `orbit design check` CLI and the `orbit.design.{init,list,show,check}` MCP surface. Reduce `scripts/check_design_doc_decay.py` to a thin wrapper that shells out to the new CLI so existing references to the script path keep working. Wire `make check-design-docs` to invoke `cargo run -- design check`.
+**Decision.** Rewrite the checker in Rust as part of `orbit-core::command::design` and expose it beside the design-doc scaffolding and inspection surface. Keep the legacy script path as a thin compatibility wrapper during the promotion.
 
 **Consequences.**
 
-- Agents driving Orbit through MCP can scaffold and check design folders without shelling out, which makes "skip the docs" the harder choice in agent-driven workflows.
-- The decay-check logic gets covered by the workspace test suite; output equivalence with the python script was verified end-to-end before the python code was deleted.
-- The init/list/show surface enables future tooling (lint, semantic search, glossary index, [3_vision.md §1.2](./3_vision.md)–[§1.7](./3_vision.md)) to extend a Rust API rather than fork a python script.
-- Cost: more code to maintain than 117 lines of python (~700 lines of Rust across `orbit-core::command::design`, the CLI shim, the four MCP tool registry entries, and the dispatch). The boundary between `orbit-core` and `orbit-cli` had to be plumbed for the new command. The python wrapper survives as a backwards-compatibility seam that has to be kept in sync with the CLI invocation contract; if `orbit design check` ever changes its flag set, the wrapper has to follow.
+- Agents driving Orbit through MCP can scaffold and inspect design folders without shelling out, which makes "skip the docs" the harder choice in agent-driven workflows.
+- The freshness-check logic gets covered by the workspace test suite; output equivalence with the python script was verified end-to-end before the python code was deleted.
+- The init/list/show surface enables future tooling (lint, semantic search, glossary index, [3_vision.md §1.2](./3_vision.md)–[§1.6](./3_vision.md)) to extend a Rust API rather than fork a python script.
+- Cost: more code to maintain than 117 lines of python (~700 lines of Rust across `orbit-core::command::design`, the CLI shim, the MCP tool registry entries, and the dispatch). The boundary between `orbit-core` and `orbit-cli` had to be plumbed for the new command. ADR-0165 later removes the checker-specific portion of this cost after the signal proved misleading.
 
 ---
 
@@ -111,11 +119,33 @@ Historical note: entries below were originally numbered ADR-001 through ADR-006 
 
 ---
 
+## ADR-0165 — Remove per-PR design-doc decay checks
+
+**Status:** Accepted · 2026-05 · [ORB-00112]
+
+**Context.** The `orbit design check` CLI, `orbit.design.check` MCP tool, `make check-design-docs` target, and `scripts/check_design_doc_decay.py` wrapper compared each design doc's `Last updated:` value with referenced code timestamps. ORB-00110 exposed release-blocking false positives during v0.6.0 promotion; ORB-00111 would have made the implementation deterministic by rebasing on git committer dates, but most code edits still do not invalidate prose claims. The worse behavior was social: the gate trained agents to bump dates instead of re-reading docs.
+
+**Decision.** Delete the per-PR decay-check surface and keep the useful design-doc tooling: `init`, `list`, and `show` for CLI and MCP callers. The replacement gate is the existing same-PR update rule plus code review against [CONVENTIONS.md](../CONVENTIONS.md).
+
+**Consequences.**
+
+- ORB-00111 is superseded because determinizing the old check would preserve the wrong signal.
+- The design-doc tool surface becomes smaller and easier to explain: scaffold, list, show.
+- Cost: Orbit loses an automated stale-doc check, but there is no documented case where it caught a real bug that the same-PR update rule and review would have missed.
+
+**Alternatives considered.**
+
+- **Content-level structural lint.** Still potentially useful, but it should validate explicit structure (frontmatter, Task References, ADR Cost lines) under a lint-shaped command rather than timestamp freshness.
+- **Periodic audit.** A slower human or agent audit cadence better matches design-doc decay, which tends to unfold over weeks or months rather than within one PR.
+
+---
+
 ## Task References
 
 - [ORB-00006] — Refresh of ARCHITECTURE.md and existing design folders that produced the layout codified in [ADR-0158].
-- [ORB-00019] — Promotion of the decay checker and scaffolder into first-class Rust + MCP tooling, documented in [ADR-0162] and [ADR-0163].
+- [ORB-00019] — Promotion of the freshness checker and scaffolder into first-class Rust + MCP tooling, documented in [ADR-0162] and [ADR-0163].
 - [ORB-00090] — Aligned design-doc ownership metadata with family-based agent identity.
 - [ORB-00103] — Backfilled this folder's ADR-001 through ADR-006 into the global store with `legacy_ids`; rewrote local headings to global IDs.
+- [ORB-00112] — Removed the per-PR freshness gate, superseding [ADR-0162] with [ADR-0165].
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

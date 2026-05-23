@@ -27,7 +27,7 @@ use std::sync::Arc;
 use orbit_agent::loop_engine::{InMemorySink, LoopAuditEvent};
 use orbit_common::types::activity_job::{V2AuditEventKind, load_job_asset};
 use orbit_engine::{
-    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2JsonlSink, V2RuntimeHost, execute_job,
+    DispatchError, ResolvedCliExecutor, V2AuditWriter, V2RuntimeHost, V2SqliteSink, execute_job,
     reset_replay_transport,
 };
 use serde_json::Value;
@@ -455,8 +455,14 @@ fn run_sample(
     let blob_dir = audit_root.join("blobs");
     let _ = std::fs::create_dir_all(&blob_dir);
     let inner = Arc::new(InMemorySink::new(blob_dir));
-    let envelope =
-        Arc::new(V2JsonlSink::open(audit_root, run_id).map_err(|e| format!("sinks: {e}"))?);
+    let envelope = Arc::new(V2SqliteSink::for_audit_root(
+        orbit_store::Store::open_in_memory().map_err(|e| format!("sinks: {e}"))?,
+        "ws_smoke",
+        run_id,
+        "smoke-agent",
+        None,
+        audit_root,
+    ));
     let writer = Arc::new(
         V2AuditWriter::new(run_id, "smoke-agent", inner.clone() as Arc<_>)
             .with_envelope_sink(envelope),
@@ -558,6 +564,7 @@ impl V2RuntimeHost for StubHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }

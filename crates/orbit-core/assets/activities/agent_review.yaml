@@ -46,8 +46,8 @@ spec:
        recover its description, acceptance criteria, plan, and context
        files. Read context selectors via `orbit.graph.pack`, falling back
        to `fs.read` only when the graph is unavailable or a selector is
-       unresolved. If `orbit.semantic.related` is available, optionally
-       call it on the task id to surface prior similar tasks whose review
+       unresolved. If `orbit.search` is available, optionally call it with
+       `semantic: "<task-id>"` to surface prior similar tasks whose review
        threads or decisions may inform this review; skip if the companion
        binary is not installed.
     3. For each blocking issue you find — correctness bug, broken contract,
@@ -77,19 +77,20 @@ spec:
     - orbit.task.*
     - orbit.friction.*
     - orbit.graph.*
-    - orbit.semantic.*
-    - orbit.learning.search
+    - orbit.search
     - orbit.learning.show
-    - orbit.learning.list
     - orbit.learning.add
     - orbit.learning.comment.add
     - orbit.learning.comment.list
-    - orbit.learning.comment.delete
+    # ORB-00289: orbit.learning.comment.delete is admin/CLI-only; not exposed on the agent surface.
     - orbit.learning.update
     - orbit.learning.supersede
     - fs.read
     - fs.delete
     - proc.spawn
+  proc_allowed_programs:
+    - git
+    - rg
   on_denial: terminate
   max_iterations: 20
   role: reviewer

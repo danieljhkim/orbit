@@ -1,5 +1,8 @@
 pub(crate) mod task_migrations;
+pub(crate) mod v2;
 pub(crate) mod v2_bundle;
-pub(crate) mod v2_store;
 
-pub(crate) use v2_store::TaskV2Store;
+pub(crate) use v2::TaskV2Store;
+
+#[cfg(test)]
+pub(crate) mod tests;

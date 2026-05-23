@@ -1,46 +1,76 @@
+---
+title: Design Doc Conventions
+owner: daniel
+last_updated: 2026-05-20
+status: Accepted
+---
+
 # Design Doc Conventions
 
-**Status:** Accepted
-**Owner:** daniel
-**Last updated:** 2026-05-17 (ORB-00098)
-
-Rules feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them.
+Recommended conventions that feature leads follow when writing and maintaining design docs under `docs/design/<feature>/`. The goal is a set of feature folders that read as one coherent documentation system regardless of which agent authored them. These are recommendations (not hard rules enforced by tooling; `orbit-design` has been retired in favor of the more tolerant `orbit-docs` surface).
 
 This doc is itself the source of truth for the conventions. When a convention changes, update this doc and then update existing feature folders to match — do not silently diverge.
 
 ---
 
-## 1. Folder Layout (per feature)
+## 1. Folder Layout (per feature, recommended)
 
 ```
 docs/design/<feature>/
-├── 1_overview.md       required — what and why
-├── 2_design.md         required — current implementation
-├── 3_vision.md         required — forward-looking
-├── 4_decisions.md      required — ADR log (append-only)
-├── specs/              required folder; may be empty initially
+├── 1_overview.md       recommended — what and why
+├── 2_design.md         recommended — current implementation
+├── 3_vision.md         recommended — forward-looking
+├── 4_decisions.md      recommended — ADR log (append-only)
+├── specs/              recommended folder; may be empty initially
 │   └── <mechanism>.md  one mechanism per file
-└── references/         required folder; may be empty initially
+└── references/         recommended folder; may be empty initially
     └── glossary.md     recommended; other lookup-style docs allowed
 ```
 
 - Folder name: lowercase, hyphenated, singular (`knowledge-graph`, `groundhog`).
 - No `README.md`, `roadmap.md`, `changelog.md`, `tutorial.md` at this level.
-- No top-level narrative files outside the numbered four (`1_`–`4_`).
+- No top-level narrative files outside the numbered four (`1_`–`4_`). Existing folders may vary; new work should prefer the layout for coherence.
 
 ---
 
 ## 2. Required Frontmatter (all numbered docs)
 
-```
+Every numbered design doc starts with YAML frontmatter:
+
+```yaml
+---
+title: <Feature> — <Doc Role>
+owner: <agent family — codex, claude, grok, or gemini>
+last_updated: YYYY-MM-DD
+status: <Draft | Accepted>
+feature: <feature-slug — matches the folder name>
+doc_role: <overview | design | vision | decisions>
+---
+
 # <Feature> — <Doc Role>
-
-**Status:** <Draft | Accepted>
-**Owner:** <agent family — `codex`, `claude`, `gemini`, or `grok`>
-**Last updated:** YYYY-MM-DD
 ```
 
-Owner field is mandatory. It's the accountable agent family, not a committer list or full model string.
+- `title` mirrors the H1 verbatim.
+- `owner` is the accountable agent family, not a committer list or full model string.
+- `last_updated` is the calendar date of the last meaningful content change. Trivial reformat commits should not reset it.
+- `status` is `Draft` until the doc is approved by the feature lead, then `Accepted`. It moves back to `Draft` if a structural rewrite is in flight.
+- `feature` is the folder slug (e.g. `groundhog`, `knowledge-graph`). Lets tooling group docs by feature without parsing paths.
+- `doc_role` is one of `overview`, `design`, `vision`, `decisions` — corresponds 1:1 with the filename prefix `1_`/`2_`/`3_`/`4_`.
+
+Orbit-docs also indexes any configured Markdown doc with this retrieval frontmatter. For numbered design docs, keep the fields above and add at least `type` and `summary`:
+
+```yaml
+---
+type: design | pattern | context | glossary | runbook
+summary: One-line hook for agent retrieval
+tags: [feature-slug]
+paths: ["crates/orbit-cli/**"]
+related_features: [feature-slug]
+related_artifacts: [ORB-00160, ADR-0168, L-0003]
+---
+```
+
+`type` and `summary` are required by the strict parser. `summary` must be a non-empty single line. `related_artifacts` accepts `ORB-NNNNN`, `L-NNNN`, `FYYYY-MM-NNN`, and `ADR-NNNN` strings. The tolerant indexer infers these fields for legacy design docs and pattern docs, but new docs should write them explicitly. Orbit-docs does not index `.orbit/`; ADR bodies remain owned by `orbit-adr`.
 
 ---
 
@@ -184,12 +214,14 @@ There is no `Deprecated` status at the doc level. If the feature is retired, arc
 
 ## 11. Enforcement
 
-Two mechanical checks worth adding later:
+These are recommendations, not mechanically enforced by `orbit-design` (retired) or `orbit-docs`. The tolerant indexer in `orbit-docs` accepts both strict numbered design folders and free-form docs.
+
+Two mechanical checks worth adding later (as optional lints, never blocking):
 
 1. Lint: every numbered doc has required frontmatter + Task References section.
 2. Lint: every ADR has a Cost line.
 
-Until those exist: cross-review is the enforcement mechanism. When one agent reviews the other's docs (KG ↔ Groundhog), the reviewer treats this doc as a checklist and rejects on any violation.
+Until those exist: cross-review and author judgment are the quality mechanism. When one agent reviews the other's docs, the reviewer treats this doc as a checklist and gives feedback on deviations; the author decides whether the deviation is justified for that folder.
 
 ---
 
@@ -207,5 +239,6 @@ Until those exist: cross-review is the enforcement mechanism. When one agent rev
 | Task Lineage | [docs/design/task-lineage/](./task-lineage/) | claude |
 | Task Sync | [docs/design/task-sync/](./task-sync/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |
+| Worktree Artifacts | [docs/design/worktree-artifacts/](./worktree-artifacts/) | codex |
 
 Ownership means: the lead is accountable for keeping the folder's docs in sync with implementation, for flipping ADR status when tasks ship, and for responding to cross-review comments. Ownership does not preclude other agents from editing — it names who's on the hook when things drift.

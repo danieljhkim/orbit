@@ -1,0 +1,1 @@
+{"id":"C20260519-1","learning_id":"L-0005","body":"ORB-00166 hit the sibling failure mode when validating: after retiring a packaged skill asset, also remove or update any `include_str!` entry in `crates/orbit-core/src/command/skill.rs`; otherwise `cargo test` fails before task code compiles.","author_model":"codex","created_at":"2026-05-19T06:52:05.019277Z"}

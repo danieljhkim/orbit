@@ -11,10 +11,13 @@ pub mod cli_runner;
 pub mod dispatcher;
 pub mod groundhog;
 pub mod job_executor;
-pub mod jsonl_sink;
 pub mod orbit_tool_executor;
+pub mod sqlite_sink;
 pub mod tool_enforcement;
 pub mod workspace;
+
+#[cfg(test)]
+mod tests;
 
 pub use agent_loop_driver::{
     drive_agent_loop, drive_agent_loop_with_session, drive_agent_loop_with_tool_context,
@@ -30,7 +33,7 @@ pub use dispatcher::{
 pub use job_executor::{
     JobOutcome, execute_job, resolve_job_catalog_refs_for_execution, validate_job,
 };
-pub use jsonl_sink::V2JsonlSink;
 pub use orbit_tool_executor::OrbitToolCallExecutor;
+pub use sqlite_sink::V2SqliteSink;
 pub use tool_enforcement::{EnforcedAuditSink, EnforcementDecision};
 pub use workspace::resolve_subprocess_cwd;

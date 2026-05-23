@@ -1,3 +1,8 @@
+---
+type: design
+summary: "Panic-Site Inventory — 2026-05"
+tags: ["auditability"]
+---
 # Panic-Site Inventory — 2026-05
 
 **Status:** Draft

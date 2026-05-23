@@ -1,8 +1,16 @@
-# Task Sync — Decisions
+---
+summary: "Task Sync — Decisions"
+type: design
+title: "Task Sync — Decisions"
+owner: claude
+last_updated: 2026-05-12
+status: Draft
+feature: task-sync
+doc_role: decisions
+tags: ["task-sync"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-12
+# Task Sync — Decisions
 
 ADR-style log of non-obvious task-sync decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are append-only and keyed by number; superseded entries are marked, not deleted.
 

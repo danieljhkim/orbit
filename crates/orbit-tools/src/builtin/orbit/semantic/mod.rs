@@ -1,2 +1,4 @@
-pub mod related;
-pub mod search;
+pub mod index;
+pub mod install;
+pub mod stats;
+pub mod uninstall;

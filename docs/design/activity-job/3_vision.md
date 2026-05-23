@@ -1,8 +1,16 @@
-# Activity / Job — Vision
+---
+summary: "Activity / Job — Vision"
+type: design
+title: "Activity / Job — Vision"
+owner: codex
+last_updated: 2026-04-30
+status: Draft
+feature: activity-job
+doc_role: vision
+tags: ["activity-job"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-04-30
+# Activity / Job — Vision
 
 This document pressure-tests where the Activity / Job substrate may go next. It starts from the v2 runtime shipped across [T20260418-2010], [T20260418-2018], [T20260418-2143], [T20260418-2210], [T20260419-0104], and [T20260419-2156]. [2_design.md](./2_design.md) is the current contract; this file asks what should harden, collapse, or disappear.
 

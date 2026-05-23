@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0164
 title: Ship PR transitions preserve task implementer attribution
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - auditability
 related_tasks:
 - ORB-00106
+tags: []
+paths: []
 supersedes: []
 legacy_ids: []
 validation_warnings: []

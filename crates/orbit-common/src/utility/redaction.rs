@@ -22,7 +22,7 @@
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, ffi::OsString, sync::OnceLock};
 
 use regex::Regex;
 use serde_json::Value;
@@ -31,6 +31,7 @@ use crate::types::OrbitError;
 
 const REDACTED_ENV_VALUE: &str = "[REDACTED_ENV]";
 static DEFAULT_PATTERN_REDACTOR: OnceLock<PatternRedactor> = OnceLock::new();
+static HIGH_CONFIDENCE_SINGLE_TOKEN_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // Env-var value scrubbing
@@ -97,6 +98,10 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
             OrbitError::CompanionNotInstalled(redact_sensitive_env_text(&m))
         }
         OrbitError::InvalidInput(m) => OrbitError::InvalidInput(redact_sensitive_env_text(&m)),
+        OrbitError::SensitiveInput { field, reason } => OrbitError::SensitiveInput {
+            field: redact_sensitive_env_text(&field),
+            reason: redact_sensitive_env_text(&reason),
+        },
         OrbitError::InvalidInputDiagnostic {
             message,
             did_you_mean,
@@ -146,6 +151,19 @@ fn sensitive_env_values() -> Vec<String> {
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values.dedup();
     values
+}
+
+/// Return the current process environment with sensitive variable names
+/// removed. Provider subprocesses use this when they need normal runtime
+/// context such as `PATH`/`HOME` without inheriting ambient credentials.
+pub fn non_sensitive_env_vars() -> Vec<(OsString, OsString)> {
+    std::env::vars_os()
+        .filter(|(name, _)| {
+            name.to_str()
+                .map(|name| !is_sensitive_env_name(name))
+                .unwrap_or(true)
+        })
+        .collect()
 }
 
 fn is_redactable_value(value: &str) -> bool {
@@ -217,6 +235,18 @@ impl PatternRedactor {
                 Regex::new(r"(?im)^(\s*api[_-]?key\s*:\s*).+$").expect("valid regex"),
                 "${1}[REDACTED_AUTH]",
             ),
+            (
+                Regex::new(r"sk-[A-Za-z0-9_\-]{20,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"ghp_[A-Za-z0-9]{36}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
+            (
+                Regex::new(r"xox[baprs]-[A-Za-z0-9\-]{10,}").expect("valid regex"),
+                "[REDACTED_SECRET]",
+            ),
         ];
         Self { patterns }
     }
@@ -275,6 +305,33 @@ pub fn redact_all(input: &str) -> String {
     default_pattern_redactor().apply_str(&env_scrubbed)
 }
 
+/// Return true when `input` is exactly one high-confidence credential token.
+///
+/// Callers that persist free-text artifacts can reject these whole-token values
+/// instead of merely masking them; embedded occurrences are still handled by
+/// [`redact_all`].
+pub fn is_high_confidence_single_token_credential(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed.split_whitespace().count() != 1 {
+        return false;
+    }
+    high_confidence_single_token_patterns()
+        .iter()
+        .any(|pattern| pattern.is_match(trimmed))
+}
+
 pub(crate) fn default_pattern_redactor() -> &'static PatternRedactor {
     DEFAULT_PATTERN_REDACTOR.get_or_init(PatternRedactor::http_default)
+}
+
+fn high_confidence_single_token_patterns() -> &'static [Regex] {
+    HIGH_CONFIDENCE_SINGLE_TOKEN_PATTERNS
+        .get_or_init(|| {
+            vec![
+                Regex::new(r"^sk-[A-Za-z0-9_\-]{20,}$").expect("valid regex"),
+                Regex::new(r"^ghp_[A-Za-z0-9]{36}$").expect("valid regex"),
+                Regex::new(r"^xox[baprs]-[A-Za-z0-9\-]{10,}$").expect("valid regex"),
+            ]
+        })
+        .as_slice()
 }

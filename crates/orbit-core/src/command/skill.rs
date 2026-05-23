@@ -9,7 +9,7 @@ use orbit_common::utility::fs::write_text_with_parent;
 use crate::OrbitRuntime;
 use crate::skill_catalog::{LoadedSkill, SkillCatalogDoctorStatus};
 
-const DEFAULT_SKILL_FILES: [(&str, &str); 11] = [
+const DEFAULT_SKILL_FILES: [(&str, &str); 12] = [
     ("orbit", include_str!("../../assets/skills/orbit/SKILL.md")),
     (
         "orbit-adr",
@@ -24,16 +24,20 @@ const DEFAULT_SKILL_FILES: [(&str, &str); 11] = [
         include_str!("../../assets/skills/orbit-debug-job-failure/SKILL.md"),
     ),
     (
-        "orbit-design",
-        include_str!("../../assets/skills/orbit-design/SKILL.md"),
-    ),
-    (
         "orbit-execute-task",
         include_str!("../../assets/skills/orbit-execute-task/SKILL.md"),
     ),
     (
+        "orbit-docs",
+        include_str!("../../assets/skills/orbit-docs/SKILL.md"),
+    ),
+    (
         "orbit-graph",
         include_str!("../../assets/skills/orbit-graph/SKILL.md"),
+    ),
+    (
+        "orbit-guide",
+        include_str!("../../assets/skills/orbit-guide/SKILL.md"),
     ),
     (
         "orbit-learning",
@@ -44,14 +48,20 @@ const DEFAULT_SKILL_FILES: [(&str, &str); 11] = [
         include_str!("../../assets/skills/orbit-review-task/SKILL.md"),
     ),
     (
-        "orbit-semantic",
-        include_str!("../../assets/skills/orbit-semantic/SKILL.md"),
+        "orbit-search",
+        include_str!("../../assets/skills/orbit-search/SKILL.md"),
     ),
     (
         "orbit-track-issues",
         include_str!("../../assets/skills/orbit-track-issues/SKILL.md"),
     ),
 ];
+
+const DEFAULT_SKILL_RESOURCE_FILES: [(&str, &str, &str); 1] = [(
+    "orbit-debug-job-failure",
+    "references/common_failures.md",
+    include_str!("../../assets/skills/orbit-debug-job-failure/references/common_failures.md"),
+)];
 
 /// Skills intentionally NOT shipped in `plugin/skills/` because they depend on
 /// CLI-only surfaces the Claude Code plugin does not expose. The CLI still
@@ -79,7 +89,7 @@ pub struct SkillDoctorResult {
     pub message: String,
 }
 
-pub(crate) fn default_skill_ids() -> [&'static str; 11] {
+pub(crate) fn default_skill_ids() -> [&'static str; 12] {
     DEFAULT_SKILL_FILES.map(|(id, _)| id)
 }
 
@@ -96,9 +106,30 @@ pub(crate) fn seed_default_skills(
         }
         let rendered = inject_skill_template_tokens(content, orbit_root);
         write_text_with_parent(&path, &rendered)?;
+        seed_default_skill_resources(&skills_root.join(id), id, orbit_root, overwrite)?;
         count += 1;
     }
     Ok(count)
+}
+
+fn seed_default_skill_resources(
+    skill_dir: &Path,
+    skill_id: &str,
+    orbit_root: &Path,
+    overwrite: bool,
+) -> Result<(), OrbitError> {
+    for (resource_skill_id, relative_path, content) in DEFAULT_SKILL_RESOURCE_FILES {
+        if resource_skill_id != skill_id {
+            continue;
+        }
+        let path = skill_dir.join(relative_path);
+        if !overwrite && path.exists() {
+            continue;
+        }
+        let rendered = inject_skill_template_tokens(content, orbit_root);
+        write_text_with_parent(&path, &rendered)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn is_default_skill_file_for_root(
@@ -273,6 +304,8 @@ mod drift_tests {
             }
         }
 
+        // L-0020: retired skills can leave dangling symlinks behind, so
+        // keep this reverse check strict about orphan plugin entries.
         // Reverse: no orphan symlinks in plugin/skills/ (catches stale entries
         // for retired skills and accidental inclusion of an excluded skill).
         let on_disk: BTreeSet<String> = std::fs::read_dir(&plugin_skills)

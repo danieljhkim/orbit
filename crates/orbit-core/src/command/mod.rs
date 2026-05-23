@@ -14,22 +14,28 @@ pub(crate) const SYSTEM_AUDIT_IDENTITY: &str = "system";
 
 pub mod activity;
 pub mod activity_v2;
-pub mod adr_migration;
 pub mod agent_rules;
 pub mod audit_event;
 pub mod backend_resolver;
-pub mod design;
 pub mod diagnostics;
+pub mod docs;
 pub mod executor;
 pub mod graph;
+pub mod hook_install;
 pub mod init;
 pub mod job;
 pub mod learning;
+pub mod learning_hook;
 pub mod pipeline_run;
 pub mod policy;
+pub mod review_thread_hook;
+pub mod search;
 pub mod semantic;
 pub mod skill;
 pub mod task;
 pub mod task_template;
 pub mod tool;
 pub mod workflow;
+
+#[cfg(test)]
+mod tests;

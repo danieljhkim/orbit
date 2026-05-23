@@ -33,6 +33,12 @@ impl Tool for OrbitFrictionUpdateTool {
                     param_type: "string_list".to_string(),
                     required: false,
                 },
+                ToolParam {
+                    name: "body".to_string(),
+                    description: "Optional replacement markdown body".to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                },
             ],
             builtin: true,
         }

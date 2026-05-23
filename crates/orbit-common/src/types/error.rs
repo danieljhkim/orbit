@@ -52,6 +52,8 @@ pub enum OrbitError {
     CompanionNotInstalled(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error("sensitive input rejected for `{field}`: {reason}")]
+    SensitiveInput { field: String, reason: String },
     #[error("invalid input: {message}")]
     InvalidInputDiagnostic {
         message: String,
@@ -116,30 +118,5 @@ impl OrbitError {
 impl From<std::io::Error> for OrbitError {
     fn from(err: std::io::Error) -> Self {
         OrbitError::Io(err.to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{NotFoundKind, OrbitError};
-
-    #[test]
-    fn orbit_not_found_error_serializes_with_typed_kind() {
-        let error = OrbitError::NotFound {
-            kind: NotFoundKind::Task,
-            id: "ORB-00001".to_string(),
-        };
-
-        let value = serde_json::to_value(error).expect("serialize orbit error");
-
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "NotFound": {
-                    "kind": "task",
-                    "id": "ORB-00001"
-                }
-            })
-        );
     }
 }

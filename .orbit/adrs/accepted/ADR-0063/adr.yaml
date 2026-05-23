@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0063
 title: Working graph is in-memory, not persistent
 status: accepted
@@ -13,6 +13,8 @@ related_tasks:
 - T20260409-0656
 - T20260416-0236
 - T20260417-0302
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-005

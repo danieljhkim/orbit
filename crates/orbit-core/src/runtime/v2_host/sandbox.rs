@@ -150,10 +150,14 @@ fn append_codex_side_write_roots(
 ///
 /// Gemini and Claude do not have a codex-style `--add-dir` side channel, but
 /// their MCP/tool calls still execute `orbit ...` as a sandbox-inherited child.
-/// Those child processes initialize the global audit/tool database, the global
-/// task registry + canonical task bundles, and the workspace-local semantic
-/// index before a planner can persist `planning-duel/<slot>.md`.
-/// Keep the grants path-shaped instead of re-allowing the whole home directory.
+/// Those child processes initialize global logs/databases/tasks plus the
+/// workspace stores exposed by activity tool allowlists.
+///
+/// Inventory boundary: this list follows currently activity-exposed Orbit write
+/// tools. Registered-but-not-exposed stores such as ADRs and graph write roots
+/// stay denied until the corresponding tools are added to those activity
+/// allowlists. Keep the grants path-shaped instead of re-allowing the whole
+/// home directory or workspace `.orbit` tree.
 #[cfg(target_os = "macos")]
 fn append_orbit_child_runtime_write_roots(
     runtime: &OrbitRuntime,
@@ -178,7 +182,10 @@ fn append_orbit_child_runtime_write_roots(
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace}/tasks/**"),
+        format!("{workspace}/learnings/**"),
+        format!("{workspace}/frictions/**"),
         format!("{workspace}/state/audit/**"),
+        format!("{workspace}/state/.id_alloc.lock"),
         format!("{workspace}/state/logs/**"),
         format!("{workspace}/state/semantic.db*"),
     ] {
@@ -413,19 +420,36 @@ mod tests {
             .unwrap_or_else(|_| runtime.paths().orbit_dir.clone())
             .display()
             .to_string();
+        let workspace_orbit_deny = format!("!{workspace_orbit}/**");
+        let deny_pos = modify
+            .iter()
+            .position(|entry| entry == &workspace_orbit_deny)
+            .unwrap_or_else(|| {
+                panic!(
+                    "default policy should deny workspace .orbit writes via {workspace_orbit_deny}; modify={modify:?}"
+                )
+            });
         let expected = [
             format!("{global}/state/logs/**"),
             format!("{global}/orbit.db*"),
             format!("{global}/tasks/**"),
             format!("{workspace_orbit}/tasks/**"),
+            format!("{workspace_orbit}/learnings/**"),
+            format!("{workspace_orbit}/frictions/**"),
             format!("{workspace_orbit}/state/audit/**"),
+            format!("{workspace_orbit}/state/.id_alloc.lock"),
             format!("{workspace_orbit}/state/logs/**"),
             format!("{workspace_orbit}/state/semantic.db*"),
         ];
         for root in expected {
+            let allow_pos = modify.iter().position(|entry| entry == &root);
             assert!(
-                modify.iter().any(|entry| entry == &root),
+                allow_pos.is_some(),
                 "gemini sandbox should allow Orbit runtime root {root}; modify={modify:?}"
+            );
+            assert!(
+                deny_pos < allow_pos.expect("root position checked above"),
+                "Orbit runtime root {root} must be re-allowed after workspace .orbit deny: {modify:?}"
             );
         }
         assert!(
@@ -436,6 +460,20 @@ mod tests {
             !modify.iter().any(|entry| entry == &workspace_orbit),
             "gemini sandbox must not re-allow the whole workspace .orbit root: {modify:?}"
         );
+        // Registered-but-not-activity-exposed write stores are intentionally
+        // outside this child-runtime inventory. If agent_implement, agent_review,
+        // step_failure_recovery, or dispatch_agent exposes ADR or graph write
+        // tools, revisit this allowlist alongside those surfaces.
+        for excluded in [
+            format!("{workspace_orbit}/adrs/**"),
+            format!("{workspace_orbit}/knowledge/**"),
+            format!("{workspace_orbit}/state/knowledge/**"),
+        ] {
+            assert!(
+                !modify.iter().any(|entry| entry == &excluded),
+                "gemini sandbox must not allow non-activity-exposed Orbit store {excluded}: {modify:?}"
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]

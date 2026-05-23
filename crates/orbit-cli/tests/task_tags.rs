@@ -26,11 +26,15 @@ fn task_cli_roundtrips_filters_and_replaces_tags() {
     );
     assert_task_titles(&perf_list, &["Perf task", "Perf bench task"]);
 
+    // ORB-00202: `orbit task search` was deleted; the substring+tag case
+    // migrates to `orbit search --kind task --tag <...>`. Results land
+    // under `output["results"]` rather than at the top level.
     let both_search = workspace.run(
         &[
-            "task",
             "search",
             "tag-search",
+            "--kind",
+            "task",
             "--tag",
             "perf",
             "--tag",
@@ -38,9 +42,9 @@ fn task_cli_roundtrips_filters_and_replaces_tags() {
             "--json",
         ],
         None,
-        "search perf+bench tasks",
+        "orbit search perf+bench tasks",
     );
-    assert_task_titles(&both_search, &["Perf bench task"]);
+    assert_orbit_search_titles(&both_search, &["Perf bench task"]);
 
     let perf_id = perf["id"].as_str().expect("perf task id");
     let updated = workspace.run(
@@ -59,6 +63,25 @@ fn assert_task_titles(output: &Output, expected: &[&str]) {
         .expect("task array")
         .iter()
         .map(|task| task["title"].as_str().expect("task title").to_string())
+        .collect::<Vec<_>>();
+    titles.sort();
+
+    let mut expected = expected
+        .iter()
+        .map(|title| (*title).to_string())
+        .collect::<Vec<_>>();
+    expected.sort();
+
+    assert_eq!(titles, expected);
+}
+
+fn assert_orbit_search_titles(output: &Output, expected: &[&str]) {
+    let response: Value = serde_json::from_slice(&output.stdout).expect("search response JSON");
+    let mut titles = response["results"]
+        .as_array()
+        .expect("results array")
+        .iter()
+        .map(|hit| hit["title"].as_str().expect("hit title").to_string())
         .collect::<Vec<_>>();
     titles.sort();
 

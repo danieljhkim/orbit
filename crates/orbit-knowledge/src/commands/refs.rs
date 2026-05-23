@@ -84,7 +84,9 @@ impl RefInclude {
         Ok(include)
     }
 
-    fn includes(self, kind: RefKind) -> bool {
+    // pub(crate) widened for commands/tests/refs.rs during test layout migration
+    // (docs/design-patterns/test_layout.md, ORB-00249).
+    pub(crate) fn includes(self, kind: RefKind) -> bool {
         match kind {
             RefKind::Code => self.code,
             RefKind::Doc => self.doc,
@@ -173,7 +175,9 @@ fn symbol_search_terms(symbol: &str, include_simple_name: bool) -> Vec<String> {
     terms
 }
 
-fn simple_selector_symbol_name(symbol: &str) -> String {
+// pub(crate) widened for commands/tests/refs.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn simple_selector_symbol_name(symbol: &str) -> String {
     let scoped = symbol
         .rsplit("::")
         .next()
@@ -194,7 +198,9 @@ fn strip_numeric_selector_suffixes(mut symbol: &str) -> &str {
     symbol
 }
 
-fn classify_ref_kind(path: &str) -> RefKind {
+// pub(crate) widened for commands/tests/refs.rs access during sibling test
+// layout migration (docs/design-patterns/test_layout.md, ORB-00249).
+pub(crate) fn classify_ref_kind(path: &str) -> RefKind {
     let extension = Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
@@ -204,48 +210,5 @@ fn classify_ref_kind(path: &str) -> RefKind {
         "md" | "txt" | "rst" | "adoc" => RefKind::Doc,
         "yaml" | "yml" | "toml" | "json" | "jsonc" | "ini" => RefKind::Config,
         _ => RefKind::Code,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn simple_selector_symbol_name_handles_qualified_leaf_ids() {
-        let cases = [
-            ("User.save", "save"),
-            ("Outer.Inner.run#2", "run"),
-            ("Client::connect#1#2", "connect"),
-            ("<Foo as Runnable>::run", "run"),
-            ("load#3", "load"),
-            ("plain_function", "plain_function"),
-        ];
-
-        for (symbol, expected) in cases {
-            assert_eq!(simple_selector_symbol_name(symbol), expected);
-        }
-    }
-
-    #[test]
-    fn ref_kind_classification_matches_snapshot() {
-        let snapshot = [
-            ("src/main.rs", RefKind::Code),
-            ("docs/guide.md", RefKind::Doc),
-            ("orbit.toml", RefKind::Config),
-            ("config/settings.jsonc", RefKind::Config),
-        ];
-
-        for (path, expected) in snapshot {
-            assert_eq!(classify_ref_kind(path), expected);
-        }
-    }
-
-    #[test]
-    fn include_all_expands_every_kind() {
-        let include = RefInclude::from_names(vec!["all".to_string()]).expect("include");
-        assert!(include.includes(RefKind::Code));
-        assert!(include.includes(RefKind::Doc));
-        assert!(include.includes(RefKind::Config));
     }
 }

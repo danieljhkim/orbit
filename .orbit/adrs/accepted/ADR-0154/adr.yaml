@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0154
 title: Replace `[agent.<role>]` tables with named `[crews.*]` registry
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - agent-families
 related_tasks:
 - ORB-00058
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - agent-families/ADR-0152

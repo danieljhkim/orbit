@@ -2,9 +2,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use orbit_common::types::{Crew, WorkspacePaths};
-use orbit_embed::{EmbedWorker, VectorStore};
 use orbit_engine::PrConfig;
 use orbit_policy::PolicyEngine;
+use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::{
     AdrStoreBackend, AuditEventStoreBackend, ExecutorDefStoreBackend, JobRunStoreBackend,
     LearningStoreBackend, PolicyDefStoreBackend, TaskArtifactStoreBackend,
@@ -259,9 +259,19 @@ impl OrbitContext {
         }
     }
 
+    /// Returns the shared .orbit/ data directory.
+    pub(crate) fn shared_root(&self) -> &Path {
+        &self.paths.orbit_dir
+    }
+
+    /// Returns the worktree-local .orbit/ data directory.
+    pub(crate) fn local_root(&self) -> &Path {
+        &self.paths.local_dir
+    }
+
     /// Returns the .orbit/ data directory (backward-compatible alias).
     pub(crate) fn data_root(&self) -> &Path {
-        &self.paths.orbit_dir
+        self.shared_root()
     }
 
     pub(crate) fn global_root(&self) -> &Path {

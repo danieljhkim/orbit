@@ -1,8 +1,16 @@
-# Task Sync — Vision
+---
+summary: "Task Sync — Vision"
+type: design
+title: "Task Sync — Vision"
+owner: claude
+last_updated: 2026-05-12
+status: Draft
+feature: task-sync
+doc_role: vision
+tags: ["task-sync"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-12
+# Task Sync — Vision
 
 This document captures the open questions task sync deliberately leaves unanswered, the prior work the design builds on or rejects, what the design contributes that's specific to Orbit, and external references for readers who want to dig deeper. The questions in §1 are the most likely sources of post-sync design pressure; the prior work in §2 explains why the design landed where it did.
 

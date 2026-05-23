@@ -9,9 +9,21 @@
 agentspace
 !.claude/settings.json
 !.claude/hooks/
+!.codex/
+.codex/*
 !.codex/config.toml
+!.codex/hooks/
+.codex/hooks/*
+!.codex/hooks/orbit-learning-reminder
+!.gemini/
+.gemini/*
 !.gemini/settings.json
+!.gemini/hooks/
+.gemini/hooks/*
+!.gemini/hooks/orbit-learning-reminder
+!.grok/
 !.grok/config.toml
+!.grok/hooks/
 # ...except the published plugin's MCP registration, which ships in the package.
 !plugin/.mcp.json
 
@@ -34,6 +46,10 @@ critique.md
 orbit.db
 orbit.db-shm
 orbit.db-wal
+
+# Benchmark run/task artifacts — regenerated per run, not committed
+benchmarks/**/runs/**
+benchmarks/**/tasks/**
 # ADR artifacts are committed source-of-truth (adr-artifact ADR-002 amended,
 # ADR-005); the SQLite index is rebuildable from the YAML+markdown. Other
 # `.orbit/` state (tasks, runs, policies, audit DB, etc.) stays workspace-local.
@@ -66,3 +82,4 @@ build/
 .gstack/
 .locks
 *.lock
+.codegraph

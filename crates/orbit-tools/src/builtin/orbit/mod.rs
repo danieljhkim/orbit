@@ -1,5 +1,5 @@
 pub mod adr;
-pub mod design;
+pub mod docs;
 pub mod duel;
 pub mod friction;
 pub mod graph_history;
@@ -8,6 +8,7 @@ pub mod knowledge;
 pub mod learning;
 pub mod pipeline;
 pub mod review_thread;
+pub mod search;
 pub mod semantic;
 pub mod state;
 pub mod task;
@@ -33,14 +34,18 @@ pub(super) struct OrbitIdentity {
 
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(adr::add::OrbitAdrAddTool);
-    registry.register(adr::list::OrbitAdrListTool);
+    // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
+    // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
+    // path for admin workflows.
+    registry.register_inactive(adr::list::OrbitAdrListTool);
     registry.register(adr::show::OrbitAdrShowTool);
     registry.register(adr::supersede::OrbitAdrSupersedeTool);
     registry.register(adr::update::OrbitAdrUpdateTool);
-    registry.register(design::check::OrbitDesignCheckTool);
-    registry.register(design::init::OrbitDesignInitTool);
-    registry.register(design::list::OrbitDesignListTool);
-    registry.register(design::show::OrbitDesignShowTool);
+    registry.register_inactive(docs::OrbitDocsListTool);
+    registry.register_inactive(docs::OrbitDocsShowTool);
+    registry.register_inactive(docs::OrbitDocsAddTool);
+    registry.register_inactive(docs::OrbitDocsIndexTool);
+    registry.register_inactive(docs::OrbitDocsMigrateTool);
     registry.register(groundhog::checkpoint_success::OrbitGroundhogCheckpointSuccessTool);
     registry.register(groundhog::checkpoint_failure::OrbitGroundhogCheckpointFailureTool);
     registry.register(groundhog::side_effect::OrbitGroundhogSideEffectTool);
@@ -48,26 +53,27 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(friction::list::OrbitFrictionListTool);
     registry.register(friction::resolve::OrbitFrictionResolveTool);
     registry.register(friction::show::OrbitFrictionShowTool);
-    registry.register(friction::stats::OrbitFrictionStatsTool);
+    registry.register_inactive(friction::stats::OrbitFrictionStatsTool);
     registry.register(friction::tags::OrbitFrictionTagsTool);
     registry.register(friction::update::OrbitFrictionUpdateTool);
     registry.register(task::add::OrbitTaskAddTool);
     registry.register(task::artifact_put::OrbitTaskArtifactPutTool);
     registry.register(task::approve::OrbitTaskApproveTool);
-    registry.register(task::delete::OrbitTaskDeleteTool);
-    registry.register(task::lint::OrbitTaskLintTool);
-    registry.register(task::locks::OrbitTaskLocksTool);
-    registry.register(task::locks_reserve::OrbitTaskLocksReserveTool);
-    registry.register(task::locks_release::OrbitTaskLocksReleaseTool);
+    // ORB-00289: destructive / admin-only — CLI subcommands still reach
+    // them via `runtime.run_tool`; the agent MCP surface should not.
+    registry.register_inactive(task::delete::OrbitTaskDeleteTool);
+    registry.register_inactive(task::lint::OrbitTaskLintTool);
+    registry.register_inactive(task::locks::OrbitTaskLocksTool);
+    registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
+    registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
     registry.register(task::start::OrbitTaskStartTool);
     registry.register(task::reject::OrbitTaskRejectTool);
     registry.register(task::show::OrbitTaskShowTool);
     registry.register(task::list::OrbitTaskListTool);
-    registry.register(task::search::OrbitTaskSearchTool);
     registry.register(task::update::OrbitTaskUpdateTool);
     registry.register(duel::plan_add::OrbitDuelPlanAddTool);
     registry.register(duel::plan_winner::OrbitDuelPlanWinnerTool);
-    registry.register(graph_history::OrbitGraphHistoryTool);
+    registry.register_inactive(graph_history::OrbitGraphHistoryTool);
     registry.register(knowledge::callers::OrbitKnowledgeCallersTool);
     registry.register(knowledge::deps::OrbitKnowledgeDepsTool);
     registry.register(knowledge::implementors::OrbitKnowledgeImplementorsTool);
@@ -78,12 +84,13 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(knowledge::show::OrbitKnowledgeShowTool);
     registry.register(learning::add::OrbitLearningAddTool);
     registry.register(learning::comment_add::OrbitLearningCommentAddTool);
-    registry.register(learning::comment_delete::OrbitLearningCommentDeleteTool);
+    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
+    registry.register_inactive(learning::comment_delete::OrbitLearningCommentDeleteTool);
     registry.register(learning::comment_list::OrbitLearningCommentListTool);
-    registry.register(learning::list::OrbitLearningListTool);
-    registry.register(learning::prune::OrbitLearningPruneTool);
-    registry.register(learning::reindex::OrbitLearningReindexTool);
-    registry.register(learning::search::OrbitLearningSearchTool);
+    registry.register_inactive(learning::list::OrbitLearningListTool);
+    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
+    registry.register_inactive(learning::prune::OrbitLearningPruneTool);
+    registry.register_inactive(learning::sync::OrbitLearningSyncTool);
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
     registry.register(learning::update::OrbitLearningUpdateTool);
@@ -91,11 +98,20 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(pipeline::invoke::OrbitPipelineInvokeTool);
     registry.register(pipeline::wait::OrbitPipelineWaitTool);
     registry.register(review_thread::add::OrbitReviewThreadAddTool);
+    registry.register(review_thread::add::OrbitReviewThreadAddAliasTool);
     registry.register(review_thread::list::OrbitReviewThreadListTool);
+    registry.register(review_thread::list::OrbitReviewThreadListAliasTool);
     registry.register(review_thread::reply::OrbitReviewThreadReplyTool);
+    registry.register(review_thread::reply::OrbitReviewThreadReplyAliasTool);
     registry.register(review_thread::resolve::OrbitReviewThreadResolveTool);
-    registry.register(semantic::search::OrbitSemanticSearchTool);
-    registry.register(semantic::related::OrbitSemanticRelatedTool);
+    registry.register(review_thread::resolve::OrbitReviewThreadResolveAliasTool);
+    registry.register(search::OrbitSearchTool);
+    registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
+    // ORB-00289: destructive teardown of the local semantic index —
+    // admin-only, retained on the CLI surface (`orbit semantic uninstall`).
+    registry.register_inactive(semantic::uninstall::OrbitSemanticUninstallTool);
+    registry.register_inactive(semantic::stats::OrbitSemanticStatsTool);
+    registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
     registry.register(state::get::OrbitStateGetTool);
     registry.register(state::set::OrbitStateSetTool);
 }
@@ -173,7 +189,7 @@ pub(super) fn model_identity_params() -> Vec<ToolParam> {
     vec![ToolParam {
         name: "model".to_string(),
         description:
-            "Preferred provenance field. Pass the canonical agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized."
+            "Preferred provenance field. Pass the canonical agent family (codex, claude, gemini, or grok); full model strings are accepted and auto-normalized."
                 .to_string(),
         param_type: "string".to_string(),
         required: false,
@@ -235,6 +251,63 @@ pub(super) fn execute_host_action(
         identity.model,
         ctx.reservation_owner.clone(),
     )
+}
+
+pub(super) fn resolve_workspace_argument(
+    ctx: &ToolContext,
+    input: &mut Value,
+    tool_name: &str,
+) -> Result<String, OrbitError> {
+    // ADR-0181: MCP workspace defaults come from explicit session context, never process cwd.
+    let explicit = optional_string_alias(input, &["workspace"])?;
+    let session = ctx
+        .session_context
+        .workspace
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    match (explicit, session) {
+        (Some(workspace), Some(session_workspace)) => {
+            if workspace != session_workspace {
+                tracing::info!(
+                    target: "orbit.tools.workspace",
+                    tool_name,
+                    explicit_workspace = %workspace,
+                    session_workspace = %session_workspace,
+                    "explicit workspace overrides MCP session context"
+                );
+            }
+            set_input_workspace(input, &workspace)?;
+            Ok(workspace)
+        }
+        (Some(workspace), None) => {
+            set_input_workspace(input, &workspace)?;
+            Ok(workspace)
+        }
+        (None, Some(workspace)) => {
+            set_input_workspace(input, &workspace)?;
+            Ok(workspace)
+        }
+        (None, None) => Err(OrbitError::InvalidInput(
+            "missing `workspace`; provide it explicitly or initialize the MCP session with `_meta.orbit.workspace`"
+                .to_string(),
+        )),
+    }
+}
+
+fn set_input_workspace(input: &mut Value, workspace: &str) -> Result<(), OrbitError> {
+    let Some(object) = input.as_object_mut() else {
+        return Err(OrbitError::InvalidInput(
+            "tool input must be a JSON object".to_string(),
+        ));
+    };
+    object.insert(
+        "workspace".to_string(),
+        Value::String(workspace.to_string()),
+    );
+    Ok(())
 }
 
 pub(super) fn task_scope(ctx: &ToolContext) -> OrbitTaskScope {
@@ -322,38 +395,4 @@ pub(super) fn orbit_id_params(kind: &str) -> Vec<ToolParam> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn runtime_identity_overwrites_self_reported_model_at_tool_boundary() {
-        let ctx = tool_context("claude", "claude-opus-4-7");
-
-        let identity =
-            resolve_identity(&ctx, &json!({ "model": "opus-4.7" })).expect("identity resolves");
-
-        assert_eq!(identity.agent.as_deref(), Some("claude"));
-        assert_eq!(identity.model.as_deref(), Some("claude"));
-        assert_eq!(identity.actor_label.as_deref(), Some("claude"));
-    }
-
-    fn tool_context(agent: &str, model: &str) -> ToolContext {
-        ToolContext {
-            cwd: None,
-            allowed_tools: Vec::new(),
-            workspace_root: None,
-            agent_name: Some(agent.to_string()),
-            model_name: Some(model.to_string()),
-            role_slot: None,
-            proc_allowed_programs: Vec::new(),
-            policy_engine: None,
-            fs_profile: None,
-            fs_audit: None,
-            reservation_owner: None,
-            orbit_host: None,
-            groundhog_host: None,
-        }
-    }
-}
+mod tests;

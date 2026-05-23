@@ -1,8 +1,16 @@
-# Auditability — Decisions
+---
+summary: "Auditability — Decisions"
+type: design
+title: "Auditability — Decisions"
+owner: codex
+last_updated: 2026-05-17
+status: Draft
+feature: auditability
+doc_role: decisions
+tags: ["auditability"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-17 (ORB-00106)
+# Auditability — Decisions
 
 This is the append-only ADR log for Auditability. Entries are ordered by ADR number. New entries should use the template in [../CONVENTIONS.md](../CONVENTIONS.md) and cite the task that made the decision real.
 
@@ -77,8 +85,22 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 **Decision.** Persist `InvocationTrace` records beside audit as first-class metric records keyed by job run, activity, task ids, agent, model, usage, and tool-call summaries.
 
 **Consequences.**
-- `orbit metrics` and scoreboards can avoid parsing audit JSONL.
+- Dashboard metrics endpoints and scoreboards can avoid parsing audit JSONL.
 - Cost: metrics can diverge from transcript detail if a provider path reports incomplete usage.
+
+## ADR-0173 — Dashboard owns invocation metrics surfaces
+
+**Status:** Accepted · 2026-05 · [ORB-00190]
+
+**Context.** The metrics CLI surface is unused, and [ORB-00191] moved the missing knowledge, activity, tool, task, and invocation views into dashboard HTTP endpoints. Keeping a second JSON-capable command would make future metrics work maintain two surfaces.
+
+**Decision.** The dashboard is the canonical user-facing and programmatic surface for invocation metrics. The metrics CLI command is retired, and future observability features should ship as dashboard endpoints and views.
+
+**Consequences.**
+- Programmatic consumers use the dashboard HTTP API (`/api/metrics/*`) instead of a dedicated CLI JSON scripting surface.
+- Future invocation-metrics features build as dashboard endpoints first.
+- No single code anchor; this convention is enforced through design docs and review.
+- Cost: shell scripts cannot rely on a dedicated metrics command and must call the local dashboard API or shared runtime libraries.
 
 ## ADR-007 — Run trace inspection stays separate from command audit
 
@@ -324,6 +346,7 @@ This is the append-only ADR log for Auditability. Entries are ordered by ADR num
 - **[T20260419-0002]** — Add workspace provenance and v2 audit envelope events for activity/job execution.
 - **[T20260426-0519]** — Move file-backed activity/job audit traces under workspace state.
 - **[T20260426-0526]** — Persist v2 invocation traces for metrics beside audit.
+- **[ORB-00190]** — Retire the metrics CLI and make dashboard endpoints canonical for invocation metrics.
 - **[T20260426-0605]** — Add this auditability design folder and record initial ADRs.
 - **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
 - **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.

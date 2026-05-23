@@ -1,8 +1,16 @@
-# Project Learnings — Vision
+---
+summary: "Project Learnings — Vision"
+type: design
+title: "Project Learnings — Vision"
+owner: claude
+last_updated: 2026-05-12
+status: Draft
+feature: project-learnings
+doc_role: vision
+tags: ["project-learnings"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-12
+# Project Learnings — Vision
 
 This document captures the questions phase 1 deliberately defers, the prior work the design draws on or rejects, what is specific to Orbit's situation, and external references for further reading. The questions in §1 are the most likely sources of post-phase-1 design pressure.
 
@@ -30,13 +38,13 @@ Phase 1 ranks matched learnings by `updated_at` desc, with optional manual `prio
 - A query that's semantically related to a learning but doesn't match its path globs gets nothing.
 - Multiple matched learnings with the same path scope all rank by date, with no signal about which is most relevant to the *current* edit.
 
-[docs/design/semantic-search/](../semantic-search/) builds the infrastructure that resolves all three: per-field embeddings, brute-force cosine, RRF fusion. Phase 2 of project-learnings layers on top of that:
+[docs/design/orbit-search/](../orbit-search/) builds the infrastructure that resolves all three: per-field embeddings, brute-force cosine, RRF fusion. Phase 2 of project-learnings layers on top of that:
 
-- Each learning's `summary` and `body` are embedded under the same `embeddings` table semantic-search uses (`source_kind = "learning"`).
+- Each learning's `summary` and `body` are embedded under the same `embeddings` table orbit-search uses (`source_kind = "learning"`).
 - Injection-time ranking unions path-glob matches with cosine matches against the current edit's surrounding context, fused via RRF.
 - Manual `priority` becomes a soft signal in fusion, not a hard tier.
 
-The phase-2 design lands as its own task once semantic-search reaches Accepted. The schema reservation in phase 1 is a `scope.semantic_seed` field — short text describing what the learning is "about" — that becomes the embedding source for phase 2.
+The phase-2 design lands as its own task once orbit-search reaches Accepted. The schema reservation in phase 1 is a `scope.semantic_seed` field — short text describing what the learning is "about" — that becomes the embedding source for phase 2.
 
 **Cost of deferring:** the phase-1 ranking is a placeholder. Users will likely hit the recency-blindness failure mode before phase 2 ships, and the documented mitigation is "use `--limit 5` and let humans curate."
 
@@ -160,7 +168,7 @@ A learning that references a function the graph no longer recognizes is flagged 
 ### 4.1 Orbit-internal
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) — folder layout, frontmatter, ADR template.
-- [docs/design/semantic-search/](../semantic-search/) — phase 2 dependency for semantic-similarity ranking.
+- [docs/design/orbit-search/](../orbit-search/) — phase 2 dependency for semantic-similarity ranking.
 - [docs/design/knowledge-graph/](../knowledge-graph/) — phase 2 dependency for symbol-aware scope and staleness detection.
 - [docs/design/task-sync/](../task-sync/) — relevant for whether learnings should sync across machines (decision: yes, via the same checked-in path tasks use).
 - [CLAUDE.md](../../../CLAUDE.md) — friction-reports section is the closest existing precedent for agent-authored project artifacts.
@@ -171,7 +179,7 @@ A learning that references a function the graph no longer recognizes is flagged 
 - **Continue.dev `rules` files** — `https://docs.continue.dev/customization/rules`. Vendor-specific approximation of layer-1 push injection.
 - **Cursor `.cursorrules`** — same shape, different vendor. Cited as evidence the form is in demand and as an example of why a cross-agent design is needed.
 - **Anthropic Claude Code hooks** — `https://docs.claude.com/en/docs/claude-code/hooks`. The mechanism layer 3 uses.
-- **Reciprocal Rank Fusion (Cormack, Clarke, Büttcher 2009)** — same fusion algorithm semantic-search uses; relevant once phase 2 fuses path-glob matches with cosine matches.
+- **Reciprocal Rank Fusion (Cormack, Clarke, Büttcher 2009)** — same fusion algorithm orbit-search uses; relevant once phase 2 fuses path-glob matches with cosine matches.
 - **"The Documentation System" / Diátaxis framework** — `https://diataxis.fr/`. Useful taxonomy for what *isn't* a learning (tutorials, reference, how-to, explanation) and therefore what belongs elsewhere.
 
 ---

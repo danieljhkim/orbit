@@ -41,8 +41,8 @@ body:
         - orbit-cli
         - orbit-common
         - orbit-core
-        - orbit-embed
-        - orbit-embed-companion
+        - orbit-search
+        - orbit-search-companion
         - orbit-engine
         - orbit-exec
         - orbit-knowledge

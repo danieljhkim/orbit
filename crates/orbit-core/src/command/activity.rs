@@ -154,6 +154,29 @@ mod tests {
     }
 
     #[test]
+    fn agent_implement_guidance_allows_bounded_scope_expansion() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_implement")
+            .expect("agent implement activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
+        match asset.spec.spec {
+            ActivityV2Spec::AgentLoop(spec) => {
+                let instruction = spec
+                    .instruction
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                assert_eq!(spec.role, Some(AgentRole::Implementer));
+                assert!(instruction.contains("not as a perfect inventory"));
+                assert!(instruction.contains("make the smallest compatible change"));
+                assert!(instruction.contains("Stop after commenting"));
+            }
+            other => panic!("expected agent_loop activity, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn seeded_activities_include_git_commit() {
         let root = tempdir().expect("create tempdir");
         let activities_dir = root.path().join("resources/activities");

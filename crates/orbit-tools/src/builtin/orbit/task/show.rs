@@ -28,6 +28,23 @@ impl Tool for OrbitTaskShowTool {
             param_type: "string".to_string(),
             required: false,
         });
+        parameters.push(ToolParam {
+            name: "with_context".to_string(),
+            description:
+                "Optional boolean. When true, include a `related_docs` array matched from task \
+                context selectors and feature tags."
+                    .to_string(),
+            param_type: "boolean".to_string(),
+            required: false,
+        });
+        parameters.push(ToolParam {
+            name: "max_docs".to_string(),
+            description:
+                "Optional cap for `related_docs` when `with_context` is true. Defaults to 5."
+                    .to_string(),
+            param_type: "integer".to_string(),
+            required: false,
+        });
         ToolSchema {
             name: "orbit.task.show".to_string(),
             description: "Fetch a single Orbit task as JSON. Use the optional `fields` projection \

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0013
 title: CLI timeout supervision owns the subprocess group
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - activity-job
 related_tasks:
 - T20260509-40
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - activity-job/ADR-050

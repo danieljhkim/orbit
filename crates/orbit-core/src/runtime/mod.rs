@@ -25,12 +25,16 @@ mod store_delegates;
 mod task_reservation_cleanup;
 mod v2_host;
 
+#[cfg(test)]
+mod tests;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::types::{Audit, OrbitError, OrbitEvent, WorkspacePaths};
+use orbit_common::types::{Audit, LearningInjectionState, OrbitError, OrbitEvent, WorkspacePaths};
 use orbit_engine::ActivityExecutorRegistry;
+use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
 
 use crate::OrbitContext;
@@ -40,8 +44,8 @@ use crate::context::OrbitStores;
 
 pub(crate) use orbit_tool_host::build_orbit_tool_host;
 pub(crate) use resolve::{
-    resolve_bootstrap_data_root, resolve_global_root, resolve_initialize_data_root,
-    try_resolve_initialized_data_root,
+    ResolvedOrbitRoots, resolve_bootstrap_roots, resolve_global_root, resolve_initialize_roots,
+    try_resolve_initialized_roots,
 };
 pub(crate) use store_delegates::TaskRecordUpdateParams;
 
@@ -53,6 +57,23 @@ pub struct OrbitRuntime {
     _temp_dir: Option<Arc<builder::TempDir>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrbitRuntimeRoots {
+    pub global_root: PathBuf,
+    pub shared_root: PathBuf,
+    pub local_root: PathBuf,
+}
+
+impl OrbitRuntimeRoots {
+    fn new(global_root: PathBuf, resolved: ResolvedOrbitRoots) -> Self {
+        Self {
+            global_root,
+            shared_root: resolved.shared_root,
+            local_root: resolved.local_root,
+        }
+    }
+}
+
 impl OrbitRuntime {
     pub fn initialize() -> Result<Self, OrbitError> {
         Self::initialize_with_root_override(None)
@@ -60,9 +81,9 @@ impl OrbitRuntime {
 
     pub fn initialize_with_root_override(root_override: Option<&Path>) -> Result<Self, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let (global_root, workspace_root) = Self::resolve_roots_for_cwd(&cwd, root_override)?;
-        ensure_orbit_root_initialized(&global_root, &workspace_root)?;
-        Self::from_roots(&global_root, &workspace_root)
+        let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
+        ensure_orbit_root_initialized(&roots.global_root, &roots.shared_root)?;
+        Self::from_resolved_roots(&roots.global_root, &roots.shared_root, &roots.local_root)
     }
 
     /// Initialize a runtime against an already-initialized workspace, returning
@@ -76,53 +97,59 @@ impl OrbitRuntime {
         root_override: Option<&Path>,
     ) -> Result<Option<Self>, OrbitError> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let Some(workspace_root) = try_resolve_initialized_data_root(&cwd, root_override)? else {
+        let Some(resolved) = try_resolve_initialized_roots(&cwd, root_override)? else {
             return Ok(None);
         };
         let global_root = resolve_global_root()?;
-        Ok(Some(Self::from_roots(&global_root, &workspace_root)?))
+        Ok(Some(Self::from_resolved_roots(
+            &global_root,
+            &resolved.shared_root,
+            &resolved.local_root,
+        )?))
     }
 
     pub fn resolve_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,
-    ) -> Result<(PathBuf, PathBuf), OrbitError> {
-        let workspace_root = resolve_initialize_data_root(cwd, root_override)?;
-        Ok((resolve_global_root()?, workspace_root))
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        let resolved = resolve_initialize_roots(cwd, root_override)?;
+        Ok(OrbitRuntimeRoots::new(resolve_global_root()?, resolved))
     }
 
     pub fn resolve_bootstrap_roots_for_cwd(
         cwd: &Path,
         root_override: Option<&Path>,
-    ) -> Result<(PathBuf, PathBuf), OrbitError> {
-        let workspace_root = resolve_bootstrap_data_root(cwd, root_override)?;
-        Self::bootstrap_roots_from_workspace_root(workspace_root, root_override)
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
+        let resolved = resolve_bootstrap_roots(cwd, root_override)?;
+        Self::bootstrap_roots_from_resolved_roots(resolved, root_override)
     }
 
-    fn bootstrap_roots_from_workspace_root(
-        workspace_root: PathBuf,
+    fn bootstrap_roots_from_resolved_roots(
+        resolved: ResolvedOrbitRoots,
         root_override: Option<&Path>,
-    ) -> Result<(PathBuf, PathBuf), OrbitError> {
+    ) -> Result<OrbitRuntimeRoots, OrbitError> {
         let global_root = if has_explicit_root_override(root_override) {
-            workspace_root.clone()
+            resolved.shared_root.clone()
         } else {
             resolve_global_root()?
         };
-        Ok((global_root, workspace_root))
+        Ok(OrbitRuntimeRoots::new(global_root, resolved))
     }
 
     pub fn from_data_root(data_root: &Path) -> Result<Self, OrbitError> {
-        let context = builder::build_context_from_data_root(data_root)?;
-        Ok(Self {
-            activity_executors: build_activity_executor_registry(&context)?,
-            context,
-            event_log: event_bus::EventLog::default(),
-            _temp_dir: None,
-        })
+        Self::from_resolved_roots(data_root, data_root, data_root)
     }
 
     pub fn from_roots(global_root: &Path, workspace_root: &Path) -> Result<Self, OrbitError> {
-        let context = builder::build_context_from_roots(global_root, workspace_root)?;
+        Self::from_resolved_roots(global_root, workspace_root, workspace_root)
+    }
+
+    pub fn from_resolved_roots(
+        global_root: &Path,
+        shared_root: &Path,
+        local_root: &Path,
+    ) -> Result<Self, OrbitError> {
+        let context = builder::build_context_from_roots(global_root, shared_root, local_root)?;
         Ok(Self {
             activity_executors: build_activity_executor_registry(&context)?,
             context,
@@ -189,8 +216,16 @@ impl OrbitRuntime {
         )
     }
 
+    pub fn shared_root(&self) -> PathBuf {
+        self.context.shared_root().to_path_buf()
+    }
+
+    pub fn local_root(&self) -> PathBuf {
+        self.context.local_root().to_path_buf()
+    }
+
     pub fn data_root(&self) -> PathBuf {
-        self.context.data_root().to_path_buf()
+        self.shared_root()
     }
 
     pub fn global_root(&self) -> PathBuf {
@@ -200,8 +235,8 @@ impl OrbitRuntime {
     /// Returns the effective config.toml path.
     /// Workspace config replaces global if present; otherwise global.
     pub fn config_path(&self) -> PathBuf {
-        let ws_config = self.data_root().join("config.toml");
-        if ws_config.exists() && self.data_root() != self.global_root() {
+        let ws_config = self.shared_root().join("config.toml");
+        if ws_config.exists() && self.shared_root() != self.global_root() {
             ws_config
         } else {
             self.global_root().join("config.toml")
@@ -210,6 +245,50 @@ impl OrbitRuntime {
 
     pub fn persistence_config_json(&self) -> Value {
         self.context.persistence().as_json_value()
+    }
+
+    pub(crate) fn sqlite_store(&self) -> Result<Store, OrbitError> {
+        Store::open(&self.context.persistence().audit_db)
+    }
+
+    pub fn workspace_id(&self) -> Result<String, OrbitError> {
+        workspace_id_for_orbit_dir(&self.context.paths().orbit_dir)
+    }
+
+    pub fn get_session_learning_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        let workspace_id = self.workspace_id()?;
+        self.sqlite_store()?
+            .get_session_learning_state(&workspace_id, session_id)
+    }
+
+    pub fn upsert_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        let workspace_id = self.workspace_id()?;
+        self.sqlite_store()?
+            .upsert_session_learning_state(&workspace_id, session_id, state)
+    }
+
+    pub fn list_v2_audit_events(
+        &self,
+        mut filter: V2AuditEventFilter,
+    ) -> Result<Vec<V2AuditEventRow>, OrbitError> {
+        if filter.workspace_id.trim().is_empty() {
+            filter.workspace_id = self.workspace_id()?;
+        }
+        self.sqlite_store()?.list_v2_audit_events(&filter)
+    }
+
+    pub fn insert_v2_audit_event(
+        &self,
+        params: &orbit_store::V2AuditEventInsertParams,
+    ) -> Result<(), OrbitError> {
+        self.sqlite_store()?.insert_v2_audit_event(params)
     }
 
     pub fn task_approval_required_for_agent(&self) -> bool {
@@ -243,6 +322,12 @@ impl OrbitRuntime {
     /// to `"main"` when no key is present.
     pub fn workflow_base_branch(&self) -> &str {
         self.context.workflow_base_branch()
+    }
+
+    /// Returns the configured `[duel] candidates` list (e.g. ["codex", "claude", "gemini", "grok"]).
+    /// Used by `orbit run duel-plan --planner-a ...` overrides to validate explicit families.
+    pub fn duel_candidate_families(&self) -> Vec<String> {
+        self.context.duel_config().candidates.clone()
     }
 
     pub(crate) fn duel_config(&self) -> &crate::config::DuelConfig {
@@ -346,7 +431,11 @@ impl OrbitRuntime {
     }
 
     pub(crate) fn data_root_path(&self) -> &Path {
-        self.context.data_root()
+        self.shared_root_path()
+    }
+
+    pub(crate) fn shared_root_path(&self) -> &Path {
+        self.context.shared_root()
     }
 
     pub(crate) fn execution_env_policy(&self) -> &crate::config::ExecutionEnvPolicy {
@@ -449,237 +538,5 @@ fn orbit_event_to_audit(id: i64, event: OrbitEvent) -> Audit {
         payload,
         message: event_type,
         created_at: Utc::now(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::ffi::OsString;
-    use std::sync::Mutex;
-
-    use tempfile::tempdir;
-
-    use crate::command::activity::DEFAULT_ACTIVITY_FILES;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn test_runtime() -> (tempfile::TempDir, OrbitRuntime, PathBuf, PathBuf) {
-        let root = tempdir().expect("create tempdir");
-        let global_root = root.path().join("global");
-        let repo_root = root.path().join("repo");
-        let workspace_root = repo_root.join(".orbit");
-        std::fs::create_dir_all(&global_root).expect("create global root");
-        std::fs::create_dir_all(&workspace_root).expect("create workspace root");
-        let runtime =
-            OrbitRuntime::from_roots(&global_root, &workspace_root).expect("build test runtime");
-        (root, runtime, global_root, workspace_root)
-    }
-
-    #[test]
-    fn orbit_root_env_selects_workspace_but_not_global_root() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
-        let home = tempdir().expect("home tempdir");
-        let repo = tempdir().expect("repo tempdir");
-        let workspace_root = repo.path().join(".orbit");
-        seed_initialized_workspace_root(&workspace_root);
-        let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
-        let _orbit_root = EnvVarGuard::set("ORBIT_ROOT", workspace_root.as_os_str().to_os_string());
-
-        let (global_root, resolved_workspace_root) =
-            OrbitRuntime::resolve_roots_for_cwd(repo.path(), None).expect("resolve roots");
-
-        assert_eq!(global_root, home.path().join(".orbit"));
-        assert_eq!(resolved_workspace_root, workspace_root);
-    }
-
-    fn seed_initialized_workspace_root(path: &Path) {
-        std::fs::create_dir_all(path.join("resources")).expect("create resources dir");
-        std::fs::create_dir_all(path.join("tasks")).expect("create tasks dir");
-        std::fs::create_dir_all(path.join("state")).expect("create state dir");
-    }
-
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: OsString) -> Self {
-            let previous = std::env::var_os(key);
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => unsafe {
-                    std::env::set_var(self.key, value);
-                },
-                None => unsafe {
-                    std::env::remove_var(self.key);
-                },
-            }
-        }
-    }
-
-    fn write_activity(path: &Path, name: &str, description: &str) {
-        let yaml = format!(
-            r#"schemaVersion: 2
-kind: Activity
-metadata:
-  name: {name}
-spec:
-  type: deterministic
-  description: {description}
-  action: test_action
-  config: {{}}
-"#
-        );
-        std::fs::create_dir_all(path.parent().expect("activity path has parent"))
-            .expect("create activity dir");
-        std::fs::write(path, yaml).expect("write activity yaml");
-    }
-
-    fn write_agent_loop_activity(path: &Path, name: &str, tools: &[&str]) {
-        let tools_yaml = tools
-            .iter()
-            .map(|tool| format!("    - {tool}\n"))
-            .collect::<String>();
-        let yaml = format!(
-            r#"schemaVersion: 2
-kind: Activity
-metadata:
-  name: {name}
-spec:
-  type: agent_loop
-  description: Test agent loop.
-  instruction: Test.
-  tools:
-{tools_yaml}"#
-        );
-        std::fs::create_dir_all(path.parent().expect("activity path has parent"))
-            .expect("create activity dir");
-        std::fs::write(path, yaml).expect("write activity yaml");
-    }
-
-    #[test]
-    fn workspace_activity_overrides_global_default_in_catalog() {
-        let (_root, runtime, global_root, workspace_root) = test_runtime();
-        write_activity(
-            &global_root.join("resources/activities/pr_open.yaml"),
-            "pr_open",
-            "global description",
-        );
-        write_activity(
-            &workspace_root.join("resources/activities/pr_open.yaml"),
-            "pr_open",
-            "workspace description",
-        );
-
-        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
-        let activity = catalog.get("pr_open").expect("pr_open activity");
-        assert_eq!(activity.description, "workspace description");
-    }
-
-    #[test]
-    fn duplicate_activities_within_one_catalog_directory_remain_invalid() {
-        let (_root, runtime, _global_root, workspace_root) = test_runtime();
-        let activities_dir = workspace_root.join("resources/activities");
-        write_activity(
-            &activities_dir.join("first.yaml"),
-            "duplicate_activity",
-            "first description",
-        );
-        write_activity(
-            &activities_dir.join("nested/second.yaml"),
-            "duplicate_activity",
-            "second description",
-        );
-
-        let err = runtime
-            .v2_activity_catalog()
-            .expect_err("duplicate activity name should fail");
-        assert!(err.to_string().contains("duplicate activity name"), "{err}");
-    }
-
-    #[test]
-    fn activity_catalog_accepts_registered_task_wildcard() {
-        let (_root, runtime, _global_root, workspace_root) = test_runtime();
-        write_agent_loop_activity(
-            &workspace_root.join("resources/activities/task_tools.yaml"),
-            "task_tools",
-            &["orbit.task.*"],
-        );
-
-        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
-
-        assert!(catalog.get("task_tools").is_some());
-    }
-
-    #[test]
-    fn activity_catalog_rejects_unknown_concrete_tool() {
-        let (_root, runtime, _global_root, workspace_root) = test_runtime();
-        write_agent_loop_activity(
-            &workspace_root.join("resources/activities/unknown_tool.yaml"),
-            "unknown_tool",
-            &["orbit.task.nope"],
-        );
-
-        let err = runtime
-            .v2_activity_catalog()
-            .expect_err("unknown concrete tool should fail");
-        let message = err.to_string();
-
-        assert!(message.contains("unknown_tool"), "{message}");
-        assert!(message.contains("orbit.task.nope"), "{message}");
-        assert!(message.contains("unknown tool name"), "{message}");
-    }
-
-    #[test]
-    fn activity_catalog_accepts_intentionally_empty_audit_wildcard() {
-        let (_root, runtime, _global_root, workspace_root) = test_runtime();
-        write_agent_loop_activity(
-            &workspace_root.join("resources/activities/audit_tools.yaml"),
-            "audit_tools",
-            &["orbit.audit.*"],
-        );
-
-        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
-
-        assert!(catalog.get("audit_tools").is_some());
-    }
-
-    #[test]
-    fn get_job_rejects_retired_v1_lookup() {
-        let (_root, runtime, _global_root, _workspace_root) = test_runtime();
-        let err = runtime
-            .get_job("legacy_job")
-            .expect_err("v1 job lookup should be fenced");
-
-        let message = err.to_string();
-        assert!(message.contains("v1 job lookup is retired"), "{message}");
-        assert!(message.contains("orbit job run"), "{message}");
-    }
-
-    #[test]
-    fn default_activity_catalog_allowlists_resolve_registered_tools() {
-        let (_root, runtime, global_root, _workspace_root) = test_runtime();
-        let activities_dir = global_root.join("resources/activities");
-        for (name, yaml) in DEFAULT_ACTIVITY_FILES {
-            let path = activities_dir.join(format!("{name}.yaml"));
-            std::fs::create_dir_all(path.parent().expect("activity path has parent"))
-                .expect("create activity dir");
-            std::fs::write(path, yaml).expect("write activity yaml");
-        }
-
-        let catalog = runtime.v2_activity_catalog().expect("activity catalog");
-
-        assert_eq!(catalog.len(), DEFAULT_ACTIVITY_FILES.len());
     }
 }

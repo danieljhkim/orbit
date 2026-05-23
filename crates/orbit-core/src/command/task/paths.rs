@@ -1,5 +1,5 @@
 use chrono::Utc;
-use orbit_common::types::{OrbitError, TaskHistoryEntry};
+use orbit_common::types::{OrbitError, TaskHistoryEntry, TaskType};
 use orbit_common::utility::selector::{
     anchor_path, canonical_selector, canonical_selector_in_workspace, exists_in_workspace,
 };
@@ -112,6 +112,81 @@ pub(crate) fn emit_graph_unavailable_warning_if_needed(candidates: &[String], or
             "knowledge graph is unavailable; selector validation is falling back to file-level anchor checks",
         );
     }
+}
+
+/// Compute advisory warnings for an `orbit.task.add` call based on the raw
+/// `context_files` (or legacy `context`) values supplied by the caller and the
+/// effective task type. Warnings are purely response-time signals; they do not
+/// block creation or mutate the stored task.
+pub(crate) fn compute_task_add_warnings(
+    context_files: &[String],
+    task_type: TaskType,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    let is_chore = task_type == TaskType::Chore;
+    if context_files.is_empty() && !is_chore {
+        warnings.push(
+            "task created without context_files — consider adding selectors for files/dirs/symbols this task will modify (use orbit.task.update with context_files)".to_string(),
+        );
+    }
+
+    let over: Vec<String> = context_files
+        .iter()
+        .filter(|e| is_over_inclusion_selector(e))
+        .cloned()
+        .collect();
+    if !over.is_empty() {
+        let listed = over.join(", ");
+        warnings.push(format!(
+            "context_files contains entries that look like reference material rather than modification targets: {}. Cite reference docs in the description; reserve context_files for files the task will modify or delete.",
+            listed
+        ));
+    }
+
+    warnings
+}
+
+/// Returns true for entries that match the over-inclusion patterns (repo-root
+/// convention docs, docs/design-patterns/**, .claude/**/CLAUDE.md). Feature
+/// design docs under docs/design/<feature>/ are deliberately excluded per
+/// CLAUDE.md "Same-PR updates".
+fn is_over_inclusion_selector(entry: &str) -> bool {
+    let raw = entry.trim();
+    if raw.is_empty() {
+        return false;
+    }
+    // Strip selector prefix if present; for symbol: take only the path portion.
+    let path_part = if let Some(p) = raw.strip_prefix("file:") {
+        p
+    } else if let Some(p) = raw.strip_prefix("dir:") {
+        p
+    } else if let Some(p) = raw.strip_prefix("symbol:") {
+        p.split('#').next().unwrap_or(p)
+    } else {
+        raw
+    };
+    let p = path_part.trim();
+
+    // docs/design-patterns/** (including bare dir)
+    if p == "docs/design-patterns" || p.starts_with("docs/design-patterns/") {
+        return true;
+    }
+
+    // repo-root convention files (exact match)
+    if matches!(
+        p,
+        "ARCHITECTURE.md" | "CLAUDE.md" | "RELEASING.md" | "CHANGELOG.md" | "README.md"
+    ) {
+        return true;
+    }
+
+    // .claude/CLAUDE.md or .claude/**/CLAUDE.md
+    if p == ".claude/CLAUDE.md" || (p.starts_with(".claude/") && p.ends_with("/CLAUDE.md")) {
+        return true;
+    }
+
+    false
 }
 
 pub(super) fn extract_task_path_mentions(text: &str) -> Vec<String> {

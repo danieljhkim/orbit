@@ -10,7 +10,7 @@ use super::workspace::{env_home_dir, resolve_workspace_layout};
 pub enum ScopeArg {
     /// Write to user-level config (~/.claude, ~/.codex, ~/.gemini, ~/.grok).
     Home,
-    /// Write to repo-local config (.mcp.json, .codex/, .gemini/, .grok/). Default.
+    /// Write to repo-local config (.claude.json, .codex/, .gemini/, .grok/). Default.
     #[default]
     Workspace,
 }
@@ -62,7 +62,7 @@ pub struct ProviderSelectionArgs {
     pub auto: bool,
     /// Target a supported MCP client integration. Can be repeated.
     #[arg(long = "client", value_enum, value_name = "CLIENT")]
-    clients: Vec<McpProvider>,
+    pub(super) clients: Vec<McpProvider>,
     /// Target Claude Code integration only.
     #[arg(long)]
     pub claude: bool,
@@ -101,7 +101,7 @@ impl ProviderSelectionArgs {
             || self.windsurf
     }
 
-    fn resolve_mode(&self) -> Result<ProviderSelectionMode, OrbitError> {
+    pub(super) fn resolve_mode(&self) -> Result<ProviderSelectionMode, OrbitError> {
         if self.auto && (self.any_explicit_provider() || self.all) {
             return Err(OrbitError::InvalidInput(
                 "--auto cannot be combined with --client, --claude, --codex, --gemini, --grok, --cursor, --vscode, --windsurf, or --all".to_string(),
@@ -236,88 +236,4 @@ pub(crate) fn init_auto_for_workspace(
             .map(|provider| provider.label().to_string())
             .collect()
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_selection_defaults_to_auto() {
-        let args = ProviderSelectionArgs::default();
-        assert!(matches!(
-            args.resolve_mode().expect("resolve mode"),
-            ProviderSelectionMode::Auto
-        ));
-    }
-
-    #[test]
-    fn provider_selection_rejects_conflicting_flags() {
-        let args = ProviderSelectionArgs {
-            auto: true,
-            claude: true,
-            ..ProviderSelectionArgs::default()
-        };
-        assert!(args.resolve_mode().is_err());
-    }
-
-    #[test]
-    fn provider_selection_all_includes_every_supported_provider() {
-        let args = ProviderSelectionArgs {
-            all: true,
-            ..ProviderSelectionArgs::default()
-        };
-        match args.resolve_mode().expect("resolve mode") {
-            ProviderSelectionMode::Explicit(providers) => assert_eq!(
-                providers,
-                vec![
-                    McpProvider::Claude,
-                    McpProvider::Codex,
-                    McpProvider::Gemini,
-                    McpProvider::Grok,
-                    McpProvider::Cursor,
-                    McpProvider::Vscode,
-                    McpProvider::Windsurf,
-                ]
-            ),
-            ProviderSelectionMode::Auto => panic!("expected explicit provider set"),
-        }
-    }
-
-    #[test]
-    fn provider_selection_rejects_auto_combined_with_new_flags() {
-        for flag in ["client", "grok", "cursor", "vscode", "windsurf"] {
-            let mut args = ProviderSelectionArgs {
-                auto: true,
-                ..ProviderSelectionArgs::default()
-            };
-            match flag {
-                "client" => args.clients.push(McpProvider::Grok),
-                "grok" => args.grok = true,
-                "cursor" => args.cursor = true,
-                "vscode" => args.vscode = true,
-                "windsurf" => args.windsurf = true,
-                _ => unreachable!(),
-            }
-            assert!(
-                args.resolve_mode().is_err(),
-                "--auto + --{flag} should error"
-            );
-        }
-    }
-
-    #[test]
-    fn provider_selection_accepts_client_aliases() {
-        let args = ProviderSelectionArgs {
-            clients: vec![McpProvider::Grok, McpProvider::Codex, McpProvider::Grok],
-            grok: true,
-            ..ProviderSelectionArgs::default()
-        };
-        match args.resolve_mode().expect("resolve mode") {
-            ProviderSelectionMode::Explicit(providers) => {
-                assert_eq!(providers, vec![McpProvider::Codex, McpProvider::Grok]);
-            }
-            ProviderSelectionMode::Auto => panic!("expected explicit provider set"),
-        }
-    }
 }

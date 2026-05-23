@@ -42,7 +42,7 @@ mod workspace_snapshot;
 pub use activity_job::{
     DispatchError, DispatchOutcome, EnforcedAuditSink, EnforcementDecision, JobOutcome,
     OrbitToolCallExecutor, ResolvedAgentSettings, ResolvedCliExecutor, ResolvedSandbox,
-    V2AuditWriter, V2DispatchInput, V2JsonlSink, V2RuntimeHost, WriteError,
+    V2AuditWriter, V2DispatchInput, V2RuntimeHost, V2SqliteSink, WriteError,
     apply_resolved_settings, dispatch_v2_activity, drive_agent_loop, drive_agent_loop_with_session,
     drive_agent_loop_with_tool_context, execute_job, reset_replay_transport,
     resolve_agent_settings, resolve_job_catalog_refs_for_execution, resolve_subprocess_cwd,
@@ -58,7 +58,7 @@ pub use context::{
     AgentRoleConfig, AttemptOutcome, DirectActivityRunOutcome, EngineHost, EnvironmentHost,
     ExecutionContext, ExecutorHost, ExecutorLookupHost, JobRunHost, JobRunResult, PrConfig,
     RuntimeHost, STALE_RUN_GRACE_SECONDS, TaskActivityUpdate, TaskAutomationUpdate, TaskHost,
-    TaskReadHost, TaskWriteHost, execution_working_directory,
+    TaskReadHost, TaskWriteHost, ensure_task_can_enter_workflow, execution_working_directory,
     execution_working_directory_with_task, input_workspace_path, redact_attempt_outcome,
 };
 pub use executor::automation::{

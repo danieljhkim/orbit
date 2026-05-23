@@ -1,8 +1,16 @@
-# Task Lineage — Vision
+---
+summary: "Task Lineage — Vision"
+type: design
+title: "Task Lineage — Vision"
+owner: claude
+last_updated: 2026-05-09
+status: Draft
+feature: task-lineage
+doc_role: vision
+tags: ["task-lineage"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-09
+# Task Lineage — Vision
 
 This document is forward-looking. It names the open questions Phase 1 deliberately leaves unanswered, surveys the prior art that shapes our reading of "novelty", and articulates the projection of lineage we believe is genuinely new. It is not a roadmap; it is the field-of-view inside which roadmap tasks will be authored.
 

@@ -1,3 +1,8 @@
+---
+type: design
+summary: "Task Artifacts Execution Plan"
+tags: ["task-artifacts"]
+---
 # Task Artifacts Execution Plan
 
 **Status:** Draft
@@ -233,13 +238,13 @@ Implemented in working tree:
 - Semantic task embedding field names now use v2 logical document names: `title`, `description`, `acceptance`, `plan`, and `execution_summary`.
 - Semantic reindex sweeps legacy field rows such as `purpose`, `summary`, and `acceptance_criteria` for each task before writing the renamed v2 fields.
 - V2 artifact search skips binary media types and invalid UTF-8 artifact blobs instead of failing the whole task search.
-- The `orbit.semantic.search` tool schema and seeded `orbit-semantic` skill now advertise v2 task field names.
+- The `orbit.search` tool schema and seeded `orbit-search` skill now advertise v2 task field names.
 
 Still open in Phase 5:
 
 - Add generated full-text indexes/snippets instead of per-query artifact reads.
 - Add semantic parity for review-thread paths/authors, external refs, artifact paths, and artifact text, or explicitly keep those fields lexical-only.
-- Update the semantic-search design docs that still describe the pre-v2 field names.
+- Update the orbit-search design docs that still describe the pre-v2 field names.
 - Decide whether `execution-summary.md` versus logical field `execution_summary` needs an ADR or glossary row.
 - Audit web/API/dashboard consumers for old task directory assumptions.
 - Update any remaining user-facing docs that describe task sync over old status directories.

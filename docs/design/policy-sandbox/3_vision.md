@@ -1,8 +1,16 @@
-# Policy & Sandboxing — Vision
+---
+summary: "Policy & Sandboxing — Vision"
+type: design
+title: "Policy & Sandboxing — Vision"
+owner: claude
+last_updated: 2026-05-16
+status: Draft
+feature: policy-sandbox
+doc_role: vision
+tags: ["policy-sandbox"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-16
+# Policy & Sandboxing — Vision
 
 This document captures the questions Orbit must answer before policy and sandboxing become a fuller safety contract. [2_design.md](./2_design.md) describes today's implementation; this file keeps future work distinct from shipped guarantees.
 

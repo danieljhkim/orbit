@@ -1,8 +1,16 @@
-# Groundhog — Vision
+---
+summary: "Groundhog — Vision"
+type: design
+title: "Groundhog — Vision"
+owner: codex
+last_updated: 2026-04-30
+status: Draft
+feature: groundhog
+doc_role: vision
+tags: ["groundhog"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-04-30 (folded status-priority notes, [T20260430-21])
+# Groundhog — Vision
 
 This document captures where Groundhog should go next. It starts from the implementation built in [T20260420-0509], [T20260420-0509-2], [T20260420-0509-3], [T20260420-0509-4], [T20260420-0510], and [T20260420-0510-2], and treats everything below as a hypothesis rather than a promise. [2_design.md](./2_design.md) is the current contract; this file is the place to pressure-test that contract before we harden more of it.
 

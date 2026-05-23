@@ -108,16 +108,21 @@ impl OrbitRuntime {
             ))),
         }?;
 
-        if task.status == TaskStatus::Review {
-            for event in self.apply_resolves_side_effects(&result) {
-                self.record_event(event)?;
-            }
+        if result.status == TaskStatus::Done {
+            self.record_resolves_side_effects(&result)?;
         }
 
         Ok(result)
     }
 
-    fn apply_resolves_side_effects(&self, task: &Task) -> Vec<OrbitEvent> {
+    pub(crate) fn record_resolves_side_effects(&self, task: &Task) -> Result<(), OrbitError> {
+        for event in self.apply_resolves_side_effects(task) {
+            self.record_event(event)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_resolves_side_effects(&self, task: &Task) -> Vec<OrbitEvent> {
         let frictions_root = self.data_root().join("frictions");
         let mut events = Vec::new();
         for relation in &task.relations {

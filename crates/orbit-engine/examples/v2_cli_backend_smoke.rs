@@ -435,6 +435,7 @@ fn cli_agent_loop_spec(provider: Option<Provider>) -> AgentLoopSpec {
         provider: provider.unwrap_or(Provider::Claude),
         wall_clock_timeout_seconds: 30,
         role: None,
+        proc_allowed_programs: None,
     }
 }
 
@@ -453,7 +454,14 @@ fn build_writer(
 ) -> Result<(Arc<V2AuditWriter>, ()), Box<dyn std::error::Error>> {
     let audit_root = root.join("audit");
     fs::create_dir_all(&audit_root)?;
-    let writer = V2AuditWriter::with_disk_sinks(&audit_root, run_id, "smoke".to_string(), None)?;
+    let writer = V2AuditWriter::with_disk_sinks(
+        &audit_root,
+        orbit_store::Store::open_in_memory()?,
+        "ws_smoke",
+        run_id,
+        "smoke".to_string(),
+        None,
+    )?;
     Ok((writer, ()))
 }
 
@@ -505,6 +513,7 @@ fn synthetic_loop_session_cli_job() -> JobV2 {
                 provider: Provider::Claude,
                 wall_clock_timeout_seconds: 30,
                 role: None,
+                proc_allowed_programs: None,
             }),
             activity_name: None,
             fs_profile: None,
@@ -596,6 +605,7 @@ impl V2RuntimeHost for ScriptHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }
@@ -628,6 +638,7 @@ impl V2RuntimeHost for NullCliHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }

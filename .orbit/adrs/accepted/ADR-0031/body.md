@@ -5,5 +5,5 @@ V2 job execution emits audit JSONL, but metrics and scoreboards read the invocat
 Persist `InvocationTrace` records beside audit as first-class metric records keyed by job run, activity, task ids, agent, model, usage, and tool-call summaries.
 
 ## Consequences
-- `orbit metrics` and scoreboards can avoid parsing audit JSONL.
+- Dashboard metrics endpoints and scoreboards can avoid parsing audit JSONL.
 - Cost: metrics can diverge from transcript detail if a provider path reports incomplete usage.

@@ -10,7 +10,7 @@ use orbit_common::types::{
     audit_execution_id, normalize_optional_attribution_label, optional_string,
     optional_string_alias, optional_string_list_alias, required_string,
 };
-use orbit_store::{AdrCreateParams, AdrDocumentUpdateParams};
+use orbit_store::{AdrCreateParams, AdrDocumentUpdateParams, AdrListEntry, RemoteArtifactStub};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -31,14 +31,19 @@ pub(super) fn add(
         optional_string_list_alias(&input, &["related_features", "features"])?.unwrap_or_default();
     let related_tasks =
         optional_string_list_alias(&input, &["related_tasks", "tasks"])?.unwrap_or_default();
+    let tags = optional_string_list_alias(&input, &["tags"])?.unwrap_or_default();
+    let paths = optional_string_list_alias(&input, &["paths"])?.unwrap_or_default();
 
     let adr = runtime.stores().adrs().add(AdrCreateParams {
         title,
         owner,
         related_features,
         related_tasks,
+        tags,
+        paths,
         body,
     })?;
+    runtime.record_id_allocation_audit("adr", &adr.id)?;
     Ok(adr_to_json(&adr))
 }
 
@@ -63,7 +68,8 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
 
     let adrs = runtime.stores().adrs();
     let adr = if by_legacy {
-        let matches = adrs.list_filtered(None, None, None, None, Some(&id_value), None)?;
+        let matches =
+            adrs.list_filtered(None, None, None, None, Some(&id_value), None, None, None)?;
         if matches.len() > 1 {
             return Err(OrbitError::InvalidInput(format!(
                 "legacy_id `{id_value}` resolves to {} ADRs; specify the canonical id",
@@ -75,8 +81,15 @@ pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
             .next()
             .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
     } else {
-        adrs.get(&id_value)?
-            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Adr, id_value.clone()))?
+        match adrs.get_federated(&id_value)? {
+            Some(adr) => adr,
+            None => {
+                if let Some(stub) = adrs.remote_stub(&id_value)? {
+                    return Err(remote_artifact_error("ADR", &stub));
+                }
+                return Err(OrbitError::not_found(NotFoundKind::Adr, id_value.clone()));
+            }
+        }
     };
     Ok(adr_to_json(&adr))
 }
@@ -89,18 +102,26 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let feature = optional_string(&input, "feature")?;
     let task_id = optional_string_alias(&input, &["task_id", "task"])?;
     let legacy_id = optional_string_alias(&input, &["legacy_id", "legacyId"])?;
+    let tag = optional_string(&input, "tag")?;
+    let path = optional_string(&input, "path")?;
     let validation_warned =
         super::input::optional_bool_alias(&input, &["validation_warned", "validation"])?;
+    let include_remote =
+        super::input::optional_bool_alias(&input, &["include_remote", "includeRemote"])?
+            .unwrap_or(false);
 
-    let adrs = runtime.stores().adrs().list_filtered(
+    let adrs = runtime.stores().adrs().list_entries_filtered(
         status,
         owner.as_deref(),
         feature.as_deref(),
         task_id.as_deref(),
         legacy_id.as_deref(),
+        tag.as_deref(),
+        path.as_deref(),
         validation_warned,
+        include_remote,
     )?;
-    Ok(Value::Array(adrs.iter().map(adr_to_json).collect()))
+    Ok(Value::Array(adrs.iter().map(adr_entry_to_json).collect()))
 }
 
 pub(super) fn update(
@@ -125,6 +146,8 @@ pub(super) fn update(
         body: optional_string(&input, "body")?,
         related_features: optional_string_list_alias(&input, &["related_features", "features"])?,
         related_tasks: optional_string_list_alias(&input, &["related_tasks", "tasks"])?,
+        tags: optional_string_list_alias(&input, &["tags"])?,
+        paths: optional_string_list_alias(&input, &["paths"])?,
         supersedes: optional_string_list_alias(&input, &["supersedes"])?,
         superseded_by: None, // see below: clients use orbit.adr.supersede
         legacy_ids: optional_string_list_alias(&input, &["legacy_ids", "legacyIds"])?,
@@ -236,6 +259,8 @@ fn has_document_changes(fields: &AdrDocumentUpdateParams) -> bool {
         || fields.body.is_some()
         || fields.related_features.is_some()
         || fields.related_tasks.is_some()
+        || fields.tags.is_some()
+        || fields.paths.is_some()
         || fields.supersedes.is_some()
         || fields.legacy_ids.is_some()
         || fields.validation_warnings.is_some()
@@ -258,12 +283,56 @@ fn adr_to_json(adr: &Adr) -> Value {
         "last_updated": adr.last_updated.to_rfc3339(),
         "related_features": adr.related_features,
         "related_tasks": adr.related_tasks,
+        "tags": adr.tags,
+        "paths": adr.paths,
         "supersedes": adr.supersedes,
         "superseded_by": adr.superseded_by,
         "legacy_ids": adr.legacy_ids,
         "validation_warnings": adr.validation_warnings,
         "legacy_validation": adr.legacy_validation.to_string(),
     })
+}
+
+fn adr_entry_to_json(entry: &AdrListEntry) -> Value {
+    match entry {
+        AdrListEntry::Local(adr) => {
+            let mut value = adr_to_json(adr);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("remote".to_string(), Value::Bool(false));
+            }
+            value
+        }
+        AdrListEntry::Remote(stub) => remote_stub_to_json(stub),
+    }
+}
+
+fn remote_stub_to_json(stub: &RemoteArtifactStub) -> Value {
+    json!({
+        "id": stub.id,
+        "kind": stub.kind,
+        "status": stub.status,
+        "remote": true,
+        "remote_marker": format!("[remote: {}]", stub.worktree_root.display()),
+        "worktree_root": stub.worktree_root.to_string_lossy(),
+        "branch": stub.branch,
+        "body_path": stub.body_path.as_ref().map(|path| path.to_string_lossy().to_string()),
+        "title": Value::Null,
+        "owner": Value::Null,
+        "related_features": Value::Null,
+        "related_tasks": Value::Null,
+        "tags": Value::Null,
+        "paths": Value::Null,
+        "legacy_ids": Value::Null,
+    })
+}
+
+fn remote_artifact_error(kind: &str, stub: &RemoteArtifactStub) -> OrbitError {
+    OrbitError::Store(format!(
+        "{kind} {} is recorded in another worktree and its body is not locally readable; worktree_root={}, branch={}",
+        stub.id,
+        stub.worktree_root.display(),
+        stub.branch.as_deref().unwrap_or("<none>")
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -328,8 +397,11 @@ fn record_transition_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OrbitRuntime;
     use crate::runtime::orbit_tool_host::test_support::test_runtime;
-    use orbit_common::types::NotFoundKind;
+    use orbit_common::types::{LearningScope, NotFoundKind};
+    use orbit_store::LearningCreateParams;
+    use tempfile::tempdir;
 
     fn assert_adr_field(value: &Value, field: &str, expected: &str) {
         let actual = value
@@ -377,6 +449,112 @@ mod tests {
             response["related_tasks"].as_array().unwrap().is_empty(),
             "related_tasks empty per ADR-008"
         );
+    }
+
+    #[test]
+    fn add_adr_and_learning_emit_id_allocation_audit_events() {
+        let (_guard, runtime, repo_root) = test_runtime();
+        let adr = add(
+            &runtime,
+            json!({"title": "Audited", "owner": "codex", "body": "Body"}),
+            None,
+            None,
+        )
+        .expect("add adr");
+        let adr_id = adr["id"].as_str().expect("adr id").to_string();
+        let learning = runtime
+            .create_learning(LearningCreateParams {
+                summary: "Audited learning".to_string(),
+                scope: LearningScope::default(),
+                body: String::new(),
+                evidence: Vec::new(),
+                created_by: Some("codex".to_string()),
+                priority: None,
+            })
+            .expect("add learning");
+
+        let events = runtime
+            .list_audit_events_with_kind(
+                None,
+                None,
+                Some("id_allocation".to_string()),
+                None,
+                None,
+                10,
+            )
+            .expect("audit list");
+        let repo_root = repo_root.to_string_lossy().to_string();
+        let payloads = events
+            .iter()
+            .map(|event| {
+                serde_json::from_str::<Value>(
+                    event.arguments_json.as_deref().expect("arguments json"),
+                )
+                .expect("payload")
+            })
+            .collect::<Vec<_>>();
+
+        assert!(payloads.iter().any(|payload| {
+            payload["kind"].as_str() == Some("adr")
+                && payload["id"].as_str() == Some(adr_id.as_str())
+                && payload["worktree_root"].as_str() == Some(repo_root.as_str())
+        }));
+        assert!(payloads.iter().any(|payload| {
+            payload["kind"].as_str() == Some("learning")
+                && payload["id"].as_str() == Some(learning.id.as_str())
+                && payload["worktree_root"].as_str() == Some(repo_root.as_str())
+        }));
+    }
+
+    #[test]
+    fn add_adr_and_learning_keep_body_files_in_local_root_when_local_root_differs() {
+        let root = tempdir().expect("tempdir");
+        let global_root = root.path().join("global");
+        let shared_repo = root.path().join("repo");
+        let local_worktree = root.path().join("linked-worktree");
+        let shared_root = shared_repo.join(".orbit");
+        let local_root = local_worktree.join(".orbit");
+        std::fs::create_dir_all(&global_root).expect("global root");
+        std::fs::create_dir_all(&shared_root).expect("shared root");
+        std::fs::create_dir_all(&local_root).expect("local root");
+        let runtime = OrbitRuntime::from_resolved_roots(&global_root, &shared_root, &local_root)
+            .expect("runtime");
+
+        let adr = add(
+            &runtime,
+            json!({"title": "Shared ADR", "owner": "codex", "body": "Body"}),
+            None,
+            None,
+        )
+        .expect("add adr");
+        let adr_id = adr["id"].as_str().expect("adr id");
+        let learning = runtime
+            .create_learning(LearningCreateParams {
+                summary: "Shared learning".to_string(),
+                scope: LearningScope::default(),
+                body: String::new(),
+                evidence: Vec::new(),
+                created_by: Some("codex".to_string()),
+                priority: None,
+            })
+            .expect("add learning");
+
+        assert!(
+            local_root
+                .join("adrs/proposed")
+                .join(adr_id)
+                .join("body.md")
+                .is_file()
+        );
+        assert!(
+            local_root
+                .join("learnings")
+                .join(&learning.id)
+                .join("learning.yaml")
+                .is_file()
+        );
+        assert!(!shared_root.join("adrs").exists());
+        assert!(!shared_root.join("learnings").exists());
     }
 
     #[test]
@@ -475,6 +653,55 @@ mod tests {
         let arr = listed.as_array().expect("array");
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["id"], b["id"]);
+    }
+
+    #[test]
+    fn list_filters_by_tag_and_path() {
+        let (_guard, runtime, _repo_root) = test_runtime();
+        let target = add(
+            &runtime,
+            json!({
+                "title": "Tagged",
+                "owner": "codex",
+                "body": "b",
+                "tags": ["Perf", "orbit-search"],
+                "paths": ["crates/orbit-search/**"],
+            }),
+            None,
+            None,
+        )
+        .expect("target");
+        let _other = add(
+            &runtime,
+            json!({
+                "title": "Other",
+                "owner": "codex",
+                "body": "b",
+                "tags": ["security"],
+                "paths": ["crates/orbit-core/**"],
+            }),
+            None,
+            None,
+        )
+        .expect("other");
+
+        let by_tag = list(&runtime, json!({"tag": "PERF"})).expect("list by tag");
+        let tag_rows = by_tag.as_array().expect("tag array");
+        assert_eq!(tag_rows.len(), 1);
+        assert_eq!(tag_rows[0]["id"], target["id"]);
+
+        let by_path = list(&runtime, json!({"path": "crates/orbit-search/src/lib.rs"}))
+            .expect("list by path");
+        let path_rows = by_path.as_array().expect("path array");
+        assert_eq!(path_rows.len(), 1);
+        assert_eq!(path_rows[0]["id"], target["id"]);
+
+        let missing = list(
+            &runtime,
+            json!({"tag": "PERF", "path": "crates/orbit-core/src/lib.rs"}),
+        )
+        .expect("list by negative intersection");
+        assert!(missing.as_array().expect("missing array").is_empty());
     }
 
     #[test]

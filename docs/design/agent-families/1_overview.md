@@ -1,8 +1,16 @@
-# Agent Families — Overview
+---
+summary: "Agent Families — Overview"
+type: design
+title: "Agent Families — Overview"
+owner: grok
+last_updated: 2026-05-16
+status: Draft
+feature: agent-families
+doc_role: overview
+tags: ["agent-families"]
+---
 
-**Status:** Draft
-**Owner:** grok
-**Last updated:** 2026-05-16
+# Agent Families — Overview
 
 Orbit models AI coding systems as first-class agent families and now groups concrete role assignments into named crews. Families answer "which provider/tooling is this model from?"; crews answer "which planner, implementer, and reviewer lineup should run this task?"
 

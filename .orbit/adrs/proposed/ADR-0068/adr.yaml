@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0068
 title: Orbit-owned symbol-level write operations
 status: proposed
@@ -9,6 +9,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260421-0543
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - knowledge-graph/ADR-010

@@ -3,8 +3,8 @@ members = [
   "crates/orbit-agent",
   "crates/orbit-cli",
   "crates/orbit-common",
-  "crates/orbit-embed",
-  "crates/orbit-embed-companion",
+  "crates/orbit-search",
+  "crates/orbit-search-companion",
   "crates/orbit-registry",
   "crates/orbit-core",
   "crates/orbit-engine",
@@ -14,11 +14,12 @@ members = [
   "crates/orbit-exec",
   "crates/orbit-tools",
   "crates/orbit-mcp",
+  "crates/orbit-dashboard",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT"
 
@@ -40,12 +41,14 @@ axum = { version = "0.7", default-features = false, features = ["http1", "json",
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 fs2 = "0.4"
+futures-core = "0.3"
 git2 = { version = "0.20", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
 jsonschema = { version = "0.18", default-features = false }
 libc = "0.2"
 rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+rsa = { version = "0.9", features = ["pem", "sha2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

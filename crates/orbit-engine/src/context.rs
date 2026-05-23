@@ -311,6 +311,30 @@ pub trait TaskHost: TaskReadHost + TaskWriteHost {}
 
 impl<T> TaskHost for T where T: TaskReadHost + TaskWriteHost + ?Sized {}
 
+pub fn ensure_task_can_enter_workflow<H: TaskReadHost + ?Sized>(
+    host: &H,
+    task_id: &str,
+    workflow: &str,
+) -> Result<Task, OrbitError> {
+    let task = host.get_task(task_id)?;
+    if matches!(
+        task.status,
+        TaskStatus::Proposed
+            | TaskStatus::Friction
+            | TaskStatus::Backlog
+            | TaskStatus::Rejected
+            | TaskStatus::Archived
+            | TaskStatus::InProgress
+    ) {
+        return Ok(task);
+    }
+
+    Err(OrbitError::InvalidInput(format!(
+        "task '{}' is in status '{}'; workflow admission for '{workflow}' requires 'proposed', 'friction', 'backlog', 'rejected', 'archived', or 'in-progress'",
+        task.id, task.status
+    )))
+}
+
 pub trait AgentProtocolHost {
     fn build_agent_stdin_envelope_payload(
         &self,
@@ -1117,6 +1141,9 @@ pub fn state_env_vars(execution: &ExecutionContext) -> Vec<(String, String)> {
         .filter(|s| !s.is_empty())
     {
         vars.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
+        // ADR-0182: hooks read the explicit active-task binding while older
+        // audit/tool code continues to consume ORBIT_TASK_ID.
+        vars.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
     }
 
     // Run-state vars only exist for steps inside a real job run, so they
@@ -1231,6 +1258,10 @@ mod state_env_var_tests {
             vars.get("ORBIT_TASK_ID").map(String::as_str),
             Some("T20260428-7")
         );
+        assert_eq!(
+            vars.get("ORBIT_ACTIVE_TASK_ID").map(String::as_str),
+            Some("T20260428-7")
+        );
         assert!(!vars.contains_key("ORBIT_RUN_ID"));
     }
 
@@ -1239,6 +1270,10 @@ mod state_env_var_tests {
         let exec = execution_with(json!({ "task_id": "T-abc" }), Some("jrun-42"));
         let vars: HashMap<String, String> = state_env_vars(&exec).into_iter().collect();
         assert_eq!(vars.get("ORBIT_TASK_ID").map(String::as_str), Some("T-abc"));
+        assert_eq!(
+            vars.get("ORBIT_ACTIVE_TASK_ID").map(String::as_str),
+            Some("T-abc")
+        );
         assert_eq!(
             vars.get("ORBIT_RUN_ID").map(String::as_str),
             Some("jrun-42")
@@ -1259,5 +1294,6 @@ mod state_env_var_tests {
             Some("agent_implement")
         );
         assert!(!vars.contains_key("ORBIT_TASK_ID"));
+        assert!(!vars.contains_key("ORBIT_ACTIVE_TASK_ID"));
     }
 }

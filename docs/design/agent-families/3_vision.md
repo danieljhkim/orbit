@@ -1,8 +1,16 @@
-# Agent Families — Vision
+---
+summary: "Agent Families — Vision"
+type: design
+title: "Agent Families — Vision"
+owner: human
+last_updated: 2026-05-16
+status: Draft
+feature: agent-families
+doc_role: vision
+tags: ["agent-families"]
+---
 
-**Status:** Draft
-**Owner:** human
-**Last updated:** 2026-05-16
+# Agent Families — Vision
 
 The long-term direction is to keep family discovery small and explicit while moving experiment-friendly model selection into named crew configuration. Future work should reuse the registry instead of reintroducing hardcoded role defaults.
 

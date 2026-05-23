@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0145
 title: Status-neutral task directories
 status: proposed
@@ -8,6 +8,8 @@ last_updated: 2026-05-11T04:45:33.205604Z
 related_features:
 - task-artifacts
 related_tasks: []
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - task-artifacts/ADR-003

@@ -13,7 +13,10 @@ pub(super) fn execute(
     model: Option<String>,
     reservation_owner: Option<ReservationOwnerContext>,
 ) -> Result<Value, OrbitError> {
-    match action {
+    let (input, redaction_report) = super::artifact_redaction::sanitize_tool_input(action, input)?;
+    let agent_for_audit = agent.clone();
+    let model_for_audit = model.clone();
+    let mut response = match action {
         OrbitBuiltinAction::AdrAdd => super::adr_tools::add(runtime, input, agent, model),
         OrbitBuiltinAction::AdrShow => super::adr_tools::show(runtime, input),
         OrbitBuiltinAction::AdrList => super::adr_tools::list(runtime, input),
@@ -21,10 +24,11 @@ pub(super) fn execute(
         OrbitBuiltinAction::AdrSupersede => {
             super::adr_tools::supersede(runtime, input, agent, model)
         }
-        OrbitBuiltinAction::DesignCheck => super::design_tools::check(runtime, input),
-        OrbitBuiltinAction::DesignInit => super::design_tools::init(runtime, input, agent, model),
-        OrbitBuiltinAction::DesignList => super::design_tools::list(runtime, input),
-        OrbitBuiltinAction::DesignShow => super::design_tools::show(runtime, input),
+        OrbitBuiltinAction::DocsList => super::docs_tools::list(runtime, input),
+        OrbitBuiltinAction::DocsShow => super::docs_tools::show(runtime, input),
+        OrbitBuiltinAction::DocsAdd => super::docs_tools::add(runtime, input),
+        OrbitBuiltinAction::DocsIndex => super::docs_tools::index(runtime, input),
+        OrbitBuiltinAction::DocsMigrate => super::docs_tools::migrate(runtime, input),
         OrbitBuiltinAction::FrictionAdd => super::friction_tools::add(runtime, input, model),
         OrbitBuiltinAction::FrictionList => super::friction_tools::list(runtime, input),
         OrbitBuiltinAction::FrictionResolve => super::friction_tools::resolve(runtime, input),
@@ -44,8 +48,7 @@ pub(super) fn execute(
         }
         OrbitBuiltinAction::LearningList => super::learning_tools::list(runtime, input),
         OrbitBuiltinAction::LearningPrune => super::learning_tools::prune(runtime, input),
-        OrbitBuiltinAction::LearningReindex => super::learning_tools::reindex(runtime, input),
-        OrbitBuiltinAction::LearningSearch => super::learning_tools::search(runtime, input),
+        OrbitBuiltinAction::LearningSync => super::learning_tools::sync(runtime, input),
         OrbitBuiltinAction::LearningShow => super::learning_tools::show(runtime, input),
         OrbitBuiltinAction::LearningSupersede => {
             super::learning_tools::supersede(runtime, input, agent, model)
@@ -72,8 +75,11 @@ pub(super) fn execute(
         OrbitBuiltinAction::ReviewThreadResolve => {
             super::review_threads::resolve(runtime, input, agent, model)
         }
-        OrbitBuiltinAction::SemanticRelated => super::semantic_tools::related(runtime, input),
-        OrbitBuiltinAction::SemanticSearch => super::semantic_tools::search(runtime, input),
+        OrbitBuiltinAction::Search => super::search_tools::search(runtime, input),
+        OrbitBuiltinAction::SemanticIndex => super::semantic_tools::index(runtime, input),
+        OrbitBuiltinAction::SemanticInstall => super::semantic_tools::install(runtime, input),
+        OrbitBuiltinAction::SemanticStats => super::semantic_tools::stats(runtime),
+        OrbitBuiltinAction::SemanticUninstall => super::semantic_tools::uninstall(runtime, input),
         OrbitBuiltinAction::StateGet => super::state_tools::get(task_scope, input),
         OrbitBuiltinAction::StateSet => super::state_tools::set(task_scope, input),
         OrbitBuiltinAction::TaskAdd => super::task_tools::add(runtime, input, agent, model),
@@ -81,7 +87,6 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskDelete => super::task_tools::delete(runtime, input),
         OrbitBuiltinAction::TaskLint => super::task_tools::lint(runtime, input),
         OrbitBuiltinAction::TaskList => super::task_tools::list(runtime, input),
-        OrbitBuiltinAction::TaskSearch => super::task_tools::search(runtime, input),
         OrbitBuiltinAction::TaskLocks => super::task_locks::list(runtime),
         OrbitBuiltinAction::TaskLocksRelease => {
             super::task_locks::release(runtime, input, agent, model)
@@ -93,5 +98,14 @@ pub(super) fn execute(
         OrbitBuiltinAction::TaskShow => super::task_tools::show(runtime, input),
         OrbitBuiltinAction::TaskStart => super::task_tools::start(runtime, input, agent, model),
         OrbitBuiltinAction::TaskUpdate => super::task_tools::update(runtime, input, agent, model),
-    }
+    }?;
+    super::artifact_redaction::finish_tool_response(
+        runtime,
+        action,
+        &mut response,
+        &redaction_report,
+        agent_for_audit.as_deref(),
+        model_for_audit.as_deref(),
+    )?;
+    Ok(response)
 }

@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0083
 title: Remove graph task attribution
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - knowledge-graph
 related_tasks:
 - T20260506-11
+tags: []
+paths: []
 supersedes:
 - ADR-0062
 - ADR-0064

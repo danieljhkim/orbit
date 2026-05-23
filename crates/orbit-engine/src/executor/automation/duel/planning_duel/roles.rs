@@ -35,22 +35,51 @@ Steps:
    - Your active planning-duel slot is in input.planning_duel_slot.
    - Your plan artifact path must be `planning-duel/<slot>.md`.
 
-3. Gather context with the graph surface first:
-   - Build graph selectors from task.context_files and call orbit.graph.pack.
-   - If pack returns knowledge_unavailable, use orbit.graph.overview to map the
-     affected area, then orbit.graph.search, orbit.graph.refs, and orbit.graph.show
-     to discover the relevant symbols and relationships.
-   - If pack returns unresolved selectors, fall back to fs.read only for those paths.
-   - Prefer orbit.graph.pack/search/show/overview/refs over raw file reads whenever
-     the graph has the needed knowledge.
+3. Gather context with the graph surface BEFORE drafting. A single orbit.graph.pack
+   is NOT sufficient — pack returns bodies; refs and search return the import graph
+   that pack misses. You must:
+   - Start with orbit.graph.pack over task.context_files for breadth.
+   - For every symbol the task proposes to move, rename, remove, or add: call
+     orbit.graph.refs on it to enumerate callers and consumers BY NAME.
+   - For every module boundary you are drawing (new crate, new module, extracted
+     file, renamed type): call orbit.graph.search to find call sites of moved
+     types and helpers across the workspace.
+   - Use orbit.graph.show for full symbol bodies you need to read.
+   - Use orbit.graph.overview when pack returns knowledge_unavailable or you
+     need to map an unfamiliar area first.
+   - fs.read is a fallback only for selectors the graph cannot resolve (raw
+     YAML, Markdown, assets the graph does not index, or unresolved selectors
+     pack reports).
+   - If you discover pub(crate) imports, helper coupling, call sites, or
+     dependency edges not reflected in the task description, treat them as
+     hidden coupling — they belong in step 1 of your plan body.
 
 4. Draft exactly one proposal as markdown:
    - Include these sections:
      ## Plan
      ## Context Files
      ## Risks
-   - Keep the plan concise, implementation-ready, and specific to the current codebase.
-   - Ignore any existing planner artifact for the other role. Your proposal must be independently reasoned.
+   - Ignore any existing planner artifact for the other role. Your proposal must
+     be independently reasoned.
+   - The plan MUST:
+     - Name every symbol being moved, renamed, removed, or added (functions,
+       types, modules, constants) BY IDENTIFIER, not by category.
+     - Enumerate the consumers and call sites discovered via orbit.graph.refs
+       and orbit.graph.search BY NAME.
+     - Specify exact verification commands the implementer should run — e.g.
+       `cargo build -p <crate>`, `cargo test -p <crate> <test_name>`,
+       `make ci-fast`, `rg '<symbol>' <path>`, or
+       `curl -s http://localhost:<port>/<route>` — that prove the change works.
+     - If hidden coupling exists (imports, helpers, call sites the task
+       description did not name), open the plan with step 1 enumerating it.
+   - The plan MUST NOT:
+     - Use hedge language: "this should just work", "should compile", "verify
+       it continues to compile", "we must verify", "this just works", or
+       similar. Replace each with the exact command above that proves it.
+     - Defer evidence to the implementer ("the implementer will discover X")
+       when orbit.graph.* could have surfaced X now.
+   - Length is not the goal. Named identifiers, enumerated consumers, and exact
+     verification commands are.
 
 5. Persist the proposal as a task artifact:
    - Use orbit.duel.plan.add to write the artifact under the slot-derived path. Orbit stamps the signature line.
@@ -148,7 +177,8 @@ fn build_role_assignment<H: RuntimeHost + ?Sized>(
     })
 }
 
-fn build_roles_output<H: RuntimeHost + ?Sized>(
+// pub(crate) widened for tests/ layout under ORB-00225; test reaches via exposed surface.
+pub(crate) fn build_roles_output<H: RuntimeHost + ?Sized>(
     host: &H,
     perm: [usize; 3],
 ) -> Result<Value, OrbitError> {
@@ -296,298 +326,72 @@ pub(super) fn select_planning_duel_roles<H: RuntimeHost + ?Sized>(
     input: &Value,
 ) -> Result<Value, OrbitError> {
     let task_id = required_input_string(input, "task_id")?;
-    let perm = next_permutation(host)?;
-    let output = build_roles_output(host, perm)?;
+
+    let pa = input_string_field(input, "planner_a_family");
+    let pb = input_string_field(input, "planner_b_family");
+    let ar = input_string_field(input, "arbiter_family");
+
+    let roles_output = if let (Some(a), Some(b), Some(c)) =
+        (pa.as_deref(), pb.as_deref(), ar.as_deref())
+    {
+        // explicit assignment path (CLI or direct workflow); all-or-nothing already enforced by caller,
+        // but defend here for partial YAML / direct activity calls
+        if a == b || a == c || b == c {
+            let dup = if a == b || a == c { a } else { b };
+            return Err(OrbitError::InvalidInput(format!(
+                "select_planning_duel_roles explicit roles must use distinct families; '{dup}' appears more than once"
+            )));
+        }
+
+        let families = host.duel_candidate_families();
+        let ia = families.iter().position(|f| f == a).ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "planner_a_family value '{a}' is not in [duel] candidates {families:?}"
+            ))
+        })?;
+        let ib = families.iter().position(|f| f == b).ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "planner_b_family value '{b}' is not in [duel] candidates {families:?}"
+            ))
+        })?;
+        let ic = families.iter().position(|f| f == c).ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "arbiter_family value '{c}' is not in [duel] candidates {families:?}"
+            ))
+        })?;
+
+        let perm = [ia, ib, ic];
+        validate_role_permutation(perm, families.len(), "select_planning_duel_roles")?;
+        build_roles_output(host, perm)?
+    } else if pa.is_some() || pb.is_some() || ar.is_some() {
+        let mut missing = vec![];
+        if pa.is_none() {
+            missing.push("planner_a_family");
+        }
+        if pb.is_none() {
+            missing.push("planner_b_family");
+        }
+        if ar.is_none() {
+            missing.push("arbiter_family");
+        }
+        return Err(OrbitError::InvalidInput(format!(
+            "select_planning_duel_roles explicit roles require all three of planner_a_family, planner_b_family, arbiter_family; missing {}",
+            missing.join(", ")
+        )));
+    } else {
+        let perm = next_permutation(host)?;
+        build_roles_output(host, perm)?
+    };
 
     Ok(json!({
         "task_id": task_id,
-        "planning_duel_started_at": output["planning_duel_started_at"].clone(),
-        "planner_a_agent_cli": output["planner_a_agent_cli"].clone(),
-        "planner_a_model": output["planner_a_model"].clone(),
-        "planner_b_agent_cli": output["planner_b_agent_cli"].clone(),
-        "planner_b_model": output["planner_b_model"].clone(),
-        "arbiter_agent_cli": output["arbiter_agent_cli"].clone(),
-        "arbiter_model": output["arbiter_model"].clone(),
-        "planning_duel_roles": output["planning_duel_roles"].clone(),
+        "planning_duel_started_at": roles_output["planning_duel_started_at"].clone(),
+        "planner_a_agent_cli": roles_output["planner_a_agent_cli"].clone(),
+        "planner_a_model": roles_output["planner_a_model"].clone(),
+        "planner_b_agent_cli": roles_output["planner_b_agent_cli"].clone(),
+        "planner_b_model": roles_output["planner_b_model"].clone(),
+        "arbiter_agent_cli": roles_output["arbiter_agent_cli"].clone(),
+        "arbiter_model": roles_output["arbiter_model"].clone(),
+        "planning_duel_roles": roles_output["planning_duel_roles"].clone(),
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-    use std::path::{Path, PathBuf};
-
-    use orbit_common::types::{
-        Activity, AgentFamily, AgentModelPair, Job, JobTargetType, OrbitError, OrbitEvent,
-        PlanningRoles, Role, RoleSlot, TaskArtifact,
-    };
-    use orbit_store::InvocationRecord;
-    use orbit_tools::ToolContext;
-
-    use crate::context::{JobRunResult, RuntimeHost};
-    use crate::executor::registry::ActivityExecutorRegistry;
-
-    use super::*;
-
-    struct TestHost {
-        data_root: PathBuf,
-        scoreboard_dir: PathBuf,
-        registry: ActivityExecutorRegistry,
-        duel_models: BTreeMap<String, String>,
-    }
-
-    impl TestHost {
-        fn new() -> Self {
-            Self::with_duel_model(None)
-        }
-
-        fn with_duel_model(duel_model: Option<&str>) -> Self {
-            let mut duel_models = BTreeMap::new();
-            if let Some(duel_model) = duel_model {
-                duel_models.insert("codex".to_string(), duel_model.to_string());
-            }
-            Self::with_duel_models(duel_models)
-        }
-
-        fn with_family_duel_model(family: &str, model: &str) -> Self {
-            let mut duel_models = BTreeMap::new();
-            duel_models.insert(family.to_string(), model.to_string());
-            Self::with_duel_models(duel_models)
-        }
-
-        fn with_duel_models(duel_models: BTreeMap<String, String>) -> Self {
-            let temp_root = std::env::temp_dir().join("orbit-planning-duel-role-test");
-            Self {
-                scoreboard_dir: temp_root.join("scoreboard"),
-                data_root: temp_root,
-                registry: ActivityExecutorRegistry::default(),
-                duel_models,
-            }
-        }
-    }
-
-    impl RuntimeHost for TestHost {
-        fn record_event(&self, _event: OrbitEvent) -> Result<(), OrbitError> {
-            Ok(())
-        }
-
-        fn repo_root(&self) -> Result<String, OrbitError> {
-            Ok(self.data_root.to_string_lossy().to_string())
-        }
-
-        fn data_root(&self) -> &Path {
-            &self.data_root
-        }
-
-        fn activity_executor_registry(&self) -> &ActivityExecutorRegistry {
-            &self.registry
-        }
-
-        fn run_job_now_with_input_debug(
-            &self,
-            _job_id: &str,
-            _input: Value,
-            _debug: bool,
-        ) -> Result<JobRunResult, OrbitError> {
-            unimplemented!("not needed by planning-duel role tests")
-        }
-
-        fn validate_activity_target_exists(
-            &self,
-            _target_type: JobTargetType,
-            _target_id: &str,
-        ) -> Result<Activity, OrbitError> {
-            unimplemented!("not needed by planning-duel role tests")
-        }
-
-        fn get_job(&self, _job_id: &str) -> Result<Option<Job>, OrbitError> {
-            Ok(None)
-        }
-
-        fn invocation_records(
-            &self,
-            _query: orbit_store::InvocationQuery,
-        ) -> Result<Vec<InvocationRecord>, OrbitError> {
-            Ok(Vec::new())
-        }
-
-        fn run_tool_with_context_and_role(
-            &self,
-            _name: &str,
-            _input: Value,
-            _role: Role,
-            _tool_context: ToolContext,
-        ) -> Result<Value, OrbitError> {
-            unimplemented!("not needed by planning-duel role tests")
-        }
-
-        fn maybe_create_failure_task(
-            &self,
-            _job_id: &str,
-            _run_id: &str,
-            _error_code: &str,
-            _error_message: &str,
-            _agent: Option<&str>,
-            _model: Option<&str>,
-        ) -> Result<(), OrbitError> {
-            Ok(())
-        }
-
-        fn resolved_agent_model_pair(&self, agent_cli: &str) -> Option<AgentModelPair> {
-            match agent_cli {
-                "codex" => Some(AgentModelPair::new("M_exec", "_")),
-                "claude" => Some(AgentModelPair::new("opus-4.7", "sonnet-4.6")),
-                "gemini" => Some(AgentModelPair::new("pro", "flash")),
-                "grok" => Some(AgentModelPair::new("grok-4", "grok-3")),
-                _ => None,
-            }
-        }
-
-        fn duel_orchestrator_model(&self, family: &str) -> Option<String> {
-            self.duel_models.get(family).cloned()
-        }
-
-        fn scoring_enabled(&self) -> bool {
-            false
-        }
-
-        fn graph_editing(&self) -> bool {
-            false
-        }
-
-        fn scoreboard_dir(&self) -> &Path {
-            &self.scoreboard_dir
-        }
-    }
-
-    #[test]
-    fn planning_duel_role_output_can_assign_grok() {
-        let host = TestHost::new();
-        let output = build_roles_output(&host, [3, 0, 1]).expect("roles output");
-
-        assert_eq!(output["planner_a_agent_cli"], "grok");
-        assert_eq!(output["planner_a_model"], "grok-4");
-        assert_eq!(output["planning_duel_roles"]["planner_a"]["family"], "grok");
-        assert!(output["planning_duel_roles"]["planner_a"]["model"].is_null());
-        assert_eq!(output["planner_b_agent_cli"], "codex");
-        assert_eq!(output["arbiter_agent_cli"], "claude");
-    }
-
-    fn queue_permutation(perm: [usize; 3]) {
-        TEST_PERMUTATION_QUEUE.with(|cell| {
-            let mut queue = cell.borrow_mut();
-            queue.clear();
-            queue.push_back(perm);
-        });
-    }
-
-    #[test]
-    fn planning_duel_roles_prefer_duel_model_then_resolved_pair() {
-        queue_permutation([0, 1, 2]);
-        let host = TestHost::with_duel_model(Some("M_duel"));
-        let output = select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" }))
-            .expect("planning role selection uses duel model");
-        assert_eq!(output["planner_a_model"], "M_duel");
-        assert_eq!(
-            output["planning_duel_roles"]["planner_a"]["family"],
-            "codex"
-        );
-
-        queue_permutation([0, 1, 2]);
-        let host = TestHost::with_duel_model(None);
-        let output = select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" }))
-            .expect("planning role selection falls back to resolved pair");
-        assert_eq!(output["planner_a_model"], "M_exec");
-    }
-
-    #[test]
-    fn planning_duel_role_selection_keeps_family_identity_for_model_aliases() {
-        for model in ["pro", "gemini-3.1-pro"] {
-            queue_permutation([2, 0, 1]);
-            let host = TestHost::with_family_duel_model("gemini", model);
-            let output = select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" }))
-                .expect("planning role selection uses configured gemini model");
-
-            assert_eq!(output["planner_a_agent_cli"], "gemini");
-            assert_eq!(output["planner_a_model"], model);
-            assert_eq!(
-                output["planning_duel_roles"]["planner_a"]["family"],
-                "gemini"
-            );
-            assert!(output["planning_duel_roles"]["planner_a"]["model"].is_null());
-        }
-    }
-
-    fn plan_artifact_local(path: &str, family: &str, slot: &str) -> TaskArtifact {
-        TaskArtifact::from_text(
-            path,
-            format!("*authored by: {family} / {slot}*\n## Plan\nDo the thing.\n"),
-        )
-    }
-
-    #[test]
-    fn planning_duel_e2e_select_roles_produces_assignment_that_validates_artifact() {
-        // [2,0,1] places gemini in planner_a (matches the alias test above)
-        for configured in ["pro", "gemini-3.1-pro"] {
-            queue_permutation([2, 0, 1]);
-            let host = TestHost::with_family_duel_model("gemini", configured);
-            let output = select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" }))
-                .expect("select_planning_duel_roles with gemini duel model");
-
-            let roles_value = output
-                .get("planning_duel_roles")
-                .expect("planning_duel_roles in output");
-            let planning_roles: PlanningRoles =
-                serde_json::from_value(roles_value.clone()).expect("parse PlanningRoles");
-            let assignment = planning_roles.planner_a.clone();
-            assert_eq!(assignment.family, AgentFamily::Gemini);
-
-            // simulate artifact written with matching gemini signature for planner_a
-            let raw_artifacts = vec![plan_artifact_local(
-                "planning-duel/planner_a.md",
-                "gemini",
-                "planner_a",
-            )];
-            let plan_artifacts =
-                super::super::artifacts::planning_duel_plan_artifacts(&raw_artifacts)
-                    .expect("planning_duel_plan_artifacts parses");
-            let matched = super::super::artifacts::plan_artifact_for_assignment(
-                &plan_artifacts,
-                &assignment,
-                RoleSlot::PlannerA,
-            )
-            .expect("plan_artifact_for_assignment succeeds when family+slot match");
-            assert_eq!(matched.path, "planning-duel/planner_a.md");
-        }
-
-        // mismatch variant: gemini assigned but claude artifact present
-        queue_permutation([2, 0, 1]);
-        let host = TestHost::with_family_duel_model("gemini", "pro");
-        let output =
-            select_planning_duel_roles(&host, &json!({ "task_id": "ORB-TEST" })).expect("select");
-        let roles_value = output.get("planning_duel_roles").expect("roles");
-        let planning_roles: PlanningRoles =
-            serde_json::from_value(roles_value.clone()).expect("parse");
-        let assignment = planning_roles.planner_a.clone();
-
-        let raw_artifacts = vec![plan_artifact_local(
-            "planning-duel/planner_a.md",
-            "claude",
-            "planner_a",
-        )];
-        let plan_artifacts =
-            super::super::artifacts::planning_duel_plan_artifacts(&raw_artifacts).expect("parse");
-        let err = super::super::artifacts::plan_artifact_for_assignment(
-            &plan_artifacts,
-            &assignment,
-            RoleSlot::PlannerA,
-        )
-        .expect_err("mismatch must fail");
-        let msg = match err {
-            OrbitError::InvalidInput(m) => m,
-            other => panic!("expected InvalidInput, got {other:?}"),
-        };
-        assert!(msg.contains("expected gemini"), "msg={msg}");
-        assert!(msg.contains("has family claude"), "msg={msg}");
-    }
 }

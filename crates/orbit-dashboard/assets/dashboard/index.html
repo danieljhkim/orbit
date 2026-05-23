@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>orbit</title>
+    <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/dashboard.css">  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 82 24" role="img" aria-label="Orbit">
+          <g fill="none" stroke="#EDEDEF" stroke-linecap="round" stroke-linejoin="round" transform="translate(2 0)">
+            <circle cx="12" cy="12" r="8.5" stroke-width="1.6"></circle>
+            <circle cx="18.5" cy="6.5" r="2.5" fill="#6E9FFF" stroke="none"></circle>
+          </g>
+          <path fill="#EDEDEF" transform="translate(0 1)" d="M35.26 17.24c-1.73 0-3.12-.52-4.18-1.56-1.05-1.05-1.58-2.45-1.58-4.2 0-1.72.53-3.1 1.6-4.14 1.07-1.05 2.45-1.58 4.16-1.58s3.09.53 4.14 1.58c1.07 1.04 1.6 2.42 1.6 4.14 0 1.75-.53 3.15-1.58 4.2-1.06 1.04-2.45 1.56-4.16 1.56Zm0-2.46c.86 0 1.55-.3 2.06-.9.52-.61.78-1.41.78-2.4 0-.98-.26-1.76-.78-2.36-.51-.6-1.2-.9-2.06-.9s-1.56.3-2.08.9c-.51.6-.76 1.38-.76 2.36 0 .99.25 1.79.76 2.4.52.6 1.22.9 2.08.9ZM43.65 17V6h2.58l.18 1.48c.32-.54.73-.95 1.24-1.24.52-.29 1.13-.44 1.84-.44.31 0 .59.03.84.08v2.74a5.5 5.5 0 0 0-.96-.08c-.82 0-1.49.23-2 .7-.5.45-.76 1.14-.76 2.06V17h-3Zm14.05.24c-.76 0-1.42-.15-1.98-.46a3.6 3.6 0 0 1-1.32-1.26L54.16 17h-2.54V1.8h3v5.46c.36-.45.8-.81 1.32-1.08a4 4 0 0 1 1.78-.38c1.46 0 2.64.53 3.52 1.58.9 1.04 1.34 2.41 1.34 4.1 0 1.72-.45 3.11-1.36 4.18-.9 1.05-2.07 1.58-3.52 1.58Zm-.68-2.48c.78 0 1.39-.3 1.84-.9.46-.6.7-1.39.7-2.38 0-.98-.24-1.76-.7-2.34-.45-.6-1.06-.9-1.84-.9-.77 0-1.38.3-1.84.9-.45.58-.68 1.36-.68 2.34 0 .99.23 1.78.68 2.38.46.6 1.07.9 1.84.9ZM65.12 17V6h3v11h-3Zm1.5-12.44c-.51 0-.94-.17-1.28-.5-.33-.34-.5-.76-.5-1.26s.17-.91.5-1.24c.34-.34.77-.52 1.28-.52s.93.18 1.26.52c.34.33.52.74.52 1.24s-.18.92-.52 1.26c-.33.33-.75.5-1.26.5ZM76.13 17.2c-1.25 0-2.22-.31-2.9-.94-.68-.64-1.02-1.58-1.02-2.82V8.48H70.3V6h1.92V3.34h3V6h3.02v2.48h-3.02v4.98c0 .45.1.76.3.94.2.17.55.26 1.04.26h1.6V17c-.28.07-.61.12-1 .16-.37.03-.72.04-1.04.04Z"></path>
+        </svg>
+      </div>
+      <div class="meta" id="meta">
+        <span id="conn-status" class="status-dot orange"></span>
+        <span id="meta-text">connecting&hellip;</span>
+        <div class="global-id-wrap">
+          <input type="search" id="global-task-id" placeholder="Jump to ORB-NNNNN" autocomplete="off" spellcheck="false" />
+          <span id="global-task-id-error" class="global-id-error"></span>
+        </div>
+        <button id="refresh-btn" class="refresh-btn" type="button">Refresh</button>
+      </div>
+    </header>
+    <nav class="tabs" id="tabs">
+      <button class="tab" data-tab="tasks" type="button">Tasks</button>
+      <button class="tab" data-tab="scoreboard" type="button">Scoreboard</button>
+      <button class="tab" data-tab="threads" type="button">Threads<span class="tab-badge" id="threads-unread-badge" style="display: none;">0</span></button>
+      <button class="tab" data-tab="audit" type="button">Audit</button>
+      <button class="tab" data-tab="diagnostics" type="button">Diagnostics</button>
+      <button class="tab" data-tab="knowledge" type="button">Knowledge</button>
+    </nav>
+    <section class="health-strip" id="health-strip" aria-label="Audit health summary">
+      <div class="tile" id="tile-events">
+        <span class="label">Events 24h</span>
+        <span class="value" id="tile-events-value">-</span>
+        <span class="glyph">EV</span>
+        <svg class="sparkline" id="tile-events-sparkline" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="tile" id="tile-denials">
+        <span class="label">Denials 24h</span>
+        <span class="value" id="tile-denials-value">-</span>
+        <span class="glyph" id="tile-denials-glyph">DN</span>
+      </div>
+      <div class="tile" id="tile-failed">
+        <span class="label">Failed Runs 24h</span>
+        <span class="value" id="tile-failed-value">-</span>
+        <span class="glyph">FR</span>
+      </div>
+      <div class="tile" id="tile-active">
+        <span class="label">Active Long</span>
+        <span class="value" id="tile-active-value">-</span>
+        <span class="glyph">LR</span>
+      </div>
+    </section>
+    <section class="tab-pane" data-tab="tasks">
+      <main class="tasks-layout" style="grid-template-columns: minmax(0, 2fr) minmax(0, 1.15fr);">
+        <div class="col-tasks" style="display: flex; flex-direction: column; min-width: 0;">
+          <section class="panel" id="tasks-panel">
+            <header><span>Tasks</span><span class="count" id="tasks-count">-</span></header>
+            <div class="controls">
+              <input type="search" id="task-search" placeholder="Search ID or title..." autocomplete="off" spellcheck="false" />
+              <div id="task-filter"></div>
+            </div>
+            <div class="body" id="tasks-body">
+              <div class="skeleton-state">
+                <div class="skeleton skeleton-row"></div>
+                <div class="skeleton skeleton-row" style="width: 80%"></div>
+                <div class="skeleton skeleton-row" style="width: 90%"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="col-log">
+          <section class="panel" id="locks-panel">
+            <header><span>Locked files</span><span class="count" id="locks-count">0 files / 0 tasks</span></header>
+            <div class="body" id="locks-body"></div>
+          </section>
+          <section class="panel" id="log-panel">
+            <header class="head">
+              <div class="title"><span class="live-dot"></span>orbit.log <span style="color: var(--fg-dim); font-family: var(--font-mono); font-weight: 400; letter-spacing: 0; text-transform: none;">— tail -F</span></div>
+              <div class="actions">
+                <span class="count" id="log-count" style="background: var(--bg-elev); padding: 1px 8px; border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono); font-size: 11px;">0</span>
+                <span class="count" id="log-buffered-count" style="display: none; cursor: pointer; background: var(--bg-elev); padding: 1px 8px; border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono); font-size: 11px; margin-left: 6px;">0 buffered</span>
+              </div>
+            </header>
+            <div class="log-stream">
+              <div class="inner" id="logInner"></div>
+            </div>
+            <div class="log-foot">
+              <span class="seg"><b>filter</b></span>
+              <span class="filter-pill on" data-filter="all">all</span>
+              <span class="filter-pill" data-filter="err">err</span>
+              <span class="filter-pill" data-filter="deny">deny</span>
+              <span class="filter-pill" data-filter="warn">warn</span>
+              <span class="seg right on" id="log-follow-tail"><b>↓</b> follow tail</span>
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="scoreboard">
+      <main style="grid-template-columns: 1fr;">
+        <section class="panel" id="scoreboard-panel">
+          <header><span>Scoreboard</span><span class="count" id="scoreboard-count">-</span></header>
+          <div class="body scoreboard-table-wrap" id="scoreboard-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="threads">
+      <main style="grid-template-columns: 1fr;">
+        <section class="panel" id="threads-panel">
+          <header><span>Review threads</span><span class="count" id="threads-count">-</span></header>
+          <div class="controls" id="threads-filters"></div>
+          <div class="body" id="threads-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 85%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="audit">
+      <main class="tasks-layout" style="grid-template-columns: minmax(0, 2fr) minmax(280px, 1.15fr);">
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <section class="panel" id="audit-pane">
+            <header><span id="audit-title">Audit Events</span><span class="count" id="audit-count">-</span></header>
+            <nav class="subtabs" id="audit-subtabs">
+              <button class="subtab" data-subtab="events" type="button">Events</button>
+              <button class="subtab" data-subtab="policy" type="button">Policy</button>
+            </nav>
+            <div class="controls" id="audit-events-controls">
+              <input type="search" id="audit-search" placeholder="Search command, tool, target..." autocomplete="off" spellcheck="false" />
+              <div id="audit-filter"></div>
+            </div>
+            <div class="body scoreboard-table-wrap" id="audit-body">
+              <div class="skeleton-state">
+                <div class="skeleton skeleton-row"></div>
+                <div class="skeleton skeleton-row" style="width: 80%"></div>
+                <div class="skeleton skeleton-row" style="width: 70%"></div>
+              </div>
+            </div>
+            <div class="body" id="audit-policy-body" style="display: none;">
+              <div class="skeleton-state">
+                <div class="skeleton skeleton-row"></div>
+                <div class="skeleton skeleton-row" style="width: 80%"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <section class="panel" id="audit-summary-panel">
+            <header><span>Audit Summary 24h</span></header>
+            <div class="body" id="audit-summary-body" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; background: var(--bg);">
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="run-detail">
+      <main style="grid-template-columns: 1fr;">
+        <section class="panel" id="run-detail-panel">
+          <header>
+            <span id="run-detail-title">Run Detail</span>
+            <span class="count" id="run-detail-count">-</span>
+          </header>
+          <div class="body" id="run-detail-meta">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+          <div class="knowledge-panel" id="run-knowledge-panel" style="display: none;"></div>
+          <div class="gantt-panel" id="run-gantt-panel" style="display: none;"></div>
+          <nav class="subtabs" id="run-detail-subtabs">
+            <button class="subtab" data-subtab="steps" type="button">Steps</button>
+            <button class="subtab" data-subtab="events" type="button">Events</button>
+          </nav>
+          <div class="body" id="run-steps-body" style="display: none;"></div>
+          <div class="body scoreboard-table-wrap" id="run-events-body" style="display: none;"></div>
+        </section>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="diagnostics">
+      <main class="tasks-layout" style="grid-template-columns: minmax(0, 2fr) minmax(280px, 1.15fr);">
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <section class="panel" id="diagnostics-panel">
+            <header>
+              <span id="diag-title">Diagnostics</span>
+              <span class="count" id="diag-count">-</span>
+            </header>
+            <nav class="subtabs" id="diag-subtabs">
+              <button class="subtab" data-subtab="runs" type="button">Recent Runs</button>
+              <button class="subtab" data-subtab="metrics" type="button">Metrics</button>
+              <button class="subtab" data-subtab="errors" type="button">Errors</button>
+            </nav>
+            <div class="body scoreboard-table-wrap" id="diag-body" style="display: none;">
+              <div class="skeleton-state">
+                <div class="skeleton skeleton-row"></div>
+                <div class="skeleton skeleton-row" style="width: 75%"></div>
+              </div>
+            </div>
+            <div class="body" id="runs-body" style="display: none;">
+              <div class="skeleton-state">
+                <div class="skeleton skeleton-row"></div>
+                <div class="skeleton skeleton-row" style="width: 80%"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div style="display: flex; flex-direction: column; min-width: 0;">
+          <section class="panel" id="diagnostics-side-panel">
+            <header><span>Diagnostics Summary</span></header>
+            <div class="body" id="diag-implement-one-body" style="padding: 16px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; background: var(--bg);">
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+    <section class="tab-pane" data-tab="knowledge">
+      <main style="grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);">
+        <section class="panel" id="knowledge-panel">
+          <header><span>Knowledge</span><span class="count" id="knowledge-count">-</span></header>
+          <nav class="subtabs" id="knowledge-subtabs">
+            <button class="subtab" data-subtab="learnings" type="button">Learnings</button>
+            <button class="subtab" data-subtab="adrs" type="button">ADRs</button>
+            <button class="subtab" data-subtab="frictions" type="button">Frictions</button>
+          </nav>
+          <div class="learning-stats" id="learning-stats">
+            <div class="tile">
+              <span class="label">Total</span>
+              <span class="value" id="learning-total-value">-</span>
+              <span class="glyph">LRN</span>
+            </div>
+            <div class="tile">
+              <span class="label">Superseded</span>
+              <span class="value" id="learning-superseded-value">-</span>
+              <span class="glyph">SUP</span>
+            </div>
+            <div class="tile">
+              <span class="label">Last Indexed</span>
+              <span class="value" id="learning-last-indexed-value">-</span>
+              <span class="glyph">IDX</span>
+            </div>
+          </div>
+          <div class="adr-stats" id="adr-stats" style="display: none;">
+            <div class="tile">
+              <span class="label">Proposed</span>
+              <span class="value" id="adr-proposed-value">-</span>
+              <span class="glyph">PRP</span>
+            </div>
+            <div class="tile">
+              <span class="label">Accepted</span>
+              <span class="value" id="adr-accepted-value">-</span>
+              <span class="glyph">ACC</span>
+            </div>
+            <div class="tile">
+              <span class="label">Superseded</span>
+              <span class="value" id="adr-superseded-value">-</span>
+              <span class="glyph">SUP</span>
+            </div>
+          </div>
+          <div class="friction-stats" id="friction-stats" style="display: none;">
+            <div class="tile">
+              <span class="label">Open</span>
+              <span class="value" id="friction-open-value">-</span>
+              <span class="glyph">OPN</span>
+            </div>
+            <div class="tile">
+              <span class="label">Triaged</span>
+              <span class="value" id="friction-triaged-value">-</span>
+              <span class="glyph">TRI</span>
+            </div>
+            <div class="tile">
+              <span class="label">Resolved This Month</span>
+              <span class="value" id="friction-resolved-month-value">-</span>
+              <span class="glyph">RSL</span>
+            </div>
+          </div>
+          <div class="controls">
+            <input type="search" id="learning-search" placeholder="Search learnings..." autocomplete="off" spellcheck="false" />
+            <input type="search" id="adr-search" placeholder="Search ADRs..." autocomplete="off" spellcheck="false" style="display: none;" />
+            <input type="search" id="friction-search" placeholder="Search frictions..." autocomplete="off" spellcheck="false" style="display: none;" />
+          </div>
+          <div class="body scoreboard-table-wrap" id="learnings-body">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+          <div class="body scoreboard-table-wrap" id="adrs-body" style="display: none;">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+          <div class="body scoreboard-table-wrap" id="frictions-body" style="display: none;">
+            <div class="skeleton-state">
+              <div class="skeleton skeleton-row"></div>
+              <div class="skeleton skeleton-row" style="width: 80%"></div>
+              <div class="skeleton skeleton-row" style="width: 70%"></div>
+            </div>
+          </div>
+        </section>
+        <section class="panel" id="learning-detail-panel">
+          <header><span>Learning Detail</span><span class="count" id="learning-detail-count">-</span></header>
+          <div class="body" id="learning-detail">
+            <div class="empty-state">
+              <div class="icon">✧</div>
+              <div class="text">No learning selected.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel" id="adr-detail-panel" style="display: none;">
+          <header><span>ADR Detail</span><span class="count" id="adr-detail-count">-</span></header>
+          <div class="body" id="adr-detail">
+            <div class="empty-state">
+              <div class="icon">✧</div>
+              <div class="text">No ADR selected.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel" id="friction-detail-panel" style="display: none;">
+          <header><span>Friction Detail</span><span class="count" id="friction-detail-count">-</span></header>
+          <div class="body" id="friction-detail">
+            <div class="empty-state">
+              <div class="icon">✧</div>
+              <div class="text">No friction selected.</div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+    <div id="gantt-tooltip" role="tooltip" aria-hidden="true"></div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

@@ -21,18 +21,31 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 ## Workflow
 
 1. Confirm objective, constraints, and done criteria.
-2. Inspect codebase context before creating the task. If you want background on prior related work, `orbit.semantic.search` is available (hybrid BM25 + cosine over indexed task fields) — useful when the proposed work might overlap with a task whose title uses different vocabulary. Optional, not required. See `orbit-semantic`.
+2. Inspect codebase context before creating the task. If you want background on prior related work, `orbit.search` is available; use `hybrid: true` with `kind: "task"` when the proposed work might overlap with a task whose title uses different vocabulary. Optional, not required. See `orbit-search`.
 3. Write clear acceptance criteria that define observable success.
-4. Add assumptions, risks, and rollback notes to the description when they matter.
-5. Call the task-add tool (`orbit_task_add` over MCP, or `orbit tool run orbit.task.add` from the shell) with the description, acceptance criteria, workspace, and canonical `model` family in the JSON input. Use `codex`, `claude`, `gemini`, or `grok`; full model strings are accepted and auto-normalized. Leave `plan` blank unless you have a compelling reason to pre-seed it.
-6. Use the result as the default confirmation. If you need to re-fetch the canonical stored record, call `orbit_task_show({"id": "<returned-id>"})` (MCP) or `orbit tool run orbit.task.show --input '{"id": "<returned-id>"}'` (CLI).
+4. Enumerate the existing files, directories, or symbols this task will modify or delete. List each as a canonical selector in `context_files` (`file:`, `dir:`, `symbol:path#name:kind`). Skip only for true chores with no scope target.
+5. Choose task metadata while the scope is fresh: set `complexity` to `low`, `medium`, or `hard` whenever you can make a reasonable call. Leave it unset only when the current context is too thin to classify.
+6. Add assumptions, risks, and rollback notes to the description when they matter.
+7. Call the task-add tool (`orbit_task_add` over MCP, or `orbit tool run orbit.task.add` from the shell) with the description, acceptance criteria, `context_files` (when the task has modification targets), workspace, complexity when known, and canonical `model` family in the JSON input. Use `codex`, `claude`, `gemini`, or `grok`; full model strings are accepted and auto-normalized. Leave `plan` blank unless you have a compelling reason to pre-seed it.
+8. Use the result as the default confirmation. If you need to re-fetch the canonical stored record, call `orbit_task_show({"id": "<returned-id>"})` (MCP) or `orbit tool run orbit.task.show --input '{"id": "<returned-id>"}'` (CLI).
 
 ## Selector-First Context
 
-- Prefer canonical task context selectors in `context_files`: `file:path`, `dir:path`, and `symbol:path#name:kind`.
+- Prefer canonical task context selectors in `context_files`: `file:`, `dir:`, or `symbol:path#name:kind`.
 - Raw legacy paths are still accepted, but Orbit silently upgrades them to canonical selector form on write.
 - Add `context_files` entries only for existing files, directories, or symbols expected to be modified or deleted by the task.
-- Do not add entries solely for files that will be created later, or for files that are only relevant background context.
+
+Do not add `context_files` entries for:
+
+- **Conventions or patterns the task must follow** — e.g. `docs/design-patterns/*.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `RELEASING.md`. Cite these in the description prose with markdown links, not in `context_files`.
+- Files cited in the description for reasoning context but not edited.
+- Sibling/precedent directories included as "see how this is structured."
+- Files that will be created from scratch (they don't exist yet to scope).
+
+`context_files` is exclusively the modification target. If you'd answer "to read it" rather than "to change it," it belongs in the description, not here.
+
+Feature design docs under `docs/design/<feature>/` are the exception — those co-change with implementation per CLAUDE.md "Same-PR updates" and belong in `context_files` when the task will edit them.
+
 - Prefer `file:` selectors over `dir:` selectors whenever the expected changes can be named at file level; use `dir:` only when the directory itself is the smallest honest scope.
 - When a task needs precise code context, prefer `symbol:` selectors over whole-file scopes.
 
@@ -43,6 +56,7 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 - `description` should be multi-line markdown when the task is non-trivial.
 - Required fields: `title`, `description`, and `workspace`.
 - Strongly prefer supplying `acceptance_criteria`.
+- Strongly prefer supplying `complexity` (`low`, `medium`, or `hard`) when enough codebase context exists to judge scope.
 - Blank or missing task companion files (`plan.md`, `execution-summary.md`) are treated as blank task fields. Repair them through `orbit.task.update` (`plan` or `execution_summary`), not manual file edits.
 - Orbit fills `created_by`, `planned_by`, and `implemented_by` automatically from execution context when those roles are authored during the task lifecycle.
 - Valid task types are `feature`, `bug`, `refactor`, and `chore`. Use `orbit-track-issues` for agent self-reported friction instead of task types.
@@ -50,11 +64,11 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 ## Optional but Behavior-Affecting Fields
 
 ### Tier 1 - Nudge
-- `complexity: "hard"` trigger: set when the task obviously cannot share a batch (large surface, multi-crate cross-cut, ambiguous design).
+- `complexity: "low" | "medium" | "hard"` metadata: set for most tasks so humans and automation can see expected scope. Use `low` for narrow single-surface work, `medium` for moderate multi-file or modestly uncertain work, and `hard` when the task obviously cannot share a batch (large surface, multi-crate cross-cut, ambiguous design).
   Behavior anchor: `crates/orbit-engine/src/executor/automation/batch/dispatch.rs` `task_prefers_single_batch`.
 - `dependencies: ["ORB-NNNN", ...]` trigger: set when prerequisite tasks must reach a dependency-satisfying status before this task starts.
   Behavior anchor: `crates/orbit-common/src/types/task.rs` `task_dependencies_ready`.
-- `relations: [{"type": "resolves", "target": "F<YYYY>-<MM>-<NNN>"}]` trigger: set when this task closes a tracked friction. On the Review → Done approval transition, the targeted friction is auto-resolved (`status: resolved`, `resolved_at: now`, `resolved_by_task: <this-task-id>`). Drop the structured relation at task-creation time so closure flows from the lifecycle, not a manual `orbit.friction.resolve` follow-up.
+- `relations: [{"type": "resolves", "target": "F<YYYY>-<MM>-<NNN>"}]` trigger: set when this task closes a tracked friction. When the task status is `done` (approval, direct update, or automation handoff), the targeted friction is auto-resolved (`status: resolved`, `resolved_at: now`, `resolved_by_task: <this-task-id>`). Drop the structured relation at task-creation time so closure flows from the lifecycle, not a manual `orbit.friction.resolve` follow-up.
   Behavior anchor: `crates/orbit-core/src/command/task/transitions.rs` `apply_resolves_side_effects`.
 
 ### Tier 2 - Mention
@@ -65,14 +79,14 @@ See the `orbit` skill for the full mapping rule and surface coverage. Examples b
 
 The full `relations` array accepts these typed variants. Only the first two accept non-`ORB-` targets:
 
-- `produces` — this task created the target artifact during execution. Targets: `ORB-NNNNN`, `F<YYYY>-<MM>-<NNN>` (friction), `L<YYYYMMDD>-N` (learning), `ADR-NNNN`. Tracking-only in v1 (no lifecycle side-effect).
-- `resolves` — this task closes or supersedes the target artifact. Same target set as `produces`. **Side-effect when target is a friction**: auto-resolve on Review → Done (see Tier 1 above). Other target kinds are tracked but not state-mutated in v1.
+- `produces` — this task created the target artifact during execution. Targets: `ORB-NNNNN`, `F<YYYY>-<MM>-<NNN>` (friction), `L-NNNN` (learning), `ADR-NNNN`. Tracking-only in v1 (no lifecycle side-effect).
+- `resolves` — this task closes or supersedes the target artifact. Same target set as `produces`. **Side-effect when target is a friction**: auto-resolve when the task status is `done` through approval, direct update, or automation handoff (see Tier 1 above). Other target kinds are tracked but not state-mutated in v1.
 - `blocked_by`, `child_of`, `spawned_from`, `regression_from`, `supersedes`, `related_to` — task-only. Target must be `ORB-NNNNN`; cross-artifact targets are rejected by validation.
 
-Dangling targets (e.g., `resolves` pointing at a non-existent friction) succeed at approval time but emit a `TaskRelationDangling` audit event — they do not roll the task back.
+Dangling targets (e.g., `resolves` pointing at a non-existent friction) succeed at completion time but emit a `TaskRelationDangling` audit event — they do not roll the task back.
 
 ### Tier 3 - Tags
-Tags are indexed by `orbit.semantic.search`; use existing tags where they fit before inventing new ones, because speculative tag soup is costly.
+Tags are part of the task corpus searched by `orbit.search`; use existing tags where they fit before inventing new ones, because speculative tag soup is costly.
 
 ## Task Quality Standards
 
@@ -115,13 +129,14 @@ orbit tool run orbit.task.add --input '{
     "<observable outcome 1>",
     "<observable outcome 2>"
   ],
-  "plan": "",
   "context_files": ["file:src/lib.rs", "dir:src/command", "symbol:src/lib.rs#run:function"],
+  "plan": "",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
+  "complexity": "<low|medium|hard>",
   "type": "<feature|bug|refactor|chore>",
   "model": "<agent-family>" # codex | claude | gemini | grok
-  # Optional: complexity, dependencies, relations, parent_id, source_task_id, tags - see "Optional but Behavior-Affecting Fields"
+  # Optional: dependencies, relations, parent_id, source_task_id, tags - see "Optional but Behavior-Affecting Fields"
 }'
 ```
 
@@ -133,11 +148,13 @@ orbit_task_add({
   "description": "<multi-line markdown>",
   "acceptance_criteria": ["<observable outcome 1>", "<observable outcome 2>"],
   "context_files": ["file:src/lib.rs", "symbol:src/lib.rs#run:function"],
+  "plan": "",
   "workspace": "<absolute_or_relative_repo_path>",
   "priority": "<low|medium|high|critical>",
+  "complexity": "<low|medium|hard>",
   "type": "<feature|bug|refactor|chore>",
   "model": "<agent-family>"
-  # Optional: complexity, dependencies, relations, parent_id, source_task_id, tags - see "Optional but Behavior-Affecting Fields"
+  # Optional: dependencies, relations, parent_id, source_task_id, tags - see "Optional but Behavior-Affecting Fields"
 })
 ```
 
@@ -157,4 +174,5 @@ orbit_task_add({
 
 ## Exit Criteria
 
-The task exists with a strong description, clear acceptance criteria, and enough context for a later planning phase to succeed.
+- The task exists with a strong description, clear acceptance criteria, and enough context for a later planning phase to succeed.
+- `context_files` (when applicable) enumerates only the files/directories/symbols the task will modify or delete, using canonical selectors.

@@ -1,10 +1,13 @@
-use orbit_common::types::{AuditEventStatus, Role, audit_execution_id};
-use orbit_engine::DispatchError;
+use orbit_common::types::{
+    AuditEventStatus, Role, TaskStatus, audit_execution_id, optional_string_list_alias,
+};
+use orbit_engine::{DispatchError, ensure_task_can_enter_workflow};
 use orbit_store::AuditEventInsertParams;
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::runtime::orbit_tool_host::parse_task_ids;
 
 pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, DispatchError> {
     let bundles_raw = input
@@ -82,6 +85,10 @@ pub(super) fn invoke_and_wait(
     input: &Value,
     tool_context: ToolContext,
 ) -> Result<Value, DispatchError> {
+    if let Some(noop) = stale_gate_admission_noop(runtime, action, input)? {
+        return Ok(noop);
+    }
+
     let job_name = input
         .get("job_name")
         .and_then(Value::as_str)
@@ -159,6 +166,157 @@ pub(super) fn invoke_and_wait(
             })
         });
     Ok(first)
+}
+
+fn stale_gate_admission_noop(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+) -> Result<Option<Value>, DispatchError> {
+    let raw_task_ids = optional_string_list_alias(
+        input,
+        &[
+            "admission_task_ids",
+            "admissionTaskIds",
+            "admission-task-ids",
+        ],
+    )
+    .map_err(|err| action_failed(action, err.to_string()))?;
+    let Some(raw_task_ids) = raw_task_ids else {
+        return Ok(None);
+    };
+    let task_ids = parse_task_ids(&serde_json::json!({ "task_ids": raw_task_ids }))
+        .map_err(|err| action_failed(action, err.to_string()))?;
+    let workflow = input
+        .get("admission_workflow")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("worktree_setup");
+
+    let mut task_statuses = Vec::with_capacity(task_ids.len());
+    let mut stale_statuses = Vec::new();
+    let mut admission_errors = Vec::new();
+
+    for task_id in &task_ids {
+        match ensure_task_can_enter_workflow(runtime, task_id, workflow) {
+            Ok(task) => {
+                task_statuses.push(serde_json::json!({
+                    "task_id": task.id,
+                    "status": task.status.to_string(),
+                    "admissible": true,
+                }));
+            }
+            Err(error) => match runtime.get_task(task_id) {
+                Ok(task) => {
+                    let status = task.status;
+                    task_statuses.push(serde_json::json!({
+                        "task_id": task.id,
+                        "status": status.to_string(),
+                        "admissible": false,
+                    }));
+                    if matches!(status, TaskStatus::Review | TaskStatus::Done) {
+                        stale_statuses.push((task_id.clone(), status.to_string()));
+                    } else {
+                        admission_errors.push(error.to_string());
+                    }
+                }
+                Err(_) => admission_errors.push(error.to_string()),
+            },
+        }
+    }
+
+    if !admission_errors.is_empty() {
+        return Err(action_failed(
+            action,
+            format!(
+                "workflow admission check before child dispatch failed: {}",
+                admission_errors.join("; ")
+            ),
+        ));
+    }
+
+    if stale_statuses.is_empty() {
+        return Ok(None);
+    }
+
+    let status_summary = stale_statuses
+        .iter()
+        .map(|(task_id, status)| format!("{task_id}={status}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let reason = format!(
+        "task_gate_pipeline stale/no-op: workflow admission for '{workflow}' skipped child dispatch because {status_summary}"
+    );
+    record_gate_stale_noop(runtime, action, input, &task_ids, &task_statuses, &reason)?;
+    let parent_run_id = input
+        .get("run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+
+    Ok(Some(serde_json::json!({
+        "status": "succeeded",
+        "run_id": format!("stale-noop-{parent_run_id}"),
+        "skipped": true,
+        "reason": reason,
+        "task_statuses": task_statuses,
+    })))
+}
+
+fn record_gate_stale_noop(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+    task_ids: &[String],
+    task_statuses: &[Value],
+    reason: &str,
+) -> Result<(), DispatchError> {
+    let parent_run_id = input
+        .get("run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let payload = serde_json::json!({
+        "task_ids": task_ids,
+        "task_statuses": task_statuses,
+        "reason": reason,
+        "parent_run_id": parent_run_id,
+    });
+    let arguments_json = serde_json::to_string(&payload).map_err(|err| {
+        action_failed(action, format!("serialize gate.stale_noop payload: {err}"))
+    })?;
+    let execution_id = audit_execution_id("audit-gate-stale-noop");
+    let working_directory = runtime.paths().repo_root.to_string_lossy().into_owned();
+
+    runtime
+        .record_audit_event(&AuditEventInsertParams {
+            execution_id,
+            command: "gate.stale_noop".to_string(),
+            subcommand: None,
+            tool_name: None,
+            target_type: Some("task_bundle".to_string()),
+            target_id: task_ids.first().cloned(),
+            role: "admin".to_string(),
+            status: AuditEventStatus::Success,
+            exit_code: 0,
+            duration_ms: 0,
+            working_directory,
+            arguments_json: Some(arguments_json),
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: None,
+            host: std::env::var("HOSTNAME").ok(),
+            pid: std::process::id(),
+            session_id: None,
+            task_id: task_ids.first().cloned(),
+            job_run_id: parent_run_id,
+            activity_id: None,
+            step_index: None,
+        })
+        .map_err(|err| action_failed(action, format!("record gate.stale_noop audit: {err}")))
 }
 
 pub(super) fn pipeline_wait(
@@ -273,6 +431,13 @@ fn pipeline_wait_entry_failure(label: &str, entry: &Value) -> Option<String> {
         Some(error) => format!("{label} run {run_id} status {status}: {error}"),
         None => format!("{label} run {run_id} status {status}"),
     })
+}
+
+fn action_failed(action: &str, message: String) -> DispatchError {
+    DispatchError::DeterministicActionFailed {
+        action: action.to_string(),
+        message,
+    }
 }
 
 pub(super) fn gate_starvation_fail(

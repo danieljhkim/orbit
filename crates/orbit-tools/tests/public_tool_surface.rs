@@ -4,7 +4,34 @@
 
 use std::collections::BTreeSet;
 
+use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
 use orbit_tools::ToolRegistry;
+
+const INACTIVE_TOOL_NAMES: &[&str] = &[
+    "orbit.docs.index",
+    "orbit.docs.migrate",
+    "orbit.docs.add",
+    "orbit.docs.list",
+    "orbit.docs.show",
+    "orbit.task.locks",
+    "orbit.task.locks.release",
+    "orbit.task.locks.reserve",
+    "orbit.semantic.index",
+    "orbit.semantic.install",
+    "orbit.semantic.stats",
+    "orbit.graph.history",
+    "orbit.learning.sync",
+    "orbit.learning.list",
+    "orbit.friction.stats",
+    // ORB-00289: admin/destructive ops — CLI path retains them, agent
+    // MCP surface does not expose them.
+    "orbit.adr.list",
+    "orbit.semantic.uninstall",
+    "orbit.task.delete",
+    "orbit.task.lint",
+    "orbit.learning.comment.delete",
+    "orbit.learning.prune",
+];
 
 #[test]
 fn unused_tools_are_not_registered_in_public_surface() {
@@ -37,6 +64,21 @@ fn unused_tools_are_not_registered_in_public_surface() {
             "removed tool still registered: {removed}"
         );
     }
+
+    let removed_prefix = "orbit.semantic.";
+    for removed in ["related", "search"] {
+        let name = format!("{removed_prefix}{removed}");
+        assert!(
+            !names.contains(name.as_str()),
+            "removed tool still registered: {name}"
+        );
+    }
+
+    let removed_docs_reindex = ["orbit.docs", "reindex"].join(".");
+    assert!(
+        !names.contains(removed_docs_reindex.as_str()),
+        "removed docs reindex tool still registered"
+    );
 }
 
 #[test]
@@ -55,13 +97,8 @@ fn workflow_critical_tools_remain_registered() {
         "github.pr.review",
         "github.pr.review.comment",
         "github.pr.view",
-        "orbit.design.check",
-        "orbit.design.init",
-        "orbit.design.list",
-        "orbit.design.show",
         "orbit.graph.callers",
         "orbit.graph.deps",
-        "orbit.graph.history",
         "orbit.graph.implementors",
         "orbit.graph.overview",
         "orbit.graph.pack",
@@ -73,8 +110,10 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.groundhog.side_effect",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
-        "orbit.semantic.related",
-        "orbit.semantic.search",
+        "orbit.search",
+        // ORB-00289: `orbit.semantic.uninstall` is inactive on the agent
+        // surface; its inactive-classification is covered by
+        // `inactive_ops_tools_*` and `INACTIVE_TOOL_NAMES` above.
         "orbit.task.artifact.put",
         "proc.spawn",
     ] {
@@ -86,23 +125,55 @@ fn workflow_critical_tools_remain_registered() {
 }
 
 #[test]
-fn semantic_search_schema_uses_v2_task_field_names() {
+fn inactive_ops_tools_are_hidden_from_default_registry_surface() {
+    let names = registered_tool_names();
+
+    for inactive in INACTIVE_TOOL_NAMES {
+        assert!(
+            !names.contains(*inactive),
+            "inactive tool must be hidden from default registry schemas: {inactive}"
+        );
+    }
+}
+
+#[test]
+fn inactive_ops_tools_remain_auditable_in_full_registry_surface() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+    let all_names = registry
+        .all_schemas()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<BTreeSet<_>>();
+
+    for inactive in INACTIVE_TOOL_NAMES {
+        assert!(
+            all_names.contains(*inactive),
+            "inactive tool must remain registered for inspection: {inactive}"
+        );
+        assert!(
+            !registry.is_active(inactive),
+            "inactive tool must be marked inactive in the registry: {inactive}"
+        );
+    }
+}
+
+#[test]
+fn global_search_schema_drops_retired_semantic_tuning_params() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
     let schema = registry
-        .get_schema("orbit.semantic.search")
-        .expect("semantic search schema");
-    let field = schema
+        .get_schema("orbit.search")
+        .expect("global search schema");
+    let names = schema
         .parameters
         .iter()
-        .find(|param| param.name == "field")
-        .expect("field parameter");
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
 
-    assert_eq!(
-        field.description,
-        "Optional indexed task field filter, such as title, description, plan, acceptance, or execution_summary."
-    );
+    assert!(!names.contains(&"field"));
+    assert!(!names.contains(&"embedding_model"));
 }
 
 #[test]
@@ -114,7 +185,6 @@ fn friction_surface_supports_artifact_triage() {
         "orbit.friction.list",
         "orbit.friction.resolve",
         "orbit.friction.show",
-        "orbit.friction.stats",
         "orbit.friction.tags",
         "orbit.friction.update",
     ] {
@@ -130,30 +200,70 @@ fn friction_surface_supports_artifact_triage() {
             "destructive friction tool registered: {removed}"
         );
     }
+    assert!(
+        !names.contains("orbit.friction.stats"),
+        "friction stats is CLI-only and must stay hidden from the default registry surface"
+    );
 }
 
 #[test]
-fn task_dependency_params_remain_in_agent_tool_schemas() {
+fn task_add_schema_uses_trimmed_authoring_surface() {
     let mut registry = ToolRegistry::new();
     registry.register_builtins();
 
-    for tool_name in ["orbit.task.add", "orbit.task.update"] {
-        let schema = registry
-            .get_schema(tool_name)
-            .unwrap_or_else(|| panic!("{tool_name} schema"));
-        let dependency_param = schema
-            .parameters
-            .iter()
-            .find(|param| param.name == "dependencies")
-            .unwrap_or_else(|| panic!("{tool_name} dependencies param"));
+    let schema = registry
+        .get_schema("orbit.task.add")
+        .expect("orbit.task.add schema");
+    let names = schema
+        .parameters
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
 
-        assert_eq!(dependency_param.param_type, "string_list");
-        assert!(!dependency_param.required);
+    assert_eq!(
+        names,
+        vec![
+            "title",
+            "description",
+            "workspace",
+            "acceptance_criteria",
+            "tags",
+            "context_files",
+            "priority",
+            "complexity",
+            "type",
+            "relations",
+            "model",
+        ]
+    );
+    for removed in RETIRED_TASK_ADD_INPUT_FIELDS {
         assert!(
-            schema.parameters.iter().any(|param| param.name == "crew"),
-            "{tool_name} should expose crew"
+            !names.contains(removed),
+            "orbit.task.add schema must not expose retired param {removed}"
         );
     }
+}
+
+#[test]
+fn task_update_dependency_params_remain_in_agent_tool_schema() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_schema("orbit.task.update")
+        .expect("orbit.task.update schema");
+    let dependency_param = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "dependencies")
+        .expect("orbit.task.update dependencies param");
+
+    assert_eq!(dependency_param.param_type, "string_list");
+    assert!(!dependency_param.required);
+    assert!(
+        schema.parameters.iter().any(|param| param.name == "crew"),
+        "orbit.task.update should expose crew"
+    );
 }
 
 #[test]

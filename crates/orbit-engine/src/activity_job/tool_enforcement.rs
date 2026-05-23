@@ -17,7 +17,7 @@ pub enum EnforcementDecision {
 
 /// AuditSink wrapper that enforces a tool allowlist at the Orbit layer.
 ///
-/// Usage: Build the inner sink (e.g. JsonlFileSink / InMemorySink), wrap it
+/// Usage: Build the inner sink (e.g. V2SqliteSink / InMemorySink), wrap it
 /// with an EnforcedAuditSink at construction, and pass the wrapper into
 /// AgentLoop::run via the audit parameter. The wrapper intercepts
 /// ToolCallRequested events, checks the name against the allowlist, and (on

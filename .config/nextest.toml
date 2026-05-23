@@ -1,0 +1,8 @@
+nextest-version = { required = "0.9.48" }
+
+[test-groups]
+stateful-runtime = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(orbit-cli) | package(orbit-core)'
+test-group = 'stateful-runtime'

@@ -1,8 +1,16 @@
-# Activity / Job — Design
+---
+summary: "Activity / Job — Design"
+type: design
+title: "Activity / Job — Design"
+owner: codex
+last_updated: 2026-05-16
+status: Draft
+feature: activity-job
+doc_role: design
+tags: ["activity-job"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-16
+# Activity / Job — Design
 
 This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, backend semantics, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
@@ -314,7 +322,7 @@ The loop shares one pipeline map and session map across iterations, which makes 
 
 ### 8.7 Invocation metrics
 
-`orbit metrics` reads knowledge usage from job-run state and agent/tool usage from the SQLite invocation store. It does not scrape `.orbit/state/audit/v2_loop/` or diagnostics JSONL.
+The dashboard metrics endpoints read knowledge usage from job-run state (`/api/metrics/knowledge`) and agent, tool, task, and invocation usage from the SQLite invocation store (`/api/metrics/activity`, `/api/metrics/tools`, `/api/metrics/task/:id`, `/api/metrics/invocations`). They do not scrape `.orbit/state/audit/v2_loop/` or diagnostics JSONL.
 
 V2 jobs persist invocation traces explicitly after [T20260426-0526]. `DispatchOutcome` carries optional trace data; the executor attaches run and step IDs; orbit-core stores canonical agent/model names plus task IDs from rendered input and refreshes the token scoreboard.
 
@@ -504,7 +512,7 @@ Read-only history does not need the same dependencies as live execution. [T20260
 - **[T20260425-0204]** — Make v2 job catalog discovery honor workspace-over-global `MergeByKey` precedence.
 - **[T20260425-2010]** — Refactor `orbit run` task workflow commands and remove workflow-specific history browsers.
 - **[T20260426-0047]** — Make v2 activity catalog discovery honor workspace-over-global `MergeByKey` precedence and remove the public `orbit activity run` command.
-- **[T20260426-0526]** — Restore v2 job invocation trace persistence so `orbit metrics` can report agent and tool usage.
+- **[T20260426-0526]** — Restore v2 job invocation trace persistence so dashboard metrics surfaces can report agent and tool usage.
 - **[T20260426-0519]** — Move file-backed activity/job audit traces under `.orbit/state/audit`.
 - **[T20260426-0705]** — Expose v2 run audit events through `orbit run events` and `orbit run trace`.
 - **[T20260426-0709]** — Align run step selectors on activity `step.id` and move CLI invocation log reading behind orbit-core runtime accessors.

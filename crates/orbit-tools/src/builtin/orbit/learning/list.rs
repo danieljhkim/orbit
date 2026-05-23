@@ -23,9 +23,17 @@ impl Tool for OrbitLearningListTool {
             ToolParam {
                 name: "path".to_string(),
                 description:
-                    "Filter to learnings whose `scope.paths` includes this glob (exact-string match against the stored glob)."
+                    "Filter to learnings whose `scope.paths` glob-contain this filesystem path. A learning matches when any of its scope globs resolves true against the given path."
                         .to_string(),
                 param_type: "string".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "include_remote".to_string(),
+                description:
+                    "Include allocation rows whose body files are not locally readable as remote stubs."
+                        .to_string(),
+                param_type: "boolean".to_string(),
                 required: false,
             },
         ];

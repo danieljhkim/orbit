@@ -1,8 +1,16 @@
-# Auditability — Vision
+---
+summary: "Auditability — Vision"
+type: design
+title: "Auditability — Vision"
+owner: codex
+last_updated: 2026-05-17
+status: Draft
+feature: auditability
+doc_role: vision
+tags: ["auditability"]
+---
 
-**Status:** Draft
-**Owner:** codex
-**Last updated:** 2026-05-17 (ORB-00090)
+# Auditability — Vision
 
 This document captures the questions that remain before Orbit's auditability story matches its product promise end to end. [2_design.md](./2_design.md) is the current implementation; this file names the pressure points that should drive future tasks and ADRs.
 

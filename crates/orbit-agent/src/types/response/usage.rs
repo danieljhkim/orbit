@@ -18,7 +18,9 @@ enum UsageKeyMode {
     TokenBlock,
 }
 
-pub(super) fn sum_usage(documents: &[Value]) -> TokenUsage {
+// Visible through `response.rs` to sibling-layout tests for the file-rooted
+// response module.
+pub(in crate::types) fn sum_usage(documents: &[Value]) -> TokenUsage {
     let mut usage = TokenUsage::default();
     for document in documents {
         collect_usage(document, &mut usage, true, UsageKeyMode::Standard);
@@ -62,7 +64,20 @@ fn collect_usage(
                     && usage_key_mode(key).is_none()
                     && !(has_model_token_usage && key == "roles")
                 {
-                    collect_usage(child, usage, false, UsageKeyMode::Standard);
+                    let allow_child = allow_direct_usage
+                        || matches!(
+                            key.as_str(),
+                            "text"
+                                | "result"
+                                | "response"
+                                | "message"
+                                | "messages"
+                                | "content"
+                                | "final"
+                                | "final_message"
+                                | "output"
+                        );
+                    collect_usage(child, usage, allow_child, UsageKeyMode::Standard);
                 }
             }
         }
@@ -112,7 +127,23 @@ fn usage_from_map(map: &JsonMap, key_mode: UsageKeyMode) -> Option<TokenUsage> {
     };
     let output = match key_mode {
         UsageKeyMode::Standard => first_u64(map, STANDARD_OUTPUT_KEYS),
-        UsageKeyMode::TokenBlock => first_u64(map, TOKEN_BLOCK_OUTPUT_KEYS),
+        // Gemini reports visible output and reasoning ("thoughts") as separate
+        // counters in the same token block; both consume the output budget, so
+        // sum them rather than first-wins. `tool` is the small tool-call channel
+        // and is also part of the output side.
+        UsageKeyMode::TokenBlock => {
+            let visible = first_u64(map, TOKEN_BLOCK_OUTPUT_KEYS);
+            let thoughts = first_u64(map, TOKEN_BLOCK_THOUGHT_KEYS);
+            let tool = first_u64(map, TOKEN_BLOCK_TOOL_KEYS);
+            match (visible, thoughts, tool) {
+                (None, None, None) => None,
+                (v, t, tl) => Some(
+                    v.unwrap_or(0)
+                        .saturating_add(t.unwrap_or(0))
+                        .saturating_add(tl.unwrap_or(0)),
+                ),
+            }
+        }
     };
 
     input.or(cache_read).or(cache_create).or(output)?;
@@ -195,6 +226,11 @@ const TOKEN_BLOCK_OUTPUT_KEYS: &[&str] = &[
     "output",
 ];
 
+const TOKEN_BLOCK_THOUGHT_KEYS: &[&str] =
+    &["thoughts", "thoughtsTokenCount", "thoughts_token_count"];
+
+const TOKEN_BLOCK_TOOL_KEYS: &[&str] = &["tool", "toolTokenCount", "tool_token_count"];
+
 fn first_u64(map: &JsonMap, keys: &[&str]) -> Option<u64> {
     keys.iter().find_map(|key| value_as_u64(map.get(*key)?))
 }
@@ -204,131 +240,5 @@ pub(super) fn value_as_u64(value: &Value) -> Option<u64> {
         Value::Number(number) => number.as_u64(),
         Value::String(raw) => raw.parse::<u64>().ok(),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn gemini_cli_model_token_blocks_are_summed_once_per_model() {
-        let documents = vec![json!({
-            "stats": {
-                "models": {
-                    "gemini-3.1-pro": {
-                        "tokens": {
-                            "input": 10,
-                            "cached": 2,
-                            "candidates": 4,
-                            "total": 999,
-                            "thoughts": 70,
-                            "tool": 30
-                        },
-                        "roles": {
-                            "user": {
-                                "tokens": {
-                                    "input": 10,
-                                    "cached": 2
-                                }
-                            },
-                            "model": {
-                                "tokens": {
-                                    "candidates": 4
-                                }
-                            }
-                        }
-                    },
-                    "gemini-2.5-flash": {
-                        "tokens": {
-                            "prompt": 20,
-                            "cached": "3",
-                            "output": "5",
-                            "total": 28
-                        },
-                        "roles": {
-                            "user": {
-                                "tokens": {
-                                    "prompt": 20
-                                }
-                            },
-                            "model": {
-                                "tokens": {
-                                    "output": 5
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        })];
-
-        assert_eq!(
-            sum_usage(&documents),
-            TokenUsage {
-                input: 30,
-                cache_read: 5,
-                cache_create: 0,
-                output: 9,
-            }
-        );
-    }
-
-    #[test]
-    fn gemini_cli_role_tokens_are_counted_when_model_tokens_are_absent() {
-        let documents = vec![json!({
-            "stats": {
-                "models": {
-                    "gemini-3.1-pro": {
-                        "roles": {
-                            "user": {
-                                "tokens": {
-                                    "input": 7,
-                                    "cached": 1
-                                }
-                            },
-                            "model": {
-                                "tokens": {
-                                    "candidates": 3
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        })];
-
-        assert_eq!(
-            sum_usage(&documents),
-            TokenUsage {
-                input: 7,
-                cache_read: 1,
-                cache_create: 0,
-                output: 3,
-            }
-        );
-    }
-
-    #[test]
-    fn gemini_cli_total_thoughts_and_tool_are_not_folded_into_usage() {
-        let documents = vec![json!({
-            "stats": {
-                "models": {
-                    "gemini-3.1-pro": {
-                        "tokens": {
-                            "total": 999,
-                            "thoughts": 70,
-                            "tool": 30
-                        }
-                    }
-                }
-            }
-        })];
-
-        // TokenUsage has no thoughts/tool fields yet, so these Gemini-only
-        // counts are intentionally ignored rather than mixed into I/O totals.
-        assert_eq!(sum_usage(&documents), TokenUsage::default());
     }
 }

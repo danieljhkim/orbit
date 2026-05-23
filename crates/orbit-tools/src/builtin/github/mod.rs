@@ -122,6 +122,9 @@ pub mod pr_review_comment;
 pub mod pr_view;
 pub mod repo;
 
+#[cfg(test)]
+mod tests;
+
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(pr_create::GithubPrCreateTool);
     registry.register(pr_view::GithubPrViewTool);

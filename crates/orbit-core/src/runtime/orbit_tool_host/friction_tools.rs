@@ -105,9 +105,10 @@ pub(super) fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
         .map(|status| parse_status(&status))
         .transpose()?;
     let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?;
-    if status.is_none() && tags.is_none() {
+    let body = optional_string(&input, "body")?;
+    if status.is_none() && tags.is_none() && body.is_none() {
         return Err(OrbitError::InvalidInput(
-            "orbit.friction.update requires `status` or `tags`".to_string(),
+            "orbit.friction.update requires `status`, `tags`, or `body`".to_string(),
         ));
     }
     let stored = update_friction(
@@ -116,6 +117,7 @@ pub(super) fn update(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
         FrictionUpdateParams {
             status,
             tags,
+            body,
             resolved_by_task: None,
             updated_at: Utc::now(),
         },

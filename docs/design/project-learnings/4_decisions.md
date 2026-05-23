@@ -1,8 +1,16 @@
-# Project Learnings — Decisions
+---
+summary: "Project Learnings — Decisions"
+type: design
+title: "Project Learnings — Decisions"
+owner: claude
+last_updated: 2026-05-17
+status: Draft
+feature: project-learnings
+doc_role: decisions
+tags: ["project-learnings"]
+---
 
-**Status:** Draft
-**Owner:** claude
-**Last updated:** 2026-05-17 (ORB-00098)
+# Project Learnings — Decisions
 
 ADR-style log of non-obvious project-learnings decisions. Each entry names the pressure, the choice, and the tradeoff. Entries are keyed by global ADR ID and ordered ascending. New entries are allocated via `orbit.adr.add` *before* the local heading is written — see [../CONVENTIONS.md §4](../CONVENTIONS.md) and the `orbit-adr` skill.
 
@@ -20,13 +28,13 @@ Historical note: entries below were originally numbered ADR-001 through ADR-006 
 
 | Approach | Profile |
 |----------|---------|
-| **Pull-only via search tool** | An `orbit.learning.search` MCP tool. Agents query when they think to. Lowest implementation cost; depends entirely on agent discipline. |
+| **Pull-only via search tool** | An `orbit.search` MCP tool (with `kind: "learning"`). Agents query when they think to. Lowest implementation cost; depends entirely on agent discipline. |
 | **Push at session start** | All learnings (or an agent-curated subset) load into agent context at session start, like `CLAUDE.md` does. No discipline required, but unscoped and noisy at scale. |
 | **Push at the moment of action** | Scoped injection triggered by the file path or task an agent is about to touch. Higher implementation cost; matches discoverability cost to relevance value. |
 
 The repeated failure mode the system exists to prevent is *agents not knowing they should look*. Pull-only inherits that failure mode wholesale: the agent that needed the learning most — the one that forgot the rule — is the one who won't think to query. Session-start push avoids the discipline problem but punishes every session with content that may not apply.
 
-**Decision.** Phase 1 ships push-at-the-moment-of-action across three layers: engine pre-prompt injection (universal, task-scoped), MCP tool-response sidecar (cross-agent, file-path-scoped), and Claude Code `PreToolUse` hook (Claude Code only, edit-scoped). A pull surface (`orbit.learning.search`, `orbit-learnings` skill) ships alongside as a complement, not a substitute.
+**Decision.** Phase 1 ships push-at-the-moment-of-action across three layers: engine pre-prompt injection (universal, task-scoped), MCP tool-response sidecar (cross-agent, file-path-scoped), and Claude Code `PreToolUse` hook (Claude Code only, edit-scoped). A pull surface (`orbit.search` with `kind: "learning"`, `orbit-learnings` skill) ships alongside as a complement, not a substitute.
 
 **Consequences.**
 - Agents get relevant learnings without having to query — the discoverability failure mode is closed.
@@ -97,7 +105,7 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 | **Path globs** | Match against file paths the agent is about to touch. Stable shape, simple matcher (reuses `orbit-policy`'s glob engine). Brittle to file renames. |
 | **Tags** | Free-form labels. Survive renames. Require the author to anticipate the categorization. |
 | **Symbol IDs** | Match against knowledge-graph symbols. Survive renames cleanly. Couples to graph rebuilds. |
-| **Semantic similarity** | Match by embedding distance to current edit context. Catches relevance the other axes miss. Depends on semantic-search infrastructure. |
+| **Semantic similarity** | Match by embedding distance to current edit context. Catches relevance the other axes miss. Depends on orbit-search infrastructure. |
 
 | Ranking | Profile |
 |---------|---------|
@@ -105,14 +113,14 @@ The cross-workspace case ([3_vision.md §1.4](./3_vision.md)) is real but second
 | **Manual `priority`** | Author-supplied. Honest signal when used; degenerates to "everything is high priority" without curation discipline. |
 | **Semantic similarity** | Best signal. Requires embeddings. Cost = embed every learning + run cosine on every query. |
 
-Phase 1's binding constraint is: ship before semantic-search reaches Accepted ([T20260510-3]). That rules out semantic similarity for both scope and ranking. Symbol-aware scope is *technically* available — the knowledge graph already exists — but coupling the learning store to graph rebuilds adds dependency surface and mainly pays off when fused with semantic ranking. Doing one without the other yields a clunky middle state.
+Phase 1's binding constraint is: ship before orbit-search reaches Accepted ([T20260510-3]). That rules out semantic similarity for both scope and ranking. Symbol-aware scope is *technically* available — the knowledge graph already exists — but coupling the learning store to graph rebuilds adds dependency surface and mainly pays off when fused with semantic ranking. Doing one without the other yields a clunky middle state.
 
 **Decision.** Phase 1 supports two scope axes, evaluated as logical OR: path globs (matched via the `orbit-policy` glob engine) and tags (matched as exact strings). The schema reserves `scope.symbols` and `scope.semantic_seed` fields for phase 2 forward compatibility, but neither is read in phase 1. Initial ranking used `updated_at` desc with optional `priority`; [ADR-0157] adds decay-weighted upvotes ahead of those tie-breakers.
 
-Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symbol-aware scope and semantic ranking once semantic-search ships.
+Phase 2 ([3_vision.md §1.1](./3_vision.md), [§1.2](./3_vision.md)) layers symbol-aware scope and semantic ranking once orbit-search ships.
 
 **Consequences.**
-- Phase 1 is implementable in parallel with semantic-search work, not gated on it.
+- Phase 1 is implementable in parallel with orbit-search work, not gated on it.
 - Path globs cover the common case (most learnings are file-area-scoped) and tags cover the cross-cutting case.
 - The schema is forward-compatible; phase 2 is additive, not a migration.
 - Cost: path globs are brittle to renames; the documented mitigation is "run `orbit learning prune --stale-only` after refactors that move files," which is operational discipline, not automation. Ranking still lacks semantic similarity until phase 2, even after [ADR-0157]'s vote signal.
@@ -159,7 +167,7 @@ Alternatives considered:
 
 **Decision.** Each learning may have `.orbit/learnings/<id>/votes.jsonl`, created lazily on first vote. Each row records `learning_id`, `voter_model`, `voted_at`, and `task_id`. V1 rejects votes without `task_id`; idempotency key is `(learning_id, voter_model, task_id)`. Search ranking filters by scope first, then sorts by decay-weighted vote score, `priority`, `updated_at`, and `id`. Default half-life is 180 days; `ORBIT_LEARNING_VOTE_HALF_LIFE_DAYS=0` disables decay for raw-count behavior.
 
-Votes are derived from per-learning JSONL on read. `orbit learning reindex` validates vote files but does not rewrite them or mirror them into SQLite.
+Votes are derived from per-learning JSONL on read. `orbit learning sync` validates vote files but does not rewrite them or mirror them into SQLite.
 
 **Consequences.**
 - Load-bearing learnings accrue a ranking signal without mutating the YAML body or bumping `updated_at`.

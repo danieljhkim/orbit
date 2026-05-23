@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
-use orbit_common::types::{AuditEvent, AuditEventStatus, AuditStats, OrbitError};
+use orbit_common::types::{
+    AuditEvent, AuditEventStatus, AuditStats, OrbitError, audit_execution_id,
+};
 use orbit_store::{
-    AuditEventFilter, AuditEventInsertParams, AuditToolCallCountsByRole,
-    AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
+    AuditEventFilter, AuditEventInsertParams, AuditRoleAggregate, AuditToolAggregate,
+    AuditToolCallCountsByRole, AuditToolCallCountsBySurfaceAndRole, AuditTopToolCall,
 };
 
 use crate::OrbitRuntime;
@@ -19,9 +21,22 @@ impl OrbitRuntime {
         role: Option<String>,
         limit: usize,
     ) -> Result<Vec<AuditEvent>, OrbitError> {
+        self.list_audit_events_with_kind(since, tool, None, status, role, limit)
+    }
+
+    pub fn list_audit_events_with_kind(
+        &self,
+        since: Option<DateTime<Utc>>,
+        tool: Option<String>,
+        target_type: Option<String>,
+        status: Option<AuditEventStatus>,
+        role: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<AuditEvent>, OrbitError> {
         self.stores().audit_events().list(&AuditEventFilter {
             since,
             tool_name: tool,
+            target_type,
             status,
             role,
             limit,
@@ -69,6 +84,52 @@ impl OrbitRuntime {
 
     pub fn record_audit_event(&self, params: &AuditEventInsertParams) -> Result<(), OrbitError> {
         self.stores().audit_events().insert(params)
+    }
+
+    pub fn record_id_allocation_audit(&self, kind: &str, id: &str) -> Result<(), OrbitError> {
+        let worktree_root = self
+            .paths()
+            .local_dir
+            .as_path()
+            .parent()
+            .map(|path| path.to_path_buf())
+            .unwrap_or_else(|| self.paths().local_dir.clone());
+        let payload = serde_json::json!({
+            "kind": kind,
+            "id": id,
+            "worktree_root": worktree_root.to_string_lossy(),
+        });
+        let arguments_json = serde_json::to_string(&payload).map_err(|error| {
+            OrbitError::Execution(format!("serialize id allocation audit: {error}"))
+        })?;
+        self.record_audit_event(&AuditEventInsertParams {
+            execution_id: audit_execution_id("audit-id-allocation"),
+            command: "id".to_string(),
+            subcommand: Some("allocate".to_string()),
+            tool_name: Some(format!("orbit.{kind}.add")),
+            target_type: Some("id_allocation".to_string()),
+            target_id: Some(id.to_string()),
+            role: "admin".to_string(),
+            status: AuditEventStatus::Success,
+            exit_code: 0,
+            duration_ms: 0,
+            working_directory: self.paths().repo_root.to_string_lossy().into_owned(),
+            arguments_json: Some(arguments_json),
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: None,
+            host: std::env::var("HOSTNAME").ok(),
+            pid: std::process::id(),
+            session_id: None,
+            task_id: None,
+            job_run_id: std::env::var("ORBIT_RUN_ID").ok().filter(|s| !s.is_empty()),
+            activity_id: std::env::var("ORBIT_ACTIVITY_ID")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            step_index: std::env::var("ORBIT_STEP_INDEX")
+                .ok()
+                .and_then(|s| s.parse().ok()),
+        })
     }
 
     /// Hourly count buckets `(rfc3339_hour_start, count)` for audit events at or
@@ -120,9 +181,43 @@ impl OrbitRuntime {
     ) -> Result<Vec<AuditTopToolCall>, OrbitError> {
         self.stores().audit_events().top_tool_calls(since, limit)
     }
+
+    /// Per-tool aggregate of audit events at or after `since`. One row per
+    /// distinct `tool_name` (NULL folded into `"unknown"`), each carrying
+    /// `total`, `failures`, MCP/CLI surface counts, and `avg_duration_ms`.
+    /// Backs the audit-summary side panel.
+    pub fn audit_event_aggregates_by_tool(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditToolAggregate>, OrbitError> {
+        self.stores().audit_events().aggregates_by_tool(since)
+    }
+
+    /// Per-role aggregate of audit events at or after `since`, with the
+    /// MCP-vs-CLI surface split (`mcp` = `subcommand='run-mcp'`, `cli` =
+    /// `subcommand='run'`). Drives the Role-split and MCP-vs-CLI cards.
+    pub fn audit_event_aggregates_by_role(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<AuditRoleAggregate>, OrbitError> {
+        self.stores().audit_events().aggregates_by_role(since)
+    }
+
+    /// Sorted `duration_ms` values for audit events with NULL `tool_name`
+    /// at or after `since`. Companion to [`Self::audit_event_aggregates_by_tool`]
+    /// for computing percentiles of the synthetic `"unknown"` bucket.
+    pub fn audit_event_durations_null_tool(
+        &self,
+        since: &DateTime<Utc>,
+    ) -> Result<Vec<i64>, OrbitError> {
+        self.stores().audit_events().durations_null_tool(since)
+    }
 }
 
-pub(crate) fn compute_p95(sorted_durations: &[i64]) -> i64 {
+/// Nearest-rank p95 over a slice of `duration_ms` values that the caller has
+/// already sorted ascending. Returns 0 for an empty slice. Shared with
+/// callers that fetch `audit_event_durations_*` directly.
+pub fn compute_p95(sorted_durations: &[i64]) -> i64 {
     if sorted_durations.is_empty() {
         return 0;
     }

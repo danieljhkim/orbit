@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 id: ADR-0156
 title: Collapse agent identity to family and move model strings to configuration
 status: accepted
@@ -10,6 +10,8 @@ related_features:
 - agent-families
 related_tasks:
 - ORB-00080
+tags: []
+paths: []
 supersedes: []
 legacy_ids:
 - agent-families/ADR-0154

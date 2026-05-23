@@ -18,7 +18,7 @@ use orbit_knowledge::graph::nodes::{
 use orbit_knowledge::graph::object_store::{GraphObjectStore, RefName, resolve_graph_read_target};
 use orbit_knowledge::pipeline::context::BuildConfig;
 use orbit_knowledge::pipeline::{RefreshStatus, ensure_fresh, run_build};
-use orbit_knowledge::{KnowledgeStore, Selector};
+use orbit_knowledge::{KnowledgeEntryKind, KnowledgeStore, Selector};
 use tempfile::TempDir;
 
 #[test]
@@ -454,15 +454,11 @@ fn pack_default_refreshes_missing_worktree_ref_before_fallback()
     let resolved =
         graph_store.resolve_ref(&read_target.requested, read_target.fallback.as_ref())?;
     assert!(!resolved.used_fallback);
-    let entries = result
-        .pack
-        .get("entries")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| io_error("pack entries missing".to_string()))?;
+    let entries = &result.pack.entries;
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0]["kind"], "leaf");
-    assert_eq!(entries[0]["name"], "feature_pack_graph");
-    assert!(result.pack.get("diagnostics").is_none());
+    assert_eq!(entries[0].kind, KnowledgeEntryKind::Leaf);
+    assert_eq!(entries[0].name.as_deref(), Some("feature_pack_graph"));
+    assert!(result.pack.diagnostics.is_none());
 
     let second = pack::run(PackInput {
         context,
@@ -472,7 +468,7 @@ fn pack_default_refreshes_missing_worktree_ref_before_fallback()
         selector_timeout_ms: 15_000,
     })?;
     assert!(second.auto_refresh_skipped);
-    assert!(second.pack.get("diagnostics").is_none());
+    assert!(second.pack.diagnostics.is_none());
     Ok(())
 }
 
@@ -578,7 +574,7 @@ fn pack_regression_selector_opens_from_branch_ref_layout() -> Result<(), Box<dyn
     })?;
 
     let store = KnowledgeStore::open(&knowledge_dir, &build_ref, None, None)?;
-    let selector: Selector = "symbol:crates/orbit-cli/src/command/observe/graph.rs#<GraphSearchArgs as Execute>::execute:method"
+    let selector: Selector = "symbol:crates/orbit-cli/src/command/graph/search.rs#<GraphSearchArgs as Execute>::execute:method"
         .parse()?;
     let pack = store.pack(&[selector])?;
 
@@ -586,7 +582,7 @@ fn pack_regression_selector_opens_from_branch_ref_layout() -> Result<(), Box<dyn
     assert!(pack.unresolved_selectors.is_empty());
     assert_eq!(
         pack.entries[0].selector,
-        "symbol:crates/orbit-cli/src/command/observe/graph.rs#<GraphSearchArgs as Execute>::execute:method"
+        "symbol:crates/orbit-cli/src/command/graph/search.rs#<GraphSearchArgs as Execute>::execute:method"
     );
     Ok(())
 }
