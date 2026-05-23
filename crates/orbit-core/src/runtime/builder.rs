@@ -61,7 +61,14 @@ pub(crate) fn build_context_from_roots(
 
     let task_backends = build_v2_task_backends(global_root, &paths)?;
     let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
-    let _import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
+    let import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
+    if import_report.skipped_records() {
+        tracing::warn!(
+            workspace_id = %workspace_id,
+            audit_events_skipped = import_report.audit_events_skipped,
+            "skipped malformed legacy state records during SQLite import",
+        );
+    }
     let id_allocator = IdAllocator::open(IdAllocatorConfig::new(
         persistence.semantic_db.clone(),
         paths.state_dir.join(".id_alloc.lock"),

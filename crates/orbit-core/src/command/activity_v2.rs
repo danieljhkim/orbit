@@ -171,6 +171,7 @@ impl OrbitRuntime {
 mod tests {
     use super::*;
 
+    use crate::V2AuditEventFilter;
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -247,17 +248,25 @@ spec:
             .run_activity_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
             .expect("direct activity run succeeds");
 
-        let events = runtime
-            .list_v2_audit_events(crate::V2AuditEventFilter {
+        let rows = runtime
+            .list_v2_audit_events(V2AuditEventFilter {
                 run_id: Some(result.run_id.clone()),
                 ..Default::default()
             })
             .expect("list v2 audit events");
-        assert!(
-            !events.is_empty(),
-            "activity run should emit at least one audit event"
+        let run_started = rows
+            .iter()
+            .find(|row| row.event_type == "run.started")
+            .expect("run.started audit row");
+        let first_event: serde_json::Value =
+            serde_json::from_str(&run_started.payload_json).expect("parse run.started");
+        assert_eq!(
+            first_event
+                .get("agent_identity")
+                .and_then(serde_json::Value::as_str),
+            Some(SYSTEM_AUDIT_IDENTITY)
         );
-        assert_eq!(events[0].agent_identity, SYSTEM_AUDIT_IDENTITY);
+        assert_eq!(run_started.agent_identity, SYSTEM_AUDIT_IDENTITY);
     }
 
     #[cfg(unix)]
@@ -274,16 +283,16 @@ spec:
         assert!(!result.success);
         assert_eq!(result.message.as_deref(), Some("exit 7 not in [0]"));
 
-        let events = runtime
-            .list_v2_audit_events(crate::V2AuditEventFilter {
+        let rows = runtime
+            .list_v2_audit_events(V2AuditEventFilter {
                 run_id: Some(result.run_id.clone()),
                 ..Default::default()
             })
             .expect("list v2 audit events");
-        let run_finished = events
+        let run_finished = rows
             .iter()
-            .find(|e| e.payload_json.contains(r#""body_kind":"run_finished""#))
-            .expect("run_finished audit event");
+            .find(|row| row.event_type == "run.finished")
+            .expect("run.finished audit row");
         let event: serde_json::Value =
             serde_json::from_str(&run_finished.payload_json).expect("parse run_finished");
         assert_eq!(

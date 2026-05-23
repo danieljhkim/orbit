@@ -38,7 +38,7 @@ mod error;
 
 use std::sync::Arc;
 
-use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
+use orbit_common::types::{LearningInjectionState, OrbitError, ToolSchema, ToolSessionContext};
 use rmcp::ServiceExt;
 use rmcp::transport::io::stdio;
 use serde_json::Value;
@@ -60,6 +60,35 @@ pub trait McpHost: Send + Sync + 'static {
         input: Value,
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError>;
+
+    /// L-0043: sidecar internals use host extensions so runtime-backed MCP
+    /// hosts can keep the client safe surface narrow.
+    fn learning_candidates_for_path(
+        &self,
+        path: &str,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.call_tool(
+            "orbit.learning.list",
+            serde_json::json!({ "path": path }),
+            session_context,
+        )
+    }
+
+    fn get_session_learning_state(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        Ok(None)
+    }
+
+    fn upsert_session_learning_state(
+        &self,
+        _session_id: &str,
+        _state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        Ok(())
+    }
 }
 
 /// Serve the given [`McpHost`] over an MCP stdio transport.

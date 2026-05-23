@@ -323,7 +323,7 @@ fn run_pretooluse_payload(
     run_pretooluse_input(runtime, &stdin, format, start)
 }
 
-pub(crate) fn run_pretooluse_input(
+pub fn run_pretooluse_input(
     runtime: &OrbitRuntime,
     stdin: &str,
     format: HookOutputFormat,

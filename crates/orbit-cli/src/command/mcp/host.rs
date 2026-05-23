@@ -10,13 +10,16 @@
 
 use std::time::Instant;
 
-use orbit_common::types::{AuditEventStatus, ToolSchema, ToolSessionContext, audit_execution_id};
+use orbit_common::types::{
+    AuditEventStatus, LearningInjectionState, ToolSchema, ToolSessionContext, audit_execution_id,
+};
 use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
 use orbit_core::{
-    AuditEventInsertParams, NotFoundKind, OrbitError, OrbitRuntime, redact_sensitive_env_text,
+    AuditEventInsertParams, LearningSearchParams, NotFoundKind, OrbitError, OrbitRuntime,
+    redact_sensitive_env_text,
 };
 use orbit_mcp::McpHost;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";
 
@@ -158,6 +161,48 @@ impl McpHost for RuntimeMcpHost {
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
         audited_mcp_call_with_session_context(&self.runtime, name, input, session_context)
+    }
+
+    fn learning_candidates_for_path(
+        &self,
+        path: &str,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        // L-0043: this is adapter-internal lookup, not a client MCP tool call.
+        let rows = self.runtime.search_learnings(LearningSearchParams {
+            path: Some(path.to_string()),
+            tag: None,
+            query: None,
+            limit: None,
+        })?;
+        Ok(Value::Array(
+            rows.into_iter()
+                .map(|row| {
+                    json!({
+                        "id": row.learning.id,
+                        "summary": row.learning.summary,
+                        "priority": row.learning.priority,
+                        "updated_at": row.learning.updated_at.to_rfc3339(),
+                    })
+                })
+                .collect(),
+        ))
+    }
+
+    fn get_session_learning_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        self.runtime.get_session_learning_state(session_id)
+    }
+
+    fn upsert_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        self.runtime
+            .upsert_session_learning_state(session_id, state)
     }
 }
 

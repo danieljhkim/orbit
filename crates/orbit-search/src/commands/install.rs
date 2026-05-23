@@ -730,7 +730,14 @@ fn run_companion_fd_for_model_download(
     if pid == 0 {
         // SAFETY: fd references the opened companion file, argv/envp are
         // null-terminated pointer arrays whose CString storage is alive across fork.
+        // The child clears FD_CLOEXEC before fexecve so Linux can execute a
+        // shebang script descriptor through its interpreter; the parent keeps
+        // its original descriptor flags because fork copied the fd table.
         unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                libc::_exit(126);
+            }
             libc::fexecve(fd, argv_ptrs.as_ptr(), env_ptrs.as_ptr());
             libc::_exit(127);
         }

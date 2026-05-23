@@ -21,7 +21,6 @@ use std::sync::{Arc, RwLock};
 
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, ToolSessionContext};
 
-use self::learning_sidecar::load_learning_state_for_session;
 use crate::McpHost;
 
 /// An rmcp [`ServerHandler`] that delegates tool listing and tool execution to
@@ -61,11 +60,7 @@ impl OrbitToolServer {
         let key = learning_session_id
             .clone()
             .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string());
-        let state = learning_session_id
-            .as_deref()
-            .and_then(load_learning_state_for_session)
-            .unwrap_or_default();
-        learning_states.insert(key, state);
+        learning_states.insert(key, LearningInjectionState::default());
         Self {
             host,
             name_map: RwLock::new(HashMap::new()),
