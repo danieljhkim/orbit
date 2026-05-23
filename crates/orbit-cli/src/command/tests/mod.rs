@@ -3,7 +3,7 @@
 
 mod init;
 
-use clap::Parser;
+use clap::{Parser, error::ErrorKind};
 
 use super::{
     Cli, Commands,
@@ -15,6 +15,16 @@ use super::{
     semantic::{SemanticIndexKindArg, SemanticSubcommand},
     web::WebSubcommand,
 };
+
+fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
+    let error = match Cli::try_parse_from(args.iter().copied()) {
+        Ok(_) => panic!("form should be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), kind, "{error}");
+    let message = error.to_string();
+    assert!(message.contains(expected), "{message}");
+}
 
 #[test]
 fn cli_parses_mcp_init() {
@@ -214,12 +224,20 @@ fn cli_parses_docs_index() {
 
 #[test]
 fn cli_rejects_docs_reindex() {
-    assert!(Cli::try_parse_from(["orbit", "docs", "reindex"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "docs", "reindex"],
+        ErrorKind::InvalidSubcommand,
+        "unrecognized subcommand 'reindex'",
+    );
 }
 
 #[test]
 fn cli_rejects_learning_reindex() {
-    assert!(Cli::try_parse_from(["orbit", "learning", "reindex"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "learning", "reindex"],
+        ErrorKind::InvalidSubcommand,
+        "unrecognized subcommand 'reindex'",
+    );
 }
 
 #[test]
@@ -330,44 +348,83 @@ fn cli_parses_top_level_search_tag_filter() {
 
 #[test]
 fn cli_rejects_search_query_with_semantic_neighbor() {
-    assert!(Cli::try_parse_from(["orbit", "search", "query", "ORB-1"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "search", "query", "ORB-1"],
+        ErrorKind::UnknownArgument,
+        "unexpected argument 'ORB-1'",
+    );
 }
 
 #[test]
 fn cli_rejects_search_related_flag() {
     let legacy_flag = concat!("--", "related");
-    assert!(Cli::try_parse_from(["orbit", "search", legacy_flag, "ORB-1"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "search", legacy_flag, "ORB-1"],
+        ErrorKind::UnknownArgument,
+        "unexpected argument '--related'",
+    );
 }
 
 #[test]
 fn cli_rejects_search_semantic_flag() {
-    assert!(Cli::try_parse_from(["orbit", "search", "--semantic", "ORB-1"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "search", "--semantic", "ORB-1"],
+        ErrorKind::UnknownArgument,
+        "unexpected argument '--semantic'",
+    );
 }
 
 #[test]
 fn cli_rejects_retired_search_field_and_model_flags() {
-    assert!(Cli::try_parse_from(["orbit", "search", "query", "--field", "title"]).is_err());
-    assert!(Cli::try_parse_from(["orbit", "search", "query", "--model", "bge-small"]).is_err());
-    assert!(
-        Cli::try_parse_from(["orbit", "search", "similar", "ORB-1", "--field", "title"]).is_err()
-    );
-    assert!(
-        Cli::try_parse_from(["orbit", "search", "path", "crates/", "--model", "bge-small"])
-            .is_err()
-    );
+    for (args, retired_flag) in [
+        (
+            &["orbit", "search", "query", "--field", "title"][..],
+            "--field",
+        ),
+        (
+            &["orbit", "search", "query", "--model", "bge-small"][..],
+            "--model",
+        ),
+        (
+            &["orbit", "search", "similar", "ORB-1", "--field", "title"][..],
+            "--field",
+        ),
+        (
+            &["orbit", "search", "path", "crates/", "--model", "bge-small"][..],
+            "--model",
+        ),
+    ] {
+        assert_cli_rejects(
+            args,
+            ErrorKind::UnknownArgument,
+            &format!("unexpected argument '{retired_flag}'"),
+        );
+    }
 }
 
 #[test]
 fn cli_rejects_retired_search_path_flag() {
-    assert!(Cli::try_parse_from(["orbit", "search", "--path", "crates/"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "search", "--path", "crates/"],
+        ErrorKind::UnknownArgument,
+        "unexpected argument '--path'",
+    );
 }
 
 #[test]
 fn cli_rejects_top_level_serve() {
-    assert!(Cli::try_parse_from(["orbit", "serve"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "serve"],
+        ErrorKind::InvalidSubcommand,
+        "unrecognized subcommand 'serve'",
+    );
 }
 
 #[test]
 fn cli_rejects_down_alias() {
-    assert!(Cli::try_parse_from(["orbit", "mcp", "down"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "mcp", "down"],
+        ErrorKind::InvalidSubcommand,
+        "unrecognized subcommand 'down'",
+    );
 }

@@ -8,7 +8,7 @@ mod support;
 
 // Content moved from inline #[cfg(test)] mod tests in run/mod.rs per ORB-00221.
 
-use clap::Parser;
+use clap::{Parser, error::ErrorKind};
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::run_audit::RunAuditEvent;
 use serde_json::{Value, json};
@@ -23,6 +23,16 @@ fn parse_run(args: &[&str]) -> RunCommand {
         Commands::Run(command) => command,
         _ => panic!("expected run command"),
     }
+}
+
+fn assert_cli_rejects(args: &[&str], kind: ErrorKind, expected: &str) {
+    let error = match Cli::try_parse_from(args.iter().copied()) {
+        Ok(_) => panic!("form should be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), kind, "{error}");
+    let message = error.to_string();
+    assert!(message.contains(expected), "{message}");
 }
 
 #[test]
@@ -115,7 +125,11 @@ fn parses_run_job_unchanged() {
 
 #[test]
 fn rejects_positional_job_fallback() {
-    assert!(Cli::try_parse_from(["orbit", "run", "task_auto_pipeline", "--json"]).is_err());
+    assert_cli_rejects(
+        &["orbit", "run", "task_auto_pipeline", "--json"],
+        ErrorKind::InvalidSubcommand,
+        "unrecognized subcommand 'task_auto_pipeline'",
+    );
 }
 
 #[test]
@@ -375,8 +389,16 @@ spec:
 
 #[test]
 fn rejects_removed_duel_history_forms() {
-    assert!(Cli::try_parse_from(["orbit", "run", "duel", "list"]).is_err());
-    assert!(Cli::try_parse_from(["orbit", "run", "duel", "show"]).is_err());
+    for args in [
+        &["orbit", "run", "duel", "list"][..],
+        &["orbit", "run", "duel", "show"][..],
+    ] {
+        assert_cli_rejects(
+            args,
+            ErrorKind::InvalidSubcommand,
+            "unrecognized subcommand 'duel'",
+        );
+    }
 }
 
 fn test_audit_event(
