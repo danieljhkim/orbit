@@ -69,7 +69,8 @@
       "mcp__orbit__orbit_learning_upvote",
       "mcp__orbit__orbit_task_add",
       "mcp__orbit__orbit_task_artifact_put",
-      "mcp__orbit__orbit_task_list"
+      "mcp__orbit__orbit_task_list",
+      "mcp__orbit__orbit_task_show"
       
     ],
     "deny": [
