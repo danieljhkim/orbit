@@ -23,6 +23,19 @@ release workflow signs `orbit-checksums.txt` as `orbit-checksums.txt.sig`;
 both `install.sh` and the npm postinstall authenticate that signature before
 trusting release-hosted SHA-256 values.
 
+The installers carry a small release-signing trust set, not a single forever
+key:
+
+- `orbit-release-2026-05-primary` — current signing path, valid through
+  `2027-12-31`, not revoked.
+- `orbit-release-2026-05-successor` — pre-staged successor signing path,
+  valid through `2028-12-31`, not revoked.
+
+During verification the installers try each known public key, then reject a
+matching key if its `not_after` date has passed or its `revoked_at` field is
+set. A signature that matches none of the trusted keys is rejected as
+untrusted.
+
 ## Steps to cut a release
 
 Each step names the exact file or command. Do them in order.
@@ -129,8 +142,49 @@ Installer environment overrides are trust-boundary changes:
   authenticity, so installers require
   `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` and log when the
   override is active.
-- Follow-up task `ORB-00270` tracks key rotation / multi-key support beyond
-  this first pinned release key.
+- `ORBIT_RELEASE_TRUSTED_KEYS_FILE` exists for deterministic installer tests
+  and emergency operations that need a full replacement trust set with key
+  IDs, `not_after`, and `revoked_at` metadata. Each record is
+  `key_id|not_after|revoked_at|public_key_path`; empty `not_after` means no
+  expiry and empty `revoked_at` means active. It also requires
+  `ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1`.
+
+## Release signing key rotation and revocation
+
+Normal rotation uses an overlap window:
+
+1. Generate the successor keypair offline. Add the public half to the trust
+   set in both `install.sh` and
+   [`plugin/npm/scripts/install-binary.js`](../plugin/npm/scripts/install-binary.js)
+   with a new key ID and `not_after` date. Keep the old active key until at
+   least one npm package containing both keys has been published.
+2. Publish a release and npm package that still signs with the old key, but
+   whose installers trust both old and new keys.
+3. Update `ORBIT_RELEASE_SIGNING_KEY_PEM` and
+   [`plugin/npm/release-signing.pub`](../plugin/npm/release-signing.pub) to the
+   successor key. Cut the next release signed by the successor key.
+4. After the overlap window, remove the old key from the trusted set or set
+   its `revoked_at` date if it should remain visible for audit history.
+
+Emergency revocation is intentionally more disruptive:
+
+1. Mark the compromised key record with `revoked_at: YYYY-MM-DD` in both
+   installers and publish a patch release signed by a non-revoked key.
+2. Update `ORBIT_RELEASE_SIGNING_KEY_PEM` and `release-signing.pub` to the
+   replacement key before cutting that patch release.
+3. Deprecate every already-published npm version whose postinstall still
+   trusts the compromised key, for example:
+
+   ```bash
+   npm deprecate '@orbit-tools/cli@<=X.Y.Z' \
+     'Release signing key revoked; upgrade to a patched @orbit-tools/cli.'
+   ```
+
+   npm packages are immutable after publish. Deprecation warns users and
+   install tooling, but old package tarballs still contain their old trust
+   set. Users pinned to a deprecated package can still run that package's
+   postinstall unless their package manager blocks deprecations, so the
+   release announcement must tell them to upgrade.
 
 Because npm publish is manual, the on-tag smoke run will fail if it fires
 before step 7 completes. That is expected and not actionable on its own;
