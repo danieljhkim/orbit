@@ -6,6 +6,15 @@ use serde::{Deserialize, Serialize};
 /// versioned independently. This constant is the envelope schema itself.
 pub const AUDIT_ENVELOPE_SCHEMA_VERSION: u32 = 1;
 
+pub const V2_EVENT_TYPE_FS_CALL_DENIED: &str = "fs.call.denied";
+pub const V2_EVENT_TYPE_TOOL_DENIED: &str = "tool.denied";
+pub const V2_EVENT_TYPE_STEP_DENIED: &str = "step.denied";
+pub const V2_DENIAL_EVENT_TYPES: &[&str] = &[
+    V2_EVENT_TYPE_FS_CALL_DENIED,
+    V2_EVENT_TYPE_TOOL_DENIED,
+    V2_EVENT_TYPE_STEP_DENIED,
+];
+
 /// Common envelope fields wrapping every v2 audit event (§7).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct V2AuditEnvelope {
@@ -175,6 +184,39 @@ pub enum V2AuditEventKind {
         harness_version: Option<String>,
         timed_out: bool,
     },
+}
+
+impl V2AuditEventKind {
+    pub fn event_type(&self) -> &'static str {
+        match self {
+            V2AuditEventKind::RunStarted { .. } => "run.started",
+            V2AuditEventKind::RunFinished { .. } => "run.finished",
+            V2AuditEventKind::StepStarted { .. } => "step.started",
+            V2AuditEventKind::StepFinished { .. } => "step.finished",
+            V2AuditEventKind::StepSkipped { .. } => "step.skipped",
+            V2AuditEventKind::StepRetry { .. } => "step.retry",
+            V2AuditEventKind::StepRecoveryAttempted { .. } => "step.recovery_attempted",
+            V2AuditEventKind::StepDenied { .. } => V2_EVENT_TYPE_STEP_DENIED,
+            V2AuditEventKind::StepJoin { .. } => "step.join",
+            V2AuditEventKind::FanoutDispatched { .. } => "fanout.dispatched",
+            V2AuditEventKind::WorkerState { .. } => "worker.state",
+            V2AuditEventKind::FaninJoined { .. } => "fanin.joined",
+            V2AuditEventKind::LoopIterationStart { .. } => "loop.iteration.start",
+            V2AuditEventKind::LoopIterationEnd { .. } => "loop.iteration.end",
+            V2AuditEventKind::LoopDidNotConverge { .. } => "loop.did_not_converge",
+            V2AuditEventKind::ActivityStarted { .. } => "activity.started",
+            V2AuditEventKind::ActivityFinished { .. } => "activity.finished",
+            V2AuditEventKind::FsCallRequest { .. } => "fs.call.request",
+            V2AuditEventKind::FsCallResult { .. } => "fs.call.result",
+            V2AuditEventKind::FsCallDenied { .. } => V2_EVENT_TYPE_FS_CALL_DENIED,
+            V2AuditEventKind::ToolDenied { .. } => V2_EVENT_TYPE_TOOL_DENIED,
+            V2AuditEventKind::ToolAllowlistHarnessDelegated { .. } => {
+                "tool_allowlist.harness_delegated"
+            }
+            V2AuditEventKind::CliInvocationStarted { .. } => "cli.invocation.started",
+            V2AuditEventKind::CliInvocationFinished { .. } => "cli.invocation.finished",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

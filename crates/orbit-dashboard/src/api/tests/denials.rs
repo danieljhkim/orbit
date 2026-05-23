@@ -1,8 +1,39 @@
 use chrono::{Duration, Utc};
+use orbit_common::types::activity_job::{V2_DENIAL_EVENT_TYPES, V2AuditEventKind};
 use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::json;
 
-use super::super::denials::{SQLITE_FS_BOUNDARY_PROFILE, collect_denial_rows, denials_payload};
+use super::super::denials::{
+    SQLITE_FS_BOUNDARY_PROFILE, collect_denial_rows, denials_payload, v2_denial_event_types,
+};
+
+#[test]
+fn v2_denial_filter_matches_audit_event_denial_variants() {
+    let denial_variants = [
+        V2AuditEventKind::FsCallDenied {
+            profile: "restricted".to_string(),
+            op: "read".to_string(),
+            path: "./secret.txt".to_string(),
+            allowed: false,
+            matched_rule: "deny".to_string(),
+        },
+        V2AuditEventKind::ToolDenied {
+            tool_name: "github.pr.merge".to_string(),
+            reason: "not allowed".to_string(),
+        },
+        V2AuditEventKind::StepDenied {
+            step_id: "implement".to_string(),
+            reason: "tool denied".to_string(),
+        },
+    ];
+    let expected = denial_variants
+        .iter()
+        .map(V2AuditEventKind::event_type)
+        .collect::<Vec<_>>();
+
+    assert_eq!(expected, V2_DENIAL_EVENT_TYPES);
+    assert_eq!(v2_denial_event_types(), expected.as_slice());
+}
 
 #[test]
 fn denials_payload_combines_v2_and_sqlite_denials() {
@@ -41,6 +72,23 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
         }),
         now,
     );
+    seed_v2_denial(
+        &runtime,
+        "evt-step-denied",
+        "step.denied",
+        json!({
+            "schemaVersion": 1,
+            "event_type": "step.denied",
+            "event_id": "evt-step-denied",
+            "ts": now.to_rfc3339(),
+            "run_id": "run-v2-denials",
+            "agent_identity": "codex / gpt-5",
+            "body_kind": "step_denied",
+            "step_id": "implement",
+            "reason": "tool denied"
+        }),
+        now,
+    );
     runtime
         .record_audit_event(&orbit_core::AuditEventInsertParams {
             execution_id: "exec-sqlite-fs".to_string(),
@@ -71,10 +119,11 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
     let since = now - Duration::minutes(5);
     let rows = collect_denial_rows(&runtime, Some(since), None, None).expect("collect denials");
     let payload = denials_payload(&rows, None, Some(since));
-    assert_eq!(payload["total"], 3);
+    assert_eq!(payload["total"], 4);
     assert!(payload["by_target"].to_string().contains("/usr/bin/false"));
     assert!(payload["by_target"].to_string().contains("./secret.txt"));
     assert!(payload["by_target"].to_string().contains("github.pr.merge"));
+    assert!(payload["by_target"].to_string().contains("implement"));
 
     let fs_payload = denials_payload(&rows, Some("fs"), Some(since));
     assert_eq!(fs_payload["total"], 2);
@@ -86,7 +135,7 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
     assert!(fs_payload["by_profile"].to_string().contains("restricted"));
 
     let tool_payload = denials_payload(&rows, Some("tool"), Some(since));
-    assert_eq!(tool_payload["total"], 1);
+    assert_eq!(tool_payload["total"], 2);
 
     let sqlite_only = collect_denial_rows(
         &runtime,

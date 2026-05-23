@@ -247,7 +247,7 @@ impl OrbitRuntime {
         self.context.persistence().as_json_value()
     }
 
-    pub(crate) fn sqlite_store(&self) -> Result<Store, OrbitError> {
+    pub fn sqlite_store(&self) -> Result<Store, OrbitError> {
         Store::open(&self.context.persistence().audit_db)
     }
 

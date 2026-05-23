@@ -5,7 +5,7 @@
 //! orbit-core never names orbit-agent types — transport/session construction
 //! lives below the boundary in `orbit_engine::job_executor`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use orbit_common::types::activity_job::{
     Backend, V2AuditEventKind, load_job_asset, resolve_job_backends,
@@ -30,7 +30,6 @@ pub struct V2JobRunResult {
     pub success: bool,
     pub pipeline: Value,
     pub message: Option<String>,
-    pub audit_jsonl: Option<PathBuf>,
     pub events_emitted: usize,
     /// Resolved backend applied at load time to every `agent_loop` step in
     /// the DAG. Recorded so smokes can inspect the precedence outcome.
@@ -38,9 +37,9 @@ pub struct V2JobRunResult {
 }
 
 impl OrbitRuntime {
-    /// Execute a v2 Job from a YAML file. Returns a structural result and the
-    /// path to the persisted §7 envelope JSONL. The file must declare
-    /// `schemaVersion: 2` and `kind: Job`; v1 files are rejected.
+    /// Execute a v2 Job from a YAML file. Returns a structural result. The
+    /// file must declare `schemaVersion: 2` and `kind: Job`; v1 files are
+    /// rejected.
     pub fn run_job_v2_from_yaml(
         &self,
         yaml_path: &Path,
@@ -241,8 +240,6 @@ impl OrbitRuntime {
             Some(workspace_path.as_path()),
         )
         .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
-        let audit_jsonl = writer.envelope_log_path();
-
         self.record_event(OrbitEvent::ActivityRunStarted {
             id: asset.name.clone(),
         })?;
@@ -281,7 +278,6 @@ impl OrbitRuntime {
                 success: o.success,
                 pipeline: o.pipeline,
                 message: o.message,
-                audit_jsonl,
                 events_emitted: events_count,
                 resolved_backend: resolution.backend,
             }),
@@ -350,6 +346,7 @@ mod tests {
     use super::*;
 
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -885,7 +882,6 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
         assert!(state.pipeline.get("nap").is_some());
         assert!(state.step_outputs.contains_key(&0));
 
-        assert!(result.audit_jsonl.is_none());
         let first_event: serde_json::Value = serde_json::from_str(
             &v2_events(&runtime, &result.run_id, "run.started")
                 .first()

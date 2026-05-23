@@ -1,21 +1,20 @@
 //! Test-only allowlist: endpoint tests use unwrap/expect for fixture setup.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
-use orbit_common::types::KnowledgeRunMetrics;
+use chrono::{Duration, SecondsFormat};
+use orbit_common::types::{InvocationTrace, KnowledgeRunMetrics, TokenUsage, ToolCallTrace};
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::{
-    ActivityInvocationMetrics, InvocationQuery, InvocationRecord, JobRunState, OrbitRuntime,
-    TaskInvocationMetrics, ToolInvocationMetrics,
+    ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,
+    JobRunState, OrbitRuntime, TaskInvocationMetrics, ToolInvocationMetrics,
 };
 use orbit_knowledge::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
-use rusqlite::{Connection, params};
 use tower::ServiceExt;
 
 use super::super::router;
@@ -77,98 +76,89 @@ fn seed_metrics_runtime() -> OrbitRuntime {
 
     seed_invocation(
         &runtime,
-        "2026-05-05T03:29:45Z",
-        RUN_ID,
-        "implement_one",
-        "codex",
-        Some("gpt-5.5"),
-        1_234,
-        100,
-        25,
-        5,
-        20,
-        &[TASK_ID],
-        &[("fs.read", 321), ("orbit.task.show", 123)],
+        SeedInvocation {
+            job_run_id: RUN_ID,
+            activity_id: "implement_one",
+            agent: "codex",
+            model: Some("gpt-5.5"),
+            duration_ms: 1_234,
+            input_tokens: 100,
+            cache_read_tokens: 25,
+            cache_create_tokens: 5,
+            output_tokens: 20,
+            task_ids: &[TASK_ID],
+            tool_calls: &[("fs.read", 321), ("orbit.task.show", 123)],
+        },
     );
     seed_invocation(
         &runtime,
-        "2026-05-05T03:30:45Z",
-        OTHER_RUN_ID,
-        "plan",
-        "claude",
-        Some("claude-opus"),
-        2_000,
-        80,
-        0,
-        0,
-        40,
-        &["ORB-METRICS-OTHER"],
-        &[("fs.write", 64)],
+        SeedInvocation {
+            job_run_id: OTHER_RUN_ID,
+            activity_id: "plan",
+            agent: "claude",
+            model: Some("claude-opus"),
+            duration_ms: 2_000,
+            input_tokens: 80,
+            cache_read_tokens: 0,
+            cache_create_tokens: 0,
+            output_tokens: 40,
+            task_ids: &["ORB-METRICS-OTHER"],
+            tool_calls: &[("fs.write", 64)],
+        },
     );
 
     runtime
 }
 
-fn audit_db_path(runtime: &OrbitRuntime) -> PathBuf {
-    runtime.persistence_config_json()["audit"]["path"]
-        .as_str()
-        .expect("audit db path")
-        .into()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn seed_invocation(
-    runtime: &OrbitRuntime,
-    ts: &str,
-    job_run_id: &str,
-    activity_id: &str,
-    agent: &str,
-    model: Option<&str>,
+struct SeedInvocation<'a> {
+    job_run_id: &'a str,
+    activity_id: &'a str,
+    agent: &'a str,
+    model: Option<&'a str>,
     duration_ms: u64,
     input_tokens: u64,
     cache_read_tokens: u64,
     cache_create_tokens: u64,
     output_tokens: u64,
-    task_ids: &[&str],
-    tool_calls: &[(&str, u64)],
-) {
-    let conn = Connection::open(audit_db_path(runtime)).expect("open audit db");
-    conn.execute(
-        r#"INSERT INTO invocations(
-            ts, job_run_id, activity_id, agent, model, slot, duration_ms,
-            input_tokens, cache_read_tokens, cache_create_tokens, output_tokens,
-            tool_call_count
-        ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11)"#,
-        params![
-            ts,
-            job_run_id,
-            activity_id,
-            agent,
-            model,
-            duration_ms as i64,
-            input_tokens as i64,
-            cache_read_tokens as i64,
-            cache_create_tokens as i64,
-            output_tokens as i64,
-            tool_calls.len() as i64,
-        ],
-    )
-    .expect("insert invocation");
-    let invocation_id = conn.last_insert_rowid();
-    for task_id in task_ids {
-        conn.execute(
-            "INSERT INTO invocation_tasks(invocation_id, task_id) VALUES (?1, ?2)",
-            params![invocation_id, task_id],
-        )
-        .expect("insert invocation task");
-    }
-    for (seq, (tool_name, result_bytes)) in tool_calls.iter().enumerate() {
-        conn.execute(
-            "INSERT INTO tool_calls(invocation_id, seq, tool_name, result_bytes) VALUES (?1, ?2, ?3, ?4)",
-            params![invocation_id, seq as i64, tool_name, *result_bytes as i64],
-        )
-        .expect("insert tool call");
-    }
+    task_ids: &'a [&'a str],
+    tool_calls: &'a [(&'a str, u64)],
+}
+
+fn seed_invocation(runtime: &OrbitRuntime, seed: SeedInvocation<'_>) {
+    runtime
+        .insert_invocation_trace_record(&InvocationInsertParams {
+            job_run_id: seed.job_run_id.to_string(),
+            activity_id: seed.activity_id.to_string(),
+            agent: seed.agent.to_string(),
+            model: seed.model.map(ToOwned::to_owned),
+            slot: None,
+            task_ids: seed
+                .task_ids
+                .iter()
+                .map(|task_id| (*task_id).to_string())
+                .collect(),
+            trace: InvocationTrace {
+                usage: TokenUsage {
+                    input: seed.input_tokens,
+                    cache_read: seed.cache_read_tokens,
+                    cache_create: seed.cache_create_tokens,
+                    output: seed.output_tokens,
+                },
+                tool_calls: seed
+                    .tool_calls
+                    .iter()
+                    .enumerate()
+                    .map(|(seq, (tool_name, result_bytes))| ToolCallTrace {
+                        seq: seq as u32,
+                        tool_name: (*tool_name).to_string(),
+                        result_bytes: *result_bytes,
+                        result_payload: None,
+                    })
+                    .collect(),
+                duration_ms: seed.duration_ms,
+            },
+        })
+        .expect("insert invocation");
 }
 
 #[tokio::test]
@@ -257,8 +247,19 @@ async fn metrics_endpoints_return_runtime_shapes() {
 #[tokio::test]
 async fn metrics_invocations_accepts_full_filter_set() {
     let runtime = seed_metrics_runtime();
-    let since = "2026-05-05T03:00:00Z";
-    let until = "2026-05-05T04:00:00Z";
+    let record = runtime
+        .invocation_records(InvocationQuery {
+            job_run_id: Some(RUN_ID.to_string()),
+            activity_id: Some("implement_one".to_string()),
+            limit: 1,
+            ..Default::default()
+        })
+        .expect("invocation record")
+        .into_iter()
+        .next()
+        .expect("seeded invocation");
+    let since = (record.ts - Duration::minutes(1)).to_rfc3339_opts(SecondsFormat::Millis, true);
+    let until = (record.ts + Duration::minutes(1)).to_rfc3339_opts(SecondsFormat::Millis, true);
     let uri = format!(
         "/metrics/invocations?since={since}&until={until}&job_run_id={RUN_ID}&activity_id=implement_one&task_id={TASK_ID}&agent=codex&model=gpt-5.5&tool_name=fs.read&limit=1"
     );
