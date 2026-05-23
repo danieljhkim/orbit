@@ -27,8 +27,9 @@ pub(crate) const TASK_TOOL_NAMES: &[&str] = &[
     "orbit.task.add",
     "orbit.task.approve",
     "orbit.task.artifact.put",
-    "orbit.task.delete",
-    "orbit.task.lint",
+    // ORB-00289: `orbit.task.delete` and `orbit.task.lint` are admin-only
+    // and remain reachable through the CLI / `runtime.run_tool` path,
+    // but are not exposed on the agent MCP surface.
     "orbit.task.list",
     "orbit.task.reject",
     "orbit.task.review_thread.add",
@@ -62,11 +63,18 @@ pub(crate) const GRAPH_READ_TOOL_NAMES: &[&str] = &[
 
 pub(crate) const SEARCH_TOOL_NAMES: &[&str] = &["orbit.search"];
 
-pub(crate) const SEMANTIC_TOOL_NAMES: &[&str] = &["orbit.semantic.uninstall"];
+// ORB-00289: `orbit.semantic.uninstall` is admin-only (destructive teardown
+// of the local semantic index) and is no longer exposed on the agent MCP
+// surface; the CLI / `runtime.run_tool` path retains it. The constant is
+// kept (empty) so the aggregation in `safe_mcp_tool_names` and the test
+// chain in `mcp/tests/mod.rs` stay structurally symmetric.
+pub(crate) const SEMANTIC_TOOL_NAMES: &[&str] = &[];
 
 pub(crate) const ADR_TOOL_NAMES: &[&str] = &[
     "orbit.adr.add",
-    "orbit.adr.list",
+    // ORB-00289: agents query ADRs via `orbit.search --kind adr`;
+    // `orbit.adr.list` remains on the CLI / dashboard `runtime.run_tool`
+    // path for admin workflows.
     "orbit.adr.show",
     "orbit.adr.supersede",
     "orbit.adr.update",
@@ -77,13 +85,14 @@ pub(crate) const DOCS_TOOL_NAMES: &[&str] = &[];
 pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
     "orbit.learning.comment.add",
-    "orbit.learning.comment.delete",
+    // ORB-00289: `orbit.learning.comment.delete` and `orbit.learning.prune`
+    // are destructive admin-only operations and are not exposed on the
+    // agent MCP surface; the CLI / `runtime.run_tool` path retains them.
     "orbit.learning.comment.list",
     "orbit.learning.show",
     "orbit.learning.update",
     "orbit.learning.supersede",
     "orbit.learning.upvote",
-    "orbit.learning.prune",
 ];
 
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {

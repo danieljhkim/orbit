@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod adr;
 pub mod audit;
 pub mod config;
 pub mod docs;
@@ -56,6 +57,7 @@ Operate:
   run         Run a workflow (ship, duel-plan, job)
   task        Create, update, and manage tasks
   docs        Search and manage the indexed docs corpus
+  adr         List and inspect Architecture Decision Records
   friction    Report, list, and triage friction records
   learning    Create, search, and curate project learnings
 
@@ -102,6 +104,7 @@ pub enum Commands {
     Task(Box<task::TaskCommand>),
     Search(search::SearchCommand),
     Docs(docs::DocsCommand),
+    Adr(adr::AdrCommand),
     Friction(friction::FrictionCommand),
     Learning(learning::LearningCommand),
 
@@ -142,6 +145,7 @@ impl Execute for Commands {
             Commands::Task(cmd) => (*cmd).execute(runtime),
             Commands::Search(cmd) => cmd.execute(runtime),
             Commands::Docs(cmd) => cmd.execute(runtime),
+            Commands::Adr(cmd) => cmd.execute(runtime),
             Commands::Friction(cmd) => cmd.execute(runtime),
             Commands::Learning(cmd) => cmd.execute(runtime),
             Commands::Graph(cmd) => cmd.execute(runtime),

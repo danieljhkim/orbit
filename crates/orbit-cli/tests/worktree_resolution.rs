@@ -167,30 +167,18 @@ fn linked_worktree_artifacts_write_locally_and_remote_lists_return_stubs() {
         ],
     );
 
-    let adr_default = run_orbit_json(
-        &main_repo,
-        &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.list",
-            "--input",
-            r#"{"model":"codex"}"#,
-        ],
-        None,
-    );
+    // ORB-00289: `orbit.adr.list` is inactive on the agent surface; admin
+    // workflows reach it through the dedicated `orbit adr list` CLI
+    // subcommand, which routes through `runtime.run_tool` and so bypasses
+    // `ensure_tool_agent_facing` while preserving the tool's filter
+    // semantics (including `--include-remote`).
+    let adr_default = run_orbit_json(&main_repo, &home, &["adr", "list"], None);
     assert!(!array_contains_id(&adr_default, &adr_id));
 
     let adr_remote = run_orbit_json(
         &main_repo,
         &home,
-        &[
-            "tool",
-            "run",
-            "orbit.adr.list",
-            "--input",
-            r#"{"include_remote":true,"model":"codex"}"#,
-        ],
+        &["adr", "list", "--include-remote"],
         None,
     );
     let adr_stub = find_id(&adr_remote, &adr_id);

@@ -23,6 +23,14 @@ const INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
+    // ORB-00289: admin/destructive ops — CLI path retains them, agent
+    // MCP surface does not expose them.
+    "orbit.adr.list",
+    "orbit.semantic.uninstall",
+    "orbit.task.delete",
+    "orbit.task.lint",
+    "orbit.learning.comment.delete",
+    "orbit.learning.prune",
 ];
 
 #[test]
@@ -103,7 +111,9 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",
-        "orbit.semantic.uninstall",
+        // ORB-00289: `orbit.semantic.uninstall` is inactive on the agent
+        // surface; its inactive-classification is covered by
+        // `inactive_ops_tools_*` and `INACTIVE_TOOL_NAMES` above.
         "orbit.task.artifact.put",
         "proc.spawn",
     ] {

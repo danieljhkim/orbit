@@ -34,7 +34,10 @@ pub(super) struct OrbitIdentity {
 
 pub fn register(registry: &mut ToolRegistry) {
     registry.register(adr::add::OrbitAdrAddTool);
-    registry.register(adr::list::OrbitAdrListTool);
+    // ORB-00289: agents query ADR metadata via `orbit search --kind adr`;
+    // `orbit.adr.list` stays available on the CLI / dashboard `runtime.run_tool`
+    // path for admin workflows.
+    registry.register_inactive(adr::list::OrbitAdrListTool);
     registry.register(adr::show::OrbitAdrShowTool);
     registry.register(adr::supersede::OrbitAdrSupersedeTool);
     registry.register(adr::update::OrbitAdrUpdateTool);
@@ -56,8 +59,10 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(task::add::OrbitTaskAddTool);
     registry.register(task::artifact_put::OrbitTaskArtifactPutTool);
     registry.register(task::approve::OrbitTaskApproveTool);
-    registry.register(task::delete::OrbitTaskDeleteTool);
-    registry.register(task::lint::OrbitTaskLintTool);
+    // ORB-00289: destructive / admin-only — CLI subcommands still reach
+    // them via `runtime.run_tool`; the agent MCP surface should not.
+    registry.register_inactive(task::delete::OrbitTaskDeleteTool);
+    registry.register_inactive(task::lint::OrbitTaskLintTool);
     registry.register_inactive(task::locks::OrbitTaskLocksTool);
     registry.register_inactive(task::locks_reserve::OrbitTaskLocksReserveTool);
     registry.register_inactive(task::locks_release::OrbitTaskLocksReleaseTool);
@@ -79,10 +84,12 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(knowledge::show::OrbitKnowledgeShowTool);
     registry.register(learning::add::OrbitLearningAddTool);
     registry.register(learning::comment_add::OrbitLearningCommentAddTool);
-    registry.register(learning::comment_delete::OrbitLearningCommentDeleteTool);
+    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
+    registry.register_inactive(learning::comment_delete::OrbitLearningCommentDeleteTool);
     registry.register(learning::comment_list::OrbitLearningCommentListTool);
     registry.register_inactive(learning::list::OrbitLearningListTool);
-    registry.register(learning::prune::OrbitLearningPruneTool);
+    // ORB-00289: destructive cleanup — admin-only, CLI path retains it.
+    registry.register_inactive(learning::prune::OrbitLearningPruneTool);
     registry.register_inactive(learning::sync::OrbitLearningSyncTool);
     registry.register(learning::show::OrbitLearningShowTool);
     registry.register(learning::supersede::OrbitLearningSupersedeTool);
@@ -100,7 +107,9 @@ pub fn register(registry: &mut ToolRegistry) {
     registry.register(review_thread::resolve::OrbitReviewThreadResolveAliasTool);
     registry.register(search::OrbitSearchTool);
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
-    registry.register(semantic::uninstall::OrbitSemanticUninstallTool);
+    // ORB-00289: destructive teardown of the local semantic index —
+    // admin-only, retained on the CLI surface (`orbit semantic uninstall`).
+    registry.register_inactive(semantic::uninstall::OrbitSemanticUninstallTool);
     registry.register_inactive(semantic::stats::OrbitSemanticStatsTool);
     registry.register_inactive(semantic::index::OrbitSemanticIndexTool);
     registry.register(state::get::OrbitStateGetTool);

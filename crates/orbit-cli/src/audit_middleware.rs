@@ -371,6 +371,25 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
                 job_run_id: None,
             }
         }
+        // ORB-00289: `orbit adr list` mirrors the `orbit docs list` shape.
+        // Only `list` is on the CLI surface today; extend this match when
+        // more ADR subcommands get promoted.
+        Commands::Adr(cmd) => {
+            use crate::command::adr::AdrSubcommand;
+            let sub = match &cmd.command {
+                AdrSubcommand::List(_) => "list",
+            };
+            CommandMeta {
+                command: "adr".to_string(),
+                subcommand: Some(sub.to_string()),
+                tool_name: None,
+                target_type: Some("adr".to_string()),
+                target_id: None,
+                role: "admin".to_string(),
+                arguments_json: None,
+                job_run_id: None,
+            }
+        }
         Commands::Friction(cmd) => {
             use crate::command::friction::FrictionSubcommand;
             let (sub, target_id) = match &cmd.command {

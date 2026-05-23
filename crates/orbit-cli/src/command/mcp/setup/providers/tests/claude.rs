@@ -64,7 +64,9 @@ fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     // The AC names the exact post-fix shape literally; pin it here so a
     // regression in `claude_permission_name` cannot pass the test above.
     assert!(
-        allow.iter().any(|item| item == "mcp__orbit__orbit_task_show"),
+        allow
+            .iter()
+            .any(|item| item == "mcp__orbit__orbit_task_show"),
         "Claude allowlist must contain literal `mcp__orbit__orbit_task_show` \
          (server-id-derived name for the CLI-registered `orbit` MCP server)",
     );

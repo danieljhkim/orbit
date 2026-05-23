@@ -1,6 +1,6 @@
 ---
 name: orbit-learning
-description: Use this when creating, searching, updating, superseding, pruning, or auditing Orbit project learnings. Agent tools cover `orbit.learning.add/show/update/upvote/supersede/prune/comment.*` plus `orbit.search`; list/sync are CLI-only operator workflows. Covers scope-OR matching (path globs / tags), evidence shape, the `update` vs `supersede` boundary, the YAML-source-of-truth + SQLite-index model, and why never to edit `.orbit/learnings/` files directly.
+description: Use this when creating, searching, updating, superseding, pruning, or auditing Orbit project learnings. Agent tools cover `orbit.learning.add/show/update/upvote/supersede/comment.add/comment.list` plus `orbit.search`; list/sync/prune/comment.delete are CLI-only operator workflows. Covers scope-OR matching (path globs / tags), evidence shape, the `update` vs `supersede` boundary, the YAML-source-of-truth + SQLite-index model, and why never to edit `.orbit/learnings/` files directly.
 ---
 
 # Orbit Learning
@@ -30,10 +30,10 @@ Both surfaces accept the same JSON. Use the CLI examples when shell access is av
 | `orbit.learning.show` | `orbit_learning_show({...})` | `orbit learning show --id L-0001` |
 | `orbit.learning.comment.add` | `orbit_learning_comment_add({...})` | `orbit learning comment add --learning-id L-0001 --body "Narrow note" --model codex` |
 | `orbit.learning.comment.list` | `orbit_learning_comment_list({...})` | `orbit learning comment list --learning-id L-0001` |
-| `orbit.learning.comment.delete` | `orbit_learning_comment_delete({...})` | `orbit learning comment delete --id C20260514-1` |
+| `orbit.learning.comment.delete` | CLI-only (admin) | `orbit learning comment delete --id C20260514-1` |
 | `orbit.learning.update` | `orbit_learning_update({...})` | `orbit learning update --id L-0001 --priority 200` |
 | `orbit.learning.supersede` | `orbit_learning_supersede({...})` | `orbit learning supersede --id L-0001 --with L-0007` |
-| `orbit.learning.prune` | `orbit_learning_prune({...})` | `orbit learning prune --stale-only` |
+| `orbit.learning.prune` | CLI-only (admin) | `orbit learning prune --stale-only` |
 | List/audit learnings | CLI-only | `orbit learning list --status active --tag rust` (also `--path <glob-or-file>`) |
 | Sync YAML envelope index | CLI-only | `orbit learning sync` |
 

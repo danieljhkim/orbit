@@ -105,7 +105,7 @@ spec:
     - orbit.learning.add
     - orbit.learning.comment.add
     - orbit.learning.comment.list
-    - orbit.learning.comment.delete
+    # ORB-00289: orbit.learning.comment.delete is admin/CLI-only; not exposed on the agent surface.
     - orbit.learning.update
     - orbit.learning.supersede
     - fs.read

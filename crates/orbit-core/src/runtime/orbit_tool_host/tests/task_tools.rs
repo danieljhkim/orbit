@@ -384,12 +384,16 @@ fn task_delete_tool_rejects_unforced_protected_statuses() {
         &[],
     );
 
-    let message = invalid_input_message(runtime.execute_tool_command(
-        "orbit.task.delete",
-        json!({ "id": task.id.clone() }),
-        Some("codex".to_string()),
-        Some("gpt-5.5".to_string()),
-    ));
+    // ORB-00289: `orbit.task.delete` is inactive on the agent surface;
+    // `execute_tool_command` now gates on `ensure_tool_agent_facing` and
+    // would reject the call. The tool's business logic (guard, force
+    // flag, status semantics) is still reachable through `runtime.run_tool`
+    // which bypasses the agent gate, matching the CLI path
+    // (`runtime.delete_task_guarded`) that admin workflows use in
+    // production.
+    let message = invalid_input_message(
+        runtime.run_tool("orbit.task.delete", json!({ "id": task.id.clone() })),
+    );
 
     assert_eq!(
         message,
@@ -421,13 +425,10 @@ fn task_delete_tool_allows_unforced_proposed_friction_and_rejected_tasks() {
             &[],
         );
 
+        // ORB-00289: see note above — `run_tool` exercises the tool
+        // dispatch business logic without the agent-surface gate.
         let output = runtime
-            .execute_tool_command(
-                "orbit.task.delete",
-                json!({ "id": task.id.clone() }),
-                Some("codex".to_string()),
-                Some("gpt-5.5".to_string()),
-            )
+            .run_tool("orbit.task.delete", json!({ "id": task.id.clone() }))
             .expect("unprotected delete succeeds");
 
         assert_eq!(output, json!({ "id": task.id, "deleted": true }));
@@ -446,12 +447,12 @@ fn task_delete_tool_allows_forced_protected_statuses() {
         &[],
     );
 
+    // ORB-00289: see note above — `run_tool` exercises the tool dispatch
+    // business logic without the agent-surface gate.
     let output = runtime
-        .execute_tool_command(
+        .run_tool(
             "orbit.task.delete",
             json!({ "id": task.id.clone(), "force": true }),
-            Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
         )
         .expect("forced protected delete succeeds");
 

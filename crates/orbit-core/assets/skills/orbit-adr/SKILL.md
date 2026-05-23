@@ -9,7 +9,7 @@ description: Use this whenever an Architecture Decision Record is being created,
 
 Create and maintain Orbit ADR artifacts through the registered tool surface. ADRs record decisions, not implementation plans: use them when a choice has a real alternative, constrains future work, and carries a non-trivial cost.
 
-ADRs and orbit-docs are sibling indexes by design. ADRs keep their stricter lifecycle and dedicated allocation through `orbit.adr.*`; `orbit search <query> --kind all`, `--kind doc`, and `--kind adr` surface ADR metadata read-only alongside doc results. After `orbit semantic index --kind adrs`, `--hybrid` applies to `--kind adr` and to federated ADR results in `--kind doc` / `--kind all` queries. For the boundary rationale, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'` and inspect the accepted ADR covering the sibling-index search overlay.
+ADRs and orbit-docs are sibling indexes by design. ADRs keep their stricter lifecycle and dedicated allocation through `orbit.adr.*`; `orbit search <query> --kind all`, `--kind doc`, and `--kind adr` surface ADR metadata read-only alongside doc results. After `orbit semantic index --kind adrs`, `--hybrid` applies to `--kind adr` and to federated ADR results in `--kind doc` / `--kind all` queries. For the boundary rationale, run `orbit search "sibling-index search overlay" --kind adr` and inspect the accepted ADR covering it.
 
 ADR artifact files are written into the current worktree's `.orbit/adrs/...`
 subtree, while IDs are allocated globally through the shared allocator. Stage
@@ -25,9 +25,10 @@ Both surfaces accept the same JSON. Use the CLI examples below when shell access
 |------|-----|-----|
 | `orbit.adr.add` | `orbit_adr_add({...})` | `orbit tool run orbit.adr.add --input-file adr.json` |
 | `orbit.adr.show` | `orbit_adr_show({...})` | `orbit tool run orbit.adr.show --input '{"id":"<adr-id>"}'` |
-| `orbit.adr.list` | `orbit_adr_list({...})` | `orbit tool run orbit.adr.list --input '{"feature":"task-artifacts"}'` |
 | `orbit.adr.update` | `orbit_adr_update({...})` | `orbit tool run orbit.adr.update --input-file update.json` |
 | `orbit.adr.supersede` | `orbit_adr_supersede({...})` | `orbit tool run orbit.adr.supersede --input '{"old_id":"<old-adr-id>","new_id":"<new-adr-id>"}'` |
+
+ADR listing is **not** exposed on the agent MCP surface — use `orbit search <query> --kind adr` for read-side discovery (substring + `--hybrid` semantic when the companion is installed). The CLI/admin path retains direct ADR listing via `orbit tool run orbit.adr.list --input '{"feature":"<feature>"}'`; agents should not call it through MCP.
 
 Always include `model` in JSON inputs when the tool accepts it. The value is your agent family (`codex`, `claude`, `gemini`, or `grok`); full model strings are accepted and auto-normalized, but the family is canonical. Prefer `--input-file` for `add` and body-changing `update` calls so markdown does not get mangled by shell quoting.
 
@@ -35,21 +36,21 @@ Run `orbit tool show orbit.adr.add` or `orbit tool list` instead of guessing if 
 
 ## When Editing `4_decisions.md` Directly
 
-If you are in the middle of writing prose into `docs/design/<feature>/4_decisions.md` and about to add an ADR heading, **stop and run `orbit.adr.add` first**. Then use the allocated global ID as the local heading verbatim. To find the accepted boundary decision behind this rule, run `orbit tool run orbit.adr.list --input '{"feature":"orbit-adr"}'`.
+If you are in the middle of writing prose into `docs/design/<feature>/4_decisions.md` and about to add an ADR heading, **stop and run `orbit.adr.add` first**. Then use the allocated global ID as the local heading verbatim. To find the accepted boundary decision behind this rule, run `orbit search "ADR heading allocation" --kind adr`.
 
 Anti-patterns this rule prevents:
 
 - Picking the next sequential local number (`## ADR-006 — ...` after `ADR-005`) without an allocation.
 - Picking a four-digit number that "looks global" without an allocation is worse than the 3-digit version because readers assume `orbit.adr.show` will return that decision; it will not.
 
-Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, and the legacy_id resolution path. If you find an existing local-numbered ADR that was authored this way, backfill it via `orbit.adr.add` and set `legacy_ids` on the resulting record.
+Both produce orphan decisions invisible to `orbit search --kind adr`, `orbit.adr.show`, and the legacy_id resolution path. If you find an existing local-numbered ADR that was authored this way, backfill it via `orbit.adr.add` and set `legacy_ids` on the resulting record.
 
 ## Workflow
 
 1. Inspect nearby decisions before adding a new one.
-   - `orbit tool run orbit.adr.list --input '{"feature":"<feature>","model":"<agent-family>"}'`
-  - `orbit tool run orbit.adr.show --input '{"id":"<adr-id>","model":"<agent-family>"}'`
-   - Use `orbit search "<concept>" --kind adr --hybrid` for concept retrieval when the semantic companion is installed and ADRs have been indexed with `orbit semantic index --kind adrs`; without vectors, Orbit falls back to lexical ADR results with a note.
+   - `orbit search "<concept>" --kind adr` (substring; add `--hybrid` once `orbit semantic index --kind adrs` has run for vector-aware retrieval).
+   - `orbit tool run orbit.adr.show --input '{"id":"<adr-id>","model":"<agent-family>"}'`
+   - For listing by feature on the CLI/admin path: `orbit tool run orbit.adr.list --input '{"feature":"<feature>","model":"<agent-family>"}'` (not exposed on the agent MCP surface — agents should reach ADRs via `orbit search --kind adr`).
    - Use `legacy_id` lookup for migrated per-feature references, for example `{"legacy_id":"activity-job/ADR-039"}`.
 2. Decide whether this is a new ADR, an update to a proposed ADR, or a supersession.
    - New decision: `orbit.adr.add`.
@@ -70,7 +71,7 @@ Both produce orphan decisions invisible to `orbit.adr.list`, `orbit.adr.show`, a
    Use the literal ADR ID returned from `orbit.adr.add` (greppability is the point). If the constraint has no single anchor — pure architectural decision, cross-cutting style — record this in the `## Consequences` body as a single sentence (e.g. "No single code anchor; convention enforced via review.") and skip the citation step.
 
    **Hard prohibition.** Never add the citation inside `crates/**/assets/**` (skill files, prompt assets, any shipped plugin asset) or other consumer-facing surfaces. Workspace-local artifact IDs become dangling references in other workspaces — this is the distribution-boundary rule for workspace-local artifact IDs. For guidance at those surfaces, author a project learning and let push-injection deliver it.
-8. Verify with `orbit.adr.show` or `orbit.adr.list`.
+8. Verify with `orbit.adr.show` (or `orbit search --kind adr` for cross-ADR discovery).
 
 ## Creation Rules
 
