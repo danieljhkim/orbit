@@ -74,7 +74,7 @@ impl ConfigTarget {
                 })
             }
             (ScopeArg::Workspace, McpProvider::Claude) => Ok(Self {
-                mcp_path: repo_root.join(".mcp.json"),
+                mcp_path: repo_root.join(".claude.json"),
                 settings_path: Some(repo_root.join(".claude").join("settings.json")),
             }),
             (ScopeArg::Home, McpProvider::Codex) => {

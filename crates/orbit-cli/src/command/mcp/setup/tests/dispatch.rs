@@ -148,7 +148,7 @@ fn home_scope_writes_to_home_paths_and_skips_repo_files() {
     assert!(grok_parsed["mcp_servers"]["orbit"].get("cwd").is_none());
 
     // Repo-local files should not have been touched.
-    assert!(!repo.path().join(".mcp.json").exists());
+    assert!(!repo.path().join(".claude.json").exists());
     assert!(!repo.path().join(".codex").join("config.toml").exists());
     assert!(!repo.path().join(".gemini").join("settings.json").exists());
     assert!(!repo.path().join(".grok").join("config.toml").exists());

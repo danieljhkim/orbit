@@ -10,7 +10,7 @@ fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     let home = tempdir().expect("home tempdir");
     std::fs::create_dir_all(repo.path().join(".claude")).expect("create .claude");
     std::fs::write(
-        repo.path().join(".mcp.json"),
+        repo.path().join(".claude.json"),
         "{\n  \"mcpServers\": {\n    \"other\": {\"command\": \"demo\"}\n  }\n}\n",
     )
     .expect("write mcp file");
@@ -35,7 +35,7 @@ fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     assert_eq!(providers, vec![McpProvider::Claude]);
 
     let mcp: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(repo.path().join(".mcp.json")).expect("read mcp"),
+        &std::fs::read_to_string(repo.path().join(".claude.json")).expect("read mcp"),
     )
     .expect("parse mcp");
     assert!(mcp["mcpServers"]["orbit"].is_object());
@@ -90,7 +90,7 @@ fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     .expect("remove claude");
 
     let mcp: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(repo.path().join(".mcp.json")).expect("read mcp"),
+        &std::fs::read_to_string(repo.path().join(".claude.json")).expect("read mcp"),
     )
     .expect("parse mcp");
     assert!(mcp["mcpServers"]["orbit"].is_null());
@@ -108,7 +108,7 @@ fn claude_remove_strips_legacy_plugin_prefixed_entries() {
     let home = tempdir().expect("home tempdir");
     std::fs::create_dir_all(repo.path().join(".claude")).expect("create .claude");
     std::fs::write(
-        repo.path().join(".mcp.json"),
+        repo.path().join(".claude.json"),
         "{\n  \"mcpServers\": {\n    \"orbit\": {\"command\": \"orbit\", \"args\": [\"mcp\", \"serve\"]}\n  }\n}\n",
     )
     .expect("write mcp file");

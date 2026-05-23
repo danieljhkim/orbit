@@ -10,7 +10,7 @@ use super::workspace::{env_home_dir, resolve_workspace_layout};
 pub enum ScopeArg {
     /// Write to user-level config (~/.claude, ~/.codex, ~/.gemini, ~/.grok).
     Home,
-    /// Write to repo-local config (.mcp.json, .codex/, .gemini/, .grok/). Default.
+    /// Write to repo-local config (.claude.json, .codex/, .gemini/, .grok/). Default.
     #[default]
     Workspace,
 }
