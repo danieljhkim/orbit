@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
 
-use orbit_common::types::{OrbitError, ToolParam, ToolSchema, ToolSessionContext};
+use orbit_common::types::{
+    LearningInjectionState, OrbitError, ToolParam, ToolSchema, ToolSessionContext,
+};
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Value, json};
 
@@ -81,6 +83,7 @@ pub(super) struct LearningSidecarHost {
     response: Value,
     search_by_path: HashMap<String, Vec<Value>>,
     calls: StdMutex<Vec<String>>,
+    session_states: StdMutex<HashMap<String, LearningInjectionState>>,
 }
 
 impl LearningSidecarHost {
@@ -89,6 +92,7 @@ impl LearningSidecarHost {
             response,
             search_by_path,
             calls: StdMutex::new(Vec::new()),
+            session_states: StdMutex::new(HashMap::new()),
         }
     }
 }
@@ -123,6 +127,30 @@ impl crate::McpHost for LearningSidecarHost {
             ));
         }
         Ok(self.response.clone())
+    }
+
+    fn get_session_learning_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        Ok(self
+            .session_states
+            .lock()
+            .expect("session states lock")
+            .get(session_id)
+            .cloned())
+    }
+
+    fn upsert_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        self.session_states
+            .lock()
+            .expect("session states lock")
+            .insert(session_id.to_string(), state.clone());
+        Ok(())
     }
 }
 

@@ -187,3 +187,71 @@ async fn learning_sidecar_enforces_per_session_hard_cap() {
     assert_eq!(state.count, 20);
     assert_eq!(state.emitted_ids.len(), 20);
 }
+
+#[tokio::test]
+async fn learning_sidecar_session_id_persists_admission_through_host_state() {
+    let mut search_by_path = HashMap::new();
+    search_by_path.insert(
+        "crates/orbit-engine/src/lib.rs".to_string(),
+        vec![json!({
+            "id": "L-0001",
+            "summary": "Persisted through host state.",
+            "updated_at": "2026-05-15T00:00:00Z",
+            "priority": null
+        })],
+    );
+    let host = Arc::new(LearningSidecarHost::new(
+        json!({
+            "code_refs": [{"file": "crates/orbit-engine/src/lib.rs"}]
+        }),
+        search_by_path,
+    ));
+    let caps = LearningInjectionCaps {
+        per_call: 5,
+        per_session_hard: 20,
+    };
+    let server = OrbitToolServer::new_for_test(
+        host.clone(),
+        Some("session-1".to_string()),
+        caps,
+        LearningInjectionState::default(),
+    );
+
+    let result = server
+        .call_tool_request(request_with_args(
+            "orbit.graph.show",
+            json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
+        ))
+        .await
+        .expect("first call succeeds");
+    let structured = result
+        .structured_content
+        .as_ref()
+        .expect("structured content");
+    assert_eq!(
+        structured.get("learnings"),
+        Some(&json!([{
+            "id": "L-0001",
+            "summary": "Persisted through host state."
+        }]))
+    );
+
+    let server = OrbitToolServer::new_for_test(
+        host,
+        Some("session-1".to_string()),
+        caps,
+        LearningInjectionState::default(),
+    );
+    let result = server
+        .call_tool_request(request_with_args(
+            "orbit.graph.show",
+            json!({"selector": "file:crates/orbit-engine/src/lib.rs"}),
+        ))
+        .await
+        .expect("second call succeeds");
+    let structured = result
+        .structured_content
+        .as_ref()
+        .expect("structured content");
+    assert!(structured.get("learnings").is_none());
+}

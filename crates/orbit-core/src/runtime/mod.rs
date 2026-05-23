@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Utc;
-use orbit_common::types::{Audit, OrbitError, OrbitEvent, WorkspacePaths};
+use orbit_common::types::{Audit, LearningInjectionState, OrbitError, OrbitEvent, WorkspacePaths};
 use orbit_engine::ActivityExecutorRegistry;
 use orbit_store::{Store, V2AuditEventFilter, V2AuditEventRow, workspace_id_for_orbit_dir};
 use serde_json::Value;
@@ -253,6 +253,25 @@ impl OrbitRuntime {
 
     pub fn workspace_id(&self) -> Result<String, OrbitError> {
         workspace_id_for_orbit_dir(&self.context.paths().orbit_dir)
+    }
+
+    pub fn get_session_learning_state(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LearningInjectionState>, OrbitError> {
+        let workspace_id = self.workspace_id()?;
+        self.sqlite_store()?
+            .get_session_learning_state(&workspace_id, session_id)
+    }
+
+    pub fn upsert_session_learning_state(
+        &self,
+        session_id: &str,
+        state: &LearningInjectionState,
+    ) -> Result<(), OrbitError> {
+        let workspace_id = self.workspace_id()?;
+        self.sqlite_store()?
+            .upsert_session_learning_state(&workspace_id, session_id, state)
     }
 
     pub fn list_v2_audit_events(

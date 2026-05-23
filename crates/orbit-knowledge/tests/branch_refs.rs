@@ -574,7 +574,7 @@ fn pack_regression_selector_opens_from_branch_ref_layout() -> Result<(), Box<dyn
     })?;
 
     let store = KnowledgeStore::open(&knowledge_dir, &build_ref, None, None)?;
-    let selector: Selector = "symbol:crates/orbit-cli/src/command/observe/graph.rs#<GraphSearchArgs as Execute>::execute:method"
+    let selector: Selector = "symbol:crates/orbit-cli/src/command/graph/search.rs#<GraphSearchArgs as Execute>::execute:method"
         .parse()?;
     let pack = store.pack(&[selector])?;
 
@@ -582,7 +582,7 @@ fn pack_regression_selector_opens_from_branch_ref_layout() -> Result<(), Box<dyn
     assert!(pack.unresolved_selectors.is_empty());
     assert_eq!(
         pack.entries[0].selector,
-        "symbol:crates/orbit-cli/src/command/observe/graph.rs#<GraphSearchArgs as Execute>::execute:method"
+        "symbol:crates/orbit-cli/src/command/graph/search.rs#<GraphSearchArgs as Execute>::execute:method"
     );
     Ok(())
 }

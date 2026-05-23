@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use orbit_common::types::{
-    LearningInjectionCaps, LearningInjectionState, LearningReminder, OrbitError, ToolSessionContext,
-};
-use orbit_common::utility::learning_session::{
-    learning_session_state_path, read_learning_session_state, update_learning_session_state,
+    LearningInjectionCaps, LearningReminder, OrbitError, ToolSessionContext,
 };
 use orbit_common::utility::selector::anchor_path;
 use rmcp::ErrorData as McpError;
@@ -70,18 +67,20 @@ impl OrbitToolServer {
         let key = self.learning_session_key();
         let caps = self.learning_caps;
         if let Some(session_id) = self.learning_session_id.clone() {
-            let root = std::env::current_dir().map_err(|error| {
-                McpError::internal_error(
-                    format!("resolve current dir for learning session: {error}"),
-                    None,
-                )
-            })?;
-            let path = learning_session_state_path(&root, &session_id);
-            let reminders_for_file = reminders.clone();
+            let memory_state = {
+                let states = self.learning_states.lock().await;
+                states.get(&key).cloned()
+            };
+            let host = Arc::clone(&self.host);
+            let reminders_for_store = reminders.clone();
             let join = tokio::task::spawn_blocking(move || {
-                update_learning_session_state(&path, |state| {
-                    state.admit_reminders(&reminders_for_file, caps)
-                })
+                let mut state = host
+                    .get_session_learning_state(&session_id)?
+                    .or(memory_state)
+                    .unwrap_or_default();
+                let admitted = state.admit_reminders(&reminders_for_store, caps);
+                host.upsert_session_learning_state(&session_id, &state)?;
+                Ok::<_, OrbitError>((state, admitted))
             })
             .await
             .map_err(|error| {
@@ -108,12 +107,6 @@ impl OrbitToolServer {
             .clone()
             .unwrap_or_else(|| PROCESS_LEARNING_SESSION_KEY.to_string())
     }
-}
-
-pub(super) fn load_learning_state_for_session(session_id: &str) -> Option<LearningInjectionState> {
-    let root = std::env::current_dir().ok()?;
-    let path = learning_session_state_path(&root, session_id);
-    read_learning_session_state(&path).ok().flatten()
 }
 
 fn learning_sidecar_tool(canonical: &str) -> bool {
@@ -216,13 +209,7 @@ fn search_learning_reminders(
     // containment `path` semantics.
     let mut by_id: BTreeMap<String, ReminderCandidate> = BTreeMap::new();
     for path in paths {
-        let value = host.call_tool(
-            "orbit.learning.list",
-            json!({
-                "path": path,
-            }),
-            session_context.clone(),
-        )?;
+        let value = host.learning_candidates_for_path(path, session_context.clone())?;
         for candidate in parse_learning_list_candidates(&value) {
             by_id
                 .entry(candidate.reminder.id.clone())

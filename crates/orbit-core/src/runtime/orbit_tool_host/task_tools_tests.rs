@@ -280,12 +280,7 @@ fn friction_stats_does_not_write_state_scoreboard_file() {
         .expect("add friction");
 
     let stats = runtime
-        .execute_tool_command(
-            "orbit.friction.stats",
-            json!({}),
-            Some("codex".to_string()),
-            Some("gpt-5.5".to_string()),
-        )
+        .run_tool("orbit.friction.stats", json!({}))
         .expect("stats succeeds");
     assert_eq!(
         stats["by_family"]["codex"]["frictions_per_10_tasks"],

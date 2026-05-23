@@ -88,7 +88,10 @@ make_traversal_archive() {
   rm -rf "$build_dir"
   mkdir -p "$build_dir/nested"
   printf '%s\n' "not orbit" > "$build_dir/evil"
-  tar -czf "$archive" -C "$build_dir/nested" ../evil
+  # GNU tar strips leading "../" from archive member names unless absolute-name
+  # preservation is enabled, which would turn this fixture into a harmless
+  # unexpected-member case instead of the traversal case it is meant to cover.
+  tar -czPf "$archive" -C "$build_dir/nested" ../evil
 }
 
 prepare_release_dir() {

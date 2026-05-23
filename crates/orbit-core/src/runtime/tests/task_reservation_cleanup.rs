@@ -292,15 +292,13 @@ fn task_reservation_reserve_pressure_reconciles_stale_running_owner() {
     reserve_via_tool_for_owner(&runtime, &stale_run.run_id, &stale_task);
 
     let output = runtime
-        .execute_tool_command(
+        .run_tool(
             "orbit.task.locks.reserve",
             json!({
                 "task_ids": [waiter_task],
                 "ttl_seconds": 3600,
                 "model": "gpt-5.5",
             }),
-            None,
-            None,
         )
         .expect("reserve after pressure");
 

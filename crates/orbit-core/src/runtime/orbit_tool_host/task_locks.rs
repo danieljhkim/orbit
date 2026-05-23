@@ -626,7 +626,7 @@ mod tests {
                 )
                 .expect("reserve direct file selectors with owner"),
             None => runtime
-                .execute_tool_command("orbit.task.locks.reserve", input, None, None)
+                .run_tool("orbit.task.locks.reserve", input)
                 .expect("reserve direct file selectors"),
         };
 
@@ -647,14 +647,12 @@ mod tests {
 
         let reservation_id = reserve_files(&runtime, None);
         let release = runtime
-            .execute_tool_command(
+            .run_tool(
                 "orbit.task.locks.release",
                 json!({
                     "reservation_id": reservation_id.clone(),
                     "model": "gpt-5.5",
                 }),
-                None,
-                None,
             )
             .expect("release reservation");
         assert_eq!(release["released"], true);
@@ -679,14 +677,12 @@ mod tests {
 
         let reservation_id = reserve_files(&runtime, Some("jrun-owner"));
         let release = runtime
-            .execute_tool_command(
+            .run_tool(
                 "orbit.task.locks.release",
                 json!({
                     "reservation_id": reservation_id.clone(),
                     "model": "gpt-5.5",
                 }),
-                None,
-                None,
             )
             .expect("release reservation");
         assert_eq!(release["released"], true);
@@ -716,15 +712,13 @@ mod tests {
         );
 
         let reserve = runtime
-            .execute_tool_command(
+            .run_tool(
                 "orbit.task.locks.reserve",
                 json!({
                     "task_ids": [task.id.clone()],
                     "ttl_seconds": 3600,
                     "model": "gpt-5.5",
                 }),
-                None,
-                None,
             )
             .expect("reserve task scope");
         assert_eq!(reserve["reserved"], true);

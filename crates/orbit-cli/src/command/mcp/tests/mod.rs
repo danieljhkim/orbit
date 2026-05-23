@@ -265,10 +265,20 @@ fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
 }
 
 mod audited_mcp_call_tests {
-    use orbit_common::types::AuditEventStatus;
-    use orbit_core::OrbitRuntime;
-    use orbit_core::TaskStatus;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::time::Instant;
+
+    use orbit_common::types::{
+        AuditEventStatus, LearningInjectionCaps, LearningInjectionState, LearningReminder,
+        LearningScope,
+    };
+    use orbit_core::command::learning_hook::{
+        HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV, ORBIT_LEARNING_SESSION_CAP_ENV,
+        ORBIT_SESSION_ID_ENV, run_pretooluse_input,
+    };
     use orbit_core::command::task::TaskAddParams;
+    use orbit_core::{LearningCreateParams, OrbitRuntime};
+    use orbit_core::{LearningEvidence, TaskStatus};
     use orbit_mcp::McpHost;
     use serde_json::json;
 
@@ -355,6 +365,97 @@ mod audited_mcp_call_tests {
             value.get("results").is_some(),
             "orbit.search returns wrapped results"
         );
+    }
+
+    #[test]
+    fn runtime_mcp_host_and_cli_hook_share_session_learning_state() {
+        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+        let learning = runtime
+            .create_learning(LearningCreateParams {
+                summary: "Use the shared state table.".to_string(),
+                scope: LearningScope {
+                    paths: vec!["crates/orbit-core/src/lib.rs".to_string()],
+                    ..Default::default()
+                },
+                body: String::new(),
+                evidence: Vec::<LearningEvidence>::new(),
+                created_by: Some("codex".to_string()),
+                priority: Some(7),
+            })
+            .expect("create learning");
+        let host = RuntimeMcpHost {
+            runtime: runtime.clone(),
+        };
+        let candidates = host
+            .learning_candidates_for_path("crates/orbit-core/src/lib.rs", Default::default())
+            .expect("mcp learning candidates");
+        let candidates = candidates
+            .as_array()
+            .expect("candidate array")
+            .iter()
+            .map(|item| LearningReminder {
+                id: item
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("candidate id")
+                    .to_string(),
+                summary: item
+                    .get("summary")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("candidate summary")
+                    .to_string(),
+                comments: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            [learning.id.as_str()]
+        );
+
+        let caps = LearningInjectionCaps {
+            per_call: 5,
+            per_session_hard: 20,
+        };
+        let mut mcp_state = LearningInjectionState::default();
+        let admitted = mcp_state.admit_reminders(&candidates, caps);
+        assert_eq!(
+            admitted
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            [learning.id.as_str()]
+        );
+        host.upsert_session_learning_state("session-shared", &mcp_state)
+            .expect("mcp writes shared session state");
+
+        let _guard = EnvGuard::set(&[
+            (ORBIT_SESSION_ID_ENV, Some("session-shared")),
+            (ORBIT_LEARNING_PER_CALL_CAP_ENV, Some("5")),
+            (ORBIT_LEARNING_SESSION_CAP_ENV, Some("20")),
+            ("ORBIT_ACTIVE_TASK_ID", None),
+            ("ORBIT_TASK_ID", None),
+        ]);
+        let stdin = json!({
+            "tool_name": "mcp__orbit__fs_read",
+            "tool_input": {
+                "path": "crates/orbit-core/src/lib.rs"
+            }
+        })
+        .to_string();
+        let output =
+            run_pretooluse_input(&runtime, &stdin, HookOutputFormat::Codex, Instant::now())
+                .expect("cli hook succeeds");
+        assert_eq!(output, None);
+
+        let persisted = runtime
+            .get_session_learning_state("session-shared")
+            .expect("read shared session state")
+            .expect("session state exists");
+        assert_eq!(persisted.count, 1);
+        assert!(persisted.emitted_ids.contains(&learning.id));
     }
 
     #[test]
@@ -508,5 +609,48 @@ mod audited_mcp_call_tests {
         assert_eq!(events[0].subcommand.as_deref(), Some("run-mcp"));
         assert_eq!(events[0].status, AuditEventStatus::Success);
         assert_eq!(events[0].exit_code, 0);
+    }
+
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn set(values: &[(&'static str, Option<&str>)]) -> Self {
+            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+            let lock = LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let saved = values
+                .iter()
+                .map(|(name, _)| (*name, std::env::var(name).ok()))
+                .collect::<Vec<_>>();
+            for (name, value) in values {
+                // SAFETY: EnvGuard serializes process-wide mutations and restores them on drop.
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+            Self { _lock: lock, saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.saved {
+                // SAFETY: EnvGuard holds the serialization lock until saved values are restored.
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
     }
 }

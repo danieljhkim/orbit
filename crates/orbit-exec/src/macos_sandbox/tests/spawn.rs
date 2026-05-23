@@ -1,11 +1,12 @@
-use super::super::spawn::{
-    MacosSandboxSpawnRequest, sandbox_exec_path_from, spawn_under_macos_sandbox,
-};
+use super::super::spawn::sandbox_exec_path_from;
+#[cfg(target_os = "macos")]
+use super::super::spawn::{MacosSandboxSpawnRequest, spawn_under_macos_sandbox};
 #[cfg(target_os = "macos")]
 use super::super::test_support::{
     ScopeGuard, sandbox_exec_can_apply, sandbox_test_parent, shell_escape,
 };
 use std::path::Path;
+#[cfg(target_os = "macos")]
 use std::process::Stdio;
 
 #[test]
