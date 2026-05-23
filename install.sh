@@ -42,7 +42,10 @@ download() {
   fail "curl or wget is required to download Orbit releases"
 }
 
-write_release_key_orbit_release_2026_05_primary() {
+# Key IDs are stable labels carried alongside the public key blocks below.
+# The numeric suffix is a generation counter, not a date — IDs survive rotation
+# so a key that has been the "successor" for a year is still readable by ID.
+write_release_key_orbit_release_key_1() {
   destination="$1"
 
   cat > "$destination" <<'EOF'
@@ -60,7 +63,7 @@ pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
 EOF
 }
 
-write_release_key_orbit_release_2026_05_successor() {
+write_release_key_orbit_release_key_2() {
   destination="$1"
 
   cat > "$destination" <<'EOF'
@@ -95,13 +98,13 @@ write_builtin_trusted_key_records() {
   key_dir="${TMP_DIR}/trusted-release-keys"
   mkdir -p "$key_dir"
 
-  primary_key_path="${key_dir}/orbit-release-2026-05-primary.pub"
-  successor_key_path="${key_dir}/orbit-release-2026-05-successor.pub"
-  write_release_key_orbit_release_2026_05_primary "$primary_key_path"
-  write_release_key_orbit_release_2026_05_successor "$successor_key_path"
+  primary_key_path="${key_dir}/orbit-release-key-1.pub"
+  successor_key_path="${key_dir}/orbit-release-key-2.pub"
+  write_release_key_orbit_release_key_1 "$primary_key_path"
+  write_release_key_orbit_release_key_2 "$successor_key_path"
 
-  printf 'orbit-release-2026-05-primary|2027-12-31||%s\n' "$primary_key_path"
-  printf 'orbit-release-2026-05-successor|2028-12-31||%s\n' "$successor_key_path"
+  printf 'orbit-release-key-1|2027-12-31||%s\n' "$primary_key_path"
+  printf 'orbit-release-key-2|2028-12-31||%s\n' "$successor_key_path"
 }
 
 trusted_key_records() {
@@ -123,6 +126,7 @@ trusted_key_records() {
       || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE requires ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1"
     [ -f "$ORBIT_RELEASE_PUBLIC_KEY_FILE" ] || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE does not exist: $ORBIT_RELEASE_PUBLIC_KEY_FILE"
     warn "ORBIT_RELEASE_PUBLIC_KEY_FILE=$ORBIT_RELEASE_PUBLIC_KEY_FILE set; trusting replacement release signing key"
+    warn "ORBIT_RELEASE_PUBLIC_KEY_FILE is deprecated; prefer ORBIT_RELEASE_TRUSTED_KEYS_FILE for the full trust set (key IDs, not_after, revoked_at)"
     printf 'override|||%s\n' "$ORBIT_RELEASE_PUBLIC_KEY_FILE"
     return
   fi
