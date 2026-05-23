@@ -46,6 +46,10 @@ critique.md
 orbit.db
 orbit.db-shm
 orbit.db-wal
+
+# Benchmark run/task artifacts — regenerated per run, not committed
+benchmarks/**/runs/**
+benchmarks/**/tasks/**
 # ADR artifacts are committed source-of-truth (adr-artifact ADR-002 amended,
 # ADR-005); the SQLite index is rebuildable from the YAML+markdown. Other
 # `.orbit/` state (tasks, runs, policies, audit DB, etc.) stays workspace-local.
