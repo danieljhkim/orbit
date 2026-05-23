@@ -118,12 +118,19 @@ Installer environment overrides are trust-boundary changes:
 - `ORBIT_INSTALL_REPO`, `ORBIT_VERSION`, and `ORBIT_INSTALL_BASE_URL` in
   `install.sh` change where release artifacts are selected from. They still
   require a valid checksum signature unless the caller also changes the
-  trusted key.
+  trusted key. `ORBIT_INSTALL_BASE_URL` intentionally accepts any scheme
+  supported by the downloader, including `file://` for tests and `http://` for
+  controlled mirrors; signature verification preserves artifact integrity, but
+  the URL transport is not a confidentiality boundary.
 - `ORBIT_BINARY_VERSION` in the npm package changes the selected release tag
   while retaining signature verification.
 - `ORBIT_RELEASE_PUBLIC_KEY_FILE` exists for tests and emergency operations.
   Setting it means the caller trusts that replacement key for release
-  authenticity.
+  authenticity, so installers require
+  `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` and log when the
+  override is active.
+- Follow-up task `ORB-00270` tracks key rotation / multi-key support beyond
+  this first pinned release key.
 
 Because npm publish is manual, the on-tag smoke run will fail if it fires
 before step 7 completes. That is expected and not actionable on its own;
