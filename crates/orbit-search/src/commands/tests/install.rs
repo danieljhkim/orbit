@@ -2,9 +2,10 @@
 
 use super::super::install::{
     CompanionIntegrity, SemanticInstallParams, checksum_from_manifest, resolve_download_source,
-    run, sha256_hex,
+    run, sha256_hex, verify_release_checksum_signature_with_key,
 };
 
+use crate::companion::unsafe_companion_overrides_enabled;
 use crate::{CompanionPaths, locate_companion, platform_companion_filename};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -147,14 +148,16 @@ fn default_download_source_requires_release_checksum_manifest() {
     let source = resolve_download_source().expect("default source");
 
     match source.integrity {
-        CompanionIntegrity::ReleaseChecksum {
+        CompanionIntegrity::ReleaseSignedChecksum {
             checksums_url,
+            signature_url,
             asset_name,
         } => {
             assert!(checksums_url.ends_with("/orbit-checksums.txt"));
+            assert!(signature_url.ends_with("/orbit-checksums.txt.sig"));
             assert_eq!(asset_name, platform_companion_filename());
         }
-        other => panic!("default source should require release checksum: {other:?}"),
+        other => panic!("default source should require signed release checksum: {other:?}"),
     }
 }
 
@@ -170,6 +173,47 @@ fn checksum_manifest_selects_platform_asset() {
         checksum_from_manifest(&manifest, &platform_companion_filename()).expect("checksum entry");
 
     assert_eq!(checksum, expected);
+}
+
+#[test]
+fn release_checksum_signature_verifies_trusted_manifest() {
+    let manifest = "64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c  orbit-search-companion-macos-aarch64";
+    let signature = decode_hex(
+        "7a30d97455a621a030176db6584a7a32875832e2d614b8faa63ac7ebd72f74100b7a9cdb3702c59d065c79fa653d0ca58dc90e19a0cd0a0699b28ff0699d89717a26d7605164d4653b6fa65d1b45db9c9a8532e47f85f3479ae6ca1175b90b3626410ebd6d511c480fdca8bce7e3eeef815d2276cfd5e8a3144a38856f5c4e21e4ee1e6962c9b3330a85e2f1a0c19c5ac921ad31394c65c2f4e477db79e901571b2a80721af082bfbb55d4c50e88ed07f69cf9434550c4625db23bc0df5b9aa4a56d683970e17b09db4a06f7544bc3b807a0c8ddda2a17e18a534fad22eca49da268f543dd510a7201a79f3259fbbe7c73d55212a93aa0a065bc07193ac81e02",
+    );
+    let public_key = r#"-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsXuoUfxsHxU/MZ9ZiBos
+oxyAiXDWb1QunevWWTT0++xvSxMJwTLkY2CIIQ7Bot17bMo/deoE5yqVDN9KJIzZ
+/JeX2Mf/E4/4iUroCmZw6p/Z0Z2eHpZlg9mZMXviCUq6IDz1APzt6m1lV8lhZvD9
+g3J50rxPizO91a30yUpYAIag02f9VPafyuuHA8SoDsWVwIyZ+Tazn7qAVKOgRWnU
+Ua2MN0GwlGsg4AySpNCH1cDKvoRDMbB0ngEm/B9r6Yiqi4stJOdOSBL0Z2VEwfpZ
+JXAFgkhiMRYeVULLjCacqxXMFDtH1J7uoowGuJaKUVA7fzq+vk2eBO8i1Wm0fVyK
+iQIDAQAB
+-----END PUBLIC KEY-----"#;
+
+    verify_release_checksum_signature_with_key(manifest.as_bytes(), &signature, public_key)
+        .expect("valid signature should verify");
+    let tampered = manifest.replace("macos-aarch64", "linux-x86_64");
+    let error =
+        verify_release_checksum_signature_with_key(tampered.as_bytes(), &signature, public_key)
+            .expect_err("tampered manifest should fail signature verification");
+
+    assert!(
+        error
+            .to_string()
+            .contains("release checksum signature verification failed"),
+        "{error}"
+    );
+}
+
+#[test]
+fn unsafe_override_gate_accepts_mixed_case_values() {
+    let _guard = EnvGuard::new();
+    set_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE", "Yes");
+    assert!(unsafe_companion_overrides_enabled());
+
+    set_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE", "True");
+    assert!(unsafe_companion_overrides_enabled());
 }
 
 #[test]
@@ -358,9 +402,25 @@ fn write_test_companion_integrity(path: &std::path::Path, version: &str) {
     let manifest_path = path.with_file_name(format!("{file_name}.sha256"));
     std::fs::write(
         manifest_path,
-        format!("version={version}\nsha256={checksum}\n"),
+        serde_json::json!({
+            "version": version,
+            "sha256": checksum,
+        })
+        .to_string(),
     )
     .expect("write companion integrity");
+}
+
+fn decode_hex(value: &str) -> Vec<u8> {
+    assert_eq!(value.len() % 2, 0);
+    value
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| {
+            let hex = std::str::from_utf8(chunk).expect("hex is utf8");
+            u8::from_str_radix(hex, 16).expect("hex byte")
+        })
+        .collect()
 }
 
 fn set_env(name: &str, value: &str) {

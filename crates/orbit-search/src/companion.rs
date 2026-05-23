@@ -91,7 +91,10 @@ pub fn locate_companion() -> Result<PathBuf, OrbitError> {
 
 pub(crate) fn unsafe_companion_overrides_enabled() -> bool {
     env::var(UNSAFE_COMPANION_OVERRIDE_ENV)
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .map(|value| {
+            let value = value.trim();
+            value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes")
+        })
         .unwrap_or(false)
 }
 
@@ -101,6 +104,12 @@ pub(crate) fn validate_companion_override_path(path: &Path) -> Result<(), OrbitE
             "{COMPANION_OVERRIDE_ENV} is a developer-only override; set {UNSAFE_COMPANION_OVERRIDE_ENV}=1 after verifying the companion path is trusted"
         )));
     }
+    tracing::warn!(
+        env_var = UNSAFE_COMPANION_OVERRIDE_ENV,
+        override_env = COMPANION_OVERRIDE_ENV,
+        path = %path.display(),
+        "unsafe companion lookup bypasses managed-install-only execution"
+    );
     if !path.is_absolute() {
         return Err(OrbitError::InvalidInput(format!(
             "{COMPANION_OVERRIDE_ENV} must be an absolute path: {}",
