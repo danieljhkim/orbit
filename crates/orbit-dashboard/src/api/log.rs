@@ -5,16 +5,17 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 use std::thread;
 use std::time::Duration as StdDuration;
 
 use axum::body::Body;
 use axum::extract::Query;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Json, Response};
 use futures_core::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
 use super::{LogQuery, map_runtime_error, non_empty_string, server_error};
 use crate::log_format::{
@@ -26,6 +27,42 @@ const LOG_DEFAULT_LIMIT: usize = 50;
 pub(super) const LOG_MAX_LIMIT: usize = 500;
 const LOG_STREAM_CHANNEL_DEPTH: usize = 64;
 const LOG_STREAM_POLL_INTERVAL: StdDuration = StdDuration::from_millis(50);
+/// Maximum number of concurrent `/api/log/stream` clients. Each accepted
+/// stream pins one native polling thread, so this cap bounds thread/FD/CPU
+/// usage even if the dashboard is bound beyond loopback.
+pub(super) const LOG_STREAM_MAX_CONCURRENT: usize = 8;
+
+/// Connection gate for log SSE streams.
+///
+/// Wraps a `tokio::sync::Semaphore` so the handler can `try_acquire` a permit
+/// per accepted stream. The permit is held by the polling thread and released
+/// when the thread exits (which happens within one poll interval after the
+/// client disconnects). Excess clients receive `503 Service Unavailable`.
+pub(super) struct LogStreamGate {
+    sem: Arc<Semaphore>,
+}
+
+impl LogStreamGate {
+    pub(super) fn new(max: usize) -> Self {
+        Self {
+            sem: Arc::new(Semaphore::new(max)),
+        }
+    }
+
+    pub(super) fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.sem).try_acquire_owned().ok()
+    }
+
+    #[cfg(test)]
+    pub(super) fn available_permits(&self) -> usize {
+        self.sem.available_permits()
+    }
+}
+
+fn global_log_stream_gate() -> &'static LogStreamGate {
+    static GATE: OnceLock<LogStreamGate> = OnceLock::new();
+    GATE.get_or_init(|| LogStreamGate::new(LOG_STREAM_MAX_CONCURRENT))
+}
 
 pub(super) async fn get_log(Query(q): Query<LogQuery>) -> Response {
     let path = match resolve_log_path(None) {
@@ -39,6 +76,10 @@ pub(super) async fn get_log(Query(q): Query<LogQuery>) -> Response {
 }
 
 pub(super) async fn stream_log(Query(q): Query<LogQuery>) -> Response {
+    let permit = match global_log_stream_gate().try_acquire() {
+        Some(p) => p,
+        None => return log_stream_unavailable(),
+    };
     let path = match resolve_log_path(None) {
         Ok(path) => path,
         Err(e) => return map_runtime_error(e),
@@ -48,7 +89,7 @@ pub(super) async fn stream_log(Query(q): Query<LogQuery>) -> Response {
         Err(e) => return map_runtime_error(e),
     };
     let stream = ReceiverSseStream {
-        rx: spawn_log_sse_frames(path, filters),
+        rx: spawn_log_sse_frames(path, filters, permit),
     };
     match Response::builder()
         .status(StatusCode::OK)
@@ -61,6 +102,22 @@ pub(super) async fn stream_log(Query(q): Query<LogQuery>) -> Response {
             "build SSE response: {e}"
         ))),
     }
+}
+
+pub(super) fn log_stream_unavailable() -> Response {
+    let mut response = (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "error": format!(
+                "log stream concurrency limit reached (max {LOG_STREAM_MAX_CONCURRENT}); retry shortly"
+            )
+        })),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+    response
 }
 
 // Widened to pub(super) so tests under api/tests/ (per-module layout migration ORB-00224)
@@ -96,9 +153,16 @@ pub(super) fn log_filters(query: &LogQuery) -> Result<LogFilters, orbit_core::Or
     )
 }
 
-fn spawn_log_sse_frames(path: PathBuf, filters: LogFilters) -> mpsc::Receiver<String> {
+fn spawn_log_sse_frames(
+    path: PathBuf,
+    filters: LogFilters,
+    permit: OwnedSemaphorePermit,
+) -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel(LOG_STREAM_CHANNEL_DEPTH);
     thread::spawn(move || {
+        // Permit is dropped when this thread exits, which happens within one
+        // poll interval of the client disconnecting (tx.is_closed()).
+        let _permit = permit;
         let mut offset = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let mut leftover = String::new();
         loop {
