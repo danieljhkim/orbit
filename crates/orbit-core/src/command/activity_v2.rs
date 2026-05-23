@@ -28,6 +28,7 @@ pub struct V2ActivityRunResult {
     pub success: bool,
     pub output: Value,
     pub message: Option<String>,
+    pub run_id: String,
     pub audit_jsonl: Option<PathBuf>,
     pub events_emitted: usize,
     /// Resolved execution backend applied to the asset at load time. `None`
@@ -37,8 +38,9 @@ pub struct V2ActivityRunResult {
 }
 
 impl OrbitRuntime {
-    /// Execute a v2 activity from a YAML path. Returns a structural result
-    /// plus the path to the persisted §7 envelope JSONL.
+    /// Execute a v2 activity from a YAML path. Returns a structural result.
+    /// Audit events for the run are queryable via `list_v2_audit_events` using
+    /// the `run_id` (the legacy envelope JSONL path is `None` post SQLite migration).
     ///
     /// `backend_flag` is the `--backend` invocation-level override; when
     /// `None`, the resolver falls through to env → config → default.
@@ -155,6 +157,7 @@ impl OrbitRuntime {
                 success: o.success,
                 output: o.output,
                 message: o.message,
+                run_id,
                 audit_jsonl,
                 events_emitted: events_count,
                 resolved_backend,
@@ -244,21 +247,17 @@ spec:
             .run_activity_v2_from_yaml(&yaml_path, json!({ "seconds": 0 }), None)
             .expect("direct activity run succeeds");
 
-        let audit_jsonl = result.audit_jsonl.as_ref().expect("audit jsonl path");
-        let first_line = std::fs::read_to_string(audit_jsonl)
-            .expect("read audit jsonl")
-            .lines()
-            .next()
-            .expect("audit jsonl has a first event")
-            .to_string();
-        let first_event: serde_json::Value =
-            serde_json::from_str(&first_line).expect("parse first audit event");
-        assert_eq!(
-            first_event
-                .get("agent_identity")
-                .and_then(serde_json::Value::as_str),
-            Some(SYSTEM_AUDIT_IDENTITY)
+        let events = runtime
+            .list_v2_audit_events(crate::V2AuditEventFilter {
+                run_id: Some(result.run_id.clone()),
+                ..Default::default()
+            })
+            .expect("list v2 audit events");
+        assert!(
+            !events.is_empty(),
+            "activity run should emit at least one audit event"
         );
+        assert_eq!(events[0].agent_identity, SYSTEM_AUDIT_IDENTITY);
     }
 
     #[cfg(unix)]
@@ -274,15 +273,19 @@ spec:
 
         assert!(!result.success);
         assert_eq!(result.message.as_deref(), Some("exit 7 not in [0]"));
-        let audit_jsonl = result.audit_jsonl.as_ref().expect("audit jsonl path");
-        let run_finished = std::fs::read_to_string(audit_jsonl)
-            .expect("read audit jsonl")
-            .lines()
-            .find(|line| line.contains(r#""body_kind":"run_finished""#))
-            .expect("run_finished audit event")
-            .to_string();
+
+        let events = runtime
+            .list_v2_audit_events(crate::V2AuditEventFilter {
+                run_id: Some(result.run_id.clone()),
+                ..Default::default()
+            })
+            .expect("list v2 audit events");
+        let run_finished = events
+            .iter()
+            .find(|e| e.payload_json.contains(r#""body_kind":"run_finished""#))
+            .expect("run_finished audit event");
         let event: serde_json::Value =
-            serde_json::from_str(&run_finished).expect("parse run_finished");
+            serde_json::from_str(&run_finished.payload_json).expect("parse run_finished");
         assert_eq!(
             event.get("outcome").and_then(serde_json::Value::as_str),
             Some("failed")

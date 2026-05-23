@@ -136,7 +136,7 @@ pub(super) async fn reply_review_thread_action(
     if reply_body.is_empty() {
         return bad_request("reply body must not be empty".to_string());
     }
-    let task_status = match runtime.get_task(&validated_id) {
+    let task_status = match runtime.get_task(validated_id) {
         Ok(t) => t.status,
         Err(e) => return map_runtime_error(e),
     };
@@ -159,7 +159,7 @@ pub(super) async fn resolve_review_thread_action(
     if thread_id.trim().is_empty() {
         return bad_request("thread_id must not be empty".to_string());
     }
-    let task_status = match runtime.get_task(&validated_id) {
+    let task_status = match runtime.get_task(validated_id) {
         Ok(t) => t.status,
         Err(e) => return map_runtime_error(e),
     };
@@ -182,7 +182,7 @@ pub(super) async fn reopen_review_thread_action(
     if thread_id.trim().is_empty() {
         return bad_request("thread_id must not be empty".to_string());
     }
-    let task_status = match runtime.get_task(&validated_id) {
+    let task_status = match runtime.get_task(validated_id) {
         Ok(t) => t.status,
         Err(e) => return map_runtime_error(e),
     };
