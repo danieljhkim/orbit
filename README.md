@@ -196,12 +196,14 @@ Two install surfaces. The CLI gives you the full power of Orbit. Choose the plug
 
 ---
 
-## Agent Tool Surface (MCP)
+## Orbit MCP Tool Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as plugin. Expand below to see the full tool surface.
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The table below is the full advertised surface — what `orbit mcp serve` returns from `tools/list`. Run `orbit tool list` for the live registry (it's the source of truth; this table can drift).
+
+Not every tool is intended for agent calls. Lifecycle/admin operations (`docs.index`, `docs.migrate`, `semantic.*`, `learning.sync`, `task.locks.*`, `friction.*` reads/updates, `graph.history`) are typically driven by humans via the CLI; the recommended agent permission profile auto-allows discovery/write tools and prompts on the rest. See `.claude/settings.json` (and `.codex/`, `.grok/`, `.gemini/` equivalents) in the seeded workspace for the default agent-facing subset.
 
 <details>
-<summary><strong>Full tool reference</strong> — task, review, graph, search, semantic, adr, learning, friction (click to expand)
+<summary><strong>Full tool reference</strong> — task, review, graph, search, semantic, adr, docs, learning, friction (click to expand)
 </summary>
 
 Agents discover project docs through `orbit.search`; docs, lock, semantic setup/index/status, graph history, learning sync/list, and friction stats operations are CLI-only admin/setup workflows.
@@ -209,15 +211,18 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | Namespace | Tool | Purpose |
 |---|---|---|
 | **task** | `orbit.task.add` | Create a new task |
-| | `orbit.task.approve` | Approve a proposed or reviewed task |
-| | `orbit.task.reject` | Reject a proposed or reviewed task |
 | | `orbit.task.update` | Mutate task fields (status, plan, acceptance criteria) |
 | | `orbit.task.show` | Fetch full task detail |
 | | `orbit.task.list` | List tasks filtered by status / scope / `path` |
 | | `orbit.task.start` | Transition into in-progress |
-| | `orbit.task.delete` | Delete a task when explicitly allowed |
-| | `orbit.task.lint` | Validate task metadata |
+| | `orbit.task.approve` | Approve a task (`proposed → backlog`, or `review → done`) |
+| | `orbit.task.reject` | Reject a task |
+| | `orbit.task.delete` | Permanently delete a task |
+| | `orbit.task.lint` | Lint a task for stale paths and vague acceptance criteria |
 | | `orbit.task.artifact.put` | Attach a generated artifact to a task |
+| | `orbit.task.locks` | List files currently locked by active tasks |
+| | `orbit.task.locks.reserve` | Reserve task-derived context files or direct selectors |
+| | `orbit.task.locks.release` | Release a previously granted reservation |
 | **review** | `orbit.task.review_thread.add` | Open a review thread on a task |
 | | `orbit.task.review_thread.list` | List review threads on a task |
 | | `orbit.task.review_thread.reply` | Reply to a thread |
@@ -229,27 +234,39 @@ Agents discover project docs through `orbit.search`; docs, lock, semantic setup/
 | | `orbit.graph.deps` | List outbound dependencies |
 | | `orbit.graph.implementors` | List trait implementors |
 | | `orbit.graph.refs` | List references to a symbol |
+| | `orbit.graph.history` | Compatibility stub (returns deprecation error); use `git log --grep '[T<task-id>]'` instead |
 | | `orbit.graph.pack` | Bundle a connected slice of the graph for a prompt |
 | **search** | `orbit.search` | Unified search across tasks, docs, learnings, and ADRs. `kind` narrows the corpus; `hybrid: true` opts task results into BM25 + cosine ranking; `semantic: "<task-id>"` returns cosine neighbors. Cross-kind filters: `tag` (AND), `all` (kind-aware status widener), `status` (`kind:value` tokens), `path` (selector-mapping for tasks, glob-containment for learnings/ADRs; docs remain content-indexed). |
-| **semantic** | `orbit.semantic.uninstall` | Remove the embedding companion and/or models |
+| **semantic** | `orbit.semantic.install` | Install the local embedding companion and model |
+| | `orbit.semantic.uninstall` | Remove the embedding companion and/or models |
+| | `orbit.semantic.stats` | Show companion and index status |
+| | `orbit.semantic.index` | Rebuild task / doc / learning / ADR embeddings |
 | **adr** | `orbit.adr.add` | Author an Architecture Decision Record |
 | | `orbit.adr.update` | Edit an ADR |
 | | `orbit.adr.show` | Fetch an ADR |
 | | `orbit.adr.list` | List ADRs by status |
 | | `orbit.adr.supersede` | Mark an ADR superseded by another |
+| **docs** | `orbit.docs.list` | List indexed Markdown docs under configured `[docs].roots` |
+| | `orbit.docs.show` | Show a single doc with parsed frontmatter and body |
+| | `orbit.docs.add` | Register an additional docs root |
+| | `orbit.docs.index` | Build or refresh doc-corpus embeddings |
+| | `orbit.docs.migrate` | Backfill locked frontmatter for legacy docs |
 | **learning** | `orbit.learning.add` | Author a project learning |
 | | `orbit.learning.update` | Edit a learning |
 | | `orbit.learning.show` | Fetch a learning |
-| | `orbit.learning.upvote` | Mark a learning as useful |
-| | `orbit.learning.comment.add` | Add a comment to a learning |
-| | `orbit.learning.comment.list` | List comments on a learning |
-| | `orbit.learning.comment.delete` | Delete a learning comment |
+| | `orbit.learning.list` | List learnings by tag / scope / `path` (glob-containment) |
 | | `orbit.learning.supersede` | Mark a learning superseded |
 | | `orbit.learning.prune` | Report or archive stale learnings |
+| | `orbit.learning.sync` | Reconcile the SQLite envelope index from YAML |
+| | `orbit.learning.upvote` | Record a task-anchored upvote |
+| | `orbit.learning.comment.add` | Append a footnote-style comment to a learning |
+| | `orbit.learning.comment.list` | List comments for a learning |
+| | `orbit.learning.comment.delete` | Soft-delete a learning comment |
 | **friction** | `orbit.friction.add` | Record an operational friction |
 | | `orbit.friction.update` | Edit a friction |
 | | `orbit.friction.show` | Fetch a friction |
 | | `orbit.friction.list` | List frictions by tag / status |
+| | `orbit.friction.stats` | Aggregate frictions by tag and recency |
 | | `orbit.friction.tags` | List configured friction taxonomy tags |
 | | `orbit.friction.resolve` | Mark a friction resolved |
 

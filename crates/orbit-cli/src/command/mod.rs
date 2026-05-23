@@ -1,21 +1,25 @@
-pub mod definitions;
+pub mod activity;
+pub mod audit;
+pub mod config;
 pub mod docs;
-pub mod environment;
+pub mod executor;
 pub mod friction;
+pub mod graph;
 pub mod hook;
+pub mod init;
+pub mod job;
 pub mod learning;
 pub mod log;
 pub mod mcp;
-pub mod observe;
+pub mod policy;
 pub mod run;
 pub mod search;
 pub mod semantic;
+pub mod skill;
 pub mod task;
+pub mod tool;
 pub mod web;
-
-pub use definitions::{activity, executor, job, policy, skill, tool};
-pub use environment::{config, init, workspace};
-pub use observe::{audit, graph};
+pub mod workspace;
 
 use std::path::PathBuf;
 

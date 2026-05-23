@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use orbit_core::OrbitRuntime;
 use orbit_mcp::McpHost;
 
-use super::{
+use super::host::{
     ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES,
     LEARNING_TOOL_NAMES, RuntimeMcpHost, SEARCH_TOOL_NAMES, SEMANTIC_TOOL_NAMES, TASK_TOOL_NAMES,
     is_mcp_tool_exposed, safe_mcp_tool_names,
@@ -272,7 +272,7 @@ mod audited_mcp_call_tests {
     use orbit_mcp::McpHost;
     use serde_json::json;
 
-    use super::super::{RuntimeMcpHost, audited_mcp_call};
+    use super::super::host::{RuntimeMcpHost, audited_mcp_call};
 
     fn create_task(runtime: &OrbitRuntime, status: TaskStatus) -> String {
         runtime
