@@ -135,6 +135,7 @@ pub enum GroundhogBuiltinAction {
 pub struct OrbitTaskScope {
     pub orbit_root: Option<PathBuf>,
     pub task_id: Option<String>,
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

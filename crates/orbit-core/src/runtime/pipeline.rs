@@ -42,8 +42,11 @@ impl OrbitRuntime {
         };
 
         if tool_context.orbit_host.is_none() {
-            tool_context.orbit_host =
-                Some(super::build_orbit_tool_host(self, resolved_task_id.clone()));
+            tool_context.orbit_host = Some(super::build_orbit_tool_host(
+                self,
+                resolved_task_id.clone(),
+                None,
+            ));
         }
 
         // Ensure fs tools always have a workspace boundary for sandboxing.
