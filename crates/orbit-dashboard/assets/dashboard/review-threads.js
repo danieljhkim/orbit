@@ -83,14 +83,6 @@ function refreshBadge() {
   }
 }
 
-function locationLabel(item) {
-  const anchor = item.anchor || {};
-  if (anchor.kind === 'inline' && item.path && item.line != null) {
-    return `${item.path}:${item.line}`;
-  }
-  return 'task-level';
-}
-
 function authorLabel(kind, family) {
   if (kind === 'agent') {
     return family ? `agent (${family})` : 'agent';
@@ -255,8 +247,8 @@ function render() {
 
   const header = el('div', { class: 'review-thread-row header' }, [
     el('span', { text: 'task' }),
+    el('span', { text: '' }),
     el('span', { text: 'author' }),
-    el('span', { text: 'location' }),
     el('span', { text: 'preview' }),
     el('span', { class: 'review-thread-meta', text: 'msgs' }),
     el('span', { text: 'status' }),
@@ -269,8 +261,8 @@ function render() {
   for (const item of items) {
     const row = el('div', { class: 'review-thread-row', title: item.task_title || item.task_id }, [
       el('span', { class: 'mono', text: item.task_id }),
+      statusPill(item.task_status || 'backlog'),
       el('span', { class: 'mono', text: authorLabel(item.last_author_kind, item.last_author_family) }),
-      el('span', { class: 'mono', text: locationLabel(item) }),
       el('span', { class: 'review-thread-preview', text: item.body_preview || '' }),
       el('span', { class: 'review-thread-meta', text: String(item.message_count || 0) }),
       statusPill(item.status || 'open'),

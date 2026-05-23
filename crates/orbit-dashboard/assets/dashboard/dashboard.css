@@ -2387,7 +2387,7 @@
 
       .review-thread-row {
         display: grid;
-        grid-template-columns: minmax(110px, 130px) minmax(110px, 130px) minmax(140px, 1.2fr) minmax(220px, 2.5fr) 60px minmax(80px, 100px) minmax(120px, 140px);
+        grid-template-columns: minmax(110px, 130px) 92px minmax(110px, 130px) minmax(220px, 2.5fr) 60px minmax(80px, 100px) minmax(120px, 140px);
         align-items: center;
         gap: 12px;
         padding: 6px 12px;
