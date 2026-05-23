@@ -1,7 +1,5 @@
 //! Run lifecycle: detail, cancel, replay, events, logs.
 
-use std::io::{BufRead, BufReader, Read};
-use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -9,22 +7,17 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::utility::redaction::redact_all;
 use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord};
-use orbit_core::{JobRun, OrbitRuntime};
+use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
 use super::{
     HISTORY_DEFAULT_LIMIT, LimitQuery, RunEventsQuery, bad_request, bounded_limit,
-    map_runtime_error, server_error, v2_loop_dir, validate_id,
+    map_runtime_error, validate_id,
 };
 use crate::projections::job_run_to_json;
 
 const RUN_EVENTS_DEFAULT_LIMIT: usize = 100;
-/// Hard cap on bytes scanned from a single run's audit JSONL per request.
-/// Streaming stops once this many bytes have been consumed; if the requested
-/// page is not yet full at that point, the endpoint returns 413.
-pub(super) const RUN_EVENTS_MAX_SCAN_BYTES: usize = 8 * 1024 * 1024;
-/// Hard cap on lines scanned from a single run's audit JSONL per request.
-/// Bounds CPU on pathological many-tiny-lines files.
+/// Hard cap on rows scanned from a single run's persisted v2 audit events.
 pub(super) const RUN_EVENTS_MAX_SCAN_LINES: usize = 50_000;
 /// Maximum bytes included in stdout/stderr previews returned by run-log APIs.
 const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
@@ -152,60 +145,28 @@ pub(super) async fn list_run_events(
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
-    let path = v2_loop_path(&runtime, run_id);
-    let path = match canonical_v2_loop_path(&runtime, &path) {
-        Ok(Some(path)) => path,
-        Ok(None) => return Json(Value::Array(Vec::new())).into_response(),
+    let rows = match runtime.list_v2_audit_events(V2AuditEventFilter {
+        workspace_id: String::new(),
+        run_id: Some(run_id.to_string()),
+        source: Some("v2_envelope".to_string()),
+        limit: Some(RUN_EVENTS_MAX_SCAN_LINES + 1),
+        ..Default::default()
+    }) {
+        Ok(rows) => rows,
         Err(e) => return map_runtime_error(e),
     };
-    let file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Json(Value::Array(Vec::new())).into_response();
-        }
-        Err(e) => {
-            return server_error(orbit_core::OrbitError::Io(format!(
-                "read {}: {e}",
-                path.display()
-            )));
-        }
-    };
-
-    // Cap total bytes read from the file so an oversized JSONL cannot inflate
-    // process memory or saturate this task. `take` is the structural memory
-    // bound; `bytes_scanned` / `lines_scanned` below are the request-budget
-    // counters that drive the 413 response when the page can't be filled
-    // within the budget.
-    let bounded = file.take(RUN_EVENTS_MAX_SCAN_BYTES as u64 + 1);
-    let reader = BufReader::new(bounded);
-
     let mut page: Vec<Value> = Vec::with_capacity(limit.min(64));
     let mut matched: usize = 0;
-    let mut bytes_scanned: usize = 0;
     let mut lines_scanned: usize = 0;
     let mut budget_exceeded = false;
 
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(line) => line,
-            Err(e) => {
-                return server_error(orbit_core::OrbitError::Io(format!(
-                    "read {}: {e}",
-                    path.display()
-                )));
-            }
-        };
-        bytes_scanned = bytes_scanned.saturating_add(line.len()).saturating_add(1);
+    for row in rows.into_iter().rev() {
         lines_scanned = lines_scanned.saturating_add(1);
-        if bytes_scanned > RUN_EVENTS_MAX_SCAN_BYTES || lines_scanned > RUN_EVENTS_MAX_SCAN_LINES {
+        if lines_scanned > RUN_EVENTS_MAX_SCAN_LINES {
             budget_exceeded = true;
             break;
         }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let value: Value = match serde_json::from_str(trimmed) {
+        let value: Value = match serde_json::from_str(&row.payload_json) {
             Ok(v) => v,
             Err(_) => continue,
         };
@@ -230,7 +191,7 @@ pub(super) async fn list_run_events(
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
             Json(json!({
-                "error": "run-events audit log exceeds bounded scan budget; narrow the kind filter or reduce offset"
+                "error": "run-events audit rows exceed bounded scan budget; narrow the kind filter or reduce offset"
             })),
         )
             .into_response();
@@ -323,34 +284,4 @@ fn bounded_preview(raw: &str) -> Preview {
         text: redact_all(&out),
         truncated,
     }
-}
-
-fn v2_loop_path(runtime: &OrbitRuntime, run_id: &str) -> PathBuf {
-    v2_loop_dir(runtime).join(format!("{run_id}.jsonl"))
-}
-
-fn canonical_v2_loop_path(
-    runtime: &OrbitRuntime,
-    path: &FsPath,
-) -> Result<Option<PathBuf>, orbit_core::OrbitError> {
-    let canonical_path = match path.canonicalize() {
-        Ok(path) => path,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => {
-            return Err(orbit_core::OrbitError::Io(format!(
-                "resolve {}: {e}",
-                path.display()
-            )));
-        }
-    };
-    let audit_dir = v2_loop_dir(runtime);
-    let canonical_dir = audit_dir
-        .canonicalize()
-        .map_err(|e| orbit_core::OrbitError::Io(format!("resolve {}: {e}", audit_dir.display())))?;
-    if !canonical_path.starts_with(&canonical_dir) {
-        return Err(orbit_core::OrbitError::InvalidInput(
-            "run id resolved outside audit log directory".to_string(),
-        ));
-    }
-    Ok(Some(canonical_path))
 }

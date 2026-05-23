@@ -18,7 +18,7 @@ use std::env;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use orbit_agent::loop_engine::{AgentLoopConfig, JsonlFileSink, Session};
+use orbit_agent::loop_engine::{AgentLoopConfig, InMemorySink, Session};
 use orbit_agent::providers::anthropic::AnthropicMessagesTransport;
 use orbit_tools::{ToolContext, ToolRegistry};
 
@@ -41,25 +41,20 @@ fn main() -> ExitCode {
         }
     };
 
-    let audit_root = env::temp_dir().join("orbit-agent-examples").join("audit");
-    let sink = match JsonlFileSink::open(
-        &audit_root,
-        format!(
-            "session-continuation-{}",
-            chrono::Utc::now().timestamp_millis()
-        ),
-    ) {
-        Ok(s) => s,
-        Err(err) => {
-            eprintln!("audit open: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let run_id = format!(
+        "session-continuation-{}",
+        chrono::Utc::now().timestamp_millis()
+    );
+    let audit_blob_root = env::temp_dir()
+        .join("orbit-agent-examples")
+        .join("audit-blobs")
+        .join(&run_id);
+    let sink = InMemorySink::new(&audit_blob_root);
 
     let registry = ToolRegistry::new();
     let tool_ctx = ToolContext::default();
 
-    let cfg = AgentLoopConfig::new_for_run(sink.run_id())
+    let cfg = AgentLoopConfig::new_for_run(&run_id)
         .with_max_iterations(2)
         .with_max_total_tokens(200_000)
         .with_wall_clock_timeout(Duration::from_secs(180))
@@ -117,8 +112,8 @@ fn main() -> ExitCode {
         }
     }
 
-    println!("audit: {}", sink.log_path().display());
-    session.close(sink.run_id(), &sink);
+    println!("audit blobs: {}", sink.blob_store().root().display());
+    session.close(&run_id, &sink);
 
     if !final_mentions_secret {
         eprintln!(

@@ -11,15 +11,15 @@ use axum::response::Response;
 use orbit_common::types::KnowledgeRunMetrics;
 use orbit_core::command::job::JobRunListParams;
 use orbit_core::{
-    ActivityInvocationMetrics, InvocationQuery, InvocationRecord, JobRun, JobRunState,
-    OrbitRuntime, TaskInvocationMetrics, ToolInvocationMetrics,
+    ActivityInvocationMetrics, InvocationQuery, InvocationRecord, JobRunState, OrbitRuntime,
+    TaskInvocationMetrics, ToolInvocationMetrics,
 };
 use orbit_knowledge::metrics::{KnowledgeStatsSummary, aggregate as aggregate_knowledge_stats};
 use rusqlite::{Connection, params};
 use tower::ServiceExt;
 
 use super::super::router;
-use super::test_support::{body_json, seed_run};
+use super::test_support::{body_json, seed_run, write_seeded_run};
 
 const RUN_ID: &str = "jrun-metrics-api";
 const OTHER_RUN_ID: &str = "jrun-metrics-other";
@@ -107,28 +107,6 @@ fn seed_metrics_runtime() -> OrbitRuntime {
     );
 
     runtime
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct JobRunDoc<'a> {
-    schema_version: u8,
-    run: &'a JobRun,
-}
-
-fn write_seeded_run(runtime: &OrbitRuntime, run: &JobRun) {
-    let run_dir = runtime
-        .data_root()
-        .join("state")
-        .join("job-runs")
-        .join(&run.job_id)
-        .join(&run.run_id);
-    let content = serde_yaml::to_string(&JobRunDoc {
-        schema_version: 1,
-        run,
-    })
-    .expect("serialize run yaml");
-    std::fs::write(run_dir.join("jrun.yaml"), content).expect("write run yaml");
 }
 
 fn audit_db_path(runtime: &OrbitRuntime) -> PathBuf {

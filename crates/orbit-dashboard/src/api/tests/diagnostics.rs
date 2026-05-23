@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use chrono::Utc;
-use orbit_core::OrbitRuntime;
+use orbit_core::{OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::json;
 use tempfile::tempdir;
 use tower::ServiceExt;
@@ -43,50 +43,72 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
         .write(b"normal output\n")
         .expect("write stdout blob");
     let stderr_ref = blob_store.write(stderr).expect("write stderr blob");
-    let audit_dir = audit_root.join("v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    write_lines(
-        &audit_dir.join(format!("{run_id}.jsonl")),
-        &[
-            json!({
-                "schemaVersion": 1,
-                "event_type": "run.started",
-                "event_id": "evt-run",
-                "ts": "2099-05-08T04:12:20Z",
-                "run_id": run_id,
-                "body_kind": "run_started"
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    for event in [
+        json!({
+            "schemaVersion": 1,
+            "event_type": "run.started",
+            "event_id": "evt-run",
+            "ts": "2099-05-08T04:12:20Z",
+            "run_id": run_id,
+            "agent_identity": "system",
+            "body_kind": "run_started"
+        }),
+        json!({
+            "schemaVersion": 1,
+            "event_type": "step.started",
+            "event_id": "evt-step",
+            "ts": "2099-05-08T04:12:21Z",
+            "run_id": run_id,
+            "agent_identity": "system",
+            "parent_event_id": "evt-run",
+            "body_kind": "step_started",
+            "step_id": "implement"
+        }),
+        json!({
+            "schemaVersion": 1,
+            "event_type": "cli.invocation.finished",
+            "event_id": "evt-cli",
+            "ts": "2099-05-08T04:12:22Z",
+            "run_id": run_id,
+            "agent_identity": "system",
+            "parent_event_id": "evt-step",
+            "body_kind": "cli_invocation_finished",
+            "provider": "codex",
+            "stdout_blob_ref": stdout_ref,
+            "stderr_blob_ref": stderr_ref,
+            "exit_code": 0,
+            "timed_out": false,
+            "duration_ms": 123
+        }),
+    ] {
+        let ts = event["ts"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .expect("event ts");
+        runtime
+            .insert_v2_audit_event(&V2AuditEventInsertParams {
+                workspace_id: workspace_id.clone(),
+                event_id: event["event_id"].as_str().expect("event id").to_string(),
+                source: "v2_envelope".to_string(),
+                schema_version: 1,
+                event_type: event["event_type"]
+                    .as_str()
+                    .expect("event type")
+                    .to_string(),
+                ts,
+                run_id: run_id.to_string(),
+                agent_identity: "system".to_string(),
+                parent_event_id: event
+                    .get("parent_event_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                workspace_path: None,
+                payload_json: event.to_string(),
             })
-            .to_string(),
-            "malformed".to_string(),
-            json!({
-                "schemaVersion": 1,
-                "event_type": "step.started",
-                "event_id": "evt-step",
-                "ts": "2099-05-08T04:12:21Z",
-                "run_id": run_id,
-                "parent_event_id": "evt-run",
-                "body_kind": "step_started",
-                "step_id": "implement"
-            })
-            .to_string(),
-            json!({
-                "schemaVersion": 1,
-                "event_type": "cli.invocation.finished",
-                "event_id": "evt-cli",
-                "ts": "2099-05-08T04:12:22Z",
-                "run_id": run_id,
-                "parent_event_id": "evt-step",
-                "body_kind": "cli_invocation_finished",
-                "provider": "codex",
-                "stdout_blob_ref": stdout_ref,
-                "stderr_blob_ref": stderr_ref,
-                "exit_code": 0,
-                "timed_out": false,
-                "duration_ms": 123
-            })
-            .to_string(),
-        ],
-    );
+            .expect("insert v2 audit event");
+    }
     stderr_ref
 }
 

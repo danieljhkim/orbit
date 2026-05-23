@@ -261,6 +261,29 @@ pub(crate) fn update_state_file(
     }
 }
 
+fn update_session_learning_state(
+    runtime: &OrbitRuntime,
+    session_id: &str,
+    candidates: &[LearningReminder],
+    caps: LearningInjectionCaps,
+) -> Result<Vec<LearningReminder>, String> {
+    let store = runtime
+        .sqlite_store()
+        .map_err(|error| format!("open sqlite store: {error}"))?;
+    let workspace_id = runtime
+        .workspace_id()
+        .map_err(|error| format!("resolve workspace_id: {error}"))?;
+    let prior = store
+        .get_session_learning_state(&workspace_id, session_id)
+        .map_err(|error| format!("read session learning state: {error}"))?
+        .unwrap_or_default();
+    let (next_state, admitted) = merge_state(prior, candidates, caps);
+    store
+        .upsert_session_learning_state(&workspace_id, session_id, &next_state)
+        .map_err(|error| format!("write session learning state: {error}"))?;
+    Ok(admitted)
+}
+
 impl OrbitRuntime {
     pub fn learning_hook_target_is_searchable(
         &self,
@@ -403,8 +426,12 @@ fn admitted_learning_reminders(
     }
 
     let candidates = reminders_from_search_results(results);
-    let state_path = runtime.learning_hook_state_file_path(session_id, tmpdir, ppid);
-    update_state_file(&state_path, &candidates, caps)
+    if let Some(session_id) = session_id {
+        update_session_learning_state(runtime, session_id, &candidates, caps)
+    } else {
+        let state_path = runtime.learning_hook_state_file_path(None, tmpdir, ppid);
+        update_state_file(&state_path, &candidates, caps)
+    }
 }
 
 fn admitted_review_thread_reminders(

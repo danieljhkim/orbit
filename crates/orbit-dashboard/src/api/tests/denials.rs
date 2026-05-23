@@ -1,43 +1,45 @@
 use chrono::{Duration, Utc};
-use orbit_core::{AuditEventStatus, OrbitRuntime};
+use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::json;
 
 use super::super::denials::{SQLITE_FS_BOUNDARY_PROFILE, collect_denial_rows, denials_payload};
-use super::test_support::write_lines;
 
 #[test]
 fn denials_payload_combines_v2_and_sqlite_denials() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
-    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
     let now = Utc::now();
-    write_lines(
-        &audit_dir.join("run-v2-denials.jsonl"),
-        &[
-            json!({
-                "schemaVersion": 1,
-                "event_type": "fs.call.denied",
-                "event_id": "evt-fs-denied",
-                "ts": now.to_rfc3339(),
-                "run_id": "run-v2-denials",
-                "agent_identity": "codex / gpt-5",
-                "body_kind": "fs_call_denied",
-                "profile": "restricted",
-                "path": "./secret.txt"
-            })
-            .to_string(),
-            json!({
-                "schemaVersion": 1,
-                "event_type": "tool.denied",
-                "event_id": "evt-tool-denied",
-                "ts": now.to_rfc3339(),
-                "run_id": "run-v2-denials",
-                "agent_identity": "codex / gpt-5",
-                "body_kind": "tool_denied",
-                "tool_name": "github.pr.merge"
-            })
-            .to_string(),
-        ],
+    seed_v2_denial(
+        &runtime,
+        "evt-fs-denied",
+        "fs.call.denied",
+        json!({
+            "schemaVersion": 1,
+            "event_type": "fs.call.denied",
+            "event_id": "evt-fs-denied",
+            "ts": now.to_rfc3339(),
+            "run_id": "run-v2-denials",
+            "agent_identity": "codex / gpt-5",
+            "body_kind": "fs_call_denied",
+            "profile": "restricted",
+            "path": "./secret.txt"
+        }),
+        now,
+    );
+    seed_v2_denial(
+        &runtime,
+        "evt-tool-denied",
+        "tool.denied",
+        json!({
+            "schemaVersion": 1,
+            "event_type": "tool.denied",
+            "event_id": "evt-tool-denied",
+            "ts": now.to_rfc3339(),
+            "run_id": "run-v2-denials",
+            "agent_identity": "codex / gpt-5",
+            "body_kind": "tool_denied",
+            "tool_name": "github.pr.merge"
+        }),
+        now,
     );
     runtime
         .record_audit_event(&orbit_core::AuditEventInsertParams {
@@ -95,6 +97,30 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
     .expect("collect filtered sqlite denials");
     assert_eq!(sqlite_only.len(), 1);
     assert_eq!(sqlite_only[0].target(), "/usr/bin/false");
+}
+
+fn seed_v2_denial(
+    runtime: &OrbitRuntime,
+    event_id: &str,
+    event_type: &str,
+    payload: serde_json::Value,
+    ts: chrono::DateTime<Utc>,
+) {
+    runtime
+        .insert_v2_audit_event(&V2AuditEventInsertParams {
+            workspace_id: runtime.workspace_id().expect("workspace id"),
+            event_id: event_id.to_string(),
+            source: "v2_envelope".to_string(),
+            schema_version: 1,
+            event_type: event_type.to_string(),
+            ts,
+            run_id: "run-v2-denials".to_string(),
+            agent_identity: "codex / gpt-5".to_string(),
+            parent_event_id: None,
+            workspace_path: None,
+            payload_json: payload.to_string(),
+        })
+        .expect("insert v2 denial");
 }
 
 #[test]

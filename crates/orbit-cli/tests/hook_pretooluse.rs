@@ -86,11 +86,7 @@ Read full body via `orbit.learning.show <id>` if needed.\n\
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
 
-    let state_path = workspace
-        .work
-        .join(".orbit/state/sessions/cold-session/learnings.json");
-    let state: Value = serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
-        .expect("state JSON");
+    let state = workspace.session_learning_state("cold-session");
     assert_eq!(state["count"], 1);
     assert_eq!(state["emitted_ids"], json!([learning_id]));
 
@@ -486,6 +482,21 @@ impl TestWorkspace {
             .as_str()
             .expect("thread id")
             .to_string()
+    }
+
+    fn session_learning_state(&self, session_id: &str) -> Value {
+        let conn = rusqlite::Connection::open(self.home.join(".orbit").join("orbit.db"))
+            .expect("open orbit db");
+        let raw: String = conn
+            .query_row(
+                "SELECT learning_injection_state_json \
+                 FROM session_learning_state \
+                 WHERE session_id = ?1",
+                (session_id,),
+                |row| row.get(0),
+            )
+            .expect("session learning state row");
+        serde_json::from_str(&raw).expect("session learning state JSON")
     }
 
     fn run_hook(&self, stdin: &str, envs: &[(&str, &str)], label: &str) -> Output {

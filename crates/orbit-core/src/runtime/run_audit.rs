@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -7,7 +6,7 @@ use orbit_common::types::OrbitError;
 use orbit_common::utility::blob_store::BlobStore;
 use serde_json::Value;
 
-use crate::OrbitRuntime;
+use crate::{OrbitRuntime, V2AuditEventFilter};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunAuditEvent {
@@ -63,18 +62,17 @@ pub struct RunCliInvocationRecord {
 
 impl OrbitRuntime {
     pub fn collect_run_audit_events(&self, run_id: &str) -> Result<Vec<RunAuditEvent>, OrbitError> {
-        let audit_path = self.v2_audit_log_path(run_id);
-        if !audit_path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let raw = fs::read_to_string(&audit_path).map_err(|err| {
-            OrbitError::Io(format!("read audit log '{}': {err}", audit_path.display()))
+        let rows = self.list_v2_audit_events(V2AuditEventFilter {
+            workspace_id: String::new(),
+            run_id: Some(run_id.to_string()),
+            source: Some("v2_envelope".to_string()),
+            limit: Some(50_000),
+            ..Default::default()
         })?;
         let mut events_by_id = HashMap::new();
         let mut ordered_ids = Vec::new();
-        for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-            let value: Value = match serde_json::from_str(line) {
+        for row in rows.into_iter().rev() {
+            let value: Value = match serde_json::from_str(&row.payload_json) {
                 Ok(value) => value,
                 Err(_) => continue,
             };
@@ -266,14 +264,6 @@ impl OrbitRuntime {
         }
 
         Ok(records)
-    }
-
-    fn v2_audit_log_path(&self, run_id: &str) -> PathBuf {
-        self.data_root()
-            .join("state")
-            .join("audit")
-            .join("v2_loop")
-            .join(format!("{run_id}.jsonl"))
     }
 
     fn v2_audit_blob_root(&self) -> PathBuf {

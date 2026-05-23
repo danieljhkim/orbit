@@ -7,9 +7,6 @@ use chrono::Utc;
 use orbit_agent::{Agent, AgentConfig, AgentOperation, AgentRequest, peek_response_status};
 use orbit_common::types::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, prepend_reminder_block};
-use orbit_common::utility::learning_session::{
-    learning_session_state_path, write_learning_session_state,
-};
 use orbit_common::utility::redaction::{PatternRedactor, redact_sensitive_env_text};
 use serde_json::Value;
 
@@ -293,11 +290,11 @@ fn cli_learning_context(
     let base_prompt = super::envelope::user_prompt_from_input(input)?;
     let prompt = prepend_reminder_block(&base_prompt, &admitted);
     let session_id = format!("S{:x}-cli", Utc::now().timestamp_micros());
-    if let Some(root) = workspace_root {
-        let path = learning_session_state_path(root, &session_id);
-        write_learning_session_state(&path, &state).map_err(|err| {
-            DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
-        })?;
+    if workspace_root.is_some() {
+        host.persist_session_learning_state(&session_id, &state)
+            .map_err(|err| {
+                DispatchError::CliInvocationFailed(format!("persist learning state: {err}"))
+            })?;
     }
     Ok(CliLearningContext {
         prompt: Some(prompt),

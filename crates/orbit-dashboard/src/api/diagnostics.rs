@@ -8,13 +8,12 @@ use axum::response::{IntoResponse, Json, Response};
 use chrono::DateTime;
 use orbit_common::utility::blob_store::BlobStore;
 use orbit_common::utility::redaction::redact_all;
-use orbit_core::{InvocationQuery, InvocationRecord, OrbitRuntime};
+use orbit_core::{InvocationQuery, InvocationRecord, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
 use super::{
-    DiagnosticsQuery, HISTORY_DEFAULT_LIMIT, V2_LOOP_FILE_SCAN_CAP, bounded_limit,
-    current_year_month_utc, map_runtime_error, month_bounds_utc, server_error, v2_loop_dir,
-    validate_year_month,
+    DiagnosticsQuery, HISTORY_DEFAULT_LIMIT, bounded_limit, current_year_month_utc,
+    map_runtime_error, month_bounds_utc, server_error, validate_year_month,
 };
 use crate::log_format::{Filters as LogFilters, read_recent_rendered_events, resolve_log_path};
 
@@ -103,54 +102,14 @@ fn diagnostics_friction_from_v2_audit(
         return Ok(Vec::new());
     }
 
-    let audit_dir = v2_loop_dir(runtime);
-    if !audit_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut files = std::fs::read_dir(&audit_dir)
-        .map_err(|e| orbit_core::OrbitError::Io(e.to_string()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"))
-        .collect::<Vec<_>>();
-    files.sort();
-    if files.len() > V2_LOOP_FILE_SCAN_CAP {
-        files = files.split_off(files.len() - V2_LOOP_FILE_SCAN_CAP);
-    }
-
-    let blob_store = BlobStore::new(
-        runtime
-            .data_root()
-            .join("state")
-            .join("audit")
-            .join("blobs"),
-    );
+    let (since, until) = month_bounds_utc(month)?;
+    let events = v2_audit_values(runtime, Some(since), Some(until), 50_000)?;
+    let blob_store = audit_blob_store(runtime);
+    let by_id = events_by_id(&events);
     let mut rows = Vec::new();
-    for path in files {
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|e| orbit_core::OrbitError::Io(format!("read {}: {e}", path.display())))?;
-        let mut events = Vec::new();
-        let mut by_id = HashMap::new();
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let value: Value = match serde_json::from_str(trimmed) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            if let Some(event_id) = value.get("event_id").and_then(Value::as_str) {
-                by_id.insert(event_id.to_string(), value.clone());
-            }
-            events.push(value);
-        }
-
-        for event in events {
-            if let Some(row) = diagnostics_friction_row(&blob_store, &by_id, &event, month) {
-                rows.push(row);
-            }
+    for event in events {
+        if let Some(row) = diagnostics_friction_row(&blob_store, &by_id, &event, month) {
+            rows.push(row);
         }
     }
 
@@ -161,6 +120,49 @@ fn diagnostics_friction_from_v2_audit(
     });
     rows.truncate(limit);
     Ok(rows)
+}
+
+fn v2_audit_values(
+    runtime: &OrbitRuntime,
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    until: Option<chrono::DateTime<chrono::Utc>>,
+    limit: usize,
+) -> Result<Vec<Value>, orbit_core::OrbitError> {
+    let rows = runtime.list_v2_audit_events(V2AuditEventFilter {
+        workspace_id: String::new(),
+        since,
+        until,
+        source: Some("v2_envelope".to_string()),
+        limit: Some(limit),
+        ..Default::default()
+    })?;
+    Ok(rows
+        .into_iter()
+        .rev()
+        .filter_map(|row| serde_json::from_str::<Value>(&row.payload_json).ok())
+        .collect())
+}
+
+fn events_by_id(events: &[Value]) -> HashMap<String, Value> {
+    events
+        .iter()
+        .filter_map(|event| {
+            event
+                .get("event_id")
+                .and_then(Value::as_str)
+                .map(|event_id| (event_id.to_string(), event.clone()))
+        })
+        .collect()
+}
+
+fn audit_blob_store(runtime: &OrbitRuntime) -> BlobStore {
+    BlobStore::new(
+        runtime
+            .data_root()
+            .join("state")
+            .join("audit")
+            .join("blobs"),
+    )
 }
 
 // Widened to pub(super) for api/tests/ access after test layout migration (ORB-00224).
@@ -361,84 +363,44 @@ fn agent_stderr_error_rows(
     runtime: &OrbitRuntime,
     limit: usize,
 ) -> Result<Vec<Value>, orbit_core::OrbitError> {
-    let audit_dir = v2_loop_dir(runtime);
-    if !audit_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut files = std::fs::read_dir(&audit_dir)
-        .map_err(|e| orbit_core::OrbitError::Io(e.to_string()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"))
-        .collect::<Vec<_>>();
-    files.sort();
-    if files.len() > V2_LOOP_FILE_SCAN_CAP {
-        files = files.split_off(files.len() - V2_LOOP_FILE_SCAN_CAP);
-    }
-    files.reverse();
-
-    let blob_store = BlobStore::new(
-        runtime
-            .data_root()
-            .join("state")
-            .join("audit")
-            .join("blobs"),
-    );
+    let events = v2_audit_values(runtime, None, None, 50_000)?;
+    let by_id = events_by_id(&events);
+    let step_index_by_id = step_index_by_id(&events);
+    let blob_store = audit_blob_store(runtime);
     let mut rows = Vec::new();
-    for path in files {
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|e| orbit_core::OrbitError::Io(format!("read {}: {e}", path.display())))?;
-        let mut events = Vec::new();
-        let mut by_id = HashMap::new();
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let value: Value = match serde_json::from_str(trimmed) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            if let Some(event_id) = value.get("event_id").and_then(Value::as_str) {
-                by_id.insert(event_id.to_string(), value.clone());
-            }
-            events.push(value);
+    for event in events {
+        if event.get("body_kind").and_then(Value::as_str) != Some("cli_invocation_finished") {
+            continue;
         }
-        let step_index_by_id = step_index_by_id(&events);
-        for event in events {
-            if event.get("body_kind").and_then(Value::as_str) != Some("cli_invocation_finished") {
-                continue;
-            }
-            let Some(blob_ref) = event.get("stderr_blob_ref").and_then(Value::as_str) else {
-                continue;
-            };
-            let stderr = read_blob_text_best_effort(&blob_store, blob_ref);
-            let fallback_ts = event
-                .get("ts")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let step = enclosing_step_id_for_event(&event, &by_id);
-            let step_index = step
-                .as_ref()
-                .and_then(|step| step_index_by_id.get(step).copied());
-            for parsed in parse_structured_error_lines(&stderr, &fallback_ts) {
-                rows.push(json!({
-                    "ts": parsed.ts,
-                    "source": "agent-stderr",
-                    "message": redact_all(&parsed.message),
-                    "job_run": event.get("run_id").and_then(Value::as_str),
-                    "step": step,
-                    "step_index": step_index,
-                    "task_id": event.get("task_id").and_then(Value::as_str),
-                    "provider": event.get("provider").and_then(Value::as_str),
-                    "blob_ref": blob_ref,
-                    "event_id": event.get("event_id").and_then(Value::as_str),
-                    "target": parsed.target,
-                }));
-                if rows.len() >= limit.saturating_mul(2) {
-                    return Ok(rows);
-                }
+        let Some(blob_ref) = event.get("stderr_blob_ref").and_then(Value::as_str) else {
+            continue;
+        };
+        let stderr = read_blob_text_best_effort(&blob_store, blob_ref);
+        let fallback_ts = event
+            .get("ts")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let step = enclosing_step_id_for_event(&event, &by_id);
+        let step_index = step
+            .as_ref()
+            .and_then(|step| step_index_by_id.get(step).copied());
+        for parsed in parse_structured_error_lines(&stderr, &fallback_ts) {
+            rows.push(json!({
+                "ts": parsed.ts,
+                "source": "agent-stderr",
+                "message": redact_all(&parsed.message),
+                "job_run": event.get("run_id").and_then(Value::as_str),
+                "step": step,
+                "step_index": step_index,
+                "task_id": event.get("task_id").and_then(Value::as_str),
+                "provider": event.get("provider").and_then(Value::as_str),
+                "blob_ref": blob_ref,
+                "event_id": event.get("event_id").and_then(Value::as_str),
+                "target": parsed.target,
+            }));
+            if rows.len() >= limit.saturating_mul(2) {
+                return Ok(rows);
             }
         }
     }

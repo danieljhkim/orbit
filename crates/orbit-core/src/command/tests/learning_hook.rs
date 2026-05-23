@@ -75,7 +75,12 @@ fn state_file_path_matches_session_and_tmp_layouts() {
     let tmpdir = Path::new("/tmp");
     assert_eq!(
         state_file_path(repo_root, Some("session-1"), tmpdir, 123),
-        PathBuf::from("/repo/.orbit/state/sessions/session-1/learnings.json")
+        PathBuf::from("/repo")
+            .join(".orbit")
+            .join("state")
+            .join("sessions")
+            .join("session-1")
+            .join("learnings.json")
     );
     assert_eq!(
         state_file_path(repo_root, None, tmpdir, 123),

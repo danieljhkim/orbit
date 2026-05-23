@@ -9,13 +9,13 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::response::Response;
 use chrono::Utc;
 use orbit_common::utility::blob_store::BlobStore;
-use orbit_core::{JobRunState, OrbitRuntime};
+use orbit_core::{JobRunState, OrbitRuntime, V2AuditEventInsertParams};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::super::router;
 use super::super::runs::*;
-use super::test_support::{body_json, seed_run, write_lines, write_replay_job};
+use super::test_support::{body_json, seed_run, write_replay_job};
 
 async fn request_cancel(runtime: OrbitRuntime, run_id: &str, origin: Option<&str>) -> Response {
     let mut builder = Request::builder()
@@ -88,11 +88,10 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
         .write(b"normal output\n")
         .expect("write stdout blob");
     let stderr_ref = blob_store.write(stderr).expect("write stderr blob");
-    let audit_dir = audit_root.join("v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    write_lines(
-        &audit_dir.join(format!("{run_id}.jsonl")),
-        &[
+    seed_v2_audit_events(
+        runtime,
+        run_id,
+        vec![
             json!({
                 "schemaVersion": 1,
                 "event_type": "run.started",
@@ -100,9 +99,7 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
                 "ts": "2026-05-08T04:12:20Z",
                 "run_id": run_id,
                 "body_kind": "run_started"
-            })
-            .to_string(),
-            "malformed".to_string(),
+            }),
             json!({
                 "schemaVersion": 1,
                 "event_type": "step.started",
@@ -112,8 +109,7 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
                 "parent_event_id": "evt-run",
                 "body_kind": "step_started",
                 "step_id": "implement"
-            })
-            .to_string(),
+            }),
             json!({
                 "schemaVersion": 1,
                 "event_type": "cli.invocation.finished",
@@ -128,11 +124,71 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
                 "exit_code": 0,
                 "timed_out": false,
                 "duration_ms": 123
-            })
-            .to_string(),
+            }),
         ],
     );
     stderr_ref
+}
+
+fn seed_v2_audit_events(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+    events: impl IntoIterator<Item = Value>,
+) {
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    for (index, mut event) in events.into_iter().enumerate() {
+        let object = event.as_object_mut().expect("event object");
+        object
+            .entry("schemaVersion".to_string())
+            .or_insert_with(|| json!(1));
+        object
+            .entry("run_id".to_string())
+            .or_insert_with(|| json!(run_id));
+        object
+            .entry("agent_identity".to_string())
+            .or_insert_with(|| json!("system"));
+        object.entry("ts".to_string()).or_insert_with(|| {
+            json!(format!(
+                "2026-05-08T04:{:02}:{:02}Z",
+                (index / 60) % 60,
+                index % 60
+            ))
+        });
+
+        let ts = event
+            .get("ts")
+            .and_then(Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .expect("event ts");
+        runtime
+            .insert_v2_audit_event(&V2AuditEventInsertParams {
+                workspace_id: workspace_id.clone(),
+                event_id: event["event_id"].as_str().expect("event id").to_string(),
+                source: "v2_envelope".to_string(),
+                schema_version: event["schemaVersion"]
+                    .as_u64()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(1),
+                event_type: event["event_type"]
+                    .as_str()
+                    .expect("event type")
+                    .to_string(),
+                ts,
+                run_id: event["run_id"].as_str().expect("run id").to_string(),
+                agent_identity: event["agent_identity"]
+                    .as_str()
+                    .expect("agent identity")
+                    .to_string(),
+                parent_event_id: event
+                    .get("parent_event_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                workspace_path: None,
+                payload_json: event.to_string(),
+            })
+            .expect("insert v2 audit event");
+    }
 }
 
 #[tokio::test]
@@ -196,36 +252,24 @@ async fn list_run_events_rejects_id_with_slashes() {
 
 #[tokio::test]
 async fn list_run_events_streams_small_page_from_oversized_fixture() {
-    // Audit JSONL is larger than `RUN_EVENTS_MAX_SCAN_BYTES`. The bounded
-    // reader must fill a small page from events at the head of the file
-    // without scanning past the budget — proving the implementation does not
-    // load or accumulate the entire file before slicing.
+    // The persisted audit table can contain many rows for a run. The endpoint
+    // must fill a small page from the head of the result set without scanning
+    // every event first.
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-events-oversize";
-    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    let path = audit_dir.join(format!("{run_id}.jsonl"));
-
-    let mut content = String::new();
-    for index in 0..10usize {
-        content.push_str(
-            &json!({
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        (0..10usize).map(|index| {
+            json!({
                 "schemaVersion": 1,
                 "event_type": "step.started",
                 "event_id": format!("evt-{index}"),
                 "run_id": run_id,
                 "body_kind": "step_started"
             })
-            .to_string(),
-        );
-        content.push('\n');
-    }
-    let pad_bytes = super::super::runs::RUN_EVENTS_MAX_SCAN_BYTES + (1024 * 1024);
-    content.reserve(pad_bytes);
-    for _ in 0..pad_bytes {
-        content.push('x');
-    }
-    std::fs::write(&path, content).expect("write fixture");
+        }),
+    );
 
     let response = request_dashboard_run_events_query(runtime, run_id, "?limit=5").await;
 
@@ -241,33 +285,24 @@ async fn list_run_events_streams_small_page_from_oversized_fixture() {
 
 #[tokio::test]
 async fn list_run_events_returns_payload_too_large_when_scan_budget_exceeded() {
-    // Fill the file with valid events whose `body_kind` does NOT match the
-    // requested filter, forcing the streamer to walk past the budget without
-    // ever filling the page. The endpoint must enforce the budget and surface
-    // a clear 413 response instead of returning a misleading empty page after
-    // doing the full scan.
+    // Fill the table with valid events whose `body_kind` does NOT match the
+    // requested filter, forcing the endpoint to walk past the row budget
+    // without ever filling the page.
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-events-budget";
-    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    let path = audit_dir.join(format!("{run_id}.jsonl"));
-
-    let line = json!({
-        "schemaVersion": 1,
-        "event_type": "step.started",
-        "event_id": "evt-x",
-        "run_id": run_id,
-        "body_kind": "step_started"
-    })
-    .to_string();
-    let line_with_newline = format!("{line}\n");
-    let target_bytes = super::super::runs::RUN_EVENTS_MAX_SCAN_BYTES + line_with_newline.len();
-    let line_count = target_bytes / line_with_newline.len() + 1;
-    let mut content = String::with_capacity(line_count * line_with_newline.len());
-    for _ in 0..line_count {
-        content.push_str(&line_with_newline);
-    }
-    std::fs::write(&path, content).expect("write fixture");
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        (0..=super::super::runs::RUN_EVENTS_MAX_SCAN_LINES).map(|index| {
+            json!({
+                "schemaVersion": 1,
+                "event_type": "step.started",
+                "event_id": format!("evt-budget-{index}"),
+                "run_id": run_id,
+                "body_kind": "step_started"
+            })
+        }),
+    );
 
     let response =
         request_dashboard_run_events_query(runtime, run_id, "?kind=does_not_match").await;
@@ -286,35 +321,31 @@ async fn list_run_events_kind_filter_still_works_with_streaming() {
     // Confirms AC3: streaming preserves kind filtering correctness.
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-events-kind";
-    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    write_lines(
-        &audit_dir.join(format!("{run_id}.jsonl")),
-        &[
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        vec![
             json!({
                 "schemaVersion": 1,
                 "event_type": "run.started",
                 "event_id": "evt-run",
                 "run_id": run_id,
                 "body_kind": "run_started"
-            })
-            .to_string(),
+            }),
             json!({
                 "schemaVersion": 1,
                 "event_type": "step.started",
                 "event_id": "evt-step-a",
                 "run_id": run_id,
                 "body_kind": "step_started"
-            })
-            .to_string(),
+            }),
             json!({
                 "schemaVersion": 1,
                 "event_type": "step.started",
                 "event_id": "evt-step-b",
                 "run_id": run_id,
                 "body_kind": "step_started"
-            })
-            .to_string(),
+            }),
         ],
     );
 
@@ -332,18 +363,16 @@ async fn list_run_events_kind_filter_still_works_with_streaming() {
 async fn list_run_events_accepts_valid_run_id() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-1";
-    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    write_lines(
-        &audit_dir.join(format!("{run_id}.jsonl")),
-        &[json!({
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        vec![json!({
             "schemaVersion": 1,
             "event_type": "step.started",
             "event_id": "evt-step-started",
             "run_id": run_id,
             "body_kind": "step_started"
-        })
-        .to_string()],
+        })],
     );
 
     let response = request_dashboard_run_events(runtime, run_id).await;
@@ -503,11 +532,10 @@ async fn replay_run_endpoint_returns_4xx_when_current_job_is_deleted() {
 fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-web-audit-step";
-    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
-    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
-    write_lines(
-        &audit_dir.join(format!("{run_id}.jsonl")),
-        &[
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        vec![
             json!({
                 "schemaVersion": 1,
                 "event_type": "step.started",
@@ -517,8 +545,7 @@ fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
                 "agent_identity": "system",
                 "body_kind": "step_started",
                 "step_id": "build"
-            })
-            .to_string(),
+            }),
             json!({
                 "schemaVersion": 1,
                 "event_type": "step.finished",
@@ -529,8 +556,7 @@ fn run_detail_uses_v2_audit_steps_when_step_bundle_is_empty() {
                 "body_kind": "step_finished",
                 "step_id": "build",
                 "outcome": "success"
-            })
-            .to_string(),
+            }),
         ],
     );
     let scheduled_at = chrono::DateTime::parse_from_rfc3339("2026-04-28T00:00:00Z")

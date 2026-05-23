@@ -17,7 +17,7 @@ use super::util::{normalize_path, now_string};
 use super::{
     BindWorkspaceParams, ProjectionRebuildResult, TaskIndexFilter, TaskRegistryStore,
     WorkspaceBinding, WorkspaceConfig, read_workspace_config, read_workspace_config_optional,
-    task_registry_path, workspace_config_path, write_workspace_config,
+    task_registry_path, workspace_config_path, workspace_id_for_orbit_dir, write_workspace_config,
 };
 
 fn registry_path(temp: &TempDir) -> PathBuf {
@@ -358,6 +358,49 @@ fn workspace_config_optional_distinguishes_missing_file() {
         read_workspace_config_optional(&temp.path().join(".orbit")).expect("read optional config"),
         None
     );
+}
+
+#[test]
+fn workspace_id_for_orbit_dir_returns_id_from_config() {
+    let temp = TempDir::new().expect("tempdir");
+    let orbit_dir = temp.path().join(".orbit");
+    write_workspace_config(
+        &orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "ws-test-abcdef".into(),
+        },
+    )
+    .expect("write config");
+
+    assert_eq!(
+        workspace_id_for_orbit_dir(&orbit_dir).expect("workspace id"),
+        "ws-test-abcdef"
+    );
+}
+
+#[test]
+fn workspace_id_for_orbit_dir_missing_file_names_path_and_key() {
+    let temp = TempDir::new().expect("tempdir");
+    let orbit_dir = temp.path().join(".orbit");
+
+    let err = workspace_id_for_orbit_dir(&orbit_dir).expect_err("missing config");
+    let message = err.to_string();
+    assert!(message.contains("config.yaml"));
+    assert!(message.contains("workspace_id"));
+}
+
+#[test]
+fn workspace_id_for_orbit_dir_malformed_yaml_returns_invalid_input() {
+    let temp = TempDir::new().expect("tempdir");
+    let orbit_dir = temp.path().join(".orbit");
+    atomic_write_text(&workspace_config_path(&orbit_dir), "not: [valid")
+        .expect("write malformed config");
+
+    assert!(matches!(
+        workspace_id_for_orbit_dir(&orbit_dir),
+        Err(OrbitError::InvalidInput(_))
+    ));
 }
 
 #[test]

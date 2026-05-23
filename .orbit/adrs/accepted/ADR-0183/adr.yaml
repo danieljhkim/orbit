@@ -1,0 +1,27 @@
+schema_version: 2
+id: ADR-0183
+title: Consolidate v2 audit, job-run, and session-learning state into the global SQLite store
+status: accepted
+owner: codex
+created_at: 2026-05-23T05:40:51.837400Z
+accepted_at: 2026-05-23T05:40:56.163428Z
+last_updated: 2026-05-23T05:40:56.163428Z
+related_features:
+- global-store-consolidation
+related_tasks:
+- ORB-00276
+tags:
+- storage
+- sqlite
+- migration
+paths:
+- crates/orbit-store/**
+- crates/orbit-core/**
+- crates/orbit-engine/**
+- crates/orbit-agent/**
+- crates/orbit-dashboard/**
+- docs/design/global-store-consolidation/**
+supersedes: []
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

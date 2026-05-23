@@ -8,9 +8,12 @@ use fs2::FileExt;
 
 use crate::types::{LearningInjectionState, OrbitError};
 
+/// Retained for legacy import only; production writes now go through SQLite.
 pub const LEARNING_SESSION_STATE_RELATIVE_DIR: &str = ".orbit/state/sessions";
+/// Retained for legacy import only; production writes now go through SQLite.
 pub const LEARNING_SESSION_STATE_FILE_NAME: &str = "learnings.json";
 
+/// Retained for legacy import only; production writes now go through SQLite.
 pub fn learning_session_state_path(workspace_root: &Path, session_id: &str) -> PathBuf {
     workspace_root
         .join(LEARNING_SESSION_STATE_RELATIVE_DIR)
@@ -18,6 +21,7 @@ pub fn learning_session_state_path(workspace_root: &Path, session_id: &str) -> P
         .join(LEARNING_SESSION_STATE_FILE_NAME)
 }
 
+/// Retained for legacy import only; production reads now go through SQLite.
 pub fn read_learning_session_state(
     path: &Path,
 ) -> Result<Option<LearningInjectionState>, OrbitError> {
@@ -41,6 +45,7 @@ pub fn read_learning_session_state(
     })
 }
 
+/// Retained for legacy import only; production writes now go through SQLite.
 pub fn write_learning_session_state(
     path: &Path,
     state: &LearningInjectionState,
@@ -51,6 +56,7 @@ pub fn write_learning_session_state(
     .map(|_| ())
 }
 
+/// Retained for legacy import only; production writes now go through SQLite.
 pub fn update_learning_session_state<R>(
     path: &Path,
     update: impl FnOnce(&mut LearningInjectionState) -> R,

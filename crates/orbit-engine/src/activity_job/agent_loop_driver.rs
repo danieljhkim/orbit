@@ -29,9 +29,6 @@ use orbit_common::types::activity_job::AgentLoopSpec;
 use orbit_common::types::{
     LearningInjectionCaps, LearningReminder, RoleSlot, prepend_reminder_block,
 };
-use orbit_common::utility::learning_session::{
-    learning_session_state_path, write_learning_session_state,
-};
 use orbit_tools::ToolContext;
 use serde_json::Value;
 
@@ -237,21 +234,20 @@ fn maybe_prepend_learning_reminders(
     if admitted.is_empty() {
         return Ok(user_prompt);
     }
-    persist_session_learning_state(tool_ctx, session, &admitted)?;
+    persist_session_learning_state(host, tool_ctx, session, &admitted)?;
     Ok(prepend_reminder_block(&user_prompt, &admitted))
 }
 
 fn persist_session_learning_state(
+    host: &dyn V2RuntimeHost,
     tool_ctx: &ToolContext,
     session: &Session,
     _admitted: &[LearningReminder],
 ) -> Result<(), DispatchError> {
-    let Some(workspace_root) = tool_ctx.workspace_root.as_deref() else {
+    let Some(_workspace_root) = tool_ctx.workspace_root.as_deref() else {
         return Ok(());
     };
-    let path = learning_session_state_path(workspace_root, session.id());
-    write_learning_session_state(&path, session.learning_injection_state())
-        .map_err(|err| DispatchError::AgentLoopFailed(format!("persist learning state: {err}")))
+    host.persist_session_learning_state(session.id(), session.learning_injection_state())
 }
 
 fn user_prompt_from_input(input: &Value) -> Result<String, DispatchError> {

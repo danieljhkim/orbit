@@ -4,6 +4,7 @@ use axum::body::to_bytes;
 use axum::response::Response;
 use chrono::Utc;
 use orbit_core::{JobRun, JobRunState, OrbitRuntime};
+use rusqlite::{Connection, params};
 use serde_json::Value;
 
 pub(super) fn write_lines(path: &std::path::Path, lines: &[String]) {
@@ -48,13 +49,6 @@ pub(super) fn seed_run(
     job_id: &str,
     state: JobRunState,
 ) -> JobRun {
-    #[derive(serde::Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct JobRunDoc<'a> {
-        schema_version: u8,
-        run: &'a JobRun,
-    }
-
     let now = Utc::now();
     let run = JobRun {
         run_id: run_id.to_string(),
@@ -85,20 +79,55 @@ pub(super) fn seed_run(
         reviewer_model: None,
         steps: Vec::new(),
     };
-    let run_dir = runtime
-        .data_root()
-        .join("state")
-        .join("job-runs")
-        .join(job_id)
-        .join(run_id);
-    std::fs::create_dir_all(&run_dir).expect("create run dir");
-    let content = serde_yaml::to_string(&JobRunDoc {
-        schema_version: 1,
-        run: &run,
-    })
-    .expect("serialize run yaml");
-    std::fs::write(run_dir.join("jrun.yaml"), content).expect("write run yaml");
+    write_seeded_run(runtime, &run);
     run
+}
+
+pub(super) fn write_seeded_run(runtime: &OrbitRuntime, run: &JobRun) {
+    let conn = Connection::open(runtime.global_root().join("orbit.db")).expect("open orbit db");
+    let workspace_id = runtime.workspace_id().expect("workspace id");
+    let input_json = run
+        .input
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .expect("serialize input");
+    let knowledge_metrics_json = run
+        .knowledge_metrics
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .expect("serialize knowledge metrics");
+    conn.execute(
+        r#"INSERT OR REPLACE INTO job_runs(
+            run_id, workspace_id, job_id, attempt, state, scheduled_at, started_at,
+            finished_at, duration_ms, created_at, pid, pid_start_time, input_json,
+            retry_source_run_id, knowledge_metrics_json, resolved_crew, planner_model,
+            implementer_model, reviewer_model, pipeline_state_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)"#,
+        params![
+            run.run_id,
+            workspace_id,
+            run.job_id,
+            i64::from(run.attempt),
+            run.state.to_string(),
+            run.scheduled_at.to_rfc3339(),
+            run.started_at.map(|value| value.to_rfc3339()),
+            run.finished_at.map(|value| value.to_rfc3339()),
+            run.duration_ms.map(|value| value as i64),
+            run.created_at.to_rfc3339(),
+            run.pid.map(i64::from),
+            run.pid_start_time,
+            input_json,
+            run.retry_source_run_id,
+            knowledge_metrics_json,
+            run.resolved_crew,
+            run.planner_model,
+            run.implementer_model,
+            run.reviewer_model,
+        ],
+    )
+    .expect("insert job run");
 }
 
 pub(super) async fn body_json(response: Response) -> Value {

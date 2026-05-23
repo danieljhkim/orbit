@@ -5,7 +5,7 @@ use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::sqlite::task_registry::{
     BindWorkspaceParams, TaskRegistryStore, WorkspaceConfig, read_workspace_config_optional,
-    task_registry_path, write_workspace_config,
+    task_registry_path, workspace_id_for_orbit_dir, write_workspace_config,
 };
 use orbit_store::{
     AuditEventInsertParams, IdAllocator, IdAllocatorConfig, LearningIdMigrationReport, Store,
@@ -60,6 +60,8 @@ pub(crate) fn build_context_from_roots(
     );
 
     let task_backends = build_v2_task_backends(global_root, &paths)?;
+    let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
+    let _import_report = store.ensure_legacy_v2_state_imported(&paths.orbit_dir, &workspace_id)?;
     let id_allocator = IdAllocator::open(IdAllocatorConfig::new(
         persistence.semantic_db.clone(),
         paths.state_dir.join(".id_alloc.lock"),
@@ -79,7 +81,7 @@ pub(crate) fn build_context_from_roots(
         workspace_learning_backend(local_learning_dir, store.clone(), id_allocator)?;
     let semantic_vector_store = Arc::new(VectorStore::open(&persistence.semantic_db)?);
     let semantic_worker = Arc::new(EmbedWorker::start((*semantic_vector_store).clone()));
-    let job_run_store = workspace_job_run_store(paths.jobs_dir.clone());
+    let job_run_store = workspace_job_run_store(store.clone(), workspace_id);
 
     // Executors and policies are global-only. Jobs always persist run state
     // under the workspace state directory.
