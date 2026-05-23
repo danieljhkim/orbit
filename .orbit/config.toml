@@ -51,12 +51,11 @@ reviewer = { model = "grok-build", provider = "grok", backend = "cli" }
 task_url_template = "https://orbit-cli.com/tasks/{task_id}"
 
 [duel]
-candidates = ["codex", "claude", "gemini", "grok"]
+candidates = ["codex", "claude", "grok"]
 
 [duel.models]                             
 codex  = "gpt-5.5"
 claude = "claude-opus-4-7"
-gemini = "pro"
 grok = "grok-build"
 
 [docs]
