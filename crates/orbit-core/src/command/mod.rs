@@ -21,6 +21,7 @@ pub mod diagnostics;
 pub mod docs;
 pub mod executor;
 pub mod graph;
+pub mod hook_install;
 pub mod init;
 pub mod job;
 pub mod learning;
@@ -34,3 +35,6 @@ pub mod task;
 pub mod task_template;
 pub mod tool;
 pub mod workflow;
+
+#[cfg(test)]
+mod tests;

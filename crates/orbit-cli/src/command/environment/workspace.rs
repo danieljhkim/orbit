@@ -123,7 +123,7 @@ impl WorkspaceInitArgs {
 
         if hooks {
             let providers =
-                crate::command::hook::install::install_for_workspace(&init_result.root)?;
+                orbit_core::command::hook_install::install_for_workspace(&init_result.root)?;
             if providers.is_empty() {
                 println!("  hooks:     no providers auto-detected");
             } else {
@@ -380,7 +380,7 @@ impl Execute for WorkspaceTeardownArgs {
         }
 
         // 3. Remove repo-local hook integrations while preserving user-authored hook entries
-        let hook_providers = crate::command::hook::install::uninstall_for_workspace(repo_root)?;
+        let hook_providers = orbit_core::command::hook_install::uninstall_for_workspace(repo_root)?;
         if !hook_providers.is_empty() {
             removed.push(format!(
                 "removed hook integrations for {}",

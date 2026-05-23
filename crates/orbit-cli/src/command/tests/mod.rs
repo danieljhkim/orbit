@@ -55,6 +55,28 @@ fn cli_parses_hook_pretooluse() {
     match cli.command {
         Commands::Hook(command) => match command.command {
             HookSubcommand::Pretooluse(_) => {}
+            _ => panic!("expected hook pretooluse"),
+        },
+        _ => panic!("expected top-level hook command"),
+    }
+}
+
+#[test]
+fn cli_parses_hook_install_and_uninstall() {
+    let cli = Cli::parse_from(["orbit", "hook", "install"]);
+    match cli.command {
+        Commands::Hook(command) => match command.command {
+            HookSubcommand::Install(_) => {}
+            _ => panic!("expected hook install"),
+        },
+        _ => panic!("expected top-level hook command"),
+    }
+
+    let cli = Cli::parse_from(["orbit", "hook", "uninstall"]);
+    match cli.command {
+        Commands::Hook(command) => match command.command {
+            HookSubcommand::Uninstall(_) => {}
+            _ => panic!("expected hook uninstall"),
         },
         _ => panic!("expected top-level hook command"),
     }
