@@ -15,6 +15,20 @@ use super::super::router;
 use super::test_support::body_json;
 
 fn seed_task_with_artifact(runtime: &OrbitRuntime) -> orbit_core::Task {
+    seed_task_with_artifact_payload(
+        runtime,
+        "subdir/file.json",
+        "application/json",
+        br#"{"ok":true}"#.to_vec(),
+    )
+}
+
+fn seed_task_with_artifact_payload(
+    runtime: &OrbitRuntime,
+    path: &str,
+    media_type: &str,
+    content: Vec<u8>,
+) -> orbit_core::Task {
     let task = runtime
         .add_task(TaskAddParams {
             title: "Artifact task".to_string(),
@@ -29,9 +43,9 @@ fn seed_task_with_artifact(runtime: &OrbitRuntime) -> orbit_core::Task {
             &task.id,
             TaskUpdateParams {
                 upsert_artifacts: vec![TaskArtifact {
-                    path: "subdir/file.json".to_string(),
-                    media_type: "application/json".to_string(),
-                    content: br#"{"ok":true}"#.to_vec(),
+                    path: path.to_string(),
+                    media_type: media_type.to_string(),
+                    content,
                     created_by: None,
                 }],
                 ..Default::default()
@@ -214,10 +228,162 @@ async fn get_task_artifact_serves_subdirectory_bytes_and_media_type() {
         response.headers().get(header::CONTENT_TYPE),
         Some(&HeaderValue::from_static("application/json"))
     );
+    assert_eq!(
+        response.headers().get("x-content-type-options"),
+        Some(&HeaderValue::from_static("nosniff"))
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .is_none()
+    );
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("read response body");
     assert_eq!(&bytes[..], br#"{"ok":true}"#);
+}
+
+#[tokio::test]
+async fn get_task_artifact_normalizes_text_plain_and_keeps_it_inline() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact_payload(
+        &runtime,
+        "notes/output.txt",
+        "Text/Plain; Charset=UTF-8",
+        b"plain artifact".to_vec(),
+    );
+
+    let response = request(
+        runtime,
+        &format!("/tasks/{}/artifacts/notes/output.txt", task.id),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static("text/plain"))
+    );
+    assert_eq!(
+        response.headers().get("x-content-type-options"),
+        Some(&HeaderValue::from_static("nosniff"))
+    );
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .is_none()
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    assert_eq!(&bytes[..], b"plain artifact");
+}
+
+#[tokio::test]
+async fn get_task_artifact_downloads_html_instead_of_serving_inline() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact_payload(
+        &runtime,
+        "reports/payload.html",
+        "text/html; charset=utf-8",
+        br#"<script>fetch("/api/tasks")</script>"#.to_vec(),
+    );
+
+    let response = request(
+        runtime,
+        &format!("/tasks/{}/artifacts/reports/payload.html", task.id),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static("application/octet-stream"))
+    );
+    assert_eq!(
+        response.headers().get("x-content-type-options"),
+        Some(&HeaderValue::from_static("nosniff"))
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION),
+        Some(&HeaderValue::from_static("attachment"))
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    assert_eq!(&bytes[..], br#"<script>fetch("/api/tasks")</script>"#);
+}
+
+#[tokio::test]
+async fn get_task_artifact_downloads_script_media_types() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact_payload(
+        &runtime,
+        "reports/payload.js",
+        "application/javascript",
+        b"fetch('/api/tasks')".to_vec(),
+    );
+
+    let response = request(
+        runtime,
+        &format!("/tasks/{}/artifacts/reports/payload.js", task.id),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static("application/octet-stream"))
+    );
+    assert_eq!(
+        response.headers().get("x-content-type-options"),
+        Some(&HeaderValue::from_static("nosniff"))
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION),
+        Some(&HeaderValue::from_static("attachment"))
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    assert_eq!(&bytes[..], b"fetch('/api/tasks')");
+}
+
+#[tokio::test]
+async fn get_task_artifact_downloads_unknown_media_types() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let task = seed_task_with_artifact_payload(
+        &runtime,
+        "reports/payload.custom",
+        "application/x-orbit-preview",
+        b"custom artifact".to_vec(),
+    );
+
+    let response = request(
+        runtime,
+        &format!("/tasks/{}/artifacts/reports/payload.custom", task.id),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static("application/octet-stream"))
+    );
+    assert_eq!(
+        response.headers().get("x-content-type-options"),
+        Some(&HeaderValue::from_static("nosniff"))
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_DISPOSITION),
+        Some(&HeaderValue::from_static("attachment"))
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read response body");
+    assert_eq!(&bytes[..], b"custom artifact");
 }
 
 #[tokio::test]

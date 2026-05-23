@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::types::validate_relative_artifact_path;
 use orbit_core::command::task::{TaskAddParams, TaskUpdateParams};
@@ -27,6 +27,11 @@ const DASHBOARD_TASK_STATUSES: &[TaskStatus] = &[
     TaskStatus::Someday,
     TaskStatus::Rejected,
 ];
+
+struct ArtifactResponsePolicy {
+    content_type: &'static str,
+    attachment: bool,
+}
 
 #[derive(Deserialize, Default)]
 pub(super) struct ApproveBody {
@@ -202,24 +207,61 @@ pub(super) async fn get_task_artifact(
     };
     match runtime.get_task_artifact(id, &path) {
         Ok(Some(artifact)) => {
-            let content_type = match HeaderValue::from_str(&artifact.media_type) {
-                Ok(value) => value,
-                Err(error) => {
-                    return server_error(orbit_core::OrbitError::Store(format!(
-                        "invalid artifact media type '{}': {error}",
-                        artifact.media_type
-                    )));
-                }
-            };
+            let policy = artifact_response_policy(&artifact.media_type);
             let mut response = Response::new(Body::from(artifact.content));
-            response
-                .headers_mut()
-                .insert(header::CONTENT_TYPE, content_type);
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(policy.content_type),
+            );
+            response.headers_mut().insert(
+                HeaderName::from_static("x-content-type-options"),
+                HeaderValue::from_static("nosniff"),
+            );
+            if policy.attachment {
+                response.headers_mut().insert(
+                    header::CONTENT_DISPOSITION,
+                    HeaderValue::from_static("attachment"),
+                );
+            }
             response
         }
         Ok(None) => super::not_found(format!("artifact not found: {id}/{path}")),
         Err(e) => map_runtime_error(e),
     }
+}
+
+fn artifact_response_policy(media_type: &str) -> ArtifactResponsePolicy {
+    let content_type = inline_safe_artifact_content_type(media_type);
+    ArtifactResponsePolicy {
+        content_type: content_type.unwrap_or("application/octet-stream"),
+        attachment: content_type.is_none(),
+    }
+}
+
+fn inline_safe_artifact_content_type(media_type: &str) -> Option<&'static str> {
+    match normalized_media_type(media_type).as_deref() {
+        Some("application/json") => Some("application/json"),
+        Some("application/toml") => Some("application/toml"),
+        Some("application/yaml") => Some("application/yaml"),
+        Some("image/gif") => Some("image/gif"),
+        Some("image/jpeg") => Some("image/jpeg"),
+        Some("image/png") => Some("image/png"),
+        Some("image/webp") => Some("image/webp"),
+        Some("text/csv") => Some("text/csv"),
+        Some("text/plain") => Some("text/plain"),
+        _ => None,
+    }
+}
+
+fn normalized_media_type(media_type: &str) -> Option<String> {
+    let base = media_type
+        .split_once(';')
+        .map_or(media_type, |(base, _params)| base)
+        .trim();
+    if base.is_empty() {
+        return None;
+    }
+    Some(base.to_ascii_lowercase())
 }
 
 fn validate_artifact_request_path(path: &str) -> Result<String, String> {
