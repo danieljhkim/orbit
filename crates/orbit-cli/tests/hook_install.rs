@@ -71,6 +71,30 @@ fn workspace_init_hooks_is_idempotent() {
 }
 
 #[test]
+fn hook_install_command_seeds_hooks_and_is_idempotent() {
+    let workspace = TestWorkspace::new();
+    workspace.seed_agent_dirs(&[".claude", ".codex", ".gemini", ".grok"]);
+    workspace.run(&["workspace", "init", "--name", "hooks"], "init workspace");
+
+    workspace.run(&["hook", "install"], "hook install");
+    assert_json_hook(
+        &workspace.work.join(".claude/settings.json"),
+        "PreToolUse",
+        ".claude/hooks/orbit-learning-reminder",
+    );
+    assert_toml_hook(
+        &workspace.work.join(".codex/config.toml"),
+        "PreToolUse",
+        ".codex/hooks/orbit-learning-reminder",
+    );
+
+    let first = workspace.read_configs();
+    workspace.run(&["hook", "install"], "hook install again");
+    let second = workspace.read_configs();
+    assert_eq!(first, second);
+}
+
+#[test]
 fn workspace_init_hooks_preserves_user_entries() {
     let workspace = TestWorkspace::new();
     workspace.seed_agent_dirs(&[".claude"]);

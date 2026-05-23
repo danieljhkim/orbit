@@ -2109,7 +2109,6 @@ dependencies = [
  "colored",
  "comfy-table",
  "csv",
- "fs2",
  "libc",
  "orbit-common",
  "orbit-core",
@@ -2156,6 +2155,7 @@ name = "orbit-core"
 version = "0.6.0"
 dependencies = [
  "chrono",
+ "fs2",
  "jsonschema",
  "libc",
  "orbit-common",

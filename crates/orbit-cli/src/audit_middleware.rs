@@ -198,7 +198,9 @@ pub fn extract_command_meta(cmd: &Commands) -> CommandMeta {
         Commands::Hook(cmd) => {
             use crate::command::hook::HookSubcommand;
             let sub = match &cmd.command {
+                HookSubcommand::Install(_) => "install",
                 HookSubcommand::Pretooluse(_) => "pretooluse",
+                HookSubcommand::Uninstall(_) => "uninstall",
             };
             CommandMeta {
                 command: "hook".to_string(),

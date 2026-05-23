@@ -15,6 +15,7 @@ clap = ["orbit-common/clap"]
 
 [dependencies]
 chrono.workspace = true
+fs2.workspace = true
 jsonschema.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-search = { path = "../orbit-search" }

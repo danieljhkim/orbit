@@ -20,7 +20,6 @@ clap.workspace = true
 colored = "2"
 comfy-table = "7"
 csv = "1"
-fs2.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-core = { path = "../orbit-core", features = ["clap"] }
 orbit-mcp = { path = "../orbit-mcp" }
