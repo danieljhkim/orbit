@@ -297,7 +297,7 @@ Couple things to note:
 
 ## Current Status
 
-Orbit is v0.5.x — work in progress.
+Orbit is v0.7.x — work in progress.
 
 - Core local execution, graph build/query, workflows, MCP, tasks, reviews, ADRs, frictions, and audit infrastructure are usable today.
 
