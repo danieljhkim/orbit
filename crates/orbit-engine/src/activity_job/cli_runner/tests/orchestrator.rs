@@ -1,9 +1,11 @@
 #![allow(missing_docs)]
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Duration;
 
+use orbit_agent::loop_engine::JsonlFileSink;
 use orbit_agent::loop_engine::audit::AuditSink;
 use orbit_common::types::activity_job::{AgentRole, V2AuditEventKind};
 use tempfile::tempdir;
@@ -193,6 +195,63 @@ printf '%s\n' '{"api_key":"stdout-json-key"}'
         Some("blob-2"),
         "full stdout should remain available via blob ref"
     );
+}
+
+#[test]
+fn run_cli_backend_redacts_live_env_values_in_stored_blobs() {
+    let temp = tempdir().expect("tempdir");
+    let secret = "live-cli-blob-secret-value";
+    let _guard = EnvVarGuard::set("ORBIT_CLI_BLOB_TEST_TOKEN", secret);
+    let script = temp.path().join("codex");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' 'stdout leak {secret}'\nprintf '%s\\n' 'stderr leak {secret}' >&2\n"
+        ),
+    );
+
+    let loop_sink = Arc::new(
+        JsonlFileSink::open(temp.path().join("audit"), "job-cli-blob-redaction")
+            .expect("open loop sink"),
+    );
+    let sink_for_writer: Arc<dyn AuditSink> = loop_sink.clone();
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-cli-blob-redaction",
+        "codex:gpt-5.5",
+        sink_for_writer,
+    ));
+    let host = TestHost::with_command(script.display().to_string());
+    let spec = test_agent_loop_spec(Duration::from_secs(5));
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-cli-blob-redaction",
+        audit,
+        &serde_json::json!({"prompt": format!("provider stdin contains {secret}")}),
+        None,
+    )
+    .expect("run succeeds");
+
+    assert!(outcome.success);
+    for key in ["stdin_blob_ref", "stdout_blob_ref", "stderr_blob_ref"] {
+        let blob_ref = outcome.output[key].as_str().expect("blob ref");
+        let text = String::from_utf8(
+            loop_sink
+                .blob_store()
+                .read(blob_ref)
+                .expect("read stored blob"),
+        )
+        .expect("stored blob utf8");
+        assert!(
+            !text.contains(secret),
+            "{key} should not contain raw live env value: {text}"
+        );
+        assert!(
+            text.contains("[REDACTED_ENV]"),
+            "{key} should include env redaction marker: {text}"
+        );
+    }
 }
 
 #[test]
@@ -494,6 +553,35 @@ fi
 
     assert!(outcome.success);
     assert_eq!(outcome.output["provider"], "grok");
+}
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(key);
+        // SAFETY: this test uses a dedicated variable name and restores the
+        // previous value on drop.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: see EnvVarGuard::set.
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 }
 
 /// Regression for T20260508-17: a CLI subprocess that exits 0 but emits an

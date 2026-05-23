@@ -22,7 +22,7 @@
 // ORB-00013: Existing expect calls in this module document local invariants; keep the allow scoped while the workspace lint is ratcheted.
 #![allow(clippy::expect_used)]
 
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, ffi::OsString, sync::OnceLock};
 
 use regex::Regex;
 use serde_json::Value;
@@ -151,6 +151,19 @@ fn sensitive_env_values() -> Vec<String> {
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values.dedup();
     values
+}
+
+/// Return the current process environment with sensitive variable names
+/// removed. Provider subprocesses use this when they need normal runtime
+/// context such as `PATH`/`HOME` without inheriting ambient credentials.
+pub fn non_sensitive_env_vars() -> Vec<(OsString, OsString)> {
+    std::env::vars_os()
+        .filter(|(name, _)| {
+            name.to_str()
+                .map(|name| !is_sensitive_env_name(name))
+                .unwrap_or(true)
+        })
+        .collect()
 }
 
 fn is_redactable_value(value: &str) -> bool {

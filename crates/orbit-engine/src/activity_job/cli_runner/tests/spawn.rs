@@ -1,5 +1,7 @@
 #![allow(missing_docs)]
 
+use std::ffi::OsString;
+
 use orbit_common::types::OrbitError;
 use tempfile::tempdir;
 
@@ -21,6 +23,30 @@ fn spawn_bare_runs_program_in_provided_cwd() {
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout utf8"),
         format!("{}\n", cwd.display())
+    );
+}
+
+#[test]
+fn spawn_bare_does_not_inherit_ambient_sensitive_env() {
+    let _guard = EnvVarGuard::set("ORBIT_SPAWN_BARE_TEST_TOKEN", "parent-process-secret-value");
+    let SpawnedChild {
+        child,
+        _profile_temp,
+    } = spawn_bare(
+        "/bin/sh",
+        &sh_args(
+            "if [ -z \"${ORBIT_SPAWN_BARE_TEST_TOKEN+x}\" ]; then printf unset; else printf 'leaked:%s' \"$ORBIT_SPAWN_BARE_TEST_TOKEN\"; fi",
+        ),
+        &[],
+        None,
+    )
+    .expect("spawn succeeds");
+
+    let output = child.wait_with_output().expect("wait succeeds");
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout utf8"),
+        "unset"
     );
 }
 
@@ -63,4 +89,33 @@ fn spawn_macos_sandboxed_falls_back_to_bare_exec_when_allow_fallback_set() {
     // because the sandbox-exec wrapper was bypassed.
     assert!(spawned._profile_temp.is_none());
     let _ = spawned.child.wait();
+}
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(key);
+        // SAFETY: this test uses a dedicated variable name and restores the
+        // previous value on drop.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: see EnvVarGuard::set.
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 }
