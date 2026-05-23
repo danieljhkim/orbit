@@ -1,6 +1,6 @@
 schema_version: 1
 id: L-0039
-status: active
+status: superseded
 scope:
   paths:
   - crates/orbit-cli/src/command/hook/**
@@ -32,5 +32,6 @@ evidence:
   reference: ORB-00273
 - kind: external
   reference: ARCHITECTURE.md
+superseded_by: L-0041
 created_at: 2026-05-23T04:27:03.082375Z
-updated_at: 2026-05-23T04:27:03.082375Z
+updated_at: 2026-05-23T04:30:10.521614Z
