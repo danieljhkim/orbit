@@ -1,13 +1,23 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use orbit_common::types::OrbitError;
+use reqwest::Url;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::commands::{DEFAULT_RELEASE_BASE_URL, parse_model};
-use crate::{CompanionPaths, RpcResponse, RpcResult, platform_companion_filename};
+use crate::companion::{
+    COMPANION_OVERRIDE_ENV, UNSAFE_COMPANION_OVERRIDE_ENV, unsafe_companion_overrides_enabled,
+    validate_companion_override_path, validate_managed_companion_path,
+};
+use crate::{CompanionPaths, platform_companion_filename};
+
+const COMPANION_URL_ENV: &str = "ORBIT_SEARCH_COMPANION_URL";
+const COMPANION_SHA256_ENV: &str = "ORBIT_SEARCH_COMPANION_SHA256";
+const RELEASE_CHECKSUMS_FILENAME: &str = "orbit-checksums.txt";
 
 #[derive(Debug, Clone)]
 pub struct SemanticInstallParams {
@@ -64,39 +74,215 @@ fn install_companion(destination: &Path) -> Result<(), OrbitError> {
         fs::remove_file(&temp_path).map_err(|error| OrbitError::Io(error.to_string()))?;
     }
 
-    let install_result = install_companion_to_temp(&temp_path)
-        .and_then(|()| replace_companion(&temp_path, destination));
+    let install_result = install_companion_to_temp(&temp_path).and_then(|checksum| {
+        replace_companion(&temp_path, destination)?;
+        write_companion_integrity(destination, &checksum)
+    });
     if install_result.is_err() {
         let _ = fs::remove_file(&temp_path);
     }
     install_result
 }
 
-fn install_companion_to_temp(temp_path: &Path) -> Result<(), OrbitError> {
-    if let Ok(local_path) = std::env::var("ORBIT_SEARCH_COMPANION")
-        && Path::new(&local_path).is_file()
-    {
-        fs::copy(&local_path, temp_path).map_err(|error| OrbitError::Io(error.to_string()))?;
-        make_executable(temp_path)?;
-        return Ok(());
+fn install_companion_to_temp(temp_path: &Path) -> Result<String, OrbitError> {
+    if let Some(local_path) = env_var_non_empty(COMPANION_OVERRIDE_ENV) {
+        return install_local_companion(Path::new(&local_path), temp_path);
     }
 
-    let url = std::env::var("ORBIT_SEARCH_COMPANION_URL").unwrap_or_else(|_| {
-        format!(
-            "{DEFAULT_RELEASE_BASE_URL}/{}",
-            platform_companion_filename()
-        )
-    });
-    let bytes = reqwest::blocking::get(&url)
+    let source = resolve_download_source()?;
+    let bytes = download_bytes(&source.url)?;
+    let checksum = verify_download_integrity(&bytes, &source.integrity)?;
+    fs::write(temp_path, bytes).map_err(|error| OrbitError::Io(error.to_string()))?;
+    make_executable(temp_path)?;
+    Ok(checksum)
+}
+
+fn install_local_companion(source_path: &Path, temp_path: &Path) -> Result<String, OrbitError> {
+    validate_companion_override_path(source_path)?;
+    let bytes = fs::read(source_path).map_err(|error| OrbitError::Io(error.to_string()))?;
+    let checksum = sha256_hex(&bytes);
+    if let Some(expected) = env_var_non_empty(COMPANION_SHA256_ENV) {
+        verify_sha256_digest(&checksum, &expected)?;
+    }
+    fs::write(temp_path, bytes).map_err(|error| OrbitError::Io(error.to_string()))?;
+    make_executable(temp_path)?;
+    Ok(checksum)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CompanionDownloadSource {
+    pub(crate) url: String,
+    pub(crate) integrity: CompanionIntegrity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CompanionIntegrity {
+    ReleaseChecksum {
+        checksums_url: String,
+        asset_name: String,
+    },
+    Sha256(String),
+    UnsafeDeveloperOverride,
+}
+
+pub(crate) fn resolve_download_source() -> Result<CompanionDownloadSource, OrbitError> {
+    if let Some(url) = env_var_non_empty(COMPANION_URL_ENV) {
+        validate_download_url(&url)?;
+        if let Some(expected) = env_var_non_empty(COMPANION_SHA256_ENV) {
+            return Ok(CompanionDownloadSource {
+                url,
+                integrity: CompanionIntegrity::Sha256(normalize_sha256(&expected)?),
+            });
+        }
+        if unsafe_companion_overrides_enabled() {
+            return Ok(CompanionDownloadSource {
+                url,
+                integrity: CompanionIntegrity::UnsafeDeveloperOverride,
+            });
+        }
+        return Err(OrbitError::InvalidInput(format!(
+            "{COMPANION_URL_ENV} requires {COMPANION_SHA256_ENV}=<sha256>; set {UNSAFE_COMPANION_OVERRIDE_ENV}=1 only for developer-only unsigned downloads"
+        )));
+    }
+
+    let asset_name = platform_companion_filename();
+    let url = format!("{DEFAULT_RELEASE_BASE_URL}/{asset_name}");
+    validate_download_url(&url)?;
+    Ok(CompanionDownloadSource {
+        url,
+        integrity: CompanionIntegrity::ReleaseChecksum {
+            checksums_url: format!(
+                "{}/{}",
+                DEFAULT_RELEASE_BASE_URL.trim_end_matches('/'),
+                RELEASE_CHECKSUMS_FILENAME
+            ),
+            asset_name,
+        },
+    })
+}
+
+fn validate_download_url(url: &str) -> Result<(), OrbitError> {
+    let parsed = Url::parse(url)
+        .map_err(|error| OrbitError::InvalidInput(format!("invalid companion URL: {error}")))?;
+    if parsed.scheme() != "https" && !unsafe_companion_overrides_enabled() {
+        return Err(OrbitError::InvalidInput(format!(
+            "companion downloads must use https; set {UNSAFE_COMPANION_OVERRIDE_ENV}=1 only for developer-only testing"
+        )));
+    }
+    Ok(())
+}
+
+fn download_bytes(url: &str) -> Result<Vec<u8>, OrbitError> {
+    Ok(reqwest::blocking::get(url)
         .map_err(|error| OrbitError::Execution(format!("failed to download companion: {error}")))?
         .error_for_status()
         .map_err(|error| OrbitError::Execution(format!("failed to download companion: {error}")))?
         .bytes()
         .map_err(|error| {
             OrbitError::Execution(format!("failed to read companion download: {error}"))
-        })?;
-    fs::write(temp_path, bytes).map_err(|error| OrbitError::Io(error.to_string()))?;
-    make_executable(temp_path)
+        })?
+        .to_vec())
+}
+
+fn download_text(url: &str) -> Result<String, OrbitError> {
+    reqwest::blocking::get(url)
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "failed to download companion checksum manifest: {error}"
+            ))
+        })?
+        .error_for_status()
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "failed to download companion checksum manifest: {error}"
+            ))
+        })?
+        .text()
+        .map_err(|error| {
+            OrbitError::Execution(format!(
+                "failed to read companion checksum manifest: {error}"
+            ))
+        })
+}
+
+fn verify_download_integrity(
+    bytes: &[u8],
+    integrity: &CompanionIntegrity,
+) -> Result<String, OrbitError> {
+    let checksum = sha256_hex(bytes);
+    match integrity {
+        CompanionIntegrity::ReleaseChecksum {
+            checksums_url,
+            asset_name,
+        } => {
+            let manifest = download_text(checksums_url)?;
+            let expected = checksum_from_manifest(&manifest, asset_name)?;
+            verify_sha256_digest(&checksum, &expected)?;
+        }
+        CompanionIntegrity::Sha256(expected) => verify_sha256_digest(&checksum, expected)?,
+        CompanionIntegrity::UnsafeDeveloperOverride => {}
+    }
+    Ok(checksum)
+}
+
+pub(crate) fn checksum_from_manifest(
+    manifest: &str,
+    asset_name: &str,
+) -> Result<String, OrbitError> {
+    for line in manifest.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(checksum) = fields.next() else {
+            continue;
+        };
+        let Some(name) = fields.next() else {
+            continue;
+        };
+        if checksum_manifest_name_matches(name, asset_name) {
+            return normalize_sha256(checksum);
+        }
+    }
+    Err(OrbitError::Execution(format!(
+        "checksum entry for companion asset `{asset_name}` was not found in {RELEASE_CHECKSUMS_FILENAME}"
+    )))
+}
+
+fn checksum_manifest_name_matches(name: &str, asset_name: &str) -> bool {
+    name == asset_name
+        || Path::new(name)
+            .file_name()
+            .and_then(|file_name| file_name.to_str())
+            .is_some_and(|file_name| file_name == asset_name)
+}
+
+fn verify_sha256_digest(actual: &str, expected: &str) -> Result<(), OrbitError> {
+    let expected = normalize_sha256(expected)?;
+    if actual != expected {
+        return Err(OrbitError::Execution(format!(
+            "companion checksum verification failed (expected {expected}, got {actual})"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn normalize_sha256(value: &str) -> Result<String, OrbitError> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.len() != 64 || !normalized.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(OrbitError::InvalidInput(format!(
+            "{COMPANION_SHA256_ENV} must be a 64-character hex SHA-256 digest"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn env_var_non_empty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn emit_stale_companion_hint(paths: &CompanionPaths) {
@@ -120,48 +306,46 @@ fn legacy_platform_companion_filename() -> String {
 }
 
 fn companion_needs_install(path: &Path) -> bool {
-    if !path.exists() {
+    if !path.exists() || validate_managed_companion_path(path).is_err() {
         return true;
     }
-    match companion_version(path) {
-        Some(version) => version != env!("CARGO_PKG_VERSION"),
-        None => true,
-    }
+    // L-0036: Avoid native version probes until the sidecar checksum proves local integrity.
+    !installed_companion_integrity_matches(path).unwrap_or(false)
 }
 
-fn companion_version(path: &Path) -> Option<String> {
-    let output = Command::new(path)
-        .arg("--version-info")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_version_info(&output.stdout)
+fn installed_companion_integrity_matches(path: &Path) -> Result<bool, OrbitError> {
+    let manifest_path = companion_integrity_path(path).ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "companion destination has no file name: {}",
+            path.display()
+        ))
+    })?;
+    let manifest =
+        fs::read_to_string(manifest_path).map_err(|error| OrbitError::Io(error.to_string()))?;
+    let bytes = fs::read(path).map_err(|error| OrbitError::Io(error.to_string()))?;
+    let checksum = sha256_hex(&bytes);
+    let expected_version = format!("version={}", env!("CARGO_PKG_VERSION"));
+    let expected_checksum = format!("sha256={checksum}");
+    Ok(manifest.lines().any(|line| line.trim() == expected_version)
+        && manifest
+            .lines()
+            .any(|line| line.trim() == expected_checksum))
 }
 
-fn parse_version_info(stdout: &[u8]) -> Option<String> {
-    let output = std::str::from_utf8(stdout).ok()?;
-    output.lines().find_map(|line| {
-        let line = line.trim();
-        if line.is_empty() {
-            return None;
-        }
-        match serde_json::from_str::<RpcResponse>(line).ok()? {
-            RpcResponse::Result {
-                result:
-                    RpcResult::Info {
-                        version: Some(version),
-                        ..
-                    },
-                ..
-            } => Some(version),
-            _ => None,
-        }
-    })
+pub(crate) fn write_companion_integrity(path: &Path, checksum: &str) -> Result<(), OrbitError> {
+    let manifest_path = companion_integrity_path(path).ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "companion destination has no file name: {}",
+            path.display()
+        ))
+    })?;
+    let content = format!("version={}\nsha256={checksum}\n", env!("CARGO_PKG_VERSION"));
+    fs::write(manifest_path, content).map_err(|error| OrbitError::Io(error.to_string()))
+}
+
+fn companion_integrity_path(path: &Path) -> Option<std::path::PathBuf> {
+    let file_name = path.file_name()?.to_string_lossy();
+    Some(path.with_file_name(format!("{file_name}.sha256")))
 }
 
 fn temporary_companion_path(destination: &Path) -> Result<std::path::PathBuf, OrbitError> {

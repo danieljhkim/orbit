@@ -200,9 +200,12 @@ fn run_orbit(cwd: &Path, home: &Path, args: &[&str], companion: Option<&Path>) -
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
         .env_remove("ORBIT_SEARCH_COMPANION")
+        .env_remove("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE")
         .args(args);
     if let Some(path) = companion {
-        command.env("ORBIT_SEARCH_COMPANION", path);
+        command
+            .env("ORBIT_SEARCH_COMPANION", path)
+            .env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE", "1");
     }
     command.output().expect("run orbit")
 }

@@ -2257,11 +2257,13 @@ version = "0.6.0"
 dependencies = [
  "blake3",
  "chrono",
+ "libc",
  "orbit-common",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

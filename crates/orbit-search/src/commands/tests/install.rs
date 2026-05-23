@@ -1,8 +1,11 @@
 //! Unit tests for `install` — sibling layout under commands/tests/.
 
-use super::super::install::{SemanticInstallParams, run};
+use super::super::install::{
+    CompanionIntegrity, SemanticInstallParams, checksum_from_manifest, resolve_download_source,
+    run, sha256_hex,
+};
 
-use crate::CompanionPaths;
+use crate::{CompanionPaths, locate_companion, platform_companion_filename};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -78,6 +81,168 @@ fn current_companion_is_left_in_place_without_force() {
     );
 }
 
+#[test]
+#[cfg(unix)]
+fn checksum_mismatch_rejects_replacement_before_install() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    fixture.write_installed_companion("0.3.1", "old");
+    fixture.write_source_companion(env!("CARGO_PKG_VERSION"), "tampered");
+    set_env("ORBIT_SEARCH_COMPANION_SHA256", &"0".repeat(64));
+
+    let error = run(SemanticInstallParams {
+        model: None,
+        force: false,
+    })
+    .expect_err("checksum mismatch should reject install");
+
+    assert!(
+        error
+            .to_string()
+            .contains("companion checksum verification failed"),
+        "{error}"
+    );
+    assert!(
+        std::fs::read_to_string(fixture.paths.companion_path())
+            .expect("read retained companion")
+            .contains("replacement-marker: old")
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn unsafe_url_override_is_rejected_without_explicit_opt_in() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    fixture.write_installed_companion("0.3.1", "old");
+    remove_env("ORBIT_SEARCH_COMPANION");
+    remove_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE");
+    set_env(
+        "ORBIT_SEARCH_COMPANION_URL",
+        "http://example.invalid/companion",
+    );
+
+    let error = run(SemanticInstallParams {
+        model: None,
+        force: true,
+    })
+    .expect_err("http override should be rejected before download");
+
+    assert!(error.to_string().contains("must use https"), "{error}");
+    assert!(
+        std::fs::read_to_string(fixture.paths.companion_path())
+            .expect("read retained companion")
+            .contains("replacement-marker: old")
+    );
+}
+
+#[test]
+fn default_download_source_requires_release_checksum_manifest() {
+    let _guard = EnvGuard::new();
+    remove_env("ORBIT_SEARCH_COMPANION");
+    remove_env("ORBIT_SEARCH_COMPANION_URL");
+    remove_env("ORBIT_SEARCH_COMPANION_SHA256");
+    remove_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE");
+
+    let source = resolve_download_source().expect("default source");
+
+    match source.integrity {
+        CompanionIntegrity::ReleaseChecksum {
+            checksums_url,
+            asset_name,
+        } => {
+            assert!(checksums_url.ends_with("/orbit-checksums.txt"));
+            assert_eq!(asset_name, platform_companion_filename());
+        }
+        other => panic!("default source should require release checksum: {other:?}"),
+    }
+}
+
+#[test]
+fn checksum_manifest_selects_platform_asset() {
+    let expected = "64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c";
+    let manifest = format!(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  other\n{expected}  ./{}\n",
+        platform_companion_filename()
+    );
+
+    let checksum =
+        checksum_from_manifest(&manifest, &platform_companion_filename()).expect("checksum entry");
+
+    assert_eq!(checksum, expected);
+}
+
+#[test]
+#[cfg(unix)]
+fn locate_companion_prefers_managed_install_over_override() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    fixture.write_installed_companion(env!("CARGO_PKG_VERSION"), "managed");
+    fixture.write_source_companion(env!("CARGO_PKG_VERSION"), "override");
+
+    let located = locate_companion().expect("managed companion should be located");
+
+    assert_eq!(located, fixture.paths.companion_path());
+}
+
+#[test]
+#[cfg(unix)]
+fn runtime_override_requires_explicit_unsafe_opt_in() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    fixture.write_source_companion(env!("CARGO_PKG_VERSION"), "override");
+    remove_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE");
+
+    let error = locate_companion().expect_err("override without unsafe gate should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE"),
+        "{error}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn runtime_override_rejects_non_executable_path() {
+    let _guard = EnvGuard::new();
+    let fixture = InstallFixture::new();
+    std::fs::write(&fixture.source_path, "#!/bin/sh\nexit 0\n").expect("write source");
+
+    let error = locate_companion().expect_err("non-executable override should fail");
+
+    assert!(error.to_string().contains("not executable"), "{error}");
+}
+
+#[test]
+#[cfg(unix)]
+fn path_candidates_are_not_executed_in_normal_lookup() {
+    let _guard = EnvGuard::new();
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let bin = temp.path().join("bin");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&bin).expect("create bin");
+    write_mock_companion(
+        &bin.join("orbit-search-companion"),
+        env!("CARGO_PKG_VERSION"),
+        "path",
+    );
+    set_env("HOME", &home.to_string_lossy());
+    set_env("USERPROFILE", &home.to_string_lossy());
+    set_env("PATH", &bin.to_string_lossy());
+    remove_env("ORBIT_SEARCH_COMPANION");
+    remove_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE");
+
+    let error = locate_companion().expect_err("PATH candidate should not be used");
+
+    assert!(
+        error.to_string().contains("Semantic search not enabled"),
+        "{error}"
+    );
+}
+
 struct InstallFixture {
     _temp: TempDir,
     paths: CompanionPaths,
@@ -93,7 +258,9 @@ impl InstallFixture {
         set_env("HOME", &home.to_string_lossy());
         set_env("USERPROFILE", &home.to_string_lossy());
         set_env("ORBIT_SEARCH_COMPANION", &source_path.to_string_lossy());
+        set_env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE", "1");
         remove_env("ORBIT_SEARCH_COMPANION_URL");
+        remove_env("ORBIT_SEARCH_COMPANION_SHA256");
 
         let paths = CompanionPaths::default_under_home().expect("paths");
         std::fs::create_dir_all(&paths.bin_dir).expect("create bin");
@@ -111,6 +278,7 @@ impl InstallFixture {
     #[cfg(unix)]
     fn write_installed_companion(&self, version: &str, marker: &str) {
         write_mock_companion(&self.paths.companion_path(), version, marker);
+        write_test_companion_integrity(&self.paths.companion_path(), version);
     }
 
     #[cfg(unix)]
@@ -134,8 +302,11 @@ impl EnvGuard {
         let names = [
             "HOME",
             "USERPROFILE",
+            "PATH",
             "ORBIT_SEARCH_COMPANION",
             "ORBIT_SEARCH_COMPANION_URL",
+            "ORBIT_SEARCH_COMPANION_SHA256",
+            "ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE",
         ];
         let vars = names
             .into_iter()
@@ -174,6 +345,22 @@ exit 0
     let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(path, permissions).expect("chmod companion");
+}
+
+#[cfg(unix)]
+fn write_test_companion_integrity(path: &std::path::Path, version: &str) {
+    let bytes = std::fs::read(path).expect("read companion for checksum");
+    let checksum = sha256_hex(&bytes);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("companion file name");
+    let manifest_path = path.with_file_name(format!("{file_name}.sha256"));
+    std::fs::write(
+        manifest_path,
+        format!("version={version}\nsha256={checksum}\n"),
+    )
+    .expect("write companion integrity");
 }
 
 fn set_env(name: &str, value: &str) {
