@@ -1141,6 +1141,9 @@ pub fn state_env_vars(execution: &ExecutionContext) -> Vec<(String, String)> {
         .filter(|s| !s.is_empty())
     {
         vars.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
+        // ADR-0182: hooks read the explicit active-task binding while older
+        // audit/tool code continues to consume ORBIT_TASK_ID.
+        vars.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
     }
 
     // Run-state vars only exist for steps inside a real job run, so they
@@ -1255,6 +1258,10 @@ mod state_env_var_tests {
             vars.get("ORBIT_TASK_ID").map(String::as_str),
             Some("T20260428-7")
         );
+        assert_eq!(
+            vars.get("ORBIT_ACTIVE_TASK_ID").map(String::as_str),
+            Some("T20260428-7")
+        );
         assert!(!vars.contains_key("ORBIT_RUN_ID"));
     }
 
@@ -1263,6 +1270,10 @@ mod state_env_var_tests {
         let exec = execution_with(json!({ "task_id": "T-abc" }), Some("jrun-42"));
         let vars: HashMap<String, String> = state_env_vars(&exec).into_iter().collect();
         assert_eq!(vars.get("ORBIT_TASK_ID").map(String::as_str), Some("T-abc"));
+        assert_eq!(
+            vars.get("ORBIT_ACTIVE_TASK_ID").map(String::as_str),
+            Some("T-abc")
+        );
         assert_eq!(
             vars.get("ORBIT_RUN_ID").map(String::as_str),
             Some("jrun-42")
@@ -1283,5 +1294,6 @@ mod state_env_var_tests {
             Some("agent_implement")
         );
         assert!(!vars.contains_key("ORBIT_TASK_ID"));
+        assert!(!vars.contains_key("ORBIT_ACTIVE_TASK_ID"));
     }
 }

@@ -68,11 +68,11 @@ pub use orbit_common::types::{
     Activity, AuditEvent, AuditEventStatus, AuditStats, EvidenceKind, ExecutorDef, ExternalRef,
     GITHUB_PR_EXTERNAL_REF_SYSTEM, Job, JobRun, JobRunState, JobRunStep, JobScheduleState, JobStep,
     JobTargetType, Learning, LearningEvidence, LearningScope, LearningStatus, LearningVoteSummary,
-    ResolvedTaskDependency, ReviewMessage, ReviewThread, ReviewThreadStatus, Role, Skill, Task,
-    TaskComment, TaskComplexity, TaskPriority, TaskStatus, TaskType, build_task_status_index,
-    normalize_task_dependencies, normalize_task_tags, push_external_ref_if_missing,
-    resolve_task_dependencies, task_dependencies_ready, task_matches_tags, unmet_task_dependencies,
-    validate_task_dependencies,
+    ResolvedTaskDependency, ReviewMessage, ReviewThread, ReviewThreadAnchor, ReviewThreadStatus,
+    Role, Skill, Task, TaskComment, TaskComplexity, TaskPriority, TaskStatus, TaskType,
+    build_task_status_index, normalize_task_dependencies, normalize_task_tags,
+    push_external_ref_if_missing, resolve_task_dependencies, task_dependencies_ready,
+    task_matches_tags, unmet_task_dependencies, validate_task_dependencies,
 };
 pub use orbit_common::types::{LearningComment, NotFoundKind, OrbitError};
 pub use orbit_common::utility::redaction::{

@@ -26,6 +26,7 @@ fn tool_context(agent: &str, model: &str) -> ToolContext {
         model_name: Some(model.to_string()),
         role_slot: None,
         proc_allowed_programs: Vec::new(),
+        proc_spawn_activity_scoped: false,
         policy_engine: None,
         fs_profile: None,
         fs_audit: None,

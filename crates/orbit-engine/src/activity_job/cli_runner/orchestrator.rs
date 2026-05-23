@@ -164,6 +164,12 @@ pub fn run_cli_backend(
     if let Some(session_id) = learning_context.session_id {
         child_env.push(("ORBIT_SESSION_ID".to_string(), session_id));
     }
+    if let Some(task_id) = task_id_from_input(input) {
+        // ADR-0182: external CLI agents get the same active-task hook binding
+        // as direct-agent executions.
+        child_env.push(("ORBIT_TASK_ID".to_string(), task_id.to_string()));
+        child_env.push(("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()));
+    }
     let (stdout, stderr, exit_code, duration, timed_out) =
         spawn_with_timeout(SpawnWithTimeoutRequest {
             program: &invocation.program,

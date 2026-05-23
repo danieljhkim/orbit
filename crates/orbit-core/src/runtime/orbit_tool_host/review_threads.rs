@@ -14,7 +14,7 @@ pub(super) fn add(
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
     require_review_model(model.as_deref(), "orbit.task.review_thread.add")?;
-    let id = required_string(&input, &["id"], "id")?;
+    let id = review_thread_task_id(&input)?;
     let body = required_string(&input, &["body"], "body")?;
     let path = optional_string(&input, "path")?;
     let line = optional_string(&input, "line")?
@@ -29,7 +29,7 @@ pub(super) fn add(
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
-    let id = required_string(&input, &["id"], "id")?;
+    let id = review_thread_task_id(&input)?;
     let status = optional_string(&input, "status")?
         .map(|value| ReviewThreadStatus::from_str(&value))
         .transpose()
@@ -45,7 +45,7 @@ pub(super) fn reply(
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
     require_review_model(model.as_deref(), "orbit.task.review_thread.reply")?;
-    let id = required_string(&input, &["id"], "id")?;
+    let id = review_thread_task_id(&input)?;
     let thread_id = required_string(&input, &["thread_id"], "thread_id")?;
     let body = required_string(&input, &["body"], "body")?;
     runtime.reply_review_thread(&id, &thread_id, body, agent, model)?;
@@ -58,7 +58,7 @@ pub(super) fn resolve(
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
-    let id = required_string(&input, &["id"], "id")?;
+    let id = review_thread_task_id(&input)?;
     let thread_id = required_string(&input, &["thread_id"], "thread_id")?;
     runtime.resolve_review_thread(&id, &thread_id, agent, model)?;
     serialize_task(runtime, &runtime.get_task(&id)?)
@@ -72,4 +72,18 @@ fn require_review_model(model: Option<&str>, tool_name: &str) -> Result<(), Orbi
         )));
     }
     Ok(())
+}
+
+fn review_thread_task_id(input: &Value) -> Result<String, OrbitError> {
+    match required_string(input, &["id", "task_id"], "id") {
+        Ok(task_id) => Ok(task_id),
+        Err(OrbitError::InvalidInput(message)) if message == "missing `id`" => {
+            crate::command::review_thread_hook::active_task_id_from_env().ok_or_else(|| {
+                OrbitError::InvalidInput(format!(
+                    "{message}; or set ORBIT_ACTIVE_TASK_ID for active-task review-thread operations"
+                ))
+            })
+        }
+        Err(error) => Err(error),
+    }
 }

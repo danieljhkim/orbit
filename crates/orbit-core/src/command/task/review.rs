@@ -89,7 +89,7 @@ impl OrbitRuntime {
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
         let threads = self.get_task_review_threads(task_id)?;
-        let existing = threads
+        let _existing = threads
             .iter()
             .find(|t| t.thread_id == thread_id)
             .ok_or_else(|| {
@@ -113,7 +113,7 @@ impl OrbitRuntime {
             thread_id: thread_id.to_string(),
             path: None,
             line: None,
-            status: existing.status,
+            status: ReviewThreadStatus::Open,
             messages: vec![ReviewMessage {
                 message_id,
                 at: now,
