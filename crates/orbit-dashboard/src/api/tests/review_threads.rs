@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
+use orbit_core::ActorIdentity;
 use orbit_core::OrbitRuntime;
 use orbit_core::command::task::TaskAddParams;
 use serde_json::Value;
@@ -12,6 +13,15 @@ use tower::ServiceExt;
 
 use super::super::router;
 use super::test_support::body_json;
+
+fn human_runtime() -> OrbitRuntime {
+    // Force a human actor so threads created without an explicit model land
+    // with `by="human"`. Without this, ambient `ORBIT_AGENT_MODEL` env vars
+    // (e.g., from CI) leak in and break author-kind assertions.
+    OrbitRuntime::in_memory()
+        .expect("build runtime")
+        .with_actor(ActorIdentity::human("human"))
+}
 
 fn seed_task(runtime: &OrbitRuntime) -> String {
     runtime
@@ -63,7 +73,7 @@ async fn post(
 
 #[tokio::test]
 async fn list_review_threads_returns_threads_across_tasks() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = human_runtime();
     let task_id = seed_task(&runtime);
     runtime
         .add_review_thread(
@@ -117,7 +127,7 @@ async fn list_review_threads_returns_threads_across_tasks() {
 
 #[tokio::test]
 async fn list_review_threads_filters_by_status_and_author_kind() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = human_runtime();
     let task_id = seed_task(&runtime);
     let agent_thread = runtime
         .add_review_thread(
@@ -163,7 +173,7 @@ async fn list_review_threads_filters_by_status_and_author_kind() {
 
 #[tokio::test]
 async fn reply_resolve_reopen_review_thread_through_router() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = human_runtime();
     let task_id = seed_task(&runtime);
     let thread = runtime
         .add_review_thread(
@@ -209,7 +219,7 @@ async fn reply_resolve_reopen_review_thread_through_router() {
 
 #[tokio::test]
 async fn reply_rejects_empty_body() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = human_runtime();
     let task_id = seed_task(&runtime);
     let thread = runtime
         .add_review_thread(&task_id, "Agent ask.".to_string(), None, None, None, None)
@@ -226,7 +236,7 @@ async fn reply_rejects_empty_body() {
 
 #[tokio::test]
 async fn cross_origin_post_is_forbidden() {
-    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let runtime = human_runtime();
     let task_id = seed_task(&runtime);
     let thread = runtime
         .add_review_thread(&task_id, "Agent ask.".to_string(), None, None, None, None)
