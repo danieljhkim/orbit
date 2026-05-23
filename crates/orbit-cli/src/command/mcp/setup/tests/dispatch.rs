@@ -100,7 +100,14 @@ fn home_scope_writes_to_home_paths_and_skips_repo_files() {
     assert!(
         allow
             .iter()
-            .any(|item| item == "mcp__plugin_orbit_orbit__orbit_task_show")
+            .any(|item| item == "mcp__orbit__orbit_task_show")
+    );
+    assert!(
+        !allow
+            .iter()
+            .any(|item| item.as_str().is_some_and(|s| s.starts_with("mcp__plugin_"))),
+        "CLI init must not emit Claude Code plugin-scoped permission names; \
+         that shape is synthesized by Claude itself for plugin installs",
     );
 
     let codex_config = std::fs::read_to_string(home.path().join(".codex").join("config.toml"))

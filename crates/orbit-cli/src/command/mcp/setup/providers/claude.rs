@@ -52,6 +52,12 @@ pub(in crate::command::mcp::setup) fn apply_claude_remove(
                 .and_then(JsonValue::as_array_mut)
             {
                 remove_known_strings(allow, &claude_safe_permissions());
+                // Migration cleanup: prior `orbit mcp init --claude` runs wrote
+                // plugin-scoped names (`mcp__plugin_orbit_orbit__*`) that the
+                // current init no longer produces. Strip them here so a single
+                // `orbit mcp remove --claude` after upgrade leaves a clean
+                // settings.json instead of orphaning stale entries.
+                remove_known_strings(allow, &claude_legacy_safe_permissions());
                 if allow.is_empty() {
                     permissions.remove("allow");
                 }
@@ -89,6 +95,38 @@ fn claude_safe_permissions() -> Vec<String> {
 }
 
 pub(super) fn claude_permission_name(tool_name: &str) -> String {
-    // pub(super) widened so providers/tests/claude.rs can call it (sibling under providers per ORB-00221 layout)
-    format!("mcp__plugin_orbit_orbit__{}", tool_name.replace('.', "_"))
+    // pub(super) widened so providers/tests/claude.rs can call it
+    // (sibling under providers per ORB-00221 layout).
+    //
+    // Claude derives MCP permission names from the connected server id in
+    // .mcp.json. The CLI registers under ORBIT_MCP_SERVER_ID = "orbit", so
+    // permission entries written here must be shaped `mcp__orbit__<tool>`.
+    // The plugin-scoped shape `mcp__plugin_<plugin>_<server>__<tool>` is
+    // what Claude itself synthesizes when Orbit is installed as a Claude
+    // Code plugin (see plugin/.claude-plugin/plugin.json) — that install
+    // path does not run this code, so the plugin-scoped prefix is
+    // intentionally not emitted from the CLI registration path.
+    // See `claude_legacy_safe_permissions` for the one-shot cleanup of
+    // stale plugin-prefixed entries left by pre-ORB-00286 CLI runs.
+    format!(
+        "mcp__{}__{}",
+        ORBIT_MCP_SERVER_ID,
+        tool_name.replace('.', "_")
+    )
+}
+
+fn claude_legacy_safe_permissions() -> Vec<String> {
+    // Pre-ORB-00286 the CLI emitted `mcp__plugin_orbit_orbit__<tool>`
+    // entries — the plugin-scoped shape that Claude Code synthesizes for
+    // its *plugin* install path, not for bare `.mcp.json` registrations.
+    // Existing users carry these stale entries in their settings.json;
+    // `apply_claude_remove` strips them alongside the current
+    // `claude_safe_permissions()` so an upgrade + `orbit mcp remove
+    // --claude` leaves a clean file. Keep the generator independent from
+    // `claude_permission_name` so a future prefix change doesn't break
+    // this migration.
+    safe_mcp_tool_names()
+        .into_iter()
+        .map(|name| format!("mcp__plugin_orbit_orbit__{}", name.replace('.', "_")))
+        .collect()
 }
