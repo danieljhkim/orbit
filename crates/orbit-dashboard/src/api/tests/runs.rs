@@ -46,12 +46,20 @@ async fn request_replay(runtime: OrbitRuntime, run_id: &str, origin: Option<&str
 }
 
 async fn request_dashboard_run_events(runtime: OrbitRuntime, encoded_run_id: &str) -> Response {
+    request_dashboard_run_events_query(runtime, encoded_run_id, "").await
+}
+
+async fn request_dashboard_run_events_query(
+    runtime: OrbitRuntime,
+    encoded_run_id: &str,
+    query: &str,
+) -> Response {
     Router::new()
         .nest("/api", router())
         .with_state(Arc::new(runtime))
         .oneshot(
             Request::builder()
-                .uri(format!("/api/runs/{encoded_run_id}/events"))
+                .uri(format!("/api/runs/{encoded_run_id}/events{query}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -184,6 +192,140 @@ async fn list_run_events_rejects_id_with_slashes() {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{label}");
     }
+}
+
+#[tokio::test]
+async fn list_run_events_streams_small_page_from_oversized_fixture() {
+    // Audit JSONL is larger than `RUN_EVENTS_MAX_SCAN_BYTES`. The bounded
+    // reader must fill a small page from events at the head of the file
+    // without scanning past the budget — proving the implementation does not
+    // load or accumulate the entire file before slicing.
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-events-oversize";
+    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
+    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
+    let path = audit_dir.join(format!("{run_id}.jsonl"));
+
+    let mut content = String::new();
+    for index in 0..10usize {
+        content.push_str(
+            &json!({
+                "schemaVersion": 1,
+                "event_type": "step.started",
+                "event_id": format!("evt-{index}"),
+                "run_id": run_id,
+                "body_kind": "step_started"
+            })
+            .to_string(),
+        );
+        content.push('\n');
+    }
+    let pad_bytes = super::super::runs::RUN_EVENTS_MAX_SCAN_BYTES + (1024 * 1024);
+    content.reserve(pad_bytes);
+    for _ in 0..pad_bytes {
+        content.push('x');
+    }
+    std::fs::write(&path, content).expect("write fixture");
+
+    let response = request_dashboard_run_events_query(runtime, run_id, "?limit=5").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    let events = payload.as_array().expect("events array");
+    assert_eq!(events.len(), 5);
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(event["event_id"], format!("evt-{index}"));
+        assert_eq!(event["body_kind"], "step_started");
+    }
+}
+
+#[tokio::test]
+async fn list_run_events_returns_payload_too_large_when_scan_budget_exceeded() {
+    // Fill the file with valid events whose `body_kind` does NOT match the
+    // requested filter, forcing the streamer to walk past the budget without
+    // ever filling the page. The endpoint must enforce the budget and surface
+    // a clear 413 response instead of returning a misleading empty page after
+    // doing the full scan.
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-events-budget";
+    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
+    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
+    let path = audit_dir.join(format!("{run_id}.jsonl"));
+
+    let line = json!({
+        "schemaVersion": 1,
+        "event_type": "step.started",
+        "event_id": "evt-x",
+        "run_id": run_id,
+        "body_kind": "step_started"
+    })
+    .to_string();
+    let line_with_newline = format!("{line}\n");
+    let target_bytes = super::super::runs::RUN_EVENTS_MAX_SCAN_BYTES + line_with_newline.len();
+    let line_count = target_bytes / line_with_newline.len() + 1;
+    let mut content = String::with_capacity(line_count * line_with_newline.len());
+    for _ in 0..line_count {
+        content.push_str(&line_with_newline);
+    }
+    std::fs::write(&path, content).expect("write fixture");
+
+    let response =
+        request_dashboard_run_events_query(runtime, run_id, "?kind=does_not_match").await;
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let payload = body_json(response).await;
+    let error = payload["error"].as_str().expect("error message");
+    assert!(
+        error.contains("bounded scan budget"),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn list_run_events_kind_filter_still_works_with_streaming() {
+    // Confirms AC3: streaming preserves kind filtering correctness.
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-events-kind";
+    let audit_dir = runtime.data_root().join("state/audit/v2_loop");
+    std::fs::create_dir_all(&audit_dir).expect("create audit dir");
+    write_lines(
+        &audit_dir.join(format!("{run_id}.jsonl")),
+        &[
+            json!({
+                "schemaVersion": 1,
+                "event_type": "run.started",
+                "event_id": "evt-run",
+                "run_id": run_id,
+                "body_kind": "run_started"
+            })
+            .to_string(),
+            json!({
+                "schemaVersion": 1,
+                "event_type": "step.started",
+                "event_id": "evt-step-a",
+                "run_id": run_id,
+                "body_kind": "step_started"
+            })
+            .to_string(),
+            json!({
+                "schemaVersion": 1,
+                "event_type": "step.started",
+                "event_id": "evt-step-b",
+                "run_id": run_id,
+                "body_kind": "step_started"
+            })
+            .to_string(),
+        ],
+    );
+
+    let response = request_dashboard_run_events_query(runtime, run_id, "?kind=step_started").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    let events = payload.as_array().expect("events array");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event_id"], "evt-step-a");
+    assert_eq!(events[1]["event_id"], "evt-step-b");
 }
 
 #[tokio::test]

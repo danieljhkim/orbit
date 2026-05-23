@@ -1,5 +1,6 @@
 //! Run lifecycle: detail, cancel, replay, events, logs.
 
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 
@@ -18,6 +19,13 @@ use super::{
 use crate::projections::job_run_to_json;
 
 const RUN_EVENTS_DEFAULT_LIMIT: usize = 100;
+/// Hard cap on bytes scanned from a single run's audit JSONL per request.
+/// Streaming stops once this many bytes have been consumed; if the requested
+/// page is not yet full at that point, the endpoint returns 413.
+pub(super) const RUN_EVENTS_MAX_SCAN_BYTES: usize = 8 * 1024 * 1024;
+/// Hard cap on lines scanned from a single run's audit JSONL per request.
+/// Bounds CPU on pathological many-tiny-lines files.
+pub(super) const RUN_EVENTS_MAX_SCAN_LINES: usize = 50_000;
 /// Maximum bytes included in stdout/stderr previews returned by run-log APIs.
 const RUN_LOG_PREVIEW_MAX_BYTES: usize = 8192;
 /// Maximum lines included in stdout/stderr previews returned by run-log APIs.
@@ -150,8 +158,8 @@ pub(super) async fn list_run_events(
         Ok(None) => return Json(Value::Array(Vec::new())).into_response(),
         Err(e) => return map_runtime_error(e),
     };
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(raw) => raw,
+    let file = match std::fs::File::open(&path) {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Json(Value::Array(Vec::new())).into_response();
         }
@@ -163,8 +171,36 @@ pub(super) async fn list_run_events(
         }
     };
 
-    let mut events: Vec<Value> = Vec::new();
-    for line in raw.lines() {
+    // Cap total bytes read from the file so an oversized JSONL cannot inflate
+    // process memory or saturate this task. `take` is the structural memory
+    // bound; `bytes_scanned` / `lines_scanned` below are the request-budget
+    // counters that drive the 413 response when the page can't be filled
+    // within the budget.
+    let bounded = file.take(RUN_EVENTS_MAX_SCAN_BYTES as u64 + 1);
+    let reader = BufReader::new(bounded);
+
+    let mut page: Vec<Value> = Vec::with_capacity(limit.min(64));
+    let mut matched: usize = 0;
+    let mut bytes_scanned: usize = 0;
+    let mut lines_scanned: usize = 0;
+    let mut budget_exceeded = false;
+
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(line) => line,
+            Err(e) => {
+                return server_error(orbit_core::OrbitError::Io(format!(
+                    "read {}: {e}",
+                    path.display()
+                )));
+            }
+        };
+        bytes_scanned = bytes_scanned.saturating_add(line.len()).saturating_add(1);
+        lines_scanned = lines_scanned.saturating_add(1);
+        if bytes_scanned > RUN_EVENTS_MAX_SCAN_BYTES || lines_scanned > RUN_EVENTS_MAX_SCAN_LINES {
+            budget_exceeded = true;
+            break;
+        }
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -179,14 +215,27 @@ pub(super) async fn list_run_events(
                 continue;
             }
         }
-        events.push(value);
+        if matched < offset {
+            matched = matched.saturating_add(1);
+            continue;
+        }
+        page.push(value);
+        matched = matched.saturating_add(1);
+        if page.len() >= limit {
+            break;
+        }
     }
 
-    if offset >= events.len() {
-        return Json(Value::Array(Vec::new())).into_response();
+    if budget_exceeded && page.len() < limit {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({
+                "error": "run-events audit log exceeds bounded scan budget; narrow the kind filter or reduce offset"
+            })),
+        )
+            .into_response();
     }
-    let end = offset.saturating_add(limit).min(events.len());
-    let page: Vec<Value> = events.drain(offset..end).collect();
+
     Json(Value::Array(page)).into_response()
 }
 
