@@ -130,14 +130,7 @@ async fn list_review_threads_filters_by_status_and_author_kind() {
         )
         .expect("add agent thread");
     runtime
-        .add_review_thread(
-            &task_id,
-            "Human note.".to_string(),
-            None,
-            None,
-            None,
-            None,
-        )
+        .add_review_thread(&task_id, "Human note.".to_string(), None, None, None, None)
         .expect("add human thread");
     runtime
         .resolve_review_thread(&task_id, &agent_thread.thread_id, None, None)
@@ -157,7 +150,11 @@ async fn list_review_threads_filters_by_status_and_author_kind() {
     assert_eq!(resolved_items.len(), 1);
     assert_eq!(resolved_items[0]["status"].as_str(), Some("resolved"));
 
-    let agent_only = get(runtime.clone(), "/review-threads?status=all&author_kind=agent").await;
+    let agent_only = get(
+        runtime.clone(),
+        "/review-threads?status=all&author_kind=agent",
+    )
+    .await;
     let agent_body = body_json(agent_only).await;
     let agent_items = agent_body["items"].as_array().expect("items");
     assert_eq!(agent_items.len(), 1);
@@ -191,14 +188,19 @@ async fn reply_resolve_reopen_review_thread_through_router() {
     let reply_body = body_json(reply_resp).await;
     assert_eq!(reply_body["message_count"].as_u64(), Some(2));
 
-    let resolve_uri =
-        format!("/tasks/{task_id}/review-threads/{}/resolve", thread.thread_id);
+    let resolve_uri = format!(
+        "/tasks/{task_id}/review-threads/{}/resolve",
+        thread.thread_id
+    );
     let resolve_resp = post(runtime.clone(), &resolve_uri, None).await;
     assert_eq!(resolve_resp.status(), StatusCode::OK);
     let resolve_body = body_json(resolve_resp).await;
     assert_eq!(resolve_body["status"].as_str(), Some("resolved"));
 
-    let reopen_uri = format!("/tasks/{task_id}/review-threads/{}/reopen", thread.thread_id);
+    let reopen_uri = format!(
+        "/tasks/{task_id}/review-threads/{}/reopen",
+        thread.thread_id
+    );
     let reopen_resp = post(runtime.clone(), &reopen_uri, None).await;
     assert_eq!(reopen_resp.status(), StatusCode::OK);
     let reopen_body = body_json(reopen_resp).await;
@@ -210,14 +212,7 @@ async fn reply_rejects_empty_body() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let task_id = seed_task(&runtime);
     let thread = runtime
-        .add_review_thread(
-            &task_id,
-            "Agent ask.".to_string(),
-            None,
-            None,
-            None,
-            None,
-        )
+        .add_review_thread(&task_id, "Agent ask.".to_string(), None, None, None, None)
         .expect("add thread");
 
     let response = post(
@@ -234,14 +229,7 @@ async fn cross_origin_post_is_forbidden() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let task_id = seed_task(&runtime);
     let thread = runtime
-        .add_review_thread(
-            &task_id,
-            "Agent ask.".to_string(),
-            None,
-            None,
-            None,
-            None,
-        )
+        .add_review_thread(&task_id, "Agent ask.".to_string(), None, None, None, None)
         .expect("add thread");
     let runtime = Arc::new(runtime);
 

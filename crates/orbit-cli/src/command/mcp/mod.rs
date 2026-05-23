@@ -117,11 +117,6 @@ pub(crate) const MCP_HIDDEN_TOOL_NAMES: &[&str] = &[
     "orbit.learning.sync",
     "orbit.learning.list",
     "orbit.friction.stats",
-    "orbit.friction.resolve",
-    "orbit.friction.show",
-    "orbit.friction.tags",
-    "orbit.friction.update",
-    "orbit.friction.list",
 ];
 
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
