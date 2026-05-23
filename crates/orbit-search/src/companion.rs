@@ -2,16 +2,18 @@
 //!
 //! `CompanionPaths` describes the on-disk layout under `~/.orbit/embed/`,
 //! and `locate_companion()` resolves a callable path by checking, in order,
-//! the `ORBIT_SEARCH_COMPANION` env override, the standard install location,
-//! then `$PATH`. When all three miss, the error is the actionable
+//! the standard install location, then a gated `ORBIT_SEARCH_COMPANION`
+//! developer override. When both miss, the error is the actionable
 //! `CompanionNotInstalled` shape so callers can surface a clean install hint.
 
 use std::env;
-use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use orbit_common::types::OrbitError;
 
+pub(crate) const COMPANION_OVERRIDE_ENV: &str = "ORBIT_SEARCH_COMPANION";
+pub(crate) const UNSAFE_COMPANION_OVERRIDE_ENV: &str = "ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE";
 pub const INSTALL_REMEDIATION: &str = "Semantic search not enabled. Run `orbit semantic install` to download the inference companion.";
 
 #[derive(Debug, Clone)]
@@ -69,13 +71,6 @@ pub fn platform_id() -> &'static str {
 }
 
 pub fn locate_companion() -> Result<PathBuf, OrbitError> {
-    if let Ok(path) = env::var("ORBIT_SEARCH_COMPANION") {
-        let path = PathBuf::from(path);
-        if is_executable_file(&path) {
-            return Ok(path);
-        }
-    }
-
     if let Ok(paths) = CompanionPaths::default_under_home() {
         let standard = paths.companion_path();
         if is_executable_file(&standard) {
@@ -83,10 +78,10 @@ pub fn locate_companion() -> Result<PathBuf, OrbitError> {
         }
     }
 
-    for name in path_candidate_names() {
-        if let Some(path) = find_on_path(&name) {
-            return Ok(path);
-        }
+    if let Ok(path) = env::var(COMPANION_OVERRIDE_ENV) {
+        let path = PathBuf::from(path);
+        validate_companion_override_path(&path)?;
+        return Ok(path);
     }
 
     Err(OrbitError::CompanionNotInstalled(
@@ -94,24 +89,135 @@ pub fn locate_companion() -> Result<PathBuf, OrbitError> {
     ))
 }
 
-fn path_candidate_names() -> Vec<OsString> {
-    let mut names = vec![OsString::from("orbit-search-companion")];
-    names.push(OsString::from(platform_companion_filename()));
-    if cfg!(windows) {
-        names.push(OsString::from("orbit-search-companion.exe"));
-    }
-    names
+pub(crate) fn unsafe_companion_overrides_enabled() -> bool {
+    env::var(UNSAFE_COMPANION_OVERRIDE_ENV)
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
 }
 
-fn find_on_path(name: &OsString) -> Option<PathBuf> {
-    let paths = env::var_os("PATH")?;
-    env::split_paths(&paths)
-        .map(|dir| dir.join(name))
-        .find(|path| is_executable_file(path))
+pub(crate) fn validate_companion_override_path(path: &Path) -> Result<(), OrbitError> {
+    if !unsafe_companion_overrides_enabled() {
+        return Err(OrbitError::InvalidInput(format!(
+            "{COMPANION_OVERRIDE_ENV} is a developer-only override; set {UNSAFE_COMPANION_OVERRIDE_ENV}=1 after verifying the companion path is trusted"
+        )));
+    }
+    if !path.is_absolute() {
+        return Err(OrbitError::InvalidInput(format!(
+            "{COMPANION_OVERRIDE_ENV} must be an absolute path: {}",
+            path.display()
+        )));
+    }
+    validate_companion_path(path, CompanionPathTrust::DeveloperOverride)
+}
+
+pub(crate) fn validate_managed_companion_path(path: &Path) -> Result<(), OrbitError> {
+    validate_companion_path(path, CompanionPathTrust::ManagedInstall)
 }
 
 fn is_executable_file(path: &Path) -> bool {
-    path.is_file()
+    validate_managed_companion_path(path).is_ok()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CompanionPathTrust {
+    ManagedInstall,
+    DeveloperOverride,
+}
+
+fn validate_companion_path(path: &Path, trust: CompanionPathTrust) -> Result<(), OrbitError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "search companion path is not readable at {}: {error}",
+            path.display()
+        ))
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(OrbitError::InvalidInput(format!(
+            "search companion path must be a regular file: {}",
+            path.display()
+        )));
+    }
+    validate_executable_metadata(path, &metadata)?;
+    if matches!(trust, CompanionPathTrust::DeveloperOverride) {
+        validate_developer_override_metadata(path, &metadata)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_executable_metadata(path: &Path, metadata: &fs::Metadata) -> Result<(), OrbitError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if metadata.permissions().mode() & 0o111 == 0 {
+        return Err(OrbitError::InvalidInput(format!(
+            "search companion is not executable: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_executable_metadata(_path: &Path, _metadata: &fs::Metadata) -> Result<(), OrbitError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_developer_override_metadata(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), OrbitError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let effective_uid = {
+        // SAFETY: geteuid has no preconditions and only reads the process effective uid.
+        unsafe { libc::geteuid() }
+    };
+    if metadata.uid() != effective_uid {
+        return Err(OrbitError::InvalidInput(format!(
+            "search companion override must be owned by the current user: {}",
+            path.display()
+        )));
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return Err(OrbitError::InvalidInput(format!(
+            "search companion override must not be group/world writable: {}",
+            path.display()
+        )));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "search companion override has no parent directory: {}",
+            path.display()
+        ))
+    })?;
+    let parent_metadata = fs::symlink_metadata(parent).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "search companion override parent is not readable at {}: {error}",
+            parent.display()
+        ))
+    })?;
+    if parent_metadata.uid() != effective_uid {
+        return Err(OrbitError::InvalidInput(format!(
+            "search companion override parent must be owned by the current user: {}",
+            parent.display()
+        )));
+    }
+    if parent_metadata.permissions().mode() & 0o022 != 0 {
+        return Err(OrbitError::InvalidInput(format!(
+            "search companion override parent must not be group/world writable: {}",
+            parent.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_developer_override_metadata(
+    _path: &Path,
+    _metadata: &fs::Metadata,
+) -> Result<(), OrbitError> {
+    Ok(())
 }
 
 fn home_dir() -> Option<PathBuf> {

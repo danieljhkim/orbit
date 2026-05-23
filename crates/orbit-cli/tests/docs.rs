@@ -1106,9 +1106,11 @@ fn run_orbit_with_companion(
         .env("ORBIT_HOME", home.join(".orbit-global"))
         .env_remove("ORBIT_ROOT")
         .env_remove("ORBIT_SEARCH_COMPANION")
+        .env_remove("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE")
         .args(args);
     if let Some(path) = companion {
-        cmd.env("ORBIT_SEARCH_COMPANION", path);
+        cmd.env("ORBIT_SEARCH_COMPANION", path)
+            .env("ORBIT_SEARCH_COMPANION_ALLOW_UNSAFE", "1");
     }
     cmd.output().expect("run orbit")
 }
