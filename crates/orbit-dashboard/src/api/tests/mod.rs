@@ -12,5 +12,6 @@ mod handlers;
 mod learnings;
 mod log;
 mod metrics;
+mod review_threads;
 mod runs;
 mod tasks;

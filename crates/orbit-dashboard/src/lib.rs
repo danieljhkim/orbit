@@ -40,6 +40,7 @@ const DIAGNOSTICS_JS: &str = include_str!("../assets/dashboard/diagnostics.js");
 const ROUTER_JS: &str = include_str!("../assets/dashboard/router.js");
 const RUNS_JS: &str = include_str!("../assets/dashboard/runs.js");
 const RUN_DETAIL_JS: &str = include_str!("../assets/dashboard/run-detail.js");
+const REVIEW_THREADS_JS: &str = include_str!("../assets/dashboard/review-threads.js");
 
 /// Arguments for `orbit web serve` (and the library entry point).
 #[derive(Args, Clone)]
@@ -82,6 +83,7 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
         .route("/static/router.js", get(serve_router_js))
         .route("/static/runs.js", get(serve_runs_js))
         .route("/static/run-detail.js", get(serve_run_detail_js))
+        .route("/static/review-threads.js", get(serve_review_threads_js))
         .route("/healthz", get(healthz))
         .nest("/api", api::router())
         .with_state(runtime);
@@ -242,6 +244,17 @@ async fn serve_run_detail_js() -> Response {
             HeaderValue::from_static("application/javascript; charset=utf-8"),
         )],
         RUN_DETAIL_JS,
+    )
+        .into_response()
+}
+
+async fn serve_review_threads_js() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/javascript; charset=utf-8"),
+        )],
+        REVIEW_THREADS_JS,
     )
         .into_response()
 }

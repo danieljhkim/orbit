@@ -5,6 +5,7 @@ import { el, statusPill, stateCell, fetchJson, requestJson, postJson, patchJson,
 import { buildChips, cacheCrewPayload, copyTaskIdWithNotice, hasCrewOptions, openVisibleTask, renderTasks, setPinnedExternalTask, wireSearch } from './tasks.js';
 import { applyAuditHashQuery, buildAuditChips, buildAuditHash, fetchAndRenderAudit, fetchAndRenderPolicy, getActiveAuditSubtab, navigateToAuditExecution, renderAuditSummary, setActiveAuditSubtabFromButton, setAuditSubtab, syncAuditControls, wireAuditSearch, } from './audit.js';
 import { renderScoreboard } from './scoreboard.js';
+import { fetchAndRender as fetchAndRenderReviewThreads, initReviewThreads, markCurrentAgentThreadsSeen } from './review-threads.js';
 import { initLogTail, fitLogPanelToViewport } from './log-tail.js';
 import { renderDiagnostics, renderImplementOneCard as renderImplOne, } from './diagnostics.js';
 import { initRouter, initTabs as iT, navigateToRun as nTR, setActiveTab as sAT, setRunDetailSubtab, } from './router.js';
@@ -1071,7 +1072,14 @@ function fetchAndRenderTasks() {
 
 function activeRefreshJobs() {
   // The health strip is global; refresh on every tick alongside the active tab.
-  const jobs = [fetchAndRenderSummary()];
+  // Threads also refresh globally so the unread badge updates without visiting
+  // the Threads tab; mark-seen only fires while that tab is active (below).
+  const jobs = [
+    fetchAndRenderSummary(),
+    fetchAndRenderReviewThreads().then(() => {
+      if (activeTab === "threads") markCurrentAgentThreadsSeen();
+    }),
+  ];
 
   if (activeTab === "tasks") {
     jobs.push(fetchAndRenderTasks());
@@ -1081,6 +1089,11 @@ function activeRefreshJobs() {
 
   if (activeTab === "scoreboard") {
     jobs.push(fetchJson("/api/scoreboard").then(renderScoreboard));
+    return jobs;
+  }
+
+  if (activeTab === "threads") {
+    // Threads payload is already in the global jobs above; nothing extra needed.
     return jobs;
   }
 
@@ -1349,6 +1362,7 @@ $("refresh-btn").addEventListener("click", refreshDashboard);
 
 initRuns(runsContext());
 initRunDetail(runDetailContext());
+initReviewThreads();
 const rctx = routerContext();
 initRouter(rctx);
 iT();

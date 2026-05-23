@@ -33,6 +33,7 @@ mod jobs;
 mod learnings;
 mod log;
 mod metrics;
+mod review_threads;
 mod runs;
 mod scoreboard;
 mod tasks;
@@ -367,6 +368,19 @@ pub(super) fn router() -> Router<Arc<OrbitRuntime>> {
             get(diagnostics::diagnostics_implement_one),
         )
         .route("/diagnostics/denials", get(denials::list_denials))
+        .route("/review-threads", get(review_threads::list_review_threads))
+        .route(
+            "/tasks/:id/review-threads/:thread_id/reply",
+            post(review_threads::reply_review_thread_action),
+        )
+        .route(
+            "/tasks/:id/review-threads/:thread_id/resolve",
+            post(review_threads::resolve_review_thread_action),
+        )
+        .route(
+            "/tasks/:id/review-threads/:thread_id/reopen",
+            post(review_threads::reopen_review_thread_action),
+        )
         .layer(middleware::from_fn(require_localhost_origin))
 }
 
