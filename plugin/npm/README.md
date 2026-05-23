@@ -32,7 +32,6 @@ Windows is not currently published. Use WSL or build from source.
 | Variable | Effect |
 |---|---|
 | `ORBIT_BINARY` | Path to a local `orbit` binary; bypasses download and trusts that path as the binary source. |
-| `ORBIT_BINARY_VERSION` | Override the release tag to install (e.g. `v0.3.1`); this changes the release-selection trust boundary but still requires a valid Orbit checksum signature. |
 | `ORBIT_RELEASE_PUBLIC_KEY_FILE` | **Deprecated** in favor of `ORBIT_RELEASE_TRUSTED_KEYS_FILE`. Single-key override for the trusted checksum-signing public key; requires `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1`, logs a deprecation notice when active. |
 | `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` | Required acknowledgement that `ORBIT_RELEASE_PUBLIC_KEY_FILE` replaces the release authenticity trust root. |
 | `ORBIT_RELEASE_TRUSTED_KEYS_FILE` | Preferred test/operations override for the full trusted signing-key set, including key IDs, `not_after`, and `revoked_at`; requires `ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` and logs when active. |
