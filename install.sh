@@ -5,6 +5,7 @@ set -eu
 REPO="${ORBIT_INSTALL_REPO:-danieljhkim/orbit}"
 BINARY_NAME="orbit"
 CHECKSUM_FILE="orbit-checksums.txt"
+CHECKSUM_SIGNATURE_FILE="orbit-checksums.txt.sig"
 INSTALL_DIR="${ORBIT_INSTALL_DIR:-$HOME/.orbit/bin}"
 
 log() {
@@ -37,6 +38,39 @@ download() {
   fail "curl or wget is required to download Orbit releases"
 }
 
+write_trusted_public_key() {
+  destination="$1"
+
+  if [ -n "${ORBIT_RELEASE_PUBLIC_KEY_FILE:-}" ]; then
+    [ -f "$ORBIT_RELEASE_PUBLIC_KEY_FILE" ] || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE does not exist: $ORBIT_RELEASE_PUBLIC_KEY_FILE"
+    cat "$ORBIT_RELEASE_PUBLIC_KEY_FILE" > "$destination"
+    return
+  fi
+
+  cat > "$destination" <<'EOF'
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAuZ8vNa+DusYhrFBXNhBh
+RSqn81AYe7tYEtCKImWGuy/6ziMHqDzDKHSku0sBMwcdLXBzI0RjNBacLCbbYr4H
+icmYrsKqqfLGf+CWfrqDqY9d3hwUPtVMRp/ynVNW6nwKAmNl5dTgUc6ZBAZTtQtt
+qwMD1JIOsrJ3vVDL9o3alcXcg/RyL0pGUo+vep2QZOjXnCGoJN3NeytQHag3zJyd
+Wq4psc7j2H1Nb5EoyY/I/7vpdwME3Mrv2ffwtDmr0/+73q1yWUDf4btY9Ba7sOhE
+Ir2UHm3bEboo1ErAYjjiDDuF/NjzZcZpJtuNbdj0vI7pHDyDZ7sKiEX7RkUO+e2c
+IouiSfRJRrwnjpuergrq3ehNjkxcn5dFST1l23FOXGsy4F7ilrF6P9cgaAsE8dc7
+CS9YgUE1ErfGJLZtfDDGKs6+E+7JiC1C3z7xwmfzOgv9gEvSlfrx2BbGl8esypKm
+pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
+-----END PUBLIC KEY-----
+EOF
+}
+
+verify_checksum_signature() {
+  checksum_path="$1"
+  signature_path="$2"
+  public_key_path="$3"
+
+  openssl dgst -sha256 -verify "$public_key_path" -signature "$signature_path" "$checksum_path" >/dev/null 2>&1 \
+    || fail "release checksum signature verification failed for ${CHECKSUM_FILE}"
+}
+
 compute_sha256() {
   file="$1"
 
@@ -56,6 +90,41 @@ compute_sha256() {
   fi
 
   fail "sha256sum, shasum, or openssl is required to verify downloads"
+}
+
+validate_archive_members() {
+  archive_path="$1"
+  member_list="${TMP_DIR}/archive-members.txt"
+  verbose_list="${TMP_DIR}/archive-members.verbose.txt"
+
+  tar -tzf "$archive_path" > "$member_list" || fail "could not inspect release archive"
+  member_count="$(wc -l < "$member_list" | awk '{print $1}')"
+  [ "$member_count" = "1" ] || fail "release archive must contain only ${BINARY_NAME}"
+
+  member="$(sed -n '1p' "$member_list")"
+  case "$member" in
+    "$BINARY_NAME")
+      ;;
+    "" | /* | *"/.."* | "../"* | *"/../"* | *".."* )
+      fail "unsafe release archive member: ${member:-<empty>}"
+      ;;
+    *)
+      fail "unexpected release archive member: $member"
+      ;;
+  esac
+
+  tar -tvzf "$archive_path" > "$verbose_list" || fail "could not inspect release archive member metadata"
+  verbose_count="$(wc -l < "$verbose_list" | awk '{print $1}')"
+  [ "$verbose_count" = "1" ] || fail "release archive must contain exactly one member"
+
+  mode="$(sed -n '1s/ .*//p' "$verbose_list")"
+  case "$mode" in
+    -*)
+      ;;
+    *)
+      fail "release archive member must be a regular file: $member"
+      ;;
+  esac
 }
 
 normalize_tag() {
@@ -97,7 +166,10 @@ resolve_target() {
 need_cmd awk
 need_cmd install
 need_cmd mktemp
+need_cmd openssl
+need_cmd sed
 need_cmd tar
+need_cmd wc
 
 TARGET="$(resolve_target)"
 ARCHIVE_NAME="orbit-${TARGET}.tar.gz"
@@ -109,7 +181,10 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-if [ -n "${ORBIT_VERSION:-}" ]; then
+if [ -n "${ORBIT_INSTALL_BASE_URL:-}" ]; then
+  BASE_URL="${ORBIT_INSTALL_BASE_URL%/}"
+  VERSION_LABEL="${ORBIT_VERSION:-custom}"
+elif [ -n "${ORBIT_VERSION:-}" ]; then
   RELEASE_TAG="$(normalize_tag "$ORBIT_VERSION")"
   BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
   VERSION_LABEL="$RELEASE_TAG"
@@ -120,9 +195,14 @@ fi
 
 ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE_NAME}"
 CHECKSUM_PATH="${TMP_DIR}/${CHECKSUM_FILE}"
+SIGNATURE_PATH="${TMP_DIR}/${CHECKSUM_SIGNATURE_FILE}"
+PUBLIC_KEY_PATH="${TMP_DIR}/orbit-release-signing.pub"
 
 log "Downloading Orbit ${VERSION_LABEL} for ${TARGET}..."
 download "${BASE_URL}/${CHECKSUM_FILE}" "$CHECKSUM_PATH"
+download "${BASE_URL}/${CHECKSUM_SIGNATURE_FILE}" "$SIGNATURE_PATH"
+write_trusted_public_key "$PUBLIC_KEY_PATH"
+verify_checksum_signature "$CHECKSUM_PATH" "$SIGNATURE_PATH" "$PUBLIC_KEY_PATH"
 download "${BASE_URL}/${ARCHIVE_NAME}" "$ARCHIVE_PATH"
 
 EXPECTED_SHA="$(awk -v asset="$ARCHIVE_NAME" '$2 == asset { print $1 }' "$CHECKSUM_PATH")"
@@ -135,7 +215,8 @@ if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
 fi
 
 mkdir -p "$INSTALL_DIR"
-tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR"
+validate_archive_members "$ARCHIVE_PATH"
+tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR" "$BINARY_NAME"
 [ -f "${TMP_DIR}/${BINARY_NAME}" ] || fail "release archive did not contain ${BINARY_NAME}"
 
 install -m 755 "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
