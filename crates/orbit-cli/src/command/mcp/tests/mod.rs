@@ -13,6 +13,32 @@ use super::{
     is_mcp_tool_exposed, safe_mcp_tool_names,
 };
 
+const EXPECTED_MCP_HIDDEN_TOOL_NAMES: &[&str] = &[
+    "orbit.docs.index",
+    "orbit.docs.migrate",
+    "orbit.docs.add",
+    "orbit.docs.list",
+    "orbit.docs.show",
+    "orbit.task.locks",
+    "orbit.task.locks.release",
+    "orbit.task.locks.reserve",
+    "orbit.semantic.index",
+    "orbit.semantic.install",
+    "orbit.semantic.stats",
+    "orbit.graph.history",
+    "orbit.learning.sync",
+    "orbit.learning.list",
+    "orbit.friction.stats",
+];
+
+const REEXPOSED_FRICTION_TOOL_NAMES: &[&str] = &[
+    "orbit.friction.list",
+    "orbit.friction.resolve",
+    "orbit.friction.show",
+    "orbit.friction.tags",
+    "orbit.friction.update",
+];
+
 const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.search",
     "orbit.task.add",
@@ -35,6 +61,11 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.comment.add",
     "orbit.learning.comment.list",
     "orbit.friction.add",
+    "orbit.friction.list",
+    "orbit.friction.resolve",
+    "orbit.friction.show",
+    "orbit.friction.tags",
+    "orbit.friction.update",
 ];
 
 fn is_runtime_mcp_category_tool(name: &str) -> bool {
@@ -45,6 +76,23 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
         || name.starts_with("orbit.semantic.")
         || name.starts_with("orbit.docs.")
         || name.starts_with("orbit.learning.")
+}
+
+#[test]
+fn mcp_hidden_denylist_matches_intended_ops_surface() {
+    assert_eq!(MCP_HIDDEN_TOOL_NAMES.len(), 15);
+    assert_eq!(MCP_HIDDEN_TOOL_NAMES, EXPECTED_MCP_HIDDEN_TOOL_NAMES);
+
+    for name in REEXPOSED_FRICTION_TOOL_NAMES {
+        assert!(
+            !MCP_HIDDEN_TOOL_NAMES.contains(name),
+            "agent-facing friction workflow should be visible over MCP: {name}"
+        );
+    }
+    assert!(
+        MCP_HIDDEN_TOOL_NAMES.contains(&"orbit.learning.list"),
+        "orbit.learning.list remains hidden; use orbit.search --kind learning for agent discovery"
+    );
 }
 
 #[test]
@@ -291,6 +339,14 @@ mod audited_mcp_call_tests {
             value.get("results").is_some(),
             "orbit.search returns wrapped results"
         );
+    }
+
+    #[test]
+    fn friction_list_is_exposed_to_mcp_dispatch() {
+        let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+        let value = audited_mcp_call(&runtime, "orbit.friction.list", json!({ "limit": 1 }))
+            .expect("orbit.friction.list dispatch ok");
+        assert!(value.is_array(), "orbit.friction.list returns JSON array");
     }
 
     #[test]
