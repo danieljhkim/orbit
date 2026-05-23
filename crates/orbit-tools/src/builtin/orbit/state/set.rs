@@ -32,8 +32,9 @@ impl Tool for OrbitStateSetTool {
                 },
                 ToolParam {
                     name: "run_id".to_string(),
-                    description: "Optional active run ID when state_dir is not provided"
-                        .to_string(),
+                    description:
+                        "Optional run ID; managed activity calls must match the active run"
+                            .to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },
@@ -45,8 +46,9 @@ impl Tool for OrbitStateSetTool {
                 },
                 ToolParam {
                     name: "state_dir".to_string(),
-                    description: "Optional active run bundle directory containing state.json"
-                        .to_string(),
+                    description:
+                        "Optional active run bundle directory; must resolve to the current run"
+                            .to_string(),
                     param_type: "string".to_string(),
                     required: false,
                 },

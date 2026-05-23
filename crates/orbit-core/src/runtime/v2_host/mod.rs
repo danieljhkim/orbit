@@ -121,7 +121,14 @@ impl V2RuntimeHost for OrbitRuntime {
                     ),
                 },
             ),
-            orbit_host: Some(build_orbit_tool_host(self, None)),
+            orbit_host: Some(build_orbit_tool_host(
+                self,
+                None,
+                run_id
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned),
+            )),
             ..Default::default()
         }
     }
