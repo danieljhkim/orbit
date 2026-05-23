@@ -16,6 +16,13 @@ honors automation tokens to bypass it for this account. Releases publish to
 npm **manually** from a maintainer's laptop, prompting for an OTP. No
 `NPM_TOKEN` secret is needed in this repository.
 
+GitHub Releases also require `ORBIT_RELEASE_SIGNING_KEY_PEM`, a PEM-encoded
+private key whose public half matches
+[`plugin/npm/release-signing.pub`](../plugin/npm/release-signing.pub). The
+release workflow signs `orbit-checksums.txt` as `orbit-checksums.txt.sig`;
+both `install.sh` and the npm postinstall authenticate that signature before
+trusting release-hosted SHA-256 values.
+
 ## Steps to cut a release
 
 Each step names the exact file or command. Do them in order.
@@ -53,8 +60,9 @@ Each step names the exact file or command. Do them in order.
    Three jobs gate the cut:
 
    - `build-release` — builds platform binaries.
-   - `publish-release` — uploads tarballs + `orbit-checksums.txt` to the
-     GitHub Release.
+   - `publish-release` — signs `orbit-checksums.txt` and uploads tarballs,
+     `orbit-checksums.txt`, and `orbit-checksums.txt.sig` to the GitHub
+     Release.
    - `bump-homebrew-tap` — updates the formula in `danieljhkim/homebrew-tap`.
 
    All three must be green before step 7.
@@ -104,6 +112,18 @@ canonical selectors used in skills and CLI args are dot-form.)
 The smoke runs against published artifacts, not the local working tree, so
 it catches version drift that local builds would miss. Windows is not
 covered — the npm proxy only ships `darwin` and `linux` builds.
+
+Installer environment overrides are trust-boundary changes:
+
+- `ORBIT_INSTALL_REPO`, `ORBIT_VERSION`, and `ORBIT_INSTALL_BASE_URL` in
+  `install.sh` change where release artifacts are selected from. They still
+  require a valid checksum signature unless the caller also changes the
+  trusted key.
+- `ORBIT_BINARY_VERSION` in the npm package changes the selected release tag
+  while retaining signature verification.
+- `ORBIT_RELEASE_PUBLIC_KEY_FILE` exists for tests and emergency operations.
+  Setting it means the caller trusts that replacement key for release
+  authenticity.
 
 Because npm publish is manual, the on-tag smoke run will fail if it fires
 before step 7 completes. That is expected and not actionable on its own;

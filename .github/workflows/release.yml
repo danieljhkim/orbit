@@ -82,6 +82,9 @@ jobs:
       darwin_intel_asset: ${{ steps.metadata.outputs.darwin_intel_asset }}
       darwin_intel_sha: ${{ steps.metadata.outputs.darwin_intel_sha }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
       - name: Download packaged artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -98,6 +101,31 @@ jobs:
             sha256sum orbit-*.tar.gz | sort > orbit-checksums.txt
           )
           cat dist/orbit-checksums.txt
+
+      - name: Sign checksums
+        shell: bash
+        env:
+          ORBIT_RELEASE_SIGNING_KEY_PEM: ${{ secrets.ORBIT_RELEASE_SIGNING_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ORBIT_RELEASE_SIGNING_KEY_PEM:-}" ]; then
+            echo "ORBIT_RELEASE_SIGNING_KEY_PEM must contain the private key matching plugin/npm/release-signing.pub" >&2
+            exit 1
+          fi
+
+          signing_key="$(mktemp)"
+          trap 'rm -f "$signing_key"' EXIT
+          printf '%s\n' "$ORBIT_RELEASE_SIGNING_KEY_PEM" > "$signing_key"
+          chmod 600 "$signing_key"
+
+          openssl dgst -sha256 \
+            -sign "$signing_key" \
+            -out dist/orbit-checksums.txt.sig \
+            dist/orbit-checksums.txt
+          openssl dgst -sha256 \
+            -verify plugin/npm/release-signing.pub \
+            -signature dist/orbit-checksums.txt.sig \
+            dist/orbit-checksums.txt
 
       - name: Capture release metadata
         id: metadata
@@ -132,6 +160,7 @@ jobs:
             dist/orbit-x86_64-apple-darwin.tar.gz
             dist/orbit-x86_64-unknown-linux-gnu.tar.gz
             dist/orbit-checksums.txt
+            dist/orbit-checksums.txt.sig
           generate_release_notes: true
 
   bump-homebrew-tap:
@@ -236,7 +265,7 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl openssl tar
 
       - name: Run installer
         shell: bash

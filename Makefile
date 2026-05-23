@@ -113,6 +113,7 @@ ci:
 # Pre-handoff gate for agents: fast checks, no compile. Full make ci runs on PRs.
 ci-fast:
 	cargo fmt --all -- --check
+	./scripts/test-installer-security.sh
 	./scripts/check-dependency-direction.sh
 	./scripts/check-cli-imports.sh
 	./scripts/check-stability.sh

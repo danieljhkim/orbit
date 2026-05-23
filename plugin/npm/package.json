@@ -12,6 +12,7 @@
   "files": [
     "bin/",
     "scripts/",
+    "release-signing.pub",
     "README.md",
     "LICENSE"
   ],

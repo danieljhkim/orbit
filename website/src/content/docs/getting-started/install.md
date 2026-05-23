@@ -17,7 +17,9 @@ The recommended install is the install script:
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 ```
 
-It detects your platform, downloads the matching release binary, and places it on your `PATH`.
+It detects your platform, downloads the matching release binary, authenticates
+the signed release checksums, validates the archive contents, and places it on
+your `PATH`.
 
 ### Alternatives
 
@@ -50,6 +52,12 @@ make install
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_VERSION=v0.3.1 sh
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | ORBIT_INSTALL_DIR="$HOME/.local/bin" sh
 ```
+
+`ORBIT_VERSION`, `ORBIT_INSTALL_REPO`, and `ORBIT_INSTALL_BASE_URL` change the
+release source the installer trusts, so use them only for pinned releases,
+forks, or controlled test mirrors. `ORBIT_RELEASE_PUBLIC_KEY_FILE` replaces the
+trusted checksum-signing key and should be limited to tests or emergency
+operations.
 
 ## Initialize State
 
