@@ -35,7 +35,6 @@ const COMMON_JS: &str = include_str!("../assets/dashboard/common.js");
 const TASKS_JS: &str = include_str!("../assets/dashboard/tasks.js");
 const AUDIT_JS: &str = include_str!("../assets/dashboard/audit.js");
 const SCOREBOARD_JS: &str = include_str!("../assets/dashboard/scoreboard.js");
-const METRICS_JS: &str = include_str!("../assets/dashboard/metrics.js");
 const LOG_TAIL_JS: &str = include_str!("../assets/dashboard/log-tail.js");
 const DIAGNOSTICS_JS: &str = include_str!("../assets/dashboard/diagnostics.js");
 const ROUTER_JS: &str = include_str!("../assets/dashboard/router.js");
@@ -78,7 +77,6 @@ pub fn serve(runtime: &OrbitRuntime, args: ServeArgs) -> Result<(), OrbitError> 
         .route("/static/tasks.js", get(serve_tasks_js))
         .route("/static/audit.js", get(serve_audit_js))
         .route("/static/scoreboard.js", get(serve_scoreboard_js))
-        .route("/static/metrics.js", get(serve_metrics_js))
         .route("/static/log-tail.js", get(serve_log_tail_js))
         .route("/static/diagnostics.js", get(serve_diagnostics_js))
         .route("/static/router.js", get(serve_router_js))
@@ -189,17 +187,6 @@ async fn serve_scoreboard_js() -> Response {
             HeaderValue::from_static("application/javascript; charset=utf-8"),
         )],
         SCOREBOARD_JS,
-    )
-        .into_response()
-}
-
-async fn serve_metrics_js() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/javascript; charset=utf-8"),
-        )],
-        METRICS_JS,
     )
         .into_response()
 }
