@@ -61,6 +61,10 @@ protects artifact integrity, not transport confidentiality.
 `ORBIT_RELEASE_PUBLIC_KEY_FILE` replaces the trusted checksum-signing key,
 requires `ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1`, and should
 be limited to tests or emergency operations.
+`ORBIT_RELEASE_TRUSTED_KEYS_FILE` replaces the full trusted signing-key set,
+including key IDs, `not_after`, and `revoked_at`; it requires
+`ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1` and should be
+limited to tests or emergency operations.
 
 ## Initialize State
 

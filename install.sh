@@ -42,17 +42,8 @@ download() {
   fail "curl or wget is required to download Orbit releases"
 }
 
-write_trusted_public_key() {
+write_release_key_orbit_release_2026_05_primary() {
   destination="$1"
-
-  if [ -n "${ORBIT_RELEASE_PUBLIC_KEY_FILE:-}" ]; then
-    [ "${ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE:-}" = "1" ] \
-      || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE requires ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1"
-    [ -f "$ORBIT_RELEASE_PUBLIC_KEY_FILE" ] || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE does not exist: $ORBIT_RELEASE_PUBLIC_KEY_FILE"
-    warn "ORBIT_RELEASE_PUBLIC_KEY_FILE=$ORBIT_RELEASE_PUBLIC_KEY_FILE set; trusting replacement release signing key"
-    cat "$ORBIT_RELEASE_PUBLIC_KEY_FILE" > "$destination"
-    return
-  fi
 
   cat > "$destination" <<'EOF'
 -----BEGIN PUBLIC KEY-----
@@ -69,13 +60,107 @@ pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
 EOF
 }
 
+write_release_key_orbit_release_2026_05_successor() {
+  destination="$1"
+
+  cat > "$destination" <<'EOF'
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA22OLkoJXb7PX/QwG7FzA
+eiDT0BctOq77WyXysUBlN1718pbjo30wLIW9d2h+cxPtld2PM35NQ4NMZJwl7lb2
+tZSWVUTRI9Se5eBhUEL6Gi4Rin4/In3NIx0YEVdA6SUA+x3OinPpe1BIN1pKGbpD
+P6GohwmrdbCUuZMv29UYPkREif6gnlehxj9ypZfZMVU7+VXOceeA5OT5iXbO4u29
+85bSys4JUN+SKtAao9BAjHCvMUJ4kL4mnGeteXRssmd5ehkEezUhWUNtP/uvKv+I
+5pjSto5vq6vqZMEpkOPDANPSUwz3F0CgyNmwHU8LKHtME+ZQqOP11xOC5Rgtw3zZ
+VQSAd3BLsSflu7ENV9lsbwPjvhSRDPlZsGUB4NGjUmFkUJPz7SGqT9LNXQqaRT2S
+8mHajs8Z/pkIMnOSOE339DHmT3xPz5eKRwZLBWttguJxHWFM50PT7g+K97Y6n9Zr
+zLEax5f3s3F9vPiWfA36hKJS5GzF564hCRViOQPqWnNlAgMBAAE=
+-----END PUBLIC KEY-----
+EOF
+}
+
+release_date_number() {
+  value="$1"
+
+  printf '%s' "$value" | awk '
+    /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ {
+      gsub("-", "")
+      print
+      exit 0
+    }
+    { exit 1 }
+  ' || fail "invalid release signing key date: $value"
+}
+
+write_builtin_trusted_key_records() {
+  key_dir="${TMP_DIR}/trusted-release-keys"
+  mkdir -p "$key_dir"
+
+  primary_key_path="${key_dir}/orbit-release-2026-05-primary.pub"
+  successor_key_path="${key_dir}/orbit-release-2026-05-successor.pub"
+  write_release_key_orbit_release_2026_05_primary "$primary_key_path"
+  write_release_key_orbit_release_2026_05_successor "$successor_key_path"
+
+  printf 'orbit-release-2026-05-primary|2027-12-31||%s\n' "$primary_key_path"
+  printf 'orbit-release-2026-05-successor|2028-12-31||%s\n' "$successor_key_path"
+}
+
+trusted_key_records() {
+  if [ -n "${ORBIT_RELEASE_PUBLIC_KEY_FILE:-}" ] && [ -n "${ORBIT_RELEASE_TRUSTED_KEYS_FILE:-}" ]; then
+    fail "ORBIT_RELEASE_PUBLIC_KEY_FILE and ORBIT_RELEASE_TRUSTED_KEYS_FILE cannot both be set"
+  fi
+
+  if [ -n "${ORBIT_RELEASE_TRUSTED_KEYS_FILE:-}" ]; then
+    [ "${ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE:-}" = "1" ] \
+      || fail "ORBIT_RELEASE_TRUSTED_KEYS_FILE requires ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1"
+    [ -f "$ORBIT_RELEASE_TRUSTED_KEYS_FILE" ] || fail "ORBIT_RELEASE_TRUSTED_KEYS_FILE does not exist: $ORBIT_RELEASE_TRUSTED_KEYS_FILE"
+    warn "ORBIT_RELEASE_TRUSTED_KEYS_FILE=$ORBIT_RELEASE_TRUSTED_KEYS_FILE set; trusting replacement release signing key set"
+    cat "$ORBIT_RELEASE_TRUSTED_KEYS_FILE"
+    return
+  fi
+
+  if [ -n "${ORBIT_RELEASE_PUBLIC_KEY_FILE:-}" ]; then
+    [ "${ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE:-}" = "1" ] \
+      || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE requires ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1"
+    [ -f "$ORBIT_RELEASE_PUBLIC_KEY_FILE" ] || fail "ORBIT_RELEASE_PUBLIC_KEY_FILE does not exist: $ORBIT_RELEASE_PUBLIC_KEY_FILE"
+    warn "ORBIT_RELEASE_PUBLIC_KEY_FILE=$ORBIT_RELEASE_PUBLIC_KEY_FILE set; trusting replacement release signing key"
+    printf 'override|||%s\n' "$ORBIT_RELEASE_PUBLIC_KEY_FILE"
+    return
+  fi
+
+  write_builtin_trusted_key_records
+}
+
 verify_checksum_signature() {
   checksum_path="$1"
   signature_path="$2"
-  public_key_path="$3"
+  records_path="${TMP_DIR}/trusted-release-key-records.txt"
+  today_number="$(release_date_number "$(date -u '+%Y-%m-%d')")"
 
-  openssl dgst -sha256 -verify "$public_key_path" -signature "$signature_path" "$checksum_path" >/dev/null 2>&1 \
-    || fail "release checksum signature verification failed for ${CHECKSUM_FILE}"
+  trusted_key_records > "$records_path"
+
+  while IFS='|' read -r key_id not_after revoked_at public_key_path; do
+    case "$key_id" in
+      "" | \#*)
+        continue
+        ;;
+    esac
+
+    [ -n "$public_key_path" ] || fail "trusted release signing key ${key_id} has no public key path"
+    [ -f "$public_key_path" ] || fail "trusted release signing key ${key_id} public key does not exist: $public_key_path"
+
+    if openssl dgst -sha256 -verify "$public_key_path" -signature "$signature_path" "$checksum_path" >/dev/null 2>&1; then
+      if [ -n "$revoked_at" ]; then
+        fail "release checksum signature was made by revoked release signing key ${key_id} (revoked ${revoked_at})"
+      fi
+      if [ -n "$not_after" ] && [ "$today_number" -gt "$(release_date_number "$not_after")" ]; then
+        fail "release checksum signature was made by expired release signing key ${key_id} (not_after ${not_after})"
+      fi
+      log "Authenticated ${CHECKSUM_FILE} with release signing key ${key_id}"
+      return
+    fi
+  done < "$records_path"
+
+  fail "release checksum signature verification failed for ${CHECKSUM_FILE}: no trusted release signing key matched"
 }
 
 compute_sha256() {
@@ -163,6 +248,7 @@ resolve_target() {
 }
 
 need_cmd awk
+need_cmd date
 need_cmd install
 need_cmd mktemp
 need_cmd openssl
@@ -193,13 +279,11 @@ fi
 ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE_NAME}"
 CHECKSUM_PATH="${TMP_DIR}/${CHECKSUM_FILE}"
 SIGNATURE_PATH="${TMP_DIR}/${CHECKSUM_SIGNATURE_FILE}"
-PUBLIC_KEY_PATH="${TMP_DIR}/orbit-release-signing.pub"
 
 log "Downloading Orbit ${VERSION_LABEL} for ${TARGET}..."
 download "${BASE_URL}/${CHECKSUM_FILE}" "$CHECKSUM_PATH"
 download "${BASE_URL}/${CHECKSUM_SIGNATURE_FILE}" "$SIGNATURE_PATH"
-write_trusted_public_key "$PUBLIC_KEY_PATH"
-verify_checksum_signature "$CHECKSUM_PATH" "$SIGNATURE_PATH" "$PUBLIC_KEY_PATH"
+verify_checksum_signature "$CHECKSUM_PATH" "$SIGNATURE_PATH"
 download "${BASE_URL}/${ARCHIVE_NAME}" "$ARCHIVE_PATH"
 
 EXPECTED_SHA="$(awk -v asset="$ARCHIVE_NAME" '$2 == asset { print $1 }' "$CHECKSUM_PATH")"

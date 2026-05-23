@@ -20,10 +20,50 @@ const BIN_DIR = path.join(PKG_ROOT, 'binaries');
 const BIN_PATH = path.join(BIN_DIR, process.platform === 'win32' ? 'orbit.exe' : 'orbit');
 const PUBLIC_KEY_OVERRIDE = process.env.ORBIT_RELEASE_PUBLIC_KEY_FILE;
 const PUBLIC_KEY_OVERRIDE_ACK_ENV = 'ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE';
+const TRUSTED_KEYS_OVERRIDE = process.env.ORBIT_RELEASE_TRUSTED_KEYS_FILE;
+const TRUSTED_KEYS_OVERRIDE_ACK_ENV = 'ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE';
 const TRUSTED_PUBLIC_KEY_PATH = PUBLIC_KEY_OVERRIDE
   ? path.resolve(PUBLIC_KEY_OVERRIDE)
   : path.join(PKG_ROOT, 'release-signing.pub');
+const TRUSTED_KEYS_OVERRIDE_PATH = TRUSTED_KEYS_OVERRIDE ? path.resolve(TRUSTED_KEYS_OVERRIDE) : null;
+const TRUSTED_RELEASE_KEYS = Object.freeze([
+  Object.freeze({
+    id: 'orbit-release-2026-05-primary',
+    notAfter: '2027-12-31',
+    revokedAt: null,
+    publicKeyPem: `-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAuZ8vNa+DusYhrFBXNhBh
+RSqn81AYe7tYEtCKImWGuy/6ziMHqDzDKHSku0sBMwcdLXBzI0RjNBacLCbbYr4H
+icmYrsKqqfLGf+CWfrqDqY9d3hwUPtVMRp/ynVNW6nwKAmNl5dTgUc6ZBAZTtQtt
+qwMD1JIOsrJ3vVDL9o3alcXcg/RyL0pGUo+vep2QZOjXnCGoJN3NeytQHag3zJyd
+Wq4psc7j2H1Nb5EoyY/I/7vpdwME3Mrv2ffwtDmr0/+73q1yWUDf4btY9Ba7sOhE
+Ir2UHm3bEboo1ErAYjjiDDuF/NjzZcZpJtuNbdj0vI7pHDyDZ7sKiEX7RkUO+e2c
+IouiSfRJRrwnjpuergrq3ehNjkxcn5dFST1l23FOXGsy4F7ilrF6P9cgaAsE8dc7
+CS9YgUE1ErfGJLZtfDDGKs6+E+7JiC1C3z7xwmfzOgv9gEvSlfrx2BbGl8esypKm
+pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
+-----END PUBLIC KEY-----
+`,
+  }),
+  Object.freeze({
+    id: 'orbit-release-2026-05-successor',
+    notAfter: '2028-12-31',
+    revokedAt: null,
+    publicKeyPem: `-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA22OLkoJXb7PX/QwG7FzA
+eiDT0BctOq77WyXysUBlN1718pbjo30wLIW9d2h+cxPtld2PM35NQ4NMZJwl7lb2
+tZSWVUTRI9Se5eBhUEL6Gi4Rin4/In3NIx0YEVdA6SUA+x3OinPpe1BIN1pKGbpD
+P6GohwmrdbCUuZMv29UYPkREif6gnlehxj9ypZfZMVU7+VXOceeA5OT5iXbO4u29
+85bSys4JUN+SKtAao9BAjHCvMUJ4kL4mnGeteXRssmd5ehkEezUhWUNtP/uvKv+I
+5pjSto5vq6vqZMEpkOPDANPSUwz3F0CgyNmwHU8LKHtME+ZQqOP11xOC5Rgtw3zZ
+VQSAd3BLsSflu7ENV9lsbwPjvhSRDPlZsGUB4NGjUmFkUJPz7SGqT9LNXQqaRT2S
+8mHajs8Z/pkIMnOSOE339DHmT3xPz5eKRwZLBWttguJxHWFM50PT7g+K97Y6n9Zr
+zLEax5f3s3F9vPiWfA36hKJS5GzF564hCRViOQPqWnNlAgMBAAE=
+-----END PUBLIC KEY-----
+`,
+  }),
+]);
 let publicKeyOverrideLogged = false;
+let trustedKeysOverrideLogged = false;
 
 function log(msg) {
   process.stderr.write(`@orbit-tools/cli: ${msg}\n`);
@@ -87,6 +127,9 @@ function parseChecksums(text) {
 }
 
 function acknowledgeTrustedPublicKeyOverride() {
+  if (PUBLIC_KEY_OVERRIDE && TRUSTED_KEYS_OVERRIDE) {
+    throw new Error('ORBIT_RELEASE_PUBLIC_KEY_FILE and ORBIT_RELEASE_TRUSTED_KEYS_FILE cannot both be set');
+  }
   if (!PUBLIC_KEY_OVERRIDE) {
     return;
   }
@@ -99,18 +142,122 @@ function acknowledgeTrustedPublicKeyOverride() {
   }
 }
 
-function readTrustedPublicKey() {
-  acknowledgeTrustedPublicKeyOverride();
-  return fs.readFileSync(TRUSTED_PUBLIC_KEY_PATH, 'utf8');
+function acknowledgeTrustedKeysOverride() {
+  if (PUBLIC_KEY_OVERRIDE && TRUSTED_KEYS_OVERRIDE) {
+    throw new Error('ORBIT_RELEASE_PUBLIC_KEY_FILE and ORBIT_RELEASE_TRUSTED_KEYS_FILE cannot both be set');
+  }
+  if (!TRUSTED_KEYS_OVERRIDE) {
+    return;
+  }
+  if (process.env[TRUSTED_KEYS_OVERRIDE_ACK_ENV] !== '1') {
+    throw new Error(`ORBIT_RELEASE_TRUSTED_KEYS_FILE requires ${TRUSTED_KEYS_OVERRIDE_ACK_ENV}=1`);
+  }
+  if (!trustedKeysOverrideLogged) {
+    log(`ORBIT_RELEASE_TRUSTED_KEYS_FILE=${TRUSTED_KEYS_OVERRIDE_PATH} set; trusting replacement release signing key set`);
+    trustedKeysOverrideLogged = true;
+  }
 }
 
-function verifyChecksumSignature(checksumText, signatureBuf, publicKeyPem = readTrustedPublicKey()) {
+function readTrustedKeysManifest(manifestPath) {
+  const manifestDir = path.dirname(manifestPath);
+  return fs
+    .readFileSync(manifestPath, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .map((line) => {
+      const [id, notAfter, revokedAt, publicKeyPath, ...extra] = line.split('|');
+      if (!id || !publicKeyPath || extra.length > 0) {
+        throw new Error(`invalid trusted release signing key record: ${line}`);
+      }
+      const resolvedPublicKeyPath = path.isAbsolute(publicKeyPath)
+        ? publicKeyPath
+        : path.resolve(manifestDir, publicKeyPath);
+      return {
+        id,
+        notAfter: notAfter || null,
+        revokedAt: revokedAt || null,
+        publicKeyPem: fs.readFileSync(resolvedPublicKeyPath, 'utf8'),
+      };
+    });
+}
+
+function normalizeTrustedReleaseKeys(trustedKeys) {
+  if (typeof trustedKeys === 'string') {
+    return [
+      {
+        id: 'override',
+        notAfter: null,
+        revokedAt: null,
+        publicKeyPem: trustedKeys,
+      },
+    ];
+  }
+
+  if (!Array.isArray(trustedKeys) || trustedKeys.length === 0) {
+    throw new Error('at least one trusted release signing key is required');
+  }
+
+  return trustedKeys.map((key) => {
+    if (!key || !key.id || !key.publicKeyPem) {
+      throw new Error('trusted release signing keys require id and publicKeyPem');
+    }
+    return {
+      id: key.id,
+      notAfter: key.notAfter || null,
+      revokedAt: key.revokedAt || null,
+      publicKeyPem: key.publicKeyPem,
+    };
+  });
+}
+
+function readTrustedReleaseKeys() {
+  acknowledgeTrustedPublicKeyOverride();
+  acknowledgeTrustedKeysOverride();
+
+  if (PUBLIC_KEY_OVERRIDE) {
+    return normalizeTrustedReleaseKeys(fs.readFileSync(TRUSTED_PUBLIC_KEY_PATH, 'utf8'));
+  }
+  if (TRUSTED_KEYS_OVERRIDE_PATH) {
+    return normalizeTrustedReleaseKeys(readTrustedKeysManifest(TRUSTED_KEYS_OVERRIDE_PATH));
+  }
+  return TRUSTED_RELEASE_KEYS;
+}
+
+function releaseDateString(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function assertTrustedKeyUsable(key, verificationDate = new Date()) {
+  if (key.revokedAt) {
+    throw new Error(`release checksum signature was made by revoked release signing key ${key.id} (revoked ${key.revokedAt})`);
+  }
+  if (key.notAfter && releaseDateString(verificationDate) > key.notAfter) {
+    throw new Error(`release checksum signature was made by expired release signing key ${key.id} (not_after ${key.notAfter})`);
+  }
+}
+
+function verifyWithPublicKey(checksumText, signatureBuf, publicKeyPem) {
   const verifier = crypto.createVerify('RSA-SHA256');
   verifier.update(checksumText, 'utf8');
   verifier.end();
-  if (!verifier.verify(publicKeyPem, signatureBuf)) {
-    throw new Error(`release checksum signature verification failed for ${CHECKSUM_FILE}`);
+  return verifier.verify(publicKeyPem, signatureBuf);
+}
+
+function verifyChecksumSignature(
+  checksumText,
+  signatureBuf,
+  trustedKeys = readTrustedReleaseKeys(),
+  verificationDate = new Date()
+) {
+  for (const key of normalizeTrustedReleaseKeys(trustedKeys)) {
+    if (verifyWithPublicKey(checksumText, signatureBuf, key.publicKeyPem)) {
+      assertTrustedKeyUsable(key, verificationDate);
+      log(`authenticated ${CHECKSUM_FILE} with release signing key ${key.id}`);
+      return key.id;
+    }
   }
+  throw new Error(`release checksum signature verification failed for ${CHECKSUM_FILE}: no trusted release signing key matched`);
 }
 
 function verifyArchiveChecksum(asset, archiveBuf, checksumText) {
@@ -244,10 +391,14 @@ if (require.main === module) {
 }
 
 module.exports = {
+  TRUSTED_RELEASE_KEYS,
   parseChecksums,
   sha256,
   acknowledgeTrustedPublicKeyOverride,
+  acknowledgeTrustedKeysOverride,
   extractTarGz,
+  normalizeTrustedReleaseKeys,
+  readTrustedReleaseKeys,
   validateArchiveMembers,
   validateExtractedBinary,
   verifyArchiveChecksum,
