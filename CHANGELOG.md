@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+
+### Fixes
+
+- **Rotate release signing key and recover package installs**: adds `orbit-release-key-3` to the shell and npm installer trust sets, makes it the canonical `plugin/npm/release-signing.pub`, and documents the new current signing path. This patch fixes forward after the `v0.7.0` GitHub Release publish failed before assets were created while `@orbit-tools/cli@0.7.0` had already been published. ([ORB-00292])
+
 ## 0.7.0
 
 ### Breaking Changes

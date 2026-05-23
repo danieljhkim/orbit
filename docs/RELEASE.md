@@ -26,14 +26,18 @@ trusting release-hosted SHA-256 values.
 The installers carry a small release-signing trust set, not a single forever
 key:
 
-- `orbit-release-key-1` — current signing path, valid through `2027-12-31`,
+- `orbit-release-key-3` — current signing path, valid through `2029-12-31`,
   not revoked.
-- `orbit-release-key-2` — pre-staged successor signing path, valid through
-  `2028-12-31`, not revoked.
+- `orbit-release-key-4` — pre-staged successor signing path, valid through
+  `2030-12-31`, not revoked. **Placeholder PEM** — the matching private key
+  is not yet held by release infrastructure. Replace before rotation.
 
-Key IDs are stable generation labels (`key-1`, `key-2`, …). The numeric suffix
+Key IDs are stable generation labels (`key-3`, `key-4`, …). The numeric suffix
 is a generation counter, not a date, so an ID survives the rotation that
-promotes it from successor to primary without becoming confusing.
+promotes it from successor to primary without becoming confusing. Earlier
+generations (`key-1`, `key-2`) were retired when the current npm package
+dropped support for installing older binaries; older versions of the published
+npm package retain those keys in their own embedded trust sets.
 
 During verification the installers try each known public key, then reject a
 matching key if its `not_after` date has passed or its `revoked_at` field is
@@ -44,10 +48,7 @@ untrusted.
 > rotation speed if the successor private key is held in *independent* custody
 > from the primary. If both private halves are stored together (same secrets
 > manager, same machine), a single compromise gets both and the trust set's
-> benefit collapses. The current `orbit-release-key-2` private half is held
-> offline and is only loaded into `ORBIT_RELEASE_SIGNING_KEY_PEM` when the
-> rotation runbook is executed. Future generations must preserve this
-> separation.
+> benefit collapses. Future generations must preserve this separation.
 
 ## Steps to cut a release
 
@@ -148,8 +149,10 @@ Installer environment overrides are trust-boundary changes:
   supported by the downloader, including `file://` for tests and `http://` for
   controlled mirrors; signature verification preserves artifact integrity, but
   the URL transport is not a confidentiality boundary.
-- `ORBIT_BINARY_VERSION` in the npm package changes the selected release tag
-  while retaining signature verification.
+- The npm package always installs the binary tag matching its own
+  `package.json` version (`v${PKG.version}`) — older binaries cannot be
+  selected through this package. To pin a different release tag, use the
+  shell installer with `ORBIT_VERSION`.
 - `ORBIT_RELEASE_TRUSTED_KEYS_FILE` is the preferred override for
   deterministic installer tests and emergency operations: a full replacement
   trust set with key IDs, `not_after`, and `revoked_at` metadata. Each record

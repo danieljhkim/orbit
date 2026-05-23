@@ -12,9 +12,11 @@ const PKG = require('../package.json');
 const BINARY_REPO = PKG.config.orbit.binaryRepo;
 const CHECKSUM_FILE = 'orbit-checksums.txt';
 const CHECKSUM_SIGNATURE_FILE = 'orbit-checksums.txt.sig';
-// Convention: npm package version is kept in lockstep with the orbit release tag.
-// `0.3.1` → fetches `v0.3.1` from GitHub Releases. Override with $ORBIT_BINARY_VERSION.
-const BINARY_VERSION = process.env.ORBIT_BINARY_VERSION || `v${PKG.version}`;
+// npm package version is kept in lockstep with the orbit release tag. `0.3.1`
+// → fetches `v0.3.1` from GitHub Releases. The mapping is intentionally strict:
+// older orbit binaries can no longer be installed through this package, so the
+// trust set only needs to cover the current release.
+const BINARY_VERSION = `v${PKG.version}`;
 const PKG_ROOT = path.resolve(__dirname, '..');
 const BIN_DIR = path.join(PKG_ROOT, 'binaries');
 const BIN_PATH = path.join(BIN_DIR, process.platform === 'win32' ? 'orbit.exe' : 'orbit');
@@ -26,38 +28,43 @@ const TRUSTED_PUBLIC_KEY_PATH = PUBLIC_KEY_OVERRIDE
   ? path.resolve(PUBLIC_KEY_OVERRIDE)
   : path.join(PKG_ROOT, 'release-signing.pub');
 const TRUSTED_KEYS_OVERRIDE_PATH = TRUSTED_KEYS_OVERRIDE ? path.resolve(TRUSTED_KEYS_OVERRIDE) : null;
+// orbit-release-key-4 is a PLACEHOLDER pre-staged for the next rotation. The
+// PEM below was generated locally and the matching private key is NOT held by
+// release infrastructure — no production signature will ever verify against
+// it. Replace with a real keypair (generated on the signing host) before
+// rotating off key-3.
 const TRUSTED_RELEASE_KEYS = Object.freeze([
   Object.freeze({
-    id: 'orbit-release-key-1',
-    notAfter: '2027-12-31',
+    id: 'orbit-release-key-3',
+    notAfter: '2029-12-31',
     revokedAt: null,
     publicKeyPem: `-----BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAuZ8vNa+DusYhrFBXNhBh
-RSqn81AYe7tYEtCKImWGuy/6ziMHqDzDKHSku0sBMwcdLXBzI0RjNBacLCbbYr4H
-icmYrsKqqfLGf+CWfrqDqY9d3hwUPtVMRp/ynVNW6nwKAmNl5dTgUc6ZBAZTtQtt
-qwMD1JIOsrJ3vVDL9o3alcXcg/RyL0pGUo+vep2QZOjXnCGoJN3NeytQHag3zJyd
-Wq4psc7j2H1Nb5EoyY/I/7vpdwME3Mrv2ffwtDmr0/+73q1yWUDf4btY9Ba7sOhE
-Ir2UHm3bEboo1ErAYjjiDDuF/NjzZcZpJtuNbdj0vI7pHDyDZ7sKiEX7RkUO+e2c
-IouiSfRJRrwnjpuergrq3ehNjkxcn5dFST1l23FOXGsy4F7ilrF6P9cgaAsE8dc7
-CS9YgUE1ErfGJLZtfDDGKs6+E+7JiC1C3z7xwmfzOgv9gEvSlfrx2BbGl8esypKm
-pYZDkW2dLqPeFj/WwGhZoYFHv0GOMIWdi6FNriQdkn4RAgMBAAE=
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAoQGLKOvvsvXriGIQ0oxA
+PcDyVHLM1iqXBCYXg+blQU41haEkG1eYabvDfeGcyGaC4awW7Q2uCZK05+/Hdjpe
+cRUVxP+QWKCAHyretQwOsoXzutZjJgId/ZRiUJPS/FeJOSv0xrayaol0tmfeJ4mH
+gFseCLq+mIIWIPRvXmYiKaUB//bjF79w/m4VXlyBhfi6n+f6x2UPG+gjjsjwG6mn
+Orec31AAFCIIX69YAd21D3MBc4S89/LoYZCq3neDscZ09Y+e6Jg2HpoBstvqSnq/
+3s34unLuIRlyB8jyK8CrdzT1E6YVB7+riAjycE9XMlLOQ2xA4tl6CKIx5YTKHyeW
+npMLlbzNaVfFT7p3IPTxsoEI0SB3ZtO7/XhzuOvOpklYcqjW2DGw/yzr2epAqHE/
+y4rLO3hkxWhxfgF5KPSR2iftc3LMONRGWELK6jpD5KB7No5vwIvjpVPUc5xA45Xw
+tT/bo0mm4TvrumxYr1xyEHrdum+ej/WYz/0BZQlwDOtXAgMBAAE=
 -----END PUBLIC KEY-----
 `,
   }),
   Object.freeze({
-    id: 'orbit-release-key-2',
-    notAfter: '2028-12-31',
+    id: 'orbit-release-key-4',
+    notAfter: '2030-12-31',
     revokedAt: null,
     publicKeyPem: `-----BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA22OLkoJXb7PX/QwG7FzA
-eiDT0BctOq77WyXysUBlN1718pbjo30wLIW9d2h+cxPtld2PM35NQ4NMZJwl7lb2
-tZSWVUTRI9Se5eBhUEL6Gi4Rin4/In3NIx0YEVdA6SUA+x3OinPpe1BIN1pKGbpD
-P6GohwmrdbCUuZMv29UYPkREif6gnlehxj9ypZfZMVU7+VXOceeA5OT5iXbO4u29
-85bSys4JUN+SKtAao9BAjHCvMUJ4kL4mnGeteXRssmd5ehkEezUhWUNtP/uvKv+I
-5pjSto5vq6vqZMEpkOPDANPSUwz3F0CgyNmwHU8LKHtME+ZQqOP11xOC5Rgtw3zZ
-VQSAd3BLsSflu7ENV9lsbwPjvhSRDPlZsGUB4NGjUmFkUJPz7SGqT9LNXQqaRT2S
-8mHajs8Z/pkIMnOSOE339DHmT3xPz5eKRwZLBWttguJxHWFM50PT7g+K97Y6n9Zr
-zLEax5f3s3F9vPiWfA36hKJS5GzF564hCRViOQPqWnNlAgMBAAE=
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAiEVVbwQYDnbPg86xYrI8
+Ddm6qpkEJ6GSJOW9NfR/eLpqwwaeWb3EPR9H/U39Rrt8ABPAGObLG9vuvSzg8YqU
+Rz6NjtrSKQ4k9xO/up+qQ/zRsHkOyISEx+6MnIrw5hY/IfkrZ+3+jm8IfXJ+VAjS
+VepR+o58u73ycrnLG1eXWIHtjED3SQSPffJjxSvVDEb3ogiJAsWClCMWNLnEjsQc
+IHYrNdS5N0m5tfcIb9LiV2cDVXgdwdRUU41Ks9sWvBQIHrNup721UWyMdJoK1hTI
+rc4PST3WTHQwFcQvVaAqod9MDPkQYlgD7IjiPkSGLHyIs52kNgFXY55E5DlU4O4e
+9QDbyQTGzZI0XlnoqAuCIXbcNXjMZuEn9UjVN35NeObsj6F/yL07YUhvORnxozjL
+41ouRFtFTWFHNenthtZnH9SUV4+O2cKDmtJpPJd68ZJ/NBqJHM4a6cteT72HJzLb
+t6yto3B43nTeXtp9ozRjetznPnPD7gmI6Zq1P2ce8v49AgMBAAE=
 -----END PUBLIC KEY-----
 `,
   }),
