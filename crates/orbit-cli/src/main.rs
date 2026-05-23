@@ -40,6 +40,7 @@ use clap::Parser;
 use orbit_core::{ActorIdentity, OrbitRuntime};
 
 use crate::command::docs::{DocsCommand, DocsSubcommand};
+use crate::command::friction::{FrictionCommand, FrictionSubcommand};
 use crate::command::hook::{HookCommand, HookSubcommand};
 use crate::command::learning::{LearningCommand, LearningSubcommand};
 use crate::command::mcp::{McpCommand, McpSubcommand};
@@ -172,6 +173,15 @@ fn json_error_output_preference(command: &Commands) -> Option<bool> {
             DocsSubcommand::Add(args) => args.json.then_some(true),
             DocsSubcommand::Index(args) => args.json.then_some(true),
             DocsSubcommand::Migrate(args) => args.json.then_some(true),
+        },
+        Commands::Friction(FrictionCommand { command }) => match command {
+            FrictionSubcommand::Add(args) => args.json.then_some(true),
+            FrictionSubcommand::List(args) => args.json.then_some(true),
+            FrictionSubcommand::Show(args) => args.json.then_some(true),
+            FrictionSubcommand::Stats(args) => args.json.then_some(true),
+            FrictionSubcommand::Tags(args) => args.json.then_some(true),
+            FrictionSubcommand::Update(args) => args.json.then_some(true),
+            FrictionSubcommand::Resolve(args) => args.json.then_some(true),
         },
         Commands::Search(SearchCommand { json: true, .. }) => Some(true),
         _ => None,

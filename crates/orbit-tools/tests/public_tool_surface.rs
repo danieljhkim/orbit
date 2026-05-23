@@ -7,6 +7,29 @@ use std::collections::BTreeSet;
 use orbit_common::types::RETIRED_TASK_ADD_INPUT_FIELDS;
 use orbit_tools::ToolRegistry;
 
+const MCP_HIDDEN_CLI_TOOL_NAMES: &[&str] = &[
+    "orbit.docs.index",
+    "orbit.docs.migrate",
+    "orbit.docs.add",
+    "orbit.docs.list",
+    "orbit.docs.show",
+    "orbit.task.locks",
+    "orbit.task.locks.release",
+    "orbit.task.locks.reserve",
+    "orbit.semantic.index",
+    "orbit.semantic.install",
+    "orbit.semantic.stats",
+    "orbit.graph.history",
+    "orbit.learning.sync",
+    "orbit.learning.list",
+    "orbit.friction.stats",
+    "orbit.friction.resolve",
+    "orbit.friction.show",
+    "orbit.friction.tags",
+    "orbit.friction.update",
+    "orbit.friction.list",
+];
+
 #[test]
 fn unused_tools_are_not_registered_in_public_surface() {
     let names = registered_tool_names();
@@ -73,7 +96,6 @@ fn workflow_critical_tools_remain_registered() {
         "github.pr.view",
         "orbit.graph.callers",
         "orbit.graph.deps",
-        "orbit.graph.history",
         "orbit.graph.implementors",
         "orbit.graph.overview",
         "orbit.graph.pack",
@@ -83,13 +105,9 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.groundhog.checkpoint_failure",
         "orbit.groundhog.checkpoint_success",
         "orbit.groundhog.side_effect",
-        "orbit.docs.index",
         "orbit.pipeline.invoke",
         "orbit.pipeline.wait",
         "orbit.search",
-        "orbit.semantic.index",
-        "orbit.semantic.install",
-        "orbit.semantic.stats",
         "orbit.semantic.uninstall",
         "orbit.task.artifact.put",
         "proc.spawn",
@@ -97,6 +115,18 @@ fn workflow_critical_tools_remain_registered() {
         assert!(
             names.contains(retained),
             "workflow-critical tool missing: {retained}"
+        );
+    }
+}
+
+#[test]
+fn mcp_hidden_ops_tools_remain_registered_for_cli_surface() {
+    let names = registered_tool_names();
+
+    for retained in MCP_HIDDEN_CLI_TOOL_NAMES {
+        assert!(
+            names.contains(*retained),
+            "MCP-hidden tool must remain registered for CLI use: {retained}"
         );
     }
 }

@@ -2,9 +2,34 @@
 // ORB-00013: Tests use unwrap/expect to keep fixture setup readable.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::collections::BTreeSet;
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use tempfile::tempdir;
+
+const MCP_HIDDEN_CLI_TOOL_NAMES: &[&str] = &[
+    "orbit.docs.index",
+    "orbit.docs.migrate",
+    "orbit.docs.add",
+    "orbit.docs.list",
+    "orbit.docs.show",
+    "orbit.task.locks",
+    "orbit.task.locks.release",
+    "orbit.task.locks.reserve",
+    "orbit.semantic.index",
+    "orbit.semantic.install",
+    "orbit.semantic.stats",
+    "orbit.graph.history",
+    "orbit.learning.sync",
+    "orbit.learning.list",
+    "orbit.friction.stats",
+    "orbit.friction.resolve",
+    "orbit.friction.show",
+    "orbit.friction.tags",
+    "orbit.friction.update",
+    "orbit.friction.list",
+];
 
 #[test]
 fn tool_list_shows_lock_reservation_without_required_input_shape() {
@@ -27,6 +52,40 @@ fn tool_list_shows_lock_reservation_without_required_input_shape() {
         .stdout(predicate::str::contains(
             "Exactly one of `task_ids` or `files`",
         ));
+}
+
+#[test]
+fn tool_list_json_keeps_mcp_hidden_tools_on_cli_surface() {
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let work = temp.path().join("work");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&work).expect("create work");
+
+    let output = cargo_bin_cmd!("orbit")
+        .current_dir(&work)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env_remove("ORBIT_ROOT")
+        .args(["tool", "list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let tools: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("tool list JSON");
+    let names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("tool name").to_string())
+        .collect::<BTreeSet<_>>();
+
+    for retained in MCP_HIDDEN_CLI_TOOL_NAMES {
+        assert!(
+            names.contains(*retained),
+            "MCP-hidden tool must remain visible through `orbit tool list`: {retained}"
+        );
+    }
 }
 
 #[test]

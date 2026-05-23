@@ -6,6 +6,7 @@ use clap::Parser;
 use super::{
     Cli, Commands,
     docs::DocsSubcommand,
+    friction::FrictionSubcommand,
     hook::HookSubcommand,
     mcp::McpSubcommand,
     search::{SearchKindArg, SearchSubcommand},
@@ -195,6 +196,45 @@ fn cli_rejects_docs_reindex() {
 #[test]
 fn cli_rejects_learning_reindex() {
     assert!(Cli::try_parse_from(["orbit", "learning", "reindex"]).is_err());
+}
+
+#[test]
+fn cli_parses_friction_list() {
+    let cli = Cli::parse_from(["orbit", "friction", "list", "--status", "open"]);
+    match cli.command {
+        Commands::Friction(command) => match command.command {
+            FrictionSubcommand::List(args) => {
+                assert_eq!(args.status.as_deref(), Some("open"));
+            }
+            _ => panic!("expected friction list"),
+        },
+        _ => panic!("expected top-level friction command"),
+    }
+}
+
+#[test]
+fn cli_parses_friction_update() {
+    let cli = Cli::parse_from([
+        "orbit",
+        "friction",
+        "update",
+        "F2026-05-001",
+        "--status",
+        "triaged",
+        "--tag",
+        "tooling,docs",
+    ]);
+    match cli.command {
+        Commands::Friction(command) => match command.command {
+            FrictionSubcommand::Update(args) => {
+                assert_eq!(args.id, "F2026-05-001");
+                assert_eq!(args.status.as_deref(), Some("triaged"));
+                assert_eq!(args.tags, vec!["tooling", "docs"]);
+            }
+            _ => panic!("expected friction update"),
+        },
+        _ => panic!("expected top-level friction command"),
+    }
 }
 
 #[test]

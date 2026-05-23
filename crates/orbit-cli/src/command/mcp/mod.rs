@@ -101,6 +101,29 @@ pub(crate) const LEARNING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.sync",
 ];
 
+pub(crate) const MCP_HIDDEN_TOOL_NAMES: &[&str] = &[
+    "orbit.docs.index",
+    "orbit.docs.migrate",
+    "orbit.docs.add",
+    "orbit.docs.list",
+    "orbit.docs.show",
+    "orbit.task.locks",
+    "orbit.task.locks.release",
+    "orbit.task.locks.reserve",
+    "orbit.semantic.index",
+    "orbit.semantic.install",
+    "orbit.semantic.stats",
+    "orbit.graph.history",
+    "orbit.learning.sync",
+    "orbit.learning.list",
+    "orbit.friction.stats",
+    "orbit.friction.resolve",
+    "orbit.friction.show",
+    "orbit.friction.tags",
+    "orbit.friction.update",
+    "orbit.friction.list",
+];
+
 pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     let mut names = Vec::with_capacity(
         TASK_TOOL_NAMES.len()
@@ -118,17 +141,19 @@ pub(crate) fn safe_mcp_tool_names() -> Vec<&'static str> {
     names.extend_from_slice(SEMANTIC_TOOL_NAMES);
     names.extend_from_slice(DOCS_TOOL_NAMES);
     names.extend_from_slice(LEARNING_TOOL_NAMES);
+    names.retain(|name| !MCP_HIDDEN_TOOL_NAMES.contains(name));
     names
 }
 
 pub(crate) fn is_mcp_tool_exposed(name: &str) -> bool {
-    TASK_TOOL_NAMES.contains(&name)
-        || FRICTION_TOOL_NAMES.contains(&name)
-        || GRAPH_READ_TOOL_NAMES.contains(&name)
-        || SEARCH_TOOL_NAMES.contains(&name)
-        || SEMANTIC_TOOL_NAMES.contains(&name)
-        || DOCS_TOOL_NAMES.contains(&name)
-        || LEARNING_TOOL_NAMES.contains(&name)
+    !MCP_HIDDEN_TOOL_NAMES.contains(&name)
+        && (TASK_TOOL_NAMES.contains(&name)
+            || FRICTION_TOOL_NAMES.contains(&name)
+            || GRAPH_READ_TOOL_NAMES.contains(&name)
+            || SEARCH_TOOL_NAMES.contains(&name)
+            || SEMANTIC_TOOL_NAMES.contains(&name)
+            || DOCS_TOOL_NAMES.contains(&name)
+            || LEARNING_TOOL_NAMES.contains(&name))
 }
 
 fn ensure_mcp_tool_exposed(name: &str) -> Result<(), OrbitError> {
