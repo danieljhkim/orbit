@@ -75,7 +75,22 @@ pub fn run(params: SemanticInstallParams) -> Result<SemanticInstallResult, Orbit
     let current_companion = if params.force {
         None
     } else {
-        ManagedCompanion::open_current(&companion_path).ok()
+        match ManagedCompanion::open_current(&companion_path) {
+            Ok(companion) => Some(companion),
+            Err(error) => {
+                // Covers integrity mismatch, missing manifest, path validation
+                // failures, and genuine I/O errors. We treat all of them as
+                // "needs reinstall," but record the cause so debugging "why
+                // did this just reinstall" doesn't require re-running with a
+                // patched build.
+                tracing::debug!(
+                    companion_path = %companion_path.display(),
+                    error = %error,
+                    "managed companion failed integrity or open check; treating as needs-reinstall"
+                );
+                None
+            }
+        }
     };
     let (companion_changed, companion) = if let Some(companion) = current_companion {
         (false, companion)
@@ -448,7 +463,7 @@ impl ManagedCompanion {
         sha256_file(&self.file)
     }
 
-    fn download_model(&self, model: &str, model_dir: &Path) -> Result<(), OrbitError> {
+    pub(crate) fn download_model(&self, model: &str, model_dir: &Path) -> Result<(), OrbitError> {
         match companion_launch_mode() {
             CompanionLaunchMode::FileDescriptor => {
                 #[cfg(any(
@@ -514,7 +529,16 @@ pub(crate) fn companion_launch_mode() -> CompanionLaunchMode {
     target_os = "dragonfly"
 )))]
 pub(crate) fn path_execution_fallback_rationale() -> &'static str {
-    "this platform does not expose fexecve through libc, so the managed companion keeps the pre-existing path execution behavior after descriptor-based freshness validation"
+    // Named explicitly so release notes and operators are unambiguous about
+    // which platforms still carry the original ORB-00271 TOCTOU window.
+    // macOS and Windows are the practical impact set: macOS ships no stable
+    // libc fexecve, and Windows has no equivalent fd-exec primitive at all.
+    // Descriptor-based freshness validation runs on every platform, but the
+    // model-download exec on these targets still goes through the path, so
+    // a process with write access to ~/.orbit/embed/bin/ between freshness
+    // check and exec can still substitute the binary. Tracked for posix_spawn
+    // /dev/fd/N exploration as a follow-up to ORB-00271."
+    "this platform (notably macOS, plus Windows) does not expose fexecve through libc, so the managed companion keeps the pre-existing path execution behavior after descriptor-based freshness validation; the descriptor-vs-path TOCTOU window from ORB-00271 remains open on these targets"
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -682,8 +706,19 @@ fn run_companion_fd_for_model_download(
     let fd = file.as_raw_fd();
 
     let pid = {
-        // SAFETY: fork has no Rust-side preconditions. The child path only calls
-        // async-signal-safe fexecve/_exit with argv/env buffers prepared before fork.
+        // SAFETY: fork() is invoked with no Rust-side preconditions, but the
+        // standard multi-threaded fork hazard applies: after fork() the child
+        // inherits only the calling thread, so any state owned by other
+        // threads (allocator mutexes, tracing dispatch locks, tokio runtime
+        // state, etc.) is in an indeterminate state in the child. We rely on
+        // `orbit semantic install` being invoked from a synchronous CLI path
+        // (no tokio runtime active on this thread, no Rust-side locks held by
+        // other threads at this point). The child path only calls
+        // async-signal-safe libc primitives (fexecve, _exit) on buffers
+        // (argv_ptrs, env_ptrs, fd) prepared in the parent before fork, so
+        // it never re-enters Rust drop glue or the allocator. If a future
+        // caller introduces a runtime here, swap this for posix_spawn — the
+        // /dev/fd/<N> path is the equivalent and portable fix.
         unsafe { libc::fork() }
     };
     if pid < 0 {
