@@ -39,6 +39,7 @@ pub(crate) fn run_attempt(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
+        spec.proc_allowed_programs.as_deref(),
     );
     tool_ctx.groundhog_host = Some(groundhog_host.clone());
 

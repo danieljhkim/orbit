@@ -61,6 +61,7 @@ pub fn drive_agent_loop(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
+        spec.proc_allowed_programs.as_deref(),
     );
     tool_ctx.agent_name = Some(provider.to_string());
     tool_ctx.model_name = Some(model);
@@ -99,6 +100,7 @@ pub fn drive_agent_loop_with_session(
         Some(run_id),
         fs_profile,
         Some(v2_fs_audit_logger(audit.clone())),
+        spec.proc_allowed_programs.as_deref(),
     );
     tool_ctx.agent_name = Some(provider.to_string());
     tool_ctx.model_name = Some(model);

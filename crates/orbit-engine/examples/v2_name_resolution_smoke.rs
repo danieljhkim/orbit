@@ -371,6 +371,7 @@ impl V2RuntimeHost for PipelineHost {
         _run_id: Option<&str>,
         _fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         orbit_tools::ToolContext::default()
     }
@@ -500,5 +501,6 @@ fn _type_gate() {
         provider: Provider::Claude,
         wall_clock_timeout_seconds: 60,
         role: None,
+        proc_allowed_programs: None,
     };
 }

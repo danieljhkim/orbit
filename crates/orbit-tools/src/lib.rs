@@ -212,9 +212,15 @@ pub struct ToolContext {
     /// Planning-duel slot asserted by the runtime envelope, when this tool call
     /// is made from a planning-duel activity.
     pub role_slot: Option<RoleSlot>,
-    /// Program allowlist for `proc.spawn`. When non-empty, `proc.spawn` rejects
-    /// any program not in this list. Empty means unrestricted.
+    /// Program allowlist for `proc.spawn`. When `proc_spawn_activity_scoped`
+    /// is `true`, an empty list denies every program (fail-closed). When
+    /// `proc_spawn_activity_scoped` is `false`, an empty list preserves the
+    /// legacy unrestricted behaviour for direct CLI / v1 callers.
     pub proc_allowed_programs: Vec<String>,
+    /// True when `proc.spawn` runs inside an activity-scoped context that
+    /// explicitly opted in to the allowlist. When set, an empty
+    /// `proc_allowed_programs` denies every program (fail-closed).
+    pub proc_spawn_activity_scoped: bool,
     /// Filesystem policy engine used by Orbit-managed agent runtimes.
     pub policy_engine: Option<Arc<PolicyEngine>>,
     /// Active activity fsProfile name. `None` bypasses fsProfile checks.
@@ -242,6 +248,10 @@ impl std::fmt::Debug for ToolContext {
             .field("model_name", &self.model_name)
             .field("role_slot", &self.role_slot)
             .field("proc_allowed_programs", &self.proc_allowed_programs)
+            .field(
+                "proc_spawn_activity_scoped",
+                &self.proc_spawn_activity_scoped,
+            )
             .field("has_policy_engine", &self.policy_engine.is_some())
             .field("fs_profile", &self.fs_profile)
             .field("reservation_owner", &self.reservation_owner)

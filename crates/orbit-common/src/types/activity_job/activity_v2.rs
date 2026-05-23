@@ -76,6 +76,12 @@ pub struct AgentLoopSpec {
     /// `TargetStep` takes precedence over this activity-level role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<AgentRole>,
+    /// Program allowlist enforced before `proc.spawn` executes a request.
+    /// `None` means `proc.spawn` is not constrained at the activity layer
+    /// (legacy / human-driven paths); an empty `Some(vec![])` denies all
+    /// programs (fail-closed). Mirrors `ShellSpec::allowed_programs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proc_allowed_programs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -108,6 +114,10 @@ pub struct GroundhogSpec {
     /// Optional role tag (ADR-029). Mirrors `AgentLoopSpec::role`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<AgentRole>,
+    /// Program allowlist enforced before `proc.spawn` executes a request.
+    /// Mirrors [`AgentLoopSpec::proc_allowed_programs`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proc_allowed_programs: Option<Vec<String>>,
 }
 
 impl GroundhogSpec {
@@ -122,6 +132,7 @@ impl GroundhogSpec {
             provider: self.provider,
             wall_clock_timeout_seconds: self.wall_clock_timeout_seconds,
             role: self.role,
+            proc_allowed_programs: self.proc_allowed_programs.clone(),
         }
     }
 }

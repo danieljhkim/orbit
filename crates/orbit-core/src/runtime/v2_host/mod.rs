@@ -94,12 +94,18 @@ impl V2RuntimeHost for OrbitRuntime {
         run_id: Option<&str>,
         fs_profile: Option<&str>,
         fs_audit: Option<Arc<dyn FsAuditLogger>>,
+        proc_allowed_programs: Option<&[String]>,
     ) -> ToolContext {
         let workspace_root = self
             .paths()
             .repo_root
             .canonicalize()
             .unwrap_or_else(|_| self.paths().repo_root.clone());
+
+        let proc_spawn_activity_scoped = proc_allowed_programs.is_some();
+        let proc_allowed_programs = proc_allowed_programs
+            .map(|programs| programs.to_vec())
+            .unwrap_or_default();
 
         ToolContext {
             cwd: std::env::current_dir()
@@ -109,6 +115,8 @@ impl V2RuntimeHost for OrbitRuntime {
             policy_engine: Some(Arc::new(self.policy_engine().clone())),
             fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string()),
             fs_audit,
+            proc_allowed_programs,
+            proc_spawn_activity_scoped,
             reservation_owner: run_id.map(str::trim).filter(|value| !value.is_empty()).map(
                 |owner_run_id| ReservationOwnerContext {
                     owner_run_id: owner_run_id.to_string(),
@@ -525,6 +533,7 @@ mod tests {
             provider: Provider::Claude,
             wall_clock_timeout_seconds: 30,
             role: None,
+            proc_allowed_programs: None,
         };
 
         drive_agent_loop(
@@ -540,5 +549,44 @@ mod tests {
 
         let updated = runtime.get_task(&task.id).expect("updated task");
         assert_eq!(updated.implemented_by.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn tool_context_for_activity_passes_proc_allowlist() {
+        let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+        // No allowlist -> not activity-scoped (legacy unrestricted path).
+        let unscoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            &runtime,
+            Some("run-allowlist-test"),
+            None,
+            None,
+            None,
+        );
+        assert!(unscoped.proc_allowed_programs.is_empty());
+        assert!(!unscoped.proc_spawn_activity_scoped);
+
+        // Activity-scoped allowlist propagates verbatim and flips the bool.
+        let programs = vec!["git".to_string(), "rg".to_string()];
+        let scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            &runtime,
+            Some("run-allowlist-test"),
+            None,
+            None,
+            Some(programs.as_slice()),
+        );
+        assert_eq!(scoped.proc_allowed_programs, programs);
+        assert!(scoped.proc_spawn_activity_scoped);
+
+        // Empty Some([]) is meaningful: fail-closed when activity-scoped.
+        let empty_scoped = <OrbitRuntime as V2RuntimeHost>::tool_context_for_activity(
+            &runtime,
+            Some("run-allowlist-test"),
+            None,
+            None,
+            Some(&[]),
+        );
+        assert!(empty_scoped.proc_allowed_programs.is_empty());
+        assert!(empty_scoped.proc_spawn_activity_scoped);
     }
 }

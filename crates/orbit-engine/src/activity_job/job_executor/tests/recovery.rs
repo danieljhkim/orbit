@@ -426,6 +426,7 @@ fn recovery_agent_loop_spec(
         provider,
         wall_clock_timeout_seconds: 30,
         role,
+        proc_allowed_programs: None,
     }
 }
 
@@ -592,6 +593,7 @@ impl V2RuntimeHost for RecoveryHost {
         _run_id: Option<&str>,
         fs_profile: Option<&str>,
         _fs_audit: Option<std::sync::Arc<dyn orbit_tools::FsAuditLogger>>,
+        _proc_allowed_programs: Option<&[String]>,
     ) -> orbit_tools::ToolContext {
         self.pending_fs_profiles
             .lock()
