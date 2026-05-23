@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "codegraph mark-dirty",
+            "command": "scripts/codegraph-if-main mark-dirty",
             "async": true
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "codegraph sync-if-dirty"
+            "command": "scripts/codegraph-if-main sync-if-dirty"
           }
         ]
       }

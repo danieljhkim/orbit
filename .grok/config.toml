@@ -10,7 +10,7 @@ type = "command"
 matcher = "Edit|Write"
 
 [[hooks.PostToolUse.hooks]]
-command = "codegraph mark-dirty"
+command = "scripts/codegraph-if-main mark-dirty"
 type = "command"
 async = true
 
@@ -18,7 +18,7 @@ async = true
 matcher = ".*"
 
 [[hooks.Stop.hooks]]
-command = "codegraph sync-if-dirty"
+command = "scripts/codegraph-if-main sync-if-dirty"
 type = "command"
 
 [mcp_servers.orbit]
