@@ -19,6 +19,9 @@ allowed_internal_deps() {
     orbit-search-companion)
       echo "orbit-common orbit-search"
       ;;
+    orbit-graph-extract)
+      echo ""
+      ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-knowledge orbit-policy"
       ;;
