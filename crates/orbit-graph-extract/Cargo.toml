@@ -11,5 +11,7 @@ stability = "internal"
 workspace = true
 
 [dependencies]
+serde.workspace = true
+thiserror.workspace = true
 tree-sitter = "0.26"
 tree-sitter-rust = "0.24"

@@ -5,7 +5,8 @@ use serde_json::Value;
 
 use crate::error::KnowledgeError;
 use crate::graph::object_store::GraphReadOptions;
-use crate::selector::Selector;
+use orbit_graph_extract::Selector;
+use orbit_graph_extract::selector::SelectorLookupKey;
 
 use super::KnowledgeStore;
 use super::graph_io::{extract_leaf_source, read_graph_object};
@@ -174,7 +175,7 @@ impl KnowledgeStore {
         loop {
             if self
                 .selector_index
-                .contains_key(&crate::selector::SelectorLookupKey::Dir(candidate.clone()))
+                .contains_key(&SelectorLookupKey::Dir(candidate.clone()))
             {
                 return true;
             }

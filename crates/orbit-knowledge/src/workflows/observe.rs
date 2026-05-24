@@ -17,7 +17,8 @@ use serde_json::{Value, json};
 use crate::graph::navigator::GraphNodeRef;
 use crate::service::GraphContextService;
 use crate::workflows::{load_graph, parse_ref_name};
-use crate::{GraphReadOptions, KnowledgeError, Selector};
+use crate::{GraphReadOptions, KnowledgeError};
+use orbit_graph_extract::Selector;
 
 pub const REMOVED_GRAPH_HISTORY_MESSAGE: &str = "Knowledge-graph task attribution has been removed. Use `git log --grep '[T<task-id>]'` for local forward lookup, and use `external_refs` for cross-engineer task references.";
 

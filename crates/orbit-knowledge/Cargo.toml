@@ -16,6 +16,7 @@ fs2.workspace = true
 ignore = "0.4.25"
 libc.workspace = true
 orbit-common = { path = "../orbit-common" }
+orbit-graph-extract = { path = "../orbit-graph-extract" }
 regex.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

@@ -2240,6 +2240,8 @@ dependencies = [
 name = "orbit-graph-extract"
 version = "0.7.1"
 dependencies = [
+ "serde",
+ "thiserror",
  "tree-sitter",
  "tree-sitter-rust",
 ]
@@ -2254,6 +2256,7 @@ dependencies = [
  "libc",
  "lru",
  "orbit-common",
+ "orbit-graph-extract",
  "proptest",
  "rayon",
  "regex",

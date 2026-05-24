@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::selector::SelectorLookupKey;
+use orbit_graph_extract::selector::SelectorLookupKey;
 
 use super::KnowledgeStore;
 use super::graph_io::{extract_leaf_source, read_graph_object};

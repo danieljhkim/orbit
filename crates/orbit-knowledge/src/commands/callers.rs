@@ -1,8 +1,9 @@
+use crate::KnowledgeError;
 use crate::commands::GraphCommandContext;
 use crate::graph::GraphReadOptions;
 use crate::service::GraphContextService;
 use crate::service::callers::{CallerHit, MAX_CALLER_DEPTH, transitive_callers};
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 const DEFAULT_DEPTH: usize = 2;
 

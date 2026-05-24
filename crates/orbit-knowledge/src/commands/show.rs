@@ -1,10 +1,11 @@
 use serde_json::Value;
 
+use crate::KnowledgeError;
 use crate::commands::GraphCommandContext;
 use crate::graph::object_store::{GraphObjectStore, resolve_graph_read_target};
 use crate::graph::{CodebaseGraphV1, GraphIndexNodeRow, GraphNode, GraphReadOptions, LeafKind};
 use crate::service::{GraphContextService, NodeContext};
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 use super::fuzzy::levenshtein_distance;
 

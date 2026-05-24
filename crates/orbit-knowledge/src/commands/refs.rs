@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::KnowledgeError;
 use crate::commands::GraphCommandContext;
 use crate::graph::GraphReadOptions;
 use crate::service::GraphContextService;
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 #[derive(Debug, Clone)]
 pub struct RefsInput {
