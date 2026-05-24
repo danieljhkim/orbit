@@ -15,6 +15,7 @@ members = [
   "crates/orbit-tools",
   "crates/orbit-mcp",
   "crates/orbit-dashboard",
+  "tools/graph-equiv",
 ]
 resolver = "2"
 
