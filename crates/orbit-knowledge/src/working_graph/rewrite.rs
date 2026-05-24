@@ -6,7 +6,7 @@ use crate::extract::{self, Language};
 use crate::io::{
     LineEnding, StagedTextFile, render_content as render_text_content, write_text_atomic_durable,
 };
-use crate::selector::Selector;
+use orbit_graph_extract::Selector;
 
 use super::model::{WorkingGraph, WorkingLeaf, WriteError, WriteResult};
 

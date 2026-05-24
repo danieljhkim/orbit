@@ -1,8 +1,9 @@
+use crate::KnowledgeError;
 use crate::commands::GraphCommandContext;
 use crate::graph::GraphReadOptions;
 use crate::service::GraphContextService;
 use crate::service::implementors::{ImplementorHit, trait_implementors};
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 #[derive(Debug, Clone)]
 pub struct ImplementorsInput {

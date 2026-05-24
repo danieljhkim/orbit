@@ -2239,6 +2239,10 @@ dependencies = [
 [[package]]
 name = "orbit-graph-extract"
 version = "0.7.1"
+dependencies = [
+ "serde",
+ "thiserror",
+]
 
 [[package]]
 name = "orbit-knowledge"
@@ -2250,6 +2254,7 @@ dependencies = [
  "libc",
  "lru",
  "orbit-common",
+ "orbit-graph-extract",
  "proptest",
  "rayon",
  "regex",

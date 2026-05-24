@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use orbit_common::types::OrbitError;
 use serde_json::Value;
 
+use crate::KnowledgeError;
 use crate::commands::{GraphCommandContext, knowledge_error_from_orbit};
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 #[derive(Debug, Clone)]
 pub struct MutationContext {

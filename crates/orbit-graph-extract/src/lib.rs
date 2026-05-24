@@ -10,10 +10,16 @@ use std::path::Path;
 pub mod extracted;
 /// Language-specific extractor implementations.
 pub mod languages;
+/// Stable selector parser shared by graph callers and extractors.
+pub mod selector;
 
 pub use extracted::{
     ExtractedFile, RawCommand, RawConfig, RawImport, RawRef, RawRelation, RawString, RawSymbol,
 };
+pub use selector::{Selector, SelectorParseError};
+
+#[cfg(test)]
+mod tests;
 
 /// Extracts graph rows from a single file's bytes.
 pub trait Extractor {

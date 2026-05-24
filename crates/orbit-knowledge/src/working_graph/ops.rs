@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::extract::{self, Language};
-use crate::selector::Selector;
+use orbit_graph_extract::Selector;
 
 use super::model::{MoveResult, WorkingGraph, WriteError, WriteResult};
 use super::rewrite::{
