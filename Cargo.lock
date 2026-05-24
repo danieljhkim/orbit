@@ -2242,6 +2242,8 @@ version = "0.7.1"
 dependencies = [
  "serde",
  "thiserror",
+ "tree-sitter",
+ "tree-sitter-rust",
 ]
 
 [[package]]
