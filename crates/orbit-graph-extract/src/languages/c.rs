@@ -8,8 +8,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{ExtractedFile, Extractor, RawImport, RawSymbol};
 use super::common::{dedup_imports, dedup_symbols, normalize_path};
+use crate::{ExtractedFile, Extractor, RawImport, RawSymbol};
 
 /// C tree-sitter extractor (functions, structs, includes).
 pub struct CExtractor;
@@ -110,9 +110,8 @@ fn extract_top_level(node: Node, source: &str, state: &mut ExtractionState) {
                 extract_tag_specifier(child, source, state)
             }
             "preproc_include" => extract_include(child, source, state),
-            "preproc_if" | "preproc_ifdef" | "preproc_elif" | "preproc_elifdef" | "preproc_else" => {
-                extract_top_level(child, source, state)
-            }
+            "preproc_if" | "preproc_ifdef" | "preproc_elif" | "preproc_elifdef"
+            | "preproc_else" => extract_top_level(child, source, state),
             _ => {}
         }
     }
@@ -126,7 +125,7 @@ fn extract_include(node: Node, source: &str, state: &mut ExtractionState) {
             "string_literal" | "system_lib_string" => {
                 let raw = node_text(child, source);
                 // strip quotes and <>
-                raw.trim_matches(|c| c == '"' || c == '<' || c == '>' )
+                raw.trim_matches(|c| c == '"' || c == '<' || c == '>')
                     .to_string()
             }
             _ => continue,

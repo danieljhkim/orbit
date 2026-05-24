@@ -1,13 +1,19 @@
 //! Language-specific tree-sitter extractors.
 
-mod common;
 pub mod c;
+mod common;
 pub mod config;
+pub mod csharp;
+pub mod java;
+pub mod kotlin;
 pub mod markdown;
 pub mod rust;
 
 pub use c::CExtractor;
 pub use config::ConfigExtractor;
+pub use csharp::CSharpExtractor;
+pub use java::JavaExtractor;
+pub use kotlin::KotlinExtractor;
 pub use markdown::MarkdownExtractor;
 pub use rust::RustExtractor;
 
@@ -20,6 +26,9 @@ pub fn extractors() -> Vec<Box<dyn Extractor>> {
         Box::new(CExtractor),
         Box::new(MarkdownExtractor),
         Box::new(ConfigExtractor),
+        Box::new(JavaExtractor),
+        Box::new(KotlinExtractor),
+        Box::new(CSharpExtractor),
     ]
 }
 

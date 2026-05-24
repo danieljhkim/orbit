@@ -30,13 +30,23 @@ void proto(int x);
     assert!(kinds.contains(&"struct"), "missing struct");
     assert!(kinds.contains(&"type_alias"), "missing typedef/type_alias");
     assert!(kinds.contains(&"function"), "missing function def");
-    assert!(kinds.contains(&"function_declaration"), "missing prototype decl");
+    assert!(
+        kinds.contains(&"function_declaration"),
+        "missing prototype decl"
+    );
 
     // byte spans
-    assert!(file.symbols.iter().all(|s| s.span_start < s.span_end && s.span_end <= source.len()));
+    assert!(
+        file.symbols
+            .iter()
+            .all(|s| s.span_start < s.span_end && s.span_end <= source.len())
+    );
 
     // imports
-    let inc = file.imports.iter().find(|i| i.target_path.contains("foo.h"));
+    let inc = file
+        .imports
+        .iter()
+        .find(|i| i.target_path.contains("foo.h"));
     assert!(inc.is_some(), "missing #include import");
     assert!(inc.unwrap().target_symbol.is_none());
 }

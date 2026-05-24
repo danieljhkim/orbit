@@ -4,8 +4,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{ExtractedFile, Extractor, RawImport, RawRef, RawRelation, RawSymbol};
 use super::common::{dedup_imports, dedup_refs, dedup_relations, dedup_symbols, normalize_path};
+use crate::{ExtractedFile, Extractor, RawImport, RawRef, RawRelation, RawSymbol};
 
 /// Extracts Rust source files into raw graph rows.
 pub struct RustExtractor;
@@ -934,4 +934,3 @@ fn import_target_path(segments: &[String]) -> String {
     }
     segments[..segments.len() - 1].join("::")
 }
-

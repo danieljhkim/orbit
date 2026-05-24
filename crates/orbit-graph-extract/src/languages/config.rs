@@ -6,8 +6,8 @@
 
 use std::path::Path;
 
-use crate::{ExtractedFile, Extractor, RawConfig};
 use super::common::normalize_path;
+use crate::{ExtractedFile, Extractor, RawConfig};
 
 /// Config (yaml/toml/json/env) key extractor.
 pub struct ConfigExtractor;
@@ -78,10 +78,10 @@ fn detect_kind(path: &Path) -> String {
         }
     }
     // handle dotfiles like .env (no extension per Path)
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        if name == ".env" || name.ends_with(".env") {
-            return "env".to_string();
-        }
+    if let Some(name) = path.file_name().and_then(|n| n.to_str())
+        && (name == ".env" || name.ends_with(".env"))
+    {
+        return "env".to_string();
     }
     "serde".to_string()
 }
@@ -92,51 +92,110 @@ fn scan_keys(source: &str, out: &mut Vec<RawConfig>, path: &Path, kind: &str) {
         let t = line.trim_start();
         if let Some(colon) = t.find(':') {
             let key = t[..colon].trim().to_string();
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
-                out.push(RawConfig { file_path: file_path.clone(), line: i + 1, key, kind: kind.to_string() });
+            if !key.is_empty()
+                && key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+            {
+                out.push(RawConfig {
+                    file_path: file_path.clone(),
+                    line: i + 1,
+                    key,
+                    kind: kind.to_string(),
+                });
             }
         } else if let Some(eq) = t.find('=') {
             let key = t[..eq].trim().to_string();
             if !key.is_empty() {
-                out.push(RawConfig { file_path: file_path.clone(), line: i + 1, key, kind: kind.to_string() });
+                out.push(RawConfig {
+                    file_path: file_path.clone(),
+                    line: i + 1,
+                    key,
+                    kind: kind.to_string(),
+                });
             }
         }
     }
 }
 
-fn collect_toml_keys(table: &toml::Table, prefix: &str, line: usize, out: &mut Vec<RawConfig>, path: &Path, kind: &str) {
+fn collect_toml_keys(
+    table: &toml::Table,
+    prefix: &str,
+    line: usize,
+    out: &mut Vec<RawConfig>,
+    path: &Path,
+    kind: &str,
+) {
     let file_path = normalize_path(path);
     for (k, v) in table {
-        let full = if prefix.is_empty() { k.clone() } else { format!("{}.{}", prefix, k) };
-        out.push(RawConfig { file_path: file_path.clone(), line, key: full.clone(), kind: kind.to_string() });
+        let full = if prefix.is_empty() {
+            k.clone()
+        } else {
+            format!("{}.{}", prefix, k)
+        };
+        out.push(RawConfig {
+            file_path: file_path.clone(),
+            line,
+            key: full.clone(),
+            kind: kind.to_string(),
+        });
         if let toml::Value::Table(sub) = v {
             collect_toml_keys(sub, &full, line, out, path, kind);
         }
     }
 }
 
-fn collect_yaml_keys(value: &serde_yaml::Value, prefix: &str, line: usize, out: &mut Vec<RawConfig>, path: &Path, kind: &str) {
+fn collect_yaml_keys(
+    value: &serde_yaml::Value,
+    prefix: &str,
+    line: usize,
+    out: &mut Vec<RawConfig>,
+    path: &Path,
+    kind: &str,
+) {
     let file_path = normalize_path(path);
-    match value {
-        serde_yaml::Value::Mapping(map) => {
-            for (k, v) in map {
-                if let Some(kstr) = k.as_str() {
-                    let full = if prefix.is_empty() { kstr.to_string() } else { format!("{}.{}", prefix, kstr) };
-                    out.push(RawConfig { file_path: file_path.clone(), line, key: full.clone(), kind: kind.to_string() });
-                    collect_yaml_keys(v, &full, line, out, path, kind);
-                }
+    if let serde_yaml::Value::Mapping(map) = value {
+        for (k, v) in map {
+            if let Some(kstr) = k.as_str() {
+                let full = if prefix.is_empty() {
+                    kstr.to_string()
+                } else {
+                    format!("{}.{}", prefix, kstr)
+                };
+                out.push(RawConfig {
+                    file_path: file_path.clone(),
+                    line,
+                    key: full.clone(),
+                    kind: kind.to_string(),
+                });
+                collect_yaml_keys(v, &full, line, out, path, kind);
             }
         }
-        _ => {}
     }
 }
 
-fn collect_json_keys(value: &serde_json::Value, prefix: &str, line: usize, out: &mut Vec<RawConfig>, path: &Path, kind: &str) {
+fn collect_json_keys(
+    value: &serde_json::Value,
+    prefix: &str,
+    line: usize,
+    out: &mut Vec<RawConfig>,
+    path: &Path,
+    kind: &str,
+) {
     let file_path = normalize_path(path);
     if let serde_json::Value::Object(map) = value {
         for (k, v) in map {
-            let full = if prefix.is_empty() { k.clone() } else { format!("{}.{}", prefix, k) };
-            out.push(RawConfig { file_path: file_path.clone(), line, key: full.clone(), kind: kind.to_string() });
+            let full = if prefix.is_empty() {
+                k.clone()
+            } else {
+                format!("{}.{}", prefix, k)
+            };
+            out.push(RawConfig {
+                file_path: file_path.clone(),
+                line,
+                key: full.clone(),
+                kind: kind.to_string(),
+            });
             collect_json_keys(v, &full, line, out, path, kind);
         }
     }
