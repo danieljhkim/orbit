@@ -2239,6 +2239,10 @@ dependencies = [
 [[package]]
 name = "orbit-graph-extract"
 version = "0.7.1"
+dependencies = [
+ "tree-sitter",
+ "tree-sitter-rust",
+]
 
 [[package]]
 name = "orbit-knowledge"

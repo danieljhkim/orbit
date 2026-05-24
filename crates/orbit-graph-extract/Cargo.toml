@@ -9,3 +9,7 @@ stability = "internal"
 
 [lints]
 workspace = true
+
+[dependencies]
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
