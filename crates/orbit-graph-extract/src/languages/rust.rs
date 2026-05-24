@@ -5,6 +5,7 @@ use std::path::Path;
 use tree_sitter::{Node, Parser};
 
 use crate::{ExtractedFile, Extractor, RawImport, RawRef, RawRelation, RawSymbol};
+use super::common::{dedup_imports, dedup_refs, dedup_relations, dedup_symbols, normalize_path};
 
 /// Extracts Rust source files into raw graph rows.
 pub struct RustExtractor;
@@ -766,10 +767,6 @@ fn normalize_signature(signature: &str) -> String {
         .to_string()
 }
 
-fn normalize_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 fn has_test_attr(attrs: &[String]) -> bool {
     attrs.iter().any(|attr| {
         let compact: String = attr.chars().filter(|ch| !ch.is_whitespace()).collect();
@@ -938,68 +935,3 @@ fn import_target_path(segments: &[String]) -> String {
     segments[..segments.len() - 1].join("::")
 }
 
-fn dedup_symbols(symbols: &mut Vec<RawSymbol>) {
-    symbols.sort_by(|left, right| {
-        left.span_start
-            .cmp(&right.span_start)
-            .then_with(|| left.span_end.cmp(&right.span_end))
-            .then_with(|| left.kind.cmp(&right.kind))
-            .then_with(|| left.qualified.cmp(&right.qualified))
-    });
-    symbols.dedup_by(|left, right| {
-        left.file_path == right.file_path
-            && left.qualified == right.qualified
-            && left.kind == right.kind
-            && left.span_start == right.span_start
-            && left.span_end == right.span_end
-    });
-}
-
-fn dedup_refs(refs: &mut Vec<RawRef>) {
-    refs.sort_by(|left, right| {
-        left.from_span_start
-            .cmp(&right.from_span_start)
-            .then_with(|| left.from_span_end.cmp(&right.from_span_end))
-            .then_with(|| left.kind.cmp(&right.kind))
-            .then_with(|| left.target_name.cmp(&right.target_name))
-    });
-    refs.dedup_by(|left, right| {
-        left.from_file == right.from_file
-            && left.from_span_start == right.from_span_start
-            && left.from_span_end == right.from_span_end
-            && left.target_name == right.target_name
-            && left.target_qualified == right.target_qualified
-            && left.kind == right.kind
-            && left.confidence == right.confidence
-    });
-}
-
-fn dedup_relations(relations: &mut Vec<RawRelation>) {
-    relations.sort_by(|left, right| {
-        left.def_span_start
-            .cmp(&right.def_span_start)
-            .then_with(|| left.from_qualified.cmp(&right.from_qualified))
-            .then_with(|| left.to_qualified.cmp(&right.to_qualified))
-    });
-    relations.dedup_by(|left, right| {
-        left.from_qualified == right.from_qualified
-            && left.to_qualified == right.to_qualified
-            && left.kind == right.kind
-            && left.def_file == right.def_file
-            && left.def_span_start == right.def_span_start
-            && left.def_span_end == right.def_span_end
-    });
-}
-
-fn dedup_imports(imports: &mut Vec<RawImport>) {
-    imports.sort_by(|left, right| {
-        left.target_path
-            .cmp(&right.target_path)
-            .then_with(|| left.target_symbol.cmp(&right.target_symbol))
-    });
-    imports.dedup_by(|left, right| {
-        left.from_file == right.from_file
-            && left.target_path == right.target_path
-            && left.target_symbol == right.target_symbol
-    });
-}

@@ -2241,8 +2241,12 @@ name = "orbit-graph-extract"
 version = "0.7.1"
 dependencies = [
  "serde",
+ "serde_json",
+ "serde_yaml",
  "thiserror",
+ "toml",
  "tree-sitter",
+ "tree-sitter-c",
  "tree-sitter-rust",
 ]
 
