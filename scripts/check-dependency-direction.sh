@@ -13,8 +13,11 @@ allowed_internal_deps() {
     orbit-registry)
       echo "orbit-common"
       ;;
-    orbit-policy | orbit-exec | orbit-knowledge | orbit-store | orbit-search)
+    orbit-policy | orbit-exec | orbit-store | orbit-search)
       echo "orbit-common"
+      ;;
+    orbit-knowledge)
+      echo "orbit-common orbit-graph-extract"
       ;;
     orbit-search-companion)
       echo "orbit-common orbit-search"

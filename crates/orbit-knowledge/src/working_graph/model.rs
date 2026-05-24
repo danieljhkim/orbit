@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::KnowledgeError;
-use crate::selector::Selector;
 use crate::store::KnowledgeStore;
+use orbit_graph_extract::Selector;
 
 /// A single edit in a leaf's version chain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

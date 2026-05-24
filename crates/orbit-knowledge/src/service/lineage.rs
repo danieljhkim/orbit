@@ -9,8 +9,8 @@ use crate::error::KnowledgeError;
 use crate::graph::navigator::GraphNodeRef;
 use crate::graph::nodes::CodebaseGraphV1;
 use crate::graph::object_store::{GraphObjectStore, GraphReadOptions, resolve_graph_read_target};
-use crate::selector::Selector;
 use crate::service::GraphContextService;
+use orbit_graph_extract::Selector;
 
 /// Options for rendering a lineage pack.
 pub struct LineagePackOptions {

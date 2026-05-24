@@ -3,9 +3,10 @@
 // Tests for commands/show.rs live here as sibling under commands/tests/ per
 // docs/design-patterns/test_layout.md. Explicit imports.
 
+use crate::KnowledgeError;
 use crate::graph::{BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode};
 use crate::service::GraphContextService;
-use crate::{KnowledgeError, Selector};
+use orbit_graph_extract::Selector;
 
 use super::super::show::{DID_YOU_MEAN_LIMIT, invalid_selector_resolution_error};
 

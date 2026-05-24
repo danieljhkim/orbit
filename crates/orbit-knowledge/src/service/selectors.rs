@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::KnowledgeError;
 use crate::graph::navigator::GraphNodeRef;
-use crate::selector::Selector;
+use orbit_graph_extract::Selector;
 
 use super::GraphContextService;
 

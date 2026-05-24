@@ -1,2 +1,1 @@
-pub(crate) use orbit_common::utility::selector::SelectorLookupKey;
-pub use orbit_common::utility::selector::{Selector, SelectorParseError};
+pub use orbit_graph_extract::{Selector, SelectorParseError};
