@@ -2249,8 +2249,10 @@ dependencies = [
  "tree-sitter-c",
  "tree-sitter-c-sharp",
  "tree-sitter-java",
+ "tree-sitter-javascript",
  "tree-sitter-kotlin-ng",
  "tree-sitter-rust",
+ "tree-sitter-typescript",
 ]
 
 [[package]]
