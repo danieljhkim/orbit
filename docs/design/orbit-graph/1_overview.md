@@ -13,7 +13,9 @@ related_features: [knowledge-graph]
 
 # Orbit Graph — Overview
 
-Orbit Graph is the proposed replacement for `orbit-knowledge`: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. Where `orbit-knowledge` is a content-addressed versioned store with mutable refs, locks, and a working-graph layer, Orbit Graph is a derived index — regenerable in seconds from `(file_contents, extractor_version)` — with no durable state beyond a single `.db` file per worktree.
+Orbit Graph is a proposed code-intelligence layer that runs **alongside** `orbit-knowledge`, not as a drop-in replacement: a per-worktree SQLite-backed code index that agents can query for symbols, references, callees, impact, and command traces. Where `orbit-knowledge` is a content-addressed versioned store with mutable refs, locks, and a working-graph layer, Orbit Graph is a derived index — regenerable in seconds from `(file_contents, extractor_version)` — with no durable state beyond a single `.db` file per worktree.
+
+The two crates coexist while orbit-graph's effectiveness is measured on real agent workloads. Whether `orbit-knowledge` is eventually phased out is a downstream decision driven by that measurement — not a foregone conclusion. See [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 Step 4 for the measurement-and-decide plan.
 
 This document is the entry point. The prescriptive V1 specification — schema, query surface, build pipeline, performance budgets, migration plan — lives in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) under `specs/`. [2_design.md](./2_design.md) is the long-form design discussion at a higher level of abstraction. [3_vision.md](./3_vision.md) captures the V2 write surface and other forward-looking items. [4_decisions.md](./4_decisions.md) is the ADR log (currently empty pending allocation via `orbit.adr.add`).
 
@@ -56,7 +58,7 @@ The root cause: the graph was designed as a versioned store when the actual job 
 | Selector parser (back-compat with skills) | `crates/orbit-graph-extract/src/selector.rs` | (unscheduled) |
 | Equivalence harness for v1↔v2 dual-run | `tools/graph-equiv/` | (unscheduled) |
 
-The four-step migration from `orbit-knowledge` to `orbit-graph` is laid out in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16.
+The four-step migration plan — landing orbit-graph alongside orbit-knowledge, dual-running them through an equivalence harness, then measuring effectiveness head-to-head before any phase-out decision — is laid out in [`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16.
 
 ---
 

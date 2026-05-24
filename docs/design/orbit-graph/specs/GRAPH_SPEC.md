@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Replaces:** `orbit-knowledge` (current crate)
+**Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
 
@@ -582,13 +582,23 @@ New crate, full schema, full query surface. MCP tools accept `ORBIT_GRAPH_BACKEN
 
 Promotion to default (Step 3) requires zero diffs for a full release cycle. Per-query waivers — if any prove necessary — are documented in `bench/equiv-waivers.md` with rationale, and the waiver itself blocks until reviewed.
 
-**Step 3 — Flip the default.**
-After equivalence holds for a week of real agent usage, flip the default to v2. Keep v1 reachable via env var for one more release in case of regressions.
+**Step 3 — Flip the default to v2.**
+After equivalence holds for a week of real agent usage, flip the default backend to v2. `orbit-knowledge` remains reachable via env var indefinitely — this step opens the head-to-head evaluation window for Step 4, it does not commit to deletion.
 
-**Step 4 — Delete `orbit-knowledge`.**
-Remove the crate, the feature flag, and all references. Update CLAUDE.md and skills.
+**Step 4 — Measure effectiveness, then decide.**
+Run a head-to-head measurement harness (`tools/graph-effectiveness/`, separate from the equivalence harness in `tools/graph-equiv/`) over a defined evaluation window of at least one full release cycle. Signals that matter:
 
-Estimated calendar time: 6–8 weeks for a single agent driving each step as discrete Orbit tasks. The bulk of risk lives in Step 2.
+| Signal | Operationalization |
+|---|---|
+| Task-completion success rate | Agent runs over a fixed task corpus; pass/fail rate per backend |
+| Query latency by kind | Median + p95 for `search`, `refs`, `callees`, `impact`, `trace` |
+| Coverage gaps | Queries that succeed against one backend and miss against the other — catalogued and triaged |
+| Token cost per resolved query | Response size + payload shape across the same corpus |
+| Operational quality | Manual reindex frequency, stale-result reports, lock contention incidents |
+
+The output is a **decision artifact**, not a deletion: keep both crates, deprecate `orbit-knowledge` gradually, or remove it. **Phase-out is downstream of measurement, not a foregone conclusion.** No deletion task is allocated up front; the measurement results determine whether that work happens at all, and on what timeline.
+
+Estimated calendar time: 6–8 weeks for Steps 1–3 driven by a single agent. Step 4's calendar is the length of the evaluation window plus the decision turnaround. The bulk of *technical* risk lives in Step 2; the bulk of *organizational* commitment lives in Step 4.
 
 ## 17. Open questions
 
