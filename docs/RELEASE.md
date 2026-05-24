@@ -20,8 +20,8 @@ GitHub Releases also require `ORBIT_RELEASE_SIGNING_KEY_PEM`, a PEM-encoded
 private key whose public half matches
 [`plugin/npm/release-signing.pub`](../plugin/npm/release-signing.pub). The
 release workflow signs `orbit-checksums.txt` as `orbit-checksums.txt.sig`;
-both `install.sh` and the npm postinstall authenticate that signature before
-trusting release-hosted SHA-256 values.
+`install.sh`, the npm postinstall, and `orbit semantic install` authenticate
+that signature before trusting release-hosted SHA-256 values.
 
 The installers carry a small release-signing trust set, not a single forever
 key:
@@ -84,15 +84,20 @@ Each step names the exact file or command. Do them in order.
    ```
 
 6. **Watch [`.github/workflows/release.yml`](../.github/workflows/release.yml).**
-   Three jobs gate the cut:
+   Five jobs gate the cut:
 
-   - `build-release` — builds platform binaries.
-   - `publish-release` — signs `orbit-checksums.txt` and uploads tarballs,
-     `orbit-checksums.txt`, and `orbit-checksums.txt.sig` to the GitHub
-     Release.
+   - `build-release` — builds platform CLI binaries and standalone
+     `orbit-search-companion-*` binaries.
+   - `publish-release` — signs the combined `orbit-checksums.txt` and uploads
+     CLI tarballs, companion binaries, `orbit-checksums.txt`, and
+     `orbit-checksums.txt.sig` to the GitHub Release.
    - `bump-homebrew-tap` — updates the formula in `danieljhkim/homebrew-tap`.
+   - `smoke-install-macos` — installs the tagged macOS arm64 CLI, then runs
+     `orbit semantic install --json` with isolated runtime state.
+   - `smoke-install-ubuntu` — installs the tagged Linux x86_64 CLI, then runs
+     `orbit semantic install --json` with isolated runtime state.
 
-   All three must be green before step 7.
+   All five must be green before step 7.
 
 7. **Publish to npm manually.** From the merged commit on your laptop:
 

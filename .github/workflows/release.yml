@@ -23,12 +23,16 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             runs_on: macos-15
+            companion_asset: orbit-search-companion-macos-aarch64
           - target: x86_64-apple-darwin
             runs_on: macos-15-intel
+            companion_asset: orbit-search-companion-macos-x86_64
           - target: x86_64-unknown-linux-gnu
             runs_on: ubuntu-22.04
+            companion_asset: orbit-search-companion-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             runs_on: ubuntu-22.04-arm
+            companion_asset: orbit-search-companion-linux-aarch64
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -53,20 +57,27 @@ jobs:
         shell: bash
         run: |
           cargo build -p orbit-cli --release --locked --target "${{ matrix.target }}"
+          cargo build -p orbit-search-companion --release --locked --target "${{ matrix.target }}"
           "./target/${{ matrix.target }}/release/orbit" --version
+          "./target/${{ matrix.target }}/release/orbit-search-companion" --version-info
 
-      - name: Package tarball
+      - name: Package release assets
         shell: bash
         run: |
           ASSET="orbit-${{ matrix.target }}.tar.gz"
+          COMPANION_ASSET="${{ matrix.companion_asset }}"
           tar -czf "$ASSET" -C "target/${{ matrix.target }}/release" orbit
-          ls -lh "$ASSET"
+          cp "target/${{ matrix.target }}/release/orbit-search-companion" "$COMPANION_ASSET"
+          chmod 755 "$COMPANION_ASSET"
+          ls -lh "$ASSET" "$COMPANION_ASSET"
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.target }}
-          path: orbit-${{ matrix.target }}.tar.gz
+          path: |
+            orbit-${{ matrix.target }}.tar.gz
+            ${{ matrix.companion_asset }}
           if-no-files-found: error
 
   publish-release:
@@ -95,10 +106,27 @@ jobs:
       - name: Generate checksums
         shell: bash
         run: |
+          set -euo pipefail
           ls -lh dist
           (
             cd dist
-            sha256sum orbit-*.tar.gz | sort > orbit-checksums.txt
+            expected_assets=(
+              orbit-aarch64-apple-darwin.tar.gz
+              orbit-aarch64-unknown-linux-gnu.tar.gz
+              orbit-x86_64-apple-darwin.tar.gz
+              orbit-x86_64-unknown-linux-gnu.tar.gz
+              orbit-search-companion-macos-aarch64
+              orbit-search-companion-macos-x86_64
+              orbit-search-companion-linux-aarch64
+              orbit-search-companion-linux-x86_64
+            )
+            for asset in "${expected_assets[@]}"; do
+              [ -f "$asset" ] || {
+                echo "missing release asset: $asset" >&2
+                exit 1
+              }
+            done
+            sha256sum "${expected_assets[@]}" | sort -k 2 > orbit-checksums.txt
           )
           cat dist/orbit-checksums.txt
 
@@ -159,6 +187,10 @@ jobs:
             dist/orbit-aarch64-unknown-linux-gnu.tar.gz
             dist/orbit-x86_64-apple-darwin.tar.gz
             dist/orbit-x86_64-unknown-linux-gnu.tar.gz
+            dist/orbit-search-companion-macos-aarch64
+            dist/orbit-search-companion-macos-x86_64
+            dist/orbit-search-companion-linux-aarch64
+            dist/orbit-search-companion-linux-x86_64
             dist/orbit-checksums.txt
             dist/orbit-checksums.txt.sig
           generate_release_notes: true
@@ -253,6 +285,15 @@ jobs:
           curl -sSfL "$INSTALL_URL" | ORBIT_INSTALL_DIR="$INSTALL_DIR" ORBIT_VERSION="${GITHUB_REF_NAME}" sh
           export PATH="$INSTALL_DIR:$PATH"
           orbit --version
+          SMOKE_ROOT="$(mktemp -d)"
+          export HOME="$SMOKE_ROOT/home"
+          export XDG_CACHE_HOME="$SMOKE_ROOT/cache"
+          WORKSPACE_DIR="$SMOKE_ROOT/workspace"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKSPACE_DIR"
+          cd "$WORKSPACE_DIR"
+          orbit semantic install --json
+          test -x "$HOME/.orbit/embed/bin/orbit-search-companion-macos-aarch64"
+          test -f "$HOME/.orbit/embed/models/bge-small/orbit-model.json"
 
   smoke-install-ubuntu:
     name: Smoke test installer on Ubuntu 22.04
@@ -277,3 +318,12 @@ jobs:
           curl -sSfL "$INSTALL_URL" | ORBIT_INSTALL_DIR="$INSTALL_DIR" ORBIT_VERSION="${GITHUB_REF_NAME}" sh
           export PATH="$INSTALL_DIR:$PATH"
           orbit --version
+          SMOKE_ROOT="$(mktemp -d)"
+          export HOME="$SMOKE_ROOT/home"
+          export XDG_CACHE_HOME="$SMOKE_ROOT/cache"
+          WORKSPACE_DIR="$SMOKE_ROOT/workspace"
+          mkdir -p "$HOME" "$XDG_CACHE_HOME" "$WORKSPACE_DIR"
+          cd "$WORKSPACE_DIR"
+          orbit semantic install --json
+          test -x "$HOME/.orbit/embed/bin/orbit-search-companion-linux-x86_64"
+          test -f "$HOME/.orbit/embed/models/bge-small/orbit-model.json"
