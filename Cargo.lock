@@ -2237,6 +2237,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-graph-extract"
+version = "0.7.1"
+
+[[package]]
 name = "orbit-knowledge"
 version = "0.7.1"
 dependencies = [
