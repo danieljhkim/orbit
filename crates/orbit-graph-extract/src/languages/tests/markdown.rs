@@ -33,15 +33,25 @@ Text with another [ref][1] link.
     assert!(kinds.contains(&"heading"), "missing heading symbols");
     // at least top + nested + deep
     let heading_names: Vec<&str> = file.symbols.iter().map(|s| s.name.as_str()).collect();
-    assert!(heading_names.iter().any(|n| n.contains("Top") || n.contains("Nested") || n.contains("Deep")));
+    assert!(
+        heading_names
+            .iter()
+            .any(|n| n.contains("Top") || n.contains("Nested") || n.contains("Deep"))
+    );
 
     // byte spans valid
     assert!(file.symbols.iter().all(|s| s.span_start < s.span_end));
 
     // strings: links and code
-    assert!(!file.strings.is_empty(), "expected notable strings from links/code fences");
+    assert!(
+        !file.strings.is_empty(),
+        "expected notable strings from links/code fences"
+    );
     let has_link = file.strings.iter().any(|s| s.value.contains("example.com"));
-    let has_code = file.strings.iter().any(|s| s.value.contains("example()") || s.value.contains("println"));
+    let has_code = file
+        .strings
+        .iter()
+        .any(|s| s.value.contains("example()") || s.value.contains("println"));
     assert!(has_link, "missing link string");
     assert!(has_code, "missing code block string");
 }

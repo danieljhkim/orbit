@@ -15,7 +15,9 @@ pub(crate) fn is_notable_string(value: &str) -> bool {
     if value.len() < 6 {
         return false;
     }
-    let all_punct = value.chars().all(|c| c.is_ascii_punctuation() || c.is_whitespace());
+    let all_punct = value
+        .chars()
+        .all(|c| c.is_ascii_punctuation() || c.is_whitespace());
     if all_punct {
         return false;
     }

@@ -6,8 +6,8 @@
 
 use std::path::Path;
 
-use crate::{ExtractedFile, Extractor, RawString, RawSymbol};
 use super::common::{dedup_symbols, is_notable_string, normalize_path};
+use crate::{ExtractedFile, Extractor, RawString, RawSymbol};
 
 /// Markdown heading/string extractor.
 pub struct MarkdownExtractor;
@@ -37,8 +37,15 @@ impl Extractor for MarkdownExtractor {
         let mut strings = Vec::new();
 
         for (i, heading) in headings.iter().enumerate() {
-            let end_line = headings.get(i + 1)
-                .map(|next| if next.depth <= heading.depth { next.line.saturating_sub(1) } else { total_lines })
+            let end_line = headings
+                .get(i + 1)
+                .map(|next| {
+                    if next.depth <= heading.depth {
+                        next.line.saturating_sub(1)
+                    } else {
+                        total_lines
+                    }
+                })
                 .unwrap_or(total_lines);
             let _body = slice_lines(&lines, heading.line, end_line);
             let (start_byte, end_byte) = line_range_to_bytes(source, heading.line, end_line);
@@ -218,7 +225,9 @@ fn collect_notable_strings(source: &str, out: &mut Vec<RawString>, path: &Path) 
                 let text_part = &line[abs + 1..abs + end_text];
                 if let Some(url_start) = line[abs + end_text..].find('(') {
                     let url_end_rel = line[abs + end_text + url_start..].find(')').unwrap_or(0);
-                    let url = line[abs + end_text + url_start + 1..abs + end_text + url_start + url_end_rel].trim();
+                    let url = line
+                        [abs + end_text + url_start + 1..abs + end_text + url_start + url_end_rel]
+                        .trim();
                     if !url.is_empty() {
                         let val = format!("{} {}", text_part.trim(), url);
                         if is_notable_string(&val) {
@@ -233,7 +242,9 @@ fn collect_notable_strings(source: &str, out: &mut Vec<RawString>, path: &Path) 
                 }
             }
             pos = abs + 1;
-            if pos >= line.len() { break; }
+            if pos >= line.len() {
+                break;
+            }
         }
     }
 

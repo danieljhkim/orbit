@@ -2247,6 +2247,9 @@ dependencies = [
  "toml",
  "tree-sitter",
  "tree-sitter-c",
+ "tree-sitter-c-sharp",
+ "tree-sitter-java",
+ "tree-sitter-kotlin-ng",
  "tree-sitter-rust",
 ]
 
