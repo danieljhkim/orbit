@@ -18,7 +18,9 @@ pub struct ImportReport {
     pub audit_events_inserted: usize,
     pub audit_events_skipped: usize,
     pub job_runs_inserted: usize,
+    pub job_runs_skipped: usize,
     pub job_run_steps_inserted: usize,
+    pub job_run_steps_skipped: usize,
     pub session_learning_state_inserted: usize,
 }
 
@@ -31,7 +33,7 @@ impl ImportReport {
     }
 
     pub fn skipped_records(&self) -> bool {
-        self.audit_events_skipped > 0
+        self.audit_events_skipped > 0 || self.job_runs_skipped > 0 || self.job_run_steps_skipped > 0
     }
 }
 
@@ -272,16 +274,22 @@ fn import_job_runs(
                 Ok(raw) => raw,
                 Err(_) => continue,
             };
-            let doc = serde_yaml::from_str::<JobRunFileDocument>(&raw).map_err(|err| {
-                OrbitError::Store(format!(
-                    "invalid jrun.yaml '{}': {err}",
-                    jrun_path.display()
-                ))
-            })?;
+            let doc = match serde_yaml::from_str::<JobRunFileDocument>(&raw) {
+                Ok(doc) => doc,
+                Err(err) => {
+                    report.job_runs_skipped += 1;
+                    orbit_common::tracing::warn!(
+                        path = %jrun_path.display(),
+                        error = %err,
+                        "skipping malformed legacy job run"
+                    );
+                    continue;
+                }
+            };
             let pipeline_state = read_pipeline_state(&run_path)?;
             store.upsert_job_run_for_workspace(workspace_id, &doc.run, pipeline_state.as_ref())?;
             report.job_runs_inserted += 1;
-            for step in read_steps(&run_path)? {
+            for step in read_steps(&run_path, report)? {
                 store.upsert_job_run_step_for_workspace(workspace_id, &doc.run.run_id, &step)?;
                 report.job_run_steps_inserted += 1;
             }
@@ -304,7 +312,7 @@ fn read_pipeline_state(run_path: &Path) -> Result<Option<PipelineState>, OrbitEr
     })
 }
 
-fn read_steps(run_path: &Path) -> Result<Vec<JobRunStep>, OrbitError> {
+fn read_steps(run_path: &Path, report: &mut ImportReport) -> Result<Vec<JobRunStep>, OrbitError> {
     let steps_dir = run_path.join("steps");
     let entries = match fs::read_dir(&steps_dir) {
         Ok(entries) => entries,
@@ -325,15 +333,31 @@ fn read_steps(run_path: &Path) -> Result<Vec<JobRunStep>, OrbitError> {
     for path in paths {
         let raw = fs::read_to_string(&path).map_err(|err| OrbitError::Io(err.to_string()))?;
         let step = if path.extension().and_then(|value| value.to_str()) == Some("json") {
-            serde_json::from_str::<JobRunStep>(&raw).map_err(|err| {
-                OrbitError::Store(format!("invalid step file '{}': {err}", path.display()))
-            })?
+            match serde_json::from_str::<JobRunStep>(&raw) {
+                Ok(step) => step,
+                Err(err) => {
+                    report.job_run_steps_skipped += 1;
+                    orbit_common::tracing::warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "skipping malformed legacy job run step"
+                    );
+                    continue;
+                }
+            }
         } else {
-            serde_yaml::from_str::<JobRunStepFileDocument>(&raw)
-                .map_err(|err| {
-                    OrbitError::Store(format!("invalid step file '{}': {err}", path.display()))
-                })?
-                .step
+            match serde_yaml::from_str::<JobRunStepFileDocument>(&raw) {
+                Ok(doc) => doc.step,
+                Err(err) => {
+                    report.job_run_steps_skipped += 1;
+                    orbit_common::tracing::warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "skipping malformed legacy job run step"
+                    );
+                    continue;
+                }
+            }
         };
         steps.push(step);
     }
@@ -480,6 +504,61 @@ mod tests {
 
         let second = import_legacy_v2_state(&store, &orbit, "ws_a").expect("second");
         assert!(second.skipped);
+    }
+
+    #[test]
+    fn import_skips_malformed_job_run_and_step_files() {
+        let temp = TempDir::new().expect("tempdir");
+        let orbit = temp.path().join(".orbit");
+
+        let valid_run = JobRun {
+            run_id: "run-good".to_string(),
+            job_id: "job-a".to_string(),
+            attempt: 1,
+            state: JobRunState::Success,
+            scheduled_at: Utc::now(),
+            started_at: None,
+            finished_at: None,
+            duration_ms: None,
+            created_at: Utc::now(),
+            pid: None,
+            pid_start_time: None,
+            input: None,
+            retry_source_run_id: None,
+            knowledge_metrics: None,
+            resolved_crew: None,
+            planner_model: None,
+            implementer_model: None,
+            reviewer_model: None,
+            steps: Vec::new(),
+        };
+        let valid_dir = orbit.join("state/job-runs/job-a/run-good");
+        fs::create_dir_all(valid_dir.join("steps")).expect("valid run dir");
+        fs::write(
+            valid_dir.join("jrun.yaml"),
+            serde_yaml::to_string(&serde_json::json!({"schema_version": 1, "run": valid_run}))
+                .expect("serialize run"),
+        )
+        .expect("write valid run");
+        fs::write(valid_dir.join("steps/000.json"), "not-json\n").expect("write bad step");
+
+        let malformed_dir = orbit.join("state/job-runs/job-a/run-bad");
+        fs::create_dir_all(&malformed_dir).expect("malformed run dir");
+        fs::write(malformed_dir.join("jrun.yaml"), "run: [").expect("write bad run");
+
+        let store = Store::open_in_memory().expect("store");
+        let report = import_legacy_v2_state(&store, &orbit, "ws_a").expect("import");
+
+        assert_eq!(report.job_runs_inserted, 1);
+        assert_eq!(report.job_runs_skipped, 1);
+        assert_eq!(report.job_run_steps_inserted, 0);
+        assert_eq!(report.job_run_steps_skipped, 1);
+        assert!(report.skipped_records());
+        let loaded = store
+            .get_job_run_for_workspace("ws_a", "run-good")
+            .expect("read valid run")
+            .expect("valid run inserted");
+        assert_eq!(loaded.job_id, "job-a");
     }
 
     #[test]

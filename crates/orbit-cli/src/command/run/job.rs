@@ -46,11 +46,6 @@ impl Execute for JobRunArgs {
                 ));
             }
             let result = runtime.run_job_v2_from_yaml(&direct_path, input, backend_flag)?;
-            let audit_jsonl_str = result
-                .audit_jsonl
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "-".to_string());
             let backend_str = result.resolved_backend.as_str();
             if self.json {
                 return crate::output::json::print_pretty(&json!({
@@ -60,18 +55,12 @@ impl Execute for JobRunArgs {
                     "success": result.success,
                     "message": result.message,
                     "pipeline": result.pipeline,
-                    "audit_jsonl": audit_jsonl_str,
                     "events_emitted": result.events_emitted,
                 }));
             }
             println!(
-                "run_id={};job={};backend={};success={};events={};audit_jsonl={}",
-                result.run_id,
-                result.job_name,
-                backend_str,
-                result.success,
-                result.events_emitted,
-                audit_jsonl_str,
+                "run_id={};job={};backend={};success={};events={}",
+                result.run_id, result.job_name, backend_str, result.success, result.events_emitted,
             );
             if let Some(msg) = &result.message {
                 println!("message: {msg}");
@@ -93,11 +82,6 @@ impl Execute for JobRunArgs {
             return Err(OrbitError::InvalidInput(build_subroutine_run_error(&job)));
         }
         let result = runtime.run_job_v2_from_yaml(&job.path, input, backend_flag)?;
-        let audit_jsonl_str = result
-            .audit_jsonl
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "-".to_string());
         let backend_str = result.resolved_backend.as_str();
         if self.json {
             crate::output::json::print_pretty(&json!({
@@ -108,19 +92,17 @@ impl Execute for JobRunArgs {
                 "success": result.success,
                 "message": result.message,
                 "pipeline": result.pipeline,
-                "audit_jsonl": audit_jsonl_str,
                 "events_emitted": result.events_emitted,
             }))
         } else {
             println!(
-                "run_id={};job_id={};kind={};backend={};success={};events={};audit_jsonl={}",
+                "run_id={};job_id={};kind={};backend={};success={};events={}",
                 result.run_id,
                 job.job_id.as_str(),
                 job.kind(),
                 backend_str,
                 result.success,
                 result.events_emitted,
-                audit_jsonl_str,
             );
             if let Some(msg) = &result.message {
                 println!("message: {msg}");
@@ -148,11 +130,6 @@ impl Execute for JobReplayArgs {
     fn execute(self, runtime: &OrbitRuntime) -> Result<(), OrbitError> {
         let source_run_id = self.run_id;
         let result = runtime.replay_job_run(&source_run_id)?;
-        let audit_jsonl_str = result
-            .audit_jsonl
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "-".to_string());
         let backend_str = result.resolved_backend.as_str();
         if self.json {
             return crate::output::json::print_pretty(&json!({
@@ -163,19 +140,17 @@ impl Execute for JobReplayArgs {
                 "success": result.success,
                 "message": result.message,
                 "pipeline": result.pipeline,
-                "audit_jsonl": audit_jsonl_str,
                 "events_emitted": result.events_emitted,
             }));
         }
         println!(
-            "run_id={};replayed_from={};job={};backend={};success={};events={};audit_jsonl={}",
+            "run_id={};replayed_from={};job={};backend={};success={};events={}",
             result.run_id,
             source_run_id,
             result.job_name,
             backend_str,
             result.success,
             result.events_emitted,
-            audit_jsonl_str,
         );
         if let Some(msg) = &result.message {
             println!("message: {msg}");

@@ -17,7 +17,9 @@ pub use asset_loader::{
     ActivityAsset, AssetLoadError, JobAsset, load_activity_asset, load_job_asset,
 };
 pub use audit_envelope::{
-    AUDIT_ENVELOPE_SCHEMA_VERSION, BranchOutcome, V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
+    AUDIT_ENVELOPE_SCHEMA_VERSION, BranchOutcome, V2_DENIAL_EVENT_TYPES,
+    V2_EVENT_TYPE_FS_CALL_DENIED, V2_EVENT_TYPE_STEP_DENIED, V2_EVENT_TYPE_TOOL_DENIED,
+    V2AuditEnvelope, V2AuditEvent, V2AuditEventKind,
 };
 pub use backend::{
     BackendConstraintError, HttpOnlyFeature, resolve_activity_backends, resolve_job_backends,

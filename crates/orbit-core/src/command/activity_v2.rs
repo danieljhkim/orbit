@@ -8,7 +8,7 @@
 //! Loop + envelope audit sink construction is delegated to
 //! `V2AuditWriter::with_disk_sinks` — this file never names orbit-agent types.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use orbit_common::types::activity_job::{
     Backend, V2AuditEventKind, load_activity_asset, resolve_activity_backends,
@@ -29,7 +29,6 @@ pub struct V2ActivityRunResult {
     pub output: Value,
     pub message: Option<String>,
     pub run_id: String,
-    pub audit_jsonl: Option<PathBuf>,
     pub events_emitted: usize,
     /// Resolved execution backend applied to the asset at load time. `None`
     /// when the activity isn't `agent_loop` (deterministic/shell ignore
@@ -40,7 +39,7 @@ pub struct V2ActivityRunResult {
 impl OrbitRuntime {
     /// Execute a v2 activity from a YAML path. Returns a structural result.
     /// Audit events for the run are queryable via `list_v2_audit_events` using
-    /// the `run_id` (the legacy envelope JSONL path is `None` post SQLite migration).
+    /// the `run_id`.
     ///
     /// `backend_flag` is the `--backend` invocation-level override; when
     /// `None`, the resolver falls through to env → config → default.
@@ -102,8 +101,6 @@ impl OrbitRuntime {
             Some(workspace_path.as_path()),
         )
         .map_err(|err| OrbitError::Execution(format!("audit sinks: {err}")))?;
-        let audit_jsonl = writer.envelope_log_path();
-
         // Record the standard orbit-core activity-run lifecycle events so v2
         // runs appear in the same audit stream v1 runs use.
         self.record_event(OrbitEvent::ActivityRunStarted {
@@ -158,7 +155,6 @@ impl OrbitRuntime {
                 output: o.output,
                 message: o.message,
                 run_id,
-                audit_jsonl,
                 events_emitted: events_count,
                 resolved_backend,
             }),
@@ -170,6 +166,8 @@ impl OrbitRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::path::PathBuf;
 
     use crate::V2AuditEventFilter;
     use serde_json::json;

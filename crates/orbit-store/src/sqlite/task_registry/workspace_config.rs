@@ -41,12 +41,10 @@ pub fn read_workspace_config(orbit_dir: &Path) -> Result<WorkspaceConfig, OrbitE
 }
 
 pub fn workspace_id_for_orbit_dir(orbit_dir: &Path) -> Result<String, OrbitError> {
-    let path = workspace_config_path(orbit_dir);
     let config = read_workspace_config(orbit_dir).map_err(|err| match err {
-        OrbitError::InvalidInput(message) => OrbitError::InvalidInput(format!(
-            "{message} (expected key `workspace_id` in {})",
-            path.display()
-        )),
+        OrbitError::InvalidInput(message) => {
+            OrbitError::InvalidInput(format!("{message} (expected key `workspace_id`)"))
+        }
         other => other,
     })?;
     Ok(config.workspace_id)

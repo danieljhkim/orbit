@@ -7,6 +7,9 @@ use std::sync::Arc;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
+use orbit_common::types::activity_job::{
+    V2_DENIAL_EVENT_TYPES, V2_EVENT_TYPE_FS_CALL_DENIED, V2_EVENT_TYPE_STEP_DENIED,
+};
 use orbit_core::{AuditEventStatus, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
@@ -69,11 +72,11 @@ pub(super) fn scan_v2_loop_denials(
     agent_filter: Option<&str>,
 ) -> Result<Vec<DenialRow>, orbit_core::OrbitError> {
     let mut rows = Vec::new();
-    for event_type in ["fs.call.denied", "tool.denied"] {
+    for event_type in v2_denial_event_types() {
         let events = runtime.list_v2_audit_events(V2AuditEventFilter {
             workspace_id: String::new(),
             since,
-            event_type: Some(event_type.to_string()),
+            event_type: Some((*event_type).to_string()),
             limit: Some(SQLITE_DENIAL_SCAN_LIMIT),
             ..Default::default()
         })?;
@@ -82,11 +85,7 @@ pub(super) fn scan_v2_loop_denials(
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            let kind = if event.event_type == "fs.call.denied" {
-                "fs"
-            } else {
-                "tool"
-            };
+            let kind = v2_denial_kind(&event.event_type);
             let (profile, target) = match kind {
                 "fs" => (
                     value
@@ -96,6 +95,14 @@ pub(super) fn scan_v2_loop_denials(
                         .to_string(),
                     value
                         .get("path")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                ),
+                _ if event.event_type == V2_EVENT_TYPE_STEP_DENIED => (
+                    "tool".to_string(),
+                    value
+                        .get("step_id")
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string(),
@@ -134,6 +141,18 @@ pub(super) fn scan_v2_loop_denials(
         }
     }
     Ok(rows)
+}
+
+pub(super) fn v2_denial_event_types() -> &'static [&'static str] {
+    V2_DENIAL_EVENT_TYPES
+}
+
+fn v2_denial_kind(event_type: &str) -> &'static str {
+    if event_type == V2_EVENT_TYPE_FS_CALL_DENIED {
+        "fs"
+    } else {
+        "tool"
+    }
 }
 
 pub(super) fn collect_denial_rows(

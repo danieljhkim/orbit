@@ -386,8 +386,11 @@ fn workspace_id_for_orbit_dir_missing_file_names_path_and_key() {
 
     let err = workspace_id_for_orbit_dir(&orbit_dir).expect_err("missing config");
     let message = err.to_string();
+    let config_path = workspace_config_path(&orbit_dir).display().to_string();
     assert!(message.contains("config.yaml"));
     assert!(message.contains("workspace_id"));
+    assert!(message.contains(&config_path));
+    assert_eq!(message.matches(&config_path).count(), 1);
 }
 
 #[test]

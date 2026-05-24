@@ -44,8 +44,8 @@ pub use orbit_store::duel_scoreboard;
 pub use orbit_store::scoreboard_summary;
 pub use orbit_store::skill_store as skill_catalog;
 pub use orbit_store::{
-    ActivityInvocationMetrics, InvocationQuery, InvocationRecord, InvocationToolCallRecord,
-    TaskInvocationMetrics, ToolInvocationMetrics,
+    ActivityInvocationMetrics, InvocationInsertParams, InvocationQuery, InvocationRecord,
+    InvocationToolCallRecord, TaskInvocationMetrics, ToolInvocationMetrics,
 };
 
 pub use command::docs::{
