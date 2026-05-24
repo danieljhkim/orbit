@@ -19,17 +19,9 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 ---
 
-## ADR allocation pending
+## ADR-0184 — Graph is a derived index, not a versioned store
 
-No ADRs have been allocated yet. The decisions enumerated below are candidates — each is non-obvious, ruled out a real alternative, and carries a forward-shaping cost. They will be allocated via `orbit.adr.add` when the first migration step ([`GRAPH_SPEC.md`](./specs/GRAPH_SPEC.md) §16 Step 1) is task-tracked, then the headings here will be rewritten to use the allocated global IDs verbatim per [`docs/design/CONVENTIONS.md`](../CONVENTIONS.md) §4.
-
-Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` without an `orbit.adr.add` allocation behind them.** The candidate list below uses placeholder `## (candidate)` headings to keep this file readable without violating the allocation contract.
-
----
-
-## (candidate) — Graph is a derived index, not a versioned store
-
-**Status:** Proposed · 2026-05 · (unscheduled)
+**Status:** Proposed · 2026-05 · [ORB-00294]
 
 **Context.** `orbit-knowledge` was built as a git-like history layer: content-addressed objects, mutable refs, atomic swaps, lock protocols. In practice the graph is consumed as "fresh queryable index of the current code" — none of the version-store affordances are used by agents.
 
@@ -40,9 +32,9 @@ Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` with
 - Removes the lock protocol's structural inability to coordinate same-branch worktrees (see knowledge-graph ADR-002 cost line).
 - Cost: **no history.** "What did the graph look like at commit X?" is no longer a query the graph can answer. Use git for that.
 
-## (candidate) — Per-worktree DB filename embeds extractor version
+## ADR-0185 — Per-worktree DB filename embeds extractor version
 
-**Status:** Proposed · 2026-05 · (unscheduled)
+**Status:** Proposed · 2026-05 · [ORB-00294]
 
 **Context.** When extractor logic changes (new language, fixed parse bug, schema tweak), the on-disk DB becomes incompatible. The traditional fix is schema migration code; the V1 ethos is to keep complexity out of the storage layer.
 
@@ -53,9 +45,9 @@ Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` with
 - Multiple extractor versions can coexist on disk temporarily during rollback testing.
 - Cost: **cold rebuild after every extractor bump.** For a 200k LOC repo that's ~3s, acceptable per the perf budget. For a much larger repo it could become noticeable; revisit if a user complains.
 
-## (candidate) — Symbol IDs are ephemeral; resolution by qualified name
+## ADR-0186 — Symbol IDs are ephemeral; resolution by qualified name
 
-**Status:** Proposed · 2026-05 · (unscheduled)
+**Status:** Proposed · 2026-05 · [ORB-00294]
 
 **Context.** With incremental sync, a file's symbol rows are deleted and re-inserted on change. If cross-file refs FK to `symbols.id`, every incremental rebuild orphans inbound refs from other files. The current `orbit-knowledge` schema has an `identity_key` column trying to paper over this; it doesn't fully work and adds complexity.
 
@@ -66,9 +58,9 @@ Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` with
 - No `identity_key` column or cross-build lineage tracking machinery.
 - Cost: **string lookups instead of integer FK joins.** SQLite's B-tree on `target_qualified` keeps this fast (low single-ms even on 100k symbols), but it's a real cost compared to the natural FK design. Rename tracking is a separate feature on top of git, not a graph affordance.
 
-## (candidate) — Two ref tables, not one
+## ADR-0187 — Two ref tables, not one
 
-**Status:** Proposed · 2026-05 · (unscheduled)
+**Status:** Proposed · 2026-05 · [ORB-00294]
 
 **Context.** The original draft put all cross-symbol edges in one `refs` table with a `kind` column covering `call | type | impl | use | trait_bound`. Calls and type uses are anchored to `(file, span)`. Impl relations are anchored to `(concrete_symbol, trait_symbol)` with no useful span. Mixing them forces meaningless columns on the impl side.
 
@@ -79,9 +71,9 @@ Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` with
 - The two tables are independently extensible (e.g. adding `relations.kind = "annotates"` for TypeScript decorators) without inflating the `refs` shape.
 - Cost: **two indexes to maintain instead of one.** Schema is wider; the `refs` command needs to union two underlying queries. Acceptable for the correctness and ergonomics gain.
 
-## (candidate) — Sync policy is a property of the Graph handle
+## ADR-0188 — Sync policy is a property of the Graph handle
 
-**Status:** Proposed · 2026-05 · (unscheduled)
+**Status:** Proposed · 2026-05 · [ORB-00294]
 
 **Context.** The original draft hardcoded "10ms stat budget at 5000 files; cache window 500ms" inside the query layer. The budget doesn't scale, and the policy mixes product decisions into the library.
 
@@ -92,9 +84,9 @@ Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` with
 - The library no longer carries an implicit perf contract that breaks silently at scale.
 - Cost: **callers must choose.** No "just works" default beyond per-entry-point conventions. The conventions are documented but the choice is exposed.
 
-## (candidate) — Performance gate is against committed baseline, not last run
+## ADR-0189 — Performance gate is against committed baseline, not last run
 
-**Status:** Proposed · 2026-05 · (unscheduled)
+**Status:** Proposed · 2026-05 · [ORB-00294]
 
 **Context.** A perf regression gate that compares "this run vs previous merged run" ratchets up to whatever the latest measurement happened to be — slow degradation goes undetected.
 
@@ -109,6 +101,6 @@ Per the `orbit-adr` skill: **never hand-author headings under `## ADR-NNNN` with
 
 ## Task References
 
-No Orbit tasks have been allocated for this feature yet.
+- [ORB-00294] allocated the six initial orbit-graph ADR IDs (ADR-0184 through ADR-0189).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
