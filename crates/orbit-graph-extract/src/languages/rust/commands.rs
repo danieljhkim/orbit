@@ -356,10 +356,10 @@ fn collect_call_handlers(
     state: &ExtractionState,
     handlers: &mut BTreeSet<String>,
 ) {
-    if node.kind() == "call_expression" {
-        if let Some(handler) = call_handler(node, source, module, variant, state) {
-            handlers.insert(handler);
-        }
+    if node.kind() == "call_expression"
+        && let Some(handler) = call_handler(node, source, module, variant, state)
+    {
+        handlers.insert(handler);
     }
 
     let mut cursor = node.walk();
@@ -588,8 +588,7 @@ fn collect_command_type_names(
 fn choose_payload_type(types: Vec<String>) -> Option<String> {
     types
         .into_iter()
-        .filter(|name| !matches!(name.as_str(), "Box" | "Option" | "Vec"))
-        .next_back()
+        .rfind(|name| !matches!(name.as_str(), "Box" | "Option" | "Vec"))
 }
 
 fn kebab_case(name: &str) -> String {

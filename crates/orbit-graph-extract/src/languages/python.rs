@@ -382,7 +382,7 @@ fn split_top_level_args(args: &str, args_start: usize) -> Vec<ArgSpan<'_>> {
     spans
 }
 
-fn split_keyword_arg<'a>(arg: &'a str, arg_start: usize) -> Option<(&'a str, &'a str, usize)> {
+fn split_keyword_arg(arg: &str, arg_start: usize) -> Option<(&str, &str, usize)> {
     let equals_index = arg.find('=')?;
     let key = arg.get(..equals_index)?.trim();
     if key.is_empty()
@@ -400,9 +400,7 @@ fn split_keyword_arg<'a>(arg: &'a str, arg_start: usize) -> Option<(&'a str, &'a
 fn python_string_literal_value(value: &str) -> Option<String> {
     let mut literal = value.trim();
     loop {
-        let Some(first) = literal.chars().next() else {
-            return None;
-        };
+        let first = literal.chars().next()?;
         if matches!(first, 'r' | 'R' | 'u' | 'U' | 'b' | 'B') {
             literal = literal.get(first.len_utf8()..)?;
             continue;

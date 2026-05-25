@@ -687,7 +687,7 @@ pub struct CleanReport {
 }
 
 /// Reference query options for [`Graph::refs`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RefOpts {
     /// Minimum confidence included in returned results.
     pub confidence: RefConfidence,
@@ -695,17 +695,8 @@ pub struct RefOpts {
     pub kind: Option<RefKind>,
 }
 
-impl Default for RefOpts {
-    fn default() -> Self {
-        Self {
-            confidence: RefConfidence::default(),
-            kind: None,
-        }
-    }
-}
-
 /// Confidence floor and output value for graph references.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefConfidence {
     /// Same file, unambiguous match on name and qualified path.
@@ -713,6 +704,7 @@ pub enum RefConfidence {
     /// Cross-file reference resolved through an explicit import.
     ImportResolved,
     /// Cross-file reference resolved within the same module namespace.
+    #[default]
     SameModule,
     /// Name-only match with ambiguous or weak resolution.
     FuzzyName,
@@ -720,12 +712,6 @@ pub enum RefConfidence {
 
 /// Confidence floor used by reference and traversal queries.
 pub use RefConfidence as Confidence;
-
-impl Default for RefConfidence {
-    fn default() -> Self {
-        Self::SameModule
-    }
-}
 
 /// Filterable reference and relation kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

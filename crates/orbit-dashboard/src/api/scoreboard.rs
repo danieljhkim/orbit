@@ -30,7 +30,7 @@ pub(super) async fn scoreboard(
 ) -> Response {
     let window = match query.window.as_deref() {
         None => ScoreboardWindow::All,
-        Some(raw) => match ScoreboardWindow::from_str(raw) {
+        Some(raw) => match raw.parse::<ScoreboardWindow>() {
             Ok(w) => w,
             Err(e) => {
                 return (

@@ -9,6 +9,7 @@ use orbit_tools::ToolContext;
 
 use orbit_common::types::{TaskPriority, TaskStatus, TaskType};
 use orbit_store::TaskCreateParams;
+use rusqlite::Connection;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -67,17 +68,17 @@ fn run_tool_context_allowlist_honors_task_wildcard() {
 }
 
 #[test]
-fn graph_tool_refresh_from_linked_worktree_attributes_to_worktree_branch() {
+fn graph_tool_sync_from_linked_worktree_attributes_to_worktree_branch() {
     let fixture = GitWorktreeFixture::new();
     let runtime =
         OrbitRuntime::from_roots(&fixture.global_root, &fixture.main_orbit).expect("build runtime");
 
     runtime
         .run_tool_with_context_and_role(
-            "orbit.graph.pack",
+            "orbit.graph.sync",
             json!({
-                "selectors": ["file:Cargo.toml"],
-                "refresh": true,
+                "full": true,
+                "workspace_path": fixture.worktree.to_string_lossy(),
             }),
             Role::Admin,
             ToolContext {
@@ -85,17 +86,12 @@ fn graph_tool_refresh_from_linked_worktree_attributes_to_worktree_branch() {
                 ..Default::default()
             },
         )
-        .expect("pack from worktree");
+        .expect("sync from worktree");
 
-    assert!(
-        fixture
-            .main_orbit
-            .join("knowledge/graph/refs/heads/orbit/ORB-00099-test.json")
-            .is_file(),
-        "worktree branch ref should be written under shared knowledge dir"
-    );
+    let graph_db = worktree_branch_graph_db(&fixture.worktree);
+    assert_eq!(graph_meta(&graph_db, "branch"), "orbit/ORB-00099-test");
     assert_eq!(
-        manifest_head_oid(&fixture.main_orbit.join("knowledge/manifest.json")),
+        graph_meta(&graph_db, "commit_sha"),
         git_output(&fixture.worktree, &["rev-parse", "HEAD"])
     );
 }
@@ -191,11 +187,28 @@ fn git_output(cwd: &Path, args: &[&str]) -> String {
         .to_string()
 }
 
-fn manifest_head_oid(path: &Path) -> String {
-    let raw = std::fs::read_to_string(path).expect("read manifest");
-    let manifest: serde_json::Value = serde_json::from_str(&raw).expect("parse manifest");
-    manifest["git_head_oid"]
-        .as_str()
-        .expect("manifest git_head_oid")
-        .to_string()
+fn worktree_branch_graph_db(worktree: &Path) -> PathBuf {
+    let graph_dir = worktree.join(".orbit").join("graph");
+    let mut matches = std::fs::read_dir(&graph_dir)
+        .expect("read graph dir")
+        .map(|entry| entry.expect("graph entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("orbit_ORB-00099-test.") && name.ends_with(".db")
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matches.len(), 1, "expected one worktree branch graph DB");
+    matches.remove(0)
+}
+
+fn graph_meta(path: &Path, key: &str) -> String {
+    Connection::open(path)
+        .expect("open graph db")
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
+        .expect("read graph meta")
 }

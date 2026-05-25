@@ -237,7 +237,6 @@ fn collect_call_ref(node: Node, source: &str, state: &mut ExtractionState) {
 
     if function.kind() == "identifier" {
         state.push_ref(function, source, None, "call", "fuzzy_name");
-        return;
     }
 
     // Complex callees like (*callback)(x) do not expose an honest target_name
