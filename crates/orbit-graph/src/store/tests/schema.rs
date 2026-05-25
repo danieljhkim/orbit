@@ -3,11 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use git2::{Oid, Repository, RepositoryInitOptions, Signature};
+use git2::{Oid, Repository, RepositoryInitOptions, Signature, build::CheckoutBuilder};
 use rusqlite::Connection;
 
 use crate::store::schema::SCHEMA_VERSION;
-use crate::{EXTRACTOR_VERSION, Graph, SyncPolicy, resolve_db_path};
+use crate::{EXTRACTOR_VERSION, Graph, SyncPolicy, resolve_db_path, resolve_db_path_for_commit};
 
 #[test]
 fn graph_open_creates_documented_schema_and_initial_meta() {
@@ -165,9 +165,14 @@ fn graph_open_records_commit_sha_for_detached_head() {
     let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open detached graph");
     drop(graph);
 
-    let db_path = resolve_db_path(worktree.path(), "HEAD", EXTRACTOR_VERSION)
-        .path()
-        .to_path_buf();
+    let db_path = resolve_db_path_for_commit(
+        worktree.path(),
+        "HEAD",
+        commit_sha.as_str(),
+        EXTRACTOR_VERSION,
+    )
+    .path()
+    .to_path_buf();
     let conn = open_test_connection(&db_path);
     let meta = read_meta(&conn);
     assert_eq!(meta.get("branch").map(String::as_str), Some("HEAD"));
@@ -176,6 +181,81 @@ fn graph_open_records_commit_sha_for_detached_head() {
         Some(commit_sha.as_str())
     );
     assert!(!commit_sha.is_empty());
+}
+
+#[test]
+fn graph_open_uses_distinct_db_files_for_detached_commits() {
+    let worktree = TestWorktree::new("detached-distinct-dbs", "main");
+    let first_commit = worktree.init_git_repo();
+    let second_commit = worktree.commit_file("second.txt", "second\n", "second");
+
+    worktree.detach_head(first_commit.as_str());
+    let first_graph =
+        Graph::open(worktree.path(), SyncPolicy::Manual).expect("open first detached graph");
+    let first_db = first_graph.db_path().path().to_path_buf();
+    drop(first_graph);
+
+    worktree.detach_head(second_commit.as_str());
+    let second_graph =
+        Graph::open(worktree.path(), SyncPolicy::Manual).expect("open second detached graph");
+    let second_db = second_graph.db_path().path().to_path_buf();
+    drop(second_graph);
+
+    assert_ne!(first_db, second_db);
+    assert!(
+        first_db.exists(),
+        "first detached DB should remain after opening another detached commit"
+    );
+    assert!(
+        second_db.exists(),
+        "second detached DB should be created separately"
+    );
+    let expected_first_file = format!("detached-{}.{}.db", &first_commit[..12], EXTRACTOR_VERSION);
+    let expected_second_file =
+        format!("detached-{}.{}.db", &second_commit[..12], EXTRACTOR_VERSION);
+    assert_eq!(
+        first_db.file_name().and_then(|name| name.to_str()),
+        Some(expected_first_file.as_str())
+    );
+    assert_eq!(
+        second_db.file_name().and_then(|name| name.to_str()),
+        Some(expected_second_file.as_str())
+    );
+}
+
+#[test]
+fn graph_open_cleans_unreachable_detached_databases() {
+    let worktree = TestWorktree::new("cleans-unreachable-detached", "main");
+    worktree.init_git_repo();
+    let reachable_commit = worktree.commit_file("reachable.txt", "reachable\n", "reachable");
+    worktree.detach_head(reachable_commit.as_str());
+    let reachable_graph =
+        Graph::open(worktree.path(), SyncPolicy::Manual).expect("open reachable detached graph");
+    let reachable_db = reachable_graph.db_path().path().to_path_buf();
+    drop(reachable_graph);
+
+    worktree.checkout_branch();
+    let unreachable_commit =
+        worktree.create_unreachable_detached_commit("unreachable.txt", "unreachable\n");
+    let unreachable_graph =
+        Graph::open(worktree.path(), SyncPolicy::Manual).expect("open unreachable detached graph");
+    let unreachable_db = unreachable_graph.db_path().path().to_path_buf();
+    drop(unreachable_graph);
+
+    worktree.checkout_branch();
+    let main_graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open main graph");
+    let main_db = main_graph.db_path().path().to_path_buf();
+    drop(main_graph);
+
+    assert!(main_db.exists(), "active branch DB should remain");
+    assert!(
+        reachable_db.exists(),
+        "detached DB reachable from a branch ref should remain"
+    );
+    assert!(
+        !unreachable_db.exists(),
+        "detached DB for commit {unreachable_commit} should be cleaned once no local ref reaches it"
+    );
 }
 
 #[test]
@@ -429,6 +509,57 @@ impl TestWorktree {
             .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
             .expect("initial commit");
         oid.to_string()
+    }
+
+    fn commit_file(&self, rel: &str, content: &str, message: &str) -> String {
+        let repo = Repository::open(&self.path).expect("open git repo");
+        let path = self.path.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create commit file parent");
+        }
+        fs::write(path, content).expect("write commit file");
+
+        let mut index = repo.index().expect("open repo index");
+        index.add_path(Path::new(rel)).expect("add commit file");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        let parent = repo
+            .head()
+            .expect("read HEAD")
+            .peel_to_commit()
+            .expect("peel HEAD to commit");
+        let sig = Signature::now("Orbit Test", "orbit@example.test").expect("test signature");
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+            .expect("create commit");
+        oid.to_string()
+    }
+
+    fn checkout_branch(&self) {
+        let repo = Repository::open(&self.path).expect("open git repo");
+        let branch_ref = format!("refs/heads/{}", self.branch);
+        repo.set_head(branch_ref.as_str())
+            .expect("set HEAD to branch");
+        let mut checkout = CheckoutBuilder::new();
+        checkout.force();
+        repo.checkout_head(Some(&mut checkout))
+            .expect("checkout branch");
+    }
+
+    fn create_unreachable_detached_commit(&self, rel: &str, content: &str) -> String {
+        let repo = Repository::open(&self.path).expect("open git repo");
+        let branch_name = format!("refs/heads/{}", self.branch);
+        let branch_commit_id = repo
+            .find_reference(branch_name.as_str())
+            .expect("find branch ref")
+            .peel_to_commit()
+            .expect("peel branch to commit")
+            .id();
+        repo.set_head_detached(branch_commit_id)
+            .expect("detach from branch commit");
+        drop(repo);
+        self.commit_file(rel, content, "unreachable detached")
     }
 
     fn detach_head(&self, commit_sha: &str) {

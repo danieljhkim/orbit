@@ -12,8 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use git2::Repository;
 pub use orbit_graph_extract::Selector;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OpenFlags, params};
 use serde::Serialize;
 
 mod query;
@@ -406,12 +407,47 @@ impl GraphDbPath {
 /// allowlist, while the returned [`GraphDbPath`] keeps the raw branch name for
 /// future `meta.branch` storage.
 pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u32) -> GraphDbPath {
-    let sanitized_branch = sanitize_branch_for_filename(branch);
-    let filename = format!("{sanitized_branch}.{extractor_version}.db");
+    resolve_db_path_for_commit(worktree_root, branch, "", extractor_version)
+}
+
+/// Resolve the canonical graph database path, using per-commit filenames for detached HEAD.
+///
+/// Branch-attached graphs keep the branch-scoped filename. Detached HEAD graphs
+/// use `detached-<short-sha>.<version>.db` when a commit SHA is available so
+/// concurrent detached checkouts on different commits do not churn the same DB.
+// ADR-0190: detached HEAD DB filenames include a commit prefix to isolate agents.
+pub fn resolve_db_path_for_commit(
+    worktree_root: &Path,
+    branch: &str,
+    commit_sha: &str,
+    extractor_version: u32,
+) -> GraphDbPath {
+    let filename_stem = graph_db_filename_stem(branch, commit_sha);
+    let filename = format!("{filename_stem}.{extractor_version}.db");
     GraphDbPath {
         path: worktree_root.join(".orbit").join("graph").join(filename),
         branch: branch.to_string(),
         extractor_version,
+    }
+}
+
+fn graph_db_filename_stem(branch: &str, commit_sha: &str) -> String {
+    if branch == "HEAD" {
+        detached_commit_prefix(commit_sha)
+            .map(|prefix| format!("detached-{prefix}"))
+            .unwrap_or_else(|| sanitize_branch_for_filename(branch))
+    } else {
+        sanitize_branch_for_filename(branch)
+    }
+}
+
+fn detached_commit_prefix(commit_sha: &str) -> Option<&str> {
+    let commit_sha = commit_sha.trim();
+    let prefix = commit_sha.get(..12)?;
+    if prefix.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Some(prefix)
+    } else {
+        None
     }
 }
 
@@ -437,7 +473,10 @@ fn sanitize_branch_for_filename(branch: &str) -> String {
     sanitized
 }
 
-/// Delete graph database files whose filename embeds an old extractor version.
+/// Delete obsolete graph database files.
+///
+/// Removes old extractor-version files, plus detached-HEAD DBs whose commit is
+/// no longer reachable from any local ref.
 pub fn clean_old_databases(worktree_root: &Path) -> Result<CleanReport, GraphError> {
     let opened = store::open(worktree_root, SyncPolicy::Manual)?;
     clean_old_databases_excluding(worktree_root, opened.db_path.path())
@@ -459,39 +498,183 @@ fn clean_old_databases_excluding(
 
     let entries = fs::read_dir(graph_dir.as_path())
         .map_err(|source| GraphError::io("read graph database directory", &graph_dir, source))?;
+    let mut paths = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| {
             GraphError::io("read graph database directory entry", &graph_dir, source)
         })?;
-        let path = entry.path();
-        if !path.is_file() {
+        paths.push(entry.path());
+    }
+    paths.sort();
+
+    let repo = Repository::discover(worktree_root).ok();
+    let mut delete_paths = Vec::new();
+    for path in paths {
+        if !path.is_file() || is_active_graph_db_family(path.as_path(), active_db_path) {
             continue;
         }
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if graph_db_file_extractor_version(file_name)
-            .is_some_and(|version| version != EXTRACTOR_VERSION)
-            && path != active_db_path
-        {
-            fs::remove_file(path.as_path()).map_err(|source| {
-                GraphError::io("delete old graph database file", &path, source)
-            })?;
-            deleted.push(path);
+        if should_delete_graph_db_file(path.as_path(), repo.as_ref())? {
+            delete_paths.push(path);
         }
+    }
+
+    for path in delete_paths {
+        fs::remove_file(path.as_path())
+            .map_err(|source| GraphError::io("delete old graph database file", &path, source))?;
+        deleted.push(path);
     }
     deleted.sort();
 
     Ok(CleanReport { graph_dir, deleted })
 }
 
-fn graph_db_file_extractor_version(file_name: &str) -> Option<u32> {
+fn should_delete_graph_db_file(path: &Path, repo: Option<&Repository>) -> Result<bool, GraphError> {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(false);
+    };
+    let Some(metadata) = graph_db_file_metadata(file_name) else {
+        return Ok(false);
+    };
+
+    if metadata.extractor_version != EXTRACTOR_VERSION {
+        return Ok(true);
+    }
+
+    // ADR-0190: per-commit detached DBs are pruned by Git reachability.
+    let Some(commit_prefix) = metadata.detached_commit_prefix else {
+        return Ok(false);
+    };
+    if !detached_db_meta_matches(path, commit_prefix.as_str())? {
+        return Ok(false);
+    }
+
+    match repo {
+        Some(repo) => detached_commit_is_unreachable(repo, commit_prefix.as_str()),
+        None => Ok(false),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GraphDbFileMetadata {
+    extractor_version: u32,
+    detached_commit_prefix: Option<String>,
+}
+
+fn graph_db_file_metadata(file_name: &str) -> Option<GraphDbFileMetadata> {
     let db_name = file_name
         .strip_suffix(".db")
         .or_else(|| file_name.strip_suffix(".db-wal"))
         .or_else(|| file_name.strip_suffix(".db-shm"))
         .or_else(|| file_name.strip_suffix(".db.lock"))?;
-    db_name.rsplit_once('.')?.1.parse().ok()
+    let (stem, version) = db_name.rsplit_once('.')?;
+    let extractor_version = version.parse().ok()?;
+    let detached_commit_prefix = stem
+        .strip_prefix("detached-")
+        .filter(|prefix| prefix.len() == 12)
+        .filter(|prefix| prefix.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .map(str::to_string);
+    Some(GraphDbFileMetadata {
+        extractor_version,
+        detached_commit_prefix,
+    })
+}
+
+fn is_active_graph_db_family(path: &Path, active_db_path: &Path) -> bool {
+    graph_db_base_path(path) == graph_db_base_path(active_db_path)
+}
+
+fn graph_db_base_path(path: &Path) -> PathBuf {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return path.to_path_buf();
+    };
+    for suffix in [".db-wal", ".db-shm", ".db.lock"] {
+        if let Some(stem) = file_name.strip_suffix(suffix) {
+            return path.with_file_name(format!("{stem}.db"));
+        }
+    }
+    path.to_path_buf()
+}
+
+fn detached_db_meta_matches(path: &Path, commit_prefix: &str) -> Result<bool, GraphError> {
+    let db_path = graph_db_base_path(path);
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    let Ok(conn) = Connection::open_with_flags(db_path.as_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return Ok(false);
+    };
+    let Ok(mut stmt) =
+        conn.prepare("SELECT key, value FROM meta WHERE key IN ('branch', 'commit_sha')")
+    else {
+        return Ok(false);
+    };
+    let mut rows = stmt
+        .query([])
+        .map_err(|source| GraphError::sqlite("query detached graph metadata", source))?;
+    let mut branch = None;
+    let mut commit_sha = None;
+    while let Some(row) = rows
+        .next()
+        .map_err(|source| GraphError::sqlite("read detached graph metadata row", source))?
+    {
+        let key: String = row
+            .get(0)
+            .map_err(|source| GraphError::sqlite("read detached graph metadata key", source))?;
+        let value: String = row
+            .get(1)
+            .map_err(|source| GraphError::sqlite("read detached graph metadata value", source))?;
+        match key.as_str() {
+            "branch" => branch = Some(value),
+            "commit_sha" => commit_sha = Some(value),
+            _ => {}
+        }
+    }
+    Ok(branch.as_deref() == Some("HEAD")
+        && commit_sha
+            .as_deref()
+            .is_some_and(|sha| sha.starts_with(commit_prefix)))
+}
+
+fn detached_commit_is_unreachable(
+    repo: &Repository,
+    commit_prefix: &str,
+) -> Result<bool, GraphError> {
+    let detached_commit = match repo
+        .revparse_single(commit_prefix)
+        .and_then(|object| object.peel_to_commit())
+    {
+        Ok(commit) => commit.id(),
+        Err(_) => return Ok(true),
+    };
+
+    let refs = repo.references().map_err(|source| {
+        GraphError::invalid_data("list git refs for graph DB cleanup", source.to_string())
+    })?;
+    for reference in refs {
+        let reference = reference.map_err(|source| {
+            GraphError::invalid_data("read git ref for graph DB cleanup", source.to_string())
+        })?;
+        let Some(name) = reference.name() else {
+            continue;
+        };
+        if !name.starts_with("refs/") {
+            continue;
+        }
+        let Ok(ref_commit) = reference.peel_to_commit() else {
+            continue;
+        };
+        let reachable = repo
+            .graph_descendant_of(ref_commit.id(), detached_commit)
+            .map_err(|source| {
+                GraphError::invalid_data("check detached graph DB reachability", source.to_string())
+            })?;
+        if reachable || ref_commit.id() == detached_commit {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 /// Summary returned after removing stale graph database files.
@@ -499,7 +682,7 @@ fn graph_db_file_extractor_version(file_name: &str) -> Option<u32> {
 pub struct CleanReport {
     /// Directory scanned for graph database files.
     pub graph_dir: PathBuf,
-    /// Files deleted because their extractor version was not current.
+    /// Files deleted because their extractor version or detached commit was stale.
     pub deleted: Vec<PathBuf>,
 }
 

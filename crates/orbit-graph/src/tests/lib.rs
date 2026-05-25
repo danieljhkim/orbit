@@ -8,6 +8,7 @@ use rusqlite::{Connection, params};
 use crate::sync::{fail_next_sync_after_scan, sync_leader_count};
 use crate::{
     CalleeEdge, EXTRACTOR_VERSION, Graph, GraphError, Selector, SyncPolicy, resolve_db_path,
+    resolve_db_path_for_commit,
 };
 
 #[test]
@@ -59,6 +60,21 @@ fn db_path_sanitizes_filesystem_hostile_branch_names() {
         );
         assert_eq!(path.branch(), branch);
     }
+}
+
+#[test]
+fn db_path_uses_detached_commit_filename_for_head() {
+    let worktree_root = Path::new("/tmp/orbit-worktree");
+    let commit_sha = "1234567890abcdef1234567890abcdef12345678";
+
+    let detached = resolve_db_path_for_commit(worktree_root, "HEAD", commit_sha, 7);
+
+    assert_eq!(
+        detached.path(),
+        Path::new("/tmp/orbit-worktree/.orbit/graph/detached-1234567890ab.7.db")
+    );
+    assert_eq!(detached.branch(), "HEAD");
+    assert_eq!(detached.extractor_version(), 7);
 }
 
 #[test]
