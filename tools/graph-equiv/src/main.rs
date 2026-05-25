@@ -10,19 +10,21 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use backend::{
     Backend, CalleeEntry, CalleesOutput, ImpactOutput, RefEntry, RefsOutput, SearchEntry,
-    SearchOutput, ShowOutput, V1Backend, V2Backend,
+    SearchOutput, ShowOutput, TraceOutput, V1Backend, V2Backend,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const EXPECTED_CORPUS_SHA256: &str =
-    "3e6d500f59c30707240791ac8e617cdb1a5f77dae08f2f431bec5eacca42eda7";
+    "3c07c90f4635c6e65a206cface7a94b077018f868deb229303b843ca98be7b05";
 const LANGUAGES: [&str; 4] = ["rust", "typescript", "python", "go"];
 const IMPACT_DEPTH: u8 = 3;
+const TRACE_DEPTH: u8 = 3;
 
 fn main() -> ExitCode {
     match try_main() {
@@ -70,6 +72,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         .iter()
         .filter(|result| result.status == QueryStatus::Fail)
         .count();
+    let performance = PerformanceSummary::from_results(&results);
     let report = DiffReport {
         schema_version: 1,
         workspace: options.workspace_root.display().to_string(),
@@ -82,7 +85,10 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             total: results.len(),
             passed: results.len().saturating_sub(failed),
             failed,
+            categorized_diffs: 0,
+            uncategorized_diffs: failed,
         },
+        performance,
         results,
     };
 
@@ -95,62 +101,112 @@ fn try_main() -> Result<(), Box<dyn Error>> {
 
 fn run_query(v1: &dyn Backend, v2: &dyn Backend, query: &CorpusQuery) -> QueryReport {
     match query.kind {
-        QueryKind::Search => compare_backend_outputs(query, || {
-            let v1_rows = v1.search(query.argument.as_str())?;
-            let v2_rows = v2.search(query.argument.as_str())?;
-            Ok(compare_search(v1_rows, v2_rows))
-        }),
-        QueryKind::Show => compare_backend_outputs(query, || {
-            let v1_rows = v1.show(query.argument.as_str())?;
-            let v2_rows = v2.show(query.argument.as_str())?;
-            Ok(compare_show(v1_rows, v2_rows))
-        }),
-        QueryKind::Refs => compare_backend_outputs(query, || {
-            let v1_rows = v1.refs(query.argument.as_str())?;
-            let v2_rows = v2.refs(query.argument.as_str())?;
-            Ok(compare_refs(v1_rows, v2_rows))
-        }),
-        QueryKind::Callees => compare_backend_outputs(query, || {
-            let v1_rows = v1.callees(query.argument.as_str())?;
-            let v2_rows = v2.callees(query.argument.as_str())?;
-            Ok(compare_callees(v1_rows, v2_rows))
-        }),
-        QueryKind::Impact => compare_backend_outputs(query, || {
-            let v1_rows = v1.impact(query.argument.as_str(), IMPACT_DEPTH)?;
-            let v2_rows = v2.impact(query.argument.as_str(), IMPACT_DEPTH)?;
-            Ok(compare_impact(v1_rows, v2_rows))
-        }),
+        QueryKind::Sync => {
+            let v1_rows = measure(|| v1.sync());
+            let v2_rows = measure(|| v2.sync());
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_sync)
+        }
+        QueryKind::Search => {
+            let v1_rows = measure(|| v1.search(query.argument.as_str()));
+            let v2_rows = measure(|| v2.search(query.argument.as_str()));
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_search)
+        }
+        QueryKind::Show => {
+            let v1_rows = measure(|| v1.show(query.argument.as_str()));
+            let v2_rows = measure(|| v2.show(query.argument.as_str()));
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_show)
+        }
+        QueryKind::Refs => {
+            let v1_rows = measure(|| v1.refs(query.argument.as_str()));
+            let v2_rows = measure(|| v2.refs(query.argument.as_str()));
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_refs)
+        }
+        QueryKind::Callees => {
+            let v1_rows = measure(|| v1.callees(query.argument.as_str()));
+            let v2_rows = measure(|| v2.callees(query.argument.as_str()));
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_callees)
+        }
+        QueryKind::Impact => {
+            let v1_rows = measure(|| v1.impact(query.argument.as_str(), IMPACT_DEPTH));
+            let v2_rows = measure(|| v2.impact(query.argument.as_str(), IMPACT_DEPTH));
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_impact)
+        }
+        QueryKind::Trace => {
+            let v1_rows = measure(|| v1.trace(query.argument.as_str(), TRACE_DEPTH));
+            let v2_rows = measure(|| v2.trace(query.argument.as_str(), TRACE_DEPTH));
+            compare_backend_outputs(query, v1_rows, v2_rows, compare_trace)
+        }
     }
 }
 
-fn compare_backend_outputs<F>(query: &CorpusQuery, run: F) -> QueryReport
+fn measure<T>(
+    run: impl FnOnce() -> Result<T, backend::BackendError>,
+) -> Measured<Result<T, backend::BackendError>> {
+    let start = Instant::now();
+    let output = run();
+    Measured {
+        output,
+        duration: start.elapsed(),
+    }
+}
+
+fn compare_backend_outputs<T, F>(
+    query: &CorpusQuery,
+    v1: Measured<Result<T, backend::BackendError>>,
+    v2: Measured<Result<T, backend::BackendError>>,
+    compare: F,
+) -> QueryReport
 where
-    F: FnOnce() -> Result<Comparison, backend::BackendError>,
+    F: FnOnce(T, T) -> Comparison,
 {
-    match run() {
-        Ok(comparison) => {
+    let timing = TimingReport::from_durations(v1.duration, v2.duration);
+    match (v1.output, v2.output) {
+        (Ok(v1_output), Ok(v2_output)) => {
+            let comparison = compare(v1_output, v2_output);
             let status = if comparison.violations.is_empty() {
                 QueryStatus::Pass
             } else {
                 QueryStatus::Fail
             };
-            QueryReport::from_comparison(query, status, comparison)
+            QueryReport::from_comparison(query, status, comparison, timing)
         }
-        Err(error) => QueryReport::from_comparison(
+        (v1_result, v2_result) => QueryReport::from_comparison(
             query,
             QueryStatus::Fail,
             Comparison {
                 tolerance: query.kind.tolerance().to_string(),
-                v1_count: 0,
-                v2_count: 0,
+                v1_count: usize::from(v1_result.is_ok()),
+                v2_count: usize::from(v2_result.is_ok()),
                 ignored_v2_count: 0,
-                violations: vec![Violation {
-                    kind: "backend_error".to_string(),
-                    rows: json!([{ "error": error.to_string() }]),
-                }],
+                violations: backend_errors(v1_result.err(), v2_result.err()),
             },
+            timing,
         ),
     }
+}
+
+fn backend_errors(
+    v1: Option<backend::BackendError>,
+    v2: Option<backend::BackendError>,
+) -> Vec<Violation> {
+    let mut rows = Vec::new();
+    if let Some(error) = v1 {
+        rows.push(json!({ "backend": "v1", "error": error.to_string() }));
+    }
+    if let Some(error) = v2 {
+        rows.push(json!({ "backend": "v2", "error": error.to_string() }));
+    }
+    vec![Violation {
+        kind: "backend_error".to_string(),
+        rows: json!(rows),
+    }]
+}
+
+fn compare_sync(_: (), _: ()) -> Comparison {
+    let mut comparison = Comparison::new("sync: both backends complete successfully");
+    comparison.v1_count = 1;
+    comparison.v2_count = 1;
+    comparison
 }
 
 fn compare_search(v1: SearchOutput, v2: SearchOutput) -> Comparison {
@@ -218,6 +274,17 @@ fn compare_impact(v1: ImpactOutput, v2: ImpactOutput) -> Comparison {
     let v2_rows = v2.into_iter().collect::<BTreeSet<_>>();
     set_comparison(
         "impact: depth=3 set of touched symbol qualified names",
+        v1_rows,
+        v2_rows,
+        0,
+    )
+}
+
+fn compare_trace(v1: TraceOutput, v2: TraceOutput) -> Comparison {
+    let v1_rows = v1.into_iter().collect::<BTreeSet<_>>();
+    let v2_rows = v2.into_iter().collect::<BTreeSet<_>>();
+    set_comparison(
+        "trace: set of root-to-callee name paths",
         v1_rows,
         v2_rows,
         0,
@@ -425,44 +492,57 @@ fn parse_corpus_file(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum QueryKind {
+    Sync,
     Search,
     Show,
     Refs,
     Callees,
     Impact,
+    Trace,
 }
 
 impl QueryKind {
     fn parse(value: &str) -> Option<Self> {
         match value {
+            "sync" => Some(Self::Sync),
             "search" => Some(Self::Search),
             "show" => Some(Self::Show),
             "refs" => Some(Self::Refs),
             "callees" => Some(Self::Callees),
             "impact" => Some(Self::Impact),
+            "trace" => Some(Self::Trace),
             _ => None,
         }
     }
 
     fn as_str(self) -> &'static str {
         match self {
+            Self::Sync => "sync",
             Self::Search => "search",
             Self::Show => "show",
             Self::Refs => "refs",
             Self::Callees => "callees",
             Self::Impact => "impact",
+            Self::Trace => "trace",
         }
     }
 
     fn tolerance(self) -> &'static str {
         match self {
+            Self::Sync => "both backends complete successfully",
             Self::Search => "unordered set of (kind,file,name); v2 string/config extras ignored",
             Self::Show => "source bytes byte-equal",
             Self::Refs => "set of (file,line,kind) at confidence >= same_module",
             Self::Callees => "set of (file,line,target_name)",
             Self::Impact => "depth=3 set of touched symbol qualified names",
+            Self::Trace => "set of root-to-callee name paths",
         }
     }
+}
+
+struct Measured<T> {
+    output: T,
+    duration: Duration,
 }
 
 #[derive(Debug)]
@@ -502,6 +582,7 @@ struct DiffReport {
     workspace: String,
     corpus: CorpusReport,
     summary: Summary,
+    performance: PerformanceSummary,
     results: Vec<QueryReport>,
 }
 
@@ -517,6 +598,59 @@ struct Summary {
     total: usize,
     passed: usize,
     failed: usize,
+    categorized_diffs: usize,
+    uncategorized_diffs: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct PerformanceSummary {
+    v1_median_us: u128,
+    v1_p95_us: u128,
+    v2_median_us: u128,
+    v2_p95_us: u128,
+}
+
+impl PerformanceSummary {
+    fn from_results(results: &[QueryReport]) -> Self {
+        let mut v1 = results
+            .iter()
+            .map(|result| result.timing.v1_us)
+            .collect::<Vec<_>>();
+        let mut v2 = results
+            .iter()
+            .map(|result| result.timing.v2_us)
+            .collect::<Vec<_>>();
+        Self {
+            v1_median_us: percentile(&mut v1, 50),
+            v1_p95_us: percentile(&mut v1, 95),
+            v2_median_us: percentile(&mut v2, 50),
+            v2_p95_us: percentile(&mut v2, 95),
+        }
+    }
+}
+
+fn percentile(values: &mut [u128], pct: usize) -> u128 {
+    if values.is_empty() {
+        return 0;
+    }
+    values.sort_unstable();
+    let index = ((values.len() * pct).div_ceil(100)).saturating_sub(1);
+    values[index.min(values.len() - 1)]
+}
+
+#[derive(Debug, Serialize)]
+struct TimingReport {
+    v1_us: u128,
+    v2_us: u128,
+}
+
+impl TimingReport {
+    fn from_durations(v1: Duration, v2: Duration) -> Self {
+        Self {
+            v1_us: v1.as_micros(),
+            v2_us: v2.as_micros(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -532,11 +666,17 @@ struct QueryReport {
     v2_count: usize,
     #[serde(skip_serializing_if = "is_zero")]
     ignored_v2_count: usize,
+    timing: TimingReport,
     violations: Vec<Violation>,
 }
 
 impl QueryReport {
-    fn from_comparison(query: &CorpusQuery, status: QueryStatus, comparison: Comparison) -> Self {
+    fn from_comparison(
+        query: &CorpusQuery,
+        status: QueryStatus,
+        comparison: Comparison,
+        timing: TimingReport,
+    ) -> Self {
         Self {
             language: query.language.clone(),
             source: query.file.clone(),
@@ -548,6 +688,7 @@ impl QueryReport {
             v1_count: comparison.v1_count,
             v2_count: comparison.v2_count,
             ignored_v2_count: comparison.ignored_v2_count,
+            timing,
             violations: comparison.violations,
         }
     }

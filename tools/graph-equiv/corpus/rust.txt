@@ -1,4 +1,5 @@
 # Frozen graph-equiv selectors for Rust fixture coverage.
+sync workspace
 search rust_helper
 search RustWidget
 show symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
