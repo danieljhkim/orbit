@@ -26,6 +26,7 @@ fn run_once(
 ) -> Result<SyncReport, GraphError> {
     let started = Instant::now();
     let diff = scanner::scan_diff(db_path, worktree_root, mode)?;
+    maybe_fail_after_scan(db_path)?;
     let pass1 = pass1::run(db_path, worktree_root, mode, &diff)?;
     pass2::run(db_path, mode, pass1.refs)?;
     let duration = started.elapsed();
@@ -102,6 +103,40 @@ where
 fn in_flight_syncs() -> &'static Mutex<HashMap<PathBuf, Arc<InFlightSync>>> {
     static IN_FLIGHT_SYNCS: OnceLock<Mutex<HashMap<PathBuf, Arc<InFlightSync>>>> = OnceLock::new();
     IN_FLIGHT_SYNCS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+fn maybe_fail_after_scan(db_path: &Path) -> Result<(), GraphError> {
+    let mut paths = fail_after_scan_paths()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if paths.remove(db_path) {
+        return Err(GraphError::invalid_data(
+            "run graph sync",
+            "injected sync failure after scan",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn maybe_fail_after_scan(_db_path: &Path) -> Result<(), GraphError> {
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_sync_after_scan(db_path: &Path) {
+    // L-0051: scope injected sync failures by DB path because orbit-graph tests run in parallel.
+    fail_after_scan_paths()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(db_path.to_path_buf());
+}
+
+#[cfg(test)]
+fn fail_after_scan_paths() -> &'static Mutex<std::collections::BTreeSet<PathBuf>> {
+    static FAIL_AFTER_SCAN: OnceLock<Mutex<std::collections::BTreeSet<PathBuf>>> = OnceLock::new();
+    FAIL_AFTER_SCAN.get_or_init(|| Mutex::new(std::collections::BTreeSet::new()))
 }
 
 #[cfg(test)]
