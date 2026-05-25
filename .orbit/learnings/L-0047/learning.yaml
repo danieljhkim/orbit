@@ -1,0 +1,22 @@
+schema_version: 1
+id: L-0047
+status: active
+scope:
+  paths:
+  - crates/orbit-knowledge/src/extract/mod.rs
+  - crates/orbit-graph-extract/src/languages/**/*.rs
+  tags:
+  - orbit-graph
+  - extractors
+summary: Preserve orbit-knowledge bridge shims for legacy extraction leaves until its query surface intentionally migrates
+body: |-
+  During ORB-00306, delegating `orbit-knowledge::extract` directly to `orbit-graph-extract` failed existing orbit-knowledge behavior in a few places because the graph-extract ports intentionally emit the raw graph model, while orbit-knowledge still exposes legacy `ExtractionResult` leaves and spans. The bridge currently preserves legacy-only C `#define` macro leaves, Kotlin package/object/companion compatibility, Ruby `attr_*` synthetic methods, and Markdown heading section extents.
+
+  Do not delete those bridge shims merely because `orbit-graph-extract` does not emit identical rows. Remove or alter them only when the downstream orbit-knowledge query surface has been intentionally migrated, accepted, or retired.
+evidence:
+- kind: task
+  reference: ORB-00306
+created_at: 2026-05-25T00:44:21.360292Z
+updated_at: 2026-05-25T00:44:21.360292Z
+created_by: codex
+priority: 120
