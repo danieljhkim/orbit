@@ -1,6 +1,7 @@
 //! Graph synchronization orchestration.
 
 pub(crate) mod pass1;
+pub(crate) mod pass2;
 pub(crate) mod scanner;
 
 use std::collections::HashMap;
@@ -26,7 +27,7 @@ fn run_once(
     let started = Instant::now();
     let diff = scanner::scan_diff(db_path, worktree_root, mode)?;
     let pass1 = pass1::run(db_path, worktree_root, mode, &diff)?;
-    run_pass2(pass1.refs);
+    pass2::run(db_path, mode, pass1.refs)?;
     let duration = started.elapsed();
 
     Ok(SyncReport {
@@ -35,14 +36,6 @@ fn run_once(
         files_removed: pass1.files_removed,
         duration,
     })
-}
-
-fn run_pass2(refs_by_file: Vec<pass1::ExtractedFileRefs>) {
-    // P3.3 owns resolution and DB writes. Pass 1 still hands the in-memory refs
-    // through this sync boundary so no staging table is needed later.
-    for file_refs in refs_by_file {
-        let _ = (file_refs.file_path, file_refs.refs);
-    }
 }
 
 type SyncResult = Result<SyncReport, GraphError>;
