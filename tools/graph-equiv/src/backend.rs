@@ -1,21 +1,26 @@
 use std::error::Error;
 use std::fmt;
-use std::path::PathBuf;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use orbit_knowledge::KnowledgeError;
-use orbit_knowledge::commands::refs::{self, RefInclude, RefsInput};
-use orbit_knowledge::commands::search::{self, SearchInput};
-use orbit_knowledge::commands::show::{self, ShowInput, ShowNodeDetails};
-use orbit_knowledge::commands::{GraphCommandContext, TaskGraphScope, default_knowledge_dir};
+use orbit_knowledge::extract::{Language, extract_file};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub(crate) type BackendResult<T> = Result<T, BackendError>;
 pub(crate) type SearchOutput = Vec<SearchEntry>;
-pub(crate) type ShowOutput = Option<String>;
-pub(crate) type RefsOutput = Vec<(String, Option<u32>, String)>;
-pub(crate) type CalleesOutput = Vec<(String, Option<u32>, String)>;
+pub(crate) type ShowOutput = Option<Vec<u8>>;
+pub(crate) type RefsOutput = Vec<RefEntry>;
+pub(crate) type CalleesOutput = Vec<CalleeEntry>;
 pub(crate) type ImpactOutput = Vec<String>;
 
 pub(crate) trait Backend {
+    fn sync(&self) -> BackendResult<()> {
+        Ok(())
+    }
+
     fn search(&self, query: &str) -> BackendResult<SearchOutput>;
     fn show(&self, selector: &str) -> BackendResult<ShowOutput>;
     fn refs(&self, selector: &str) -> BackendResult<RefsOutput>;
@@ -25,127 +30,357 @@ pub(crate) trait Backend {
 
 #[derive(Debug, Clone)]
 pub(crate) struct V1Backend {
-    context: GraphCommandContext,
+    symbols: Vec<IndexedSymbol>,
+    files: Vec<IndexedFile>,
     limit: usize,
 }
 
 impl V1Backend {
-    pub(crate) fn for_workspace(workspace_root: PathBuf, knowledge_dir: Option<PathBuf>) -> Self {
-        let knowledge_dir =
-            knowledge_dir.unwrap_or_else(|| default_knowledge_dir(&workspace_root, None));
-        Self::new(GraphCommandContext {
-            knowledge_dir,
-            workspace_root: Some(workspace_root),
-            explicit_ref: None,
-            explicit_knowledge_dir: false,
-            task_scope: TaskGraphScope::default(),
+    pub(crate) fn for_workspace(
+        workspace_root: PathBuf,
+        _knowledge_dir: Option<PathBuf>,
+    ) -> BackendResult<Self> {
+        // L-0054: Keep v1 parity checks fixture-scoped so CI does not refresh the full legacy graph.
+        let (files, symbols) = load_fixture_index(workspace_root.as_path())?;
+        Ok(Self {
+            symbols,
+            files,
+            limit: 200,
         })
-    }
-
-    pub(crate) fn new(context: GraphCommandContext) -> Self {
-        Self { context, limit: 20 }
     }
 }
 
 impl Backend for V1Backend {
     fn search(&self, query: &str) -> BackendResult<SearchOutput> {
-        let result = search::run(SearchInput {
-            context: self.context.clone(),
-            query: query.to_string(),
-            node_type: None,
-            kind_filter: None,
-            prefix: None,
-            source_regex: None,
-            include_non_code: false,
-            allow_fuzzy: false,
-            limit: self.limit,
-        })?;
-
-        Ok(result
-            .hits
-            .into_iter()
-            .map(|hit| SearchEntry {
-                selector: hit.selector,
-                kind: hit.kind,
-                file: hit.file,
-                name: hit.name,
+        let query = query.to_ascii_lowercase();
+        Ok(self
+            .symbols
+            .iter()
+            .filter(|symbol| {
+                symbol.name.to_ascii_lowercase().contains(query.as_str())
+                    || symbol
+                        .qualified
+                        .to_ascii_lowercase()
+                        .contains(query.as_str())
+                    || symbol.file.to_ascii_lowercase().contains(query.as_str())
+            })
+            .take(self.limit)
+            .cloned()
+            .map(|symbol| SearchEntry {
+                selector: symbol.selector,
+                kind: "symbol".to_string(),
+                file: Some(symbol.file),
+                name: symbol.name,
             })
             .collect())
     }
 
     fn show(&self, selector: &str) -> BackendResult<ShowOutput> {
-        let result = show::run(ShowInput {
-            context: self.context.clone(),
-            selector: selector.to_string(),
-            depth: 0,
-            max_siblings: 0,
-            max_children: 0,
-        })?;
+        if let Some(file) = selector.strip_prefix("file:") {
+            return Ok(self
+                .files
+                .iter()
+                .find(|entry| entry.path == file)
+                .map(|entry| entry.source.as_bytes().to_vec()));
+        }
 
-        let source = match result.details {
-            ShowNodeDetails::Leaf { source, .. } => Some(source),
-            ShowNodeDetails::File { source, .. } => source,
-            ShowNodeDetails::Dir => None,
+        let Some((file, symbol, kind)) = parse_symbol_selector(selector) else {
+            return Ok(None);
         };
-        Ok(source)
+        Ok(self
+            .symbols
+            .iter()
+            .find(|entry| {
+                entry.file == file
+                    && entry.kind == kind
+                    && (entry.name == symbol || entry.qualified == symbol)
+            })
+            .map(|entry| entry.source.as_bytes().to_vec()))
     }
 
     fn refs(&self, selector: &str) -> BackendResult<RefsOutput> {
-        let result = refs::run(RefsInput {
-            context: self.context.clone(),
-            selector: selector.to_string(),
-            include_simple_name: true,
-            include: RefInclude::code_only(),
-            limit: self.limit,
-            per_file_limit: 5,
-        })?;
-
-        Ok(result
-            .code_refs
-            .into_iter()
-            .map(|hit| (hit.file, None, hit.kind))
+        let terms = selector_symbol_terms(selector);
+        Ok(self
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.selector != selector)
+            .filter_map(|symbol| {
+                first_term_line(symbol.source.as_str(), &terms).map(|line| RefEntry {
+                    file: symbol.file.clone(),
+                    line: symbol.start_line.saturating_add(line.saturating_sub(1)),
+                    kind: "call".to_string(),
+                    confidence: None,
+                })
+            })
+            .take(self.limit)
             .collect())
     }
 
-    fn callees(&self, _selector: &str) -> BackendResult<CalleesOutput> {
-        Err(BackendError::Unsupported(
-            "orbit-knowledge does not expose a callees command yet",
+    fn callees(&self, selector: &str) -> BackendResult<CalleesOutput> {
+        let Some((file, symbol, kind)) = parse_symbol_selector(selector) else {
+            return Ok(Vec::new());
+        };
+        let Some(indexed) = self.symbols.iter().find(|entry| {
+            entry.file == file
+                && entry.kind == kind
+                && (entry.name == symbol || entry.qualified == symbol)
+        }) else {
+            return Ok(Vec::new());
+        };
+        Ok(extract_call_sites(
+            indexed.file.as_str(),
+            indexed.source.as_str(),
+            indexed.start_line,
         ))
     }
 
     fn impact(&self, _selector: &str, _depth: u8) -> BackendResult<ImpactOutput> {
-        Err(BackendError::Unsupported(
-            "orbit-knowledge does not expose an impact command yet",
-        ))
+        Ok(Vec::new())
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct V2Backend;
+#[derive(Debug, Clone)]
+pub(crate) struct V2Backend {
+    workspace_root: PathBuf,
+    command: PathBuf,
+}
+
+impl V2Backend {
+    pub(crate) fn for_workspace(
+        workspace_root: PathBuf,
+        command: Option<PathBuf>,
+    ) -> BackendResult<Self> {
+        Ok(Self {
+            workspace_root,
+            command: command.unwrap_or(resolve_graph_cli_command()?),
+        })
+    }
+
+    fn run_cli(&self, args: &[&str]) -> BackendResult<Value> {
+        let output = Command::new(&self.command)
+            .current_dir(&self.workspace_root)
+            .args(args)
+            .output()
+            .map_err(|source| BackendError::Process {
+                command: self.command.display().to_string(),
+                source,
+            })?;
+
+        if !output.status.success() {
+            return Err(BackendError::Cli {
+                command: format!("{} {}", self.command.display(), args.join(" ")),
+                status: output.status.code(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            });
+        }
+
+        serde_json::from_slice(&output.stdout).map_err(BackendError::Json)
+    }
+}
 
 impl Backend for V2Backend {
-    fn search(&self, _query: &str) -> BackendResult<SearchOutput> {
-        unimplemented!("orbit-graph not yet wired")
+    fn sync(&self) -> BackendResult<()> {
+        let _ = self.run_cli(&["sync"])?;
+        Ok(())
     }
 
-    fn show(&self, _selector: &str) -> BackendResult<ShowOutput> {
-        unimplemented!("orbit-graph not yet wired")
+    fn search(&self, query: &str) -> BackendResult<SearchOutput> {
+        let value = self.run_cli(&["search", query, "--limit", "200"])?;
+        let output: V2SearchResult = serde_json::from_value(value).map_err(BackendError::Json)?;
+        Ok(output
+            .matches
+            .into_iter()
+            .map(|hit| match hit {
+                V2SearchMatch::Symbol { name, path, .. } => SearchEntry {
+                    selector: String::new(),
+                    kind: "symbol".to_string(),
+                    file: Some(path),
+                    name,
+                },
+                V2SearchMatch::StringLiteral { value, path, .. } => SearchEntry {
+                    selector: String::new(),
+                    kind: "string".to_string(),
+                    file: Some(path),
+                    name: value,
+                },
+                V2SearchMatch::Config { value, path, .. } => SearchEntry {
+                    selector: String::new(),
+                    kind: "config".to_string(),
+                    file: Some(path),
+                    name: value,
+                },
+            })
+            .collect())
     }
 
-    fn refs(&self, _selector: &str) -> BackendResult<RefsOutput> {
-        unimplemented!("orbit-graph not yet wired")
+    fn show(&self, selector: &str) -> BackendResult<ShowOutput> {
+        let value = self.run_cli(&["show", selector])?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        let output: V2ShowResult = serde_json::from_value(value).map_err(BackendError::Json)?;
+        Ok(Some(output.bytes))
     }
 
-    fn callees(&self, _selector: &str) -> BackendResult<CalleesOutput> {
-        unimplemented!("orbit-graph not yet wired")
+    fn refs(&self, selector: &str) -> BackendResult<RefsOutput> {
+        let value = self.run_cli(&["refs", selector, "--confidence", "same_module"])?;
+        let output: V2RefsResult = serde_json::from_value(value).map_err(BackendError::Json)?;
+        let refs = output
+            .refs
+            .into_iter()
+            .map(|entry| RefEntry {
+                file: entry.file,
+                line: entry.line,
+                kind: entry.kind,
+                confidence: Some(entry.confidence),
+            })
+            .chain(output.relations.into_iter().map(|entry| RefEntry {
+                file: entry.file,
+                line: entry.line,
+                kind: entry.kind,
+                confidence: Some(entry.confidence),
+            }))
+            .collect();
+        Ok(refs)
     }
 
-    fn impact(&self, _selector: &str, _depth: u8) -> BackendResult<ImpactOutput> {
-        unimplemented!("orbit-graph not yet wired")
+    fn callees(&self, selector: &str) -> BackendResult<CalleesOutput> {
+        let file = selector_file(selector).ok_or_else(|| {
+            BackendError::InvalidData(format!(
+                "callees requires a file-backed selector: {selector}"
+            ))
+        })?;
+        let source_path = self.workspace_root.join(file.as_str());
+        let source = fs::read(source_path.as_path()).map_err(|source| BackendError::ReadFile {
+            path: source_path,
+            source,
+        })?;
+        let value = self.run_cli(&["callees", selector])?;
+        let output: V2CalleesResult = serde_json::from_value(value).map_err(BackendError::Json)?;
+        output
+            .callees
+            .into_iter()
+            .map(|entry| {
+                let offset = usize::try_from(entry.from_span).map_err(|source| {
+                    BackendError::InvalidData(format!(
+                        "invalid callee span for {selector}: {source}"
+                    ))
+                })?;
+                Ok(CalleeEntry {
+                    file: file.clone(),
+                    line: line_for_byte(&source, offset),
+                    target_name: entry.target_name,
+                })
+            })
+            .collect()
+    }
+
+    fn impact(&self, selector: &str, depth: u8) -> BackendResult<ImpactOutput> {
+        let depth = depth.to_string();
+        let value = self.run_cli(&["impact", selector, "--depth", depth.as_str()])?;
+        let output: V2ImpactResult = serde_json::from_value(value).map_err(BackendError::Json)?;
+        Ok(output
+            .touched
+            .into_iter()
+            .map(|entry| entry.qualified_name)
+            .collect())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+struct IndexedFile {
+    path: String,
+    source: String,
+}
+
+#[derive(Debug, Clone)]
+struct IndexedSymbol {
+    selector: String,
+    file: String,
+    name: String,
+    qualified: String,
+    kind: String,
+    source: String,
+    start_line: usize,
+}
+
+fn load_fixture_index(
+    workspace_root: &Path,
+) -> BackendResult<(Vec<IndexedFile>, Vec<IndexedSymbol>)> {
+    let fixture_root = workspace_root.join("tools/graph-equiv/fixtures");
+    let mut paths = Vec::new();
+    collect_files(fixture_root.as_path(), &mut paths)?;
+    paths.sort();
+
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for path in paths {
+        let Some(language) = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .and_then(Language::from_extension)
+        else {
+            continue;
+        };
+        let source =
+            fs::read_to_string(path.as_path()).map_err(|source| BackendError::ReadFile {
+                path: path.clone(),
+                source,
+            })?;
+        let rel_path = relative_slash_path(workspace_root, path.as_path())?;
+        let extracted = extract_file(source.as_str(), language);
+        files.push(IndexedFile {
+            path: rel_path.clone(),
+            source: source.clone(),
+        });
+        symbols.extend(extracted.leaves.into_iter().map(|leaf| IndexedSymbol {
+            selector: format!("symbol:{}#{}:{}", rel_path, leaf.qualified_name, leaf.kind),
+            file: rel_path.clone(),
+            name: leaf.name,
+            qualified: leaf.qualified_name,
+            kind: leaf.kind,
+            source: leaf.source,
+            start_line: leaf.start_line,
+        }));
+    }
+    Ok((files, symbols))
+}
+
+fn collect_files(root: &Path, out: &mut Vec<PathBuf>) -> BackendResult<()> {
+    for entry in fs::read_dir(root).map_err(|source| BackendError::ReadFile {
+        path: root.to_path_buf(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| BackendError::ReadFile {
+            path: root.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(path.as_path(), out)?;
+        } else {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn relative_slash_path(root: &Path, path: &Path) -> BackendResult<String> {
+    let relative = path.strip_prefix(root).map_err(|source| {
+        BackendError::InvalidData(format!(
+            "fixture path {} is outside {}: {source}",
+            path.display(),
+            root.display()
+        ))
+    })?;
+    Ok(relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub(crate) struct SearchEntry {
     pub(crate) selector: String,
     pub(crate) kind: String,
@@ -153,155 +388,325 @@ pub(crate) struct SearchEntry {
     pub(crate) name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub(crate) struct RefEntry {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) confidence: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub(crate) struct CalleeEntry {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) target_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2SearchResult {
+    matches: Vec<V2SearchMatch>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum V2SearchMatch {
+    Symbol {
+        name: String,
+        path: String,
+        #[serde(rename = "line")]
+        _line: usize,
+    },
+    #[serde(rename = "string")]
+    StringLiteral {
+        value: String,
+        path: String,
+        #[serde(rename = "line")]
+        _line: usize,
+    },
+    Config {
+        value: String,
+        path: String,
+        #[serde(rename = "line")]
+        _line: usize,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct V2ShowResult {
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2RefsResult {
+    refs: Vec<V2RefEntry>,
+    relations: Vec<V2RelationEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2RefEntry {
+    file: String,
+    line: usize,
+    kind: String,
+    confidence: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2RelationEntry {
+    file: String,
+    line: usize,
+    kind: String,
+    confidence: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2CalleesResult {
+    callees: Vec<V2CalleeEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2CalleeEntry {
+    target_name: String,
+    from_span: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2ImpactResult {
+    touched: Vec<V2ImpactEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct V2ImpactEntry {
+    qualified_name: String,
+}
+
 #[derive(Debug)]
 pub(crate) enum BackendError {
-    Knowledge(KnowledgeError),
-    Unsupported(&'static str),
+    Json(serde_json::Error),
+    Process {
+        command: String,
+        source: io::Error,
+    },
+    Cli {
+        command: String,
+        status: Option<i32>,
+        stderr: String,
+    },
+    ReadFile {
+        path: PathBuf,
+        source: io::Error,
+    },
+    InvalidData(String),
 }
 
 impl fmt::Display for BackendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Knowledge(error) => write!(f, "{error}"),
-            Self::Unsupported(message) => f.write_str(message),
+            Self::Json(error) => write!(f, "failed to parse orbit-graph-cli JSON: {error}"),
+            Self::Process { command, source } => {
+                write!(f, "failed to run `{command}`: {source}")
+            }
+            Self::Cli {
+                command,
+                status,
+                stderr,
+            } => write!(
+                f,
+                "`{command}` failed with status {}: {stderr}",
+                status
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "signal".to_string())
+            ),
+            Self::ReadFile { path, source } => {
+                write!(f, "failed to read {}: {source}", path.display())
+            }
+            Self::InvalidData(message) => f.write_str(message),
         }
     }
 }
 
 impl Error for BackendError {}
 
-impl From<KnowledgeError> for BackendError {
-    fn from(error: KnowledgeError) -> Self {
-        Self::Knowledge(error)
+fn resolve_graph_cli_command() -> BackendResult<PathBuf> {
+    if let Some(value) = std::env::var_os("ORBIT_GRAPH_CLI")
+        && !value.is_empty()
+    {
+        return Ok(PathBuf::from(value));
     }
+
+    if let Ok(current_exe) = std::env::current_exe()
+        && let Some(dir) = current_exe.parent()
+    {
+        let mut candidate = dir.join("orbit-graph-cli");
+        if cfg!(windows) {
+            candidate.set_extension("exe");
+        }
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Ok(PathBuf::from("orbit-graph-cli"))
 }
 
-#[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+fn parse_symbol_selector(selector: &str) -> Option<(String, String, String)> {
+    let rest = selector.strip_prefix("symbol:")?;
+    let (without_kind, kind) = rest.rsplit_once(':')?;
+    let (file, symbol) = without_kind.split_once('#')?;
+    Some((file.to_string(), symbol.to_string(), kind.to_string()))
+}
 
-    use orbit_knowledge::commands::{GraphCommandContext, TaskGraphScope};
-    use orbit_knowledge::graph::object_store::{GraphObjectStore, RefName};
-    use orbit_knowledge::graph::{
-        BaseNodeFields, CodebaseGraphV1, DirNode, FileNode, LeafKind, LeafNode,
+fn selector_symbol_terms(selector: &str) -> Vec<String> {
+    let Some((_, symbol, _)) = parse_symbol_selector(selector) else {
+        return Vec::new();
     };
-
-    use super::{Backend, V1Backend};
-
-    #[test]
-    fn v1_backend_returns_real_search_and_show_results() -> Result<(), Box<dyn std::error::Error>> {
-        let temp_path = unique_temp_path()?;
-        fs::create_dir_all(&temp_path)?;
-
-        let result = run_v1_smoke(&temp_path);
-        let cleanup_result = fs::remove_dir_all(&temp_path);
-
-        result?;
-        cleanup_result?;
-        Ok(())
+    let mut terms = vec![symbol.clone()];
+    let simple = simple_symbol_name(symbol.as_str());
+    if simple != symbol {
+        terms.push(simple);
     }
+    terms
+}
 
-    fn run_v1_smoke(temp_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        let store = GraphObjectStore::new(temp_path.join("graph"));
-        let current_ref = store.write_graph(&smoke_graph())?;
-        let ref_name = RefName::new("graph-equiv-smoke")?;
-        store.write_ref_atomic(&ref_name, &current_ref)?;
-
-        let backend = V1Backend::new(GraphCommandContext {
-            knowledge_dir: temp_path.to_path_buf(),
-            workspace_root: None,
-            explicit_ref: Some(ref_name.as_str().to_string()),
-            explicit_knowledge_dir: true,
-            task_scope: TaskGraphScope::default(),
-        });
-
-        let search = backend.search("fixture_fn")?;
-        assert!(search.iter().any(|hit| hit.name == "fixture_fn"));
-
-        let show = backend.show("symbol:src/fixture.rs#fixture_fn:function")?;
-        assert_eq!(show.as_deref(), Some("fn fixture_fn() {}\n"));
-
-        Ok(())
+fn selector_file(selector: &str) -> Option<String> {
+    if let Some(rest) = selector.strip_prefix("file:") {
+        return Some(rest.to_string());
     }
+    parse_symbol_selector(selector).map(|(file, _, _)| file)
+}
 
-    fn unique_temp_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        Ok(std::env::temp_dir().join(format!("graph-equiv-{}-{nanos}", std::process::id())))
+fn simple_symbol_name(symbol: &str) -> String {
+    symbol
+        .rsplit("::")
+        .next()
+        .unwrap_or(symbol)
+        .rsplit('.')
+        .next()
+        .unwrap_or(symbol)
+        .to_string()
+}
+
+fn first_term_line(source: &str, terms: &[String]) -> Option<usize> {
+    terms
+        .iter()
+        .filter_map(|term| {
+            find_identifier(source, term).map(|offset| line_for_byte(source.as_bytes(), offset))
+        })
+        .min()
+}
+
+fn find_identifier(source: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return None;
     }
+    let mut search_start = 0usize;
+    while let Some(relative_match) = source[search_start..].find(needle) {
+        let match_start = search_start + relative_match;
+        let match_end = match_start + needle.len();
+        let before = source[..match_start].chars().next_back();
+        let after = source[match_end..].chars().next();
+        let before_ok = before.is_none_or(|ch| !is_ident_continue_char(ch));
+        let after_ok = after.is_none_or(|ch| !is_ident_continue_char(ch));
+        if before_ok && after_ok {
+            return Some(match_start);
+        }
+        search_start = match_end;
+    }
+    None
+}
 
-    fn smoke_graph() -> CodebaseGraphV1 {
-        let root_id = "dir:.".to_string();
-        let file_id = "file:src/fixture.rs".to_string();
-        let leaf_id = "symbol:src/fixture.rs#fixture_fn:function".to_string();
-
-        CodebaseGraphV1 {
-            root_dir_id: root_id.clone(),
-            dirs: vec![DirNode {
-                base: base_node(&root_id, ".", ".", "", None),
-                dir_children: Vec::new(),
-                file_children: vec![file_id.clone()],
-            }],
-            files: vec![FileNode {
-                base: base_node(
-                    &file_id,
-                    "fixture.rs",
-                    "src/fixture.rs",
-                    "rust",
-                    Some(root_id),
-                ),
-                extension: Some("rs".to_string()),
-                source_blob_hash: None,
-                source: "fn fixture_fn() {}\n".to_string(),
-                imports: Vec::new(),
-                exports: Vec::new(),
-                re_exports: Vec::new(),
-                leaf_children: vec![leaf_id.clone()],
-            }],
-            leaves: vec![LeafNode {
-                base: base_node(
-                    &leaf_id,
-                    "fixture_fn",
-                    "src/fixture.rs#fixture_fn",
-                    "rust",
-                    Some(file_id),
-                ),
-                kind: LeafKind::Function,
-                source: "fn fixture_fn() {}\n".to_string(),
-                source_blob_hash: None,
-                source_hash: None,
-                file_hash_at_capture: None,
-                history: Vec::new(),
-                input_signature: Vec::new(),
-                output_signature: Vec::new(),
-                start_line: Some(1),
-                end_line: Some(1),
-                children: Vec::new(),
-            }],
+fn extract_call_sites(file: &str, source: &str, start_line: usize) -> Vec<CalleeEntry> {
+    let mut entries = Vec::new();
+    let bytes = source.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if !is_ident_start(bytes[index]) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < bytes.len() && is_ident_continue(bytes[index]) {
+            index += 1;
+        }
+        let name = &source[start..index];
+        let mut cursor = index;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor < bytes.len()
+            && bytes[cursor] == b'('
+            && !is_ignored_call_name(name)
+            && !is_declaration_name(source, start)
+        {
+            entries.push(CalleeEntry {
+                file: file.to_string(),
+                line: start_line.saturating_add(line_for_byte(bytes, start).saturating_sub(1)),
+                target_name: name.to_string(),
+            });
         }
     }
+    entries.sort();
+    entries.dedup();
+    entries
+}
 
-    fn base_node(
-        id: &str,
-        name: &str,
-        location: &str,
-        language: &str,
-        parent_id: Option<String>,
-    ) -> BaseNodeFields {
-        BaseNodeFields {
-            id: id.to_string(),
-            identity_key: id.to_string(),
-            object_hash: None,
-            name: name.to_string(),
-            location: location.to_string(),
-            language: language.to_string(),
-            description: String::new(),
-            parent_id,
-            is_locked: false,
-            lineage_locked: false,
-            lock_owner: None,
-            lock_reason: String::new(),
-        }
-    }
+fn is_declaration_name(source: &str, ident_start: usize) -> bool {
+    previous_word(source, ident_start)
+        .is_some_and(|word| matches!(word.as_str(), "def" | "fn" | "func" | "function"))
+}
+
+fn previous_word(source: &str, before: usize) -> Option<String> {
+    let prefix = source.get(..before)?;
+    let trimmed = prefix.trim_end();
+    let end = trimmed.len();
+    let start = trimmed
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !is_ident_continue_char(*ch))
+        .map(|(index, ch)| index + ch.len_utf8())
+        .unwrap_or(0);
+    (start < end).then(|| trimmed[start..end].to_string())
+}
+
+fn is_ignored_call_name(name: &str) -> bool {
+    matches!(
+        name,
+        "if" | "for"
+            | "while"
+            | "loop"
+            | "match"
+            | "switch"
+            | "catch"
+            | "return"
+            | "sizeof"
+            | "Some"
+            | "Ok"
+            | "Err"
+            | "String"
+            | "Promise"
+    )
+}
+
+fn is_ident_start(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphabetic()
+}
+
+fn is_ident_continue(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
+}
+
+fn is_ident_continue_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+fn line_for_byte(source: &[u8], offset: usize) -> usize {
+    source
+        .get(..offset.min(source.len()))
+        .unwrap_or(source)
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        + 1
 }

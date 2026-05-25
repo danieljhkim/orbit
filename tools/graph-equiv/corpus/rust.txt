@@ -1,0 +1,9 @@
+# Frozen graph-equiv selectors for Rust fixture coverage.
+search rust_helper
+search RustWidget
+show symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
+show file:tools/graph-equiv/fixtures/rust/sample.rs
+refs symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_helper:function
+refs symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_isolated:function
+callees symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
+impact symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_isolated:function

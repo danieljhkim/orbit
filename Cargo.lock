@@ -1137,6 +1137,9 @@ name = "graph-equiv"
 version = "0.7.1"
 dependencies = [
  "orbit-knowledge",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
