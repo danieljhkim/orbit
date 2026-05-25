@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use crate::{ExtractedFile, Extractor, RawImport, RawRef, RawRelation, RawSymbol};
+use crate::{ExtractedFile, Extractor, RawCommand, RawImport, RawRef, RawRelation, RawSymbol};
 
 /// Extracts Python source files into raw graph rows.
 pub struct PythonExtractor;
@@ -47,6 +47,7 @@ struct ExtractionState {
     refs: Vec<RawRef>,
     relations: Vec<RawRelation>,
     imports: Vec<RawImport>,
+    commands: Vec<RawCommand>,
 }
 
 impl ExtractionState {
@@ -57,6 +58,7 @@ impl ExtractionState {
             refs: Vec::new(),
             relations: Vec::new(),
             imports: Vec::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -65,6 +67,7 @@ impl ExtractionState {
         dedup_refs(&mut self.refs);
         dedup_relations(&mut self.relations);
         dedup_imports(&mut self.imports);
+        dedup_commands(&mut self.commands);
         ExtractedFile {
             symbols: self.symbols,
             refs: self.refs,
@@ -72,7 +75,7 @@ impl ExtractionState {
             imports: self.imports,
             strings: Vec::new(),
             configs: Vec::new(),
-            commands: Vec::new(),
+            commands: self.commands,
         }
     }
 
@@ -112,14 +115,50 @@ impl ExtractionState {
             return;
         }
 
+        self.push_ref_span(
+            node.start_byte(),
+            node.end_byte(),
+            target_name,
+            target_qualified,
+            kind,
+            confidence,
+        );
+    }
+
+    fn push_ref_span(
+        &mut self,
+        from_span_start: usize,
+        from_span_end: usize,
+        target_name: String,
+        target_qualified: Option<String>,
+        kind: &'static str,
+        confidence: &'static str,
+    ) {
+        if target_name.is_empty() || is_ignored_name(&target_name) {
+            return;
+        }
+
         self.refs.push(RawRef {
             from_file: self.file_path.clone(),
-            from_span_start: node.start_byte(),
-            from_span_end: node.end_byte(),
+            from_span_start,
+            from_span_end,
             target_name,
             target_qualified,
             kind: kind.to_string(),
             confidence: confidence.to_string(),
+        });
+    }
+
+    fn push_command(&mut self, name: String, span_start: usize, handler_symbol: Option<String>) {
+        if name.is_empty() {
+            return;
+        }
+
+        self.commands.push(RawCommand {
+            name,
+            file_path: self.file_path.clone(),
+            span_start,
+            handler_symbol,
         });
     }
 }
@@ -153,11 +192,254 @@ fn extract_decorated(
 ) {
     if let Some(definition) = node.child_by_field_name("definition") {
         match definition.kind() {
-            "function_definition" => extract_function(definition, source, parent_symbol, state),
+            "function_definition" => {
+                extract_function(definition, source, parent_symbol, state);
+                extract_click_commands(node, definition, source, parent_symbol, state);
+            }
             "class_definition" => extract_class(definition, source, parent_symbol, state),
             _ => {}
         }
     }
+}
+
+fn extract_click_commands(
+    decorated: Node,
+    function: Node,
+    source: &str,
+    parent_symbol: Option<&str>,
+    state: &mut ExtractionState,
+) {
+    let Some(function_name) = get_name(function, source) else {
+        return;
+    };
+    let handler_symbol = qualify_name(parent_symbol, &function_name);
+
+    let mut cursor = decorated.walk();
+    for child in decorated.named_children(&mut cursor) {
+        if child.start_byte() >= function.start_byte() {
+            break;
+        }
+        if child.kind() != "decorator" {
+            continue;
+        }
+
+        match click_command_from_decorator(child, source, &function_name) {
+            Some(CommandName::Resolved(name)) => {
+                state.push_command(name, child.start_byte(), Some(handler_symbol.clone()));
+            }
+            Some(CommandName::Unresolved {
+                span_start,
+                span_end,
+                target_name,
+            }) => state.push_ref_span(
+                span_start,
+                span_end,
+                target_name,
+                None,
+                "command",
+                "fuzzy_name",
+            ),
+            None => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CommandName {
+    Resolved(String),
+    Unresolved {
+        span_start: usize,
+        span_end: usize,
+        target_name: String,
+    },
+}
+
+fn click_command_from_decorator(
+    node: Node,
+    source: &str,
+    fallback_function_name: &str,
+) -> Option<CommandName> {
+    let text = node_text(node, source);
+    let at_index = text.find('@')?;
+    let body_start = at_index + 1;
+    let body = text.get(body_start..)?.trim_start();
+    let body_leading_ws = text.get(body_start..)?.len() - body.len();
+    let body_start = body_start + body_leading_ws;
+
+    let Some(open_index_in_body) = body.find('(') else {
+        return is_click_command_target(body)
+            .then(|| CommandName::Resolved(click_default_command_name(fallback_function_name)));
+    };
+
+    let target = body.get(..open_index_in_body)?.trim();
+    if !is_click_command_target(target) {
+        return None;
+    }
+
+    let args_start = body_start + open_index_in_body + 1;
+    let close_index = text.rfind(')').unwrap_or(text.len());
+    let args = text.get(args_start..close_index).unwrap_or_default();
+    command_name_from_click_args(args, node.start_byte() + args_start, fallback_function_name)
+}
+
+fn is_click_command_target(target: &str) -> bool {
+    matches!(
+        target.rsplit('.').next().map(str::trim),
+        Some("command" | "group")
+    )
+}
+
+fn command_name_from_click_args(
+    args: &str,
+    args_start: usize,
+    fallback_function_name: &str,
+) -> Option<CommandName> {
+    for arg in split_top_level_args(args, args_start) {
+        let trimmed = arg.text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let trimmed_start = arg.start + leading_whitespace_len(arg.text);
+        if let Some((key, value, value_start)) = split_keyword_arg(trimmed, trimmed_start) {
+            if key == "name" {
+                return command_name_from_value(value, value_start);
+            }
+            continue;
+        }
+
+        return command_name_from_value(trimmed, trimmed_start);
+    }
+
+    Some(CommandName::Resolved(click_default_command_name(
+        fallback_function_name,
+    )))
+}
+
+fn command_name_from_value(value: &str, value_start: usize) -> Option<CommandName> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let span_start = value_start + leading_whitespace_len(value);
+
+    if let Some(literal) = python_string_literal_value(trimmed) {
+        return Some(CommandName::Resolved(literal));
+    }
+
+    let target_name = unresolved_command_target_name(trimmed)?;
+    Some(CommandName::Unresolved {
+        span_start,
+        span_end: span_start + trimmed.len(),
+        target_name,
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ArgSpan<'a> {
+    text: &'a str,
+    start: usize,
+}
+
+fn split_top_level_args(args: &str, args_start: usize) -> Vec<ArgSpan<'_>> {
+    let mut spans = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+
+    for (index, ch) in args.char_indices() {
+        if let Some(quote_char) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote_char {
+                quote = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                spans.push(ArgSpan {
+                    text: &args[start..index],
+                    start: args_start + start,
+                });
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    spans.push(ArgSpan {
+        text: &args[start..],
+        start: args_start + start,
+    });
+    spans
+}
+
+fn split_keyword_arg<'a>(arg: &'a str, arg_start: usize) -> Option<(&'a str, &'a str, usize)> {
+    let equals_index = arg.find('=')?;
+    let key = arg.get(..equals_index)?.trim();
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    let value_start = arg_start + equals_index + 1;
+    let value = arg.get(equals_index + 1..)?;
+    Some((key, value, value_start))
+}
+
+fn python_string_literal_value(value: &str) -> Option<String> {
+    let mut literal = value.trim();
+    loop {
+        let Some(first) = literal.chars().next() else {
+            return None;
+        };
+        if matches!(first, 'r' | 'R' | 'u' | 'U' | 'b' | 'B') {
+            literal = literal.get(first.len_utf8()..)?;
+            continue;
+        }
+        if matches!(first, 'f' | 'F') {
+            return None;
+        }
+        break;
+    }
+
+    let quote = literal.chars().next()?;
+    if !matches!(quote, '\'' | '"') {
+        return None;
+    }
+    let rest = literal.get(quote.len_utf8()..)?;
+    let end = rest.rfind(quote)?;
+    Some(rest.get(..end)?.to_string())
+}
+
+fn unresolved_command_target_name(value: &str) -> Option<String> {
+    let token_end = value
+        .find(|ch: char| !(ch == '_' || ch == '.' || ch.is_ascii_alphanumeric()))
+        .unwrap_or(value.len());
+    value
+        .get(..token_end)?
+        .rsplit('.')
+        .next()
+        .map(str::to_string)
+        .filter(|name| !name.is_empty())
+}
+
+fn click_default_command_name(function_name: &str) -> String {
+    function_name.replace('_', "-")
+}
+
+fn leading_whitespace_len(value: &str) -> usize {
+    value.len() - value.trim_start().len()
 }
 
 fn extract_function(
@@ -686,6 +968,21 @@ fn dedup_imports(imports: &mut Vec<RawImport>) {
         left.from_file == right.from_file
             && left.target_path == right.target_path
             && left.target_symbol == right.target_symbol
+    });
+}
+
+fn dedup_commands(commands: &mut Vec<RawCommand>) {
+    commands.sort_by(|left, right| {
+        left.span_start
+            .cmp(&right.span_start)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.handler_symbol.cmp(&right.handler_symbol))
+    });
+    commands.dedup_by(|left, right| {
+        left.file_path == right.file_path
+            && left.name == right.name
+            && left.span_start == right.span_start
+            && left.handler_symbol == right.handler_symbol
     });
 }
 

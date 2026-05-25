@@ -1,6 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
+**Last updated:** 2026-05-25 (ORB-00323 command extraction coverage)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -479,6 +480,15 @@ This is the "structural feature expansion" capability — concrete, bounded, no 
 | 4 | `fuzzy_name` | Name matches but multiple candidates exist, or no import path can be established. | no (opt-in via `--confidence fuzzy`) |
 
 Ordering is strict high→low. `import_resolved` outranks `same_module` deliberately: an explicit `use` is stronger evidence than module-namespace uniqueness, because wildcard re-exports can produce the same `same_module` candidate for unrelated symbols.
+
+**Command surface coverage.** `RawCommand` rows follow the same honesty rule as refs: extractors populate a command only when the CLI declaration exposes a literal or defaulted command name and a concrete handler symbol in the same file; dynamic command names are surfaced as `fuzzy_name` refs instead of being guessed.
+
+| Language | CLI patterns populating `RawCommand` | Dynamic / unresolved behavior |
+|---|---|---|
+| Python | Click decorators on functions: `@click.command()`, `@click.group(...)`, and group-bound `@cli.command(...)` / `@cli.group(...)`. Literal `name=` or first positional names are exact; no-arg decorators use Click's default function-name command. | Non-literal command names emit `kind=command, confidence=fuzzy_name` refs and do not create a command row. |
+| Rust | Not yet populated. `clap` derive macros remain opaque without macro expansion. | No command rows. |
+| JavaScript / TypeScript | Not yet populated. `commander` / `yargs` chains are still refs only. | No command rows. |
+| C, C#, Go, Java, Kotlin, Ruby, Markdown, Config | No CLI command extraction in V1. | No command rows. |
 
 What we explicitly **don't** promise:
 

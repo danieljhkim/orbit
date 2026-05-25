@@ -73,3 +73,47 @@ def helper():
             && reference.confidence == "fuzzy_name"
     }));
 }
+
+#[test]
+fn extracts_click_commands_and_marks_dynamic_names_fuzzy() {
+    let source = r#"
+import click
+
+@click.command()
+def status():
+    pass
+
+@click.group(name="ops")
+def cli():
+    pass
+
+@cli.command("serve")
+def serve():
+    status()
+
+@cli.command(name=COMMAND_NAME)
+def dynamic():
+    pass
+"#;
+
+    let file = extract(source);
+
+    assert!(file.commands.iter().any(|command| {
+        command.name == "status" && command.handler_symbol.as_deref() == Some("status")
+    }));
+    assert!(file.commands.iter().any(|command| {
+        command.name == "ops" && command.handler_symbol.as_deref() == Some("cli")
+    }));
+    assert!(file.commands.iter().any(|command| {
+        command.name == "serve" && command.handler_symbol.as_deref() == Some("serve")
+    }));
+    assert!(file.commands.iter().all(|command| {
+        command.span_start < source.len() && command.file_path == "src/sample.py"
+    }));
+    assert!(file.refs.iter().any(|reference| {
+        reference.kind == "command"
+            && reference.target_name == "COMMAND_NAME"
+            && reference.target_qualified.is_none()
+            && reference.confidence == "fuzzy_name"
+    }));
+}

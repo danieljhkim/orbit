@@ -4,7 +4,7 @@ use crate::query::tests::support::{
     TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
 };
 use crate::sync::sync_leader_count;
-use crate::{SyncPolicy, TRACE_NODE_CAP, TraceNode};
+use crate::{SyncMode, SyncPolicy, TRACE_NODE_CAP, TraceNode};
 
 #[test]
 fn synthetic_command_with_three_level_call_tree_returns_full_tree() {
@@ -70,6 +70,41 @@ fn unknown_command_returns_empty_trace_result() {
     assert_eq!(result.visited_nodes, 0);
     assert!(!result.truncated);
     assert!(result.root.is_none());
+}
+
+#[test]
+fn trace_resolves_python_click_command_from_synced_fixture() {
+    let worktree = TestWorktree::new("trace-click-command");
+    worktree.write(
+        "src/cli.py",
+        r#"
+import click
+
+@click.command()
+def ship():
+    helper()
+
+def helper():
+    leaf()
+
+def leaf():
+    return "done"
+"#,
+    );
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    graph.sync(SyncMode::Full).expect("sync click fixture");
+
+    let result = graph.trace("ship", 3).expect("trace click command");
+
+    assert!(result.visited_nodes > 0);
+    let root = result.root.expect("trace root");
+    assert_eq!(root.name, "ship");
+    assert_eq!(root.qualified_name.as_deref(), Some("ship"));
+    assert_eq!(child_names(&root), vec!["helper"]);
+
+    let helper = child(&root, "helper");
+    assert_eq!(helper.qualified_name.as_deref(), Some("helper"));
+    assert_eq!(child_names(helper), vec!["leaf"]);
 }
 
 #[test]
