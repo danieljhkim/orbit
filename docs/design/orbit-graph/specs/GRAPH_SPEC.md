@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-05-25 (ORB-00327 impact/trace confidence floor)
+**Last updated:** 2026-05-25 (ORB-00331 detached-HEAD DB layout)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -125,13 +125,16 @@ crates/
 
 ```
 .orbit/graph/
-├── <branch>.<extractor_version>.db   # the only persistent artifact
-└── <branch>.<extractor_version>.db-wal
+├── <branch>.<extractor_version>.db
+├── detached-<short-sha>.<extractor_version>.db
+└── detached-<short-sha>.<extractor_version>.db-wal
 ```
 
-One SQLite file per `(worktree, branch, extractor_version)`. No objects, no blobs, no refs directory, no JSON index files.
+One SQLite file per `(worktree, branch-or-detached-commit, extractor_version)`. No objects, no blobs, no refs directory, no JSON index files.
 
 `<branch>` in the filename is sanitized — `/` is replaced by `_` so that `feat/foo` produces `feat_foo.42.db`, not a `feat/` subdirectory. The raw branch name is preserved in `meta.branch` for traceability.
+
+Detached HEAD uses `detached-<short-sha>.<extractor_version>.db` while preserving `meta.branch = "HEAD"` and the full commit in `meta.commit_sha`; see ADR-0190. This avoids different detached commits churning one `HEAD.<version>.db` cache. The stale-DB sweep removes detached DBs whose commits are no longer reachable from any local ref, excluding the active DB family.
 
 **Worktree-scoped, not workspace-scoped.** Each git worktree gets its own DB. Disk cost is ~10MB per worktree for orbit-sized repos — negligible. Same-branch worktree contention is solved by not sharing state.
 
@@ -552,6 +555,17 @@ pub struct TraceNode {
 
 pub enum SyncMode { Auto, Full }
 pub enum SyncPolicy { Manual, OnRead, Windowed { window: Duration } }
+
+pub struct GraphDbPath { /* opaque */ }
+
+pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u32) -> GraphDbPath;
+pub fn resolve_db_path_for_commit(
+    worktree_root: &Path,
+    branch: &str,
+    commit_sha: &str,
+    extractor_version: u32,
+) -> GraphDbPath;
+pub fn clean_old_databases(worktree_root: &Path) -> Result<CleanReport, GraphError>;
 
 pub struct SyncReport {
     pub files_indexed: usize,

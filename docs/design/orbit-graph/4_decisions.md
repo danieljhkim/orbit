@@ -3,7 +3,7 @@ summary: "Orbit Graph — Decisions"
 type: design
 title: "Orbit Graph — Decisions"
 owner: claude
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 status: Draft
 feature: orbit-graph
 doc_role: decisions
@@ -97,10 +97,24 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - Performance wins are realized by intentional baseline bumps, not silent improvements that immediately become the new floor.
 - Cost: **baseline updates are friction.** Every routine improvement requires a labeled PR. Acceptable — the friction is intentional and the alternative (no friction, no guarantee) is worse.
 
+## ADR-0190 — Use per-commit DB files for detached HEAD
+
+**Status:** Accepted · 2026-05-25 · [ORB-00331]
+
+**Context.** ORB-00326 (78e26efa) fixed detached-HEAD meta recording, but the filename still used `HEAD.<version>.db`, so detached checkouts on different commits churned the same cache. ORB-00331 compared keeping one `HEAD` DB with warnings against giving each detached commit its own DB file.
+
+**Decision.** Detached HEAD uses `detached-<short-sha>.<extractor_version>.db`. Branch-attached checkouts keep the existing `<branch>.<extractor_version>.db` layout, and detached meta still records `branch = "HEAD"` plus the full commit SHA.
+
+**Consequences.**
+- Detached checkouts on different commits no longer invalidate each other through the same `HEAD` database.
+- The stale-DB sweep removes detached DBs whose commits are no longer reachable from any local ref, while preserving the active DB family.
+- Cost: **more files during commit-hopping workflows.** Bisects and cherry-picks can create O(N) detached DBs until reachability cleanup prunes the unreachable ones.
+
 ---
 
 ## Task References
 
 - [ORB-00294] allocated the six initial orbit-graph ADR IDs (ADR-0184 through ADR-0189).
+- [ORB-00331] allocated ADR-0190 and shipped the detached-HEAD per-commit DB layout.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

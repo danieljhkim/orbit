@@ -8,7 +8,7 @@ use std::path::Path;
 use git2::Repository;
 use rusqlite::Connection;
 
-use crate::{EXTRACTOR_VERSION, GraphDbPath, GraphError, SyncPolicy, resolve_db_path};
+use crate::{EXTRACTOR_VERSION, GraphDbPath, GraphError, SyncPolicy, resolve_db_path_for_commit};
 
 pub(crate) struct OpenedGraph {
     pub(crate) db_path: GraphDbPath,
@@ -16,7 +16,12 @@ pub(crate) struct OpenedGraph {
 
 pub(crate) fn open(worktree_root: &Path, _policy: SyncPolicy) -> Result<OpenedGraph, GraphError> {
     let git = GitContext::for_worktree(worktree_root);
-    let db_path = resolve_db_path(worktree_root, git.branch.as_str(), EXTRACTOR_VERSION);
+    let db_path = resolve_db_path_for_commit(
+        worktree_root,
+        git.branch.as_str(),
+        git.commit_sha.as_str(),
+        EXTRACTOR_VERSION,
+    );
 
     if let Some(parent) = db_path.path().parent() {
         fs::create_dir_all(parent)
