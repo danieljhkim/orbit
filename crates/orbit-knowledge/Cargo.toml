@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 fs2.workspace = true
-ignore = "0.4.25"
+ignore.workspace = true
 libc.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-graph-extract = { path = "../orbit-graph-extract" }
