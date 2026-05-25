@@ -47,6 +47,7 @@ pub(crate) struct Diff {
     pub(crate) deleted: Vec<PathBuf>,
 }
 
+#[cfg(test)]
 pub(crate) fn scan_diff(
     db_path: &Path,
     worktree_root: &Path,
@@ -55,22 +56,35 @@ pub(crate) fn scan_diff(
     Scanner::new(db_path, worktree_root)?.scan(mode, &Blake3Hasher)
 }
 
+pub(crate) fn scan_diff_with_lock_held(
+    db_path: &Path,
+    worktree_root: &Path,
+    mode: SyncMode,
+) -> Result<Diff, GraphError> {
+    Scanner::new_with_lock(db_path, worktree_root, None).scan(mode, &Blake3Hasher)
+}
+
 struct Scanner {
     db_path: PathBuf,
     worktree_root: PathBuf,
-    _lock: DbLockGuard,
+    _lock: Option<DbLockGuard>,
     registry: ExtractorRegistry,
 }
 
 impl Scanner {
+    #[cfg(test)]
     fn new(db_path: &Path, worktree_root: &Path) -> Result<Self, GraphError> {
         let lock = DbLockGuard::acquire(db_path)?;
-        Ok(Self {
+        Ok(Self::new_with_lock(db_path, worktree_root, Some(lock)))
+    }
+
+    fn new_with_lock(db_path: &Path, worktree_root: &Path, lock: Option<DbLockGuard>) -> Self {
+        Self {
             db_path: db_path.to_path_buf(),
             worktree_root: worktree_root.to_path_buf(),
             _lock: lock,
             registry: ExtractorRegistry::default(),
-        })
+        }
     }
 
     fn scan(&self, mode: SyncMode, hasher: &dyn ContentHasher) -> Result<Diff, GraphError> {

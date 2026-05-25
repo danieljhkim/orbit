@@ -25,8 +25,10 @@ fn run_once(
     mode: SyncMode,
 ) -> Result<SyncReport, GraphError> {
     let started = Instant::now();
-    let diff = scanner::scan_diff(db_path, worktree_root, mode)?;
+    let _lock = scanner::DbLockGuard::acquire(db_path)?;
+    let diff = scanner::scan_diff_with_lock_held(db_path, worktree_root, mode)?;
     maybe_fail_after_scan(db_path)?;
+    maybe_wait_after_scan(db_path);
     let pass1 = pass1::run(db_path, worktree_root, mode, &diff)?;
     pass2::run(db_path, mode, pass1.refs)?;
     let duration = started.elapsed();
@@ -123,6 +125,17 @@ fn maybe_fail_after_scan(db_path: &Path) -> Result<(), GraphError> {
 fn maybe_fail_after_scan(_db_path: &Path) -> Result<(), GraphError> {
     Ok(())
 }
+
+#[cfg(test)]
+fn maybe_wait_after_scan(db_path: &Path) {
+    if let Some(gate) = sync_after_scan_gate(db_path) {
+        gate.mark_started();
+        gate.wait_released();
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_wait_after_scan(_db_path: &Path) {}
 
 #[cfg(test)]
 pub(crate) fn fail_next_sync_after_scan(db_path: &Path) {
@@ -237,6 +250,14 @@ pub(crate) fn set_sync_leader_gate(gate: Option<Arc<SyncLeaderGate>>) {
 }
 
 #[cfg(test)]
+pub(crate) fn set_sync_after_scan_gate(db_path: PathBuf, gate: Option<Arc<SyncLeaderGate>>) {
+    let mut slot = sync_after_scan_gate_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *slot = gate.map(|gate| (db_path, gate));
+}
+
+#[cfg(test)]
 fn sync_leader_gate() -> Option<Arc<SyncLeaderGate>> {
     sync_leader_gate_slot()
         .lock()
@@ -249,3 +270,24 @@ fn sync_leader_gate_slot() -> &'static Mutex<Option<Arc<SyncLeaderGate>>> {
     static SYNC_LEADER_GATE: OnceLock<Mutex<Option<Arc<SyncLeaderGate>>>> = OnceLock::new();
     SYNC_LEADER_GATE.get_or_init(|| Mutex::new(None))
 }
+
+#[cfg(test)]
+fn sync_after_scan_gate(db_path: &Path) -> Option<Arc<SyncLeaderGate>> {
+    sync_after_scan_gate_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .filter(|(gate_path, _gate)| gate_path == db_path)
+        .map(|(_gate_path, gate)| Arc::clone(gate))
+}
+
+#[cfg(test)]
+fn sync_after_scan_gate_slot() -> &'static Mutex<Option<(PathBuf, Arc<SyncLeaderGate>)>> {
+    static SYNC_AFTER_SCAN_GATE: OnceLock<Mutex<Option<(PathBuf, Arc<SyncLeaderGate>)>>> =
+        OnceLock::new();
+    SYNC_AFTER_SCAN_GATE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+#[path = "tests/mod.rs"]
+mod tests;

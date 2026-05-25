@@ -14,7 +14,6 @@ use orbit_graph_extract::RawRef;
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
 use super::pass1::ExtractedFileRefs;
-use super::scanner::DbLockGuard;
 use crate::{GraphError, SyncMode};
 
 const CONFIDENCE_EXACT: &str = "exact";
@@ -27,7 +26,6 @@ pub(crate) fn run(
     mode: SyncMode,
     refs_by_file: Vec<ExtractedFileRefs>,
 ) -> Result<(), GraphError> {
-    let _lock = DbLockGuard::acquire(db_path)?;
     let mut conn = open_writer_connection(db_path)?;
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
