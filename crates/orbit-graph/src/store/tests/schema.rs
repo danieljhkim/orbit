@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use git2::{Repository, RepositoryInitOptions, Signature};
+use git2::{Oid, Repository, RepositoryInitOptions, Signature};
 use rusqlite::Connection;
 
 use crate::store::schema::SCHEMA_VERSION;
@@ -120,6 +120,62 @@ fn graph_open_creates_documented_schema_and_initial_meta() {
         meta.get("last_incremental_at").map(String::as_str),
         Some("0")
     );
+}
+
+#[test]
+fn graph_open_cleans_stale_version_databases_without_deleting_active_db() {
+    let worktree = TestWorktree::new("cleans-stale-dbs", "main");
+    worktree.init_git_repo();
+
+    let [stale_version_a, stale_version_b] = stale_versions();
+    let stale_main = resolve_db_path(worktree.path(), "main", stale_version_a)
+        .path()
+        .to_path_buf();
+    let stale_feature = resolve_db_path(worktree.path(), "feat/old", stale_version_b)
+        .path()
+        .to_path_buf();
+    fs::create_dir_all(stale_main.parent().expect("stale db parent")).expect("create graph dir");
+    fs::write(&stale_main, "stale main").expect("write stale main db");
+    fs::write(&stale_feature, "stale feature").expect("write stale feature db");
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    let active_db = graph.db_path().path().to_path_buf();
+    drop(graph);
+
+    assert!(
+        active_db.exists(),
+        "active DB should remain after auto-clean"
+    );
+    assert!(
+        !stale_main.exists(),
+        "same-branch stale DB should be removed"
+    );
+    assert!(
+        !stale_feature.exists(),
+        "other-branch stale DB should be removed"
+    );
+}
+
+#[test]
+fn graph_open_records_commit_sha_for_detached_head() {
+    let worktree = TestWorktree::new("detached-head-meta", "main");
+    let commit_sha = worktree.init_git_repo();
+    worktree.detach_head(commit_sha.as_str());
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open detached graph");
+    drop(graph);
+
+    let db_path = resolve_db_path(worktree.path(), "HEAD", EXTRACTOR_VERSION)
+        .path()
+        .to_path_buf();
+    let conn = open_test_connection(&db_path);
+    let meta = read_meta(&conn);
+    assert_eq!(meta.get("branch").map(String::as_str), Some("HEAD"));
+    assert_eq!(
+        meta.get("commit_sha").map(String::as_str),
+        Some(commit_sha.as_str())
+    );
+    assert!(!commit_sha.is_empty());
 }
 
 #[test]
@@ -316,6 +372,21 @@ fn row_count(conn: &Connection, table: &str) -> i64 {
         .expect("count table rows")
 }
 
+fn stale_versions() -> [u32; 2] {
+    [
+        if EXTRACTOR_VERSION > 0 {
+            EXTRACTOR_VERSION - 1
+        } else {
+            EXTRACTOR_VERSION + 1
+        },
+        if EXTRACTOR_VERSION > 1 {
+            EXTRACTOR_VERSION - 2
+        } else {
+            EXTRACTOR_VERSION + 2
+        },
+    ]
+}
+
 struct TestWorktree {
     path: PathBuf,
     branch: String,
@@ -358,6 +429,12 @@ impl TestWorktree {
             .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
             .expect("initial commit");
         oid.to_string()
+    }
+
+    fn detach_head(&self, commit_sha: &str) {
+        let repo = Repository::open(&self.path).expect("open git repo");
+        let oid = Oid::from_str(commit_sha).expect("parse commit oid");
+        repo.set_head_detached(oid).expect("detach HEAD");
     }
 }
 

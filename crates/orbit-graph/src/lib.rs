@@ -61,6 +61,7 @@ impl Graph {
         // Phase 4 query methods will call this; keep the dispatcher live under dead-code lints.
         let _ensure_synced: fn(&Self) -> Result<(), GraphError> = Self::ensure_synced;
         let opened = store::open(worktree_root, policy)?;
+        clean_old_databases_excluding(worktree_root, opened.db_path.path())?;
         Ok(Self {
             db_path: opened.db_path,
             worktree_root: worktree_root.to_path_buf(),
@@ -391,11 +392,11 @@ impl GraphDbPath {
 
 /// Resolve the canonical graph database path for a worktree and branch.
 ///
-/// The filename sanitizes the branch by replacing `/` with `_`, while the
-/// returned [`GraphDbPath`] keeps the raw branch name for future `meta.branch`
-/// storage.
+/// The filename sanitizes the branch with a conservative filesystem-safe
+/// allowlist, while the returned [`GraphDbPath`] keeps the raw branch name for
+/// future `meta.branch` storage.
 pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u32) -> GraphDbPath {
-    let sanitized_branch = branch.replace('/', "_");
+    let sanitized_branch = sanitize_branch_for_filename(branch);
     let filename = format!("{sanitized_branch}.{extractor_version}.db");
     GraphDbPath {
         path: worktree_root.join(".orbit").join("graph").join(filename),
@@ -404,12 +405,39 @@ pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u3
     }
 }
 
+fn sanitize_branch_for_filename(branch: &str) -> String {
+    if branch.is_empty() {
+        return "_".to_string();
+    }
+
+    let chars = branch.chars().collect::<Vec<_>>();
+    let mut sanitized = String::with_capacity(branch.len());
+    for (index, ch) in chars.iter().copied().enumerate() {
+        let is_dot = ch == '.';
+        let is_double_dot = is_dot
+            && ((index > 0 && chars[index - 1] == '.')
+                || (index + 1 < chars.len() && chars[index + 1] == '.'));
+        let allowed = ch.is_ascii_alphanumeric()
+            || ch == '_'
+            || ch == '-'
+            || (index > 0 && is_dot && !is_double_dot);
+
+        sanitized.push(if allowed { ch } else { '_' });
+    }
+    sanitized
+}
+
 /// Delete graph database files whose filename embeds an old extractor version.
 pub fn clean_old_databases(worktree_root: &Path) -> Result<CleanReport, GraphError> {
-    let graph = Graph::open(worktree_root, SyncPolicy::Manual)?;
-    let graph_dir = graph
-        .db_path
-        .path()
+    let opened = store::open(worktree_root, SyncPolicy::Manual)?;
+    clean_old_databases_excluding(worktree_root, opened.db_path.path())
+}
+
+fn clean_old_databases_excluding(
+    worktree_root: &Path,
+    active_db_path: &Path,
+) -> Result<CleanReport, GraphError> {
+    let graph_dir = active_db_path
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| worktree_root.join(".orbit").join("graph"));
@@ -434,6 +462,7 @@ pub fn clean_old_databases(worktree_root: &Path) -> Result<CleanReport, GraphErr
         };
         if graph_db_file_extractor_version(file_name)
             .is_some_and(|version| version != EXTRACTOR_VERSION)
+            && path != active_db_path
         {
             fs::remove_file(path.as_path()).map_err(|source| {
                 GraphError::io("delete old graph database file", &path, source)
