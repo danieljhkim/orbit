@@ -17,6 +17,7 @@ flowchart LR
   Engine --> Exec["orbit-exec"]
   Engine --> Tools
   Agent --> Tools
+  Graph["orbit-graph"] --> GraphExtract["orbit-graph-extract"]
   Tools --> Exec["orbit-exec"]
   Tools --> Knowledge
   Tools --> Policy
@@ -49,6 +50,7 @@ flowchart LR
 - **orbit-search-companion**: separately installed search companion binary. Depends on `orbit-search` and fastembed-rs; not linked into the default `orbit` CLI binary.
 - **orbit-registry**: generic replicated registry substrate for publication flows. Opaque-bytes payloads + caller-chosen merge classes; optional `transport-git2` feature for git-backed replicas. Depends only on `orbit-common`.
 - **orbit-graph-extract**: pure graph extraction contracts and language-specific tree-sitter extractors for the orbit-graph migration. Owns `Extractor`, `ExtractedFile`, raw row shapes, and the stable `Selector` parser; no internal crate dependencies, storage, async, or filesystem traversal.
+- **orbit-graph**: SQLite graph store, sync policy, and query API skeleton for the orbit-graph migration. Depends on `orbit-graph-extract` for selector/extraction contracts; storage and query implementations land in later phase tasks.
 - **orbit-knowledge**: knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript/TypeScript, Python). Depends on `orbit-common` and temporarily on `orbit-graph-extract` for the selector parser during the orbit-graph dual-run migration; consumed by `orbit-tools`, which exposes graph tool and CLI-use-case facades upstream.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
 - **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
@@ -79,6 +81,7 @@ Each workspace crate declares a stability tier in its `Cargo.toml` under `[packa
 | orbit-agent           | internal     |
 | orbit-cli             | internal     |
 | orbit-core            | internal     |
+| orbit-graph           | internal     |
 | orbit-search           | internal     |
 | orbit-engine          | internal     |
 | orbit-exec            | internal     |
