@@ -36,18 +36,26 @@ const EXPECTED_INACTIVE_TOOL_NAMES: &[&str] = &[
     "orbit.task.lint",
     "orbit.learning.comment.delete",
     "orbit.learning.prune",
+    // Agent-surface narrowing: triage / human-decision tools — CLI-only.
+    "orbit.task.reject",
+    "orbit.friction.list",
+    "orbit.friction.resolve",
+    "orbit.friction.show",
+    "orbit.learning.comment.list",
+    "orbit.learning.upvote",
 ];
 
-// ORB-00289: `orbit.adr.list`, `orbit.semantic.uninstall`,
-// `orbit.task.delete`, `orbit.task.lint`, `orbit.learning.comment.delete`,
-// `orbit.learning.prune` deliberately omitted — admin/destructive, retained
-// on the CLI / `runtime.run_tool` path only.
+// ORB-00289 + agent-surface narrowing: admin/destructive and triage tools
+// (`orbit.adr.list`, `orbit.semantic.uninstall`, `orbit.task.delete`,
+// `orbit.task.lint`, `orbit.task.reject`, `orbit.learning.comment.delete`,
+// `orbit.learning.prune`, `orbit.learning.comment.list`,
+// `orbit.learning.upvote`, `orbit.friction.list/show/resolve`) deliberately
+// omitted — retained on the CLI / `runtime.run_tool` path only.
 const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.search",
     "orbit.task.add",
     "orbit.task.approve",
     "orbit.task.artifact.put",
-    "orbit.task.reject",
     "orbit.task.show",
     "orbit.task.update",
     "orbit.task.list",
@@ -71,13 +79,8 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.learning.add",
     "orbit.learning.show",
     "orbit.learning.update",
-    "orbit.learning.upvote",
     "orbit.learning.comment.add",
-    "orbit.learning.comment.list",
     "orbit.friction.add",
-    "orbit.friction.list",
-    "orbit.friction.resolve",
-    "orbit.friction.show",
     "orbit.friction.tags",
     "orbit.friction.update",
 ];
@@ -96,7 +99,7 @@ fn is_runtime_mcp_category_tool(name: &str) -> bool {
 #[test]
 fn inactive_tools_are_not_in_the_mcp_safe_surface() {
     let safe_names: BTreeSet<&str> = safe_mcp_tool_names().into_iter().collect();
-    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 21);
+    assert_eq!(EXPECTED_INACTIVE_TOOL_NAMES.len(), 27);
 
     for name in EXPECTED_INACTIVE_TOOL_NAMES {
         assert!(
@@ -283,7 +286,7 @@ mod audited_mcp_call_tests {
         HookOutputFormat, ORBIT_LEARNING_PER_CALL_CAP_ENV, ORBIT_LEARNING_SESSION_CAP_ENV,
         ORBIT_SESSION_ID_ENV, run_pretooluse_input,
     };
-    use orbit_core::{LearningCreateParams, OrbitRuntime};
+    use orbit_core::{LearningCreateParams, OrbitError, OrbitRuntime};
     use orbit_mcp::McpHost;
     use serde_json::json;
 
@@ -482,11 +485,14 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn friction_list_is_exposed_to_mcp_dispatch() {
+    fn friction_list_is_not_exposed_to_mcp_dispatch() {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        let value = audited_mcp_call(&runtime, "orbit.friction.list", json!({ "limit": 1 }))
-            .expect("orbit.friction.list dispatch ok");
-        assert!(value.is_array(), "orbit.friction.list returns JSON array");
+        let err = audited_mcp_call(&runtime, "orbit.friction.list", json!({ "limit": 1 }))
+            .expect_err("orbit.friction.list must be hidden from the agent MCP surface");
+        assert!(
+            matches!(err, OrbitError::NotFound { .. }),
+            "expected NotFound for triage-only orbit.friction.list, got: {err}"
+        );
     }
 
     #[test]
