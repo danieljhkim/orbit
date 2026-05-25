@@ -1,0 +1,212 @@
+//! Graph synchronization orchestration.
+
+pub(crate) mod scanner;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::Instant;
+
+use crate::{GraphError, SyncMode, SyncReport};
+
+pub(crate) fn run(
+    db_path: &Path,
+    worktree_root: &Path,
+    mode: SyncMode,
+) -> Result<SyncReport, GraphError> {
+    coalesced(db_path, || run_once(db_path, worktree_root, mode))
+}
+
+fn run_once(
+    db_path: &Path,
+    worktree_root: &Path,
+    mode: SyncMode,
+) -> Result<SyncReport, GraphError> {
+    let started = Instant::now();
+    let diff = scanner::scan_diff(db_path, worktree_root, mode)?;
+    let duration = started.elapsed();
+
+    Ok(SyncReport {
+        files_indexed: diff.files_indexed_after_sync(),
+        files_changed: diff.new.len() + diff.modified.len(),
+        files_removed: diff.deleted.len(),
+        duration,
+    })
+}
+
+type SyncResult = Result<SyncReport, GraphError>;
+
+struct InFlightSync {
+    result: Mutex<Option<SyncResult>>,
+    ready: Condvar,
+}
+
+fn coalesced<F>(db_path: &Path, run: F) -> SyncResult
+where
+    F: FnOnce() -> SyncResult,
+{
+    let key = db_path.to_path_buf();
+    let (state, leader) = {
+        let mut in_flight = in_flight_syncs()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(state) = in_flight.get(&key) {
+            (Arc::clone(state), false)
+        } else {
+            let state = Arc::new(InFlightSync {
+                result: Mutex::new(None),
+                ready: Condvar::new(),
+            });
+            in_flight.insert(key.clone(), Arc::clone(&state));
+            (state, true)
+        }
+    };
+
+    if leader {
+        note_sync_leader_started(key.as_path());
+        let result = run();
+        {
+            let mut slot = state
+                .result
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *slot = Some(result.clone());
+            state.ready.notify_all();
+        }
+        let mut in_flight = in_flight_syncs()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        in_flight.remove(&key);
+        result
+    } else {
+        let mut slot = state
+            .result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(result) = slot.as_ref() {
+                return result.clone();
+            }
+            slot = state
+                .ready
+                .wait(slot)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+fn in_flight_syncs() -> &'static Mutex<HashMap<PathBuf, Arc<InFlightSync>>> {
+    static IN_FLIGHT_SYNCS: OnceLock<Mutex<HashMap<PathBuf, Arc<InFlightSync>>>> = OnceLock::new();
+    IN_FLIGHT_SYNCS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+fn note_sync_leader_started(db_path: &Path) {
+    let mut counts = sync_leader_counts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *counts.entry(db_path.to_path_buf()).or_insert(0) += 1;
+    drop(counts);
+
+    if let Some(gate) = sync_leader_gate() {
+        gate.mark_started();
+        gate.wait_released();
+    }
+}
+
+#[cfg(not(test))]
+fn note_sync_leader_started(_db_path: &Path) {}
+
+#[cfg(test)]
+pub(crate) fn sync_leader_count(db_path: &Path) -> usize {
+    sync_leader_counts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(db_path)
+        .copied()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+fn sync_leader_counts() -> &'static Mutex<std::collections::BTreeMap<PathBuf, usize>> {
+    static SYNC_LEADER_COUNTS: OnceLock<Mutex<std::collections::BTreeMap<PathBuf, usize>>> =
+        OnceLock::new();
+    SYNC_LEADER_COUNTS.get_or_init(|| Mutex::new(std::collections::BTreeMap::new()))
+}
+
+#[cfg(test)]
+pub(crate) struct SyncLeaderGate {
+    started: (Mutex<bool>, Condvar),
+    release: (Mutex<bool>, Condvar),
+}
+
+#[cfg(test)]
+impl SyncLeaderGate {
+    pub(crate) fn new() -> Self {
+        Self {
+            started: (Mutex::new(false), Condvar::new()),
+            release: (Mutex::new(false), Condvar::new()),
+        }
+    }
+
+    fn mark_started(&self) {
+        let (lock, ready) = &self.started;
+        let mut started = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *started = true;
+        ready.notify_all();
+    }
+
+    pub(crate) fn wait_started(&self, timeout: std::time::Duration) -> bool {
+        let (lock, ready) = &self.started;
+        let started = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (started, _) = ready
+            .wait_timeout_while(started, timeout, |started| !*started)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *started
+    }
+
+    fn wait_released(&self) {
+        let (lock, ready) = &self.release;
+        let released = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _released = ready
+            .wait_while(released, |released| !*released)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+
+    pub(crate) fn release(&self) {
+        let (lock, ready) = &self.release;
+        let mut released = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *released = true;
+        ready.notify_all();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_sync_leader_gate(gate: Option<Arc<SyncLeaderGate>>) {
+    let mut slot = sync_leader_gate_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *slot = gate;
+}
+
+#[cfg(test)]
+fn sync_leader_gate() -> Option<Arc<SyncLeaderGate>> {
+    sync_leader_gate_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+#[cfg(test)]
+fn sync_leader_gate_slot() -> &'static Mutex<Option<Arc<SyncLeaderGate>>> {
+    static SYNC_LEADER_GATE: OnceLock<Mutex<Option<Arc<SyncLeaderGate>>>> = OnceLock::new();
+    SYNC_LEADER_GATE.get_or_init(|| Mutex::new(None))
+}

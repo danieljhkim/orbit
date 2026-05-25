@@ -2240,7 +2240,10 @@ dependencies = [
 name = "orbit-graph"
 version = "0.7.1"
 dependencies = [
+ "blake3",
+ "fs2",
  "git2",
+ "ignore",
  "orbit-graph-extract",
  "rusqlite",
 ]

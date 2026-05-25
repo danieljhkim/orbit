@@ -11,6 +11,9 @@ stability = "internal"
 workspace = true
 
 [dependencies]
+blake3.workspace = true
+fs2.workspace = true
 git2.workspace = true
+ignore.workspace = true
 orbit-graph-extract = { path = "../orbit-graph-extract" }
 rusqlite.workspace = true

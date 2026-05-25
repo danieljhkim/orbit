@@ -10,9 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub use orbit_graph_extract::Selector;
-use rusqlite::Connection;
-
 mod store;
+mod sync;
 
 #[cfg(test)]
 mod tests;
@@ -26,8 +25,8 @@ pub const EXTRACTOR_VERSION: u32 = 1;
 
 /// Opaque handle to a worktree-scoped graph database.
 pub struct Graph {
-    _conn: Connection,
-    _db_path: GraphDbPath,
+    db_path: GraphDbPath,
+    worktree_root: PathBuf,
     _policy: SyncPolicy,
 }
 
@@ -36,16 +35,15 @@ impl Graph {
     pub fn open(worktree_root: &Path, policy: SyncPolicy) -> Result<Self, GraphError> {
         let opened = store::open(worktree_root, policy)?;
         Ok(Self {
-            _conn: opened.conn,
-            _db_path: opened.db_path,
+            db_path: opened.db_path,
+            worktree_root: worktree_root.to_path_buf(),
             _policy: policy,
         })
     }
 
     /// Synchronize indexed rows with files on disk.
     pub fn sync(&self, mode: SyncMode) -> Result<SyncReport, GraphError> {
-        let _ = (self, mode);
-        todo!("sync graph rows")
+        sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)
     }
 
     /// Search indexed symbols, strings, and config keys.
@@ -105,6 +103,13 @@ pub enum GraphError {
         /// Source error rendered as text for cloneable error propagation.
         reason: String,
     },
+    /// Stored or discovered graph data was invalid.
+    InvalidData {
+        /// Operation being performed.
+        operation: &'static str,
+        /// Validation failure rendered as text for cloneable error propagation.
+        reason: String,
+    },
     /// Placeholder variant until storage, sync, and query errors are defined.
     Unimplemented,
 }
@@ -132,6 +137,13 @@ impl GraphError {
             reason: reason.into(),
         }
     }
+
+    pub(crate) fn invalid_data(operation: &'static str, reason: impl Into<String>) -> Self {
+        Self::InvalidData {
+            operation,
+            reason: reason.into(),
+        }
+    }
 }
 
 impl Display for GraphError {
@@ -143,6 +155,7 @@ impl Display for GraphError {
                 reason,
             } => write!(f, "{operation} at {}: {reason}", path.display()),
             Self::Sqlite { operation, reason } => write!(f, "{operation}: {reason}"),
+            Self::InvalidData { operation, reason } => write!(f, "{operation}: {reason}"),
             Self::Unimplemented => f.write_str("graph operation is not implemented"),
         }
     }

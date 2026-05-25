@@ -11,7 +11,6 @@ use rusqlite::Connection;
 use crate::{EXTRACTOR_VERSION, GraphDbPath, GraphError, SyncPolicy, resolve_db_path};
 
 pub(crate) struct OpenedGraph {
-    pub(crate) conn: Connection,
     pub(crate) db_path: GraphDbPath,
 }
 
@@ -39,7 +38,7 @@ pub(crate) fn open(worktree_root: &Path, _policy: SyncPolicy) -> Result<OpenedGr
         )?;
     }
 
-    Ok(OpenedGraph { conn, db_path })
+    Ok(OpenedGraph { db_path })
 }
 
 fn configure_connection(conn: &Connection) -> Result<(), GraphError> {
