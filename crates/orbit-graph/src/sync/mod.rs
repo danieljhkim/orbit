@@ -282,9 +282,11 @@ fn sync_after_scan_gate(db_path: &Path) -> Option<Arc<SyncLeaderGate>> {
 }
 
 #[cfg(test)]
-fn sync_after_scan_gate_slot() -> &'static Mutex<Option<(PathBuf, Arc<SyncLeaderGate>)>> {
-    static SYNC_AFTER_SCAN_GATE: OnceLock<Mutex<Option<(PathBuf, Arc<SyncLeaderGate>)>>> =
-        OnceLock::new();
+type SyncAfterScanGateSlot = Mutex<Option<(PathBuf, Arc<SyncLeaderGate>)>>;
+
+#[cfg(test)]
+fn sync_after_scan_gate_slot() -> &'static SyncAfterScanGateSlot {
+    static SYNC_AFTER_SCAN_GATE: OnceLock<SyncAfterScanGateSlot> = OnceLock::new();
     SYNC_AFTER_SCAN_GATE.get_or_init(|| Mutex::new(None))
 }
 

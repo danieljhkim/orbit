@@ -9,18 +9,25 @@ use predicates::prelude::*;
 use serde_json::Value;
 use tempfile::TempDir;
 
-#[test]
-fn query_and_admin_subcommands_emit_json() {
-    let worktree = fixture_worktree();
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-    let sync = run_json(worktree.path(), ["sync", "--full"]);
+#[test]
+fn query_and_admin_subcommands_emit_json() -> TestResult {
+    let worktree = fixture_worktree()?;
+
+    let sync = run_json(worktree.path(), ["sync", "--full"])?;
     assert_eq!(sync["files_removed"], 0);
-    assert!(sync["files_indexed"].as_u64().expect("files_indexed") >= 1);
+    assert!(
+        sync["files_indexed"]
+            .as_u64()
+            .is_some_and(|files_indexed| files_indexed >= 1),
+        "files_indexed should be at least 1 in {sync}"
+    );
 
     let search = run_json(
         worktree.path(),
         ["search", "helper", "--kind", "symbol", "--limit", "5"],
-    );
+    )?;
     assert_array_field(&search, "matches");
 
     let show = run_json(
@@ -31,12 +38,9 @@ fn query_and_admin_subcommands_emit_json() {
             "--max-bytes",
             "256",
         ],
-    );
+    )?;
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_eq!(
-        show["text"].as_str().expect("show text"),
-        expected_entry_source()
-    );
+    assert_eq!(show["text"].as_str(), Some(expected_entry_source()));
     assert!(show.get("bytes").is_none());
 
     let refs = run_json(
@@ -49,7 +53,7 @@ fn query_and_admin_subcommands_emit_json() {
             "--kind",
             "call",
         ],
-    );
+    )?;
     assert!(refs.get("target").is_some());
     assert_array_field(&refs, "refs");
     assert_array_field(&refs, "relations");
@@ -57,7 +61,7 @@ fn query_and_admin_subcommands_emit_json() {
     let callees = run_json(
         worktree.path(),
         ["callees", "symbol:src/lib.rs#entry:function"],
-    );
+    )?;
     assert_array_field(&callees, "callees");
 
     let impact = run_json(
@@ -70,7 +74,7 @@ fn query_and_admin_subcommands_emit_json() {
             "--confidence",
             "same_module",
         ],
-    );
+    )?;
     assert_array_field(&impact, "touched");
     assert!(impact.get("visited_nodes").is_some());
 
@@ -84,44 +88,49 @@ fn query_and_admin_subcommands_emit_json() {
             "--confidence",
             "same_module",
         ],
-    );
+    )?;
     assert!(trace["root"].is_null());
     assert_eq!(trace["visited_nodes"], 0);
 
-    let version = run_json(worktree.path(), ["version"]);
+    let version = run_json(worktree.path(), ["version"])?;
     assert_eq!(version["crate_version"], env!("CARGO_PKG_VERSION"));
     assert!(
         version["extractor_version"]
             .as_u64()
-            .expect("extractor_version")
-            > 0
+            .is_some_and(|extractor_version| extractor_version > 0),
+        "extractor_version should be positive in {version}"
     );
 
-    let db_path = run_json(worktree.path(), ["db-path"]);
+    let db_path = run_json(worktree.path(), ["db-path"])?;
     assert!(
         db_path["path"]
             .as_str()
-            .expect("db path string")
-            .ends_with(".db")
+            .is_some_and(|path| path.ends_with(".db")),
+        "db path should end with .db in {db_path}"
     );
     assert!(db_path.get("branch").is_some());
 
     let graph_dir = worktree.path().join(".orbit").join("graph");
-    fs::create_dir_all(&graph_dir).expect("create graph dir");
+    fs::create_dir_all(&graph_dir)?;
     let old_db = graph_dir.join("main.1.db");
-    fs::write(&old_db, b"stale").expect("write stale db");
-    let clean = run_json(worktree.path(), ["clean"]);
-    let deleted = clean["deleted"].as_array().expect("deleted array");
-    assert!(deleted.iter().any(|path| {
-        path.as_str()
-            .is_some_and(|path| path.ends_with("main.1.db"))
-    }));
+    fs::write(&old_db, b"stale")?;
+    let clean = run_json(worktree.path(), ["clean"])?;
+    assert!(
+        clean["deleted"].as_array().is_some_and(|deleted| {
+            deleted.iter().any(|path| {
+                path.as_str()
+                    .is_some_and(|path| path.ends_with("main.1.db"))
+            })
+        }),
+        "deleted should include main.1.db in {clean}"
+    );
     assert!(!old_db.exists());
+    Ok(())
 }
 
 #[test]
-fn invalid_selector_errors_are_json_on_stderr() {
-    let worktree = fixture_worktree();
+fn invalid_selector_errors_are_json_on_stderr() -> TestResult {
+    let worktree = fixture_worktree()?;
     let mut command = graph_cli_command();
     command
         .current_dir(worktree.path())
@@ -131,9 +140,10 @@ fn invalid_selector_errors_are_json_on_stderr() {
         .stderr(predicate::str::contains(
             "\"code\":\"selector_parse_error\"",
         ));
+    Ok(())
 }
 
-fn run_json<const N: usize>(worktree: &Path, args: [&str; N]) -> Value {
+fn run_json<const N: usize>(worktree: &Path, args: [&str; N]) -> TestResult<Value> {
     let mut command = graph_cli_command();
     let output = command
         .current_dir(worktree)
@@ -143,7 +153,7 @@ fn run_json<const N: usize>(worktree: &Path, args: [&str; N]) -> Value {
         .get_output()
         .stdout
         .clone();
-    serde_json::from_slice(&output).expect("stdout is JSON")
+    Ok(serde_json::from_slice(&output)?)
 }
 
 fn graph_cli_command() -> Command {
@@ -161,16 +171,16 @@ fn expected_entry_source() -> &'static str {
     "pub fn entry() -> i32 {\n    helper()\n}"
 }
 
-fn fixture_worktree() -> TempDir {
-    let tempdir = TempDir::new().expect("temp worktree");
-    run_git(tempdir.path(), ["init", "-b", "main"]);
+fn fixture_worktree() -> TestResult<TempDir> {
+    let tempdir = TempDir::new()?;
+    run_git(tempdir.path(), ["init", "-b", "main"])?;
     run_git(
         tempdir.path(),
         ["config", "user.email", "orbit@example.invalid"],
-    );
-    run_git(tempdir.path(), ["config", "user.name", "Orbit Test"]);
+    )?;
+    run_git(tempdir.path(), ["config", "user.name", "Orbit Test"])?;
 
-    fs::create_dir_all(tempdir.path().join("src")).expect("create src");
+    fs::create_dir_all(tempdir.path().join("src"))?;
     fs::write(
         tempdir.path().join("src/lib.rs"),
         r#"
@@ -186,29 +196,27 @@ pub fn caller() -> i32 {
     entry()
 }
 "#,
-    )
-    .expect("write fixture");
+    )?;
     fs::write(
         tempdir.path().join("Cargo.toml"),
         "[package]\nname = \"graph_cli_fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
-    )
-    .expect("write manifest");
+    )?;
 
-    run_git(tempdir.path(), ["add", "."]);
-    run_git(tempdir.path(), ["commit", "-m", "fixture"]);
-    tempdir
+    run_git(tempdir.path(), ["add", "."])?;
+    run_git(tempdir.path(), ["commit", "-m", "fixture"])?;
+    Ok(tempdir)
 }
 
-fn run_git<const N: usize>(worktree: &Path, args: [&str; N]) {
+fn run_git<const N: usize>(worktree: &Path, args: [&str; N]) -> TestResult {
     let output = StdCommand::new("git")
         .current_dir(worktree)
         .args(args)
-        .output()
-        .expect("run git");
+        .output()?;
     assert!(
         output.status.success(),
         "git failed: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    Ok(())
 }

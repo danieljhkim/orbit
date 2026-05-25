@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-use tempfile::tempdir;
+use tempfile::{tempdir, tempdir_in};
 
 use orbit_common::types::OrbitError;
 
@@ -224,12 +224,14 @@ fn bootstrap_ignores_home_global_orbit_when_repo_has_no_workspace_orbit() {
 fn try_resolve_returns_none_outside_orbit_workspace() {
     let _guard = ENV_LOCK.lock().expect("lock env");
     let _env = EnvVarGuard::remove("ORBIT_ROOT");
-    let nowhere = tempdir().expect("nowhere tempdir");
+    let home = tempdir().expect("home tempdir");
+    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let nowhere = tempdir_in(home.path()).expect("nowhere tempdir");
 
     let resolved = try_resolve_initialized_roots(nowhere.path(), None)
         .expect("try_resolve completes without error");
 
-    assert!(resolved.is_none());
+    assert!(resolved.is_none(), "unexpected roots: {resolved:?}");
     assert!(!nowhere.path().join(".orbit").exists());
 }
 
@@ -253,8 +255,10 @@ fn try_resolve_finds_initialized_workspace_via_walk_up() {
 fn try_resolve_finds_main_worktree_orbit_for_linked_worktree() {
     let _guard = ENV_LOCK.lock().expect("lock env");
     let _env = EnvVarGuard::remove("ORBIT_ROOT");
-    let main_repo = tempdir().expect("main repo tempdir");
-    let worktree = tempdir().expect("worktree tempdir");
+    let home = tempdir().expect("home tempdir");
+    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let main_repo = tempdir_in(home.path()).expect("main repo tempdir");
+    let worktree = tempdir_in(home.path()).expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
     let main_orbit = main_repo.path().join(".orbit");
     seed_initialized_workspace_root(&main_orbit);
@@ -269,8 +273,10 @@ fn try_resolve_finds_main_worktree_orbit_for_linked_worktree() {
 fn try_resolve_returns_none_when_main_worktree_orbit_is_uninitialized() {
     let _guard = ENV_LOCK.lock().expect("lock env");
     let _env = EnvVarGuard::remove("ORBIT_ROOT");
-    let main_repo = tempdir().expect("main repo tempdir");
-    let worktree = tempdir().expect("worktree tempdir");
+    let home = tempdir().expect("home tempdir");
+    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let main_repo = tempdir_in(home.path()).expect("main repo tempdir");
+    let worktree = tempdir_in(home.path()).expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
     // No `.orbit/` exists at all — main worktree resolution finds the
     // path but it's uninitialized, so try_resolve falls through.
@@ -278,7 +284,7 @@ fn try_resolve_returns_none_when_main_worktree_orbit_is_uninitialized() {
     let resolved = try_resolve_initialized_roots(worktree.path(), None)
         .expect("try_resolve completes without error");
 
-    assert!(resolved.is_none());
+    assert!(resolved.is_none(), "unexpected roots: {resolved:?}");
     assert!(!main_repo.path().join(".orbit").exists());
     assert!(!worktree.path().join(".orbit").exists());
 }

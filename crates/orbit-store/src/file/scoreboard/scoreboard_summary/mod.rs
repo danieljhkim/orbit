@@ -78,11 +78,15 @@ impl ScoreboardWindow {
             ScoreboardWindow::All => "all",
         }
     }
+}
+
+impl std::str::FromStr for ScoreboardWindow {
+    type Err = OrbitError;
 
     /// Parse a canonical window string. Accepts exactly `"1h"`, `"24h"`,
     /// `"7d"`, `"30d"`, or `"all"`. Any other input returns
     /// [`OrbitError::InvalidInput`] so HTTP callers can render an exact 400.
-    pub fn from_str(value: &str) -> Result<Self, OrbitError> {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "1h" => Ok(ScoreboardWindow::Hour),
             "24h" => Ok(ScoreboardWindow::Day),
@@ -100,7 +104,7 @@ impl TryFrom<&str> for ScoreboardWindow {
     type Error = OrbitError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ScoreboardWindow::from_str(value)
+        value.parse()
     }
 }
 

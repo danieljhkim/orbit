@@ -26,7 +26,7 @@ impl Tool for OrbitGraphSyncTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.sync",
-            "Synchronize the orbit-graph index for the current worktree.",
+            "Use when the orbit-graph index may be stale and graph reads need current results. Prefer over grep when follow-up graph queries should reflect recent file changes.",
             vec![param(
                 "full",
                 "Run a full sync instead of an incremental auto sync.",
@@ -46,7 +46,7 @@ impl Tool for OrbitGraphSearchTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.search",
-            "Search orbit-graph symbols, notable strings, and config keys.",
+            "Use when finding symbols, notable strings, or config keys by text. Prefer over grep when structured symbol metadata or language filters matter.",
             vec![
                 param("query", "Search query text.", "string", true),
                 param(
@@ -71,7 +71,7 @@ impl Tool for OrbitGraphShowTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.show",
-            "Show source and metadata for an orbit-graph selector. UTF-8 source is returned as `text`; non-UTF-8 source omits `text` and returns fallback `bytes`.",
+            "Use when inspecting one known orbit-graph selector's source and metadata, including UTF-8 `text` or fallback `bytes`. Prefer over grep when the selector is already known.",
             vec![
                 param("selector", "Selector to show.", "string", true),
                 param(
@@ -94,7 +94,7 @@ impl Tool for OrbitGraphRefsTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.refs",
-            "Find inbound references and relations for an orbit-graph symbol selector.",
+            "Use when finding inbound references and relations for a symbol selector. Prefer over grep when cross-file graph resolution is needed.",
             vec![
                 param("symbol", "Symbol selector to query.", "string", true),
                 param("confidence", "Minimum confidence floor.", "string", false),
@@ -118,7 +118,7 @@ impl Tool for OrbitGraphCalleesTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.callees",
-            "Find outbound calls from an orbit-graph symbol selector.",
+            "Use when finding outbound calls from a symbol selector. Prefer over grep when call edges are needed instead of textual matches.",
             vec![param("symbol", "Symbol selector to query.", "string", true)],
         )
     }
@@ -133,7 +133,7 @@ impl Tool for OrbitGraphImpactTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.impact",
-            "Return a bounded orbit-graph blast-radius traversal.",
+            "Use when estimating the blast radius from a symbol selector. Prefer over grep when transitive graph impact matters.",
             vec![
                 param("selector", "Origin selector.", "string", true),
                 param("depth", "Maximum traversal depth.", "number", false),
@@ -157,7 +157,7 @@ impl Tool for OrbitGraphTraceTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.trace",
-            "Trace a command handler call tree from orbit-graph command metadata.",
+            "Use when tracing a command handler call tree from graph command metadata. Prefer over grep when call-tree structure matters.",
             vec![
                 param("command_name", "Command name to trace.", "string", true),
                 param("depth", "Maximum call-tree depth.", "number", false),

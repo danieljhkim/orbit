@@ -878,9 +878,10 @@ fn window_string_round_trips_for_all_variants() {
         ScoreboardWindow::Month,
         ScoreboardWindow::All,
     ] {
-        let parsed = ScoreboardWindow::from_str(w.as_str()).expect("round trip");
-        assert_eq!(parsed, w);
+        assert_eq!(w.as_str().parse::<ScoreboardWindow>().ok(), Some(w));
     }
-    let err = ScoreboardWindow::from_str("bogus").expect_err("rejects unknown");
-    assert!(matches!(err, OrbitError::InvalidInput(_)));
+    assert!(matches!(
+        "bogus".parse::<ScoreboardWindow>(),
+        Err(OrbitError::InvalidInput(_))
+    ));
 }

@@ -221,8 +221,8 @@ fn add(_args: AddArgs) {}
         .commands
         .iter()
         .find(|command| command.name == "task add")
-        .expect("task add command");
-    assert_eq!(command.handler_symbol.as_deref(), Some("add"));
+        .map(|command| command.handler_symbol.as_deref());
+    assert_eq!(command, Some(Some("add")));
 }
 
 #[test]
@@ -298,6 +298,6 @@ fn run(_args: RunArgs) {}
         .commands
         .iter()
         .find(|command| command.name == "job run")
-        .expect("job run command");
-    assert_eq!(command.handler_symbol, None);
+        .map(|command| command.handler_symbol.as_deref());
+    assert_eq!(command, Some(None));
 }
