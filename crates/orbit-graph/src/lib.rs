@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub use orbit_graph_extract::Selector;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 mod store;
 mod sync;
@@ -98,8 +98,45 @@ impl Graph {
 
     /// Return outbound call edges from `sel`.
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError> {
-        let _ = (self, sel);
-        todo!("query graph callees")
+        self.ensure_synced()?;
+
+        let symbol = match resolve_symbol_span(self.db_path.path(), sel)? {
+            Some(s) => s,
+            None => return Ok(vec![]),
+        };
+
+        let conn = Connection::open(self.db_path.path())
+            .map_err(|source| GraphError::sqlite("open graph database for callees", source))?;
+
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT target_name, target_qualified, confidence, from_span_start
+                 FROM refs
+                 WHERE from_file = ?1
+                   AND from_span_start >= ?2
+                   AND from_span_end <= ?3
+                   AND kind = 'call'
+                 ORDER BY from_span_start",
+            )
+            .map_err(|source| GraphError::sqlite("prepare callees query", source))?;
+
+        let edges = stmt
+            .query_map(
+                params![symbol.file_path, symbol.span_start, symbol.span_end],
+                |row| {
+                    Ok(CalleeEdge {
+                        target_name: row.get(0)?,
+                        target_qualified: row.get(1)?,
+                        confidence: row.get(2)?,
+                        from_span: row.get(3)?,
+                    })
+                },
+            )
+            .map_err(|source| GraphError::sqlite("execute callees query", source))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| GraphError::sqlite("collect callees edges", source))?;
+
+        Ok(edges)
     }
 
     /// Return the bounded impact set around `sel`.
@@ -150,6 +187,68 @@ fn now_epoch_nanos(operation: &'static str) -> Result<i64, GraphError> {
         })?;
     i64::try_from(duration.as_nanos())
         .map_err(|error| GraphError::invalid_data(operation, error.to_string()))
+}
+
+/// Internal result of resolving a Selector to a symbol's file and span for
+/// span-containment queries like callees.
+#[derive(Debug, Clone)]
+struct SymbolSpan {
+    file_path: String,
+    span_start: i64,
+    span_end: i64,
+}
+
+/// Resolve a Selector to a single symbol's (file_path, span) if it exists in
+/// the graph. Returns None for selectors that do not map to a stored symbol
+/// (including non-Symbol variants and unknown names). Used by read queries
+/// that then perform containment or adjacency lookups.
+fn resolve_symbol_span(db_path: &Path, sel: &Selector) -> Result<Option<SymbolSpan>, GraphError> {
+    let Selector::Symbol { path, symbol, kind } = sel else {
+        return Ok(None);
+    };
+
+    let conn = Connection::open(db_path)
+        .map_err(|source| GraphError::sqlite("open graph database for symbol resolve", source))?;
+
+    // Match on either short name or qualified; apply kind filter when provided.
+    // Paths in DB are normalized (slash-separated, relative to worktree).
+    let mut sql = String::from(
+        "SELECT file_path, span_start, span_end FROM symbols
+         WHERE file_path = ?1 AND (name = ?2 OR qualified = ?2)",
+    );
+    let has_kind = !kind.trim().is_empty();
+    if has_kind {
+        sql.push_str(" AND kind = ?3");
+    }
+    sql.push_str(" ORDER BY id LIMIT 1");
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|source| GraphError::sqlite("prepare symbol resolve for query", source))?;
+
+    let row = if has_kind {
+        stmt.query_row(params![path, symbol, kind.trim()], |r| {
+            Ok(SymbolSpan {
+                file_path: r.get(0)?,
+                span_start: r.get(1)?,
+                span_end: r.get(2)?,
+            })
+        })
+    } else {
+        stmt.query_row(params![path, symbol], |r| {
+            Ok(SymbolSpan {
+                file_path: r.get(0)?,
+                span_start: r.get(1)?,
+                span_end: r.get(2)?,
+            })
+        })
+    };
+
+    match row {
+        Ok(s) => Ok(Some(s)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(source) => Err(GraphError::sqlite("resolve symbol for query", source)),
+    }
 }
 
 /// Graph crate error surface.
@@ -330,7 +429,16 @@ pub struct RefResult;
 
 /// Outbound call edge returned by [`Graph::callees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CalleeEdge;
+pub struct CalleeEdge {
+    /// Short target name as written in the call site.
+    pub target_name: String,
+    /// Resolved qualified name (authoritative when present); None for fuzzy/unresolved.
+    pub target_qualified: Option<String>,
+    /// Confidence label emitted verbatim by the resolver (P3.3) at write time.
+    pub confidence: String,
+    /// Start byte offset of the call site span inside its source file (minimum for attribution).
+    pub from_span: i64,
+}
 
 /// Bounded impact result returned by [`Graph::impact`].
 #[derive(Debug, Clone, PartialEq, Eq)]
