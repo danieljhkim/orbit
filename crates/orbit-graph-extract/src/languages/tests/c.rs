@@ -47,8 +47,10 @@ void proto(int x);
         .imports
         .iter()
         .find(|i| i.target_path.contains("foo.h"));
-    assert!(inc.is_some(), "missing #include import");
-    assert!(inc.unwrap().target_symbol.is_none());
+    assert!(
+        inc.is_some_and(|import| import.target_symbol.is_none()),
+        "missing #include import without target symbol"
+    );
 }
 
 #[test]

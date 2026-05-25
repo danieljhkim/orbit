@@ -76,11 +76,13 @@ impl Render for Widget {}
 "#,
     );
 
-    let relation = file
+    let Some(relation) = file
         .relations
         .iter()
         .find(|relation| relation.kind == "impl")
-        .expect("impl relation");
+    else {
+        panic!("impl relation");
+    };
     assert_eq!(relation.from_qualified, "Widget");
     assert_eq!(relation.to_qualified, "Render");
     assert_eq!(relation.confidence, "exact");

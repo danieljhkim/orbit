@@ -224,10 +224,12 @@ fn collect_notable_strings(source: &str, out: &mut Vec<RawString>, path: &Path) 
             if let Some(end_text) = line[abs..].find(']') {
                 let text_part = &line[abs + 1..abs + end_text];
                 if let Some(url_start) = line[abs + end_text..].find('(') {
-                    let url_end_rel = line[abs + end_text + url_start..].find(')').unwrap_or(0);
-                    let url = line
-                        [abs + end_text + url_start + 1..abs + end_text + url_start + url_end_rel]
-                        .trim();
+                    let value_start = abs + end_text + url_start + 1;
+                    let Some(url_end_rel) = line[value_start..].find(')') else {
+                        pos = abs + 1;
+                        continue;
+                    };
+                    let url = line[value_start..value_start + url_end_rel].trim();
                     if !url.is_empty() {
                         let val = format!("{} {}", text_part.trim(), url);
                         if is_notable_string(&val) {
