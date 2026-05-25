@@ -8,6 +8,7 @@
 //! the stable schema.
 
 use std::fmt::{Display, Formatter};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -70,6 +71,11 @@ impl Graph {
     /// Synchronize indexed rows with files on disk.
     pub fn sync(&self, mode: SyncMode) -> Result<SyncReport, GraphError> {
         sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)
+    }
+
+    /// Return the resolved database path backing this graph handle.
+    pub fn db_path(&self) -> &GraphDbPath {
+        &self.db_path
     }
 
     pub(crate) fn ensure_synced(&self) -> Result<(), GraphError> {
@@ -398,6 +404,66 @@ pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u3
     }
 }
 
+/// Delete graph database files whose filename embeds an old extractor version.
+pub fn clean_old_databases(worktree_root: &Path) -> Result<CleanReport, GraphError> {
+    let graph = Graph::open(worktree_root, SyncPolicy::Manual)?;
+    let graph_dir = graph
+        .db_path
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| worktree_root.join(".orbit").join("graph"));
+    let mut deleted = Vec::new();
+
+    if !graph_dir.exists() {
+        return Ok(CleanReport { graph_dir, deleted });
+    }
+
+    let entries = fs::read_dir(graph_dir.as_path())
+        .map_err(|source| GraphError::io("read graph database directory", &graph_dir, source))?;
+    for entry in entries {
+        let entry = entry.map_err(|source| {
+            GraphError::io("read graph database directory entry", &graph_dir, source)
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if graph_db_file_extractor_version(file_name)
+            .is_some_and(|version| version != EXTRACTOR_VERSION)
+        {
+            fs::remove_file(path.as_path()).map_err(|source| {
+                GraphError::io("delete old graph database file", &path, source)
+            })?;
+            deleted.push(path);
+        }
+    }
+    deleted.sort();
+
+    Ok(CleanReport { graph_dir, deleted })
+}
+
+fn graph_db_file_extractor_version(file_name: &str) -> Option<u32> {
+    let db_name = file_name
+        .strip_suffix(".db")
+        .or_else(|| file_name.strip_suffix(".db-wal"))
+        .or_else(|| file_name.strip_suffix(".db-shm"))
+        .or_else(|| file_name.strip_suffix(".db.lock"))?;
+    db_name.rsplit_once('.')?.1.parse().ok()
+}
+
+/// Summary returned after removing stale graph database files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CleanReport {
+    /// Directory scanned for graph database files.
+    pub graph_dir: PathBuf,
+    /// Files deleted because their extractor version was not current.
+    pub deleted: Vec<PathBuf>,
+}
+
 /// Reference query options for [`Graph::refs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefOpts {
@@ -501,7 +567,7 @@ pub struct RelationEntry {
 }
 
 /// Outbound call edge returned by [`Graph::callees`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CalleeEdge {
     /// Short target name as written in the call site.
     pub target_name: String,

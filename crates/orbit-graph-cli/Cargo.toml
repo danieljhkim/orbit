@@ -1,0 +1,28 @@
+[package]
+name = "orbit-graph-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[package.metadata.orbit]
+stability = "internal"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+git2.workspace = true
+orbit-graph = { path = "../orbit-graph" }
+orbit-graph-extract = { path = "../orbit-graph-extract" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
