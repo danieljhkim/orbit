@@ -71,12 +71,12 @@ impl Tool for OrbitGraphShowTool {
     fn schema(&self) -> ToolSchema {
         schema(
             "orbit.graph.show",
-            "Show source and metadata for an orbit-graph selector.",
+            "Show source and metadata for an orbit-graph selector. UTF-8 source is returned as `text`; non-UTF-8 source omits `text` and returns fallback `bytes`.",
             vec![
                 param("selector", "Selector to show.", "string", true),
                 param(
                     "max_bytes",
-                    "Maximum source bytes returned.",
+                    "Maximum source bytes returned in `text` or fallback `bytes`.",
                     "number",
                     false,
                 ),

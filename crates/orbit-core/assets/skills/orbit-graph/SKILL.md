@@ -19,7 +19,7 @@ Mapping rule: `orbit.graph.<action>` ↔ `orbit_graph_<action>`. See the `orbit`
 ## Default Workflow
 
 1. **Search first** — Use `orbit.graph.search` when the prompt names a symbol, string, config key, or file. Add `kind`, `lang`, and `limit` filters when useful.
-2. **Inspect the exact selector** — Use `orbit.graph.show` to confirm the definition, source bytes, span, and metadata for the match you found.
+2. **Inspect the exact selector** — Use `orbit.graph.show` to confirm the definition, source text, span, and metadata for the match you found.
 3. **Use one relationship tool only if needed**:
    - `orbit.graph.refs` for inbound usages and structural relations
    - `orbit.graph.callees` for outbound calls from a symbol
