@@ -22,7 +22,7 @@ use orbit_graph_extract::{
 use rayon::prelude::*;
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
-use super::scanner::{DbLockGuard, Diff, mtime_ns, normalize_path};
+use super::scanner::{Diff, mtime_ns, normalize_path};
 use crate::{GraphError, SyncMode};
 
 pub(crate) struct Pass1Output {
@@ -63,7 +63,6 @@ fn run_with_backend(
     let mut extracted = extract_changed_files(worktree_root, &changed, backend);
     extracted.sort_by(|left, right| left.path.cmp(&right.path));
 
-    let _lock = DbLockGuard::acquire(db_path)?;
     let mut conn = open_writer_connection(db_path)?;
 
     let mut files_removed = 0;
