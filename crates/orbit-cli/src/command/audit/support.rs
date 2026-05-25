@@ -27,6 +27,7 @@ pub(super) fn audit_event_to_json(event: &AuditEvent) -> Value {
         "job_run_id": event.job_run_id,
         "activity_id": event.activity_id,
         "step_index": event.step_index,
+        "backend": event.backend,
     })
 }
 

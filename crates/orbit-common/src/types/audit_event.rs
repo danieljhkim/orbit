@@ -102,6 +102,9 @@ pub struct AuditEvent {
     /// Zero-based step index within the enclosing job run, when known.
     #[serde(default)]
     pub step_index: Option<i64>,
+    /// Graph backend selected for `orbit.graph.*` calls, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

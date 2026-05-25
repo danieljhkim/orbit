@@ -9,8 +9,9 @@ use orbit_common::types::{
     required_string,
 };
 use orbit_graph::{
-    DEFAULT_IMPACT_DEPTH, DEFAULT_SHOW_MAX_BYTES, DEFAULT_TRACE_DEPTH, Graph, GraphError,
-    RefConfidence, RefKind, RefOpts, SearchKind, SearchQuery, SyncMode, SyncPolicy,
+    DEFAULT_IMPACT_DEPTH, DEFAULT_SHOW_MAX_BYTES, DEFAULT_TRACE_DEPTH, Graph, GraphBackend,
+    GraphBackendParseError, GraphError, GraphQueryKind, RefConfidence, RefKind, RefOpts,
+    SearchKind, SearchQuery, SyncMode, SyncPolicy, route_query,
 };
 use orbit_graph_extract::{Selector, SelectorParseError};
 use serde_json::{Value, json};
@@ -59,22 +60,52 @@ impl GraphToolRegistry {
         name: &str,
         input: Value,
         session_context: ToolSessionContext,
+        backend: GraphBackend,
+        run_legacy_primary: impl FnOnce(&str, Value, ToolSessionContext) -> Result<Value, OrbitError>
+        + Send,
+        run_legacy_shadow: impl FnOnce(&str, Value, ToolSessionContext) -> Result<Value, OrbitError>
+        + Send,
     ) -> Result<Value, OrbitError> {
+        let query = graph_query_kind(name)?;
         let worktree = resolve_worktree(&input, &session_context)?;
-        let graph = self.graph_for_worktree(worktree.as_path())?;
+        let new_input = input.clone();
+        let legacy_input = legacy_input_for_graph_tool(name, input);
+        let legacy_context = session_context.clone();
         match name {
-            GRAPH_SYNC_TOOL => graph_sync(graph.as_ref(), &input),
-            GRAPH_SEARCH_TOOL => graph_search(graph.as_ref(), &input),
-            GRAPH_SHOW_TOOL => graph_show(graph.as_ref(), &input),
-            GRAPH_REFS_TOOL => graph_refs(graph.as_ref(), &input),
-            GRAPH_CALLEES_TOOL => graph_callees(graph.as_ref(), &input),
-            GRAPH_IMPACT_TOOL => graph_impact(graph.as_ref(), &input),
-            GRAPH_TRACE_TOOL => graph_trace(graph.as_ref(), &input),
+            GRAPH_SYNC_TOOL | GRAPH_SEARCH_TOOL | GRAPH_SHOW_TOOL | GRAPH_REFS_TOOL
+            | GRAPH_CALLEES_TOOL | GRAPH_IMPACT_TOOL | GRAPH_TRACE_TOOL => route_query(
+                backend,
+                query,
+                || {
+                    let graph = self.graph_for_worktree(worktree.as_path())?;
+                    graph_new_query(name, graph.as_ref(), &new_input)
+                },
+                move || {
+                    let legacy_name = legacy_tool_name(name)?;
+                    match backend {
+                        GraphBackend::Legacy => {
+                            run_legacy_primary(legacy_name, legacy_input, legacy_context)
+                        }
+                        GraphBackend::Both => {
+                            run_legacy_shadow(legacy_name, legacy_input, legacy_context)
+                        }
+                        GraphBackend::New => unreachable!("new backend does not call legacy"),
+                    }
+                },
+            ),
             _ => Err(OrbitError::not_found(
                 orbit_common::types::NotFoundKind::Tool,
                 name.to_string(),
             )),
         }
+    }
+
+    pub(super) fn resolve_backend(&self, input: &Value) -> Result<GraphBackend, OrbitError> {
+        GraphBackend::resolve(parse_backend_override(input)?).map_err(backend_error_to_orbit)
+    }
+
+    pub(super) fn host_audits_call(&self, name: &str, backend: GraphBackend) -> bool {
+        matches!(backend, GraphBackend::Legacy) && legacy_tool_name(name).is_ok()
     }
 
     fn graph_for_worktree(&self, worktree: &Path) -> Result<Arc<Graph>, OrbitError> {
@@ -205,6 +236,12 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
 
 fn schema(name: &str, description: &str, mut parameters: Vec<ToolParam>) -> ToolSchema {
     parameters.push(param(
+        "backend",
+        "Optional graph backend override: legacy, new, or both. Takes precedence over ORBIT_GRAPH_BACKEND.",
+        "string",
+        false,
+    ));
+    parameters.push(param(
         "workspace_path",
         "Optional worktree path for this graph request.",
         "string",
@@ -222,6 +259,78 @@ fn schema(name: &str, description: &str, mut parameters: Vec<ToolParam>) -> Tool
         parameters,
         builtin: true,
     }
+}
+
+fn graph_new_query(name: &str, graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
+    match name {
+        GRAPH_SYNC_TOOL => graph_sync(graph, input),
+        GRAPH_SEARCH_TOOL => graph_search(graph, input),
+        GRAPH_SHOW_TOOL => graph_show(graph, input),
+        GRAPH_REFS_TOOL => graph_refs(graph, input),
+        GRAPH_CALLEES_TOOL => graph_callees(graph, input),
+        GRAPH_IMPACT_TOOL => graph_impact(graph, input),
+        GRAPH_TRACE_TOOL => graph_trace(graph, input),
+        _ => Err(OrbitError::not_found(
+            orbit_common::types::NotFoundKind::Tool,
+            name.to_string(),
+        )),
+    }
+}
+
+fn graph_query_kind(name: &str) -> Result<GraphQueryKind, OrbitError> {
+    match name {
+        GRAPH_SYNC_TOOL => Ok(GraphQueryKind::Sync),
+        GRAPH_SEARCH_TOOL => Ok(GraphQueryKind::Search),
+        GRAPH_SHOW_TOOL => Ok(GraphQueryKind::Show),
+        GRAPH_REFS_TOOL => Ok(GraphQueryKind::Refs),
+        GRAPH_CALLEES_TOOL => Ok(GraphQueryKind::Callees),
+        GRAPH_IMPACT_TOOL => Ok(GraphQueryKind::Impact),
+        GRAPH_TRACE_TOOL => Ok(GraphQueryKind::Trace),
+        _ => Err(OrbitError::not_found(
+            orbit_common::types::NotFoundKind::Tool,
+            name.to_string(),
+        )),
+    }
+}
+
+fn legacy_tool_name(name: &str) -> Result<&'static str, OrbitError> {
+    match name {
+        GRAPH_SEARCH_TOOL => Ok(GRAPH_SEARCH_TOOL),
+        GRAPH_SHOW_TOOL => Ok(GRAPH_SHOW_TOOL),
+        GRAPH_REFS_TOOL => Ok(GRAPH_REFS_TOOL),
+        GRAPH_SYNC_TOOL => Err(OrbitError::Execution(
+            "legacy graph backend does not expose orbit.graph.sync over MCP".to_string(),
+        )),
+        GRAPH_CALLEES_TOOL => Err(OrbitError::Execution(
+            "legacy graph backend does not expose orbit.graph.callees".to_string(),
+        )),
+        GRAPH_IMPACT_TOOL => Err(OrbitError::Execution(
+            "legacy graph backend does not expose orbit.graph.impact".to_string(),
+        )),
+        GRAPH_TRACE_TOOL => Err(OrbitError::Execution(
+            "legacy graph backend does not expose orbit.graph.trace".to_string(),
+        )),
+        _ => Err(OrbitError::not_found(
+            orbit_common::types::NotFoundKind::Tool,
+            name.to_string(),
+        )),
+    }
+}
+
+fn legacy_input_for_graph_tool(name: &str, mut input: Value) -> Value {
+    if name == GRAPH_REFS_TOOL
+        && input.get("selector").is_none()
+        && let Some(symbol) = input.get("symbol").cloned()
+    {
+        input["selector"] = symbol;
+    }
+    if name == GRAPH_SEARCH_TOOL
+        && input.get("type").is_none()
+        && input.get("kind").and_then(Value::as_str) == Some("symbol")
+    {
+        input["type"] = json!("symbol");
+    }
+    input
 }
 
 fn param(name: &str, description: &str, param_type: &str, required: bool) -> ToolParam {
@@ -317,6 +426,16 @@ fn optional_confidence(input: &Value) -> Result<RefConfidence, OrbitError> {
         .map(|value| parse_confidence(value.as_str()))
         .transpose()
         .map(|confidence| confidence.unwrap_or_default())
+}
+
+fn parse_backend_override(input: &Value) -> Result<Option<GraphBackend>, OrbitError> {
+    optional_string(input, "backend")?
+        .map(|value| {
+            value
+                .parse::<GraphBackend>()
+                .map_err(backend_error_to_orbit)
+        })
+        .transpose()
 }
 
 fn parse_selector(raw: String) -> Result<Selector, OrbitError> {
@@ -440,6 +559,10 @@ fn graph_error_to_orbit(error: GraphError) -> OrbitError {
         }
         _ => OrbitError::Execution(error.to_string()),
     }
+}
+
+fn backend_error_to_orbit(error: GraphBackendParseError) -> OrbitError {
+    OrbitError::InvalidInput(error.to_string())
 }
 
 fn selector_error_to_orbit(error: SelectorParseError) -> OrbitError {

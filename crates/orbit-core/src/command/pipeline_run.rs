@@ -515,6 +515,7 @@ impl OrbitRuntime {
             job_run_id: target_id.map(ToOwned::to_owned),
             activity_id: None,
             step_index: None,
+            backend: None,
         })
     }
 }

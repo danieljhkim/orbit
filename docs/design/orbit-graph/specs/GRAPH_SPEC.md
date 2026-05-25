@@ -4,7 +4,7 @@
 **Last updated:** 2026-05-25 (ORB-00330 Rust command extraction; ORB-00331 detached-HEAD DB layout)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
-**Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
+**Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §18 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
 
 ---
 
@@ -639,7 +639,33 @@ The output is a **decision artifact**, not a deletion: keep both crates, depreca
 
 Estimated calendar time: 6–8 weeks for Steps 1–3 driven by a single agent. Step 4's calendar is the length of the evaluation window plus the decision turnaround. The bulk of *technical* risk lives in Step 2; the bulk of *organizational* commitment lives in Step 4.
 
-## 17. Open questions
+## 17. Backend selection and cutover flag
+
+During Phase 7, every graph query surface accepts a runtime backend selector:
+
+- Environment variable: `ORBIT_GRAPH_BACKEND=legacy|new|both`.
+- Per-call override: `--backend legacy|new|both` on the `orbit-graph-cli` query commands, and `backend: "legacy" | "new" | "both"` on MCP/tool calls.
+- Precedence: per-call override > `ORBIT_GRAPH_BACKEND` > default.
+- Default: `legacy` until the Phase 7.4 effectiveness data supports the P7.2 default flip.
+
+Backend meanings:
+
+| Backend | Behavior |
+|---|---|
+| `legacy` | Route to the existing `orbit-knowledge` graph surface. This is the conservative default during the measurement window. |
+| `new` | Route to the SQLite-backed `orbit-graph` implementation. |
+| `both` | Return `orbit-graph` as the primary result and run `orbit-knowledge` as a shadow query. Shadow failures are logged but do not fail the primary query. Shadow result differences are logged at `WARN` with structured fields including query name, primary/shadow backend labels, serialized lengths, and content hashes. |
+
+Command audit entries for `orbit.graph.*` calls carry `backend: legacy|new|both` so the Phase 7.4 analysis can correlate latency, coverage, failures, and downstream task outcomes with the backend that served each query. Invalid environment values fail the graph call rather than silently changing the query path.
+
+Cutover plan:
+
+1. P7.1 ships the selector with `legacy` as default and `both` for shadow comparison.
+2. P7.3/P7.4 run real agent workflows through `both` and `new`, using audit rows plus shadow diffs to quantify coverage and effectiveness.
+3. P7.2 flips the default to `new` only after the documented measurement window is green.
+4. `legacy` remains available after the flip until a separate decision artifact chooses deprecation or removal.
+
+## 18. Open questions
 
 These are deliberately deferred — not blockers for shipping the spec, but listed so they don't get lost.
 
@@ -649,7 +675,7 @@ These are deliberately deferred — not blockers for shipping the spec, but list
 4. **Watcher reliability.** `notify` has known issues on Linux with mass-rename operations. `SyncPolicy::Windowed` is the safety net; we should still measure.
 5. **V2 write surface.** Rename, ReplaceBody, Delete, InsertAfter, Move — with an in-memory working-graph overlay, optimistic per-file hash verification on commit, and a patch compiler that turns graph edits into source diffs. Sketch lives in [`../3_vision.md`](../3_vision.md) §1.1. Out of scope for V1, but the V1 read model (per-worktree DB, qualified-name resolution, ephemeral symbol IDs) is deliberately compatible with adding writes later without a schema break.
 
-## 18. What this spec deliberately does *not* include
+## 19. What this spec deliberately does *not* include
 
 - A philosophy section. The principles ("structural not semantic," "deterministic," etc.) are inherited from `GRAPH_V2.md` and the existing knowledge-graph ADRs. They don't need restating.
 - A long list of "why not LSP." Not actually a live option in this codebase.

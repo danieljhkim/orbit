@@ -113,6 +113,7 @@ fn denials_payload_combines_v2_and_sqlite_denials() {
             job_run_id: None,
             activity_id: None,
             step_index: None,
+            backend: None,
         })
         .expect("record sqlite denial");
 
@@ -200,6 +201,7 @@ fn denials_payload_distinguishes_job_runs_from_audit_executions() {
             job_run_id: Some("jrun-real-policy".to_string()),
             activity_id: Some("agent_implement".to_string()),
             step_index: Some(0),
+            backend: None,
         })
         .expect("record linked denial");
     runtime
@@ -238,6 +240,7 @@ fn denials_payload_distinguishes_job_runs_from_audit_executions() {
             job_run_id: None,
             activity_id: None,
             step_index: None,
+            backend: None,
         })
         .expect("record task-lock denial");
 

@@ -718,6 +718,7 @@ fn emit_learning_injected_audit(
         step_index: std::env::var("ORBIT_STEP_INDEX")
             .ok()
             .and_then(|value| value.parse().ok()),
+        backend: None,
     };
 
     runtime

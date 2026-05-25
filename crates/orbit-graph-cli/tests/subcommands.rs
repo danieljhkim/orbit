@@ -13,13 +13,22 @@ use tempfile::TempDir;
 fn query_and_admin_subcommands_emit_json() {
     let worktree = fixture_worktree();
 
-    let sync = run_json(worktree.path(), ["sync", "--full"]);
+    let sync = run_json(worktree.path(), ["sync", "--full", "--backend", "new"]);
     assert_eq!(sync["files_removed"], 0);
     assert!(sync["files_indexed"].as_u64().expect("files_indexed") >= 1);
 
     let search = run_json(
         worktree.path(),
-        ["search", "helper", "--kind", "symbol", "--limit", "5"],
+        [
+            "search",
+            "helper",
+            "--kind",
+            "symbol",
+            "--limit",
+            "5",
+            "--backend",
+            "new",
+        ],
     );
     assert_array_field(&search, "matches");
 
@@ -30,6 +39,8 @@ fn query_and_admin_subcommands_emit_json() {
             "symbol:src/lib.rs#entry:function",
             "--max-bytes",
             "256",
+            "--backend",
+            "new",
         ],
     );
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
@@ -44,6 +55,8 @@ fn query_and_admin_subcommands_emit_json() {
             "fuzzy",
             "--kind",
             "call",
+            "--backend",
+            "new",
         ],
     );
     assert!(refs.get("target").is_some());
@@ -52,7 +65,12 @@ fn query_and_admin_subcommands_emit_json() {
 
     let callees = run_json(
         worktree.path(),
-        ["callees", "symbol:src/lib.rs#entry:function"],
+        [
+            "callees",
+            "symbol:src/lib.rs#entry:function",
+            "--backend",
+            "new",
+        ],
     );
     assert_array_field(&callees, "callees");
 
@@ -65,6 +83,8 @@ fn query_and_admin_subcommands_emit_json() {
             "2",
             "--confidence",
             "same_module",
+            "--backend",
+            "new",
         ],
     );
     assert_array_field(&impact, "touched");
@@ -79,6 +99,8 @@ fn query_and_admin_subcommands_emit_json() {
             "2",
             "--confidence",
             "same_module",
+            "--backend",
+            "new",
         ],
     );
     assert!(trace["root"].is_null());
@@ -127,6 +149,31 @@ fn invalid_selector_errors_are_json_on_stderr() {
         .stderr(predicate::str::contains(
             "\"code\":\"selector_parse_error\"",
         ));
+}
+
+#[test]
+fn backend_cli_override_takes_precedence_over_env() {
+    let worktree = fixture_worktree();
+    let mut command = graph_cli_command();
+    command
+        .current_dir(worktree.path())
+        .env("ORBIT_GRAPH_BACKEND", "legacy")
+        .args(["sync", "--full", "--backend", "new"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn backend_env_selects_legacy_by_default() {
+    let worktree = fixture_worktree();
+    let mut command = graph_cli_command();
+    command
+        .current_dir(worktree.path())
+        .env("ORBIT_GRAPH_BACKEND", "legacy")
+        .args(["callees", "symbol:src/lib.rs#entry:function"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("\"code\":\"legacy_unavailable\""));
 }
 
 fn run_json<const N: usize>(worktree: &Path, args: [&str; N]) -> Value {

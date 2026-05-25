@@ -56,7 +56,8 @@ pub(crate) fn apply_schema(conn: &Connection) -> Result<(), OrbitError> {
                 task_id TEXT,
                 job_run_id TEXT,
                 activity_id TEXT,
-                step_index INTEGER
+                step_index INTEGER,
+                backend TEXT
             );
 
             CREATE TABLE IF NOT EXISTS task_reservations (
@@ -393,6 +394,7 @@ fn ensure_audit_events_schema(conn: &Connection) -> Result<(), OrbitError> {
         conn,
         "ALTER TABLE audit_events ADD COLUMN step_index INTEGER",
     )?;
+    add_column_if_missing(conn, "ALTER TABLE audit_events ADD COLUMN backend TEXT")?;
 
     conn.execute_batch(
         r#"

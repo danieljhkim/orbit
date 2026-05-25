@@ -17,10 +17,14 @@ pub use orbit_graph_extract::Selector;
 use rusqlite::{Connection, OpenFlags, params};
 use serde::Serialize;
 
+mod backend;
 mod query;
 mod store;
 mod sync;
 
+pub use backend::{
+    GraphBackend, GraphBackendParseError, GraphQueryKind, ORBIT_GRAPH_BACKEND_ENV, route_query,
+};
 pub use query::{
     DEFAULT_SEARCH_LIMIT, DEFAULT_SHOW_MAX_BYTES, Match, NodeMetadata, NodeView, SearchKind,
     SearchQuery, SearchResult, SourceSpan,

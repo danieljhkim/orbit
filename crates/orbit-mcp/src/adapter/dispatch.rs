@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
 use rmcp::ErrorData as McpError;
@@ -16,6 +17,7 @@ use super::name_map::{ToolNameCollision, build_name_map};
 use super::schema::schema_to_tool;
 use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
+use crate::{McpToolAudit, McpToolAuditStatus};
 
 impl OrbitToolServer {
     pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
@@ -103,9 +105,42 @@ impl OrbitToolServer {
         let session_context = self.session_context();
         let input_for_learning = input.clone();
         let graph_tool = self.graph_tools.is_graph_tool(&canonical);
+        let graph_backend = if graph_tool {
+            match self.graph_tools.resolve_backend(&input) {
+                Ok(backend) => Some(backend),
+                Err(err) => {
+                    record_direct_graph_audit(
+                        host.as_ref(),
+                        &canonical,
+                        input.clone(),
+                        None,
+                        McpToolAuditStatus::Failure,
+                        Some(err.to_string()),
+                        1,
+                    );
+                    return Ok(tool_error_result(&err));
+                }
+            }
+        } else {
+            None
+        };
+        let direct_audit_backend = graph_backend
+            .filter(|backend| !self.graph_tools.host_audits_call(&canonical, *backend))
+            .map(|backend| backend.as_str().to_string());
+        let start = Instant::now();
+        let input_for_audit = input.clone();
         let join = tokio::task::spawn_blocking(move || {
             if graph_tool {
-                graph_tools.call_tool(&exec_name, input, session_context)
+                let legacy_host = Arc::clone(&host);
+                let shadow_host = Arc::clone(&host);
+                graph_tools.call_tool(
+                    &exec_name,
+                    input,
+                    session_context,
+                    graph_backend.expect("graph backend resolved before graph dispatch"),
+                    |name, input, context| legacy_host.call_tool(name, input, context),
+                    |name, input, context| shadow_host.call_shadow_tool(name, input, context),
+                )
             } else {
                 host.call_tool(&exec_name, input, session_context)
             }
@@ -114,12 +149,34 @@ impl OrbitToolServer {
 
         match join {
             Ok(Ok(value)) => {
+                if let Some(backend) = direct_audit_backend.as_deref() {
+                    record_direct_graph_audit(
+                        self.host.as_ref(),
+                        &canonical,
+                        input_for_audit.clone(),
+                        Some(backend.to_string()),
+                        McpToolAuditStatus::Success,
+                        None,
+                        elapsed_ms(start),
+                    );
+                }
                 let value = self
                     .maybe_attach_learning_sidecar(&canonical, input_for_learning, value)
                     .await?;
                 Ok(CallToolResult::structured(mcp_structured_content(value)))
             }
             Ok(Err(orbit_err)) => {
+                if let Some(backend) = direct_audit_backend.as_deref() {
+                    record_direct_graph_audit(
+                        self.host.as_ref(),
+                        &canonical,
+                        input_for_audit.clone(),
+                        Some(backend.to_string()),
+                        McpToolAuditStatus::Failure,
+                        Some(orbit_err.to_string()),
+                        elapsed_ms(start),
+                    );
+                }
                 if graph_tool {
                     tracing::warn!(
                         target: "orbit.mcp.graph",
@@ -134,9 +191,50 @@ impl OrbitToolServer {
                 let err = OrbitError::Execution(format!(
                     "tool '{canonical}' worker panicked or was cancelled: {join_err}"
                 ));
+                if let Some(backend) = direct_audit_backend.as_deref() {
+                    record_direct_graph_audit(
+                        self.host.as_ref(),
+                        &canonical,
+                        input_for_audit,
+                        Some(backend.to_string()),
+                        McpToolAuditStatus::Failure,
+                        Some(err.to_string()),
+                        elapsed_ms(start),
+                    );
+                }
                 Ok(tool_error_result(&err))
             }
         }
+    }
+}
+
+fn elapsed_ms(start: Instant) -> i64 {
+    (start.elapsed().as_millis() as i64).max(1)
+}
+
+fn record_direct_graph_audit(
+    host: &dyn crate::McpHost,
+    name: &str,
+    input: Value,
+    backend: Option<String>,
+    status: McpToolAuditStatus,
+    error_message: Option<String>,
+    duration_ms: i64,
+) {
+    if let Err(err) = host.record_tool_audit(McpToolAudit {
+        name: name.to_string(),
+        input,
+        status,
+        duration_ms,
+        error_message,
+        backend,
+    }) {
+        tracing::warn!(
+            target: "orbit.mcp.audit",
+            tool = %name,
+            error = %err,
+            "failed to persist direct MCP graph audit event"
+        );
     }
 }
 

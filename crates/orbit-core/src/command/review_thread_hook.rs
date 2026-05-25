@@ -285,6 +285,7 @@ pub(crate) fn emit_review_thread_surfaced_audit(
         step_index: std::env::var("ORBIT_STEP_INDEX")
             .ok()
             .and_then(|value| value.parse().ok()),
+        backend: None,
     };
 
     runtime

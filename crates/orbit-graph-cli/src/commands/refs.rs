@@ -1,8 +1,9 @@
 use clap::{Args, ValueEnum};
-use orbit_graph::{RefConfidence, RefKind, RefOpts};
+use orbit_graph::{GraphQueryKind, RefConfidence, RefKind, RefOpts};
 use orbit_graph_extract::Selector;
+use serde_json::json;
 
-use super::{CliError, CommandContext, json_value};
+use super::{BackendArg, CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
 pub(crate) struct RefsCommand {
@@ -11,17 +12,37 @@ pub(crate) struct RefsCommand {
     confidence: ConfidenceArg,
     #[arg(long, value_enum)]
     kind: Option<RefKindArg>,
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
 }
 
 impl RefsCommand {
     pub(crate) fn run(&self, context: &CommandContext) -> Result<serde_json::Value, CliError> {
-        let graph = context.open_graph()?;
         let selector = self.symbol.parse::<Selector>()?;
         let opts = RefOpts {
             confidence: self.confidence.into_graph(),
             kind: self.kind.map(RefKindArg::into_graph),
         };
-        json_value(graph.refs(&selector, &opts)?)
+        let raw_selector = self.symbol.clone();
+        let worktree = context.worktree_root.clone();
+        context.route_query(
+            self.backend,
+            GraphQueryKind::Refs,
+            move || {
+                let graph =
+                    orbit_graph::Graph::open(worktree.as_path(), orbit_graph::SyncPolicy::Manual)
+                        .map_err(CliError::Graph)?;
+                json_value(graph.refs(&selector, &opts)?)
+            },
+            || {
+                context.run_legacy_tool(
+                    "orbit.graph.refs",
+                    json!({
+                        "selector": raw_selector,
+                    }),
+                )
+            },
+        )
     }
 }
 

@@ -13,12 +13,12 @@ use std::time::Instant;
 use orbit_common::types::{
     AuditEventStatus, LearningInjectionState, ToolSchema, ToolSessionContext, audit_execution_id,
 };
-use orbit_core::command::tool::{ToolEntryPoint, audit_role_label};
+use orbit_core::command::tool::{ToolEntryPoint, audit_role_label, graph_backend_for_audit};
 use orbit_core::{
     AuditEventInsertParams, LearningSearchParams, NotFoundKind, OrbitError, OrbitRuntime,
     redact_sensitive_env_text,
 };
-use orbit_mcp::McpHost;
+use orbit_mcp::{McpHost, McpToolAudit, McpToolAuditStatus};
 use serde_json::{Value, json};
 
 pub(crate) const ORBIT_MCP_SERVER_ID: &str = "orbit";
@@ -172,6 +172,20 @@ impl McpHost for RuntimeMcpHost {
         audited_mcp_call_with_session_context(&self.runtime, name, input, session_context)
     }
 
+    fn call_shadow_tool(
+        &self,
+        name: &str,
+        input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        ensure_mcp_tool_exposed(name)?;
+        self.runtime.run_tool(name, input)
+    }
+
+    fn record_tool_audit(&self, audit: McpToolAudit) -> Result<(), OrbitError> {
+        record_mcp_tool_audit(&self.runtime, audit)
+    }
+
     fn learning_candidates_for_path(
         &self,
         path: &str,
@@ -263,60 +277,95 @@ fn record_mcp_preflight_failure(
     input: &Value,
     err: &OrbitError,
 ) {
+    let audit = McpToolAudit {
+        name: name.to_string(),
+        input: input.clone(),
+        status: McpToolAuditStatus::Failure,
+        duration_ms: 1,
+        error_message: Some(err.to_string()),
+        backend: graph_backend_for_audit(name, input),
+    };
+    if let Err(write_err) = record_mcp_tool_audit(runtime, audit) {
+        eprintln!("warning: failed to persist MCP preflight audit event: {write_err}");
+    }
+}
+
+fn record_mcp_tool_audit(runtime: &OrbitRuntime, audit: McpToolAudit) -> Result<(), OrbitError> {
     let start = Instant::now();
-    let role = audit_role_label(input, None, None);
-    let duration_ms = (start.elapsed().as_millis() as i64).max(1);
+    let role = audit_role_label(&audit.input, None, None);
+    let duration_ms = audit
+        .duration_ms
+        .max((start.elapsed().as_millis() as i64).max(1));
     let working_directory = std::env::current_dir()
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
+    let (status, exit_code, error_message) = match audit.status {
+        McpToolAuditStatus::Success => (AuditEventStatus::Success, 0, None),
+        McpToolAuditStatus::Failure => (
+            AuditEventStatus::Failure,
+            1,
+            audit
+                .error_message
+                .as_deref()
+                .map(redact_sensitive_env_text),
+        ),
+    };
 
     let params = AuditEventInsertParams {
         execution_id: audit_execution_id("exec"),
         command: "tool".to_string(),
         subcommand: Some(ToolEntryPoint::Mcp.audit_subcommand().to_string()),
-        tool_name: Some(name.to_string()),
+        tool_name: Some(audit.name.clone()),
         target_type: Some("tool".to_string()),
-        target_id: Some(name.to_string()),
+        target_id: Some(audit.name.clone()),
         role,
-        status: AuditEventStatus::Failure,
-        exit_code: 1,
+        status,
+        exit_code,
         duration_ms,
         working_directory,
         arguments_json: None,
         stdout_truncated: None,
         stderr_truncated: None,
-        error_message: Some(redact_sensitive_env_text(&err.to_string())),
+        error_message,
         host: std::env::var("HOSTNAME").ok(),
         pid: std::process::id(),
         session_id: None,
-        task_id: input
+        task_id: audit
+            .input
             .get("task_id")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .or_else(|| std::env::var("ORBIT_TASK_ID").ok())
             .filter(|s| !s.is_empty()),
-        job_run_id: input
+        job_run_id: audit
+            .input
             .get("job_run_id")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .or_else(|| std::env::var("ORBIT_RUN_ID").ok())
             .filter(|s| !s.is_empty()),
-        activity_id: input
+        activity_id: audit
+            .input
             .get("activity_id")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .or_else(|| std::env::var("ORBIT_ACTIVITY_ID").ok())
             .filter(|s| !s.is_empty()),
-        step_index: input.get("step_index").and_then(Value::as_i64).or_else(|| {
-            std::env::var("ORBIT_STEP_INDEX")
-                .ok()
-                .and_then(|s| s.parse().ok())
-        }),
+        step_index: audit
+            .input
+            .get("step_index")
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                std::env::var("ORBIT_STEP_INDEX")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            }),
+        backend: audit
+            .backend
+            .or_else(|| graph_backend_for_audit(&audit.name, &audit.input)),
     };
 
-    if let Err(write_err) = runtime.record_audit_event(&params) {
-        eprintln!("warning: failed to persist MCP preflight audit event: {write_err}");
-    }
+    runtime.record_audit_event(&params)
 }
 
 /// MCP host returned when no initialized Orbit workspace is discoverable.

@@ -1,8 +1,8 @@
 use clap::{Args, ValueEnum};
-use orbit_graph::{DEFAULT_IMPACT_DEPTH, RefConfidence};
+use orbit_graph::{DEFAULT_IMPACT_DEPTH, GraphQueryKind, RefConfidence};
 use orbit_graph_extract::Selector;
 
-use super::{CliError, CommandContext, json_value};
+use super::{BackendArg, CliError, CommandContext, json_value};
 
 #[derive(Debug, Args)]
 pub(crate) struct ImpactCommand {
@@ -11,13 +11,27 @@ pub(crate) struct ImpactCommand {
     depth: u8,
     #[arg(long, value_enum, default_value_t = ConfidenceArg::SameModule)]
     confidence: ConfidenceArg,
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
 }
 
 impl ImpactCommand {
     pub(crate) fn run(&self, context: &CommandContext) -> Result<serde_json::Value, CliError> {
-        let graph = context.open_graph()?;
         let selector = self.selector.parse::<Selector>()?;
-        json_value(graph.impact(&selector, self.depth, self.confidence.into_graph())?)
+        let depth = self.depth;
+        let confidence = self.confidence.into_graph();
+        let worktree = context.worktree_root.clone();
+        context.route_query(
+            self.backend,
+            GraphQueryKind::Impact,
+            move || {
+                let graph =
+                    orbit_graph::Graph::open(worktree.as_path(), orbit_graph::SyncPolicy::Manual)
+                        .map_err(CliError::Graph)?;
+                json_value(graph.impact(&selector, depth, confidence)?)
+            },
+            || context.legacy_unavailable("impact"),
+        )
     }
 }
 

@@ -26,6 +26,7 @@ fn sample_params() -> AuditEventInsertParams {
         job_run_id: Some("jrun-xyz".to_string()),
         activity_id: Some("agent_implement".to_string()),
         step_index: Some(2),
+        backend: Some("legacy".to_string()),
     }
 }
 
@@ -59,6 +60,7 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(event.job_run_id.as_deref(), Some("jrun-xyz"));
     assert_eq!(event.activity_id.as_deref(), Some("agent_implement"));
     assert_eq!(event.step_index, Some(2));
+    assert_eq!(event.backend.as_deref(), Some("legacy"));
 
     let by_id = store
         .get_audit_event(event.id)
@@ -68,6 +70,7 @@ fn insert_then_read_round_trips_correlation_fields() {
     assert_eq!(by_id.job_run_id.as_deref(), Some("jrun-xyz"));
     assert_eq!(by_id.activity_id.as_deref(), Some("agent_implement"));
     assert_eq!(by_id.step_index, Some(2));
+    assert_eq!(by_id.backend.as_deref(), Some("legacy"));
 }
 
 #[test]

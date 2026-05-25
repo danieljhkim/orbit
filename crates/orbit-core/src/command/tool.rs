@@ -17,6 +17,7 @@ use crate::redact_sensitive_env_text;
 pub use crate::runtime::pipeline::DryRunResult;
 
 const ORBIT_MANAGED_RUN_CONTEXT_ENV: &str = "ORBIT_MANAGED_RUN_CONTEXT";
+const ORBIT_GRAPH_BACKEND_ENV: &str = "ORBIT_GRAPH_BACKEND";
 
 #[derive(Debug, Clone)]
 pub struct ToolInfo {
@@ -149,6 +150,7 @@ impl OrbitRuntime {
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|_| ".".to_string());
         let audit_context = resolve_audit_context(&input);
+        let graph_backend = graph_backend_for_audit(name, &input);
 
         // Closure boundary so any setup failure (e.g. an inconsistent
         // `agent`/`model` rejected by `resolve_agent_identity`) becomes a
@@ -216,6 +218,7 @@ impl OrbitRuntime {
             job_run_id: audit_context.job_run_id,
             activity_id: audit_context.activity_id,
             step_index: audit_context.step_index,
+            backend: graph_backend,
         };
 
         let audit_recorded = match self.record_audit_event(&params) {
@@ -282,6 +285,25 @@ fn resolve_audit_context(input: &Value) -> AuditContext {
             .and_then(Value::as_i64)
             .or_else(|| env_str("ORBIT_STEP_INDEX").and_then(|s| s.parse().ok())),
     }
+}
+
+pub fn graph_backend_for_audit(name: &str, input: &Value) -> Option<String> {
+    if !name.starts_with("orbit.graph.") {
+        return None;
+    }
+    input
+        .get("backend")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| matches!(*value, "legacy" | "new" | "both"))
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            std::env::var(ORBIT_GRAPH_BACKEND_ENV)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| matches!(value.as_str(), "legacy" | "new" | "both"))
+        })
+        .or_else(|| Some("legacy".to_string()))
 }
 
 fn reservation_owner_from_env() -> Option<ReservationOwnerContext> {
@@ -807,6 +829,26 @@ mod audit_tests {
         assert_eq!(row.exit_code, 1);
         assert!(row.error_message.is_some());
         assert_eq!(row.subcommand.as_deref(), Some("run-mcp"));
+    }
+
+    #[test]
+    fn dispatch_records_graph_backend_in_audit_row() {
+        let _g = env_guard();
+        let runtime = fresh_runtime();
+
+        let _ = runtime.execute_tool_command_dispatch(
+            "orbit.graph.search",
+            json!({ "query": "anything", "backend": "both", "model": "gpt-5.5" }),
+            None,
+            None,
+            ToolEntryPoint::Mcp,
+        );
+
+        let events = runtime
+            .list_audit_events(None, Some("orbit.graph.search".to_string()), None, None, 16)
+            .expect("list audit events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].backend.as_deref(), Some("both"));
     }
 
     #[test]

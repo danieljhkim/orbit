@@ -233,6 +233,7 @@ fn record_learning_id_migration_audit(
         step_index: std::env::var("ORBIT_STEP_INDEX")
             .ok()
             .and_then(|s| s.parse().ok()),
+        backend: None,
     })
 }
 

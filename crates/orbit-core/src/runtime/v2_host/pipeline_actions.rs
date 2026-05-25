@@ -315,6 +315,7 @@ fn record_gate_stale_noop(
             job_run_id: parent_run_id,
             activity_id: None,
             step_index: None,
+            backend: None,
         })
         .map_err(|err| action_failed(action, format!("record gate.stale_noop audit: {err}")))
 }
@@ -511,6 +512,7 @@ pub(super) fn gate_starvation_fail(
             job_run_id: None,
             activity_id: None,
             step_index: None,
+            backend: None,
         })
         .map_err(|err| DispatchError::DeterministicActionFailed {
             action: action.to_string(),

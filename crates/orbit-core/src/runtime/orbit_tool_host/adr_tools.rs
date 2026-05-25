@@ -391,6 +391,7 @@ fn record_transition_audit(
         step_index: std::env::var("ORBIT_STEP_INDEX")
             .ok()
             .and_then(|s| s.parse().ok()),
+        backend: None,
     })
 }
 

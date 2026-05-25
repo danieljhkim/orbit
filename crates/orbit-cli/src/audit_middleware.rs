@@ -131,6 +131,7 @@ impl Drop for AuditGuard<'_> {
             step_index: std::env::var("ORBIT_STEP_INDEX")
                 .ok()
                 .and_then(|s| s.parse().ok()),
+            backend: None,
         };
 
         let write_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

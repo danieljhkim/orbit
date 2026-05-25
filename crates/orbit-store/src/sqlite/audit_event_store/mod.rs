@@ -35,6 +35,7 @@ pub struct AuditEventInsertParams {
     pub job_run_id: Option<String>,
     pub activity_id: Option<String>,
     pub step_index: Option<i64>,
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -119,8 +120,8 @@ impl Store {
                 duration_ms, working_directory, arguments_json,
                 stdout_truncated, stderr_truncated, error_message,
                 host, pid, session_id, task_id, job_run_id, activity_id,
-                step_index
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"#,
+                step_index, backend
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)"#,
             rusqlite::params![
                 params.execution_id,
                 now_string(),
@@ -145,6 +146,7 @@ impl Store {
                 params.job_run_id,
                 params.activity_id,
                 params.step_index,
+                params.backend,
             ],
         )
         .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -202,7 +204,7 @@ impl Store {
              target_type, target_id, role, status, exit_code, duration_ms, \
              working_directory, arguments_json, stdout_truncated, stderr_truncated, \
              error_message, host, pid, session_id, task_id, job_run_id, activity_id, \
-             step_index \
+             step_index, backend \
              FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{}",
             param_values.len() + 1
         );
@@ -255,6 +257,7 @@ impl Store {
                     job_run_id: row.get(21)?,
                     activity_id: row.get(22)?,
                     step_index: row.get(23)?,
+                    backend: row.get(24)?,
                 })
             })
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -275,7 +278,7 @@ impl Store {
                  target_type, target_id, role, status, exit_code, duration_ms, \
                  working_directory, arguments_json, stdout_truncated, stderr_truncated, \
                  error_message, host, pid, session_id, task_id, job_run_id, activity_id, \
-                 step_index \
+                 step_index, backend \
                  FROM audit_events WHERE id = ?1",
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -319,6 +322,7 @@ impl Store {
                     job_run_id: row.get(21)?,
                     activity_id: row.get(22)?,
                     step_index: row.get(23)?,
+                    backend: row.get(24)?,
                 })
             })
             .optional()

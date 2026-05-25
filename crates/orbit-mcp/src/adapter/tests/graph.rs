@@ -1,11 +1,14 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
-use orbit_common::types::ToolSessionContext;
+use orbit_common::types::{OrbitError, ToolSchema, ToolSessionContext};
 use serde_json::{Value, json};
 use tempfile::TempDir;
+
+use crate::{McpHost, McpToolAudit, McpToolAuditStatus};
 
 use super::super::OrbitToolServer;
 use super::super::graph::graph_tool_schemas;
@@ -28,27 +31,27 @@ fn graph_tool_schemas_cover_cli_parameters() {
         ]
     );
 
-    assert_param_names(&schemas[0], &with_workspace_params(&["full"]));
+    assert_param_names(&schemas[0], &with_workspace_params(&["full", "backend"]));
     assert_param_names(
         &schemas[1],
-        &with_workspace_params(&["query", "kind", "lang", "limit"]),
+        &with_workspace_params(&["query", "kind", "lang", "limit", "backend"]),
     );
     assert_param_names(
         &schemas[2],
-        &with_workspace_params(&["selector", "max_bytes"]),
+        &with_workspace_params(&["selector", "max_bytes", "backend"]),
     );
     assert_param_names(
         &schemas[3],
-        &with_workspace_params(&["symbol", "confidence", "kind"]),
+        &with_workspace_params(&["symbol", "confidence", "kind", "backend"]),
     );
-    assert_param_names(&schemas[4], &with_workspace_params(&["symbol"]));
+    assert_param_names(&schemas[4], &with_workspace_params(&["symbol", "backend"]));
     assert_param_names(
         &schemas[5],
-        &with_workspace_params(&["selector", "depth", "confidence"]),
+        &with_workspace_params(&["selector", "depth", "confidence", "backend"]),
     );
     assert_param_names(
         &schemas[6],
-        &with_workspace_params(&["command_name", "depth", "confidence"]),
+        &with_workspace_params(&["command_name", "depth", "confidence", "backend"]),
     );
     assert_workspace_params_optional_strings(&schemas);
 }
@@ -77,7 +80,7 @@ fn combined_schemas_override_legacy_host_graph_tools() {
         .expect("graph search schema");
     assert_param_names(
         search,
-        &with_workspace_params(&["query", "kind", "lang", "limit"]),
+        &with_workspace_params(&["query", "kind", "lang", "limit", "backend"]),
     );
     assert!(
         schemas
@@ -102,7 +105,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         &server,
         "orbit.graph.sync",
         json!({
-            "full": true
+            "full": true,
+            "backend": "new"
         }),
     )
     .await;
@@ -115,7 +119,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         json!({
             "query": "helper",
             "kind": "symbol",
-            "limit": 5
+            "limit": 5,
+            "backend": "new"
         }),
     )
     .await;
@@ -126,7 +131,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         "orbit.graph.show",
         json!({
             "selector": "symbol:src/lib.rs#entry:function",
-            "max_bytes": 256
+            "max_bytes": 256,
+            "backend": "new"
         }),
     )
     .await;
@@ -139,7 +145,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         json!({
             "symbol": "symbol:src/lib.rs#helper:function",
             "confidence": "fuzzy",
-            "kind": "call"
+            "kind": "call",
+            "backend": "new"
         }),
     )
     .await;
@@ -151,7 +158,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         &server,
         "orbit.graph.callees",
         json!({
-            "symbol": "symbol:src/lib.rs#entry:function"
+            "symbol": "symbol:src/lib.rs#entry:function",
+            "backend": "new"
         }),
     )
     .await;
@@ -163,7 +171,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         json!({
             "selector": "symbol:src/lib.rs#entry:function",
             "depth": 2,
-            "confidence": "same_module"
+            "confidence": "same_module",
+            "backend": "new"
         }),
     )
     .await;
@@ -176,7 +185,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         json!({
             "command_name": "missing-command",
             "depth": 2,
-            "confidence": "same_module"
+            "confidence": "same_module",
+            "backend": "new"
         }),
     )
     .await;
@@ -201,7 +211,7 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
     let result = server
         .call_tool_request(request_with_args(
             "orbit.graph.show",
-            json!({ "selector": "not-a-selector" }),
+            json!({ "selector": "not-a-selector", "backend": "new" }),
         ))
         .await
         .expect("MCP request succeeds with tool error payload");
@@ -217,6 +227,38 @@ async fn graph_tool_errors_are_structured_mcp_tool_errors() {
     );
 }
 
+#[tokio::test]
+async fn graph_both_backend_records_one_direct_audit_and_uses_unaudited_shadow() {
+    let worktree = fixture_worktree();
+    let host = Arc::new(RecordingHost::default());
+    let server = OrbitToolServer::new(host.clone());
+    server.replace_session_context(ToolSessionContext::with_workspace(
+        worktree.path().display().to_string(),
+    ));
+
+    let search = call_json(
+        &server,
+        "orbit.graph.search",
+        json!({
+            "query": "helper",
+            "kind": "symbol",
+            "limit": 5,
+            "backend": "both"
+        }),
+    )
+    .await;
+    assert_array_field(&search, "matches");
+
+    assert_eq!(host.primary_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(host.shadow_calls.load(Ordering::SeqCst), 1);
+
+    let audits = host.audits.lock().expect("audit lock");
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0].name, "orbit.graph.search");
+    assert_eq!(audits[0].status, McpToolAuditStatus::Success);
+    assert_eq!(audits[0].backend.as_deref(), Some("both"));
+}
+
 async fn call_json(server: &OrbitToolServer, name: &str, args: Value) -> Value {
     let result = server
         .call_tool_request(request_with_args(name, args))
@@ -227,6 +269,46 @@ async fn call_json(server: &OrbitToolServer, name: &str, args: Value) -> Value {
         "{name} should not return a tool error: {result:?}"
     );
     result.structured_content.expect("structured content")
+}
+
+#[derive(Default)]
+struct RecordingHost {
+    audits: Mutex<Vec<McpToolAudit>>,
+    primary_calls: AtomicUsize,
+    shadow_calls: AtomicUsize,
+}
+
+impl McpHost for RecordingHost {
+    fn list_tool_schemas(&self) -> Vec<ToolSchema> {
+        Vec::new()
+    }
+
+    fn call_tool(
+        &self,
+        _name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.primary_calls.fetch_add(1, Ordering::SeqCst);
+        Err(OrbitError::Execution(
+            "primary legacy host should not run for backend=both".to_string(),
+        ))
+    }
+
+    fn call_shadow_tool(
+        &self,
+        _name: &str,
+        _input: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.shadow_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(json!({ "matches": [] }))
+    }
+
+    fn record_tool_audit(&self, audit: McpToolAudit) -> Result<(), OrbitError> {
+        self.audits.lock().expect("audit lock").push(audit);
+        Ok(())
+    }
 }
 
 fn assert_array_field(value: &Value, field: &str) {

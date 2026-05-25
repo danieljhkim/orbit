@@ -33,6 +33,7 @@ fn audit_list_json_projection_shape_is_stable() {
         job_run_id: Some("jrun-1".to_string()),
         activity_id: Some("implement".to_string()),
         step_index: Some(2),
+        backend: Some("legacy".to_string()),
     };
 
     assert_eq!(
@@ -62,6 +63,7 @@ fn audit_list_json_projection_shape_is_stable() {
             "job_run_id": "jrun-1",
             "activity_id": "implement",
             "step_index": 2,
+            "backend": "legacy",
         })
     );
 }

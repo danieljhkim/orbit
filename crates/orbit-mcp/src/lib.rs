@@ -48,6 +48,22 @@ use serde_json::Value;
 
 pub use adapter::OrbitToolServer;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpToolAuditStatus {
+    Success,
+    Failure,
+}
+
+#[derive(Debug, Clone)]
+pub struct McpToolAudit {
+    pub name: String,
+    pub input: Value,
+    pub status: McpToolAuditStatus,
+    pub duration_ms: i64,
+    pub error_message: Option<String>,
+    pub backend: Option<String>,
+}
+
 /// A pluggable back-end that satisfies MCP `tools/list` and `tools/call`
 /// requests.
 ///
@@ -63,6 +79,19 @@ pub trait McpHost: Send + Sync + 'static {
         input: Value,
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError>;
+
+    fn call_shadow_tool(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        self.call_tool(name, input, session_context)
+    }
+
+    fn record_tool_audit(&self, _audit: McpToolAudit) -> Result<(), OrbitError> {
+        Ok(())
+    }
 
     /// L-0043: sidecar internals use host extensions so runtime-backed MCP
     /// hosts can keep the client safe surface narrow.
