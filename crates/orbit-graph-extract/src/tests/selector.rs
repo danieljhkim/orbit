@@ -28,6 +28,8 @@ fn selector_audit_corpus_keeps_frozen_debug_output() {
         r#"File { path: "src/lib.rs" }"#,
         r#"Symbol { path: "src/lib.rs", symbol: "hello", kind: "function" }"#,
         r#"Symbol { path: "src/lib.rs", symbol: "Greeter", kind: "trait" }"#,
+        r#"Module { qualified: "orbit_core::scheduler" }"#,
+        r#"Command { name: "task.update" }"#,
     ];
 
     assert_eq!(actual, expected);

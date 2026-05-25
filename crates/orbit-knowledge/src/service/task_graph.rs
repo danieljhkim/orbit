@@ -299,7 +299,7 @@ fn lock_targets_for_mutation(selector: &Selector, extra_files: &[&str]) -> Vec<S
             targets.push(selector.to_string());
             targets.push(format!("file:{path}"));
         }
-        Selector::Dir { .. } => {}
+        Selector::Dir { .. } | Selector::Module { .. } | Selector::Command { .. } => {}
     }
 
     for file in extra_files {

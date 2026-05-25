@@ -39,6 +39,16 @@ pub enum Selector {
         /// Symbol kind, such as `function`, `method`, or `trait`.
         kind: String,
     },
+    /// Module selector addressed by qualified module name.
+    Module {
+        /// Qualified module name.
+        qualified: String,
+    },
+    /// Command selector addressed by CLI command name.
+    Command {
+        /// Command name.
+        name: String,
+    },
 }
 
 impl Selector {
@@ -50,10 +60,17 @@ impl Selector {
             .collect()
     }
 
-    /// Return the filesystem anchor path for this selector.
+    /// Return the filesystem anchor path for this selector, or an empty string
+    /// for selector forms that are resolved through graph metadata.
     pub fn path(&self) -> &str {
+        self.anchor_path().unwrap_or("")
+    }
+
+    /// Return the filesystem anchor path for this selector when it has one.
+    pub fn anchor_path(&self) -> Option<&str> {
         match self {
-            Self::Dir { path } | Self::File { path } | Self::Symbol { path, .. } => path,
+            Self::Dir { path } | Self::File { path } | Self::Symbol { path, .. } => Some(path),
+            Self::Module { .. } | Self::Command { .. } => None,
         }
     }
 
@@ -66,6 +83,10 @@ impl Selector {
                 symbol: symbol.clone(),
                 kind: kind.clone(),
             },
+            Self::Module { qualified } => Self::Module {
+                qualified: qualified.clone(),
+            },
+            Self::Command { name } => Self::Command { name: name.clone() },
         }
     }
 
@@ -74,6 +95,8 @@ impl Selector {
             Self::Dir { .. } => ParsedScopeKind::Dir,
             Self::File { .. } => ParsedScopeKind::File,
             Self::Symbol { .. } => ParsedScopeKind::Symbol,
+            Self::Module { .. } => ParsedScopeKind::Module,
+            Self::Command { .. } => ParsedScopeKind::Command,
         }
     }
 
@@ -85,6 +108,8 @@ impl Selector {
             Self::Symbol { path, symbol, kind } => {
                 SelectorLookupKey::Symbol(format!("{path}#{symbol}"), kind.clone())
             }
+            Self::Module { qualified } => SelectorLookupKey::Module(qualified.clone()),
+            Self::Command { name } => SelectorLookupKey::Command(name.clone()),
         }
     }
 }
@@ -95,6 +120,8 @@ impl Display for Selector {
             Self::Dir { path } => write!(f, "dir:{path}"),
             Self::File { path } => write!(f, "file:{path}"),
             Self::Symbol { path, symbol, kind } => write!(f, "symbol:{path}#{symbol}:{kind}"),
+            Self::Module { qualified } => write!(f, "module:{qualified}"),
+            Self::Command { name } => write!(f, "command:{name}"),
         }
     }
 }
@@ -152,9 +179,37 @@ impl FromStr for Selector {
             });
         }
 
+        if let Some(qualified) = trimmed.strip_prefix("module:") {
+            let qualified = qualified.trim();
+            if qualified.is_empty() {
+                return Err(SelectorParseError {
+                    input: selector.to_string(),
+                    reason: "module selectors must include a qualified module".to_string(),
+                });
+            }
+            return Ok(Self::Module {
+                qualified: qualified.to_string(),
+            });
+        }
+
+        if let Some(name) = trimmed.strip_prefix("command:") {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(SelectorParseError {
+                    input: selector.to_string(),
+                    reason: "command selectors must include a command name".to_string(),
+                });
+            }
+            return Ok(Self::Command {
+                name: name.to_string(),
+            });
+        }
+
         Err(SelectorParseError {
             input: selector.to_string(),
-            reason: "selectors must start with `dir:`, `file:`, or `symbol:`".to_string(),
+            reason:
+                "selectors must start with `dir:`, `file:`, `symbol:`, `module:`, or `command:`"
+                    .to_string(),
         })
     }
 }
@@ -168,6 +223,10 @@ pub enum SelectorLookupKey {
     File(String),
     /// Symbol(location, kind) where location = "path#symbol".
     Symbol(String, String),
+    /// Module qualified-name key.
+    Module(String),
+    /// Command name key.
+    Command(String),
 }
 
 impl SelectorLookupKey {
@@ -177,6 +236,8 @@ impl SelectorLookupKey {
             Self::Dir(path) => format!("dir:{path}"),
             Self::File(path) => format!("file:{path}"),
             Self::Symbol(location, kind) => format!("symbol:{location}:{kind}"),
+            Self::Module(qualified) => format!("module:{qualified}"),
+            Self::Command(name) => format!("command:{name}"),
         }
     }
 }
@@ -212,8 +273,12 @@ pub fn canonical_selector_in_workspace(
     let parsed = ParsedScope::parse(input)?;
     match parsed {
         ParsedScope::Selector(selector) => {
-            let path = normalize_workspace_anchor(selector.path(), workspace)?;
-            Ok(selector.with_path(path).to_string())
+            if let Some(anchor) = selector.anchor_path() {
+                let path = normalize_workspace_anchor(anchor, workspace)?;
+                Ok(selector.with_path(path).to_string())
+            } else {
+                Ok(selector.to_string())
+            }
         }
         ParsedScope::LegacyPath { path, is_dir_hint } => {
             let path = normalize_workspace_anchor(path.as_str(), workspace)?;
@@ -233,7 +298,14 @@ pub fn canonical_selector_in_workspace(
 /// backing file path. Legacy `path:line` references are reduced to their file
 /// path anchor.
 pub fn anchor_path(selector: &str) -> Result<PathBuf, SelectorParseError> {
-    Ok(PathBuf::from(ParsedScope::parse(selector)?.anchor_path()))
+    let parsed = ParsedScope::parse(selector)?;
+    parsed
+        .anchor_path()
+        .map(PathBuf::from)
+        .ok_or_else(|| SelectorParseError {
+            input: selector.to_string(),
+            reason: "selector has no filesystem anchor".to_string(),
+        })
 }
 
 /// Return whether a selector's filesystem anchor exists in the given workspace.
@@ -261,8 +333,9 @@ pub fn overlaps(a: &str, b: &str) -> bool {
         return false;
     };
 
-    let left_anchor = left.anchor_path();
-    let right_anchor = right.anchor_path();
+    let (Some(left_anchor), Some(right_anchor)) = (left.anchor_path(), right.anchor_path()) else {
+        return a.trim() == b.trim();
+    };
     if left_anchor == right_anchor {
         return true;
     }
@@ -308,6 +381,8 @@ enum ParsedScopeKind {
     Dir,
     File,
     Symbol,
+    Module,
+    Command,
     Legacy,
 }
 
@@ -330,6 +405,8 @@ impl ParsedScope {
         if trimmed.starts_with("dir:")
             || trimmed.starts_with("file:")
             || trimmed.starts_with("symbol:")
+            || trimmed.starts_with("module:")
+            || trimmed.starts_with("command:")
         {
             return Ok(Self::Selector(trimmed.parse()?));
         }
@@ -343,10 +420,10 @@ impl ParsedScope {
         Ok(Self::LegacyPath { path, is_dir_hint })
     }
 
-    fn anchor_path(&self) -> &str {
+    fn anchor_path(&self) -> Option<&str> {
         match self {
-            Self::Selector(selector) => selector.path(),
-            Self::LegacyPath { path, .. } => path,
+            Self::Selector(selector) => selector.anchor_path(),
+            Self::LegacyPath { path, .. } => Some(path),
         }
     }
 

@@ -246,6 +246,13 @@ fn insert_file_with_three_symbols(conn: &Connection, rel: &str) {
             ],
         )
         .expect("insert old symbol");
+        let id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO symbols_fts (rowid, name, qualified, signature)
+             VALUES (?1, ?2, ?3, NULL)",
+            params![id, format!("old_{index}"), format!("crate::old_{index}")],
+        )
+        .expect("insert old symbol fts");
     }
 }
 
@@ -263,6 +270,12 @@ fn insert_file_anchored_rows(conn: &Connection, rel: &str) {
         params![rel],
     )
     .expect("insert symbol");
+    conn.execute(
+        "INSERT INTO symbols_fts (rowid, name, qualified, signature)
+         VALUES (1, 'run', 'crate::run', 'fn run()')",
+        [],
+    )
+    .expect("insert symbol fts");
     conn.execute(
         "INSERT INTO refs (
             from_file, from_span_start, from_span_end, target_name, target_qualified,
@@ -296,12 +309,24 @@ fn insert_file_anchored_rows(conn: &Connection, rel: &str) {
         params![rel],
     )
     .expect("insert string");
+    let string_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO strings_fts (rowid, value) VALUES (?1, 'hello world')",
+        params![string_id],
+    )
+    .expect("insert string fts");
     conn.execute(
         "INSERT INTO configs (file_path, line, key, kind)
          VALUES (?1, 1, 'app.name', 'toml')",
         params![rel],
     )
     .expect("insert config");
+    let config_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO configs_fts (rowid, key) VALUES (?1, 'app.name')",
+        params![config_id],
+    )
+    .expect("insert config fts");
 }
 
 fn open_test_connection(worktree: &Path) -> Connection {
