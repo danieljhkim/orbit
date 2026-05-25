@@ -1,0 +1,368 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use git2::{Repository, RepositoryInitOptions, Signature};
+use rusqlite::Connection;
+
+use crate::store::schema::SCHEMA_VERSION;
+use crate::{EXTRACTOR_VERSION, Graph, SyncPolicy, resolve_db_path};
+
+#[test]
+fn graph_open_creates_documented_schema_and_initial_meta() {
+    let worktree = TestWorktree::new("creates-schema", "feat/schema-open");
+    let commit_sha = worktree.init_git_repo();
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    drop(graph);
+
+    let db_path = resolve_db_path(worktree.path(), "feat/schema-open", EXTRACTOR_VERSION)
+        .path()
+        .to_path_buf();
+    let conn = open_test_connection(&db_path);
+
+    assert_eq!(
+        object_names(&conn, "table"),
+        BTreeSet::from([
+            "commands".to_string(),
+            "configs".to_string(),
+            "configs_fts".to_string(),
+            "configs_fts_config".to_string(),
+            "configs_fts_data".to_string(),
+            "configs_fts_docsize".to_string(),
+            "configs_fts_idx".to_string(),
+            "files".to_string(),
+            "imports".to_string(),
+            "meta".to_string(),
+            "refs".to_string(),
+            "relations".to_string(),
+            "strings".to_string(),
+            "strings_fts".to_string(),
+            "strings_fts_config".to_string(),
+            "strings_fts_data".to_string(),
+            "strings_fts_docsize".to_string(),
+            "strings_fts_idx".to_string(),
+            "symbols".to_string(),
+            "symbols_fts".to_string(),
+            "symbols_fts_config".to_string(),
+            "symbols_fts_data".to_string(),
+            "symbols_fts_docsize".to_string(),
+            "symbols_fts_idx".to_string(),
+        ])
+    );
+    assert_eq!(
+        object_names(&conn, "index"),
+        BTreeSet::from([
+            "refs_from_file".to_string(),
+            "refs_target_name".to_string(),
+            "refs_target_qualified".to_string(),
+            "relations_from".to_string(),
+            "relations_kind".to_string(),
+            "relations_to".to_string(),
+            "symbols_file".to_string(),
+            "symbols_name".to_string(),
+            "symbols_qualified".to_string(),
+        ])
+    );
+
+    for table in [
+        "files",
+        "symbols",
+        "refs",
+        "relations",
+        "imports",
+        "commands",
+        "strings",
+        "configs",
+        "meta",
+    ] {
+        assert!(
+            table_sql(&conn, table).contains("STRICT"),
+            "{table} table should be STRICT"
+        );
+    }
+    assert_eq!(
+        table_sql(&conn, "symbols_fts"),
+        "CREATE VIRTUAL TABLE symbols_fts USING fts5(name, qualified, signature, content='symbols')"
+    );
+    assert_eq!(
+        table_sql(&conn, "strings_fts"),
+        "CREATE VIRTUAL TABLE strings_fts USING fts5(value, content='strings')"
+    );
+    assert_eq!(
+        table_sql(&conn, "configs_fts"),
+        "CREATE VIRTUAL TABLE configs_fts USING fts5(key, content='configs')"
+    );
+
+    let meta = read_meta(&conn);
+    assert_eq!(
+        meta.get("extractor_version").map(String::as_str),
+        Some(EXTRACTOR_VERSION.to_string().as_str())
+    );
+    assert_eq!(
+        meta.get("schema_version").map(String::as_str),
+        Some(SCHEMA_VERSION.to_string().as_str())
+    );
+    assert_eq!(
+        meta.get("branch").map(String::as_str),
+        Some("feat/schema-open")
+    );
+    assert_eq!(
+        meta.get("commit_sha").map(String::as_str),
+        Some(commit_sha.as_str())
+    );
+    assert_eq!(
+        meta.get("last_full_build_at").map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        meta.get("last_incremental_at").map(String::as_str),
+        Some("0")
+    );
+}
+
+#[test]
+fn reopening_existing_db_preserves_meta_rows() {
+    let worktree = TestWorktree::new("preserves-meta", "main");
+    worktree.init_git_repo();
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("first open");
+    drop(graph);
+
+    let db_path = resolve_db_path(worktree.path(), "main", EXTRACTOR_VERSION)
+        .path()
+        .to_path_buf();
+    {
+        let conn = open_test_connection(&db_path);
+        conn.execute(
+            "UPDATE meta SET value = 'kept' WHERE key = 'last_full_build_at'",
+            [],
+        )
+        .expect("mutate meta before reopen");
+        conn.execute("UPDATE meta SET value = 'manual' WHERE key = 'branch'", [])
+            .expect("mutate branch before reopen");
+    }
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("second open");
+    drop(graph);
+
+    let conn = open_test_connection(&db_path);
+    let meta = read_meta(&conn);
+    assert_eq!(
+        meta.get("last_full_build_at").map(String::as_str),
+        Some("kept")
+    );
+    assert_eq!(meta.get("branch").map(String::as_str), Some("manual"));
+}
+
+#[test]
+fn refs_target_symbol_hint_has_no_symbol_foreign_key() {
+    let worktree = TestWorktree::new("refs-no-fk", "main");
+    worktree.init_git_repo();
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    drop(graph);
+
+    let db_path = resolve_db_path(worktree.path(), "main", EXTRACTOR_VERSION)
+        .path()
+        .to_path_buf();
+    let conn = open_test_connection(&db_path);
+    let refs_sql = normalized_sql(&table_sql(&conn, "refs"));
+
+    assert!(refs_sql.contains("target_symbol_hint INTEGER"));
+    assert!(
+        !refs_sql.contains("target_symbol_hint INTEGER REFERENCES"),
+        "refs.target_symbol_hint must stay non-authoritative and must not reference symbols(id): {refs_sql}"
+    );
+}
+
+#[test]
+fn deleting_file_cascades_every_file_anchored_row() {
+    let worktree = TestWorktree::new("cascade-delete", "main");
+    worktree.init_git_repo();
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    drop(graph);
+
+    let db_path = resolve_db_path(worktree.path(), "main", EXTRACTOR_VERSION)
+        .path()
+        .to_path_buf();
+    let conn = open_test_connection(&db_path);
+    insert_file_anchored_rows(&conn);
+
+    conn.execute("DELETE FROM files WHERE path = 'src/lib.rs'", [])
+        .expect("delete file row");
+
+    for table in [
+        "symbols",
+        "refs",
+        "relations",
+        "imports",
+        "commands",
+        "strings",
+        "configs",
+    ] {
+        assert_eq!(
+            row_count(&conn, table),
+            0,
+            "{table} should cascade on file delete"
+        );
+    }
+}
+
+fn insert_file_anchored_rows(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO files (path, content_hash, mtime_ns, lang, byte_len, extracted_at)
+         VALUES ('src/lib.rs', x'00', 1, 'rust', 12, 2)",
+        [],
+    )
+    .expect("insert file");
+    conn.execute(
+        "INSERT INTO symbols (
+            id, file_path, name, qualified, kind, span_start, span_end, signature, parent_symbol
+         ) VALUES (1, 'src/lib.rs', 'run', 'crate::run', 'function', 0, 3, 'fn run()', NULL)",
+        [],
+    )
+    .expect("insert symbol");
+    conn.execute(
+        "INSERT INTO refs (
+            from_file, from_span_start, from_span_end, target_name, target_qualified,
+            target_symbol_hint, kind, confidence
+         ) VALUES ('src/lib.rs', 4, 7, 'run', 'crate::run', 1, 'call', 'exact')",
+        [],
+    )
+    .expect("insert ref");
+    conn.execute(
+        "INSERT INTO relations (
+            from_qualified, to_qualified, kind, def_file, def_span_start, def_span_end, confidence
+         ) VALUES ('crate::Type', 'crate::Trait', 'impl', 'src/lib.rs', 0, 10, 'exact')",
+        [],
+    )
+    .expect("insert relation");
+    conn.execute(
+        "INSERT INTO imports (from_file, target_path, target_symbol)
+         VALUES ('src/lib.rs', 'crate::other', 'Other')",
+        [],
+    )
+    .expect("insert import");
+    conn.execute(
+        "INSERT INTO commands (name, file_path, span_start, handler_symbol)
+         VALUES ('run', 'src/lib.rs', 0, 1)",
+        [],
+    )
+    .expect("insert command");
+    conn.execute(
+        "INSERT INTO strings (file_path, line, value, context_symbol)
+         VALUES ('src/lib.rs', 1, 'hello world', 1)",
+        [],
+    )
+    .expect("insert string");
+    conn.execute(
+        "INSERT INTO configs (file_path, line, key, kind)
+         VALUES ('src/lib.rs', 1, 'app.name', 'toml')",
+        [],
+    )
+    .expect("insert config");
+}
+
+fn open_test_connection(path: &Path) -> Connection {
+    let conn = Connection::open(path).expect("open test sqlite connection");
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .expect("enable foreign keys");
+    conn
+}
+
+fn object_names(conn: &Connection, object_type: &str) -> BTreeSet<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = ?1 AND name NOT LIKE 'sqlite_%'
+             ORDER BY name",
+        )
+        .expect("prepare object name query");
+    stmt.query_map([object_type], |row| row.get::<_, String>(0))
+        .expect("query object names")
+        .collect::<Result<BTreeSet<_>, _>>()
+        .expect("collect object names")
+}
+
+fn table_sql(conn: &Connection, name: &str) -> String {
+    conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE name = ?1",
+        [name],
+        |row| row.get(0),
+    )
+    .expect("read sqlite_master sql")
+}
+
+fn normalized_sql(sql: &str) -> String {
+    sql.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn read_meta(conn: &Connection) -> BTreeMap<String, String> {
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM meta ORDER BY key")
+        .expect("prepare meta query");
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query meta")
+        .collect::<Result<BTreeMap<_, _>, _>>()
+        .expect("collect meta")
+}
+
+fn row_count(conn: &Connection, table: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    conn.query_row(&sql, [], |row| row.get(0))
+        .expect("count table rows")
+}
+
+struct TestWorktree {
+    path: PathBuf,
+    branch: String,
+}
+
+impl TestWorktree {
+    fn new(name: &str, branch: &str) -> Self {
+        let mut path = std::env::temp_dir();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        path.push(format!("orbit-graph-{name}-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&path).expect("create test worktree");
+        Self {
+            path,
+            branch: branch.to_string(),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.path.as_path()
+    }
+
+    fn init_git_repo(&self) -> String {
+        let mut opts = RepositoryInitOptions::new();
+        opts.initial_head(self.branch.as_str());
+        let repo = Repository::init_opts(&self.path, &opts).expect("init git repo");
+        fs::write(self.path.join("README.md"), "test\n").expect("write initial file");
+
+        let mut index = repo.index().expect("open repo index");
+        index
+            .add_path(Path::new("README.md"))
+            .expect("add initial file");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        let sig = Signature::now("Orbit Test", "orbit@example.test").expect("test signature");
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .expect("initial commit");
+        oid.to_string()
+    }
+}
+
+impl Drop for TestWorktree {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
