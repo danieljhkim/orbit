@@ -1,0 +1,14 @@
+[
+  {
+    "target_name": "foo",
+    "target_qualified": "crate::foo",
+    "confidence": "exact",
+    "line": 2
+  },
+  {
+    "target_name": "dynamic",
+    "target_qualified": null,
+    "confidence": "fuzzy_name",
+    "line": 4
+  }
+]

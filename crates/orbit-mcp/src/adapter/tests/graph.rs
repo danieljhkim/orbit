@@ -28,13 +28,29 @@ fn graph_tool_schemas_cover_cli_parameters() {
         ]
     );
 
-    assert_param_names(&schemas[0], &["full"]);
-    assert_param_names(&schemas[1], &["query", "kind", "lang", "limit"]);
-    assert_param_names(&schemas[2], &["selector", "max_bytes"]);
-    assert_param_names(&schemas[3], &["symbol", "confidence", "kind"]);
-    assert_param_names(&schemas[4], &["symbol"]);
-    assert_param_names(&schemas[5], &["selector", "depth", "confidence"]);
-    assert_param_names(&schemas[6], &["command_name", "depth", "confidence"]);
+    assert_param_names(&schemas[0], &with_workspace_params(&["full"]));
+    assert_param_names(
+        &schemas[1],
+        &with_workspace_params(&["query", "kind", "lang", "limit"]),
+    );
+    assert_param_names(
+        &schemas[2],
+        &with_workspace_params(&["selector", "max_bytes"]),
+    );
+    assert_param_names(
+        &schemas[3],
+        &with_workspace_params(&["symbol", "confidence", "kind"]),
+    );
+    assert_param_names(&schemas[4], &with_workspace_params(&["symbol"]));
+    assert_param_names(
+        &schemas[5],
+        &with_workspace_params(&["selector", "depth", "confidence"]),
+    );
+    assert_param_names(
+        &schemas[6],
+        &with_workspace_params(&["command_name", "depth", "confidence"]),
+    );
+    assert_workspace_params_optional_strings(&schemas);
 }
 
 #[test]
@@ -59,7 +75,10 @@ fn combined_schemas_override_legacy_host_graph_tools() {
         .iter()
         .find(|schema| schema.name == "orbit.graph.search")
         .expect("graph search schema");
-    assert_param_names(search, &["query", "kind", "lang", "limit"]);
+    assert_param_names(
+        search,
+        &with_workspace_params(&["query", "kind", "lang", "limit"]),
+    );
     assert!(
         schemas
             .iter()
@@ -224,6 +243,27 @@ fn assert_param_names(schema: &orbit_common::types::ToolSchema, expected: &[&str
         .map(|param| param.name.as_str())
         .collect();
     assert_eq!(names, expected);
+}
+
+fn with_workspace_params(base: &[&'static str]) -> Vec<&'static str> {
+    base.iter()
+        .copied()
+        .chain(["workspace_path", "workspace"])
+        .collect()
+}
+
+fn assert_workspace_params_optional_strings(schemas: &[orbit_common::types::ToolSchema]) {
+    for schema in schemas {
+        for param_name in ["workspace_path", "workspace"] {
+            let param = schema
+                .parameters
+                .iter()
+                .find(|param| param.name == param_name)
+                .expect("workspace parameter exists");
+            assert_eq!(param.param_type, "string");
+            assert!(!param.required);
+        }
+    }
 }
 
 fn fixture_worktree() -> TempDir {

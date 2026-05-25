@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
+use serde::Serialize;
+use serde_json::Value;
 
 use crate::{EXTRACTOR_VERSION, Graph, SyncPolicy, resolve_db_path};
 
@@ -106,4 +108,13 @@ pub(in crate::query) fn insert_symbol(
     )
     .expect("insert symbol fts row");
     id
+}
+
+pub(in crate::query) fn assert_json_matches_fixture<T>(actual: &T, fixture: &str)
+where
+    T: Serialize,
+{
+    let actual = serde_json::to_value(actual).expect("serialize query result to JSON");
+    let expected: Value = serde_json::from_str(fixture).expect("parse golden JSON fixture");
+    assert_eq!(actual, expected);
 }

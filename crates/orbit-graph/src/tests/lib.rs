@@ -256,10 +256,14 @@ impl Drop for TestWorktree {
 }
 
 fn populate_callees_fixture(conn: &Connection, file_path: &str) {
+    let content = "0123456789\n".repeat(10);
     conn.execute(
         "INSERT INTO files (path, content_hash, mtime_ns, lang, byte_len, extracted_at)
-                 VALUES (?1, x'00', 1, 'rust', 200, 2)",
-        [file_path],
+                 VALUES (?1, x'00', 1, 'rust', ?2, 2)",
+        params![
+            file_path,
+            i64::try_from(content.len()).expect("content length fits")
+        ],
     )
     .expect("insert file");
 
@@ -309,7 +313,7 @@ fn query_callees_function_with_five_call_sites_returns_five_edges_including_nest
  {
     let worktree = TestWorktree::new("callees-five");
     let file_path = "src/example.rs";
-    worktree.write(file_path, "fn outer() { /* calls */ fn inner(){} }\n");
+    worktree.write(file_path, &"0123456789\n".repeat(10));
 
     let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
     let conn = open_test_connection(worktree.path());
@@ -336,7 +340,7 @@ fn query_callees_function_with_five_call_sites_returns_five_edges_including_nest
         .find(|e| e.target_name == "nested_call")
         .unwrap();
     assert_eq!(nested.confidence, "exact");
-    assert_eq!(nested.from_span, 30);
+    assert_eq!(nested.line, 3);
 }
 
 #[test]

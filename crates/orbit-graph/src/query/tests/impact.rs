@@ -8,7 +8,34 @@ use crate::query::tests::support::{
     TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
 };
 use crate::sync::sync_leader_count;
-use crate::{IMPACT_NODE_CAP, ImpactEntry, RefConfidence, RefKind, Selector, SyncPolicy};
+use crate::{
+    IMPACT_NODE_CAP, ImpactEntry, ImpactResult, RefConfidence, RefKind, Selector, SyncPolicy,
+};
+
+#[test]
+fn impact_result_shape_matches_golden_fixture() {
+    let result = ImpactResult {
+        touched: vec![
+            ImpactEntry {
+                qualified_name: "crate::a".to_string(),
+                distance: 1,
+                edge_kind: RefKind::Call,
+            },
+            ImpactEntry {
+                qualified_name: "crate::Impl".to_string(),
+                distance: 2,
+                edge_kind: RefKind::Impl,
+            },
+        ],
+        truncated: false,
+        visited_nodes: 2,
+    };
+
+    crate::query::tests::support::assert_json_matches_fixture(
+        &result,
+        include_str!("impact.golden.json"),
+    );
+}
 
 #[test]
 fn five_node_tree_at_depth_two_returns_all_five_touched_symbols() {

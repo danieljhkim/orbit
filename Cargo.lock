@@ -2251,6 +2251,7 @@ dependencies = [
  "rayon",
  "rusqlite",
  "serde",
+ "serde_json",
  "tracing",
 ]
 

@@ -368,7 +368,7 @@ fn collect_call_ref(
             source,
             Some(qualify_name(parent_symbol, &method_name)),
             "call",
-            "same_module",
+            "fuzzy_name",
         );
     }
 }
@@ -545,7 +545,7 @@ fn confidence_for_name(name: &str) -> &'static str {
     if name.contains("::") {
         "import_resolved"
     } else {
-        "same_module"
+        "fuzzy_name"
     }
 }
 

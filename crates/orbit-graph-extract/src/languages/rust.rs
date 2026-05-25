@@ -608,7 +608,7 @@ fn collect_call_ref(node: Node, source: &str, module: &ModuleScope, state: &mut 
             source,
             Some(module.qualify(&node_text(function, source))),
             "call",
-            "same_module",
+            "fuzzy_name",
         ),
         "scoped_identifier" => state.push_ref(
             function,
@@ -900,7 +900,7 @@ fn confidence_for_type(node: Node, source: &str) -> &'static str {
     if text.contains("::") {
         "import_resolved"
     } else {
-        "same_module"
+        "fuzzy_name"
     }
 }
 
