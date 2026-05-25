@@ -40,16 +40,22 @@ pub(crate) struct ExtractedFileRefs {
 pub(crate) fn run(
     db_path: &Path,
     worktree_root: &Path,
-    mode: SyncMode,
+    _mode: SyncMode,
     diff: &Diff,
 ) -> Result<Pass1Output, GraphError> {
-    run_with_backend(db_path, worktree_root, mode, diff, &DefaultExtractorBackend)
+    run_with_backend(
+        db_path,
+        worktree_root,
+        _mode,
+        diff,
+        &DefaultExtractorBackend,
+    )
 }
 
 fn run_with_backend(
     db_path: &Path,
     worktree_root: &Path,
-    mode: SyncMode,
+    _mode: SyncMode,
     diff: &Diff,
     backend: &dyn ExtractorBackend,
 ) -> Result<Pass1Output, GraphError> {
@@ -78,7 +84,6 @@ fn run_with_backend(
         files_written += 1;
     }
 
-    update_sync_meta(&conn, mode)?;
     let files_indexed = count_files(&conn)?;
 
     Ok(Pass1Output {
@@ -466,19 +471,6 @@ fn insert_commands(
         )
         .map_err(|source| GraphError::sqlite("insert graph command row", source))?;
     }
-    Ok(())
-}
-
-fn update_sync_meta(conn: &Connection, mode: SyncMode) -> Result<(), GraphError> {
-    let key = match mode {
-        SyncMode::Auto => "last_incremental_at",
-        SyncMode::Full => "last_full_build_at",
-    };
-    conn.execute(
-        "UPDATE meta SET value = ?1 WHERE key = ?2",
-        params![now_epoch_nanos("record sync timestamp")?.to_string(), key],
-    )
-    .map_err(|source| GraphError::sqlite("update graph sync metadata", source))?;
     Ok(())
 }
 

@@ -86,6 +86,7 @@ fn deleted_file_row_cascades_all_pass1_tables() {
 fn pass1_writes_relations_but_not_refs() {
     let worktree = TestWorktree::new("relations-no-refs");
     let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    drop(graph);
     worktree.write(
         "src/lib.rs",
         r#"
@@ -104,8 +105,18 @@ impl Service for Worker {
 fn helper() {}
 "#,
     );
+    let diff = Diff {
+        new: vec![PathBuf::from("src/lib.rs")],
+        ..Diff::default()
+    };
 
-    graph.sync(SyncMode::Full).expect("sync rust file");
+    super::run(
+        graph_db_path(worktree.path()).as_path(),
+        worktree.path(),
+        SyncMode::Full,
+        &diff,
+    )
+    .expect("run pass1");
 
     let conn = open_test_connection(worktree.path());
     assert_eq!(row_count(&conn, "relations"), 1);
