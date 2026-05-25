@@ -1,14 +1,18 @@
 //! SQLite-backed graph store and query API skeleton.
 //!
 //! This crate owns the durable graph database path contract, sync policy, and
-//! public query surface. Storage, sync, and query behavior lands in later
-//! phases; this task establishes the type contract those phases implement.
+//! public query surface. Query and sync behavior lands in later phases; this
+//! crate already owns database creation so downstream phases can write against
+//! the stable schema.
 
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub use orbit_graph_extract::Selector;
+use rusqlite::Connection;
+
+mod store;
 
 #[cfg(test)]
 mod tests;
@@ -22,14 +26,20 @@ pub const EXTRACTOR_VERSION: u32 = 1;
 
 /// Opaque handle to a worktree-scoped graph database.
 pub struct Graph {
-    _private: (),
+    _conn: Connection,
+    _db_path: GraphDbPath,
+    _policy: SyncPolicy,
 }
 
 impl Graph {
     /// Open the graph database for `worktree_root` using `policy`.
     pub fn open(worktree_root: &Path, policy: SyncPolicy) -> Result<Self, GraphError> {
-        let _ = (worktree_root, policy);
-        todo!("initialize graph storage")
+        let opened = store::open(worktree_root, policy)?;
+        Ok(Self {
+            _conn: opened.conn,
+            _db_path: opened.db_path,
+            _policy: policy,
+        })
     }
 
     /// Synchronize indexed rows with files on disk.
@@ -79,13 +89,60 @@ impl Graph {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GraphError {
+    /// A filesystem operation failed while opening graph storage.
+    Io {
+        /// Operation being performed.
+        operation: &'static str,
+        /// Filesystem path involved in the failed operation.
+        path: PathBuf,
+        /// Source error rendered as text for cloneable error propagation.
+        reason: String,
+    },
+    /// A SQLite operation failed while opening or initializing graph storage.
+    Sqlite {
+        /// Operation being performed.
+        operation: &'static str,
+        /// Source error rendered as text for cloneable error propagation.
+        reason: String,
+    },
     /// Placeholder variant until storage, sync, and query errors are defined.
     Unimplemented,
+}
+
+impl GraphError {
+    pub(crate) fn io(
+        operation: &'static str,
+        path: impl Into<PathBuf>,
+        source: std::io::Error,
+    ) -> Self {
+        Self::Io {
+            operation,
+            path: path.into(),
+            reason: source.to_string(),
+        }
+    }
+
+    pub(crate) fn sqlite(operation: &'static str, source: rusqlite::Error) -> Self {
+        Self::sqlite_message(operation, source.to_string())
+    }
+
+    pub(crate) fn sqlite_message(operation: &'static str, reason: impl Into<String>) -> Self {
+        Self::Sqlite {
+            operation,
+            reason: reason.into(),
+        }
+    }
 }
 
 impl Display for GraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Io {
+                operation,
+                path,
+                reason,
+            } => write!(f, "{operation} at {}: {reason}", path.display()),
+            Self::Sqlite { operation, reason } => write!(f, "{operation}: {reason}"),
             Self::Unimplemented => f.write_str("graph operation is not implemented"),
         }
     }
