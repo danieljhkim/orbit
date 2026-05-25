@@ -4,10 +4,36 @@ use rusqlite::{Connection, params};
 
 use super::{Match, SearchKind, SearchQuery};
 use crate::query::tests::support::{
-    TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
+    TestWorktree, assert_json_matches_fixture, graph_db_path, insert_file, insert_symbol,
+    open_connection, open_graph,
 };
 use crate::sync::sync_leader_count;
 use crate::{SyncMode, SyncPolicy};
+
+#[test]
+fn search_result_shape_matches_golden_fixture() {
+    let result = super::SearchResult {
+        matches: vec![
+            Match::Symbol {
+                name: "run_due_schedulers".to_string(),
+                path: "crates/orbit-core/src/scheduler/scheduler.rs".to_string(),
+                line: 142,
+            },
+            Match::StringLiteral {
+                value: "scheduler tick failed".to_string(),
+                path: "crates/orbit-core/src/scheduler/runner.rs".to_string(),
+                line: 88,
+            },
+            Match::Config {
+                value: "scheduler.interval".to_string(),
+                path: "crates/orbit-core/Cargo.toml".to_string(),
+                line: 12,
+            },
+        ],
+    };
+
+    assert_json_matches_fixture(&result, include_str!("search.golden.json"));
+}
 
 #[test]
 fn search_unions_fts_tables_and_filters_kind_and_lang() {

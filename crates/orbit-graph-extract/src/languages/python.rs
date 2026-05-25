@@ -626,7 +626,7 @@ fn collect_call_ref(
                 source,
                 Some(qualify_name(parent_symbol, &name)),
                 "call",
-                "same_module",
+                "fuzzy_name",
             );
         }
         "attribute" => {
@@ -880,7 +880,7 @@ fn confidence_for_name(name: &str) -> &'static str {
     if name.contains('.') {
         "import_resolved"
     } else {
-        "same_module"
+        "fuzzy_name"
     }
 }
 

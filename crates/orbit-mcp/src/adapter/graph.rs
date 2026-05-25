@@ -203,7 +203,19 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
     ]
 }
 
-fn schema(name: &str, description: &str, parameters: Vec<ToolParam>) -> ToolSchema {
+fn schema(name: &str, description: &str, mut parameters: Vec<ToolParam>) -> ToolSchema {
+    parameters.push(param(
+        "workspace_path",
+        "Optional worktree path for this graph request.",
+        "string",
+        false,
+    ));
+    parameters.push(param(
+        "workspace",
+        "Optional worktree path alias for this graph request.",
+        "string",
+        false,
+    ));
     ToolSchema {
         name: name.to_string(),
         description: description.to_string(),

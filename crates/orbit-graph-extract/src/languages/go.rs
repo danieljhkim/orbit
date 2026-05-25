@@ -307,7 +307,7 @@ fn collect_call_ref(node: Node, source: &str, state: &mut ExtractionState) {
             source,
             Some(node_text(function, source)),
             "call",
-            "same_module",
+            "fuzzy_name",
         ),
         "selector_expression" => collect_selector_call_ref(function, source, state),
         "type_instantiation_expression" | "generic_type" => {
@@ -344,7 +344,7 @@ fn collect_type_refs(node: Node, source: &str, state: &mut ExtractionState) {
     match node.kind() {
         "type_identifier" => {
             let target = node_text(node, source);
-            state.push_ref(node, source, Some(target), "type", "same_module");
+            state.push_ref(node, source, Some(target), "type", "fuzzy_name");
             return;
         }
         "qualified_type" => {
@@ -387,7 +387,7 @@ fn collect_qualified_type_ref(node: Node, source: &str, state: &mut ExtractionSt
     let confidence = if state.import_aliases.contains_key(&package) {
         "import_resolved"
     } else {
-        "same_module"
+        "fuzzy_name"
     };
     state.push_ref(
         name_node,

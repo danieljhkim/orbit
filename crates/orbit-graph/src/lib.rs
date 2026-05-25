@@ -583,6 +583,7 @@ pub struct RefTarget {
     /// Short symbol name requested or resolved.
     pub name: String,
     /// Fully-qualified symbol name used as the graph query key.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub qualified: Option<String>,
 }
 
@@ -623,8 +624,8 @@ pub struct CalleeEdge {
     pub target_qualified: Option<String>,
     /// Confidence label emitted verbatim by the resolver (P3.3) at write time.
     pub confidence: String,
-    /// Start byte offset of the call site span inside its source file (minimum for attribution).
-    pub from_span: i64,
+    /// One-based source line containing the call site.
+    pub line: usize,
 }
 
 /// Bounded impact result returned by [`Graph::impact`].

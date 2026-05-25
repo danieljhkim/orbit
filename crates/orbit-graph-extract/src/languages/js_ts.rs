@@ -475,7 +475,7 @@ fn collect_type_refs(node: Node, source: &str, state: &mut ExtractionState) {
                     symbol.name.clone(),
                     Some(symbol.name),
                     "type",
-                    "same_module",
+                    "fuzzy_name",
                 );
             }
         }
@@ -586,7 +586,7 @@ fn collect_callable_ref(
     match function.kind() {
         "identifier" => {
             let name = node_text(function, source);
-            state.push_ref(function, source, Some(name), "call", "same_module");
+            state.push_ref(function, source, Some(name), "call", "fuzzy_name");
         }
         "member_expression" | "optional_chain" | "subscript_expression" => {
             if let Some(property) = member_property_node(function) {
@@ -765,7 +765,7 @@ fn confidence_for_reference(name: &str) -> &'static str {
     if name.contains('.') || name.contains('/') {
         "import_resolved"
     } else {
-        "same_module"
+        "fuzzy_name"
     }
 }
 

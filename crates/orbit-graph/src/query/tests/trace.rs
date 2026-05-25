@@ -4,7 +4,31 @@ use crate::query::tests::support::{
     TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
 };
 use crate::sync::sync_leader_count;
-use crate::{RefConfidence, SyncMode, SyncPolicy, TRACE_NODE_CAP, TraceNode};
+use crate::{RefConfidence, SyncMode, SyncPolicy, TRACE_NODE_CAP, TraceNode, TraceResult};
+
+#[test]
+fn trace_result_shape_matches_golden_fixture() {
+    let result = TraceResult {
+        root: Some(TraceNode {
+            name: "handler".to_string(),
+            qualified_name: Some("crate::handler".to_string()),
+            confidence: None,
+            children: vec![TraceNode {
+                name: "helper".to_string(),
+                qualified_name: Some("crate::helper".to_string()),
+                confidence: Some("exact".to_string()),
+                children: Vec::new(),
+            }],
+        }),
+        truncated: false,
+        visited_nodes: 2,
+    };
+
+    crate::query::tests::support::assert_json_matches_fixture(
+        &result,
+        include_str!("trace.golden.json"),
+    );
+}
 
 #[test]
 fn synthetic_command_with_three_level_call_tree_returns_full_tree() {

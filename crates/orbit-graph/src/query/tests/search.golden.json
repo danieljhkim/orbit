@@ -1,0 +1,22 @@
+{
+  "matches": [
+    {
+      "kind": "symbol",
+      "name": "run_due_schedulers",
+      "path": "crates/orbit-core/src/scheduler/scheduler.rs",
+      "line": 142
+    },
+    {
+      "kind": "string",
+      "value": "scheduler tick failed",
+      "path": "crates/orbit-core/src/scheduler/runner.rs",
+      "line": 88
+    },
+    {
+      "kind": "config",
+      "value": "scheduler.interval",
+      "path": "crates/orbit-core/Cargo.toml",
+      "line": 12
+    }
+  ]
+}

@@ -7,9 +7,27 @@ use rusqlite::{Connection, params};
 
 use crate::sync::sync_leader_count;
 use crate::{
-    EXTRACTOR_VERSION, Graph, RefConfidence, RefKind, RefOpts, Selector, SyncPolicy,
-    resolve_db_path,
+    EXTRACTOR_VERSION, Graph, RefConfidence, RefKind, RefOpts, RefResult, RefTarget, Selector,
+    SyncPolicy, resolve_db_path,
 };
+
+#[test]
+fn refs_result_shape_matches_golden_fixture_and_skips_unresolved_qualified() {
+    let result = RefResult {
+        target: RefTarget {
+            name: "Missing".to_string(),
+            qualified: None,
+        },
+        refs: Vec::new(),
+        relations: Vec::new(),
+        skipped_low_confidence: 0,
+    };
+
+    crate::query::tests::support::assert_json_matches_fixture(
+        &result,
+        include_str!("refs.golden.json"),
+    );
+}
 
 #[test]
 fn default_floor_skips_fuzzy_refs_and_reports_count() {

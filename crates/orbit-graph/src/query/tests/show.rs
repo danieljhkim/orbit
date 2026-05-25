@@ -1,12 +1,30 @@
 use orbit_graph_extract::Selector;
 use rusqlite::{Connection, params};
 
-use super::{DEFAULT_SHOW_MAX_BYTES, SourceSpan};
+use super::{DEFAULT_SHOW_MAX_BYTES, NodeMetadata, NodeView, SourceSpan};
 use crate::SyncPolicy;
 use crate::query::tests::support::{
-    TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
+    TestWorktree, assert_json_matches_fixture, graph_db_path, insert_file, insert_symbol,
+    open_connection, open_graph,
 };
 use crate::sync::sync_leader_count;
+
+#[test]
+fn show_result_shape_matches_golden_fixture() {
+    let result = NodeView {
+        bytes: b"pub fn handler() {}\n".to_vec(),
+        metadata: NodeMetadata {
+            file: "src/lib.rs".to_string(),
+            span: SourceSpan { start: 0, end: 20 },
+            kind: "function".to_string(),
+            name: Some("handler".to_string()),
+            qualified: Some("crate::handler".to_string()),
+            truncated: false,
+        },
+    };
+
+    assert_json_matches_fixture(&result, include_str!("show.golden.json"));
+}
 
 #[test]
 fn show_resolves_symbol_file_module_and_command_selectors() {

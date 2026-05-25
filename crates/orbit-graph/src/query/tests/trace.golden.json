@@ -1,0 +1,17 @@
+{
+  "root": {
+    "name": "handler",
+    "qualified_name": "crate::handler",
+    "confidence": null,
+    "children": [
+      {
+        "name": "helper",
+        "qualified_name": "crate::helper",
+        "confidence": "exact",
+        "children": []
+      }
+    ]
+  },
+  "truncated": false,
+  "visited_nodes": 2
+}
