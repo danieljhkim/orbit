@@ -25,6 +25,9 @@ allowed_internal_deps() {
     orbit-graph-extract)
       echo ""
       ;;
+    orbit-graph)
+      echo "orbit-graph-extract"
+      ;;
     orbit-tools)
       echo "orbit-common orbit-exec orbit-knowledge orbit-policy"
       ;;

@@ -8,6 +8,7 @@ members = [
   "crates/orbit-registry",
   "crates/orbit-core",
   "crates/orbit-engine",
+  "crates/orbit-graph",
   "crates/orbit-graph-extract",
   "crates/orbit-knowledge",
   "crates/orbit-store",
