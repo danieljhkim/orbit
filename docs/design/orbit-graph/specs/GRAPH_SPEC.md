@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-05-25 (ORB-00331 detached-HEAD DB layout)
+**Last updated:** 2026-05-25 (ORB-00330 Rust command extraction; ORB-00331 detached-HEAD DB layout)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -457,7 +457,7 @@ BFS over the union of `refs` (inbound) and `callees` (outbound), plus `relations
 orbit graph trace job-run [--confidence exact|import|same_module|fuzzy]
 ```
 
-Resolves command name to its handler symbol via `commands.handler_symbol`, then BFS over `callees` with depth 5. The Rust API accepts `min_confidence`; the CLI/MCP default is `same_module`, matching `refs` and `impact`. Call edges below the floor are not included or enqueued for later BFS levels. Returns the call tree as nested JSON.
+Resolves command name to its handler symbol via `commands.handler_symbol`, then BFS over `callees` with depth 5. Python Click decorators and Rust clap-derive subcommand enums currently populate this command surface. The Rust API accepts `min_confidence`; the CLI/MCP default is `same_module`, matching `refs` and `impact`. Call edges below the floor are not included or enqueued for later BFS levels. Returns the call tree as nested JSON.
 
 Unknown command names return an empty result (`root: null`, `visited_nodes: 0`). Resolved commands return a single root node for the handler; each nested `children` list contains outbound call targets reached from that symbol. `confidence` is `null` on the root and carries the resolver confidence string on call edges.
 
@@ -484,12 +484,12 @@ This is the "structural feature expansion" capability — concrete, bounded, no 
 
 Ordering is strict high→low. `import_resolved` outranks `same_module` deliberately: an explicit `use` is stronger evidence than module-namespace uniqueness, because wildcard re-exports can produce the same `same_module` candidate for unrelated symbols.
 
-**Command surface coverage.** `RawCommand` rows follow the same honesty rule as refs: extractors populate a command only when the CLI declaration exposes a literal or defaulted command name and a concrete handler symbol in the same file; dynamic command names are surfaced as `fuzzy_name` refs instead of being guessed.
+**Command surface coverage.** `RawCommand` rows follow the same honesty rule as refs: extractors populate a command only when the CLI declaration exposes a literal or defaulted command name. `handler_symbol` is filled only when the extractor finds a concrete handler symbol that sync can resolve uniquely; dynamic command names are surfaced as refs instead of being guessed.
 
 | Language | CLI patterns populating `RawCommand` | Dynamic / unresolved behavior |
 |---|---|---|
 | Python | Click decorators on functions: `@click.command()`, `@click.group(...)`, and group-bound `@cli.command(...)` / `@cli.group(...)`. Literal `name=` or first positional names are exact; no-arg decorators use Click's default function-name command. | Non-literal command names emit `kind=command, confidence=fuzzy_name` refs and do not create a command row. |
-| Rust | Not yet populated. `clap` derive macros remain opaque without macro expansion. | No command rows. |
+| Rust | clap derive enums: `#[derive(Parser)]` / `#[derive(Subcommand)]`, variant `#[command(name = "...")]` overrides, default kebab-case variant names, and nested same-file subcommand enums. Single-call `match` arms and payload `execute` / `run` methods populate `handler_symbol` when sync resolves the handler uniquely. | Multi-statement or otherwise ambiguous arms still create command rows with `handler_symbol = NULL`; trace returns empty until a concrete handler can be resolved. |
 | JavaScript / TypeScript | Not yet populated. `commander` / `yargs` chains are still refs only. | No command rows. |
 | C, C#, Go, Java, Kotlin, Ruby, Markdown, Config | No CLI command extraction in V1. | No command rows. |
 

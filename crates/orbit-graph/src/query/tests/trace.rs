@@ -134,6 +134,48 @@ def leaf():
 }
 
 #[test]
+fn trace_resolves_rust_clap_command_from_synced_fixture() {
+    let worktree = TestWorktree::new("trace-rust-clap-command");
+    worktree.write(
+        "src/cli.rs",
+        r#"
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+enum TaskSubcommand {
+    Add(AddArgs),
+}
+
+struct AddArgs;
+
+fn dispatch(command: TaskSubcommand) {
+    match command {
+        TaskSubcommand::Add(args) => add(args),
+    }
+}
+
+fn add(_args: AddArgs) {
+    helper();
+}
+
+fn helper() {}
+"#,
+    );
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    graph.sync(SyncMode::Full).expect("sync rust clap fixture");
+
+    let result = graph
+        .trace("task add", 3, RefConfidence::SameModule)
+        .expect("trace rust clap command");
+
+    assert!(result.visited_nodes > 0);
+    let root = result.root.expect("trace root");
+    assert_eq!(root.name, "add");
+    assert_eq!(root.qualified_name.as_deref(), Some("add"));
+    assert_eq!(child_names(&root), vec!["helper"]);
+}
+
+#[test]
 fn trace_calls_ensure_synced_at_entry() {
     let worktree = TestWorktree::new("trace-ensure-synced");
     worktree.write("src/lib.rs", "pub fn synced_trace_marker() {}\n");
