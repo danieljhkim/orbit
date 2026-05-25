@@ -58,23 +58,40 @@ fn combined_schemas_override_legacy_host_graph_tools() {
     let host = Arc::new(StubHost {
         schemas: vec![
             tool_schema("orbit.graph.search"),
+            tool_schema("orbit.graph.pack"),
+            tool_schema("orbit.graph.callers"),
             tool_schema("orbit.task.show"),
         ],
     });
     let server = OrbitToolServer::new(host);
     let schemas = server.combined_tool_schemas();
+    let graph_names: Vec<_> = schemas
+        .iter()
+        .filter(|schema| schema.name.starts_with("orbit.graph."))
+        .map(|schema| schema.name.as_str())
+        .collect();
+    let expected_schemas = graph_tool_schemas();
+    let expected_graph_names: Vec<_> = expected_schemas
+        .iter()
+        .map(|schema| schema.name.as_str())
+        .collect();
 
     assert_eq!(
-        schemas
-            .iter()
-            .filter(|schema| schema.name == "orbit.graph.search")
-            .count(),
-        1
+        graph_names, expected_graph_names,
+        "MCP graph tools must be owned by the in-process wrapper surface"
+    );
+    assert!(
+        !graph_names.contains(&"orbit.graph.pack"),
+        "removed pack tool must not leak from a legacy host schema"
     );
     let search = schemas
         .iter()
         .find(|schema| schema.name == "orbit.graph.search")
         .expect("graph search schema");
+    assert!(
+        !search.description.to_ascii_lowercase().contains("pack"),
+        "orbit.graph.search description must not point agents at the removed pack tool"
+    );
     assert_param_names(
         search,
         &with_workspace_params(&["query", "kind", "lang", "limit"]),

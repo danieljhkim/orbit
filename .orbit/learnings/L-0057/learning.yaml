@@ -1,0 +1,19 @@
+schema_version: 1
+id: L-0057
+status: active
+scope:
+  paths:
+  - crates/orbit-mcp/src/adapter/**/*.rs
+  tags:
+  - orbit-mcp
+  - graph-tools
+  - testing
+summary: Filter every host-provided orbit.graph.* schema before appending MCP graph wrappers
+body: The MCP adapter owns the advertised `orbit.graph.*` surface. When `OrbitToolServer::combined_tool_schemas` only filtered names known to the current graph wrapper registry, stale host schemas such as the removed `orbit.graph.pack` could leak into `tools/list`. Filter all host schemas with the `orbit.graph.` prefix first, then append the adapter's wrapper schemas from `graph_tool_schemas()`, and keep a regression test with a legacy host schema.
+evidence:
+- kind: task
+  reference: ORB-00339
+created_at: 2026-05-25T20:58:10.585426Z
+updated_at: 2026-05-25T20:58:10.585426Z
+created_by: codex
+priority: 120
