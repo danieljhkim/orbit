@@ -58,14 +58,28 @@ fn query_and_admin_subcommands_emit_json() {
 
     let impact = run_json(
         worktree.path(),
-        ["impact", "symbol:src/lib.rs#entry:function", "--depth", "2"],
+        [
+            "impact",
+            "symbol:src/lib.rs#entry:function",
+            "--depth",
+            "2",
+            "--confidence",
+            "same_module",
+        ],
     );
     assert_array_field(&impact, "touched");
     assert!(impact.get("visited_nodes").is_some());
 
     let trace = run_json(
         worktree.path(),
-        ["trace", "missing-command", "--depth", "2"],
+        [
+            "trace",
+            "missing-command",
+            "--depth",
+            "2",
+            "--confidence",
+            "same_module",
+        ],
     );
     assert!(trace["root"].is_null());
     assert_eq!(trace["visited_nodes"], 0);

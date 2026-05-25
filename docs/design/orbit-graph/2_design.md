@@ -3,7 +3,7 @@ summary: "Orbit Graph — Design"
 type: design
 title: "Orbit Graph — Design"
 owner: claude
-last_updated: 2026-05-24
+last_updated: 2026-05-25
 status: Draft
 feature: orbit-graph
 doc_role: design
@@ -181,8 +181,8 @@ orbit graph search   <query>   [--kind symbol|string|config] [--lang X]
 orbit graph show     <selector>
 orbit graph refs     <symbol>  [--confidence ...] [--kind ...]
 orbit graph callees  <symbol>
-orbit graph impact   <selector> [--depth N=3]
-orbit graph trace    <command> [--depth N=5]
+orbit graph impact   <selector> [--depth N=3] [--confidence exact|import|same_module|fuzzy]
+orbit graph trace    <command> [--depth N=5] [--confidence exact|import|same_module|fuzzy]
 ```
 
 Bounded outputs: `impact` and `trace` both cap at 200 visited nodes regardless of `--depth`. When the cap fires, the response carries `truncated: true` so callers can split into narrower queries.
@@ -210,8 +210,8 @@ impl Graph {
     pub fn show(&self, sel: &Selector, max_bytes: usize) -> Result<Option<NodeView>, GraphError>;
     pub fn refs(&self, sel: &Selector, opts: &RefOpts)-> Result<RefResult, GraphError>;
     pub fn callees(&self, sel: &Selector)             -> Result<Vec<CalleeEdge>, GraphError>;
-    pub fn impact(&self, sel: &Selector, depth: u8)   -> Result<ImpactResult, GraphError>;
-    pub fn trace(&self, command: &str, depth: u8)     -> Result<TraceResult, GraphError>;
+    pub fn impact(&self, sel: &Selector, depth: u8, min_confidence: Confidence) -> Result<ImpactResult, GraphError>;
+    pub fn trace(&self, command: &str, depth: u8, min_confidence: Confidence)   -> Result<TraceResult, GraphError>;
 }
 ```
 

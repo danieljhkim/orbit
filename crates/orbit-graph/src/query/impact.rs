@@ -8,10 +8,15 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::query::callees;
 use crate::{
     DEFAULT_IMPACT_DEPTH, Graph, GraphError, IMPACT_NODE_CAP, ImpactEntry, ImpactResult,
-    RefConfidence, RefKind, RefOpts, SymbolSpan,
+    RefConfidence, RefKind, SymbolSpan,
 };
 
-pub(crate) fn run(graph: &Graph, sel: &Selector, depth: u8) -> Result<ImpactResult, GraphError> {
+pub(crate) fn run(
+    graph: &Graph,
+    sel: &Selector,
+    depth: u8,
+    min_confidence: RefConfidence,
+) -> Result<ImpactResult, GraphError> {
     let conn = Connection::open(graph.db_path.path())
         .map_err(|source| GraphError::sqlite("open graph database for impact", source))?;
     let Some(origin) = resolve_selector(&conn, sel)? else {
@@ -33,7 +38,7 @@ pub(crate) fn run(graph: &Graph, sel: &Selector, depth: u8) -> Result<ImpactResu
             continue;
         }
         let next_distance = distance + 1;
-        for neighbor in neighbors(&conn, &symbol)? {
+        for neighbor in neighbors(&conn, &symbol, min_confidence)? {
             if seen.contains(neighbor.qualified_name.as_str()) {
                 continue;
             }
@@ -72,16 +77,25 @@ fn empty_result() -> ImpactResult {
     }
 }
 
-fn neighbors(conn: &Connection, symbol: &ImpactSymbol) -> Result<Vec<ImpactNeighbor>, GraphError> {
-    let mut neighbors = inbound_ref_neighbors(conn, symbol.qualified.as_str())?;
-    neighbors.extend(outbound_call_neighbors(conn, symbol)?);
-    neighbors.extend(relation_neighbors(conn, symbol.qualified.as_str())?);
+fn neighbors(
+    conn: &Connection,
+    symbol: &ImpactSymbol,
+    min_confidence: RefConfidence,
+) -> Result<Vec<ImpactNeighbor>, GraphError> {
+    let mut neighbors = inbound_ref_neighbors(conn, symbol.qualified.as_str(), min_confidence)?;
+    neighbors.extend(outbound_call_neighbors(conn, symbol, min_confidence)?);
+    neighbors.extend(relation_neighbors(
+        conn,
+        symbol.qualified.as_str(),
+        min_confidence,
+    )?);
     Ok(neighbors)
 }
 
 fn inbound_ref_neighbors(
     conn: &Connection,
     qualified: &str,
+    min_confidence: RefConfidence,
 ) -> Result<Vec<ImpactNeighbor>, GraphError> {
     let mut stmt = conn
         .prepare_cached(
@@ -113,12 +127,13 @@ fn inbound_ref_neighbors(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| GraphError::sqlite("collect impact inbound refs rows", source))?;
 
-    rows_to_neighbors(rows)
+    rows_to_neighbors(rows, min_confidence)
 }
 
 fn outbound_call_neighbors(
     conn: &Connection,
     symbol: &ImpactSymbol,
+    min_confidence: RefConfidence,
 ) -> Result<Vec<ImpactNeighbor>, GraphError> {
     let span = SymbolSpan {
         file_path: symbol.file_path.clone(),
@@ -127,7 +142,7 @@ fn outbound_call_neighbors(
     };
     let mut neighbors = Vec::new();
     for edge in callees::edges_for_symbol(conn, &span)? {
-        if !confidence_visible_at_default_floor(edge.confidence.as_str())? {
+        if !confidence_visible_at_floor(edge.confidence.as_str(), min_confidence)? {
             continue;
         }
         let Some(qualified_name) = edge.target_qualified else {
@@ -144,6 +159,7 @@ fn outbound_call_neighbors(
 fn relation_neighbors(
     conn: &Connection,
     qualified: &str,
+    min_confidence: RefConfidence,
 ) -> Result<Vec<ImpactNeighbor>, GraphError> {
     let mut neighbors = relation_rows(
         conn,
@@ -153,6 +169,7 @@ fn relation_neighbors(
          ORDER BY def_file, def_span_start, id",
         qualified,
         "impact inbound relations",
+        min_confidence,
     )?;
     neighbors.extend(relation_rows(
         conn,
@@ -162,6 +179,7 @@ fn relation_neighbors(
          ORDER BY def_file, def_span_start, id",
         qualified,
         "impact outbound relations",
+        min_confidence,
     )?);
     Ok(neighbors)
 }
@@ -171,6 +189,7 @@ fn relation_rows(
     sql: &str,
     qualified: &str,
     operation: &'static str,
+    min_confidence: RefConfidence,
 ) -> Result<Vec<ImpactNeighbor>, GraphError> {
     let mut stmt = conn
         .prepare_cached(sql)
@@ -187,13 +206,16 @@ fn relation_rows(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| GraphError::sqlite("collect relation rows for impact", source))?;
 
-    rows_to_neighbors(rows)
+    rows_to_neighbors(rows, min_confidence)
 }
 
-fn rows_to_neighbors(rows: Vec<RawNeighborRow>) -> Result<Vec<ImpactNeighbor>, GraphError> {
+fn rows_to_neighbors(
+    rows: Vec<RawNeighborRow>,
+    min_confidence: RefConfidence,
+) -> Result<Vec<ImpactNeighbor>, GraphError> {
     let mut neighbors = Vec::with_capacity(rows.len());
     for row in rows {
-        if !confidence_visible_at_default_floor(row.confidence.as_str())? {
+        if !confidence_visible_at_floor(row.confidence.as_str(), min_confidence)? {
             continue;
         }
         let Some(qualified_name) = row.qualified_name else {
@@ -207,8 +229,11 @@ fn rows_to_neighbors(rows: Vec<RawNeighborRow>) -> Result<Vec<ImpactNeighbor>, G
     Ok(neighbors)
 }
 
-fn confidence_visible_at_default_floor(confidence: &str) -> Result<bool, GraphError> {
-    Ok(RefConfidence::from_db(confidence)?.visible_at_floor(RefOpts::default().confidence))
+fn confidence_visible_at_floor(
+    confidence: &str,
+    min_confidence: RefConfidence,
+) -> Result<bool, GraphError> {
+    Ok(RefConfidence::from_db(confidence)?.visible_at_floor(min_confidence))
 }
 
 fn resolve_selector(

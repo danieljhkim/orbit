@@ -135,15 +135,25 @@ impl Graph {
     }
 
     /// Return the bounded impact set around `sel`.
-    pub fn impact(&self, sel: &Selector, depth: u8) -> Result<ImpactResult, GraphError> {
+    pub fn impact(
+        &self,
+        sel: &Selector,
+        depth: u8,
+        min_confidence: Confidence,
+    ) -> Result<ImpactResult, GraphError> {
         self.ensure_synced()?;
-        query::impact::run(self, sel, depth)
+        query::impact::run(self, sel, depth, min_confidence)
     }
 
     /// Trace the call tree rooted at a command handler.
-    pub fn trace(&self, command: &str, depth: u8) -> Result<TraceResult, GraphError> {
+    pub fn trace(
+        &self,
+        command: &str,
+        depth: u8,
+        min_confidence: Confidence,
+    ) -> Result<TraceResult, GraphError> {
         self.ensure_synced()?;
-        query::trace::run(self, command, depth)
+        query::trace::run(self, command, depth, min_confidence)
     }
 }
 
@@ -505,7 +515,7 @@ pub struct RefOpts {
 impl Default for RefOpts {
     fn default() -> Self {
         Self {
-            confidence: RefConfidence::SameModule,
+            confidence: RefConfidence::default(),
             kind: None,
         }
     }
@@ -523,6 +533,15 @@ pub enum RefConfidence {
     SameModule,
     /// Name-only match with ambiguous or weak resolution.
     FuzzyName,
+}
+
+/// Confidence floor used by reference and traversal queries.
+pub use RefConfidence as Confidence;
+
+impl Default for RefConfidence {
+    fn default() -> Self {
+        Self::SameModule
+    }
 }
 
 /// Filterable reference and relation kinds.

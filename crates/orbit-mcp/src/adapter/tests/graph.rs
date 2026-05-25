@@ -33,8 +33,8 @@ fn graph_tool_schemas_cover_cli_parameters() {
     assert_param_names(&schemas[2], &["selector", "max_bytes"]);
     assert_param_names(&schemas[3], &["symbol", "confidence", "kind"]);
     assert_param_names(&schemas[4], &["symbol"]);
-    assert_param_names(&schemas[5], &["selector", "depth"]);
-    assert_param_names(&schemas[6], &["command_name", "depth"]);
+    assert_param_names(&schemas[5], &["selector", "depth", "confidence"]);
+    assert_param_names(&schemas[6], &["command_name", "depth", "confidence"]);
 }
 
 #[test]
@@ -143,7 +143,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         "orbit.graph.impact",
         json!({
             "selector": "symbol:src/lib.rs#entry:function",
-            "depth": 2
+            "depth": 2,
+            "confidence": "same_module"
         }),
     )
     .await;
@@ -155,7 +156,8 @@ async fn graph_tools_invoke_in_process_fixture() {
         "orbit.graph.trace",
         json!({
             "command_name": "missing-command",
-            "depth": 2
+            "depth": 2,
+            "confidence": "same_module"
         }),
     )
     .await;
