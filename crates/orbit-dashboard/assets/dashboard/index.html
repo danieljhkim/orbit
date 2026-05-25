@@ -115,9 +115,9 @@
             <span>Scoreboard</span>
             <span style="display: inline-flex; align-items: center; gap: 8px;">
               <span class="count" id="scoreboard-count">-</span>
-              <!-- Phase 1: window selector is UI-only (aria-disabled). Phase 2
-                   will wire a windowed ScoreboardSummary fetch. -->
-              <span class="scoreboard-window-selector" id="scoreboard-window-selector" aria-disabled="true" title="Phase 1: display-only — windowed scoreboard arrives in phase 2.">
+              <!-- Window selector — click a segment to refetch the
+                   scoreboard scoped to that window. Wired in ORB-00337. -->
+              <span class="scoreboard-window-selector" id="scoreboard-window-selector" title="window scope">
                 <span class="scoreboard-window-seg" data-window="1h">1h</span>
                 <span class="scoreboard-window-seg on" data-window="24h">24h</span>
                 <span class="scoreboard-window-seg" data-window="7d">7d</span>

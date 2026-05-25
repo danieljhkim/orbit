@@ -1,8 +1,39 @@
 // Orbit dashboard scoreboard-domain rendering.
 // Pure vanilla JS, split into ES modules with no build step.
 
-import { el, syncNodes } from './common.js';
+import { el, syncNodes, fetchJson } from './common.js';
 import { navigateToRole } from './audit.js';
+
+// ORB-00337: canonical scoreboard windows (mirror of
+// `orbit_store::scoreboard_summary::ScoreboardWindow::as_str`). The
+// boot fetch in app.js hardcodes `24h` to match the visually-highlighted
+// segment; subsequent fetches happen from the selector click handler.
+const SCOREBOARD_WINDOWS = ["1h", "24h", "7d", "30d", "all"];
+
+function wireScoreboardWindowSelector() {
+  const selector = document.getElementById("scoreboard-window-selector");
+  if (!selector || selector.dataset.wired === "true") return;
+  selector.dataset.wired = "true";
+  selector.addEventListener("click", (event) => {
+    const seg = event.target && event.target.closest(".scoreboard-window-seg");
+    if (!seg || !selector.contains(seg)) return;
+    const next = seg.dataset.window;
+    if (!SCOREBOARD_WINDOWS.includes(next)) return;
+    if (seg.classList.contains("on")) return; // no-op refetch
+    for (const peer of selector.querySelectorAll(".scoreboard-window-seg")) {
+      peer.classList.remove("on");
+    }
+    seg.classList.add("on");
+    fetchJson(`/api/scoreboard?window=${encodeURIComponent(next)}`)
+      .then(renderScoreboard)
+      .catch((err) => {
+        // Surface fetch failures in the console so the dashboard's "no
+        // console errors" verification step catches regressions; the UI
+        // keeps the previously-rendered scoreboard.
+        console.error("scoreboard window refetch failed:", err);
+      });
+  });
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -37,7 +68,6 @@ function formatScoreboardPair(agent, col) {
 }
 
 const CANONICAL_SCOREBOARD_FAMILIES = ["codex", "claude", "gemini", "grok"];
-const CANONICAL_SCOREBOARD_SET = new Set(CANONICAL_SCOREBOARD_FAMILIES);
 
 const DELIVERY_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
@@ -122,15 +152,6 @@ const PLANNING_SCOREBOARD_COLUMNS = [
   },
 ];
 
-const OTHER_SCOREBOARD_COLUMNS = [
-  { key: "agent", label: "agent", num: false },
-  ...DELIVERY_SCOREBOARD_COLUMNS.slice(1),
-  ...REVIEW_SCOREBOARD_COLUMNS.slice(1),
-  ...KNOWLEDGE_SCOREBOARD_COLUMNS.slice(1),
-  ...OPERATIONS_SCOREBOARD_COLUMNS.slice(1),
-  ...PLANNING_SCOREBOARD_COLUMNS.slice(1),
-];
-
 const ALL_SCOREBOARD_SECTIONS = [
   { title: "Delivery", columns: DELIVERY_SCOREBOARD_COLUMNS },
   { title: "Review", columns: REVIEW_SCOREBOARD_COLUMNS },
@@ -149,6 +170,10 @@ function readPath(obj, path) {
 }
 
 function renderScoreboard(summary) {
+  // ORB-00337: idempotent attach of the window-selector click handler
+  // (guarded internally so re-renders don't double-bind).
+  wireScoreboardWindowSelector();
+
   const body = $("scoreboard-body");
   const narrativeHost = $("scoreboard-narrative");
   const duelHost = $("scoreboard-duel-matrix-host");
@@ -174,25 +199,10 @@ function renderScoreboard(summary) {
   }
 
   const canonicalRows = canonicalScoreboardRows(agentsMap);
-  const otherRows = entries
-    .filter(([name]) => !CANONICAL_SCOREBOARD_SET.has(name))
-    .filter(([, agent]) => scoreboardSignalForColumns(agent, OTHER_SCOREBOARD_COLUMNS) > 0)
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  const sections = [
-    buildLeaderboardMatrix(canonicalRows, ALL_SCOREBOARD_SECTIONS, { showSectionDividers: true }),
-  ];
-  if (otherRows.length > 0) {
-    sections.push(
-      buildLeaderboardMatrix(
-        otherRows,
-        [{ title: "Attribution Cleanup", columns: OTHER_SCOREBOARD_COLUMNS }],
-        { showSectionDividers: true },
-      ),
-    );
-  }
-
-  syncNodes(body, [el("div", { class: "scoreboard-sections" }, sections)]);
+  const matrix = buildLeaderboardMatrix(canonicalRows, ALL_SCOREBOARD_SECTIONS, {
+    showSectionDividers: true,
+  });
+  syncNodes(body, [el("div", { class: "scoreboard-sections" }, [matrix])]);
 
   // Narrative — single-line "claude leads creation · ..." summary. Skipped when
   // the cycle is too small to make a confident claim (< 10 created across the
@@ -226,18 +236,6 @@ function renderScoreboard(summary) {
 
 function canonicalScoreboardRows(agentsMap) {
   return CANONICAL_SCOREBOARD_FAMILIES.map((family) => [family, agentsMap[family] || {}]);
-}
-
-function scoreboardSignalForColumns(agent, columns) {
-  return columns.reduce((total, col) => {
-    if (col.key === "agent") return total;
-    if (col.format === "pair") {
-      const pair = formatScoreboardPair(agent, col);
-      return total + (pair.zero ? 0 : 1);
-    }
-    const value = col.compute ? col.compute(agent) : readPath(agent, col.key);
-    return total + Math.abs(asScoreboardNumber(value));
-  }, 0);
 }
 
 function buildLeaderboardMatrix(rows, sectionList, opts = {}) {

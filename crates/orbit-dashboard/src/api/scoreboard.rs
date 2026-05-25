@@ -3,16 +3,46 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{Duration, Utc};
 use orbit_core::OrbitRuntime;
+use orbit_core::scoreboard_summary::ScoreboardWindow;
+use serde::Deserialize;
 use serde_json::json;
 
 use super::server_error;
 
-pub(super) async fn scoreboard(State(runtime): State<Arc<OrbitRuntime>>) -> Response {
-    let summary = match runtime.generate_scoreboard_summary() {
+/// Query-string shape for `GET /api/scoreboard`.
+///
+/// `?window=<1h|24h|7d|30d|all>` scopes the summary. Missing param keeps
+/// the legacy lifetime behavior. Unknown values produce HTTP 400.
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct ScoreboardQuery {
+    #[serde(default)]
+    pub(super) window: Option<String>,
+}
+
+pub(super) async fn scoreboard(
+    State(runtime): State<Arc<OrbitRuntime>>,
+    Query(query): Query<ScoreboardQuery>,
+) -> Response {
+    let window = match query.window.as_deref() {
+        None => ScoreboardWindow::All,
+        Some(raw) => match ScoreboardWindow::from_str(raw) {
+            Ok(w) => w,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response();
+            }
+        },
+    };
+
+    let summary = match runtime.generate_scoreboard_summary(Some(window)) {
         Ok(s) => s,
         Err(e) => return server_error(e),
     };
@@ -24,8 +54,14 @@ pub(super) async fn scoreboard(State(runtime): State<Arc<OrbitRuntime>>) -> Resp
     // Join MetricsEntry-derived per-actor stats and audit denials. Errors are
     // logged-and-swallowed so the existing scoreboard surface still renders if
     // a side log is missing or malformed.
+    //
+    // Denials honor the same window as the rest of the scoreboard so the
+    // dashboard column lines up with the windowed counts.
     let metrics_extras = compute_metrics_extras(&runtime).unwrap_or_default();
-    let denials_by_role = runtime.audit_denials_by_role(None).unwrap_or_default();
+    let since_window = window.duration().map(|d| Utc::now() - d);
+    let denials_by_role = runtime
+        .audit_denials_by_role(since_window.as_ref())
+        .unwrap_or_default();
     let denial_map: BTreeMap<String, i64> = denials_by_role.into_iter().collect();
 
     if let Some(agents) = value.get_mut("agents").and_then(|v| v.as_object_mut()) {

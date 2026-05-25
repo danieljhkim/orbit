@@ -1088,7 +1088,10 @@ function activeRefreshJobs() {
   }
 
   if (activeTab === "scoreboard") {
-    jobs.push(fetchJson("/api/scoreboard").then(renderScoreboard));
+    // ORB-00337: boot fetch matches the visually-highlighted segment
+    // (`24h`); the user can pick a different window from the selector,
+    // which calls /api/scoreboard?window=... directly.
+    jobs.push(fetchJson("/api/scoreboard?window=24h").then(renderScoreboard));
     return jobs;
   }
 
