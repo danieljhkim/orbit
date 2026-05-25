@@ -6,12 +6,12 @@ use rusqlite::{Connection, params};
 
 use crate::{EXTRACTOR_VERSION, Graph, SyncPolicy, resolve_db_path};
 
-pub(super) struct TestWorktree {
+pub(in crate::query) struct TestWorktree {
     path: PathBuf,
 }
 
 impl TestWorktree {
-    pub(super) fn new(name: &str) -> Self {
+    pub(in crate::query) fn new(name: &str) -> Self {
         let mut path = std::env::temp_dir();
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -25,11 +25,11 @@ impl TestWorktree {
         Self { path }
     }
 
-    pub(super) fn path(&self) -> &Path {
+    pub(in crate::query) fn path(&self) -> &Path {
         self.path.as_path()
     }
 
-    pub(super) fn write(&self, rel: &str, content: &str) {
+    pub(in crate::query) fn write(&self, rel: &str, content: &str) {
         let path = self.path.join(rel);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create parent directory");
@@ -44,24 +44,24 @@ impl Drop for TestWorktree {
     }
 }
 
-pub(super) fn open_graph(worktree: &TestWorktree, policy: SyncPolicy) -> Graph {
+pub(in crate::query) fn open_graph(worktree: &TestWorktree, policy: SyncPolicy) -> Graph {
     Graph::open(worktree.path(), policy).expect("open graph")
 }
 
-pub(super) fn open_connection(worktree: &TestWorktree) -> Connection {
+pub(in crate::query) fn open_connection(worktree: &TestWorktree) -> Connection {
     let conn = Connection::open(graph_db_path(worktree).as_path()).expect("open graph database");
     conn.pragma_update(None, "foreign_keys", "ON")
         .expect("enable foreign keys");
     conn
 }
 
-pub(super) fn graph_db_path(worktree: &TestWorktree) -> PathBuf {
+pub(in crate::query) fn graph_db_path(worktree: &TestWorktree) -> PathBuf {
     resolve_db_path(worktree.path(), "HEAD", EXTRACTOR_VERSION)
         .path()
         .to_path_buf()
 }
 
-pub(super) fn insert_file(conn: &Connection, path: &str, lang: &str, content: &str) {
+pub(in crate::query) fn insert_file(conn: &Connection, path: &str, lang: &str, content: &str) {
     conn.execute(
         "INSERT INTO files (path, content_hash, mtime_ns, lang, byte_len, extracted_at)
          VALUES (?1, x'00', 1, ?2, ?3, 2)",
@@ -74,7 +74,7 @@ pub(super) fn insert_file(conn: &Connection, path: &str, lang: &str, content: &s
     .expect("insert file row");
 }
 
-pub(super) fn insert_symbol(
+pub(in crate::query) fn insert_symbol(
     conn: &Connection,
     file_path: &str,
     name: &str,

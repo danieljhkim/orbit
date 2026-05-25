@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
+
 //! SQLite-backed graph store and query API skeleton.
 //!
 //! This crate owns the durable graph database path contract, sync policy, and
@@ -10,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub use orbit_graph_extract::Selector;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
+use serde::Serialize;
 
 mod query;
 mod store;
@@ -102,8 +105,8 @@ impl Graph {
 
     /// Return inbound references and relations for `sel`.
     pub fn refs(&self, sel: &Selector, opts: &RefOpts) -> Result<RefResult, GraphError> {
-        let _ = (self, sel, opts);
-        todo!("query graph refs")
+        self.ensure_synced()?;
+        query::refs::run(self, sel, opts)
     }
 
     /// Return outbound call edges from `sel`.
@@ -419,11 +422,105 @@ pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u3
 
 /// Reference query options for [`Graph::refs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RefOpts;
+pub struct RefOpts {
+    /// Minimum confidence included in returned results.
+    pub confidence: RefConfidence,
+    /// Optional kind filter for textual refs or structural relations.
+    pub kind: Option<RefKind>,
+}
+
+impl Default for RefOpts {
+    fn default() -> Self {
+        Self {
+            confidence: RefConfidence::SameModule,
+            kind: None,
+        }
+    }
+}
+
+/// Confidence floor and output value for graph references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefConfidence {
+    /// Same file, unambiguous match on name and qualified path.
+    Exact,
+    /// Cross-file reference resolved through an explicit import.
+    ImportResolved,
+    /// Cross-file reference resolved within the same module namespace.
+    SameModule,
+    /// Name-only match with ambiguous or weak resolution.
+    FuzzyName,
+}
+
+/// Filterable reference and relation kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RefKind {
+    /// Function or method call reference.
+    Call,
+    /// Type usage reference.
+    Type,
+    /// Import or use-statement reference.
+    Use,
+    /// Trait-bound reference.
+    TraitBound,
+    /// Implementation relation.
+    Impl,
+    /// Inheritance relation.
+    Extends,
+    /// Interface implementation relation.
+    Implements,
+}
 
 /// Reference query result returned by [`Graph::refs`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RefResult;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefResult {
+    /// Resolved target symbol, or the unresolved selector target.
+    pub target: RefTarget,
+    /// Textual references anchored to a source file and span.
+    pub refs: Vec<RefEntry>,
+    /// Structural relations whose destination is the target symbol.
+    pub relations: Vec<RelationEntry>,
+    /// Number of candidate rows excluded by the confidence floor.
+    pub skipped_low_confidence: usize,
+}
+
+/// Target metadata included in a [`RefResult`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefTarget {
+    /// Short symbol name requested or resolved.
+    pub name: String,
+    /// Fully-qualified symbol name used as the graph query key.
+    pub qualified: Option<String>,
+}
+
+/// Textual reference entry returned by [`Graph::refs`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefEntry {
+    /// Source file containing the reference.
+    pub file: String,
+    /// One-based source line containing the reference.
+    pub line: usize,
+    /// Textual reference kind.
+    pub kind: RefKind,
+    /// Resolution confidence for this reference.
+    pub confidence: RefConfidence,
+}
+
+/// Structural relation entry returned by [`Graph::refs`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RelationEntry {
+    /// Qualified source symbol for the relation.
+    pub from: String,
+    /// Structural relation kind.
+    pub kind: RefKind,
+    /// Source file defining the relation.
+    pub file: String,
+    /// One-based source line defining the relation.
+    pub line: usize,
+    /// Resolution confidence for this relation.
+    pub confidence: RefConfidence,
+}
 
 /// Outbound call edge returned by [`Graph::callees`].
 #[derive(Debug, Clone, PartialEq, Eq)]

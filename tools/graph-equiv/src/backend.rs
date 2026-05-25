@@ -179,7 +179,7 @@ impl From<KnowledgeError> for BackendError {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use orbit_knowledge::commands::{GraphCommandContext, TaskGraphScope};
@@ -203,14 +203,14 @@ mod tests {
         Ok(())
     }
 
-    fn run_v1_smoke(temp_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    fn run_v1_smoke(temp_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let store = GraphObjectStore::new(temp_path.join("graph"));
         let current_ref = store.write_graph(&smoke_graph())?;
         let ref_name = RefName::new("graph-equiv-smoke")?;
         store.write_ref_atomic(&ref_name, &current_ref)?;
 
         let backend = V1Backend::new(GraphCommandContext {
-            knowledge_dir: temp_path.clone(),
+            knowledge_dir: temp_path.to_path_buf(),
             workspace_root: None,
             explicit_ref: Some(ref_name.as_str().to_string()),
             explicit_knowledge_dir: true,

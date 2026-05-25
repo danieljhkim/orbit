@@ -1,15 +1,12 @@
-mod support;
-
 use orbit_graph_extract::Selector;
 use rusqlite::{Connection, params};
 
 use super::{DEFAULT_SHOW_MAX_BYTES, SourceSpan};
 use crate::SyncPolicy;
-use crate::sync::sync_leader_count;
-
-use support::{
+use crate::query::tests::support::{
     TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
 };
+use crate::sync::sync_leader_count;
 
 #[test]
 fn show_resolves_symbol_file_module_and_command_selectors() {

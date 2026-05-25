@@ -1,16 +1,13 @@
-mod support;
-
 use std::time::Instant;
 
 use rusqlite::{Connection, params};
 
 use super::{Match, SearchKind, SearchQuery};
-use crate::sync::sync_leader_count;
-use crate::{SyncMode, SyncPolicy};
-
-use support::{
+use crate::query::tests::support::{
     TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
 };
+use crate::sync::sync_leader_count;
+use crate::{SyncMode, SyncPolicy};
 
 #[test]
 fn search_unions_fts_tables_and_filters_kind_and_lang() {
