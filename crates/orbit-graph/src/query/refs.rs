@@ -31,6 +31,7 @@ pub(crate) fn run(graph: &Graph, sel: &Selector, opts: &RefOpts) -> Result<RefRe
         query_refs(
             &conn,
             qualified,
+            target.name.as_str(),
             opts,
             &mut line_cache,
             &mut skipped_low_confidence,
@@ -113,18 +114,37 @@ fn should_query_relations(kind: Option<RefKind>) -> bool {
 fn query_refs(
     conn: &Connection,
     qualified: &str,
+    target_name: &str,
     opts: &RefOpts,
     line_cache: &mut LineCache,
     skipped_low_confidence: &mut usize,
 ) -> Result<Vec<RefEntry>, GraphError> {
-    let sql = match opts.kind {
-        Some(_) => {
+    let include_fuzzy_name = opts.confidence == RefConfidence::FuzzyName;
+    let sql = match (opts.kind, include_fuzzy_name) {
+        (Some(_), true) => {
+            "SELECT from_file, from_span_start, kind, confidence
+             FROM refs
+             WHERE kind = ?2
+               AND (
+                   target_qualified = ?1
+                   OR (confidence = 'fuzzy_name' AND target_name = ?3)
+               )
+             ORDER BY from_file, from_span_start, id"
+        }
+        (Some(_), false) => {
             "SELECT from_file, from_span_start, kind, confidence
              FROM refs
              WHERE target_qualified = ?1 AND kind = ?2
              ORDER BY from_file, from_span_start, id"
         }
-        None => {
+        (None, true) => {
+            "SELECT from_file, from_span_start, kind, confidence
+             FROM refs
+             WHERE target_qualified = ?1
+                OR (confidence = 'fuzzy_name' AND target_name = ?2)
+             ORDER BY from_file, from_span_start, id"
+        }
+        (None, false) => {
             "SELECT from_file, from_span_start, kind, confidence
              FROM refs
              WHERE target_qualified = ?1
@@ -134,12 +154,23 @@ fn query_refs(
     let mut stmt = conn
         .prepare_cached(sql)
         .map_err(|source| GraphError::sqlite("prepare refs lookup", source))?;
-    let rows = match opts.kind {
-        Some(kind) => stmt
+    let rows = match (opts.kind, include_fuzzy_name) {
+        (Some(kind), true) => stmt
+            .query_map(
+                params![qualified, kind.as_str(), target_name],
+                row_to_ref_row,
+            )
+            .map_err(|source| GraphError::sqlite("query refs by target", source))?
+            .collect::<Result<Vec<_>, _>>(),
+        (Some(kind), false) => stmt
             .query_map(params![qualified, kind.as_str()], row_to_ref_row)
             .map_err(|source| GraphError::sqlite("query refs by target", source))?
             .collect::<Result<Vec<_>, _>>(),
-        None => stmt
+        (None, true) => stmt
+            .query_map(params![qualified, target_name], row_to_ref_row)
+            .map_err(|source| GraphError::sqlite("query refs by target", source))?
+            .collect::<Result<Vec<_>, _>>(),
+        (None, false) => stmt
             .query_map(params![qualified], row_to_ref_row)
             .map_err(|source| GraphError::sqlite("query refs by target", source))?
             .collect::<Result<Vec<_>, _>>(),

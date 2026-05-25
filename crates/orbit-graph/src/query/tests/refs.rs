@@ -34,7 +34,7 @@ fn default_floor_skips_fuzzy_refs_and_reports_count() {
             &conn,
             "src/caller.rs",
             "Target",
-            "crate::Target",
+            Some("crate::Target"),
             "call",
             "exact",
             index,
@@ -45,7 +45,7 @@ fn default_floor_skips_fuzzy_refs_and_reports_count() {
             &conn,
             "src/caller.rs",
             "Target",
-            "crate::Target",
+            Some("crate::Target"),
             "call",
             "fuzzy_name",
             index,
@@ -83,7 +83,7 @@ fn fuzzy_floor_includes_fuzzy_name_refs() {
         &conn,
         "src/caller.rs",
         "Target",
-        "crate::Target",
+        Some("crate::Target"),
         "call",
         "fuzzy_name",
         0,
@@ -105,6 +105,50 @@ fn fuzzy_floor_includes_fuzzy_name_refs() {
 }
 
 #[test]
+fn fuzzy_floor_includes_name_only_fuzzy_refs() {
+    let worktree = TestWorktree::new("include-name-only-fuzzy");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    let conn = open_test_connection(worktree.path());
+    seed_target(
+        &conn,
+        worktree.path(),
+        "src/target.rs",
+        "Target",
+        "crate::Target",
+    );
+    seed_file(
+        &conn,
+        worktree.path(),
+        "src/caller.rs",
+        "Target::fuzzy();\n",
+    );
+    insert_ref(
+        &conn,
+        "src/caller.rs",
+        "Target",
+        None,
+        "call",
+        "fuzzy_name",
+        0,
+    );
+
+    let result = graph
+        .refs(
+            &target_selector(),
+            &RefOpts {
+                confidence: RefConfidence::FuzzyName,
+                kind: None,
+            },
+        )
+        .expect("query name-only fuzzy refs");
+
+    assert_eq!(result.refs.len(), 1);
+    assert_eq!(result.refs[0].kind, RefKind::Call);
+    assert_eq!(result.refs[0].confidence, RefConfidence::FuzzyName);
+    assert_eq!(result.skipped_low_confidence, 0);
+}
+
+#[test]
 fn kind_filter_routes_to_textual_refs_or_structural_relations() {
     let worktree = TestWorktree::new("kind-routing");
     let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
@@ -121,7 +165,7 @@ fn kind_filter_routes_to_textual_refs_or_structural_relations() {
         &conn,
         "src/caller.rs",
         "Target",
-        "crate::Target",
+        Some("crate::Target"),
         "call",
         "exact",
         0,
@@ -283,7 +327,7 @@ fn insert_ref(
     conn: &Connection,
     from_file: &str,
     target_name: &str,
-    target_qualified: &str,
+    target_qualified: Option<&str>,
     kind: &str,
     confidence: &str,
     index: i64,
