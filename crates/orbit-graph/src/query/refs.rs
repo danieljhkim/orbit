@@ -239,7 +239,7 @@ fn row_to_relation_row(row: &Row<'_>) -> rusqlite::Result<StoredRelationRow> {
 }
 
 impl RefConfidence {
-    fn from_db(value: &str) -> Result<Self, GraphError> {
+    pub(crate) fn from_db(value: &str) -> Result<Self, GraphError> {
         match value {
             CONFIDENCE_EXACT => Ok(Self::Exact),
             CONFIDENCE_IMPORT_RESOLVED => Ok(Self::ImportResolved),
@@ -252,7 +252,7 @@ impl RefConfidence {
         }
     }
 
-    fn visible_at_floor(self, floor: Self) -> bool {
+    pub(crate) fn visible_at_floor(self, floor: Self) -> bool {
         self.rank() <= floor.rank()
     }
 
@@ -267,7 +267,7 @@ impl RefConfidence {
 }
 
 impl RefKind {
-    fn from_db(value: &str) -> Result<Self, GraphError> {
+    pub(crate) fn from_db(value: &str) -> Result<Self, GraphError> {
         match value {
             "call" => Ok(Self::Call),
             "type" => Ok(Self::Type),

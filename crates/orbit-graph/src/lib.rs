@@ -35,6 +35,12 @@ mod tests;
 // L-0052: FTS population invariants require a fresh DB when old indexes may be empty.
 pub const EXTRACTOR_VERSION: u32 = 2;
 
+/// Default graph distance used by callers that do not supply `--depth`.
+pub const DEFAULT_IMPACT_DEPTH: u8 = 3;
+
+/// Maximum number of impacted symbols returned by bounded traversals.
+pub const IMPACT_NODE_CAP: usize = 200;
+
 /// Opaque handle to a worktree-scoped graph database.
 pub struct Graph {
     db_path: GraphDbPath,
@@ -112,50 +118,13 @@ impl Graph {
     /// Return outbound call edges from `sel`.
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError> {
         self.ensure_synced()?;
-
-        let symbol = match resolve_symbol_span(self.db_path.path(), sel)? {
-            Some(s) => s,
-            None => return Ok(vec![]),
-        };
-
-        let conn = Connection::open(self.db_path.path())
-            .map_err(|source| GraphError::sqlite("open graph database for callees", source))?;
-
-        let mut stmt = conn
-            .prepare_cached(
-                "SELECT target_name, target_qualified, confidence, from_span_start
-                 FROM refs
-                 WHERE from_file = ?1
-                   AND from_span_start >= ?2
-                   AND from_span_end <= ?3
-                   AND kind = 'call'
-                 ORDER BY from_span_start",
-            )
-            .map_err(|source| GraphError::sqlite("prepare callees query", source))?;
-
-        let edges = stmt
-            .query_map(
-                params![symbol.file_path, symbol.span_start, symbol.span_end],
-                |row| {
-                    Ok(CalleeEdge {
-                        target_name: row.get(0)?,
-                        target_qualified: row.get(1)?,
-                        confidence: row.get(2)?,
-                        from_span: row.get(3)?,
-                    })
-                },
-            )
-            .map_err(|source| GraphError::sqlite("execute callees query", source))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| GraphError::sqlite("collect callees edges", source))?;
-
-        Ok(edges)
+        query::callees::run(self, sel)
     }
 
     /// Return the bounded impact set around `sel`.
     pub fn impact(&self, sel: &Selector, depth: u8) -> Result<ImpactResult, GraphError> {
-        let _ = (self, sel, depth);
-        todo!("query graph impact")
+        self.ensure_synced()?;
+        query::impact::run(self, sel, depth)
     }
 
     /// Trace the call tree rooted at a command handler.
@@ -205,17 +174,20 @@ fn now_epoch_nanos(operation: &'static str) -> Result<i64, GraphError> {
 /// Internal result of resolving a Selector to a symbol's file and span for
 /// span-containment queries like callees.
 #[derive(Debug, Clone)]
-struct SymbolSpan {
-    file_path: String,
-    span_start: i64,
-    span_end: i64,
+pub(crate) struct SymbolSpan {
+    pub(crate) file_path: String,
+    pub(crate) span_start: i64,
+    pub(crate) span_end: i64,
 }
 
 /// Resolve a Selector to a single symbol's (file_path, span) if it exists in
 /// the graph. Returns None for selectors that do not map to a stored symbol
 /// (including non-Symbol variants and unknown names). Used by read queries
 /// that then perform containment or adjacency lookups.
-fn resolve_symbol_span(db_path: &Path, sel: &Selector) -> Result<Option<SymbolSpan>, GraphError> {
+pub(crate) fn resolve_symbol_span(
+    db_path: &Path,
+    sel: &Selector,
+) -> Result<Option<SymbolSpan>, GraphError> {
     let Selector::Symbol { path, symbol, kind } = sel else {
         return Ok(None);
     };
@@ -536,8 +508,26 @@ pub struct CalleeEdge {
 }
 
 /// Bounded impact result returned by [`Graph::impact`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImpactResult;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImpactResult {
+    /// Impacted symbols in breadth-first order from the origin.
+    pub touched: Vec<ImpactEntry>,
+    /// Whether traversal stopped because [`IMPACT_NODE_CAP`] was reached.
+    pub truncated: bool,
+    /// Number of impacted symbols returned in `touched`.
+    pub visited_nodes: usize,
+}
+
+/// A symbol reached by [`Graph::impact`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImpactEntry {
+    /// Qualified symbol name reached by the traversal.
+    pub qualified_name: String,
+    /// Breadth-first distance from the origin symbol.
+    pub distance: usize,
+    /// Edge kind used for the prior hop into this symbol.
+    pub edge_kind: RefKind,
+}
 
 /// Command trace result returned by [`Graph::trace`].
 #[derive(Debug, Clone, PartialEq, Eq)]
