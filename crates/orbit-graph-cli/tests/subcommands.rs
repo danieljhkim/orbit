@@ -33,7 +33,11 @@ fn query_and_admin_subcommands_emit_json() {
         ],
     );
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_array_field(&show, "bytes");
+    assert_eq!(
+        show["text"].as_str().expect("show text"),
+        expected_entry_source()
+    );
+    assert!(show.get("bytes").is_none());
 
     let refs = run_json(
         worktree.path(),
@@ -151,6 +155,10 @@ fn assert_array_field(value: &Value, field: &str) {
         value.get(field).and_then(Value::as_array).is_some(),
         "{field} should be an array in {value}"
     );
+}
+
+fn expected_entry_source() -> &'static str {
+    "pub fn entry() -> i32 {\n    helper()\n}"
 }
 
 fn fixture_worktree() -> TempDir {

@@ -36,6 +36,14 @@ fn graph_tools_expose_orbit_graph_query_surface() {
     ] {
         assert!(!registry.has(removed), "{removed} should not be registered");
     }
+
+    let show_schema = registry
+        .schemas()
+        .into_iter()
+        .find(|schema| schema.name == "orbit.graph.show")
+        .expect("show schema");
+    assert!(show_schema.description.contains("`text`"));
+    assert!(show_schema.description.contains("fallback `bytes`"));
 }
 
 #[test]
@@ -72,7 +80,11 @@ fn graph_tools_query_synced_worktree() {
         }),
     );
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_array_field(&show, "bytes");
+    assert_eq!(
+        show["text"].as_str().expect("show text"),
+        expected_entry_source()
+    );
+    assert!(show.get("bytes").is_none());
 
     let refs = execute_graph_tool(
         worktree.path(),
@@ -138,6 +150,10 @@ fn assert_array_field(value: &Value, field: &str) {
         value.get(field).and_then(Value::as_array).is_some(),
         "{field} should be an array in {value}"
     );
+}
+
+fn expected_entry_source() -> &'static str {
+    "pub fn entry() -> i32 {\n    helper()\n}"
 }
 
 fn fixture_worktree() -> TempDir {

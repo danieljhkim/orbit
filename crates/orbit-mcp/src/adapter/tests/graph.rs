@@ -37,6 +37,8 @@ fn graph_tool_schemas_cover_cli_parameters() {
         &schemas[2],
         &with_workspace_params(&["selector", "max_bytes"]),
     );
+    assert!(schemas[2].description.contains("`text`"));
+    assert!(schemas[2].description.contains("fallback `bytes`"));
     assert_param_names(
         &schemas[3],
         &with_workspace_params(&["symbol", "confidence", "kind"]),
@@ -131,7 +133,11 @@ async fn graph_tools_invoke_in_process_fixture() {
     )
     .await;
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_array_field(&show, "bytes");
+    assert_eq!(
+        show["text"].as_str().expect("show text"),
+        expected_entry_source()
+    );
+    assert!(show.get("bytes").is_none());
 
     let refs = call_json(
         &server,
@@ -234,6 +240,10 @@ fn assert_array_field(value: &Value, field: &str) {
         value.get(field).and_then(Value::as_array).is_some(),
         "{field} should be an array in {value}"
     );
+}
+
+fn expected_entry_source() -> &'static str {
+    "pub fn entry() -> i32 {\n    helper()\n}"
 }
 
 fn assert_param_names(schema: &orbit_common::types::ToolSchema, expected: &[&str]) {

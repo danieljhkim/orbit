@@ -1,3 +1,5 @@
+use std::fs;
+
 use orbit_graph_extract::Selector;
 use rusqlite::{Connection, params};
 
@@ -12,7 +14,8 @@ use crate::sync::sync_leader_count;
 #[test]
 fn show_result_shape_matches_golden_fixture() {
     let result = NodeView {
-        bytes: b"pub fn handler() {}\n".to_vec(),
+        text: Some("pub fn handler() {}\n".to_string()),
+        bytes: None,
         metadata: NodeMetadata {
             file: "src/lib.rs".to_string(),
             span: SourceSpan { start: 0, end: 20 },
@@ -84,9 +87,10 @@ fn show_resolves_symbol_file_module_and_command_selectors() {
         Some("crate::api::handler")
     );
     assert_eq!(
-        &symbol.bytes,
+        symbol.text.as_ref().expect("symbol text").as_bytes(),
         &source.as_bytes()[handler_start..handler_end]
     );
+    assert!(symbol.bytes.is_none());
 
     let file = graph
         .show(
@@ -103,7 +107,12 @@ fn show_resolves_symbol_file_module_and_command_selectors() {
             end: source.len()
         }
     );
-    assert_eq!(file.bytes, source.as_bytes());
+    assert_eq!(file.text.as_deref(), Some(source));
+    assert_eq!(
+        file.text.as_ref().expect("file text").as_bytes(),
+        source.as_bytes()
+    );
+    assert!(file.bytes.is_none());
 
     let module = graph
         .show(
@@ -116,7 +125,11 @@ fn show_resolves_symbol_file_module_and_command_selectors() {
         .expect("module resolves");
     assert_eq!(module.metadata.kind, "module");
     assert_eq!(module.metadata.qualified.as_deref(), Some("crate::api"));
-    assert_eq!(&module.bytes, &source.as_bytes()[module_start..module_end]);
+    assert_eq!(
+        module.text.as_ref().expect("module text").as_bytes(),
+        &source.as_bytes()[module_start..module_end]
+    );
+    assert!(module.bytes.is_none());
 
     let command = graph
         .show(
@@ -134,9 +147,10 @@ fn show_resolves_symbol_file_module_and_command_selectors() {
         Some("crate::api::handler")
     );
     assert_eq!(
-        &command.bytes,
+        command.text.as_ref().expect("command text").as_bytes(),
         &source.as_bytes()[handler_start..handler_end]
     );
+    assert!(command.bytes.is_none());
 }
 
 #[test]
@@ -167,7 +181,8 @@ fn show_truncates_source_when_max_bytes_is_shorter_than_span() {
         .expect("show symbol")
         .expect("symbol resolves");
 
-    assert_eq!(view.bytes, b"pub fn ");
+    assert_eq!(view.text.as_deref(), Some("pub fn "));
+    assert!(view.bytes.is_none());
     assert_eq!(
         view.metadata.span,
         SourceSpan {
@@ -176,6 +191,31 @@ fn show_truncates_source_when_max_bytes_is_shorter_than_span() {
         }
     );
     assert!(view.metadata.truncated);
+}
+
+#[test]
+fn show_non_utf8_file_omits_text_and_returns_bytes() {
+    let worktree = TestWorktree::new("show-binary");
+    let source_path = worktree.path().join("assets/blob.bin");
+    fs::create_dir_all(source_path.parent().expect("source parent")).expect("create asset dir");
+    let source = [0xff, 0xfe, 0x00, b'a'];
+    fs::write(source_path, source).expect("write binary source");
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+    insert_file_len(&conn, "assets/blob.bin", "binary", source.len());
+
+    let view = graph
+        .show(
+            &"file:assets/blob.bin".parse().expect("file selector"),
+            DEFAULT_SHOW_MAX_BYTES,
+        )
+        .expect("show file")
+        .expect("file resolves");
+
+    assert!(view.text.is_none());
+    assert_eq!(view.bytes.as_deref(), Some(source.as_slice()));
+    assert_eq!(view.metadata.kind, "file");
+    assert!(!view.metadata.truncated);
 }
 
 #[test]
@@ -231,6 +271,19 @@ fn show_unresolved_dir_selector_returns_none() {
         .expect("show dir");
 
     assert!(view.is_none());
+}
+
+fn insert_file_len(conn: &Connection, path: &str, lang: &str, byte_len: usize) {
+    conn.execute(
+        "INSERT INTO files (path, content_hash, mtime_ns, lang, byte_len, extracted_at)
+         VALUES (?1, x'00', 1, ?2, ?3, 2)",
+        params![
+            path,
+            lang,
+            i64::try_from(byte_len).expect("content length fits")
+        ],
+    )
+    .expect("insert file row");
 }
 
 fn insert_command(
