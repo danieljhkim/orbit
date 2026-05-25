@@ -37,8 +37,6 @@ fn graph_tool_schemas_cover_cli_parameters() {
         &schemas[2],
         &with_workspace_params(&["selector", "max_bytes"]),
     );
-    assert!(schemas[2].description.contains("`text`"));
-    assert!(schemas[2].description.contains("fallback `bytes`"));
     assert_param_names(
         &schemas[3],
         &with_workspace_params(&["symbol", "confidence", "kind"]),
@@ -56,53 +54,51 @@ fn graph_tool_schemas_cover_cli_parameters() {
 }
 
 #[test]
-fn combined_schemas_override_legacy_host_graph_tools() {
+fn combined_schemas_preserve_legacy_host_graph_tools() {
     let host = Arc::new(StubHost {
         schemas: vec![
             tool_schema("orbit.graph.search"),
             tool_schema("orbit.graph.pack"),
-            tool_schema("orbit.graph.callers"),
             tool_schema("orbit.task.show"),
         ],
     });
     let server = OrbitToolServer::new(host);
     let schemas = server.combined_tool_schemas();
-    let graph_names: Vec<_> = schemas
-        .iter()
-        .filter(|schema| schema.name.starts_with("orbit.graph."))
-        .map(|schema| schema.name.as_str())
-        .collect();
-    let expected_schemas = graph_tool_schemas();
-    let expected_graph_names: Vec<_> = expected_schemas
-        .iter()
-        .map(|schema| schema.name.as_str())
-        .collect();
+    let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
 
     assert_eq!(
-        graph_names, expected_graph_names,
-        "MCP graph tools must be owned by the in-process wrapper surface"
-    );
-    assert!(
-        !graph_names.contains(&"orbit.graph.pack"),
-        "removed pack tool must not leak from a legacy host schema"
+        schemas
+            .iter()
+            .filter(|schema| schema.name == "orbit.graph.search")
+            .count(),
+        1
     );
     let search = schemas
         .iter()
         .find(|schema| schema.name == "orbit.graph.search")
         .expect("graph search schema");
-    assert!(
-        !search.description.to_ascii_lowercase().contains("pack"),
-        "orbit.graph.search description must not point agents at the removed pack tool"
-    );
-    assert_param_names(
-        search,
-        &with_workspace_params(&["query", "kind", "lang", "limit"]),
-    );
-    assert!(
-        schemas
-            .iter()
-            .any(|schema| schema.name == "orbit.task.show")
-    );
+    assert_param_names(search, &[]);
+    assert!(names.contains(&"orbit.graph.pack"));
+    assert!(names.contains(&"orbit.task.show"));
+    assert!(!names.contains(&"orbit.graph.sync"));
+    assert!(!names.contains(&"orbit.graph.callees"));
+    assert!(!names.contains(&"orbit.graph.impact"));
+    assert!(!names.contains(&"orbit.graph.trace"));
+}
+
+#[test]
+fn combined_schemas_use_adapter_graph_tools_when_host_has_no_graph_surface() {
+    let host = Arc::new(StubHost {
+        schemas: vec![tool_schema("orbit.task.show")],
+    });
+    let server = OrbitToolServer::new(host);
+    let schemas = server.combined_tool_schemas();
+    let names: Vec<_> = schemas.iter().map(|schema| schema.name.as_str()).collect();
+
+    assert!(names.contains(&"orbit.task.show"));
+    assert!(names.contains(&"orbit.graph.sync"));
+    assert!(names.contains(&"orbit.graph.search"));
+    assert!(names.contains(&"orbit.graph.trace"));
 }
 
 #[tokio::test]
@@ -150,11 +146,7 @@ async fn graph_tools_invoke_in_process_fixture() {
     )
     .await;
     assert_eq!(show["metadata"]["file"], "src/lib.rs");
-    assert_eq!(
-        show["text"].as_str().expect("show text"),
-        expected_entry_source()
-    );
-    assert!(show.get("bytes").is_none());
+    assert_array_field(&show, "bytes");
 
     let refs = call_json(
         &server,
@@ -257,10 +249,6 @@ fn assert_array_field(value: &Value, field: &str) {
         value.get(field).and_then(Value::as_array).is_some(),
         "{field} should be an array in {value}"
     );
-}
-
-fn expected_entry_source() -> &'static str {
-    "pub fn entry() -> i32 {\n    helper()\n}"
 }
 
 fn assert_param_names(schema: &orbit_common::types::ToolSchema, expected: &[&str]) {

@@ -3,10 +3,9 @@
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use orbit_core::OrbitRuntime;
-use orbit_mcp::{McpHost, OrbitToolServer};
+use orbit_mcp::McpHost;
 
 use super::host::{
     ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES,
@@ -59,11 +58,12 @@ const REQUIRED_AGENT_FACING_TOOL_NAMES: &[&str] = &[
     "orbit.task.start",
     "orbit.graph.search",
     "orbit.graph.show",
+    "orbit.graph.pack",
+    "orbit.graph.overview",
     "orbit.graph.refs",
-    "orbit.graph.sync",
-    "orbit.graph.callees",
-    "orbit.graph.impact",
-    "orbit.graph.trace",
+    "orbit.graph.callers",
+    "orbit.graph.deps",
+    "orbit.graph.implementors",
     "orbit.adr.add",
     "orbit.adr.show",
     "orbit.adr.supersede",
@@ -249,75 +249,24 @@ fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
         );
     }
 
+    // ORB-00195: MCP `tools/list` (via schema_to_tool) must advertise allow_fuzzy for
+    // the sanitized orbit_graph_search so agents discover the fuzzy fallback.
     let search_schema = host
         .list_tool_schemas()
         .into_iter()
         .find(|s| s.name == "orbit.graph.search")
         .expect("orbit.graph.search schema must be exposed to MCP");
-    let params: BTreeSet<_> = search_schema
+    let fuzzy = search_schema
         .parameters
         .iter()
-        .map(|param| param.name.as_str())
-        .collect();
-    assert!(params.contains("query"));
-    assert!(params.contains("kind"));
-    assert!(params.contains("lang"));
-    assert!(params.contains("limit"));
-}
-
-#[test]
-fn plugin_mcp_graph_surface_matches_active_registry() {
-    let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-    let registry_graph_tools: BTreeSet<String> = runtime
-        .list_tools()
-        .expect("list runtime tools")
-        .into_iter()
-        .map(|tool| tool.name)
-        .filter(|name| name.starts_with("orbit.graph."))
-        .collect();
-    let server = OrbitToolServer::new(Arc::new(RuntimeMcpHost { runtime }));
-    let listed = server.tool_schemas();
-    let mcp_graph_tools: BTreeSet<String> = listed
-        .iter()
-        .map(|schema| schema.name.clone())
-        .filter(|name| name.starts_with("orbit.graph."))
-        .collect();
-    let expected: BTreeSet<String> = [
-        "orbit.graph.sync",
-        "orbit.graph.search",
-        "orbit.graph.show",
-        "orbit.graph.refs",
-        "orbit.graph.callees",
-        "orbit.graph.impact",
-        "orbit.graph.trace",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-
-    assert_eq!(
-        mcp_graph_tools, registry_graph_tools,
-        "MCP graph advertisement must match the active orbit-tools graph registry"
-    );
-    assert_eq!(
-        mcp_graph_tools, expected,
-        "MCP graph advertisement must expose the cutover read surface"
-    );
+        .find(|p| p.name == "allow_fuzzy")
+        .expect("allow_fuzzy must be declared in ToolSchema for discoverability");
+    assert_eq!(fuzzy.param_type, "boolean", "allow_fuzzy is boolean input");
+    assert!(!fuzzy.required, "allow_fuzzy is optional");
     assert!(
-        !mcp_graph_tools.contains("orbit.graph.pack"),
-        "removed pack tool must not be advertised"
-    );
-
-    let search_schema = listed
-        .iter()
-        .find(|schema| schema.name == "orbit.graph.search")
-        .expect("orbit.graph.search schema must be exposed to MCP");
-    assert!(
-        !search_schema
-            .description
-            .to_ascii_lowercase()
-            .contains("pack"),
-        "orbit.graph.search description must not mention the removed pack tool"
+        fuzzy.description.contains("fuzzy") || fuzzy.description.contains("fallback"),
+        "description must mention fuzzy fallback: {}",
+        fuzzy.description
     );
 }
 
@@ -541,18 +490,21 @@ mod audited_mcp_call_tests {
     }
 
     #[test]
-    fn mcp_graph_search_accepts_cutover_params_and_returns_result_shape() {
+    fn mcp_graph_search_accepts_allow_fuzzy_and_returns_result_shape() {
         let runtime = OrbitRuntime::in_memory().expect("build test runtime");
-        // In-memory test runtime has no graph data, so execution may yield graph err;
+        // MCP-path (preflight + audited dispatch) regression for ORB-00195.
+        // Exercises allow_fuzzy passthrough for both canonical and (via adapter) sanitized names.
+        // In-memory test runtime has no graph data, so execution may yield knowledge err;
         // the important check is that preflight accepts the exposed tool+param (no "not found").
         let res = audited_mcp_call(
             &runtime,
             "orbit.graph.search",
-            json!({"query": "GraphCutoverTest", "kind": "symbol", "limit": 3}),
+            json!({"query": "TypoForFuzzyTest", "allow_fuzzy": true, "limit": 3}),
         );
         match res {
             Ok(body) => {
-                assert!(body.get("matches").is_some());
+                assert!(body.get("total").is_some());
+                assert!(body.get("results").is_some());
             }
             Err(e) => {
                 let msg = e.to_string().to_lowercase();

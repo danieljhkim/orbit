@@ -1,0 +1,30 @@
+schema_version: 2
+id: ADR-0192
+title: Roll back orbit-graph tool cutover to orbit-knowledge
+status: accepted
+owner: codex
+created_at: 2026-05-25T21:45:55.890898Z
+accepted_at: 2026-05-25T21:46:06.664684Z
+last_updated: 2026-05-25T21:46:27.351793Z
+related_features:
+- orbit-graph
+- knowledge-graph
+- mcp-session-context
+related_tasks:
+- ORB-00344
+tags:
+- orbit-graph
+- rollback
+- cutover
+paths:
+- crates/orbit-tools/**
+- crates/orbit-cli/src/command/mcp/**
+- crates/orbit-mcp/src/adapter/**
+- crates/orbit-core/assets/skills/orbit-graph/SKILL.md
+- tools/graph-equiv/**
+- docs/design/orbit-graph/**
+supersedes:
+- ADR-0191
+legacy_ids: []
+validation_warnings: []
+legacy_validation: none

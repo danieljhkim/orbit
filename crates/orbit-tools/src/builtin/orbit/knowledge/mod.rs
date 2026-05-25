@@ -1,11 +1,22 @@
 #[allow(dead_code)]
 mod add;
+pub mod callers;
 #[allow(dead_code)]
 mod delete;
+pub mod deps;
+pub mod implementors;
 #[allow(dead_code)]
 mod move_;
+pub mod overview;
+pub mod pack;
+pub mod refs;
+pub mod search;
+pub mod show;
 #[allow(dead_code)]
 mod write;
+
+#[cfg(test)]
+mod tests;
 
 use std::path::{Path, PathBuf};
 

@@ -21,9 +21,7 @@ mod tests;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use orbit_common::types::{
-    LearningInjectionCaps, LearningInjectionState, ToolSchema, ToolSessionContext,
-};
+use orbit_common::types::{LearningInjectionCaps, LearningInjectionState, ToolSessionContext};
 
 use crate::McpHost;
 
@@ -75,11 +73,6 @@ impl OrbitToolServer {
             learning_caps,
             learning_states: tokio::sync::Mutex::new(learning_states),
         }
-    }
-
-    /// Return the canonical tool schemas that will be advertised over MCP.
-    pub fn tool_schemas(&self) -> Vec<ToolSchema> {
-        self.combined_tool_schemas()
     }
 
     #[cfg(test)]

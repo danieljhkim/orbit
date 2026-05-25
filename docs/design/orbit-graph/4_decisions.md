@@ -110,19 +110,19 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 - The stale-DB sweep removes detached DBs whose commits are no longer reachable from any local ref, while preserving the active DB family.
 - Cost: **more files during commit-hopping workflows.** Bisects and cherry-picks can create O(N) detached DBs until reachability cleanup prunes the unreachable ones.
 
-## ADR-0191 — Cut over graph query tools to orbit-graph
+## ADR-0192 — Roll back orbit-graph tool cutover to orbit-knowledge
 
-**Status:** Proposed · 2026-05-25 · [ORB-00338]
+**Status:** Accepted · 2026-05-25 · [ORB-00344] · Supersedes ADR-0191
 
-**Context.** MCP graph tools already used `orbit-graph`, but the CLI tool registry still routed graph queries through `orbit-knowledge`. ORB-00338 extended the fixture-scoped equivalence corpus to 34 selectors across sync, search, show, refs, callees, impact, and trace before making the cutover call.
+**Context.** ORB-00338 cut the active graph query tools over from `orbit-knowledge` to `orbit-graph`, but audit data and post-cutover testing found unacceptable steady-state regressions: 13.5x p50 search slowdown, a roughly 9s cold-call floor, deleted high-use tools, incomplete plugin MCP exposure, byte-array `show` output, empty `trace` results for real enum-dispatch commands, and direction-confused `impact` output.
 
-**Decision.** Cut over the graph query tool surface to the seven `orbit-graph` query/sync tools only. Do not add a runtime backend selector, environment toggle, audit-row backend column, or shadow-diff logger; rollback is `git revert <cutover-sha>`.
+**Decision.** Restore the legacy `orbit-knowledge`-backed `orbit.graph.search`, `show`, `refs`, `callers`, `pack`, `overview`, `implementors`, and `deps` surface as the active backend. Keep the `orbit-graph` crate and equivalence harness in tree, but gate any future cutover on the rollback learnings captured in the global ADR.
 
 **Consequences.**
-- Equivalence report: 34/34 passed; zero `bug-in-new`, zero `improvement-over-legacy`, and zero uncategorized diffs.
-- Perf report: v1 median 8us / p95 16us; v2 median 6870us / p95 7780us, with v2 measured through subprocess CLI dispatch.
-- Rollback verification is pending the commit/PR step because this executor does not create the cutover commit SHA.
-- Cost: the agent-facing CLI graph surface drops legacy `orbit-knowledge` helpers (`pack`, `overview`, `callers`, `implementors`, `deps`) in favor of the smaller seven-tool surface.
+- Future cutover work must use `SyncPolicy::Manual` as the query-tool default unless a measured long-lived process explicitly opts into another policy.
+- Pre-cutover audit-log analysis, plugin MCP exposure equivalence, UTF-8 text response boundaries, trace/impact correctness gates, and cold-call latency measurements are required before another backend swap.
+- Lost for now: cutover-only `callees`, `impact`, `trace`, the changed `sync` shape, and the extended graph-equiv corpus.
+- Cost: **cutover pauses.** The `orbit-graph` backend remains available for development, but agents lose the new cutover-only APIs until the root causes are fixed and a new cutover passes the gates.
 
 ---
 
@@ -130,6 +130,6 @@ Format for each entry: **Status · Date · Task(s)**, then *Context → Decision
 
 - [ORB-00294] allocated the six initial orbit-graph ADR IDs (ADR-0184 through ADR-0189).
 - [ORB-00331] allocated ADR-0190 and shipped the detached-HEAD per-commit DB layout.
-- [ORB-00338] allocated ADR-0191 and cut graph query tools over to orbit-graph.
+- [ORB-00344] allocated ADR-0192 and restored `orbit-knowledge` as the primary graph tool backend.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

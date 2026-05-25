@@ -21,8 +21,6 @@ flowchart LR
   MCP --> Graph
   MCP --> GraphExtract
   Tools --> Exec["orbit-exec"]
-  Tools --> Graph
-  Tools --> GraphExtract
   Tools --> Knowledge
   Tools --> Policy
   Knowledge --> GraphExtract["orbit-graph-extract"]
@@ -60,7 +58,7 @@ flowchart LR
 - **orbit-graph-cli**: clap-based JSON command surface for the orbit-graph migration. Depends on `orbit-graph` for sync/query dispatch and `orbit-graph-extract` for selector parsing, without depending on `orbit-knowledge`.
 - **orbit-knowledge**: knowledge/graph parsing and storage helpers. Multi-language source parsing (Rust, Go, Java, JavaScript/TypeScript, Python). Depends on `orbit-common` and temporarily on `orbit-graph-extract` for the selector parser during the orbit-graph dual-run migration; consumed by `orbit-tools`, which exposes graph tool and CLI-use-case facades upstream.
 - **orbit-store**: layered store pattern (YAML + SQLite). Match existing modules when adding new ones. Depends only on `orbit-common`; the semantic vector schema is owned by `orbit-search::vector` (not `orbit-store`).
-- **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-graph` / `orbit-graph-extract` for read-only graph tools, `orbit-knowledge` for legacy write/indexing compatibility, and `orbit-policy`.
+- **orbit-tools**: tool registry plus built-in graph, fs, and policy-aware exec tools. Depends on `orbit-common`, `orbit-exec`, `orbit-knowledge`, `orbit-policy`.
 - **orbit-mcp**: Model Context Protocol adapter using `rmcp`. Depends on `orbit-common` plus `orbit-graph` / `orbit-graph-extract` for the in-process read-only `orbit.graph.*` wrappers; consumed by `orbit-cli` via `orbit mcp serve`.
 - **orbit-dashboard**: read-only web dashboard (axum server + embedded HTML/JS assets + JSON API handlers for tasks, runs, scoreboard, logs, etc.). Depends on `orbit-core` (for OrbitRuntime/OrbitError) and `orbit-knowledge` (for read-only knowledge metrics aggregation) plus axum/clap/chrono/serde; consumed by `orbit-cli` via `web serve`. Extracted from orbit-cli in ORB-00146 to isolate compile graph and co-locate assets. The only public surface is `serve(runtime, ServeArgs)`.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, openai_compat, anthropic, ollama, mock_agent). Implements `backend: cli`, hosts HTTP `LoopTransport` primitives, and routes loop tool calls through the shared `orbit-tools` registry. Depends on `orbit-common` and `orbit-tools`.

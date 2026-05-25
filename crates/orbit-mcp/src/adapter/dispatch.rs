@@ -19,14 +19,11 @@ use crate::error::tool_error_result;
 
 impl OrbitToolServer {
     pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
-        let mut schemas: Vec<_> = self
-            .host
-            .list_tool_schemas()
-            .into_iter()
-            // L-0057: stale host graph schemas must not leak into the adapter-owned MCP graph surface.
-            .filter(|schema| !schema.name.starts_with("orbit.graph."))
-            .collect();
-        schemas.extend(self.graph_tools.schemas());
+        let mut schemas = self.host.list_tool_schemas();
+        // L-0058: legacy host graph schemas stay visible while orbit-knowledge owns orbit.graph.*.
+        if !host_exposes_graph_tools(&schemas) {
+            schemas.extend(self.graph_tools.schemas());
+        }
         schemas
     }
 
@@ -103,7 +100,8 @@ impl OrbitToolServer {
         let exec_name = canonical.clone();
         let session_context = self.session_context();
         let input_for_learning = input.clone();
-        let graph_tool = self.graph_tools.is_graph_tool(&canonical);
+        let graph_tool =
+            self.adapter_graph_tools_enabled() && self.graph_tools.is_graph_tool(&canonical);
         let join = tokio::task::spawn_blocking(move || {
             if graph_tool {
                 graph_tools.call_tool(&exec_name, input, session_context)
@@ -139,6 +137,16 @@ impl OrbitToolServer {
             }
         }
     }
+
+    fn adapter_graph_tools_enabled(&self) -> bool {
+        !host_exposes_graph_tools(&self.host.list_tool_schemas())
+    }
+}
+
+fn host_exposes_graph_tools(schemas: &[ToolSchema]) -> bool {
+    schemas
+        .iter()
+        .any(|schema| schema.name.starts_with("orbit.graph."))
 }
 
 impl ServerHandler for OrbitToolServer {

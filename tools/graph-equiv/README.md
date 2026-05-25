@@ -21,8 +21,6 @@ show symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
 refs symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_helper:function
 callees symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_entry:function
 impact symbol:tools/graph-equiv/fixtures/rust/sample.rs#rust_isolated:function
-trace py-ship
-sync workspace
 ```
 
 At startup the runner checks the committed corpus checksum. If a selector list
@@ -41,11 +39,8 @@ The diff logic implements the five GRAPH_SPEC §16 rules:
   `same_module` confidence floor.
 - `callees <sym>` compares `(file, line, target_name)` triples.
 - `impact <sym>` compares the depth-3 set of touched symbol qualified names.
-- `trace <command>` compares the set of root-to-callee name paths.
-- `sync <label>` verifies both backends can refresh before query execution.
 
-Output is a structured JSON report with per-query backend wall-clock timings
-and aggregate median/p95 timings. Any out-of-tolerance diff exits non-zero and
+Output is a structured JSON report. Any out-of-tolerance diff exits non-zero and
 includes the language, corpus file line, query kind, selector, tolerance, and
 offending rows.
 

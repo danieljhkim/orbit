@@ -142,12 +142,12 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
         ),
         schema(
             GRAPH_SHOW_TOOL,
-            "Show source and metadata for an orbit-graph selector. UTF-8 source is returned as `text`; non-UTF-8 source omits `text` and returns fallback `bytes`.",
+            "Show source and metadata for an orbit-graph selector.",
             vec![
                 param("selector", "Selector to show.", "string", true),
                 param(
                     "max_bytes",
-                    "Maximum source bytes returned in `text` or fallback `bytes`.",
+                    "Maximum source bytes returned.",
                     "number",
                     false,
                 ),
