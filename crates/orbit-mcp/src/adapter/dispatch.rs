@@ -23,7 +23,8 @@ impl OrbitToolServer {
             .host
             .list_tool_schemas()
             .into_iter()
-            .filter(|schema| !self.graph_tools.is_graph_tool(&schema.name))
+            // L-0057: stale host graph schemas must not leak into the adapter-owned MCP graph surface.
+            .filter(|schema| !schema.name.starts_with("orbit.graph."))
             .collect();
         schemas.extend(self.graph_tools.schemas());
         schemas

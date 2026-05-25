@@ -3,9 +3,10 @@
 // Content moved from inline #[cfg(test)] mod tests in mcp/mod.rs per ORB-00221.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use orbit_core::OrbitRuntime;
-use orbit_mcp::McpHost;
+use orbit_mcp::{McpHost, OrbitToolServer};
 
 use super::host::{
     ADR_TOOL_NAMES, DOCS_TOOL_NAMES, FRICTION_TOOL_NAMES, GRAPH_READ_TOOL_NAMES,
@@ -262,6 +263,62 @@ fn runtime_mcp_host_lists_safe_graph_tools_for_clients() {
     assert!(params.contains("kind"));
     assert!(params.contains("lang"));
     assert!(params.contains("limit"));
+}
+
+#[test]
+fn plugin_mcp_graph_surface_matches_active_registry() {
+    let runtime = OrbitRuntime::in_memory().expect("build test runtime");
+    let registry_graph_tools: BTreeSet<String> = runtime
+        .list_tools()
+        .expect("list runtime tools")
+        .into_iter()
+        .map(|tool| tool.name)
+        .filter(|name| name.starts_with("orbit.graph."))
+        .collect();
+    let server = OrbitToolServer::new(Arc::new(RuntimeMcpHost { runtime }));
+    let listed = server.tool_schemas();
+    let mcp_graph_tools: BTreeSet<String> = listed
+        .iter()
+        .map(|schema| schema.name.clone())
+        .filter(|name| name.starts_with("orbit.graph."))
+        .collect();
+    let expected: BTreeSet<String> = [
+        "orbit.graph.sync",
+        "orbit.graph.search",
+        "orbit.graph.show",
+        "orbit.graph.refs",
+        "orbit.graph.callees",
+        "orbit.graph.impact",
+        "orbit.graph.trace",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+
+    assert_eq!(
+        mcp_graph_tools, registry_graph_tools,
+        "MCP graph advertisement must match the active orbit-tools graph registry"
+    );
+    assert_eq!(
+        mcp_graph_tools, expected,
+        "MCP graph advertisement must expose the cutover read surface"
+    );
+    assert!(
+        !mcp_graph_tools.contains("orbit.graph.pack"),
+        "removed pack tool must not be advertised"
+    );
+
+    let search_schema = listed
+        .iter()
+        .find(|schema| schema.name == "orbit.graph.search")
+        .expect("orbit.graph.search schema must be exposed to MCP");
+    assert!(
+        !search_schema
+            .description
+            .to_ascii_lowercase()
+            .contains("pack"),
+        "orbit.graph.search description must not mention the removed pack tool"
+    );
 }
 
 mod audited_mcp_call_tests {
