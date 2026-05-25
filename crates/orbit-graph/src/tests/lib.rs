@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, params};
 
 use crate::sync::{fail_next_sync_after_scan, sync_leader_count};
-use crate::{EXTRACTOR_VERSION, Graph, GraphError, SyncPolicy, resolve_db_path};
+use crate::{CalleeEdge, EXTRACTOR_VERSION, Graph, GraphError, Selector, SyncPolicy, resolve_db_path};
 
 #[test]
 fn db_path_sanitizes_branch_slashes_and_preserves_raw_branch() {
@@ -229,4 +229,110 @@ impl Drop for TestWorktree {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+fn populate_callees_fixture(conn: &Connection, file_path: &str) {
+            conn.execute(
+                "INSERT INTO files (path, content_hash, mtime_ns, lang, byte_len, extracted_at)
+                 VALUES (?1, x'00', 1, 'rust', 200, 2)",
+                [file_path],
+            )
+            .expect("insert file");
+
+            // Outer function span: 0..100
+            conn.execute(
+                "INSERT INTO symbols (id, file_path, name, qualified, kind, span_start, span_end, signature, parent_symbol)
+                 VALUES (1, ?1, 'outer', 'crate::outer', 'function', 0, 100, 'fn outer()', NULL)",
+                [file_path],
+            )
+            .expect("insert outer symbol");
+
+            // Nested inner function span: 20..50 (contained in outer)
+            conn.execute(
+                "INSERT INTO symbols (id, file_path, name, qualified, kind, span_start, span_end, signature, parent_symbol)
+                 VALUES (2, ?1, 'inner', 'crate::outer::inner', 'function', 20, 50, 'fn inner()', 1)",
+                [file_path],
+            )
+            .expect("insert inner symbol");
+
+            // 4 direct calls inside outer but outside inner (spans 10-15, 55-60, 70-75, 80-85)
+            let calls = [
+                (10, 15, "foo", Some("crate::foo"), "exact"),
+                (55, 60, "bar", None, "fuzzy_name"),
+                (70, 75, "baz", Some("crate::baz"), "same_module"),
+                (80, 85, "quux", Some("other::quux"), "import_resolved"),
+            ];
+            for (i, (start, end, name, qual, conf)) in calls.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO refs (id, from_file, from_span_start, from_span_end, target_name, target_qualified, target_symbol_hint, kind, confidence)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'call', ?7)",
+                    params![i as i64 + 10, file_path, *start, *end, name, qual, conf],
+                )
+                .expect("insert direct call ref");
+            }
+
+            // 1 nested call inside inner (span 30-35, contained in both)
+            conn.execute(
+                "INSERT INTO refs (id, from_file, from_span_start, from_span_end, target_name, target_qualified, target_symbol_hint, kind, confidence)
+                 VALUES (99, ?1, 30, 35, 'nested_call', 'crate::nested_call', NULL, 'call', 'exact')",
+                [file_path],
+            )
+            .expect("insert nested call ref");
+}
+
+#[test]
+fn query_callees_function_with_five_call_sites_returns_five_edges_including_nested_via_span_containment() {
+    let worktree = TestWorktree::new("callees-five");
+    let file_path = "src/example.rs";
+    worktree.write(file_path, "fn outer() { /* calls */ fn inner(){} }\n");
+
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+    let conn = open_test_connection(worktree.path());
+    populate_callees_fixture(&conn, file_path);
+
+    let sel = Selector::Symbol {
+        path: file_path.to_string(),
+        symbol: "outer".to_string(),
+        kind: "function".to_string(),
+    };
+    let edges: Vec<CalleeEdge> = graph.callees(&sel).expect("callees query");
+
+    assert_eq!(edges.len(), 5, "expected 5 callees (4 direct + 1 nested via containment)");
+
+    let names: Vec<_> = edges.iter().map(|e| e.target_name.as_str()).collect();
+    assert!(names.contains(&"foo"));
+    assert!(names.contains(&"nested_call")); // attributed to outer via span containment
+    let nested = edges.iter().find(|e| e.target_name == "nested_call").unwrap();
+    assert_eq!(nested.confidence, "exact");
+    assert_eq!(nested.from_span, 30);
+}
+
+#[test]
+fn query_callees_unknown_symbol_selector_returns_empty_vec_not_error() {
+    let worktree = TestWorktree::new("callees-miss");
+    worktree.write("src/lib.rs", "pub fn present() {}\n");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+
+    let sel = Selector::Symbol {
+        path: "src/lib.rs".to_string(),
+        symbol: "absent".to_string(),
+        kind: "function".to_string(),
+    };
+    let edges: Vec<CalleeEdge> = graph.callees(&sel).expect("callees on missing symbol");
+    assert!(edges.is_empty());
+}
+
+#[test]
+fn query_callees_non_symbol_selector_returns_empty_vec() {
+    let worktree = TestWorktree::new("callees-non-sym");
+    worktree.write("src/lib.rs", "// empty\n");
+    let graph = Graph::open(worktree.path(), SyncPolicy::Manual).expect("open graph");
+
+    let file_sel = Selector::File { path: "src/lib.rs".to_string() };
+    let edges: Vec<CalleeEdge> = graph.callees(&file_sel).expect("callees on file sel");
+    assert!(edges.is_empty());
+
+    let dir_sel = Selector::Dir { path: "src".to_string() };
+    let edges2: Vec<CalleeEdge> = graph.callees(&dir_sel).expect("callees on dir sel");
+    assert!(edges2.is_empty());
 }
