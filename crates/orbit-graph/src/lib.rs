@@ -7,9 +7,11 @@
 
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub use orbit_graph_extract::Selector;
+use rusqlite::Connection;
+
 mod store;
 mod sync;
 
@@ -27,23 +29,53 @@ pub const EXTRACTOR_VERSION: u32 = 1;
 pub struct Graph {
     db_path: GraphDbPath,
     worktree_root: PathBuf,
-    _policy: SyncPolicy,
+    policy: SyncPolicy,
 }
 
 impl Graph {
     /// Open the graph database for `worktree_root` using `policy`.
     pub fn open(worktree_root: &Path, policy: SyncPolicy) -> Result<Self, GraphError> {
+        // Phase 4 query methods will call this; keep the dispatcher live under dead-code lints.
+        let _ensure_synced: fn(&Self) -> Result<(), GraphError> = Self::ensure_synced;
         let opened = store::open(worktree_root, policy)?;
         Ok(Self {
             db_path: opened.db_path,
             worktree_root: worktree_root.to_path_buf(),
-            _policy: policy,
+            policy,
         })
     }
 
     /// Synchronize indexed rows with files on disk.
     pub fn sync(&self, mode: SyncMode) -> Result<SyncReport, GraphError> {
         sync::run(self.db_path.path(), self.worktree_root.as_path(), mode)
+    }
+
+    pub(crate) fn ensure_synced(&self) -> Result<(), GraphError> {
+        match self.policy {
+            SyncPolicy::Manual => Ok(()),
+            SyncPolicy::OnRead => self.sync(SyncMode::Auto).map(|_| ()),
+            SyncPolicy::Windowed { window } => {
+                if sync_window_elapsed(self.last_incremental_at()?, window)? {
+                    self.sync(SyncMode::Auto)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn last_incremental_at(&self) -> Result<i64, GraphError> {
+        let conn = Connection::open(self.db_path.path())
+            .map_err(|source| GraphError::sqlite("open graph database for sync policy", source))?;
+        let value = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'last_incremental_at'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|source| {
+                GraphError::sqlite("read graph last incremental sync metadata", source)
+            })?;
+        parse_epoch_nanos("read graph last incremental sync metadata", &value)
     }
 
     /// Search indexed symbols, strings, and config keys.
@@ -81,6 +113,43 @@ impl Graph {
         let _ = (self, command, depth);
         todo!("trace graph command")
     }
+}
+
+fn sync_window_elapsed(last_incremental_at: i64, window: Duration) -> Result<bool, GraphError> {
+    if last_incremental_at < 0 {
+        return Err(GraphError::invalid_data(
+            "check graph sync policy window",
+            format!("last_incremental_at is negative: {last_incremental_at}"),
+        ));
+    }
+    if last_incremental_at == 0 {
+        return Ok(true);
+    }
+
+    let now = now_epoch_nanos("check graph sync policy window")?;
+    let elapsed = now.saturating_sub(last_incremental_at);
+    Ok(u128::try_from(elapsed).map_err(|source| {
+        GraphError::invalid_data("check graph sync policy window", source.to_string())
+    })? > window.as_nanos())
+}
+
+fn parse_epoch_nanos(operation: &'static str, value: &str) -> Result<i64, GraphError> {
+    value
+        .parse::<i64>()
+        .map_err(|source| GraphError::invalid_data(operation, source.to_string()))
+}
+
+fn now_epoch_nanos(operation: &'static str) -> Result<i64, GraphError> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            GraphError::invalid_data(
+                operation,
+                format!("system time is before UNIX_EPOCH: {error}"),
+            )
+        })?;
+    i64::try_from(duration.as_nanos())
+        .map_err(|error| GraphError::invalid_data(operation, error.to_string()))
 }
 
 /// Graph crate error surface.
