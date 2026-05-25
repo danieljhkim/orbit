@@ -2245,7 +2245,9 @@ dependencies = [
  "git2",
  "ignore",
  "orbit-graph-extract",
+ "rayon",
  "rusqlite",
+ "tracing",
 ]
 
 [[package]]

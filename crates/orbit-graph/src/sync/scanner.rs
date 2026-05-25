@@ -47,12 +47,6 @@ pub(crate) struct Diff {
     pub(crate) deleted: Vec<PathBuf>,
 }
 
-impl Diff {
-    pub(crate) fn files_indexed_after_sync(&self) -> usize {
-        self.unchanged.len() + self.modified.len() + self.new.len()
-    }
-}
-
 pub(crate) fn scan_diff(
     db_path: &Path,
     worktree_root: &Path,
@@ -133,12 +127,12 @@ impl Scanner {
     }
 }
 
-struct DbLockGuard {
+pub(crate) struct DbLockGuard {
     _file: File,
 }
 
 impl DbLockGuard {
-    fn acquire(db_path: &Path) -> Result<Self, GraphError> {
+    pub(crate) fn acquire(db_path: &Path) -> Result<Self, GraphError> {
         // L-0048: lock a sidecar so SQLite can still read the DB while the RAII guard is held.
         let lock_path = lock_path_for(db_path);
         let file = OpenOptions::new()
@@ -429,7 +423,7 @@ fn hash_file(
     Ok(hasher.hash(rel_path, &bytes))
 }
 
-fn mtime_ns(path: &Path) -> Result<i64, GraphError> {
+pub(crate) fn mtime_ns(path: &Path) -> Result<i64, GraphError> {
     let modified = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .map_err(|source| GraphError::io("read file mtime", path, source))?;
@@ -447,7 +441,7 @@ fn mtime_ns(path: &Path) -> Result<i64, GraphError> {
     })
 }
 
-fn normalize_path(path: &Path) -> String {
+pub(crate) fn normalize_path(path: &Path) -> String {
     path.components()
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
