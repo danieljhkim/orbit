@@ -44,7 +44,7 @@ allowed_internal_deps() {
       echo "orbit-common orbit-search orbit-engine orbit-knowledge orbit-policy orbit-store orbit-tools"
       ;;
     orbit-mcp)
-      echo "orbit-common orbit-tools"
+      echo "orbit-common orbit-graph orbit-graph-extract orbit-tools"
       ;;
     orbit-dashboard)
       echo "orbit-common orbit-core orbit-knowledge"

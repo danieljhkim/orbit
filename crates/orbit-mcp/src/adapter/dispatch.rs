@@ -18,6 +18,17 @@ use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
 impl OrbitToolServer {
+    pub(super) fn combined_tool_schemas(&self) -> Vec<ToolSchema> {
+        let mut schemas: Vec<_> = self
+            .host
+            .list_tool_schemas()
+            .into_iter()
+            .filter(|schema| !self.graph_tools.is_graph_tool(&schema.name))
+            .collect();
+        schemas.extend(self.graph_tools.schemas());
+        schemas
+    }
+
     // pub(super) visibility widened from private so that adapter::tests (sibling under adapter)
     // can exercise the name-mapping and canonical-name logic after collapsing the nested
     // tests/ anti-pattern. These remain internal to the adapter module; not part of the
@@ -60,7 +71,7 @@ impl OrbitToolServer {
     }
 
     pub(super) fn canonical_name(&self, advertised: &str) -> Result<String, ToolNameCollision> {
-        let schemas = self.host.list_tool_schemas();
+        let schemas = self.combined_tool_schemas();
         let map = match build_name_map(&schemas) {
             Ok(map) => map,
             Err(err) => {
@@ -87,12 +98,19 @@ impl OrbitToolServer {
             .unwrap_or_else(|| Value::Object(Map::new()));
 
         let host = Arc::clone(&self.host);
+        let graph_tools = Arc::clone(&self.graph_tools);
         let exec_name = canonical.clone();
         let session_context = self.session_context();
         let input_for_learning = input.clone();
-        let join =
-            tokio::task::spawn_blocking(move || host.call_tool(&exec_name, input, session_context))
-                .await;
+        let graph_tool = self.graph_tools.is_graph_tool(&canonical);
+        let join = tokio::task::spawn_blocking(move || {
+            if graph_tool {
+                graph_tools.call_tool(&exec_name, input, session_context)
+            } else {
+                host.call_tool(&exec_name, input, session_context)
+            }
+        })
+        .await;
 
         match join {
             Ok(Ok(value)) => {
@@ -101,7 +119,17 @@ impl OrbitToolServer {
                     .await?;
                 Ok(CallToolResult::structured(mcp_structured_content(value)))
             }
-            Ok(Err(orbit_err)) => Ok(tool_error_result(&orbit_err)),
+            Ok(Err(orbit_err)) => {
+                if graph_tool {
+                    tracing::warn!(
+                        target: "orbit.mcp.graph",
+                        tool = %canonical,
+                        error = %orbit_err,
+                        "graph tool call failed"
+                    );
+                }
+                Ok(tool_error_result(&orbit_err))
+            }
             Err(join_err) => {
                 let err = OrbitError::Execution(format!(
                     "tool '{canonical}' worker panicked or was cancelled: {join_err}"
@@ -142,7 +170,7 @@ impl ServerHandler for OrbitToolServer {
         _request: Option<PaginatedRequestParams>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let mut schemas = self.host.list_tool_schemas();
+        let mut schemas = self.combined_tool_schemas();
         schemas.sort_by(|a, b| a.name.cmp(&b.name));
         self.refresh_name_map(&schemas)
             .map_err(ToolNameCollision::into_mcp_error)?;
