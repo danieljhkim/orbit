@@ -1,7 +1,7 @@
 # Orbit Graph — Redesign Spec
 
 **Status:** Draft proposal
-**Last updated:** 2026-05-25 (ORB-00323 command extraction coverage)
+**Last updated:** 2026-05-25 (ORB-00327 impact/trace confidence floor)
 **Relation to `orbit-knowledge`:** Coexists initially. Both crates run side-by-side under a feature flag; whether `orbit-knowledge` is eventually phased out depends on the head-to-head effectiveness measurement in §16 Step 4 — it is not a foregone conclusion of this spec.
 **Author:** working from the V2 sketch in `GRAPH_V2.md` + the existing design in [`../../knowledge-graph/`](../../knowledge-graph/)
 **Scope:** V1 — read-only graph. A writeable graph (Rename, ReplaceBody, Move, working-graph overlay, patch compiler) is V2, sketched in §17 and tracked in [`../3_vision.md`](../3_vision.md). The previous separate `GRAPH_DESIGN.md` describing the write surface has been folded into this spec on 2026-05-24 to remove the contradictory scope between the two docs.
@@ -382,8 +382,8 @@ orbit graph show <selector>
 orbit graph refs <symbol> [--confidence exact|import|same_module|fuzzy]
                           [--kind call|type|use|trait_bound|impl|extends|implements]
 orbit graph callees <symbol>
-orbit graph impact <selector> [--depth N=3]
-orbit graph trace <command-name> [--depth N=5]
+orbit graph impact <selector> [--depth N=3] [--confidence exact|import|same_module|fuzzy]
+orbit graph trace <command-name> [--depth N=5] [--confidence exact|import|same_module|fuzzy]
 ```
 
 ### 9.1 `search`
@@ -446,15 +446,15 @@ Outbound calls from a symbol. Walks `refs WHERE from_file = ? AND from_span_star
 
 ### 9.5 `impact`
 
-BFS over the union of `refs` (inbound) and `callees` (outbound), plus `relations` for impl-driven edges. Default depth 3. Default confidence floor: `same_module` (matches `refs`' default — excludes only `fuzzy_name`). Returns a flat list of touched symbols ordered by graph distance, capped at 200.
+BFS over the union of `refs` (inbound) and `callees` (outbound), plus `relations` for impl-driven edges. Default depth 3. Accepts the same confidence floor as `refs` (`--confidence exact|import|same_module|fuzzy`; Rust API parameter `min_confidence`). Default confidence floor: `same_module` (matches `refs`' default -- excludes only `fuzzy_name`). Edges below the floor are not included or enqueued for later BFS levels. Returns a flat list of touched symbols ordered by graph distance, capped at 200.
 
 ### 9.6 `trace`
 
 ```bash
-orbit graph trace job-run
+orbit graph trace job-run [--confidence exact|import|same_module|fuzzy]
 ```
 
-Resolves command name to its handler symbol via `commands.handler_symbol`, then BFS over `callees` with depth 5. Returns the call tree as nested JSON.
+Resolves command name to its handler symbol via `commands.handler_symbol`, then BFS over `callees` with depth 5. The Rust API accepts `min_confidence`; the CLI/MCP default is `same_module`, matching `refs` and `impact`. Call edges below the floor are not included or enqueued for later BFS levels. Returns the call tree as nested JSON.
 
 Unknown command names return an empty result (`root: null`, `visited_nodes: 0`). Resolved commands return a single root node for the handler; each nested `children` list contains outbound call targets reached from that symbol. `confidence` is `null` on the root and carries the resolver confidence string on call edges.
 
@@ -533,8 +533,8 @@ impl Graph {
     pub fn show(&self, sel: &Selector, max_bytes: usize) -> Result<Option<NodeView>, GraphError>;
     pub fn refs(&self, sel: &Selector, opts: &RefOpts) -> Result<RefResult, GraphError>;
     pub fn callees(&self, sel: &Selector) -> Result<Vec<CalleeEdge>, GraphError>;
-    pub fn impact(&self, sel: &Selector, depth: u8) -> Result<ImpactResult, GraphError>;
-    pub fn trace(&self, command: &str, depth: u8) -> Result<TraceResult, GraphError>;
+    pub fn impact(&self, sel: &Selector, depth: u8, min_confidence: Confidence) -> Result<ImpactResult, GraphError>;
+    pub fn trace(&self, command: &str, depth: u8, min_confidence: Confidence) -> Result<TraceResult, GraphError>;
 }
 
 pub struct TraceResult {

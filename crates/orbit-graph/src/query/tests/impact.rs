@@ -8,7 +8,7 @@ use crate::query::tests::support::{
     TestWorktree, graph_db_path, insert_file, insert_symbol, open_connection, open_graph,
 };
 use crate::sync::sync_leader_count;
-use crate::{IMPACT_NODE_CAP, ImpactEntry, RefKind, Selector, SyncPolicy};
+use crate::{IMPACT_NODE_CAP, ImpactEntry, RefConfidence, RefKind, Selector, SyncPolicy};
 
 #[test]
 fn five_node_tree_at_depth_two_returns_all_five_touched_symbols() {
@@ -47,7 +47,11 @@ fn five_node_tree_at_depth_two_returns_all_five_touched_symbols() {
     );
 
     let result = graph
-        .impact(&symbol_selector("src/root.rs", "root"), 2)
+        .impact(
+            &symbol_selector("src/root.rs", "root"),
+            2,
+            RefConfidence::SameModule,
+        )
         .expect("query impact tree");
 
     assert_eq!(result.visited_nodes, 5);
@@ -85,7 +89,11 @@ fn circular_reference_does_not_loop_forever() {
     insert_call_ref(&conn, "src/a.rs", 10, 11, "root", "crate::root", "exact");
 
     let result = graph
-        .impact(&symbol_selector("src/root.rs", "root"), 10)
+        .impact(
+            &symbol_selector("src/root.rs", "root"),
+            10,
+            RefConfidence::SameModule,
+        )
         .expect("query impact cycle");
 
     assert_eq!(result.visited_nodes, 1);
@@ -102,7 +110,11 @@ fn synthetic_300_node_graph_caps_at_200_and_reports_truncation() {
     seed_wide_callee_graph(&conn, 300);
 
     let result = graph
-        .impact(&symbol_selector("src/root.rs", "root"), 10)
+        .impact(
+            &symbol_selector("src/root.rs", "root"),
+            10,
+            RefConfidence::SameModule,
+        )
         .expect("query impact cap");
 
     assert_eq!(result.visited_nodes, IMPACT_NODE_CAP);
@@ -120,7 +132,9 @@ fn impact_calls_ensure_synced_at_entry() {
     let selector =
         Selector::from_str("symbol:src/lib.rs#synced_root:function").expect("parse selector");
 
-    let result = graph.impact(&selector, 1).expect("impact triggers sync");
+    let result = graph
+        .impact(&selector, 1, RefConfidence::SameModule)
+        .expect("impact triggers sync");
 
     assert_eq!(sync_leader_count(db_path.as_path()), 1);
     assert!(result.touched.is_empty());
@@ -135,7 +149,11 @@ fn impact_200_node_cap_performance_smoke_prints_elapsed_ms() {
 
     let started = Instant::now();
     let result = graph
-        .impact(&symbol_selector("src/root.rs", "root"), 10)
+        .impact(
+            &symbol_selector("src/root.rs", "root"),
+            10,
+            RefConfidence::SameModule,
+        )
         .expect("query impact perf cap");
     let elapsed = started.elapsed();
 
@@ -145,6 +163,79 @@ fn impact_200_node_cap_performance_smoke_prints_elapsed_ms() {
     }
     assert_eq!(result.visited_nodes, IMPACT_NODE_CAP);
     assert!(result.truncated);
+}
+
+#[test]
+fn confidence_floor_filters_and_prevents_below_floor_expansion() {
+    let worktree = TestWorktree::new("impact-confidence-floor");
+    let graph = open_graph(&worktree, SyncPolicy::Manual);
+    let conn = open_connection(&worktree);
+
+    seed_symbol(&conn, "src/root.rs", "root", "crate::root", 0, 100);
+    seed_symbol(&conn, "src/exact.rs", "exact", "crate::exact", 0, 50);
+    seed_symbol(&conn, "src/same.rs", "same", "crate::same_module", 0, 50);
+    seed_symbol(&conn, "src/leaf.rs", "leaf", "crate::leaf", 0, 50);
+    seed_symbol(&conn, "src/fuzzy.rs", "fuzzy", "crate::fuzzy", 0, 50);
+
+    insert_call_ref(
+        &conn,
+        "src/root.rs",
+        10,
+        11,
+        "exact",
+        "crate::exact",
+        "exact",
+    );
+    insert_call_ref(
+        &conn,
+        "src/root.rs",
+        12,
+        13,
+        "same",
+        "crate::same_module",
+        "same_module",
+    );
+    insert_call_ref(
+        &conn,
+        "src/root.rs",
+        14,
+        15,
+        "fuzzy",
+        "crate::fuzzy",
+        "fuzzy_name",
+    );
+    insert_call_ref(&conn, "src/same.rs", 10, 11, "leaf", "crate::leaf", "exact");
+
+    let default_floor = graph
+        .impact(
+            &symbol_selector("src/root.rs", "root"),
+            2,
+            RefConfidence::SameModule,
+        )
+        .expect("query impact default confidence floor");
+    let default_names: Vec<_> = default_floor
+        .touched
+        .iter()
+        .map(|entry| entry.qualified_name.as_str())
+        .collect();
+    assert_eq!(
+        default_names,
+        vec!["crate::exact", "crate::same_module", "crate::leaf"]
+    );
+
+    let exact_floor = graph
+        .impact(
+            &symbol_selector("src/root.rs", "root"),
+            2,
+            RefConfidence::Exact,
+        )
+        .expect("query impact exact confidence floor");
+    let exact_names: Vec<_> = exact_floor
+        .touched
+        .iter()
+        .map(|entry| entry.qualified_name.as_str())
+        .collect();
+    assert_eq!(exact_names, vec!["crate::exact"]);
 }
 
 fn seed_symbol(

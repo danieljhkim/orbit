@@ -6,10 +6,16 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::query::callees;
 use crate::{
-    DEFAULT_TRACE_DEPTH, Graph, GraphError, SymbolSpan, TRACE_NODE_CAP, TraceNode, TraceResult,
+    DEFAULT_TRACE_DEPTH, Graph, GraphError, RefConfidence, SymbolSpan, TRACE_NODE_CAP, TraceNode,
+    TraceResult,
 };
 
-pub(crate) fn run(graph: &Graph, command: &str, depth: u8) -> Result<TraceResult, GraphError> {
+pub(crate) fn run(
+    graph: &Graph,
+    command: &str,
+    depth: u8,
+    min_confidence: RefConfidence,
+) -> Result<TraceResult, GraphError> {
     let conn = Connection::open(graph.db_path.path())
         .map_err(|source| GraphError::sqlite("open graph database for trace", source))?;
     let Some(origin) = resolve_command_handler(&conn, command)? else {
@@ -32,6 +38,9 @@ pub(crate) fn run(graph: &Graph, command: &str, depth: u8) -> Result<TraceResult
 
         let next_distance = distance + 1;
         for edge in callees::edges_for_symbol(&conn, &symbol.span())? {
+            if !confidence_visible_at_floor(edge.confidence.as_str(), min_confidence)? {
+                continue;
+            }
             if arena.len() >= TRACE_NODE_CAP {
                 truncated = true;
                 break 'bfs;
@@ -60,6 +69,13 @@ pub(crate) fn run(graph: &Graph, command: &str, depth: u8) -> Result<TraceResult
         truncated,
         visited_nodes: arena.len(),
     })
+}
+
+fn confidence_visible_at_floor(
+    confidence: &str,
+    min_confidence: RefConfidence,
+) -> Result<bool, GraphError> {
+    Ok(RefConfidence::from_db(confidence)?.visible_at_floor(min_confidence))
 }
 
 fn resolve_command_handler(

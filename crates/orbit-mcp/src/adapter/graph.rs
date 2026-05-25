@@ -178,6 +178,12 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
             vec![
                 param("selector", "Origin selector.", "string", true),
                 param("depth", "Maximum traversal depth.", "number", false),
+                param(
+                    "confidence",
+                    "Minimum confidence floor. Defaults to same_module.",
+                    "string",
+                    false,
+                ),
             ],
         ),
         schema(
@@ -186,6 +192,12 @@ pub(super) fn graph_tool_schemas() -> Vec<ToolSchema> {
             vec![
                 param("command_name", "Command name to trace.", "string", true),
                 param("depth", "Maximum call-tree depth.", "number", false),
+                param(
+                    "confidence",
+                    "Minimum confidence floor. Defaults to same_module.",
+                    "string",
+                    false,
+                ),
             ],
         ),
     ]
@@ -269,9 +281,10 @@ fn graph_callees(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
 fn graph_impact(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
     let selector = parse_selector(required_string(input, &["selector"], "selector")?)?;
     let depth = optional_u8(input, "depth")?.unwrap_or(DEFAULT_IMPACT_DEPTH);
+    let min_confidence = optional_confidence(input)?;
     to_json(
         graph
-            .impact(&selector, depth)
+            .impact(&selector, depth, min_confidence)
             .map_err(graph_error_to_orbit)?,
     )
 }
@@ -279,11 +292,19 @@ fn graph_impact(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
 fn graph_trace(graph: &Graph, input: &Value) -> Result<Value, OrbitError> {
     let command_name = required_string(input, &["command_name", "command"], "command_name")?;
     let depth = optional_u8(input, "depth")?.unwrap_or(DEFAULT_TRACE_DEPTH);
+    let min_confidence = optional_confidence(input)?;
     to_json(
         graph
-            .trace(command_name.as_str(), depth)
+            .trace(command_name.as_str(), depth, min_confidence)
             .map_err(graph_error_to_orbit)?,
     )
+}
+
+fn optional_confidence(input: &Value) -> Result<RefConfidence, OrbitError> {
+    optional_string(input, "confidence")?
+        .map(|value| parse_confidence(value.as_str()))
+        .transpose()
+        .map(|confidence| confidence.unwrap_or_default())
 }
 
 fn parse_selector(raw: String) -> Result<Selector, OrbitError> {
