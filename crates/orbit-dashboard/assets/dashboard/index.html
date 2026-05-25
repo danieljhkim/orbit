@@ -111,13 +111,38 @@
     <section class="tab-pane" data-tab="scoreboard">
       <main style="grid-template-columns: 1fr;">
         <section class="panel" id="scoreboard-panel">
-          <header><span>Scoreboard</span><span class="count" id="scoreboard-count">-</span></header>
+          <header>
+            <span>Scoreboard</span>
+            <span style="display: inline-flex; align-items: center; gap: 8px;">
+              <span class="count" id="scoreboard-count">-</span>
+              <!-- Phase 1: window selector is UI-only (aria-disabled). Phase 2
+                   will wire a windowed ScoreboardSummary fetch. -->
+              <span class="scoreboard-window-selector" id="scoreboard-window-selector" aria-disabled="true" title="Phase 1: display-only — windowed scoreboard arrives in phase 2.">
+                <span class="scoreboard-window-seg" data-window="1h">1h</span>
+                <span class="scoreboard-window-seg on" data-window="24h">24h</span>
+                <span class="scoreboard-window-seg" data-window="7d">7d</span>
+                <span class="scoreboard-window-seg" data-window="30d">30d</span>
+                <span class="scoreboard-window-seg" data-window="all">all</span>
+              </span>
+            </span>
+          </header>
+          <div id="scoreboard-narrative" class="scoreboard-narrative"></div>
           <div class="body scoreboard-table-wrap" id="scoreboard-body">
             <div class="skeleton-state">
               <div class="skeleton skeleton-row"></div>
               <div class="skeleton skeleton-row" style="width: 70%"></div>
             </div>
           </div>
+        </section>
+        <section class="scoreboard-duel-section">
+          <section class="panel" id="scoreboard-duel-matrix-panel">
+            <header><span>Duel Matrix</span><span class="count" id="scoreboard-duel-count">—</span></header>
+            <div id="scoreboard-duel-matrix-host"></div>
+          </section>
+          <section class="panel" id="scoreboard-insights-panel">
+            <header><span>Insights</span><span class="count" id="scoreboard-insights-count">—</span></header>
+            <div id="scoreboard-insights"></div>
+          </section>
         </section>
       </main>
     </section>

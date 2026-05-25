@@ -41,6 +41,16 @@
         --state-error: #ef4444;
         --state-cancelled: #f87171;
         --state-disabled: #52525b;
+
+        /* Per-agent identity colors (matches raw/scoreboard-league.html mock). */
+        --ag-codex:  #5ec8d4;
+        --ag-claude: #c97cf0;
+        --ag-gemini: #f5b14a;
+        --ag-grok:   #4cc38a;
+        --ag-codex-low:  rgba(94, 200, 212, 0.12);
+        --ag-claude-low: rgba(201, 124, 240, 0.12);
+        --ag-gemini-low: rgba(245, 177, 74, 0.12);
+        --ag-grok-low:   rgba(76, 195, 138, 0.12);
       }
       
       * { box-sizing: border-box; }
@@ -1310,7 +1320,185 @@
         border-left: 1px solid rgba(255, 255, 255, 0.05) !important;
         box-shadow: none;
       }
-      
+
+      /* ===== Scoreboard phase 1: narrative + window selector + duel-matrix
+         re-skin + insights panel. Selective adopt from raw/scoreboard-league.html
+         per ORB-00336. All scoping namespaced to avoid collision with sb-* /
+         scoreboard-table rules above. ===== */
+
+      .scoreboard-narrative {
+        padding: 10px 16px;
+        font-family: var(--font-sans);
+        font-size: 12.5px;
+        color: var(--fg-dim);
+        line-height: 1.5;
+        border-bottom: 1px solid var(--border);
+        background: #0d0d0d;
+      }
+      .scoreboard-narrative:empty { display: none; }
+      .scoreboard-narrative b { color: var(--fg); font-weight: 500; }
+      .scoreboard-narrative .nar-sep { color: var(--border); margin: 0 8px; }
+
+      .scoreboard-window-selector {
+        display: inline-flex;
+        gap: 0;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-left: 8px;
+      }
+      .scoreboard-window-selector[aria-disabled="true"] {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .scoreboard-window-seg {
+        padding: 4px 10px;
+        color: var(--fg-dim);
+        background: transparent;
+        border-right: 1px solid var(--border);
+        user-select: none;
+      }
+      .scoreboard-window-seg:last-child { border-right: none; }
+      .scoreboard-window-seg.on {
+        color: var(--fg);
+        background: var(--bg);
+      }
+
+      .scoreboard-duel-section {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 16px;
+        padding: 8px 0 0;
+      }
+      @media (max-width: 1100px) {
+        .scoreboard-duel-section {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      .scoreboard-duel-matrix {
+        display: grid;
+        grid-template-columns: 80px repeat(4, minmax(0, 1fr));
+        gap: 6px;
+        padding: 14px 16px 16px;
+      }
+      .scoreboard-duel-matrix .dm-col-h,
+      .scoreboard-duel-matrix .dm-row-h {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        display: flex;
+        align-items: center;
+      }
+      .scoreboard-duel-matrix .dm-col-h {
+        justify-content: center;
+        padding: 0 4px 6px;
+        border-bottom: 1px solid var(--border);
+      }
+      .scoreboard-duel-matrix .dm-row-h {
+        justify-content: flex-start;
+        padding-right: 8px;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      .scoreboard-duel-matrix .dm-row-h:hover { color: var(--accent-hover); }
+      .scoreboard-duel-matrix .dm-cell {
+        position: relative;
+        height: 54px;
+        border-radius: 2px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        padding: 6px 8px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        cursor: pointer;
+        transition: border-color .12s, transform .12s;
+      }
+      .scoreboard-duel-matrix .dm-cell:hover {
+        transform: translateY(-1px);
+        border-color: var(--accent);
+      }
+      .scoreboard-duel-matrix .dm-cell.diag {
+        background: transparent;
+        border: 1px dashed var(--border);
+        cursor: default;
+      }
+      .scoreboard-duel-matrix .dm-cell.diag:hover {
+        transform: none;
+        border-color: var(--border);
+      }
+      .scoreboard-duel-matrix .dm-cell.dm-empty { opacity: 0.5; }
+      .scoreboard-duel-matrix .dm-score {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--fg);
+        font-feature-settings: "tnum";
+      }
+      .scoreboard-duel-matrix .dm-score .w { color: var(--status-done); }
+      .scoreboard-duel-matrix .dm-score .l { color: var(--status-blocked); }
+      .scoreboard-duel-matrix .dm-score .sep { color: var(--fg-dim); margin: 0 2px; }
+      .scoreboard-duel-matrix .dm-score .dim { color: var(--fg-dim); }
+      .scoreboard-duel-matrix .dm-bar {
+        display: flex;
+        height: 4px;
+        border-radius: 2px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .scoreboard-duel-matrix .dm-bar i { display: block; height: 100%; }
+      .scoreboard-duel-matrix .dm-bar i.w { background: var(--status-done); }
+      .scoreboard-duel-matrix .dm-bar i.l { background: var(--status-blocked); }
+      .scoreboard-duel-matrix .dm-cell.diag .dim {
+        color: var(--fg-dim);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-align: center;
+        align-self: center;
+        width: 100%;
+      }
+
+      .scoreboard-insights .ins-row {
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .scoreboard-insights .ins-row:last-child { border-bottom: none; }
+      .scoreboard-insights .ins-row .hd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        margin-bottom: 4px;
+      }
+      .scoreboard-insights .ins-row .body {
+        font-size: 12.5px;
+        color: var(--fg);
+        line-height: 1.5;
+      }
+      .scoreboard-insights .ins-row .body b { font-weight: 500; }
+      .scoreboard-insights .ins-row.win  .body b { color: var(--status-done); }
+      .scoreboard-insights .ins-row.loss .body b { color: var(--status-blocked); }
+      .scoreboard-insights .ins-row.flag .body b { color: var(--status-proposed); }
+
+      .scoreboard-insights .ag {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 2px;
+      }
+      .scoreboard-insights .ag.codex  { color: var(--ag-codex);  background: var(--ag-codex-low); }
+      .scoreboard-insights .ag.claude { color: var(--ag-claude); background: var(--ag-claude-low); }
+      .scoreboard-insights .ag.gemini { color: var(--ag-gemini); background: var(--ag-gemini-low); }
+      .scoreboard-insights .ag.grok   { color: var(--ag-grok);   background: var(--ag-grok-low); }
+
       .subtabs {
         display: flex;
         gap: 4px;
