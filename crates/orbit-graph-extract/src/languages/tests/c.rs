@@ -6,7 +6,11 @@ use crate::Extractor;
 use crate::languages::CExtractor;
 
 fn extract(source: &str) -> crate::ExtractedFile {
-    CExtractor.extract(Path::new("example.c"), source.as_bytes())
+    extract_at("example.c", source)
+}
+
+fn extract_at(path: &str, source: &str) -> crate::ExtractedFile {
+    CExtractor.extract(Path::new(path), source.as_bytes())
 }
 
 #[test]
@@ -54,8 +58,49 @@ void proto(int x);
 }
 
 #[test]
-fn c_extractor_emits_no_relations_or_refs() {
-    let file = extract("struct S { int f; }; int f(void) {}");
+fn c_extractor_emits_fuzzy_call_refs() {
+    let source = r#"
+#define LOG_EVENT(value) helper(value)
+
+typedef void (*callback_t)(int);
+int helper(int value);
+
+void caller(callback_t callback, callback_t indirect) {
+    helper(1);
+    callback(2);
+    LOG_EVENT(3);
+    (*indirect)(4);
+}
+"#;
+
+    let file = extract(source);
     assert!(file.relations.is_empty());
-    assert!(file.refs.is_empty());
+    assert!(file.refs.iter().all(|reference| {
+        reference.confidence == "fuzzy_name" && !reference.target_name.is_empty()
+    }));
+    assert_fuzzy_call_ref(&file, "helper");
+    assert_fuzzy_call_ref(&file, "callback");
+    assert_fuzzy_call_ref(&file, "LOG_EVENT");
+    assert!(
+        !file
+            .refs
+            .iter()
+            .any(|reference| reference.target_name == "indirect")
+    );
+
+    let header = extract_at(
+        "example.h",
+        "static inline int header_call(void) { return helper(1); }",
+    );
+    assert_fuzzy_call_ref(&header, "helper");
+}
+
+fn assert_fuzzy_call_ref(file: &crate::ExtractedFile, target_name: &str) {
+    assert!(file.refs.iter().any(|reference| {
+        reference.kind == "call"
+            && reference.target_name == target_name
+            && reference.target_qualified.is_none()
+            && reference.confidence == "fuzzy_name"
+            && reference.from_span_start < reference.from_span_end
+    }));
 }

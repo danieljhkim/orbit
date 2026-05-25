@@ -8,8 +8,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::common::{dedup_imports, dedup_symbols, normalize_path};
-use crate::{ExtractedFile, Extractor, RawImport, RawSymbol};
+use super::common::{dedup_imports, dedup_refs, dedup_symbols, normalize_path};
+use crate::{ExtractedFile, Extractor, RawImport, RawRef, RawSymbol};
 
 /// C tree-sitter extractor (functions, structs, includes).
 pub struct CExtractor;
@@ -45,6 +45,7 @@ impl Extractor for CExtractor {
 
         let mut state = ExtractionState::new(path);
         extract_top_level(tree.root_node(), source, &mut state);
+        collect_call_refs(tree.root_node(), source, &mut state);
         state.finish()
     }
 }
@@ -52,6 +53,7 @@ impl Extractor for CExtractor {
 struct ExtractionState {
     file_path: String,
     symbols: Vec<RawSymbol>,
+    refs: Vec<RawRef>,
     imports: Vec<RawImport>,
 }
 
@@ -60,15 +62,18 @@ impl ExtractionState {
         Self {
             file_path: normalize_path(path),
             symbols: Vec::new(),
+            refs: Vec::new(),
             imports: Vec::new(),
         }
     }
 
     fn finish(mut self) -> ExtractedFile {
         dedup_symbols(&mut self.symbols);
+        dedup_refs(&mut self.refs);
         dedup_imports(&mut self.imports);
         ExtractedFile {
             symbols: self.symbols,
+            refs: self.refs,
             imports: self.imports,
             ..Default::default()
         }
@@ -92,6 +97,30 @@ impl ExtractionState {
             from_file: self.file_path.clone(),
             target_path,
             target_symbol: None,
+        });
+    }
+
+    fn push_ref(
+        &mut self,
+        node: Node,
+        source: &str,
+        target_qualified: Option<String>,
+        kind: &'static str,
+        confidence: &'static str,
+    ) {
+        let target_name = node_text(node, source);
+        if target_name.is_empty() {
+            return;
+        }
+
+        self.refs.push(RawRef {
+            from_file: self.file_path.clone(),
+            from_span_start: node.start_byte(),
+            from_span_end: node.end_byte(),
+            target_name,
+            target_qualified,
+            kind: kind.to_string(),
+            confidence: confidence.to_string(),
         });
     }
 }
@@ -188,6 +217,31 @@ fn extract_tag_specifier(node: Node, source: &str, state: &mut ExtractionState) 
         return;
     };
     state.push_symbol(node, name, kind);
+}
+
+fn collect_call_refs(node: Node, source: &str, state: &mut ExtractionState) {
+    if node.kind() == "call_expression" {
+        collect_call_ref(node, source, state);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_call_refs(child, source, state);
+    }
+}
+
+fn collect_call_ref(node: Node, source: &str, state: &mut ExtractionState) {
+    let Some(function) = node.child_by_field_name("function") else {
+        return;
+    };
+
+    if function.kind() == "identifier" {
+        state.push_ref(function, source, None, "call", "fuzzy_name");
+        return;
+    }
+
+    // Complex callees like (*callback)(x) do not expose an honest target_name
+    // without type/preprocessor context, so GRAPH_SPEC.md §11 requires eliding.
 }
 
 fn get_name(node: Node, source: &str) -> Option<String> {
