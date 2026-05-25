@@ -19,6 +19,11 @@ mod query;
 mod store;
 mod sync;
 
+pub use query::{
+    DEFAULT_SEARCH_LIMIT, DEFAULT_SHOW_MAX_BYTES, Match, NodeMetadata, NodeView, SearchKind,
+    SearchQuery, SearchResult, SourceSpan,
+};
+
 #[cfg(test)]
 mod tests;
 
@@ -27,7 +32,8 @@ mod tests;
 /// Bump this when extractor output or storage expectations change
 /// incompatibly. Older graph DB files then become invisible to the active
 /// graph handle and are removed by the next sync.
-pub const EXTRACTOR_VERSION: u32 = 1;
+// L-0052: FTS population invariants require a fresh DB when old indexes may be empty.
+pub const EXTRACTOR_VERSION: u32 = 2;
 
 /// Opaque handle to a worktree-scoped graph database.
 pub struct Graph {
@@ -83,15 +89,18 @@ impl Graph {
     }
 
     /// Search indexed symbols, strings, and config keys.
-    pub fn search(&self, q: &SearchQuery) -> Result<Vec<Match>, GraphError> {
-        let _ = (self, q);
-        todo!("search graph index")
+    pub fn search(&self, q: &SearchQuery) -> Result<SearchResult, GraphError> {
+        self.ensure_synced()?;
+        query::search::run(self, q)
     }
 
     /// Show the node or source view addressed by `sel`.
-    pub fn show(&self, sel: &Selector) -> Result<Option<NodeView>, GraphError> {
-        let _ = (self, sel);
-        todo!("show graph node")
+    ///
+    /// `max_bytes` bounds the returned source slice. [`DEFAULT_SHOW_MAX_BYTES`]
+    /// is the intended CLI/MCP default.
+    pub fn show(&self, sel: &Selector, max_bytes: usize) -> Result<Option<NodeView>, GraphError> {
+        self.ensure_synced()?;
+        query::show::run(self, sel, max_bytes)
     }
 
     /// Return inbound references and relations for `sel`.
@@ -410,18 +419,6 @@ pub fn resolve_db_path(worktree_root: &Path, branch: &str, extractor_version: u3
         extractor_version,
     }
 }
-
-/// Search request for the graph query surface.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SearchQuery;
-
-/// Search match returned by [`Graph::search`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Match;
-
-/// Source and metadata view returned by [`Graph::show`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeView;
 
 /// Reference query options for [`Graph::refs`].
 #[derive(Debug, Clone, PartialEq, Eq)]

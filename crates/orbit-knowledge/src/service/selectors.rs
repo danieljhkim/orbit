@@ -43,6 +43,8 @@ impl<'a> GraphContextService<'a> {
             Selector::Dir { path } => path.trim_end_matches('/').to_string(),
             Selector::File { path } => path.clone(),
             Selector::Symbol { path, symbol, kind } => format!("{path}#{symbol}:{kind}"),
+            Selector::Module { qualified } => format!("module:{qualified}"),
+            Selector::Command { name } => format!("command:{name}"),
         };
 
         let node_id = self.location_index.get(key.as_str()).ok_or_else(|| {
