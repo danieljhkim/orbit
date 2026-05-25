@@ -81,11 +81,7 @@ impl GitContext {
         } else {
             "HEAD".to_string()
         };
-        let commit_sha = if head.is_branch() {
-            head.target().map(|oid| oid.to_string()).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let commit_sha = head.target().map(|oid| oid.to_string()).unwrap_or_default();
 
         Self { branch, commit_sha }
     }

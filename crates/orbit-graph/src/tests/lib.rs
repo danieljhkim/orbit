@@ -40,6 +40,28 @@ fn db_path_sanitizes_branch_slashes_and_preserves_raw_branch() {
 }
 
 #[test]
+fn db_path_sanitizes_filesystem_hostile_branch_names() {
+    let worktree_root = Path::new("/tmp/orbit-worktree");
+
+    for (branch, expected_file_name) in [
+        ("feat:foo", "feat_foo.1.db"),
+        ("feat\\foo", "feat_foo.1.db"),
+        ("feat..foo", "feat__foo.1.db"),
+        (".hidden", "_hidden.1.db"),
+        ("", "_.1.db"),
+        ("feat\0foo", "feat_foo.1.db"),
+    ] {
+        let path = resolve_db_path(worktree_root, branch, 1);
+        assert_eq!(
+            path.path().file_name().and_then(|name| name.to_str()),
+            Some(expected_file_name),
+            "sanitized filename for branch {branch:?}"
+        );
+        assert_eq!(path.branch(), branch);
+    }
+}
+
+#[test]
 fn manual_policy_ensure_synced_is_noop() {
     let worktree = TestWorktree::new("manual-noop");
     worktree.write("src/lib.rs", "pub fn manual() {}\n");
