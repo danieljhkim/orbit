@@ -2252,6 +2252,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-graph-cli"
+version = "0.7.1"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "git2",
+ "orbit-graph",
+ "orbit-graph-extract",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "orbit-graph-extract"
 version = "0.7.1"
 dependencies = [
