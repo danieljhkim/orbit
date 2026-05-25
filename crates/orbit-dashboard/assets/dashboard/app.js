@@ -332,16 +332,68 @@ function learningScopeNodes(learning) {
   const tags = Array.isArray(scope.tags) ? scope.tags : [];
   const chips = [];
   for (const tag of tags.slice(0, 3)) {
-    chips.push(el("span", { class: "pill", text: `#${tag}`, title: tag }));
+    chips.push(el("span", { class: "knowledge-tag", text: `#${tag}`, title: tag }));
   }
   for (const path of paths.slice(0, Math.max(0, 4 - chips.length))) {
-    chips.push(el("span", { class: "pill", text: truncate(path, 28), title: path }));
+    chips.push(el("span", { class: "knowledge-tag path", text: truncate(path, 28), title: path }));
   }
   if (paths.length + tags.length > chips.length) {
-    chips.push(el("span", { class: "pill", text: `+${paths.length + tags.length - chips.length}` }));
+    chips.push(el("span", { class: "knowledge-tag dim", text: `+${paths.length + tags.length - chips.length}` }));
   }
-  if (chips.length === 0) chips.push(el("span", { class: "pill", text: "global" }));
+  if (chips.length === 0) chips.push(el("span", { class: "knowledge-tag", text: "global" }));
   return chips;
+}
+
+function knowledgeStatusPill(status) {
+  const value = status || "active";
+  return el("span", { class: `knowledge-pill ${value}`, text: value });
+}
+
+function knowledgeTagWrap(nodes) {
+  const values = Array.isArray(nodes) ? nodes : [];
+  return el("span", { class: "knowledge-tags" }, values.length > 0
+    ? values
+    : [el("span", { class: "knowledge-tag dim", text: "-" })]);
+}
+
+function evidenceMeter(count) {
+  const total = Math.max(0, Number(count) || 0);
+  const dots = [];
+  for (let i = 0; i < 5; i += 1) {
+    dots.push(el("i", { class: i < Math.min(total, 5) ? "on" : "" }));
+  }
+  dots.push(el("span", { class: "lbl", text: `${total} ev` }));
+  return el("span", { class: "knowledge-evidence", title: `${total} evidence references` }, dots);
+}
+
+function detailMetaRows(entries) {
+  const rows = entries
+    .filter(([, value]) => value != null && value !== "")
+    .map(([label, value]) => el("div", { class: "meta-row" }, [
+      el("span", { class: "k", text: label }),
+      el("span", { class: "v", text: String(value) }),
+    ]));
+  return el("div", { class: "meta-list" }, rows);
+}
+
+function detailGroup(title, content) {
+  return el("div", { class: "knowledge-side-group" }, [
+    el("h4", { text: title }),
+    content || el("div", { class: "empty", text: "-" }),
+  ]);
+}
+
+function markdownPanel(body, fallbackClass) {
+  const text = body || "";
+  const view = el(typeof marked !== "undefined" ? "div" : "pre", {
+    class: typeof marked !== "undefined" ? "markdown-body" : fallbackClass,
+  });
+  if (typeof marked !== "undefined") {
+    view.innerHTML = marked.parse(text || "_No body._");
+  } else {
+    view.textContent = text || "No body.";
+  }
+  return view;
 }
 
 function renderLearningStats(stats = {}) {
@@ -375,27 +427,27 @@ function renderLearnings(payload) {
   }
 
   const frag = document.createDocumentFragment();
-  const header = el("div", { class: "learning-row header" }, [
-    el("span", { text: "id" }),
-    el("span", { text: "scope" }),
-    el("span", { class: "evidence", text: "evidence" }),
-    el("span", { text: "status" }),
-    el("span", { class: "updated", text: "updated" }),
-  ]);
-  header.dataset.key = "learning-header";
-  header.dataset.hash = "learning-header";
-  frag.appendChild(header);
 
   for (const learning of items) {
-    const row = el("div", { class: "learning-row", title: learning.summary || learning.id }, [
-      el("span", { class: "id", text: learning.id, title: learning.id }),
-      el("span", { class: "scope" }, learningScopeNodes(learning)),
-      el("span", { class: "evidence", text: String(evidenceCount(learning)) }),
-      statusPill(learning.status || "active"),
-      el("span", { class: "updated", text: fmtTimestamp(learning.updated_at), title: fmtAbsTime(learning.updated_at) }),
+    const evidence = evidenceCount(learning);
+    const row = el("div", { class: "knowledge-row learning-row", title: learning.summary || learning.id }, [
+      el("div", { class: "top" }, [
+        el("span", { class: "id", text: learning.id, title: learning.id }),
+        el("span", { class: "spacer" }),
+        el("span", { class: "when", text: fmtTimestamp(learning.updated_at), title: fmtAbsTime(learning.updated_at) }),
+      ]),
+      el("div", { class: "title", text: learning.summary || learning.id }),
+      el("div", { class: "summary", text: truncate(learning.body || learning.summary || "", 180) }),
+      el("div", { class: "meta" }, [
+        knowledgeStatusPill(learning.status || "active"),
+        el("span", { class: "dot", text: "·" }),
+        knowledgeTagWrap(learningScopeNodes(learning)),
+        el("span", { class: "dot", text: "·" }),
+        evidenceMeter(evidence),
+      ]),
     ]);
     row.dataset.key = `learning-${learning.id}`;
-    row.dataset.hash = `${learning.id}-${learning.status}-${learning.updated_at}-${activeLearningId === learning.id}`;
+    row.dataset.hash = `${learning.id}-${learning.status}-${learning.updated_at}-${evidence}-${activeLearningId === learning.id}`;
     if (activeLearningId === learning.id) row.classList.add("active");
     row.addEventListener("click", () => {
       activeLearningId = learning.id;
@@ -422,38 +474,13 @@ function renderLearningDetail(learning) {
   }
   if (count) count.textContent = learning.status || "active";
 
-  const title = el("div", { class: "field-block" }, [
-    el("h4", { text: learning.id }),
-    el("div", { class: "markdown-body", text: learning.summary || "" }),
-  ]);
-
-  const meta = el("div", { class: "learning-detail-meta" });
-  const addMeta = (label, value) => {
-    if (value == null || value === "") return;
-    meta.appendChild(el("span", {}, [
-      document.createTextNode(`${label}: `),
-      el("span", { class: "value", text: String(value) }),
-    ]));
-  };
-  addMeta("status", learning.status || "active");
-  addMeta("evidence", evidenceCount(learning));
-  addMeta("updated", fmtAbsTime(learning.updated_at));
-  addMeta("superseded_by", learning.superseded_by);
-  addMeta("supersedes", learning.supersedes);
-
-  const scopeBlock = el("div", { class: "field-block" }, [
-    el("h4", { text: "scope" }),
-    el("div", { class: "learning-detail-scope" }, learningScopeNodes(learning)),
-  ]);
-
-  const bodyBlock = renderBodyBlock(learning.body, "learning-detail-body");
-
   const actions = el("div", { class: "actions" });
   const supersede = el("button", {
-    class: "action archive",
-    text: "Supersede",
+    class: "knowledge-btn primary",
+    text: "supersede",
     title: `Supersede ${learning.id}`,
   });
+  supersede.type = "button";
   supersede.disabled = learning.status === "superseded";
   supersede.addEventListener("click", () => {
     const by = window.prompt(`Replacement learning ID for ${learning.id}`);
@@ -462,10 +489,52 @@ function renderLearningDetail(learning) {
   });
   actions.appendChild(supersede);
 
-  const nodes = [title, meta, scopeBlock];
-  if (bodyBlock) nodes.push(bodyBlock);
-  nodes.push(actions);
-  syncNodes(detail, nodes);
+  const evidence = evidenceCount(learning);
+  const body = el("div", { class: "knowledge-detail-body" }, [
+    el("div", { class: "knowledge-body" }, [
+      markdownPanel(learning.body || learning.summary, "learning-detail-body"),
+      el("div", { class: "evidence-line" }, [
+        el("span", { class: "lbl", text: "evidence" }),
+        el("span", { text: `${evidence} references` }),
+      ]),
+    ]),
+    el("aside", { class: "knowledge-side" }, [
+      detailGroup("metadata", detailMetaRows([
+        ["id", learning.id],
+        ["status", learning.status || "active"],
+        ["evidence", `${evidence} refs`],
+        ["created", fmtAbsTime(learning.created_at)],
+        ["updated", fmtAbsTime(learning.updated_at)],
+        ["created_by", learning.created_by],
+      ])),
+      detailGroup("scope", knowledgeTagWrap(learningScopeNodes(learning))),
+      detailGroup("supersession", knowledgeTagWrap([
+        ...(Array.isArray(learning.supersedes) ? learning.supersedes.map((id) => el("span", { class: "knowledge-tag", text: `supersedes ${id}` })) : []),
+        ...(learning.superseded_by ? [el("span", { class: "knowledge-tag", text: `superseded_by ${learning.superseded_by}` })] : []),
+      ])),
+    ]),
+  ]);
+
+  syncNodes(detail, [
+    el("div", { class: "knowledge-detail-head" }, [
+      el("div", { class: "crumb" }, [
+        el("span", { class: "id", text: learning.id }),
+        el("span", { text: "·" }),
+        el("span", { text: "learning" }),
+        el("span", { text: "·" }),
+        el("span", { text: learning.status || "active" }),
+      ]),
+      el("h2", { text: learning.summary || learning.id }),
+      el("div", { class: "sub" }, [
+        knowledgeStatusPill(learning.status || "active"),
+        el("span", { text: `${evidence} evidence refs` }),
+        el("span", { class: "dot", text: "·" }),
+        el("span", { text: `updated ${fmtTimestamp(learning.updated_at)}` }),
+      ]),
+      actions,
+    ]),
+    body,
+  ]);
 }
 
 async function supersedeLearning(learning, by, btn, detail) {
@@ -487,8 +556,8 @@ async function supersedeLearning(learning, by, btn, detail) {
 
 function frictionTagNodes(tags = []) {
   const values = Array.isArray(tags) ? tags : [];
-  if (values.length === 0) return [el("span", { class: "pill", text: "-" })];
-  return values.map((tag) => el("span", { class: "pill mono", text: tag, title: tag }));
+  if (values.length === 0) return [el("span", { class: "knowledge-tag dim", text: "-" })];
+  return values.map((tag) => el("span", { class: "knowledge-tag", text: tag, title: tag }));
 }
 
 function renderFrictionStats(stats = {}) {
@@ -520,25 +589,26 @@ function renderFrictions(payload) {
   }
 
   const frag = document.createDocumentFragment();
-  const header = el("div", { class: "friction-row header" }, [
-    el("span", { text: "id" }),
-    el("span", { text: "title" }),
-    el("span", { class: "tags", text: "tags" }),
-    el("span", { text: "status" }),
-    el("span", { class: "reported", text: "reported" }),
-  ]);
-  header.dataset.key = "friction-header";
-  header.dataset.hash = "friction-header";
-  frag.appendChild(header);
 
   for (const friction of items) {
     const title = friction.title || friction.id;
-    const row = el("div", { class: "friction-row", title }, [
-      el("span", { class: "id", text: friction.id, title: friction.id }),
-      el("span", { class: "title", text: title }),
-      el("span", { class: "tags" }, frictionTagNodes(friction.tags)),
-      statusPill(friction.status || "open"),
-      el("span", { class: "reported", text: fmtTimestamp(friction.created_at), title: fmtAbsTime(friction.created_at) }),
+    const row = el("div", { class: "knowledge-row friction-row", title }, [
+      el("div", { class: "top" }, [
+        el("span", { class: "id", text: friction.id, title: friction.id }),
+        el("span", { class: "spacer" }),
+        el("span", { class: "when", text: fmtTimestamp(friction.created_at), title: fmtAbsTime(friction.created_at) }),
+      ]),
+      el("div", { class: "title", text: title }),
+      el("div", { class: "summary", text: truncate(friction.body || title, 180) }),
+      el("div", { class: "meta" }, [
+        knowledgeStatusPill(friction.status || "open"),
+        el("span", { class: "dot", text: "·" }),
+        knowledgeTagWrap(frictionTagNodes(friction.tags)),
+        ...(friction.during_task ? [
+          el("span", { class: "dot", text: "·" }),
+          el("span", { text: `during ${friction.during_task}` }),
+        ] : []),
+      ]),
     ]);
     row.dataset.key = `friction-${friction.id}`;
     row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${activeFrictionId === friction.id}`;
@@ -568,49 +638,65 @@ function renderFrictionDetail(friction) {
   }
   if (count) count.textContent = friction.status || "open";
 
-  const title = el("div", { class: "field-block" }, [
-    el("h4", { text: friction.id }),
-    el("div", { class: "markdown-body", text: friction.title || "" }),
-  ]);
-
-  const meta = el("div", { class: "friction-detail-meta" });
-  const addMeta = (label, value) => {
-    if (value == null || value === "") return;
-    meta.appendChild(el("span", {}, [
-      document.createTextNode(`${label}: `),
-      el("span", { class: "value", text: String(value) }),
-    ]));
-  };
-  addMeta("status", friction.status || "open");
-  addMeta("model", friction.model);
-  addMeta("reported", fmtAbsTime(friction.created_at));
-  addMeta("resolved", friction.resolved_at ? fmtAbsTime(friction.resolved_at) : null);
-  addMeta("task", friction.during_task);
-
-  const controls = el("div", { class: "field-block friction-controls" }, [
-    el("h4", { text: "triage" }),
-  ]);
+  const controls = el("div", { class: "friction-controls" });
   const controlGrid = el("div", { class: "friction-control-grid" });
   controlGrid.appendChild(buildFrictionStatusControl(friction, detail));
   controlGrid.appendChild(buildFrictionTagPicker(friction, detail));
   controls.appendChild(controlGrid);
 
-  const bodyBlock = el("div", { class: "field-block" }, [
-    el("h4", { text: "body" }),
-    el("pre", { class: "friction-detail-body", text: friction.body || "" }),
-  ]);
-
   const actions = el("div", { class: "actions" });
   const resolve = el("button", {
-    class: "action approve",
-    text: "Resolve",
+    class: "knowledge-btn primary",
+    text: "resolve",
     title: `Resolve ${friction.id}`,
   });
+  resolve.type = "button";
   resolve.disabled = friction.status === "resolved";
   resolve.addEventListener("click", () => resolveFriction(friction, resolve, detail));
   actions.appendChild(resolve);
 
-  syncNodes(detail, [title, meta, controls, bodyBlock, actions]);
+  const body = el("div", { class: "knowledge-detail-body" }, [
+    el("div", { class: "knowledge-body" }, [
+      markdownPanel(friction.body || friction.title, "friction-detail-body"),
+    ]),
+    el("aside", { class: "knowledge-side" }, [
+      detailGroup("metadata", detailMetaRows([
+        ["id", friction.id],
+        ["status", friction.status || "open"],
+        ["model", friction.model],
+        ["reported", fmtAbsTime(friction.created_at)],
+        ["resolved", friction.resolved_at ? fmtAbsTime(friction.resolved_at) : "—"],
+      ])),
+      detailGroup("triage", controls),
+      detailGroup("tags", knowledgeTagWrap(frictionTagNodes(friction.tags))),
+      friction.during_task ? detailGroup("during task", buildAdrValueList([friction.during_task], { taskLinks: true })) : null,
+    ].filter(Boolean)),
+  ]);
+
+  syncNodes(detail, [
+    el("div", { class: "knowledge-detail-head" }, [
+      el("div", { class: "crumb" }, [
+        el("span", { class: "id", text: friction.id }),
+        el("span", { text: "·" }),
+        el("span", { text: "friction event" }),
+        el("span", { text: "·" }),
+        el("span", { text: friction.status || "open" }),
+      ]),
+      el("h2", { text: friction.title || friction.id }),
+      el("div", { class: "sub" }, [
+        knowledgeStatusPill(friction.status || "open"),
+        friction.model ? el("span", { text: `reported by ${friction.model}` }) : null,
+        el("span", { class: "dot", text: "·" }),
+        el("span", { text: fmtAbsTime(friction.created_at) }),
+        ...(friction.during_task ? [
+          el("span", { class: "dot", text: "·" }),
+          el("span", { text: `during ${friction.during_task}` }),
+        ] : []),
+      ]),
+      actions,
+    ]),
+    body,
+  ]);
 }
 
 function buildFrictionStatusControl(friction, detail) {
@@ -639,7 +725,7 @@ function buildFrictionTagPicker(friction, detail) {
   const grid = el("div", { class: "friction-tag-options" });
   const checkboxes = new Map();
   if (options.length === 0) {
-    grid.appendChild(el("span", { class: "pill", text: "-" }));
+    grid.appendChild(el("span", { class: "knowledge-tag dim", text: "-" }));
   }
   for (const tag of options) {
     const id = `friction-tag-${friction.id}-${tag}`;
@@ -739,26 +825,29 @@ function renderAdrs(payload) {
   }
 
   const frag = document.createDocumentFragment();
-  const header = el("div", { class: "adr-row header" }, [
-    el("span", { text: "id" }),
-    el("span", { text: "title" }),
-    el("span", { text: "status" }),
-    el("span", { class: "feature", text: "feature" }),
-    el("span", { class: "accepted", text: "accepted-at" }),
-  ]);
-  header.dataset.key = "adr-header";
-  header.dataset.hash = "adr-header";
-  frag.appendChild(header);
 
   for (const adr of items) {
     const feature = adrPrimaryFeature(adr);
     const accepted = adr.accepted_at ? fmtTimestamp(adr.accepted_at) : "-";
-    const row = el("div", { class: "adr-row", title: adr.title || adr.id }, [
-      el("span", { class: "id", text: adr.id, title: adr.id }),
-      el("span", { class: "title", text: adr.title || "" }),
-      statusPill(adr.status || "proposed"),
-      el("span", { class: "feature", text: feature, title: adrList(adr, "related_features").join(", ") }),
-      el("span", { class: "accepted", text: accepted, title: fmtAbsTime(adr.accepted_at) }),
+    const row = el("div", { class: "knowledge-row adr-row", title: adr.title || adr.id }, [
+      el("div", { class: "top" }, [
+        el("span", { class: "id", text: adr.id, title: adr.id }),
+        el("span", { class: "spacer" }),
+        el("span", { class: "when", text: adr.accepted_at ? accepted : fmtTimestamp(adr.last_updated || adr.created_at), title: fmtAbsTime(adr.accepted_at || adr.last_updated || adr.created_at) }),
+      ]),
+      el("div", { class: "title", text: adr.title || adr.id }),
+      el("div", { class: "summary", text: truncate(adr.body || "", 180) }),
+      el("div", { class: "meta" }, [
+        knowledgeStatusPill(adr.status || "proposed"),
+        el("span", { class: "dot", text: "·" }),
+        knowledgeTagWrap(adrList(adr, "related_features").slice(0, 4).map((value) => el("span", { class: "knowledge-tag feature", text: value, title: value })).concat(
+          adrList(adr, "related_features").length === 0 ? [el("span", { class: "knowledge-tag dim", text: feature })] : [],
+        )),
+        ...(adr.owner ? [
+          el("span", { class: "dot", text: "·" }),
+          el("span", { text: `owner ${adr.owner}` }),
+        ] : []),
+      ]),
     ]);
     row.dataset.key = `adr-${adr.id}`;
     row.dataset.hash = `${adr.id}-${adr.status}-${adr.accepted_at || ""}-${adr.superseded_by || ""}-${activeAdrId === adr.id}`;
@@ -777,19 +866,20 @@ function renderAdrs(payload) {
 function buildAdrValueList(values, opts = {}) {
   const wrap = el("div", { class: "adr-detail-list" });
   if (!values || values.length === 0) {
-    wrap.appendChild(el("span", { class: "pill", text: "-" }));
+    wrap.appendChild(el("span", { class: "knowledge-tag dim", text: "-" }));
     return wrap;
   }
   for (const value of values) {
     if (opts.taskLinks) {
-      const btn = el("button", { class: "relation-target mono", text: value, title: `Open task ${value}` });
+      const btn = el("button", { class: "knowledge-link-row", text: value, title: `Open task ${value}` });
+      btn.type = "button";
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         openTaskFromKnowledge(value);
       });
       wrap.appendChild(btn);
     } else {
-      wrap.appendChild(el("span", { class: "pill mono", text: value, title: value }));
+      wrap.appendChild(el("span", { class: "knowledge-tag", text: value, title: value }));
     }
   }
   return wrap;
@@ -825,58 +915,24 @@ function renderAdrDetail(adr) {
   }
   if (count) count.textContent = adr.status || "proposed";
 
-  const title = el("div", { class: "field-block" }, [
-    el("h4", { text: adr.id }),
-    el("div", { class: "markdown-body", text: adr.title || "" }),
-  ]);
-
-  const meta = el("div", { class: "adr-detail-meta" });
-  const addMeta = (label, value) => {
-    if (value == null || value === "") return;
-    meta.appendChild(el("span", {}, [
-      document.createTextNode(`${label}: `),
-      el("span", { class: "value", text: String(value) }),
-    ]));
-  };
-  addMeta("status", adr.status || "proposed");
-  addMeta("owner", adr.owner);
-  addMeta("created", fmtAbsTime(adr.created_at));
-  addMeta("accepted", fmtAbsTime(adr.accepted_at));
-  addMeta("updated", fmtAbsTime(adr.last_updated));
-
-  const featuresBlock = el("div", { class: "field-block" }, [
-    el("h4", { text: "related_features" }),
-    buildAdrValueList(adrList(adr, "related_features")),
-  ]);
-  const tasksBlock = el("div", { class: "field-block" }, [
-    el("h4", { text: "related_tasks" }),
-    buildAdrValueList(adrList(adr, "related_tasks"), { taskLinks: true }),
-  ]);
-  const edgesBlock = el("div", { class: "field-block" }, [
-    el("h4", { text: "supersession" }),
-    buildAdrValueList([
-      ...adrList(adr, "supersedes").map((id) => `supersedes ${id}`),
-      ...(adr.superseded_by ? [`superseded_by ${adr.superseded_by}`] : []),
-    ]),
-  ]);
-  const bodyBlock = renderBodyBlock(adr.body, "adr-detail-body");
-
   const actions = el("div", { class: "actions" });
   if (adr.status === "proposed") {
     const accept = el("button", {
-      class: "action approve",
-      text: "Accept",
+      class: "knowledge-btn primary",
+      text: "accept",
       title: `Accept ${adr.id}`,
     });
+    accept.type = "button";
     accept.addEventListener("click", () => acceptAdr(adr, accept, detail));
     actions.appendChild(accept);
   }
   if (adr.status === "accepted") {
     const supersede = el("button", {
-      class: "action archive",
-      text: "Supersede",
+      class: "knowledge-btn primary",
+      text: "supersede",
       title: `Supersede ${adr.id}`,
     });
+    supersede.type = "button";
     supersede.addEventListener("click", () => {
       const by = window.prompt(`Replacement ADR ID for ${adr.id}`);
       if (!by || !by.trim()) return;
@@ -885,10 +941,49 @@ function renderAdrDetail(adr) {
     actions.appendChild(supersede);
   }
 
-  const nodes = [title, meta, featuresBlock, tasksBlock, edgesBlock];
-  if (bodyBlock) nodes.push(bodyBlock);
-  if (actions.children.length > 0) nodes.push(actions);
-  syncNodes(detail, nodes);
+  const supersession = [
+    ...adrList(adr, "supersedes").map((id) => `supersedes ${id}`),
+    ...(adr.superseded_by ? [`superseded_by ${adr.superseded_by}`] : []),
+  ];
+  const body = el("div", { class: "knowledge-detail-body" }, [
+    el("div", { class: "knowledge-body" }, [
+      markdownPanel(adr.body || adr.title, "adr-detail-body"),
+    ]),
+    el("aside", { class: "knowledge-side" }, [
+      detailGroup("metadata", detailMetaRows([
+        ["id", adr.id],
+        ["status", adr.status || "proposed"],
+        ["owner", adr.owner],
+        ["created", fmtAbsTime(adr.created_at)],
+        ["accepted", fmtAbsTime(adr.accepted_at)],
+        ["updated", fmtAbsTime(adr.last_updated)],
+      ])),
+      detailGroup("related features", buildAdrValueList(adrList(adr, "related_features"))),
+      detailGroup("related tasks", buildAdrValueList(adrList(adr, "related_tasks"), { taskLinks: true })),
+      detailGroup("supersession", buildAdrValueList(supersession)),
+    ]),
+  ]);
+
+  syncNodes(detail, [
+    el("div", { class: "knowledge-detail-head" }, [
+      el("div", { class: "crumb" }, [
+        el("span", { class: "id", text: adr.id }),
+        el("span", { text: "·" }),
+        el("span", { text: "architecture decision" }),
+        el("span", { text: "·" }),
+        el("span", { text: adr.status || "proposed" }),
+      ]),
+      el("h2", { text: adr.title || adr.id }),
+      el("div", { class: "sub" }, [
+        knowledgeStatusPill(adr.status || "proposed"),
+        adr.owner ? el("span", { text: `owner ${adr.owner}` }) : null,
+        el("span", { class: "dot", text: "·" }),
+        el("span", { text: `updated ${fmtTimestamp(adr.last_updated || adr.created_at)}` }),
+      ]),
+      actions,
+    ]),
+    body,
+  ]);
 }
 
 async function acceptAdr(adr, btn, detail) {

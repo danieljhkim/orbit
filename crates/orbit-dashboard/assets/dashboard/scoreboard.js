@@ -69,6 +69,25 @@ function formatScoreboardPair(agent, col) {
 
 const CANONICAL_SCOREBOARD_FAMILIES = ["codex", "claude", "gemini", "grok"];
 
+const AGENT_THEME = {
+  codex: { color: "var(--ag-codex)", low: "var(--ag-codex-low)" },
+  claude: { color: "var(--ag-claude)", low: "var(--ag-claude-low)" },
+  gemini: { color: "var(--ag-gemini)", low: "var(--ag-gemini-low)" },
+  grok: { color: "var(--ag-grok)", low: "var(--ag-grok-low)" },
+};
+
+const AGENT_CARD_KPIS = [
+  { key: "tasks_created", label: "created", tone: "normal" },
+  { key: "tasks_planned", label: "planned", tone: "normal" },
+  { key: "tasks_completed", label: "completed", tone: "normal" },
+  {
+    key: "friction.reported",
+    label: "friction",
+    tone: "warn",
+    compute: (agent) => agent?.friction?.reported ?? 0,
+  },
+];
+
 const DELIVERY_SCOREBOARD_COLUMNS = [
   { key: "agent", label: "agent", num: false },
   { key: "tasks_created", label: "created", num: true },
@@ -153,11 +172,11 @@ const PLANNING_SCOREBOARD_COLUMNS = [
 ];
 
 const ALL_SCOREBOARD_SECTIONS = [
-  { title: "Delivery", columns: DELIVERY_SCOREBOARD_COLUMNS },
-  { title: "Review", columns: REVIEW_SCOREBOARD_COLUMNS },
-  { title: "Knowledge", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
-  { title: "Operations", columns: OPERATIONS_SCOREBOARD_COLUMNS },
-  { title: "Planning Duels", columns: PLANNING_SCOREBOARD_COLUMNS },
+  { title: "Delivery", badge: "tasks created · planned · completed", columns: DELIVERY_SCOREBOARD_COLUMNS },
+  { title: "Review", badge: "review threads · PR comments", columns: REVIEW_SCOREBOARD_COLUMNS },
+  { title: "Knowledge", badge: "learnings · ADRs · votes", columns: KNOWLEDGE_SCOREBOARD_COLUMNS },
+  { title: "Operations", badge: "tool calls · failures · friction", columns: OPERATIONS_SCOREBOARD_COLUMNS },
+  { title: "Planning Duels", badge: "wins · losses · roles", columns: PLANNING_SCOREBOARD_COLUMNS },
 ];
 
 function readPath(obj, path) {
@@ -176,6 +195,8 @@ function renderScoreboard(summary) {
 
   const body = $("scoreboard-body");
   const narrativeHost = $("scoreboard-narrative");
+  const agentStrip = $("scoreboard-agent-strip");
+  const meta = $("scoreboard-meta");
   const duelHost = $("scoreboard-duel-matrix-host");
   const duelCount = $("scoreboard-duel-count");
   const insightsHost = $("scoreboard-insights");
@@ -191,6 +212,8 @@ function renderScoreboard(summary) {
       el("div", { class: "text", text: "No scoreboard data yet." })
     ])]);
     if (narrativeHost) syncNodes(narrativeHost, []);
+    if (agentStrip) syncNodes(agentStrip, []);
+    if (meta) meta.textContent = "-";
     if (duelHost) syncNodes(duelHost, []);
     if (duelCount) duelCount.textContent = "—";
     if (insightsHost) syncNodes(insightsHost, []);
@@ -199,6 +222,13 @@ function renderScoreboard(summary) {
   }
 
   const canonicalRows = canonicalScoreboardRows(agentsMap);
+  if (meta) {
+    const activeCanonical = canonicalRows.filter(([, agent]) => agentActivityTotal(agent) > 0).length;
+    meta.textContent = `${activeCanonical} of ${canonicalRows.length} canonical active · ${entries.length} total agents`;
+  }
+  if (agentStrip) {
+    syncNodes(agentStrip, [renderAgentStrip(canonicalRows)]);
+  }
   const matrix = buildLeaderboardMatrix(canonicalRows, ALL_SCOREBOARD_SECTIONS, {
     showSectionDividers: true,
   });
@@ -238,22 +268,139 @@ function canonicalScoreboardRows(agentsMap) {
   return CANONICAL_SCOREBOARD_FAMILIES.map((family) => [family, agentsMap[family] || {}]);
 }
 
+function applyAgentTheme(node, name) {
+  const theme = AGENT_THEME[name] || {};
+  node.style.setProperty("--ag", theme.color || "var(--accent)");
+  node.style.setProperty("--ag-low", theme.low || "rgba(110, 159, 255, 0.12)");
+  return node;
+}
+
+function agentActivityTotal(agent) {
+  const knowledge = agent?.knowledge || {};
+  const duels = agent?.duels || {};
+  return (
+    asScoreboardNumber(agent?.tasks_created) +
+    asScoreboardNumber(agent?.tasks_planned) +
+    asScoreboardNumber(agent?.tasks_completed) +
+    asScoreboardNumber(agent?.task_review?.threads) +
+    asScoreboardNumber(agent?.pr?.review_comments) +
+    asScoreboardNumber(knowledge.learnings_created) +
+    asScoreboardNumber(knowledge.learning_votes_received) +
+    asScoreboardNumber(knowledge.adrs_created) +
+    asScoreboardNumber(knowledge.adrs_accepted) +
+    asScoreboardNumber(knowledge.adrs_proposed_open) +
+    asScoreboardNumber(agent?.tool_calls) +
+    asScoreboardNumber(agent?.failed_tool_calls) +
+    asScoreboardNumber(agent?.friction?.reported) +
+    asScoreboardNumber(duels.participated)
+  );
+}
+
+function knowledgeScore(agent) {
+  const knowledge = agent?.knowledge || {};
+  return (
+    asScoreboardNumber(knowledge.learnings_created) +
+    asScoreboardNumber(knowledge.learning_votes_received) +
+    asScoreboardNumber(knowledge.adrs_created) +
+    asScoreboardNumber(knowledge.adrs_accepted) +
+    asScoreboardNumber(knowledge.adrs_proposed_open)
+  );
+}
+
+function agentRoleLabel(agent, rows) {
+  if (agentActivityTotal(agent) === 0) return "quiet";
+  const labels = [];
+  const leaderIf = (label, getter) => {
+    const value = asScoreboardNumber(getter(agent));
+    const max = Math.max(...rows.map(([, rowAgent]) => asScoreboardNumber(getter(rowAgent))));
+    if (value > 0 && value === max) labels.push(label);
+  };
+  leaderIf("author", (a) => a?.tasks_created);
+  leaderIf("planner", (a) => a?.tasks_planned);
+  leaderIf("closer", (a) => a?.tasks_completed);
+  leaderIf("knowledge", knowledgeScore);
+  leaderIf("ops", (a) => a?.tool_calls);
+  if (labels.length === 0) return "active";
+  return labels.slice(0, 2).join(" / ");
+}
+
+function renderAgentStrip(rows) {
+  const sorted = rows
+    .map(([name, agent]) => [name, agent, agentActivityTotal(agent)])
+    .sort((a, b) => b[2] - a[2]);
+  const maxByKpi = new Map();
+  for (const kpi of AGENT_CARD_KPIS) {
+    maxByKpi.set(kpi.key, Math.max(...rows.map(([, agent]) => scoreboardColumnValue(agent, kpi))));
+  }
+
+  const strip = el("div", { class: "scoreboard-agent-strip-inner" });
+  strip.dataset.key = "scoreboard-agent-strip";
+  strip.dataset.hash = JSON.stringify(sorted.map(([name, agent, score]) => [
+    name,
+    score,
+    agentRoleLabel(agent, rows),
+    AGENT_CARD_KPIS.map((kpi) => [kpi.key, scoreboardColumnValue(agent, kpi)]),
+  ]));
+
+  sorted.forEach(([name, agent, score], index) => {
+    const card = applyAgentTheme(el("button", {
+      class: `scoreboard-agent-card ${score === 0 ? "quiet" : ""}`,
+      title: `${name} - click to filter audit by role`,
+    }), name);
+    card.type = "button";
+    card.addEventListener("click", () => navigateToRole(name));
+
+    card.appendChild(el("div", { class: "scoreboard-agent-rank", text: `#${String(index + 1).padStart(2, "0")} · activity` }));
+    card.appendChild(el("div", { class: "scoreboard-agent-heading" }, [
+      el("span", { class: "scoreboard-agent-name", text: name }),
+      el("span", { class: `scoreboard-agent-role ${score === 0 ? "quiet" : ""}`, text: agentRoleLabel(agent, rows) }),
+    ]));
+
+    const kpis = el("div", { class: "scoreboard-agent-kpis" });
+    for (const kpi of AGENT_CARD_KPIS) {
+      const value = scoreboardColumnValue(agent, kpi);
+      const max = maxByKpi.get(kpi.key) || 0;
+      const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+      const valueClass = value === 0 ? "dim" : kpi.tone === "warn" ? "warn" : "";
+      const fill = el("span", {
+        class: `scoreboard-agent-kpi-fill ${kpi.tone === "warn" ? "warn" : ""}`,
+        style: { width: `${pct}%` },
+      });
+      kpis.appendChild(el("div", { class: "scoreboard-agent-kpi" }, [
+        el("span", { class: "k", text: kpi.label }),
+        el("span", { class: "track" }, [fill]),
+        el("span", { class: `v ${valueClass}`, text: value === 0 ? "—" : fmtScoreboardCount(value) }),
+      ]));
+    }
+    card.appendChild(kpis);
+    strip.appendChild(card);
+  });
+  return strip;
+}
+
 function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
   if (!rows.length) {
     return el("div", { class: "empty-state compact", text: "No rows." });
   }
 
   const showSectionDividers = opts.showSectionDividers !== false;
-  const table = el("table", { class: "sb-leaderboard" });
+  const table = el("table", { class: "sb2-matrix" });
+  const colgroup = el("colgroup");
+  colgroup.appendChild(el("col", { class: "metric" }));
+  for (let i = 0; i < rows.length; i += 1) colgroup.appendChild(el("col"));
+  table.appendChild(colgroup);
+
   const thead = el("thead");
   const headRow = el("tr");
-  headRow.appendChild(el("th", { class: "sb-metric-head", text: "metric" }));
-  for (const [name] of rows) {
-    const th = el("th", {
-      class: "sb-agent-head clickable",
-      text: name,
+  headRow.appendChild(el("th", { class: "col-metric", text: "metric" }));
+  for (const [name, agent] of rows) {
+    const th = applyAgentTheme(el("th", {
+      class: "col-agent clickable",
       title: `${name} — click to filter audit by role`,
-    });
+    }, [
+      document.createTextNode(name),
+      el("span", { class: "totals", text: `${fmtScoreboardCount(agentActivityTotal(agent))} activity` }),
+    ]), name);
     th.addEventListener("click", () => navigateToRole(name));
     headRow.appendChild(th);
   }
@@ -263,24 +410,32 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
   const tbody = el("tbody");
   const columnCount = rows.length + 1;
   for (const section of sectionList) {
+    const metrics = section.columns
+      .filter((candidate) => candidate.key !== "agent")
+      .filter((candidate) => metricHasActivity(rows, candidate));
     if (showSectionDividers) {
-      tbody.appendChild(sectionDividerRow(section.title, columnCount));
+      const badge = metrics.length === 0
+        ? "no activity this window"
+        : section.badge;
+      tbody.appendChild(sectionDividerRow(section.title, badge, columnCount));
     }
-    for (const col of section.columns.filter((candidate) => candidate.key !== "agent")) {
+    for (const col of metrics) {
       const rowMax = rowMaxValue(rows, col);
-      const tr = el("tr");
+      const tr = el("tr", { class: "metric" });
       tr.dataset.key = `scoreboard-${section.title}-${col.key}`;
       tr.appendChild(el("td", {
-        class: "sb-metric-label",
-        text: col.label,
+        class: "m-label",
         title: col.title || col.label,
-      }));
+      }, [
+        document.createTextNode(col.label),
+        ...(col.help ? [el("span", { class: "help", text: col.help })] : []),
+      ]));
       for (const [name, agent] of rows) {
         const value = scoreboardColumnValue(agent, col);
         const isLeader = rowMax > 0 && value === rowMax;
         const td = col.format === "pair"
-          ? pairMetricCell(agent, col, rowMax, isLeader)
-          : metricCell(agent, col, rowMax, isLeader);
+          ? pairMetricCell(name, agent, col, rowMax, isLeader)
+          : metricCell(name, agent, col, rowMax, isLeader);
         td.dataset.agent = name;
         td.dataset.metric = col.key;
         tr.appendChild(td);
@@ -290,6 +445,18 @@ function buildLeaderboardMatrix(rows, sectionList, opts = {}) {
   }
   table.appendChild(tbody);
   return table;
+}
+
+function metricHasActivity(rows, col) {
+  return rows.some(([, agent]) => scoreboardCellActivity(agent, col) > 0);
+}
+
+function scoreboardCellActivity(agent, col) {
+  if (col.format === "pair") {
+    const pair = formatScoreboardPair(agent, col);
+    return pair.left + pair.right;
+  }
+  return scoreboardColumnValue(agent, col);
 }
 
 function rowMaxValue(rows, col) {
@@ -304,73 +471,77 @@ function scoreboardColumnValue(agent, col) {
   return Math.max(0, asScoreboardNumber(value));
 }
 
-function metricCell(agent, col, rowMax, isLeader) {
+function metricCell(name, agent, col, rowMax, isLeader) {
   const value = asScoreboardNumber(col.compute ? col.compute(agent) : readPath(agent, col.key));
   const td = el("td", {
-    class: `sb-metric-cell num${value === 0 ? " zero" : ""}${isLeader ? " sb-leader" : ""}`,
+    class: "cell",
     title: `${col.title || col.label}: ${value}`,
-  }, metricNodes(value, rowMax, isLeader));
-  return td;
+  }, [scoreboardCellNode(name, value, rowMax, isLeader, { warn: col.tone === "warn" })]);
+  return applyAgentTheme(td, name);
 }
 
-function pairMetricCell(agent, col, rowMax, isLeader) {
+function pairMetricCell(name, agent, col, rowMax, isLeader) {
   const pair = formatScoreboardPair(agent, col);
   const td = el("td", {
-    class: `sb-metric-cell num${pair.zero ? " zero" : ""}${isLeader ? " sb-leader" : ""}`,
+    class: "cell",
     title: pair.title,
-  }, [
-    metricBar(pair.left, rowMax),
-    el("span", { class: "sb-pair" }, pairTextNodes(pair.left, pair.right, pair.zero)),
-    ...(isLeader ? [leaderBadge()] : []),
-  ]);
-  return td;
+  }, [scoreboardCellNode(name, pair.left, rowMax, isLeader, {
+    pair,
+    warn: col.tone === "warn",
+  })]);
+  return applyAgentTheme(td, name);
 }
 
-function metricNodes(value, rowMax, isLeader) {
-  return [
-    metricBar(value, rowMax),
-    value === 0
-      ? emptyScoreboardNode()
-      : el("span", { class: "sb-value", text: fmtScoreboardCount(value) }),
-    ...(isLeader ? [leaderBadge()] : []),
-  ];
-}
-
-function metricBar(value, rowMax) {
+function scoreboardCellNode(name, value, rowMax, isLeader, opts = {}) {
   const num = Math.max(0, asScoreboardNumber(value));
-  const width = num === 0 ? 6 : scaledMetricWidth(num, rowMax);
-  return el("span", {
-    class: `sb-bar${num === 0 ? " sb-bar-empty" : ""}`,
-    style: { width: `${width}px` },
+  const width = rowMax > 0 ? Math.max(2, Math.round((num / rowMax) * 100)) : 0;
+  const fill = el("span", {
+    class: `fill ${opts.warn ? "warn" : ""}`,
+    style: { width: `${width}%` },
   });
-}
-
-function scaledMetricWidth(value, rowMax) {
-  const max = Math.max(0, asScoreboardNumber(rowMax));
-  if (max < 3) return Math.min(value * 14, 56);
-  return Math.max(2, Math.round((value / max) * 56));
+  const valueClass = [
+    "v",
+    num === 0 ? "dim em" : "",
+    isLeader ? "lead" : "",
+    opts.warn ? "warn" : "",
+  ].filter(Boolean).join(" ");
+  return applyAgentTheme(el("span", {
+    class: `sb2-cell${num === 0 ? " zero" : ""}`,
+  }, [
+    el("span", { class: "track" }, [fill]),
+    el("span", { class: valueClass }, opts.pair
+      ? pairTextNodes(opts.pair.left, opts.pair.right, opts.pair.zero, isLeader)
+      : [
+          document.createTextNode(num === 0 ? "—" : fmtScoreboardCount(num)),
+          ...(isLeader ? [leaderBadge()] : []),
+        ]),
+  ]), name);
 }
 
 function leaderBadge() {
-  return el("span", { class: "sb-leader-badge", text: "▲", title: "row leader" });
+  return el("span", { class: "lead-mark", text: "▲", title: "row leader" });
 }
 
 function emptyScoreboardNode() {
-  return el("span", { class: "sb-empty", text: "—" });
+  return el("span", { class: "em", text: "—" });
 }
 
-function pairTextNodes(left, right, zero) {
+function pairTextNodes(left, right, zero, isLeader) {
   if (zero) return [emptyScoreboardNode()];
   return [
     left === 0 ? emptyScoreboardNode() : el("span", { class: "sb-value", text: fmtScoreboardCount(left) }),
-    "/",
+    el("span", { class: "pair", text: "/" }),
     right === 0 ? emptyScoreboardNode() : el("span", { class: "sb-pair-right", text: fmtScoreboardCount(right) }),
+    ...(isLeader ? [leaderBadge()] : []),
   ];
 }
 
-function sectionDividerRow(title, columnCount) {
-  const tr = el("tr", { class: "sb-section-divider" });
-  const td = el("td", { text: title });
+function sectionDividerRow(title, badge, columnCount) {
+  const tr = el("tr", { class: "group" });
+  const td = el("td", {}, [
+    document.createTextNode(title),
+    badge ? el("span", { class: "badge", text: badge }) : null,
+  ]);
   td.colSpan = columnCount;
   tr.appendChild(td);
   return tr;
@@ -390,15 +561,18 @@ function renderDuelMatrixGrid(summary) {
   const grid = el("div", { class: "scoreboard-duel-matrix" });
   grid.appendChild(el("span", { class: "dm-corner" }));
   for (const opponent of families) {
-    grid.appendChild(el("span", { class: "dm-col-h", text: `vs ${opponent}` }));
+    const label = applyAgentTheme(el("span", { class: "dm-col-h" }, [
+      document.createTextNode("vs "),
+      el("span", { class: "nm", text: opponent }),
+    ]), opponent);
+    grid.appendChild(label);
   }
 
   for (const family of families) {
-    const rowHeader = el("span", {
+    const rowHeader = applyAgentTheme(el("span", {
       class: "dm-row-h",
-      text: family,
       title: `${family} — click to filter audit by role`,
-    });
+    }, [el("span", { class: "nm", text: family })]), family);
     rowHeader.addEventListener("click", () => navigateToRole(family));
     grid.appendChild(rowHeader);
 
@@ -497,8 +671,9 @@ function renderScoreboardNarrative(summary) {
   const children = [];
   segments.forEach((seg, idx) => {
     if (idx > 0) children.push(el("span", { class: "nar-sep", text: "·" }));
-    children.push(el("b", { text: seg.leader }));
-    children.push(document.createTextNode(` leads ${seg.label}`));
+    children.push(el("span", { class: `ag-tag ${seg.leader}`, text: seg.leader }));
+    children.push(document.createTextNode(" leads "));
+    children.push(el("b", { text: seg.label }));
   });
   return el("div", { class: "scoreboard-narrative" }, children);
 }
@@ -508,7 +683,7 @@ function renderScoreboardNarrative(summary) {
 // DOM-nodes-or-strings so we can interleave agent pills.
 
 function insightAgentPill(name) {
-  return el("span", { class: `ag ${name}`, text: name });
+  return el("span", { class: `ag-tag ${name}`, text: name });
 }
 
 // LEADER — top agent by `tasks_created`. Suppressed when nobody has created
